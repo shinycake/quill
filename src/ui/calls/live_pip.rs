@@ -114,7 +114,7 @@ impl QuillApp {
         self.open_live_pip(player, LivePipSource::Stream { call_id }, return_to, cx);
         self.group_call_screen.window_closed_by_user = Some(call_id);
         self.group_call_screen.clear_stream_wish();
-        self.group_call.stream.overlay = None;
+        self.close_call_box();
         // The stream window goes now, out of full screen first, rather
         // than on the main window's next frame.
         if self.group_call.window.is(window.window_handle()) {

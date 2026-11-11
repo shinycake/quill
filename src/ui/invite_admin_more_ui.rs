@@ -71,6 +71,7 @@ impl QuillApp {
     pub(super) fn drop_invite_link_pages(&mut self) {
         if let Some(session) = self.session_mut() {
             session.groups.invite_pages.clear();
+            session.groups.revoked_invite_links.clear();
         }
     }
 

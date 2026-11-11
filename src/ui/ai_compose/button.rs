@@ -68,28 +68,23 @@ impl QuillApp {
         )
     }
 
-    /// Start the sparkle's blink when the button appears, forget it when
-    /// the button hides (tdesktop restarts the animation on every show).
-    pub(super) fn sync_ai_compose_button(&mut self, cx: &App) {
-        let wanted = self.ai_compose_button_wanted(cx);
-        match (wanted, self.ai_compose.button_shown_at) {
-            (true, None) => self.ai_compose.button_shown_at = Some(Instant::now()),
-            (false, Some(_)) => self.ai_compose.button_shown_at = None,
-            _ => {}
-        }
-    }
-
     pub(in crate::ui) fn ai_compose_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         // Decided for the composer in place as the button draws: a chat
         // window's field, not the main window's the upkeep looked at.
+        // The window's own composer remembers when its button appeared (the
+        // sparkle blinks from there, as tdesktop restarts it on every show)
+        // and forgets when the button is not drawn.
+        let since = &self.composer_ui.ai_button_since;
         if !self.ai_compose_button_wanted(cx) {
+            since.set(None);
             return None;
         }
-        // The sparkle's blink follows the main window's field.
-        let elapsed = match (self.windows.scope, self.ai_compose.button_shown_at) {
-            (None, Some(shown_at)) => shown_at.elapsed(),
-            _ => BLINK,
-        };
+        let shown_at = since.get().unwrap_or_else(|| {
+            let now = Instant::now();
+            since.set(Some(now));
+            now
+        });
+        let elapsed = shown_at.elapsed();
         let reduce_motion = cx.reduce_motion();
         if !reduce_motion && elapsed < BLINK {
             self.request_animation_tick(60, cx);

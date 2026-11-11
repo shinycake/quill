@@ -109,96 +109,15 @@ pub struct PaymentVerification {
     pub giveaway_chat_id: Option<i64>,
 }
 
-/// The checkout's form, one stage at a time.
-///
-/// `Loading` leaves on the answer of its own `getPaymentForm` (`Ready`; an
-/// answer to an earlier checkout's fetch is not this one's) or its error
-/// (`Closed`, with the error in `PaymentsState::note`). `Ready` leaves on
-/// the `sendPaymentForm` answer: `Paid` (Pay stays off, so one form is
-/// never sent twice), `Verifying` (the answer asked for a verification
-/// step; nothing drains it, a mini app's checkout reads it to report
-/// `pending`) or back to `Ready` when it failed. Any stage leaves with the
-/// checkout closing.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub enum CheckoutForm {
-    #[default]
-    Closed,
-    /// `getPaymentForm` is out as `request` (the dialog shows a spinner).
-    Loading {
-        request: RequestId,
-    },
-    Ready(PaymentFormData),
-    Verifying(PaymentFormData),
-    Paid(PaymentFormData),
-}
-
-impl CheckoutForm {
-    /// The fetched form, in any stage that has one.
-    pub fn form(&self) -> Option<&PaymentFormData> {
-        match self {
-            Self::Ready(form) | Self::Verifying(form) | Self::Paid(form) => Some(form),
-            Self::Closed | Self::Loading { .. } => None,
-        }
-    }
-
-    pub fn is_loading(&self) -> bool {
-        matches!(self, Self::Loading { .. })
-    }
-
-    pub fn is_paid(&self) -> bool {
-        matches!(self, Self::Paid(_))
-    }
-
-    pub fn is_verifying(&self) -> bool {
-        matches!(self, Self::Verifying(_))
-    }
-
-    /// `request` is the form this checkout waits for.
-    pub(crate) fn waits_for(&self, request: Option<RequestId>) -> bool {
-        matches!((self, request), (Self::Loading { request: asked }, Some(id)) if *asked == id)
-    }
-
-    /// The form was paid.
-    pub fn mark_paid(&mut self) {
-        if let Some(form) = self.form().cloned() {
-            *self = Self::Paid(form);
-        }
-    }
-
-    /// The payment asked for a verification step.
-    pub fn mark_verifying(&mut self) {
-        if let Self::Ready(form) = self {
-            *self = Self::Verifying(form.clone());
-        }
-    }
-
-    /// The verification step is over (the payment answered).
-    pub fn end_verification(&mut self) {
-        if let Self::Verifying(form) = self {
-            *self = Self::Ready(form.clone());
-        }
-    }
-}
-
 pub struct PaymentsState {
-    /// Slice P1: the in-flight payment request context (`getPaymentForm`,
-    /// `validateOrderInfo`, `sendPaymentForm`, `getPaymentReceipt`).
-    pub request: Option<PaymentRequest>,
-    /// Slice P1: the checkout's `paymentForm`, from `getPaymentForm` in
-    /// flight to paid ([`CheckoutForm`]).
+    /// The checkout, one value: its invoice, form, order info, shipping
+    /// choice and note live in the stage that owns them ([`CheckoutForm`]),
+    /// so closing it takes them all.
     pub checkout: CheckoutForm,
-    /// Where the checkout's order info stands (`validateOrderInfo`).
-    pub order_info: OrderInfoStage,
-    /// Slice P1: the chosen shipping option id (default: the first).
-    pub shipping_id: Option<String>,
     /// The receipt dialog: closed, waiting for the `getPaymentReceipt` it
     /// asked, or showing the answer. Closing it forgets the request, so a
     /// late answer cannot reopen it.
     pub receipt: ReceiptStage,
-    /// Slice P1: latest payment error / outcome note, shown in the
-    /// checkout dialog (never a secret — order fields and credentials are
-    /// never echoed here).
-    pub note: Option<String>,
     /// Slice P1: the `sendPaymentForm`s in flight, each with the invoice
     /// and form it pays (tdesktop keeps one checkout process per invoice).
     /// An answer goes to its own payment: the checkout on screen takes the
@@ -328,8 +247,8 @@ impl PaymentsState {
     /// The checkout on screen is being paid: its invoice has a
     /// `sendPaymentForm` in flight.
     pub fn checkout_sending(&self) -> bool {
-        self.request
-            .as_ref()
+        self.checkout
+            .invoice()
             .is_some_and(|request| self.is_paying(&request.invoice))
     }
 
@@ -348,8 +267,8 @@ impl PaymentsState {
 
     /// The checkout on screen shows `invoice`.
     pub fn shows(&self, invoice: &crate::payment_invoice::InputInvoice) -> bool {
-        self.request
-            .as_ref()
+        self.checkout
+            .invoice()
             .is_some_and(|request| &request.invoice == invoice)
     }
 
@@ -409,12 +328,8 @@ impl BankCardLookup {
 impl PaymentsState {
     pub(crate) fn new() -> Self {
         Self {
-            request: None,
             checkout: CheckoutForm::Closed,
-            order_info: OrderInfoStage::Unvalidated,
-            shipping_id: None,
             receipt: ReceiptStage::Closed,
-            note: None,
             paying: Vec::new(),
             unlocked_notice: None,
             notices: Vec::new(),

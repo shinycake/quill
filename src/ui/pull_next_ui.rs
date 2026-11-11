@@ -302,7 +302,7 @@ impl QuillApp {
                 let next = quill::pull_next::find_next_unread_channel(
                     session,
                     target.chat,
-                    self.folders.tab,
+                    self.chat_list.view.folder(),
                 );
                 self.history.pull.route =
                     next.map_or(Route::Unfound, |chat| Route::Found(Next::Chat(chat)));

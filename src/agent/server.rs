@@ -82,6 +82,18 @@ impl Drop for Slot {
     }
 }
 
+/// Empties the new-message and send-outcome buffers when it drops with no
+/// agent connected: nobody reads them then.
+struct ClearBuffersWhenEmpty;
+
+impl Drop for ClearBuffersWhenEmpty {
+    fn drop(&mut self) {
+        if connected_agents() == 0 {
+            super::events::clear_buffers();
+        }
+    }
+}
+
 /// Whether agents are connected right now.
 pub fn connected_agents() -> usize {
     CONNECTIONS.load(Ordering::SeqCst)
@@ -124,6 +136,15 @@ pub(super) fn same_user(stream: &Stream) -> bool {
         .ok()
         .and_then(|creds| creds.pid())
         .is_some_and(crate::pipe_security::is_current_user_process)
+}
+
+/// The client's process id as the socket reports it, when it does.
+fn peer_process(stream: &Stream) -> Option<i64> {
+    stream
+        .peer_creds()
+        .ok()
+        .and_then(|creds| creds.pid())
+        .map(i64::from)
 }
 
 /// Read one line, unbuffered, so nothing past it is consumed.
@@ -214,13 +235,17 @@ pub fn serve(connection: Connection) {
     // Taken after auth, so a client that never authenticates (a Windows pipe
     // has no read timeout) cannot hold a slot.
     drop(waiting);
-    if super::activity::refused(&agent) {
+    let process = peer_process(stream);
+    if super::activity::refused_from(&agent, process) {
         let _ = write_line(
             &mut out,
             &error_line(&auth_id, code::ACCESS_OFF, REVOKED_MESSAGE),
         );
         return;
     }
+    // Dropped after the connection's slot and presence: the last agent
+    // leaving takes the buffered messages with it.
+    let _last_out = ClearBuffersWhenEmpty;
     let Some(_slot) = Slot::take(&CONNECTIONS, MAX_CONNECTIONS) else {
         let _ = write_line(
             &mut out,
@@ -240,7 +265,7 @@ pub fn serve(connection: Connection) {
     {
         return;
     }
-    let presence = super::activity::connect(&agent);
+    let presence = super::activity::connect_from(&agent, process);
     let conn = Conn {
         generation,
         id: presence.id(),

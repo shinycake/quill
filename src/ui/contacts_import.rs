@@ -15,10 +15,55 @@ use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with, trn, trn_with};
 use quill::telegram::requests::{ImportedContact, VCARD_IMPORT_LIMIT};
 use quill::vcard_import::{VcardError, VcardImport, VcardPreview, display_name, read_vcard_file};
+use std::borrow::Cow;
 use std::path::PathBuf;
 
 /// The preview lists this many contacts before "and N more".
 const PREVIEW_ROWS: usize = 6;
+
+/// Where the box stands: what it shows, with the file dialog open over it,
+/// or reading a chosen file. The two off-thread stages own their task, so a
+/// box that closes or a new choice ends the work, and its answer can only
+/// come to the stage that asked.
+pub(crate) enum ImportStage {
+    Showing(VcardImport),
+    /// The system open dialog is up over what the box showed `before`.
+    Choosing {
+        before: VcardImport,
+        _picker: Task<()>,
+    },
+    Reading {
+        file_name: String,
+        _read: Task<()>,
+    },
+}
+
+impl Default for ImportStage {
+    fn default() -> Self {
+        Self::Showing(VcardImport::Empty)
+    }
+}
+
+impl ImportStage {
+    /// What the box draws.
+    pub(crate) fn state(&self) -> Cow<'_, VcardImport> {
+        match self {
+            Self::Showing(state) | Self::Choosing { before: state, .. } => Cow::Borrowed(state),
+            Self::Reading { file_name, .. } => Cow::Owned(VcardImport::Reading {
+                file_name: file_name.clone(),
+            }),
+        }
+    }
+
+    /// What the box showed last that a file read produced (or nothing yet):
+    /// where a cancelled open dialog leaves it.
+    fn settled(&self) -> VcardImport {
+        match self {
+            Self::Showing(state) | Self::Choosing { before: state, .. } => state.clone(),
+            Self::Reading { .. } => VcardImport::Empty,
+        }
+    }
+}
 
 impl QuillApp {
     /// Show the import box with no file chosen.
@@ -37,69 +82,82 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// "Choose File…": the system open dialog, then the read.
+    /// "Choose File…": the system open dialog, then the read. A second click
+    /// while the dialog is open does nothing.
     pub(super) fn choose_vcard_file(&mut self, cx: &mut Context<Self>) {
-        let Some(box_id) = self
-            .dialogs
-            .import_contacts_dialog
-            .as_ref()
-            .map(|dialog| dialog.id)
-        else {
+        let Some(dialog) = self.dialogs.import_contacts_dialog.as_mut() else {
             return;
         };
+        if matches!(dialog.stage, ImportStage::Choosing { .. }) {
+            return;
+        }
         let picker = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
             multiple: false,
             prompt: Some(tr(keys::Q_PEOPLE_IMPORT_CONTACTS).into()),
         });
-        self.spawn_screen(cx, async move |this, cx| {
-            if let Ok(Ok(Some(paths))) = picker.await
-                && let Some(path) = paths.into_iter().next()
-            {
-                let _ = this.update(cx, |this, cx| {
-                    // Only the box that asked reads the file.
-                    if this
-                        .dialogs
-                        .import_contacts_dialog
-                        .as_ref()
-                        .is_some_and(|dialog| dialog.id == box_id)
-                    {
-                        this.read_vcard(path, cx);
-                    }
-                });
-            }
-        })
-        .detach();
-    }
-
-    /// Read `path` off the UI thread; the box shows "Reading…" until the
-    /// answer lands, unless the user chose again or closed it meanwhile.
-    fn read_vcard(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        let task = self.spawn_screen(cx, async move |this, cx| {
+            let path = match picker.await {
+                Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                _ => None,
+            };
+            let _ = this.update(cx, |this, cx| this.vcard_file_chosen(path, cx));
+        });
         let Some(dialog) = self.dialogs.import_contacts_dialog.as_mut() else {
             return;
         };
-        let pick = ImportContactsDialog::next_token();
-        dialog.pick = pick;
-        dialog.state = VcardImport::Reading {
-            file_name: display_name(&path),
+        let before = dialog.stage.settled();
+        dialog.stage = ImportStage::Choosing {
+            before,
+            _picker: task,
         };
         cx.notify();
-        self.spawn_screen(cx, async move |this, cx| {
+    }
+
+    /// The open dialog answered: the chosen file is read, or the box shows
+    /// what it showed before. The task of any other stage was dropped with
+    /// it, so only the picker of the stage in place gets here.
+    fn vcard_file_chosen(&mut self, path: Option<PathBuf>, cx: &mut Context<Self>) {
+        let Some(dialog) = self.dialogs.import_contacts_dialog.as_mut() else {
+            return;
+        };
+        let ImportStage::Choosing { before, .. } = std::mem::take(&mut dialog.stage) else {
+            return;
+        };
+        match path {
+            Some(path) => self.read_vcard(path, cx),
+            None => {
+                dialog.stage = ImportStage::Showing(before);
+                cx.notify();
+            }
+        }
+    }
+
+    /// Read `path` off the UI thread; the box shows "Reading…" until the
+    /// answer lands. Closing the box or choosing again drops the read.
+    fn read_vcard(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        let file_name = display_name(&path);
+        let read = self.spawn_screen(cx, async move |this, cx| {
             let state = cx
                 .background_executor()
                 .spawn(async move { read_vcard_file(&path) })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                if let Some(dialog) = this.dialogs.import_contacts_dialog.as_mut()
-                    && dialog.pick == pick
-                {
-                    dialog.state = state;
+                if let Some(dialog) = this.dialogs.import_contacts_dialog.as_mut() {
+                    dialog.stage = ImportStage::Showing(state);
                     cx.notify();
                 }
             });
-        })
-        .detach();
+        });
+        let Some(dialog) = self.dialogs.import_contacts_dialog.as_mut() else {
+            return;
+        };
+        dialog.stage = ImportStage::Reading {
+            file_name,
+            _read: read,
+        };
+        cx.notify();
     }
 
     /// Send `importContacts` for what the box shows. The Import button is
@@ -112,8 +170,8 @@ impl QuillApp {
         let Some(dialog) = self.dialogs.import_contacts_dialog.as_ref() else {
             return;
         };
-        let (contacts, skipped, truncated) = match &dialog.state {
-            VcardImport::Ready(preview) => {
+        let (contacts, skipped, truncated) = match &dialog.stage {
+            ImportStage::Showing(VcardImport::Ready(preview)) => {
                 (preview.contacts.clone(), preview.skipped, preview.truncated)
             }
             _ => return,

@@ -118,10 +118,60 @@ mod watcher {
         }
     }
 
+    /// Ends a watch when it goes out of scope, so a watcher thread that
+    /// panics (the thread guard catches that) or returns early still moves
+    /// the stage out of `Watching`.
+    pub(super) struct EndGuard<F: FnMut(bool)> {
+        reached: bool,
+        on_end: F,
+    }
+
+    impl<F: FnMut(bool)> EndGuard<F> {
+        pub(super) fn new(on_end: F) -> Self {
+            Self {
+                reached: false,
+                on_end,
+            }
+        }
+
+        /// The value was read before the watch ended.
+        pub(super) fn reached(&mut self) {
+            self.reached = true;
+        }
+    }
+
+    impl<F: FnMut(bool)> Drop for EndGuard<F> {
+        fn drop(&mut self) {
+            (self.on_end)(self.reached);
+        }
+    }
+
     #[cfg(test)]
     mod tests {
-        use super::{RETRY_AFTER, Watch};
+        use super::{EndGuard, RETRY_AFTER, Watch};
         use std::time::Instant;
+
+        #[test]
+        fn a_watcher_that_panics_still_ends_its_watch() {
+            let t0 = Instant::now();
+            let mut watch = Watch::Idle;
+            assert!(watch.start_if_due(t0));
+            let ended = std::cell::Cell::new(None);
+            let died = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _guard = EndGuard::new(|reached| ended.set(Some(reached)));
+                std::panic::resume_unwind(Box::new("the watcher died"));
+            }));
+            assert!(died.is_err());
+            assert_eq!(ended.get(), Some(false), "the guard ended it, unreached");
+            let read = std::cell::Cell::new(None);
+            {
+                let mut guard = EndGuard::new(|reached| read.set(Some(reached)));
+                guard.reached();
+            }
+            assert_eq!(read.get(), Some(true), "a read before the end is kept");
+            watch.ended(t0, ended.get().unwrap_or(false));
+            assert!(watch.start_if_due(t0 + RETRY_AFTER * 2), "asked again");
+        }
 
         #[test]
         fn a_watch_that_ended_starts_again_after_the_pause() {
@@ -159,7 +209,7 @@ mod watcher {
 
 #[cfg(all(feature = "ui", target_os = "linux"))]
 mod platform {
-    use super::watcher::Watch;
+    use super::watcher::{EndGuard, Watch};
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Instant;
@@ -180,30 +230,31 @@ mod platform {
     /// goes away. Returns at once without a session bus or AT-SPI; either
     /// way [`running`] starts another watch after a pause.
     fn watch() {
-        let reached = read_and_follow();
-        // The value can no longer be trusted: the next watch reads it again.
-        ON.store(false, Ordering::Relaxed);
-        crate::locks::lock_or_recover(&WATCH).ended(Instant::now(), reached);
+        // However the thread ends, even by a panic, the guard ends the
+        // watch, so `running()` starts another after the pause.
+        let mut end = EndGuard::new(|reached| {
+            // The value can no longer be trusted: the next watch reads it again.
+            ON.store(false, Ordering::Relaxed);
+            crate::locks::lock_or_recover(&WATCH).ended(Instant::now(), reached);
+        });
+        read_and_follow(&mut end);
     }
 
-    /// Whether the property could be read (the bus and AT-SPI were there).
-    fn read_and_follow() -> bool {
+    /// Reads the property (`end.reached()` once it could be: the bus and
+    /// AT-SPI were there), then follows its changes.
+    fn read_and_follow(end: &mut EndGuard<impl FnMut(bool)>) {
         let Some(proxy) = proxy() else {
-            return false;
+            return;
         };
-        let reached = match proxy.get_property::<bool>("ScreenReaderEnabled") {
-            Ok(on) => {
-                ON.store(on, Ordering::Relaxed);
-                true
-            }
-            Err(_) => false,
-        };
+        if let Ok(on) = proxy.get_property::<bool>("ScreenReaderEnabled") {
+            ON.store(on, Ordering::Relaxed);
+            end.reached();
+        }
         for change in proxy.receive_property_changed::<bool>("ScreenReaderEnabled") {
             if let Ok(on) = change.get() {
                 ON.store(on, Ordering::Relaxed);
             }
         }
-        reached
     }
 
     fn proxy() -> Option<zbus::blocking::Proxy<'static>> {

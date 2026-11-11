@@ -79,6 +79,7 @@ impl QuillApp {
             return;
         }
         self.profile_modal_replaced_by(target);
+        self.forget_emoji_access_shown();
         if let InfoPanelTarget::User(user_id) = target {
             self.reset_common_groups_search(user_id, window, cx);
         }
@@ -246,9 +247,8 @@ impl QuillApp {
         // Slice G2: the event-log section's search box (created lazily;
         // its value syncs to the panel chat's stored query). The per-admin
         // filter lives in the session and follows the chat.
-        self.ensure_event_log_search(window, cx);
         if let Some(chat_id) = invite_panel_chat_id {
-            self.show_event_log_query(chat_id, window, cx);
+            self.ensure_event_log_search(chat_id, window, cx);
         }
         self.inline_members_opened(target, window, cx);
         cx.notify();
@@ -261,8 +261,9 @@ impl QuillApp {
             session.users_state.open_info_panel = None;
         }
         self.common_groups.close();
+        self.forget_emoji_access_shown();
         // The members block belongs to the panel that closed.
-        self.inline_members.reset(None);
+        self.inline_members.reset();
         cx.notify();
     }
 

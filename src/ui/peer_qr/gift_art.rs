@@ -164,14 +164,8 @@ impl QuillApp {
         let Some(open) = self.peer_qr.open.as_ref() else {
             return Vec::new();
         };
-        let mut gifts: Vec<ThemeGift> = open
-            .state
-            .gift
-            .iter()
-            .map(|gift| (**gift).clone())
-            .collect();
-        if open.motion.visible(std::time::Instant::now())
-            == Some(quill::peer_qr::state::QrPanel::Gifts)
+        let mut gifts: Vec<ThemeGift> = open.state.gift().into_iter().cloned().collect();
+        if open.motion.shown() == Some(quill::peer_qr::state::QrPanel::Gifts)
             && let Some(session) = self.session()
         {
             gifts.extend(session.users_state.peer_qr.gifts.list.iter().cloned());
@@ -190,7 +184,7 @@ impl QuillApp {
             .peer_qr
             .open
             .as_ref()
-            .and_then(|open| open.state.gift.as_ref().map(|gift| gift.id));
+            .and_then(|open| open.state.gift().map(|gift| gift.id));
         let mut wanted = Vec::new();
         for gift in &gifts {
             if let Some(model) = gift.model.as_ref().and_then(still_source) {

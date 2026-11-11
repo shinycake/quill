@@ -24,7 +24,7 @@ use crate::diagnostics::{Diagnostic, DiagnosticSink};
 use crate::telegram::client::{OwnedEnvelope, ReceiveBridge, copy_and_parse};
 use crate::telegram::ffi::{MAX_NATIVE_LOG_VERBOSITY, TdJson, TdJsonError};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
@@ -98,25 +98,27 @@ pub const LAUNCH_CHATS_EXTRA: &str = "quill-launch-chats";
 /// first frame before the chats could draw. A TDLib still opening its
 /// database is further off, and the window does not wait for it.
 pub struct LaunchChats {
-    /// The client whose page the first frame waits for: the on-screen
-    /// account's, claimed when it asks for the page. Another account's
-    /// states move nothing. `NO_OWNER` before the claim.
-    owner: AtomicI64,
-    stage: AtomicU8,
-    lock: Mutex<()>,
+    stage: Mutex<Launch>,
     came: Condvar,
 }
 
-/// No client has claimed the launch page.
-const NO_OWNER: i64 = -1;
-
-/// TDLib is opening its database.
-const STARTING: u8 = 0;
-/// `authorizationStateReady` came, and the receive thread asked for the page.
-const ASKED: u8 = 1;
-/// The page is in, no chats are coming (the account is not signed in), or
-/// the first frame stopped waiting. Stages only move forward.
-const IN: u8 = 2;
+/// The launch page's stage. The client is the one whose page the first
+/// frame waits for: the on-screen account's, claimed when it asks for the
+/// page. Another account's states move nothing. Stages only move forward,
+/// except that a new claim starts over for its own client.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Launch {
+    /// TDLib is opening its database, or no client claimed the page.
+    Starting,
+    /// `client` claimed the page; it is not ready yet.
+    Claimed { client: i32 },
+    /// `authorizationStateReady` came, and the receive thread asked for the
+    /// page.
+    Asked { client: i32 },
+    /// The page is in, no chats are coming (the account is not signed in),
+    /// or the first frame stopped waiting.
+    In,
+}
 
 /// What [`LaunchChats::wait`] found.
 #[derive(Debug, PartialEq, Eq)]
@@ -134,9 +136,7 @@ pub static LAUNCH_CHATS: LaunchChats = LaunchChats::new();
 impl LaunchChats {
     pub const fn new() -> Self {
         Self {
-            owner: AtomicI64::new(NO_OWNER),
-            stage: AtomicU8::new(STARTING),
-            lock: Mutex::new(()),
+            stage: Mutex::new(Launch::Starting),
             came: Condvar::new(),
         }
     }
@@ -144,35 +144,35 @@ impl LaunchChats {
     /// `client_id` asks for the launch page: only its envelopes move the
     /// wait from now on.
     pub fn claim(&self, client_id: i32) {
-        self.owner.store(i64::from(client_id), Ordering::SeqCst);
-    }
-
-    fn stage(&self) -> u8 {
-        self.stage.load(Ordering::SeqCst)
+        let mut stage = lock(&self.stage);
+        if *stage != Launch::In {
+            *stage = Launch::Claimed { client: client_id };
+        }
     }
 
     fn set_in(&self) {
-        let _guard = lock(&self.lock);
-        self.stage.store(IN, Ordering::SeqCst);
+        *lock(&self.stage) = Launch::In;
         self.came.notify_all();
     }
 
+    #[cfg(test)]
     fn is_in(&self) -> bool {
-        self.stage() == IN
+        *lock(&self.stage) == Launch::In
     }
 
     /// Block while the page is asked for, for at most `cap`. The page then
     /// counts as in, so later calls return at once.
     pub fn wait(&self, cap: Duration) -> LaunchWait {
-        let guard = lock(&self.lock);
-        let found = match self.stage() {
-            IN => LaunchWait::Came,
-            STARTING => LaunchWait::Skipped,
-            _ => {
-                let (_guard, waited) = self
+        let mut guard = lock(&self.stage);
+        let found = match *guard {
+            Launch::In => LaunchWait::Came,
+            Launch::Starting | Launch::Claimed { .. } => LaunchWait::Skipped,
+            Launch::Asked { .. } => {
+                let (waited_guard, waited) = self
                     .came
-                    .wait_timeout_while(guard, cap, |_| !self.is_in())
+                    .wait_timeout_while(guard, cap, |stage| *stage != Launch::In)
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
+                guard = waited_guard;
                 if waited.timed_out() {
                     LaunchWait::Capped
                 } else {
@@ -180,7 +180,9 @@ impl LaunchChats {
                 }
             }
         };
-        self.stage.store(IN, Ordering::SeqCst);
+        *guard = Launch::In;
+        drop(guard);
+        self.came.notify_all();
         found
     }
 
@@ -188,15 +190,24 @@ impl LaunchChats {
     /// authorization state that means no chats are coming.
     fn observe(&self, json: &str, owned: &OwnedEnvelope) {
         use crate::telegram::envelope::{AuthPayload, AuthorizationState, EnvelopePayload};
-        if self.is_in() || owned.client_id.map(i64::from) != Some(self.owner.load(Ordering::SeqCst))
-        {
+        let Some(from) = owned.client_id else {
+            return;
+        };
+        let owner = match *lock(&self.stage) {
+            Launch::Claimed { client } | Launch::Asked { client } => client,
+            Launch::Starting | Launch::In => return,
+        };
+        if from != owner {
             return;
         }
         let no_chats = match &owned.envelope.payload {
             EnvelopePayload::Auth(AuthPayload::UpdateAuthorizationState(
                 AuthorizationState::Ready,
             )) => {
-                self.stage.fetch_max(ASKED, Ordering::SeqCst);
+                let mut stage = lock(&self.stage);
+                if *stage == (Launch::Claimed { client: owner }) {
+                    *stage = Launch::Asked { client: owner };
+                }
                 false
             }
             EnvelopePayload::Auth(AuthPayload::UpdateAuthorizationState(state)) => {
@@ -288,12 +299,12 @@ impl Routes {
 
     /// Block while no client is registered, so `td_receive` only runs after
     /// a client id was made, and with it the exit hook
-    /// ([`stop_shared_before_tdlib_teardown`]). The shutdown flag is read
+    /// ([`stop_shared_before_tdlib_teardown`]). The run stage is read
     /// under the lock [`TdHub::request_stop`] notifies under, so a stop is
     /// never missed.
-    fn wait_for_client(&self, shutdown: &AtomicBool) {
+    fn wait_for_client(&self, run: &Run) {
         let mut map = lock(&self.map);
-        while map.is_empty() && !shutdown.load(Ordering::SeqCst) {
+        while map.is_empty() && !run.stop_requested() {
             map = self
                 .changed
                 .wait(map)
@@ -307,26 +318,82 @@ pub struct TdHub {
     api: Option<Arc<TdJson>>,
     routes: Arc<Routes>,
     seq: Arc<AtomicU64>,
-    shutdown: Arc<AtomicBool>,
+    run: Arc<Run>,
     wake: ReceiveWake,
-    /// Set when the receive loop ends without a shutdown request (a panic):
-    /// every bridge then reports itself stopped.
-    stopped: Arc<AtomicBool>,
     thread: Mutex<Option<JoinHandle<Option<()>>>>,
 }
 
-/// Marks the hub stopped when the loop ends for any reason other than a
-/// requested shutdown, including a panic unwind.
+/// Where one receive loop is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RunStage {
+    /// The loop reads and routes.
+    Running,
+    /// The loop ended without a stop request (a panic): every bridge then
+    /// reports itself stopped.
+    Died,
+    /// A stop was requested; the loop ends at its next check.
+    Stopping,
+    /// The thread was joined.
+    Joined,
+}
+
+/// One receive loop's stage, owned by the hub that started it. Only its own
+/// transitions write the report the clients' bridges read, and a replacement
+/// hub's loop starts a stage of its own over the same report.
+struct Run {
+    stage: Mutex<RunStage>,
+    /// Whether the loop died: the bridges' `stopped_unexpectedly`.
+    report: Arc<AtomicBool>,
+}
+
+impl Run {
+    /// A loop that is starting now; the clients' report reads running.
+    fn begin(report: Arc<AtomicBool>) -> Arc<Self> {
+        report.store(false, Ordering::SeqCst);
+        Arc::new(Self {
+            stage: Mutex::new(RunStage::Running),
+            report,
+        })
+    }
+
+    /// The loop ended by itself.
+    fn died(&self) {
+        let mut stage = lock(&self.stage);
+        if *stage == RunStage::Running {
+            *stage = RunStage::Died;
+            self.report.store(true, Ordering::SeqCst);
+        }
+    }
+
+    fn stop(&self) {
+        let mut stage = lock(&self.stage);
+        if matches!(*stage, RunStage::Running | RunStage::Died) {
+            *stage = RunStage::Stopping;
+        }
+    }
+
+    fn joined(&self) {
+        *lock(&self.stage) = RunStage::Joined;
+    }
+
+    fn stop_requested(&self) -> bool {
+        matches!(*lock(&self.stage), RunStage::Stopping | RunStage::Joined)
+    }
+
+    fn died_unexpectedly(&self) -> bool {
+        self.report.load(Ordering::SeqCst)
+    }
+}
+
+/// Marks the loop dead when it ends for any reason other than a requested
+/// shutdown, including a panic unwind.
 struct StopGuard {
-    shutdown: Arc<AtomicBool>,
-    stopped: Arc<AtomicBool>,
+    run: Arc<Run>,
 }
 
 impl Drop for StopGuard {
     fn drop(&mut self) {
-        if !self.shutdown.load(Ordering::SeqCst) {
-            self.stopped.store(true, Ordering::SeqCst);
-        }
+        self.run.died();
     }
 }
 
@@ -342,13 +409,13 @@ enum Reuse {
 }
 
 /// What a replacement hub takes over from a stopped one: the routing table
-/// and the stopped flag the live clients' bridges hold. Without it every
+/// and the report the live clients' bridges hold. Without it every
 /// open client would be unrouted on the new hub and still report itself
 /// stopped, while its TDLib instance stays open on the database.
 #[derive(Clone)]
 pub struct Handover {
     routes: Arc<Routes>,
-    stopped: Arc<AtomicBool>,
+    report: Arc<AtomicBool>,
     /// The sequence counter: each client's `Session` ignores envelopes at or
     /// below its last seen `seq`, so a counter restarting at 0 would make
     /// every surviving client drop everything the new hub delivers.
@@ -428,7 +495,7 @@ impl TdHub {
         Self::start(source, wake, sink, None)
     }
 
-    /// A hub taking over a stopped one's routes and stopped flag, so the
+    /// A hub taking over a stopped one's routes and bridge report, so the
     /// clients that were on it keep receiving.
     pub fn with_source_replacing(
         source: ReceiveSource,
@@ -443,7 +510,7 @@ impl TdHub {
     pub fn handover(&self) -> Handover {
         Handover {
             routes: self.routes.clone(),
-            stopped: self.stopped.clone(),
+            report: self.run.report.clone(),
             seq: self.seq.clone(),
         }
     }
@@ -454,43 +521,36 @@ impl TdHub {
         sink: Arc<dyn DiagnosticSink>,
         handover: Option<Handover>,
     ) -> std::io::Result<Self> {
-        let (routes, stopped, seq) = match handover {
-            // The old loop is gone: the clients' flag reads running again.
+        let (routes, report, seq) = match handover {
             Some(Handover {
                 routes,
-                stopped,
+                report,
                 seq,
-            }) => {
-                stopped.store(false, Ordering::SeqCst);
-                (routes, stopped, seq)
-            }
+            }) => (routes, report, seq),
             None => (
                 Arc::new(Routes::default()),
                 Arc::new(AtomicBool::new(false)),
                 Arc::new(AtomicU64::new(0)),
             ),
         };
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let guard = StopGuard {
-            shutdown: shutdown.clone(),
-            stopped: stopped.clone(),
-        };
+        // The old loop, if any, is gone: this one reports running.
+        let run = Run::begin(report);
+        let guard = StopGuard { run: run.clone() };
         let thread = {
             let routes = routes.clone();
             let seq = seq.clone();
-            let shutdown = shutdown.clone();
+            let run = run.clone();
             crate::thread_guard::spawn_guarded("quill-td-receive", move || {
                 let _guard = guard;
-                receive_loop(source, &routes, &seq, &shutdown, &sink);
+                receive_loop(source, &routes, &seq, &run, &sink);
             })?
         };
         Ok(Self {
             api: None,
             routes,
             seq,
-            shutdown,
+            run,
             wake,
-            stopped,
             thread: Mutex::new(Some(thread)),
         })
     }
@@ -514,12 +574,12 @@ impl TdHub {
             self.clone(),
             client_id,
             self.seq.clone(),
-            self.stopped.clone(),
+            self.run.report.clone(),
         )
     }
 
     pub fn stopped_unexpectedly(&self) -> bool {
-        self.stopped.load(Ordering::SeqCst)
+        self.run.died_unexpectedly()
     }
 
     /// Stop the loop and join it. Test hubs are stopped here; the shared
@@ -528,6 +588,7 @@ impl TdHub {
         self.request_stop();
         if let Some(thread) = lock(&self.thread).take() {
             let _ = thread.join();
+            self.run.joined();
         }
     }
 
@@ -546,11 +607,12 @@ impl TdHub {
             return false;
         }
         let _ = thread.join();
+        self.run.joined();
         true
     }
 
     fn request_stop(&self) {
-        self.shutdown.store(true, Ordering::SeqCst);
+        self.run.stop();
         let map = lock(&self.routes.map);
         self.routes.changed.notify_all();
         drop(map);
@@ -575,16 +637,16 @@ fn receive_loop(
     mut source: ReceiveSource,
     routes: &Routes,
     seq: &AtomicU64,
-    shutdown: &AtomicBool,
+    run: &Run,
     sink: &Arc<dyn DiagnosticSink>,
 ) {
     let mut panics = 0u32;
-    while !shutdown.load(Ordering::SeqCst) {
+    while !run.stop_requested() {
         // One envelope's parse or delivery going wrong must not end the
         // receive thread: it serves every account in the process. The panic
         // hook has already filed the report (`crate::thread_guard`).
         let finished = crate::thread_guard::ffi_boundary(false, || {
-            receive_one(&mut source, routes, seq, shutdown, sink);
+            receive_one(&mut source, routes, seq, run, sink);
             true
         });
         if finished {
@@ -604,18 +666,18 @@ fn receive_one(
     source: &mut ReceiveSource,
     routes: &Routes,
     seq: &AtomicU64,
-    shutdown: &AtomicBool,
+    run: &Run,
     sink: &Arc<dyn DiagnosticSink>,
 ) {
-    routes.wait_for_client(shutdown);
-    if shutdown.load(Ordering::SeqCst) {
+    routes.wait_for_client(run);
+    if run.stop_requested() {
         return;
     }
     let Some(json) = source(exit::receive_timeout_secs(RECEIVE_TIMEOUT_SECS)) else {
         return;
     };
     // What ended the call may be the stop's own wake.
-    if shutdown.load(Ordering::SeqCst) {
+    if run.stop_requested() {
         return;
     }
     // A conference call's frame answers go to the call thread waiting on

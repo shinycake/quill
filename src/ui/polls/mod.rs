@@ -278,7 +278,7 @@ impl QuillApp {
                     .text_color(text_muted())
                     .child(tr(keys::Q_MEDIA_SELECT_AN_OPTION_TO_SEE)),
             ),
-            Some(PollVotersFetch::Loading) => body.child(
+            Some(PollVotersFetch::Loading(_)) => body.child(
                 div()
                     .flex()
                     .items_center()
@@ -307,6 +307,7 @@ impl QuillApp {
             Some(PollVotersFetch::Loaded {
                 voters,
                 total_count,
+                ..
             }) => {
                 let mut list = body;
                 if voters.is_empty() {

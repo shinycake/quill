@@ -4,7 +4,6 @@
 use super::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::ids::MessageId;
 
 pub(crate) struct MessageUi {
     /// M1: right-click context menu target + window position, and what
@@ -30,8 +29,6 @@ pub(crate) struct MessageUi {
     pub(super) history_focus: FocusHandle,
     /// Screen-reader focus among the history's messages (`history_a11y`).
     pub(super) a11y: super::history_a11y::HistoryA11y,
-    /// M1: swipe-to-reply press origin (chat, message, press x).
-    pub(super) swipe_reply_start: Option<(ChatId, MessageId, Pixels)>,
     /// Phase 4.1: revealed text-entity spoilers, keyed by
     /// (chat id, message id, run index, is-caption block). Message ids are
     /// only unique within a chat, so the chat id is part of the key.
@@ -51,8 +48,8 @@ pub(crate) struct MessageUi {
     pub(super) rendered_sponsored: std::rc::Rc<std::cell::RefCell<Vec<(ChatId, i64)>>>,
     /// The custom emoji card of this window: tapped, asked for, shown (it
     /// times itself out; a new tap of the same emoji starts the timer over).
-    /// It shows here, over the window of the tap (the session keeps one
-    /// preview, as the answer).
+    /// It shows here, over the window of the tap; the session keeps the
+    /// answer under the request that asked until this window takes it.
     pub(super) custom_emoji: super::custom_emoji_card::CustomEmojiCard,
     /// B4: poll voter-list viewer.
     pub(super) poll_voters_dialog: Option<PollVotersDialog>,
@@ -77,7 +74,6 @@ impl MessageUi {
             selection_drag: Default::default(),
             history_focus: cx.focus_handle(),
             a11y: Default::default(),
-            swipe_reply_start: None,
             revealed: Default::default(),
             dismissed_keyboards: std::collections::HashSet::new(),
             collapsed_keyboards: std::collections::HashSet::new(),

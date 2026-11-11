@@ -585,15 +585,15 @@ pub fn live(account: &AccountKey) -> AccessSummary {
 /// The inputs [`live`] reads, for a caller that adjusts them first.
 pub fn live_inputs(account: &AccountKey) -> Inputs {
     use super::ui_driver::takeover;
-    let takeover = if takeover::stopped() {
-        Takeover::Stopped
-    } else if takeover::paused() {
-        Takeover::Paused
-    } else {
-        match takeover::current() {
-            takeover::Phase::Driving { agent, .. } => Takeover::Driving { agent },
-            _ => Takeover::Idle,
+    // One read, so Stop or a pause cannot land between the parts.
+    let (phase, facts, _) = takeover::snapshot();
+    let takeover = match (facts.hold, phase) {
+        (takeover::Hold::Stopped, _) => Takeover::Stopped,
+        (takeover::Hold::Paused { .. }, _) => Takeover::Paused,
+        (takeover::Hold::None, takeover::Phase::Driving { agent, .. }) => {
+            Takeover::Driving { agent }
         }
+        (takeover::Hold::None, _) => Takeover::Idle,
     };
     Inputs {
         enabled: super::access::enabled(),

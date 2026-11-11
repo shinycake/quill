@@ -364,8 +364,9 @@ const MAIN_WINDOW: &[Surface] = &[
         open: |h| {
             h.act(|app, _, cx| {
                 let at = point(px(40.), px(80.));
-                app.chat_list.menu =
-                    Some(crate::ui::menu_states::ChatMenuState::at(ChatId(11), at));
+                app.chat_list
+                    .menu
+                    .open_row(crate::ui::menu_states::ChatMenuState::at(ChatId(11), at));
                 cx.notify();
             })
         },
@@ -740,7 +741,7 @@ fn closing_the_call_window_lets_go_of_what_it_made(cx: &mut TestAppContext) {
                     if let Some(session) = app.demo_session.as_mut() {
                         session.calls.active_call = CALL.with(|slot| slot.borrow().clone());
                     }
-                    app.call_screen.window_closed_by_user = None;
+                    app.call_screen.wanted = crate::ui::calls_state::WindowWanted::Open;
                     app.sync_call_window(cx);
                 })
             },

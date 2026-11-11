@@ -26,7 +26,7 @@ impl QuillApp {
             .into_iter()
             .chain(self.chat_ui.reply().map(|reply| reply.chat_id))
             .chain(self.windows.slot_history_holds())
-            .chain(self.playback.player.chat)
+            .chain(self.playback.active.chat())
             .chain(
                 self.playback
                     .intent

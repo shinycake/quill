@@ -188,7 +188,7 @@ impl Session {
                 Some(ProfilePhotosFetch::Loaded { next_page, .. })
                     if next_page.answers(pending.id) =>
                 {
-                    *next_page = PhotoPage::Idle;
+                    *next_page = PhotoPage::Failed(reason);
                 }
                 Some(ProfilePhotosFetch::Loading(id)) if *id == pending.id => {
                     self.users_state
@@ -204,7 +204,7 @@ impl Session {
                 Some(ChatPhotosFetch::Loaded { next_page, .. })
                     if next_page.answers(pending.id) =>
                 {
-                    *next_page = PhotoPage::Idle;
+                    *next_page = PhotoPage::Failed(reason);
                 }
                 Some(ChatPhotosFetch::Loading(id)) if *id == pending.id => {
                     self.users_state

@@ -174,9 +174,9 @@ impl QuillApp {
         };
         let motion = open.motion;
         let opened = open.opened;
-        let picks = super::plain_picks(&open.state.emoji);
+        let picks = super::plain_picks(open.state.emoji());
         let swap = open.swap.clone();
-        let gift = open.state.gift.clone();
+        let gift = open.state.gift().cloned().map(Box::new);
         let gift_entry = open.gift_entry;
         let progress = motion.progress(now, animate);
         let layout = box_layout(true, if view.can_style { 3 } else { 0 });

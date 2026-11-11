@@ -89,14 +89,10 @@ super::super::on_screen::on_screen_fields! {
     pub(super) images: Entity<BoundedImageCache>,
     /// The frame `QuillApp::chat_frame_starts` last ran for.
     pub(super) frame_started: Cell<u64>,
-    /// The window was the active one at its last render or activation
-    /// change.
-    pub(super) active: bool,
-    /// Where the window stood then (`cover`).
-    pub(super) place: Option<super::cover::WindowPlace>,
-    /// The window's geometry at its last render or move, so the places
-    /// can be saved while the window itself is leased (`saved`).
-    pub(super) bounds: Option<Bounds<Pixels>>,
+    /// Where the window stands as the platform last reported it, so the
+    /// places can be read and saved while the window itself is leased
+    /// (`cover`, `saved`).
+    pub(super) stand: super::cover::Standing,
     ;
     history: HistoryUi,
     composer: Entity<TextareaState>,
@@ -148,6 +144,7 @@ impl super::ChatWindows {
     pub(in crate::ui) fn take_slot_inline_return(
         &self,
         bot_id: i64,
+        account: &quill::ids::AccountKey,
     ) -> Option<super::super::inline_return::InlineReturn> {
         self.slots().find_map(|slot| {
             let mut slot = slot.try_borrow_mut().ok()?;
@@ -155,7 +152,7 @@ impl super::ChatWindows {
                 .composer_ui
                 .inline_return
                 .as_ref()
-                .is_some_and(|ret| ret.waits_for_start(bot_id));
+                .is_some_and(|ret| ret.waits_for_start(bot_id) && ret.is_of(account));
             waits
                 .then(|| slot.composer_ui.inline_return.take())
                 .flatten()
@@ -260,9 +257,7 @@ impl WindowSlot {
                 .with_composer_height(app.slices.composer_height()),
             images: cx.new(|_| BoundedImageCache::for_window(chat_id, app.slices.scope())),
             frame_started: Cell::new(0),
-            active: false,
-            place: None,
-            bounds: None,
+            stand: Default::default(),
         }
     }
 }
@@ -278,18 +273,29 @@ impl QuillApp {
         if self.windows.scope == target {
             return true;
         }
-        if let Some(current) = self.windows.scope.take()
-            && let Some(slot) = self.windows.slot_for(current)
-        {
-            self.swap_slot(&slot);
+        if let Some(current) = self.windows.scope {
+            // A slot in use cannot take its state back: the scope stays
+            // where it is, and the caller sees `target` is not in place.
+            if let Some(slot) = self.windows.slot_for(current)
+                && !self.swap_slot(&slot)
+            {
+                return false;
+            }
+            self.windows.scope = None;
         }
         let slot = target.and_then(|chat_id| Some((chat_id, self.windows.slot_for(chat_id)?)));
         let view = slot.as_ref().map(|(chat_id, _)| *chat_id);
         if self.enter_session_view(view)
             && let Some((chat_id, slot)) = slot
         {
-            self.swap_slot(&slot);
-            self.windows.scope = Some(chat_id);
+            if self.swap_slot(&slot) {
+                self.windows.scope = Some(chat_id);
+            } else {
+                // The window's state could not come in place: the session
+                // goes back to the main window's view, like a window with
+                // no view.
+                self.enter_session_view(None);
+            }
         }
         self.windows.scope == target
     }
@@ -306,9 +312,12 @@ impl QuillApp {
         }
     }
 
-    /// Exchange the app's view state with the slot's (symmetric).
-    fn swap_slot(&mut self, slot: &SharedSlot) {
-        let mut slot = slot.borrow_mut();
+    /// Exchange the app's view state with the slot's (symmetric). `false`,
+    /// with nothing exchanged, when the slot is in use.
+    fn swap_slot(&mut self, slot: &SharedSlot) -> bool {
+        let Ok(mut slot) = slot.try_borrow_mut() else {
+            return false;
+        };
         std::mem::swap(&mut self.history, &mut slot.history);
         std::mem::swap(&mut self.composer, &mut slot.composer);
         std::mem::swap(&mut self.composer_ui, &mut slot.composer_ui);
@@ -323,6 +332,7 @@ impl QuillApp {
         std::mem::swap(&mut self.frame.surfaces, &mut slot.surfaces);
         std::mem::swap(&mut self.frame.motion, &mut slot.motion);
         std::mem::swap(&mut self.frame.menu, &mut slot.menu);
+        true
     }
 
     /// Run `f` as `window_chat`'s window (`None`: the main window), for
@@ -434,9 +444,11 @@ impl QuillApp {
             return;
         };
         let frame = window.frame_number();
-        let (started, images) = {
-            let slot = slot.borrow();
-            (slot.frame_started.replace(frame), slot.images.clone())
+        let Ok((started, images)) = slot
+            .try_borrow()
+            .map(|slot| (slot.frame_started.replace(frame), slot.images.clone()))
+        else {
+            return;
         };
         if started == frame {
             return;

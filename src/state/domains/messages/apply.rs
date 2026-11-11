@@ -40,9 +40,7 @@ impl Session {
                 {
                     self.set_live_story_senders(group_call_id, senders);
                 } else if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.chats_state
-                        .send_as_options
-                        .insert(chat_id.0, crate::state::fetch::Fetch::Ready(senders));
+                    self.accept_message_senders(chat_id, pending.map(|p| p.id), senders);
                 }
             }
             MessagesPayload::UpdateChatIsTranslatable {
@@ -161,16 +159,14 @@ impl Session {
                         .filter(|stop| {
                             matches!(stop, BotStopStage::Stopped | BotStopStage::Stopping(_))
                         });
-                    let stopped = carried == Some(BotStopStage::Stopped);
                     self.remember_files(&files);
                     self.messages.pending_bot_messages.insert(
                         (chat_id.0, forum_topic_id),
                         PendingBotMessage {
                             draft_id,
-                            can_stop: can_stop && !stopped,
                             keep_on_stop,
                             content,
-                            stop: carried.unwrap_or(BotStopStage::Running),
+                            stop: carried.unwrap_or(BotStopStage::Running { can_stop }),
                             expires_at_ms: unix_ms_now().saturating_add(
                                 self.messages.pending_bot_period_secs.saturating_mul(1000),
                             ),
@@ -228,11 +224,7 @@ impl Session {
                 self.in_every_view(|session| session.replace_view_copy(old_message_id, &row));
                 // The draft of the slot the message went to (topic, thread
                 // or chat) is cleared once the composer is seen idle.
-                let slot = if direct_topic != 0 && self.is_direct_messages_admin(chat_id) {
-                    crate::composer::DraftTopic::DirectMessages(direct_topic)
-                } else {
-                    Self::draft_topic_of_message(topic_id, thread_id)
-                };
+                let slot = self.draft_slot_of_message(chat_id, topic_id, thread_id, direct_topic);
                 self.messages.draft_clears.push((chat_id, slot));
             }
             MessagesPayload::UpdateMessageSendFailed {
@@ -250,6 +242,15 @@ impl Session {
                 }
                 let chat_id = message.chat_id;
                 let topic_id = message.topic_id();
+                // The send never became a message: whatever waited on its
+                // ack to clear the draft must let the draft stay.
+                let slot = self.draft_slot_of_message(
+                    chat_id,
+                    topic_id,
+                    message.thread_id(),
+                    message.extras.direct_messages_topic_id(),
+                );
+                self.messages.failed_sends.push((chat_id, slot));
                 let failed = crate::telegram::envelope::MessageSendState::Failed {
                     can_retry: matches!(
                         message.send_state,

@@ -104,7 +104,7 @@ impl Render for QuillApp {
         self.sync_video_avatar(active, window.scale_factor(), cx);
         self.sync_userpic_videos(active, window.scale_factor(), history_drawn);
         self.viewer_follow_window_fullscreen(window);
-        self.frame.media_roots_frame.borrow_mut().take();
+        self.frame.media_roots_frame.set(None);
         let opening = self.viewer.state.is_open().then_some(self.viewer.open_gen);
         let cover = self.frame.viewer_cover.get();
         self.frame
@@ -337,8 +337,11 @@ impl Render for QuillApp {
             .when(
                 matches!(
                     self.preferences.update_state,
-                    quill::updater::UpdateState::Installed(_)
-                ) && !self.preferences.update_banner_dismissed,
+                    quill::updater::UpdateState::Installed(
+                        _,
+                        quill::updater::ChangelogBanner::Shown
+                    )
+                ),
                 |this| this.child(self.update_banner(cx)),
             )
             // Slice parity:platform-offline-indicator — slim connection
@@ -470,7 +473,7 @@ impl Render for QuillApp {
                 }
             })
             // Phase 9.3: story composer overlay above the story viewer.
-            .when(self.stories.composer.open, |this| {
+            .when(self.stories.composer.is_open(), |this| {
                 this.child(self.story_composer_overlay(cx))
             })
             // Phase 9.7: chat story page overlay (albums / chat page /
@@ -553,7 +556,7 @@ impl Render for QuillApp {
                 },
             )
             // Slice CL1: right-click chat-row context menu.
-            .when_some(self.chat_list.menu, |this, menu| {
+            .when_some(self.chat_list.menu.row_copy(), |this, menu| {
                 this.child(self.chat_menu_overlay(menu, cx))
             })
             .when_some(
@@ -565,7 +568,7 @@ impl Render for QuillApp {
             .when_some(self.playback.playlist.menu(), |this, menu| {
                 this.child(self.playlist_menu_overlay(menu, cx))
             })
-            .when_some(self.chat_list.archive_menu, |this, position| {
+            .when_some(self.chat_list.menu.archive(), |this, position| {
                 this.child(self.archive_menu_overlay(position, cx))
             })
             .when_some(self.admin.community.flow.row_menu, |this, menu| {
@@ -607,7 +610,7 @@ impl Render for QuillApp {
             Some(cache) => super::image_budget::CacheScope::new(cache, root).into_any_element(),
             None => root.into_any_element(),
         };
-        self.frame.menu.items.apply_pending_focus(window, cx);
+        self.menu_frame_end(window, cx);
         // Back to the scope this draw interrupted; the layout and paint of
         // the root run as the main window's again.
         self.set_window_scope(outer_scope);

@@ -20,7 +20,7 @@ fn page_json(extra: u64, ids: &[i64]) -> String {
 fn loaded_ids(session: &Session) -> Option<(Vec<i64>, bool)> {
     match session.groups.event_log_fetch(13)? {
         ChatEventLogFetch::Loaded(page) => {
-            Some((page.events.iter().map(|e| e.id).collect(), page.has_more))
+            Some((page.events.iter().map(|e| e.id).collect(), page.has_more()))
         }
         _ => None,
     }

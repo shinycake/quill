@@ -78,7 +78,7 @@ fn nothing_is_sent_while_the_wallet_option_is_off() {
         "{:?}",
         rig.wallet_methods()
     );
-    assert!(!rig.driver.session.ton_wallet.money.open);
+    assert!(!rig.driver.session.ton_wallet.money_open());
 }
 
 #[test]
@@ -109,8 +109,8 @@ fn opening_money_loads_state_rates_and_history_once() {
     assert_eq!(own.gram_amount, 3_000_000_000, "the page's balance wins");
     assert!(own.is_backup_enabled);
     assert_eq!(wallet.rates, vec![("EUR".to_string(), 0.5)]);
-    assert_eq!(wallet.money.history.items().len(), 1);
-    assert!(wallet.money.history.has_more());
+    assert_eq!(wallet.money_page().history.items().len(), 1);
+    assert!(wallet.money_page().history.has_more());
 
     rig.driver.fetch_wallet_history(true).unwrap();
     assert_eq!(rig.last("getTonWalletTransactions")["offset"], "p2");
@@ -139,7 +139,16 @@ fn collectibles_load_on_first_view() {
     rig.driver.set_money_tab(MoneyTab::Transactions).unwrap();
     rig.driver.set_money_tab(MoneyTab::Collectibles).unwrap();
     assert_eq!(rig.sent("getTonWalletNfts"), 1, "loaded once");
-    assert_eq!(rig.driver.session.ton_wallet.money.nfts.items().len(), 1);
+    assert_eq!(
+        rig.driver
+            .session
+            .ton_wallet
+            .money_page()
+            .nfts
+            .items()
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -184,7 +193,7 @@ fn a_user_without_a_wallet_settles_to_none() {
     );
     assert_eq!(
         rig.driver.session.ton_wallet.profile_addresses.get(&1),
-        Some(&ProfileAddress::None)
+        Some(&ProfileAddress::NoWallet)
     );
 }
 
@@ -200,13 +209,13 @@ fn a_transfer_card_opens_its_transaction_and_the_first_grams_hint() {
     );
     assert!(rig.driver.open_wallet_transaction("t1").unwrap());
     assert!(matches!(
-        rig.driver.session.ton_wallet.money.detail,
+        rig.driver.session.ton_wallet.money_page().detail,
         MoneyDetail::Lookup { .. }
     ));
     assert_eq!(rig.last("getTonWalletTransaction")["transaction_id"], "t1");
     rig.answer("getTonWalletTransaction", transfer("t1", 2_000_000_000));
-    let money = &rig.driver.session.ton_wallet.money;
-    assert!(money.open);
+    let money = &rig.driver.session.ton_wallet.money_page();
+    assert!(rig.driver.session.ton_wallet.money_open());
     assert_eq!(money.selected_tx().map(|tx| tx.id.as_str()), Some("t1"));
     assert!(
         money.hint_open(),
@@ -214,7 +223,7 @@ fn a_transfer_card_opens_its_transaction_and_the_first_grams_hint() {
     );
 
     rig.driver.dismiss_first_transfer_hint().unwrap();
-    assert!(!rig.driver.session.ton_wallet.money.hint_open());
+    assert!(!rig.driver.session.ton_wallet.money_page().hint_open());
     assert_eq!(rig.sent("hideSuggestedAction"), 1);
     assert_eq!(
         rig.last("hideSuggestedAction")["action"]["@type"],
@@ -254,7 +263,7 @@ fn a_failed_lookup_says_so() {
         "getTonWalletTransaction",
         json!({"@type": "error", "code": 400, "message": "TRANSACTION_NOT_FOUND"}),
     );
-    let money = &rig.driver.session.ton_wallet.money;
+    let money = &rig.driver.session.ton_wallet.money_page();
     assert!(money.selected_tx().is_none());
     assert!(money.tx_error().is_some());
 }
@@ -266,21 +275,21 @@ fn a_late_answer_for_an_earlier_card_is_dropped() {
     rig.driver.open_wallet_transaction("t1").unwrap();
     let first_extra = rig.last("getTonWalletTransaction")["@extra"].clone();
     rig.driver.open_wallet_transaction("t2").unwrap();
-    let second = rig.driver.session.ton_wallet.money.detail.clone();
+    let second = rig.driver.session.ton_wallet.money_page().detail.clone();
     // The first card answers after the second was clicked: dropped, for an
     // answer and for an error alike.
     let mut late = transfer("t1", 1);
     late["@extra"] = first_extra.clone();
     rig.ingest(&late.to_string());
-    let money = &rig.driver.session.ton_wallet.money;
+    let money = &rig.driver.session.ton_wallet.money_page();
     assert!(money.selected_tx().is_none());
     assert_eq!(money.detail, second);
     rig.ingest(
         &json!({"@type": "error", "@extra": first_extra, "code": 400, "message": "X"}).to_string(),
     );
-    assert_eq!(rig.driver.session.ton_wallet.money.detail, second);
+    assert_eq!(rig.driver.session.ton_wallet.money_page().detail, second);
     rig.answer("getTonWalletTransaction", transfer("t2", 2_000_000_000));
-    let money = &rig.driver.session.ton_wallet.money;
+    let money = &rig.driver.session.ton_wallet.money_page();
     assert_eq!(money.selected_tx().map(|tx| tx.id.as_str()), Some("t2"));
 }
 
@@ -332,4 +341,79 @@ fn wallet_links_show_a_notice_instead_of_acting() {
     // Only the three lookups went out: nothing was prefilled or sent.
     assert_eq!(rig.recorder.snapshot().len(), before + 3);
     assert!(rig.wallet_methods().is_empty());
+}
+
+impl Rig {
+    /// The `@extra` of the last `ty` request.
+    fn extra_of(&self, ty: &str) -> Value {
+        self.last(ty)["@extra"].clone()
+    }
+
+    fn fail_request(&mut self, extra: Value) {
+        self.ingest(
+            &json!({"@type": "error", "@extra": extra, "code": 500, "message": "later"})
+                .to_string(),
+        );
+    }
+}
+
+#[test]
+fn a_failed_profile_lookup_is_asked_again_when_the_profile_opens_again() {
+    let mut rig = Rig::new();
+    rig.wallet_on(true);
+    assert!(rig.driver.fetch_user_ton_wallet_address(1).unwrap());
+    let extra = rig.extra_of("getUserTonWalletAddresses");
+    rig.fail_request(extra);
+    assert_eq!(
+        rig.driver.session.ton_wallet.profile_addresses.get(&1),
+        Some(&ProfileAddress::Failed)
+    );
+    assert!(rig.driver.fetch_user_ton_wallet_address(1).unwrap());
+    assert_eq!(rig.sent("getUserTonWalletAddresses"), 2);
+    // A lookup in flight is not asked twice.
+    assert!(!rig.driver.fetch_user_ton_wallet_address(1).unwrap());
+}
+
+#[test]
+fn a_late_lookup_error_after_the_wallet_toggled_blocks_nothing() {
+    let mut rig = Rig::new();
+    rig.wallet_on(true);
+    rig.driver.fetch_user_ton_wallet_address(1).unwrap();
+    let late = rig.extra_of("getUserTonWalletAddresses");
+    rig.wallet_on(false);
+    rig.wallet_on(true);
+    rig.fail_request(late);
+    assert!(rig.driver.session.ton_wallet.profile_addresses.is_empty());
+    assert!(rig.driver.fetch_user_ton_wallet_address(1).unwrap());
+}
+
+#[test]
+fn an_older_state_request_failing_late_leaves_the_newer_one_loading() {
+    let mut rig = Rig::new();
+    rig.wallet_on(true);
+    rig.driver.open_money_page().unwrap();
+    let older = rig.extra_of("loadTonWalletState");
+    rig.wallet_on(false);
+    rig.wallet_on(true);
+    rig.driver.open_money_page().unwrap();
+    assert_eq!(rig.sent("loadTonWalletState"), 2);
+    // The older request fails after the newer one went out.
+    rig.fail_request(older);
+    assert!(rig.driver.session.ton_wallet.state_fetch.is_loading());
+    // The newer one failing is its own error.
+    let newer = rig.extra_of("loadTonWalletState");
+    rig.fail_request(newer);
+    assert!(rig.driver.session.ton_wallet.state_fetch.error().is_some());
+}
+
+#[test]
+fn the_wallet_turning_off_closes_its_notice_with_the_money_page() {
+    let mut rig = Rig::new();
+    rig.wallet_on(true);
+    rig.driver.open_money_page().unwrap();
+    rig.driver.session.ton_wallet.notice = Some(WalletSurface::Send);
+    rig.wallet_on(false);
+    let wallet = &rig.driver.session.ton_wallet;
+    assert!(wallet.notice.is_none() && !wallet.money_open());
+    assert!(wallet.rates_fetch.is_idle() && wallet.rates.is_empty());
 }

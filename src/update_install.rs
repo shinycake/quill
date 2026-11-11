@@ -210,7 +210,9 @@ pub fn startup_state() -> UpdateState {
             r.release,
             "Update installation failed. Your previous version was restored. Retry the update.",
         ),
-        Some(r) if r.release.version == crate::version::APP => UpdateState::Installed(r.release),
+        Some(r) if r.release.version == crate::version::APP => {
+            UpdateState::Installed(r.release, Default::default())
+        }
         _ => UpdateState::Idle,
     }
 }

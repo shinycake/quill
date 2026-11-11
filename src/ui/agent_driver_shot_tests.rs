@@ -292,7 +292,10 @@ fn an_input_brings_back_a_screenshot_of_the_frame_after(cx: &mut TestAppContext)
         ["ui_screenshot", "ui_click", "ui_screenshot"],
         "{log:?}"
     );
-    assert!(log.iter().all(|a| a.chat_id == 11 && a.ok));
+    assert!(
+        log.iter()
+            .all(|a| a.chat_id == 11 && a.outcome == activity::Outcome::Done)
+    );
 }
 
 #[gpui_kit::test]
@@ -520,7 +523,9 @@ fn a_chat_menu_is_cut_with_its_row(cx: &mut TestAppContext) {
     for (chat, shown) in [(12_i64, false), (11, true)] {
         let anchor = row_anchor(vcx, chat as u64);
         app.update(vcx, |app, cx| {
-            app.chat_list.menu = Some(ChatMenuState::at(ChatId(chat), anchor));
+            app.chat_list
+                .menu
+                .open_row(ChatMenuState::at(ChatId(chat), anchor));
             cx.notify();
         });
         settle(vcx);
@@ -538,7 +543,7 @@ fn a_chat_menu_is_cut_with_its_row(cx: &mut TestAppContext) {
             "chat {chat}'s menu in the picture"
         );
         app.update(vcx, |app, cx| {
-            app.chat_list.menu = None;
+            app.chat_list.menu.close();
             cx.notify();
         });
         settle(vcx);

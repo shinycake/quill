@@ -79,7 +79,7 @@ fn replay_call_signaling_lifecycle() {
         ],
     );
     let call = session.calls.active_call.as_ref().expect("call 77 ready");
-    assert!(matches!(call.state, CallState::Ready));
+    assert!(matches!(call.state, CallState::Ready(_)));
     assert!(call.ready.is_some());
     // Only the tracked call's signaling data is kept (call 78's is
     // dropped — no tracked call with that id).
@@ -244,7 +244,7 @@ fn replay_video_call_signaling() {
         ],
     );
     let call = session.calls.active_call.as_ref().expect("call 90 ready");
-    assert!(matches!(call.state, CallState::Ready));
+    assert!(matches!(call.state, CallState::Ready(_)));
     assert!(call.is_video);
     assert!(call.ready.is_some());
 

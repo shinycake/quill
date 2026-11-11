@@ -83,7 +83,9 @@ fn demo_screenshot(app: &mut QuillApp, window: &mut Window, cx: &mut Context<Qui
     // Over the second and third rows of the demo's chat list.
     let anchor = point(px(48.), px(200.));
     if let Some(chat_id) = env_chat("QUILL_DEMO_SHOT_MENU") {
-        app.chat_list.menu = Some(ChatMenuState::at(chat_id, anchor));
+        app.chat_list
+            .menu
+            .open_row(ChatMenuState::at(chat_id, anchor));
     }
     if let Some(chat_id) = env_chat("QUILL_DEMO_SHOT_PEEK") {
         app.chat_list.peek =

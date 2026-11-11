@@ -289,8 +289,11 @@ impl QuillApp {
     fn polled_chrome(&self) -> (StatusNote, bool, Option<i32>, bool) {
         (
             self.connection.note().clone(),
-            self.auth_ui.login_prevented.is_some(),
-            self.folders.tab,
+            matches!(
+                self.account_boxes.notice,
+                super::account_state::OpenNotice::LoginPrevented(_)
+            ),
+            self.chat_list.view.folder(),
             self.connection_lost(),
         )
     }
@@ -446,7 +449,7 @@ impl QuillApp {
         let deliver = live.driver.session.force_reply_ready();
         // Parity slice: the selected folder tab may have been deleted or
         // removed remotely (`updateChatFolders`); fall back to Main.
-        if let Some(folder_id) = self.screen.folders.tab
+        if let Some(folder_id) = self.screen.chat_list.view.folder()
             && !live
                 .driver
                 .session
@@ -455,12 +458,10 @@ impl QuillApp {
                 .iter()
                 .any(|f| f.id == folder_id)
         {
-            // `live` is borrowed here, so go through the list's own mover
-            // (it ends the selection and a pinned drag, as `set_chat_list_view`).
-            let filter = self.screen.chat_list.filter;
-            self.screen
-                .chat_list
-                .show_view(&mut self.screen.folders.tab, filter, None);
+            // (`live` is borrowed here, so the view changes on the chat
+            // list itself, the same transition `set_chat_list_view` runs.)
+            let filter = self.screen.chat_list.view.filter();
+            self.screen.chat_list.show_view(filter, None);
         }
         let err = live.driver.session.auth_state.last_auth_error;
         let new_auth = live.driver.session.auth.clone();
@@ -549,12 +550,15 @@ impl QuillApp {
     /// breaks on `live.is_none()`) stops.
     pub(super) fn restart_live_connection(&mut self, cx: &mut Context<Self>) {
         self.payments.marketplace.forget();
+        let account = self.session().map(|session| session.account.clone());
         self.close_screen_client(cx);
         // D2 fix-up: the warning promises "Downloaded media will be
         // erased from this device" — TDLib destroyed its own data, but
         // Quill's decrypted media scratch is only swept at startup. Only
         // this account's: another signed-in account may be using its own.
-        quill::local_path::sweep_account_media_cache();
+        if let Some(account) = &account {
+            quill::local_path::sweep_account_media_cache(account);
+        }
         avatar_icon::forget_cached_icons();
         self.start_connection(cx);
     }

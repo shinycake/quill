@@ -9,6 +9,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::group_call_state::CallBox;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::switch::Switch;
@@ -22,29 +23,42 @@ impl QuillApp {
         if self.refused_while_locked() {
             return;
         }
-        self.group_call_screen.settings_open = true;
+        self.open_call_box(CallBox::Settings);
         cx.notify();
     }
 
     pub(super) fn close_group_call_settings(&mut self, cx: &mut Context<Self>) {
-        self.group_call_screen.settings_open = false;
+        if self.settings_open() {
+            self.close_call_box();
+        }
         cx.notify();
     }
 
     /// Esc in the video chat window closes its topmost box: the screen
-    /// privacy box, then Settings, then rename. The boxes are drawn in
+    /// privacy box, then Settings, then rename, then the share box, then the
+    /// invite picker (the order they are drawn in). The boxes are drawn in
     /// that window only, so their Esc lives there and not in the main
     /// window. Whether a box closed.
     pub(super) fn group_call_window_escape(&mut self, cx: &mut Context<Self>) -> bool {
         if self.escape_screen_privacy(true, cx) {
             return true;
         }
-        if self.group_call_screen.settings_open {
+        if self.settings_open() {
             self.close_group_call_settings(cx);
             return true;
         }
-        if self.group_call_screen.title_dialog.is_some() {
+        if self.title_dialog().is_some() {
             self.close_group_call_title_dialog(cx);
+            return true;
+        }
+        if self.share_open() {
+            self.close_group_call_share_links(cx);
+            return true;
+        }
+        if self.invite_open() {
+            self.close_call_box();
+            self.close_conference_link();
+            cx.notify();
             return true;
         }
         false
@@ -52,7 +66,7 @@ impl QuillApp {
 
     /// The Settings box over the voice chat window, while open.
     pub(super) fn group_call_settings_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.group_call_screen.settings_open {
+        if !self.settings_open() {
             return None;
         }
         let noise_row = self.noise_suppression_row(cx);

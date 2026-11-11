@@ -104,6 +104,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// Retry a failed list: drops the failed value and asks again, so the
+    /// box never resets the stage from outside its own transitions.
+    pub fn retry_join_requests(&mut self, chat_id: ChatId, query: &str) {
+        self.session.groups.join_requests.remove(&chat_id.0);
+        self.ask_join_requests(chat_id, query, true);
+    }
+
     /// Next page of the (possibly searched) join-request list, appended.
     pub fn load_more_chat_join_requests(
         &mut self,
@@ -240,7 +247,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .insert(chat_id.0, InviteLinkCountsFetch::Loading);
         let sent = self.send_invite_admin(extra, &get_chat_invite_link_counts(extra, chat_id.0));
         if sent.is_err() {
-            self.session.groups.invite_link_counts.remove(&chat_id.0);
+            self.session.groups.invite_link_counts.insert(
+                chat_id.0,
+                InviteLinkCountsFetch::Failed(crate::state::send_failed_line(
+                    "Could not load invite links",
+                )),
+            );
         }
         sent
     }

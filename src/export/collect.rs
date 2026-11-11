@@ -3,7 +3,7 @@
 //! resolve the names the pages print, and spool each page to a small file
 //! so a long chat never sits in memory.
 use super::model::{Body, ExportMessage, Origin, Who, parse_message};
-use super::worker::{ExportError, Job, Progress, QUERY_TIMEOUT, Tdlib, query};
+use super::worker::{ExportError, Job, Progress, QUERY_TIMEOUT, Stage, Tdlib, query};
 use crate::json_access::JsonExt;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -183,7 +183,7 @@ pub fn collect<T: Tdlib>(
             ids.extend(kept.iter().map(|m| m.id));
             fs::write(spool.join(spool_name(chunks)), serde_json::to_vec(&kept)?)?;
             chunks += 1;
-            progress.done = ids.len();
+            progress.stage = Stage::Collecting { read: ids.len() };
             (job.report)(progress.clone());
         }
         if !progressed || past_range {

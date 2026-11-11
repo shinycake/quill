@@ -24,6 +24,10 @@ pub(crate) struct GiveawayForm {
     pub(super) draft: GiveawayDraft,
     /// The additional prize text.
     pub(super) prize_input: Entity<InputState>,
+    /// The search box of the members and countries pages. It is the
+    /// form's own (the gift pickers keep theirs), so a query typed here
+    /// goes with the form.
+    pub(super) search: Entity<InputState>,
     /// A note under the form (a refused field), cleared on the next change.
     pub(super) note: Option<String>,
     /// The page that shows: the form, its "are you sure" step, or a list.

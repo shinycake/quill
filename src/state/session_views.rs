@@ -185,11 +185,12 @@ impl Session {
     pub(crate) fn miss_search_jump(&mut self, chat_id: ChatId, deleted: &[MessageId]) {
         // Server message ids repeat across channels: only a deletion in the
         // chat the search is over can take its jump's message away.
-        if self.search.chat_search.chat_id != Some(chat_id) {
+        if self.search.chat_search.chat_id() != Some(chat_id) {
             return;
         }
         let jump = &mut self.search.chat_search.jump;
-        if let ChatSearchJump::Ready { message_id } | ChatSearchJump::Loading { message_id } = *jump
+        if let ChatSearchJump::Ready { message_id } | ChatSearchJump::Loading { message_id, .. } =
+            *jump
             && deleted.contains(&message_id)
         {
             *jump = ChatSearchJump::Missing { message_id };

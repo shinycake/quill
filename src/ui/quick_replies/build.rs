@@ -214,7 +214,7 @@ impl QuillApp {
                     .map(|s| s.settings.quick_replies.messages_of(id).to_vec())
             })
             .unwrap_or_default();
-        let editing = state.pane.editing;
+        let editing = state.pane.stage.editing();
         let message_limit = self.session().map_or(qr::MESSAGES_MAX, |s| {
             s.settings.quick_replies.message_limit()
         });
@@ -316,7 +316,8 @@ impl QuillApp {
                             })),
                     ),
             );
-        let confirm = state.pane.delete == super::DeleteStep::Asked;
+        let confirm = matches!(state.pane.stage, super::PaneStage::ConfirmDelete { .. });
+        let deleting = matches!(state.pane.stage, super::PaneStage::Deleting { .. });
         body.child(
             div()
                 .flex()
@@ -351,6 +352,7 @@ impl QuillApp {
                         })
                         .ghost()
                         .small()
+                        .disabled(deleting)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.delete_quick_reply_shortcut(window, cx);
                         })),

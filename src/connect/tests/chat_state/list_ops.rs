@@ -515,6 +515,44 @@ fn cl2_create_private_chat_refusal_opens_nothing() {
 }
 
 #[test]
+fn r2_35_create_private_chat_is_deduped_by_user_not_by_purpose() {
+    // A creation for another user in flight must not swallow the Saved
+    // Messages request; only a second request for the same user is deduped.
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = ViewCtlSender::new();
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    ready_private_chat(&mut driver, &seq, &dyn_sink);
+    driver.session.my_user_id = Some(777);
+
+    let other = driver
+        .create_private_chat_for(555)
+        .expect("send")
+        .expect("request sent");
+    let own = driver
+        .create_private_chat_with_self()
+        .expect("send")
+        .expect("the own chat is asked while another user's is in flight");
+    assert_ne!(other, own);
+    assert!(
+        driver.create_private_chat_for(555).expect("send").is_none(),
+        "the same user is not asked twice"
+    );
+    assert!(
+        driver
+            .create_private_chat_with_self()
+            .expect("send")
+            .is_none(),
+        "the own chat is not asked twice"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn cl1_remove_chat_from_list_sends_delete_history() {
     // Slice CL1: chat-list "Delete chat" is `deleteChatHistory`
     // with `remove_from_chat_list: true` (Telegram X
@@ -771,5 +809,36 @@ fn a_pin_counts_for_the_next_chats_limit_check_as_soon_as_it_is_sent() {
     assert_eq!(pinned(&driver), 1);
     driver.toggle_chat_pin(ChatId(8), true).unwrap();
     assert_eq!(pinned(&driver), 2, "both count before any answer");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn r2_35_a_second_window_gets_its_own_bot_thread_request() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = ViewCtlSender::new();
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    ready_private_chat(&mut driver, &seq, &dyn_sink);
+    for json in [
+        r#"{"@type":"updateUser","user":{"id":41,"first_name":"Bot","type":{"@type":"userTypeBot","has_topics":true,"allows_users_to_create_topics":true,"is_inline":false}}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":41,"title":"Bot","type":{"@type":"chatTypePrivate","user_id":41},"unread_count":0}}"#,
+    ] {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    }
+    let first = driver
+        .start_bot_thread(ChatId(41), "New Chat")
+        .expect("send")
+        .expect("the first window's request");
+    let second = driver
+        .start_bot_thread(ChatId(41), "New Chat")
+        .expect("send")
+        .expect("the second window's own request, not a refusal");
+    assert_ne!(first, second);
     let _ = std::fs::remove_dir_all(&dir);
 }

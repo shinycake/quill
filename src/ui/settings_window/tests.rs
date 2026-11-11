@@ -123,7 +123,7 @@ fn a_box_opens_over_settings_and_closing_it_comes_back(cx: &mut TestAppContext) 
     vcx.update(|window, cx| window.click("settings-row-Accounts", cx));
     assert_eq!(open_dialog(&shell, vcx), Some(DialogKind::Accounts));
     app.update(vcx, |app, cx| {
-        app.account.accounts.open = false;
+        app.account.accounts.dialog = crate::ui::accounts::AccountsDialog::Closed;
         cx.notify();
     });
     assert_eq!(open_dialog(&shell, vcx), None);
@@ -439,17 +439,19 @@ fn leaving_the_calls_page_disarms_the_push_to_talk_capture(cx: &mut TestAppConte
     let (app, _shell, mut vcx) = new_app(cx, 1100.);
     let vcx = &mut vcx;
     let armed = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
-        app.read_with(vcx, |app, _| app.group_call.ptt_capture)
+        app.read_with(vcx, |app, _| {
+            app.preferences.keybinding.capture.push_to_talk_armed()
+        })
     };
     app.update(vcx, |app, cx| {
         app.open_settings(Some(Page::Calls), cx);
-        app.group_call.ptt_capture = true;
+        app.preferences.keybinding.toggle_ptt_capture();
         app.switch_settings_page(Page::Privacy);
     });
     assert!(!armed(&app, vcx), "another page");
     app.update(vcx, |app, _| {
         app.switch_settings_page(Page::Calls);
-        app.group_call.ptt_capture = true;
+        app.preferences.keybinding.toggle_ptt_capture();
         app.close_settings();
     });
     assert!(!armed(&app, vcx), "Settings closed");

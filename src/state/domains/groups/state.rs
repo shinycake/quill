@@ -55,11 +55,68 @@ impl GroupsState {
         }
     }
 
-    /// `chat` gained members: its cached member pages go and the lists on
-    /// screen ask again.
-    pub(crate) fn members_added(&mut self, chat: i64) {
-        self.supergroup_members.retain(|(id, _), _| *id != chat);
-        self.basic_group_members.remove(&chat);
+    /// The next page `pending` of `chat`'s list came back.
+    pub(crate) fn more_answered(
+        &mut self,
+        chat: i64,
+        filter: MemberListFilter,
+        pending: &PendingRequest,
+    ) -> bool {
+        self.settle_member_more((chat, filter), pending, true)
+    }
+
+    /// The answer to the revoked-links fetch `request` fills the list only
+    /// while the list still waits for it (a list closed meanwhile stays
+    /// closed).
+    pub(crate) fn land_revoked(
+        &mut self,
+        chat: i64,
+        pending: &PendingRequest,
+        total_count: i32,
+        links: Vec<ParsedChatInviteLink>,
+    ) {
+        if let Some(slot) = self.revoked_invite_links.get_mut(&chat)
+            && *slot == InviteLinkFetch::Loading(pending.id)
+        {
+            *slot = InviteLinkFetch::Loaded(InviteLinkList { total_count, links });
+        }
+    }
+
+    /// `chat` gained members: its cached member pages go stale (the last
+    /// page stays drawn in its `Loading`) and the lists on screen ask again.
+    pub fn members_added(&mut self, chat: i64) {
+        // A loaded page (or one already stale) stays drawn while its
+        // refetch is out; anything else goes.
+        fn stale(fetch: &mut SupergroupMembersFetch) -> bool {
+            let previous = std::mem::replace(fetch, SupergroupMembersFetch::Failed(String::new()));
+            let last = match previous {
+                SupergroupMembersFetch::Loaded {
+                    members,
+                    total_count,
+                } => MembersPage {
+                    members,
+                    total_count,
+                },
+                SupergroupMembersFetch::Loading {
+                    last: Some(last), ..
+                } => last,
+                _ => return false,
+            };
+            *fetch = SupergroupMembersFetch::Loading {
+                request: None,
+                last: Some(last),
+            };
+            true
+        }
+        self.supergroup_members
+            .retain(|(id, _), fetch| *id != chat || stale(fetch));
+        if self
+            .basic_group_members
+            .get_mut(&chat)
+            .is_some_and(|fetch| !stale(fetch))
+        {
+            self.basic_group_members.remove(&chat);
+        }
         self.mark_member_list_stale(chat);
     }
 
@@ -89,17 +146,59 @@ impl GroupsState {
         );
     }
 
-    /// The members panel of `chat` takes the failed next pages: each goes
-    /// back to idle so the next scroll asks again. Whether any failed.
-    pub fn take_member_more_failures(&mut self, chat: i64) -> bool {
-        let mut any = false;
+    /// A first page for `key` with `query` could not be sent: the list is
+    /// `Failed` under that query, with no request to wait for.
+    pub(crate) fn note_member_refused(&mut self, key: (i64, MemberListFilter), query: &str) {
+        self.member_asks.insert(
+            key,
+            MemberAsk {
+                first: None,
+                query: query.to_string(),
+                more: MoreMembers::Idle,
+            },
+        );
+    }
+
+    /// The next page the list `key` shows is not asked again at this
+    /// offset (out, answered or failed).
+    pub fn member_more_blocked(&self, key: (i64, MemberListFilter)) -> Option<i32> {
+        self.member_asks
+            .get(&key)
+            .and_then(|ask| ask.more.blocked())
+    }
+
+    /// The members panel of `chat` was scrolled: a failed next page goes
+    /// back to idle, so this scroll asks for it again.
+    pub fn rearm_failed_member_more(&mut self, chat: i64) {
         for (_, ask) in self.member_asks.iter_mut().filter(|(key, _)| key.0 == chat) {
-            if ask.more == MoreMembers::Failed {
+            if matches!(ask.more, MoreMembers::Failed { .. }) {
                 ask.more = MoreMembers::Idle;
-                any = true;
             }
         }
-        any
+    }
+
+    /// The members panel of `chat` starts over (opened, or its list went
+    /// stale): answered and failed next pages are forgotten, one still out
+    /// keeps its request so its answer is matched.
+    pub fn forget_member_more(&mut self, chat: i64) {
+        for (_, ask) in self.member_asks.iter_mut().filter(|(key, _)| key.0 == chat) {
+            if !matches!(ask.more, MoreMembers::Asking { .. }) {
+                ask.more = MoreMembers::Idle;
+            }
+        }
+    }
+
+    /// `chat`'s failed member lists are forgotten, so a reopened panel
+    /// asks for them again.
+    pub fn forget_failed_member_lists(&mut self, chat: i64) {
+        self.supergroup_members.retain(|(id, _), fetch| {
+            *id != chat || !matches!(fetch, SupergroupMembersFetch::Failed(_))
+        });
+    }
+
+    /// Sending the next page at `offset` for `key` failed (nothing is out).
+    pub fn member_more_send_failed(&mut self, key: (i64, MemberListFilter), offset: i32) {
+        self.member_asks.entry(key).or_default().more = MoreMembers::Failed { offset };
     }
 
     /// Whether `pending` is the latest first-page request for `key`, the
@@ -115,27 +214,41 @@ impl GroupsState {
             .is_none_or(|id| id == pending.id)
     }
 
-    /// A next-page request for `key` was sent: it extends the list the
-    /// latest first page filled.
-    pub(crate) fn note_member_more(&mut self, key: (i64, MemberListFilter), more: RequestId) {
-        self.member_asks.entry(key).or_default().more = MoreMembers::Asking(more);
+    /// A next-page request for `key` at `offset` was sent: it extends the
+    /// list the latest first page filled.
+    pub(crate) fn note_member_more(
+        &mut self,
+        key: (i64, MemberListFilter),
+        request: RequestId,
+        offset: i32,
+    ) {
+        self.member_asks.entry(key).or_default().more = MoreMembers::Asking { request, offset };
     }
 
-    /// Settle the next page `pending`: whether it extends the list `key`
-    /// shows now. A page asked for an older query (another first page came
-    /// since) is dropped, or it would join the new search's results.
-    pub(crate) fn take_member_more(
+    /// Settle the next page `pending` with its outcome: whether it is the
+    /// page the list `key` waits for. A page asked for an older query
+    /// (another first page came since) is dropped, or it would join the
+    /// new search's results.
+    pub(crate) fn settle_member_more(
         &mut self,
         key: (i64, MemberListFilter),
         pending: &PendingRequest,
+        answered: bool,
     ) -> bool {
         let Some(ask) = self.member_asks.get_mut(&key) else {
             return false;
         };
-        if ask.more != MoreMembers::Asking(pending.id) {
+        let MoreMembers::Asking { request, offset } = ask.more else {
+            return false;
+        };
+        if request != pending.id {
             return false;
         }
-        ask.more = MoreMembers::Idle;
+        ask.more = if answered {
+            MoreMembers::Settled { offset }
+        } else {
+            MoreMembers::Failed { offset }
+        };
         true
     }
 }
@@ -169,9 +282,9 @@ pub struct GroupsState {
     pub communities: HashMap<i64, ParsedCommunity>,
     /// Slice (communities backend core): `communityFullInfo` cache, keyed
     /// by community id, fed by the `getCommunityFullInfo` answer and
-    /// `updateCommunityFullInfo` (TDLib 1.8.68). Presence records
-    /// "fetched".
-    pub community_full_infos: HashMap<i64, ParsedCommunityFullInfo>,
+    /// `updateCommunityFullInfo` (TDLib 1.8.68); one fetch per community
+    /// holds the stage, its request and the pack.
+    pub community_full_infos: CommunityFullInfos,
     /// TDLib 1.8.68 community management: one-shot; set when
     /// `setCommunityName` / `setCommunityPhoto` / `setCommunityPermissions`
     /// / `deleteCommunity` errors. The UI drains it into the status note.
@@ -413,7 +526,7 @@ impl GroupsState {
             invite_link_error: None,
             supergroup_full_infos: HashMap::new(),
             communities: HashMap::new(),
-            community_full_infos: HashMap::new(),
+            community_full_infos: CommunityFullInfos::default(),
             community_error: None,
             chat_statistics: HashMap::new(),
             stats: StatsState::default(),

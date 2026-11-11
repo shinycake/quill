@@ -2,6 +2,7 @@
 //! for a ready file and a failed file leaves the box open (needs the
 //! `demo-capture` feature for gpui-kit's test support).
 use crate::ui::app::QuillApp;
+use crate::ui::contacts_import::ImportStage;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::{DialogKind, QuillShell};
@@ -35,7 +36,7 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, Entity<QuillShell>, Vi
 fn set_state(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, state: VcardImport) {
     app.update_in(vcx, |app, _, cx| {
         if let Some(dialog) = app.dialogs.import_contacts_dialog.as_mut() {
-            dialog.state = state;
+            dialog.stage = ImportStage::Showing(state);
         }
         cx.notify();
     });
@@ -90,25 +91,57 @@ fn a_ready_file_imports_and_closes_the_box(cx: &mut TestAppContext) {
     shell.read_with(vcx, |shell, _| assert_eq!(shell.open_dialog, None));
 }
 
-/// Sweep 09-001: a read started in a closed box can never be taken for the
-/// next box's, which would show the wrong file as ready.
+/// Sweep 09-001: a read started in a closed box ends with it: it can never
+/// show the wrong file as ready in the next box.
 #[gpui_kit::test]
-fn a_new_box_never_shares_a_read_token_with_a_closed_one(cx: &mut TestAppContext) {
+fn a_read_started_in_a_closed_box_never_reaches_the_next_one(cx: &mut TestAppContext) {
     let (app, _shell, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     let file = quill::scratch::process_dir("quill-contacts-import").join("people.vcf");
     let _ = std::fs::create_dir_all(file.parent().expect("has a parent"));
     std::fs::write(&file, "BEGIN:VCARD\nFN:Ada\nTEL:+15550100\nEND:VCARD\n").expect("writes");
-    let mut picks = Vec::new();
-    for _ in 0..2 {
-        app.update_in(vcx, |app, window, cx| {
-            app.close_import_contacts_dialog(cx);
-            app.open_import_contacts_dialog(window, cx);
-            app.read_vcard(file.clone(), cx);
-            picks.extend(app.dialogs.import_contacts_dialog.as_ref().map(|d| d.pick));
-        });
-    }
+    app.update_in(vcx, |app, window, cx| {
+        app.close_import_contacts_dialog(cx);
+        app.open_import_contacts_dialog(window, cx);
+        app.read_vcard(file.clone(), cx);
+        app.close_import_contacts_dialog(cx);
+        app.open_import_contacts_dialog(window, cx);
+    });
     vcx.run_until_parked();
-    assert_eq!(picks.len(), 2);
-    assert_ne!(picks.first(), picks.get(1));
+    app.read_with(vcx, |app, _| {
+        let dialog = app.dialogs.import_contacts_dialog.as_ref();
+        assert!(
+            dialog.is_some_and(|dialog| *dialog.stage.state() == VcardImport::Empty),
+            "the new box is still empty"
+        );
+    });
+}
+
+/// Choosing another file while one is being read replaces the read: only
+/// the second file shows.
+#[gpui_kit::test]
+fn choosing_again_replaces_the_read_in_flight(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let dir = quill::scratch::process_dir("quill-contacts-import-twice");
+    let _ = std::fs::create_dir_all(&dir);
+    let (first, second) = (dir.join("a.vcf"), dir.join("b.vcf"));
+    std::fs::write(&first, "BEGIN:VCARD\nFN:Ada\nTEL:+15550100\nEND:VCARD\n").expect("writes");
+    std::fs::write(&second, "BEGIN:VCARD\nFN:Bob\nTEL:+15550101\nEND:VCARD\n").expect("writes");
+    app.update_in(vcx, |app, _, cx| {
+        app.read_vcard(first.clone(), cx);
+        app.read_vcard(second.clone(), cx);
+    });
+    vcx.run_until_parked();
+    app.read_with(vcx, |app, _| {
+        let state = app
+            .dialogs
+            .import_contacts_dialog
+            .as_ref()
+            .map(|dialog| dialog.stage.state().into_owned());
+        assert!(
+            matches!(&state, Some(VcardImport::Ready(preview)) if preview.file_name == "b.vcf"),
+            "the second file, got {state:?}"
+        );
+    });
 }

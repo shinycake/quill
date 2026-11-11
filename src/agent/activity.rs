@@ -16,12 +16,107 @@ const LOG_FILE: &str = "agent_actions.json";
 /// Log entries kept.
 const KEEP: usize = 500;
 
+/// How one logged write ended. One value, so a refused write cannot also
+/// read as done and an Undo only lands on a write that went through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    /// It went through.
+    Done,
+    /// Telegram refused it.
+    Failed,
+    /// The user declined it in Quill.
+    Declined,
+    /// It went through and the user undid it from the log.
+    Undone,
+}
+
+impl Outcome {
+    /// The outcome of a write from what the writer knows: Telegram's answer
+    /// and whether the user declined.
+    pub fn of(ok: bool, declined: bool) -> Self {
+        if declined {
+            Self::Declined
+        } else if ok {
+            Self::Done
+        } else {
+            Self::Failed
+        }
+    }
+}
+
+/// The log's on-disk shape of [`Action`]: the outcome as the three flags
+/// earlier versions wrote.
+#[derive(Serialize, Deserialize)]
+struct ActionRecord {
+    #[serde(default)]
+    id: u64,
+    time: i64,
+    account: AccountKey,
+    agent: String,
+    tool: String,
+    chat_id: i64,
+    chat_title: String,
+    summary: String,
+    ok: bool,
+    #[serde(default)]
+    declined: bool,
+    #[serde(default)]
+    message_ids: Vec<i64>,
+    #[serde(default)]
+    undone: bool,
+}
+
+impl From<ActionRecord> for Action {
+    fn from(r: ActionRecord) -> Self {
+        let outcome = if r.declined {
+            Outcome::Declined
+        } else if !r.ok {
+            Outcome::Failed
+        } else if r.undone {
+            Outcome::Undone
+        } else {
+            Outcome::Done
+        };
+        Action {
+            id: r.id,
+            time: r.time,
+            account: r.account,
+            agent: r.agent,
+            tool: r.tool,
+            chat_id: r.chat_id,
+            chat_title: r.chat_title,
+            summary: r.summary,
+            outcome,
+            message_ids: r.message_ids,
+        }
+    }
+}
+
+impl From<Action> for ActionRecord {
+    fn from(a: Action) -> Self {
+        ActionRecord {
+            id: a.id,
+            time: a.time,
+            account: a.account,
+            agent: a.agent,
+            tool: a.tool,
+            chat_id: a.chat_id,
+            chat_title: a.chat_title,
+            summary: a.summary,
+            ok: matches!(a.outcome, Outcome::Done | Outcome::Undone),
+            declined: a.outcome == Outcome::Declined,
+            message_ids: a.message_ids,
+            undone: a.outcome == Outcome::Undone,
+        }
+    }
+}
+
 /// One write an agent made.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "ActionRecord", into = "ActionRecord")]
 pub struct Action {
     /// Stable within the log, so the user can act on one entry (Undo).
     /// Entries from before ids existed read 0.
-    #[serde(default)]
     pub id: u64,
     /// Unix seconds.
     pub time: i64,
@@ -35,18 +130,11 @@ pub struct Action {
     /// What the action carried, in the agent's own words or ids
     /// (`"See you at 6"`); the verb comes from `tool`, worded by the UI.
     pub summary: String,
-    /// False when Telegram or the user refused it.
-    pub ok: bool,
-    /// The user declined it in Quill.
-    #[serde(default)]
-    pub declined: bool,
+    /// How it ended.
+    pub outcome: Outcome,
     /// The messages it made or acted on (a send's final ids, the message
     /// a reaction went on), so the log can open them.
-    #[serde(default)]
     pub message_ids: Vec<i64>,
-    /// The user undid it from the log.
-    #[serde(default)]
-    pub undone: bool,
 }
 
 /// An agent connected now.
@@ -116,6 +204,16 @@ enum Stage {
 struct Connection {
     shown: Connected,
     stage: Stage,
+    /// The client's process, as the socket reports it. Unlike the name the
+    /// client declares, it cannot be changed to get back in after Revoke.
+    process: Option<i64>,
+}
+
+/// An agent the user disconnected.
+struct Refused {
+    agent: String,
+    /// The processes that were connected under the name when it was revoked.
+    processes: Vec<i64>,
 }
 
 /// Who is connected and who is refused, under one lock so a connection and
@@ -124,7 +222,7 @@ struct Roster {
     connections: Vec<Connection>,
     /// Agents the user disconnected: refused at `auth` until the user
     /// allows them again, turns Agent access off, or restarts Quill.
-    refused: Vec<String>,
+    refused: Vec<Refused>,
 }
 
 static ROSTER: Mutex<Roster> = Mutex::new(Roster {
@@ -227,8 +325,8 @@ pub fn mark_undone(account: &AccountKey, id: u64) {
     }
     change_log(|store| {
         for action in store.actions.iter_mut() {
-            if action.id == id && action.account == *account {
-                action.undone = true;
+            if action.id == id && action.account == *account && action.outcome == Outcome::Done {
+                action.outcome = Outcome::Undone;
             }
         }
     });
@@ -266,6 +364,11 @@ impl Drop for Presence {
 
 /// Mark `agent` as connected; it stays listed while the guard lives.
 pub fn connect(agent: &str) -> Presence {
+    connect_from(agent, None)
+}
+
+/// [`connect`] for a client whose socket named its `process`.
+pub fn connect_from(agent: &str, process: Option<i64>) -> Presence {
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
     roster().connections.push(Connection {
         shown: Connected {
@@ -275,6 +378,7 @@ pub fn connect(agent: &str) -> Presence {
             tools: Vec::new(),
         },
         stage: Stage::Live,
+        process,
     });
     crate::wake::AGENT.poke();
     Presence(id)
@@ -320,8 +424,22 @@ pub fn revoke(id: u64) {
     };
     connection.stage = Stage::Revoked;
     let agent = connection.shown.agent.clone();
-    if !roster.refused.contains(&agent) {
-        roster.refused.push(agent);
+    let process = connection.process;
+    let known = roster.refused.iter().position(|r| r.agent == agent);
+    let entry = match known {
+        Some(at) => roster.refused.get_mut(at),
+        None => {
+            roster.refused.push(Refused {
+                agent,
+                processes: Vec::new(),
+            });
+            roster.refused.last_mut()
+        }
+    };
+    if let (Some(entry), Some(process)) = (entry, process)
+        && !entry.processes.contains(&process)
+    {
+        entry.processes.push(process);
     }
     drop(roster);
     crate::wake::AGENT.poke();
@@ -337,12 +455,21 @@ pub fn is_revoked(id: u64) -> bool {
 
 /// Whether `agent` was disconnected by the user and may not connect.
 pub fn refused(agent: &str) -> bool {
-    roster().refused.iter().any(|name| name == agent)
+    refused_from(agent, None)
+}
+
+/// [`refused`] for a client that also names its `process`: a revoked
+/// agent's process stays refused under any other name it declares.
+pub fn refused_from(agent: &str, process: Option<i64>) -> bool {
+    roster()
+        .refused
+        .iter()
+        .any(|r| r.agent == agent || process.is_some_and(|process| r.processes.contains(&process)))
 }
 
 /// The agents the user disconnected, in the order they were.
 pub fn refused_agents() -> Vec<String> {
-    roster().refused.clone()
+    roster().refused.iter().map(|r| r.agent.clone()).collect()
 }
 
 /// "Allow again" for one disconnected agent.
@@ -350,7 +477,7 @@ pub fn allow_again(agent: &str) {
     if super::ui_driver::guard::refuse_if_injecting("allow an agent again") {
         return;
     }
-    roster().refused.retain(|name| name != agent);
+    roster().refused.retain(|r| r.agent != agent);
     crate::wake::AGENT.poke();
 }
 
@@ -362,8 +489,8 @@ pub(crate) fn allow_all_again() {
 #[cfg(test)]
 mod tests {
     use super::{
-        Action, Stored, allow_again, connect, connected, is_revoked, mark_undone, note_tool,
-        recent, record, refused, revoke,
+        Action, Outcome, Stored, allow_again, connect, connected, is_revoked, mark_undone,
+        note_tool, recent, record, refused, revoke,
     };
     use crate::ids::AccountKey;
 
@@ -377,10 +504,8 @@ mod tests {
             chat_id: 1,
             chat_title: "Saved Messages".into(),
             summary: summary.into(),
-            ok: true,
-            declined: false,
+            outcome: Outcome::Done,
             message_ids: vec![7],
-            undone: false,
         }
     }
 
@@ -419,10 +544,19 @@ mod tests {
         record(action(&other, "theirs"));
         let id = recent(&account).first().map_or(0, |a| a.id);
         mark_undone(&other, id);
-        assert!(!recent(&account).iter().any(|a| a.undone), "wrong account");
+        assert!(
+            !recent(&account)
+                .iter()
+                .any(|a| a.outcome == Outcome::Undone),
+            "wrong account"
+        );
         mark_undone(&account, id);
-        assert!(recent(&account).first().is_some_and(|a| a.undone));
-        assert!(!recent(&other).iter().any(|a| a.undone));
+        assert!(
+            recent(&account)
+                .first()
+                .is_some_and(|a| a.outcome == Outcome::Undone)
+        );
+        assert!(!recent(&other).iter().any(|a| a.outcome == Outcome::Undone));
     }
 
     #[test]
@@ -431,7 +565,7 @@ mod tests {
         let action: Action = serde_json::from_str(old).unwrap_or_else(|_| panic!("parses"));
         assert_eq!(action.id, 0);
         assert!(action.message_ids.is_empty());
-        assert!(!action.undone && !action.declined);
+        assert_eq!(action.outcome, Outcome::Done);
     }
 
     #[test]
@@ -463,6 +597,54 @@ mod tests {
         assert_eq!(store.actions.len(), 1);
         store.push(action(&account, "new"));
         assert_eq!(store.actions.back().map(|a| a.id), Some(10));
+    }
+
+    #[test]
+    fn only_a_write_that_went_through_can_be_undone() {
+        crate::fast_buttons::set_persistence(false);
+        let account = AccountKey("activity-undo-outcomes".into());
+        for outcome in [Outcome::Failed, Outcome::Declined] {
+            let mut refused = action(&account, "refused");
+            refused.outcome = outcome;
+            record(refused);
+            let id = recent(&account).first().map_or(0, |a| a.id);
+            mark_undone(&account, id);
+            assert_eq!(recent(&account).first().map(|a| a.outcome), Some(outcome));
+        }
+    }
+
+    #[test]
+    fn the_outcome_reads_and_writes_the_old_flags() {
+        let account = AccountKey("activity-flags".into());
+        for (outcome, flags) in [
+            (Outcome::Done, (true, false, false)),
+            (Outcome::Failed, (false, false, false)),
+            (Outcome::Declined, (false, true, false)),
+            (Outcome::Undone, (true, false, true)),
+        ] {
+            let mut a = action(&account, "x");
+            a.outcome = outcome;
+            let json = serde_json::to_value(&a).unwrap_or_default();
+            let flag = |key: &str| json.get(key).and_then(|v| v.as_bool());
+            assert_eq!(
+                (flag("ok"), flag("declined"), flag("undone")),
+                (Some(flags.0), Some(flags.1), Some(flags.2))
+            );
+            let back: Action = serde_json::from_value(json).unwrap_or_else(|_| panic!("reads"));
+            assert_eq!(back.outcome, outcome);
+        }
+    }
+
+    #[test]
+    fn a_revoked_process_stays_refused_under_another_name() {
+        let _lock = crate::locks::lock_or_recover(&crate::agent::access::TEST_LOCK);
+        let guard = super::connect_from("Rename test", Some(4_242_001));
+        revoke(guard.id());
+        assert!(super::refused_from("Rename test 2", Some(4_242_001)));
+        assert!(!super::refused_from("Rename test 2", Some(4_242_002)));
+        assert!(!super::refused_from("Rename test 2", None));
+        allow_again("Rename test");
+        assert!(!super::refused_from("Rename test 2", Some(4_242_001)));
     }
 
     #[test]

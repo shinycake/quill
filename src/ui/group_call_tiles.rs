@@ -106,7 +106,8 @@ impl QuillApp {
         let mut built: Vec<Tile> = Vec::new();
         for participant in call.participants.iter() {
             let own_camera = participant.is_current_user && call.is_my_video_enabled;
-            if !own_camera && !participant.video_enabled && !participant.screen_sharing_enabled {
+            if !own_camera && !participant.video_enabled() && !participant.screen_sharing_enabled()
+            {
                 continue;
             }
             let name = self.group_call_participant_name(&participant.participant_id);
@@ -124,7 +125,7 @@ impl QuillApp {
                         .then_some(PictureState::LivePaused { wide: contain }),
                     own: true,
                 });
-            } else if participant.video_enabled {
+            } else if participant.video_enabled() {
                 let paused = participant
                     .video_info
                     .as_ref()
@@ -144,14 +145,14 @@ impl QuillApp {
                     });
                 }
             }
-            if participant.screen_sharing_enabled {
+            if participant.screen_sharing_enabled() {
                 // Your own hidden window shows paused at once, before the
                 // participant update.
                 let paused = participant
                     .screen_sharing_video_info
                     .as_ref()
                     .is_some_and(|info| info.is_paused)
-                    || (participant.is_current_user && call.screen_share_paused);
+                    || (participant.is_current_user && call.screen_share.paused());
                 if let Some((picture, overlay)) =
                     self.group_stream_tile(call, participant, true, &name, paused, contain, cx)
                 {
@@ -173,7 +174,10 @@ impl QuillApp {
 
     /// The video area: the pinned tile large, the rest in a wrapped strip.
     fn retain_group_call_pin(&mut self, keys: &[TileKey]) {
-        if self.group_call_screen.pin.retain_available(keys) {
+        if self
+            .call_view_mut()
+            .is_some_and(|view| view.pin.retain_available(keys))
+        {
             self.sync_group_call_large_tile();
         }
     }
@@ -190,7 +194,7 @@ impl QuillApp {
         if built.is_empty() {
             return None;
         }
-        let layout = self.group_call_screen.pin.layout(&keys);
+        let layout = self.call_pin().layout(&keys);
         let mut main: Option<AnyElement> = None;
         let mut rest: Vec<AnyElement> = Vec::new();
         for tile in built {
@@ -223,13 +227,13 @@ impl QuillApp {
         let built = self.collect_group_tiles(call, true, cx);
         let keys: Vec<TileKey> = built.iter().map(|t| t.key).collect();
         self.retain_group_call_pin(&keys);
-        let stage = stage_tile(&self.group_call_screen.pin, &keys)?;
+        let stage = stage_tile(&self.call_pin(), &keys)?;
         let tile = built.into_iter().find(|t| t.key == stage)?;
         let volume = (!tile.own)
             .then(|| self.stage_volume_slider(call, stage.participant, cx))
             .flatten();
         if volume.is_none() {
-            self.group_call.stage_volume = None;
+            self.clear_stage_volume();
         }
         Some(stage_view(tile, volume, cx))
     }
@@ -332,9 +336,9 @@ fn call_streams(call: &ActiveGroupCall, key: LiveKey) -> bool {
         } => call.participants.iter().any(|participant| {
             participant.participant_id == MessageSender::User { user_id }
                 && if screen {
-                    participant.screen_sharing_enabled
+                    participant.screen_sharing_enabled()
                 } else {
-                    participant.video_enabled
+                    participant.video_enabled()
                 }
         }),
     }

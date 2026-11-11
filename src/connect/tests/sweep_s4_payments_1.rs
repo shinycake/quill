@@ -59,16 +59,16 @@ fn a_refused_end_keeps_the_confirmation_box() {
     let mut t = Flaky::new();
     t.driver.open_starref_setup(BOT).unwrap();
     let setup = t.driver.session.payments.earn.setup.as_mut().unwrap();
-    setup.confirm = Some(SetupConfirm::End);
+    setup.ask_confirm(SetupConfirm::End);
     t.sender.refuse(&["setChatAffiliateProgram"]);
     assert!(t.driver.end_starref_program().is_err());
     let setup = t.driver.session.payments.earn.setup.as_ref().unwrap();
-    assert_eq!(setup.confirm, Some(SetupConfirm::End));
+    assert_eq!(setup.confirm(), Some(SetupConfirm::End));
     assert!(!setup.is_saving());
     t.sender.refuse(&[]);
     t.driver.end_starref_program().unwrap();
     let setup = t.driver.session.payments.earn.setup.as_ref().unwrap();
-    assert_eq!(setup.confirm, None);
+    assert_eq!(setup.confirm(), None);
     assert!(setup.is_saving());
 }
 

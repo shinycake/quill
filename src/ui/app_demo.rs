@@ -46,11 +46,7 @@ impl QuillApp {
                 }
                 (None, note, stage)
             }
-            None => (
-                None,
-                "Connecting to Telegram…".into(),
-                ConnectStage::Connecting,
-            ),
+            None => (None, "Connecting to Telegram…".into(), ConnectStage::Idle),
         };
         let screen = super::on_screen::OnScreen::new(
             Default::default(),
@@ -167,7 +163,9 @@ impl QuillApp {
         let ptt_app = cx.weak_entity();
         super::passcode::intercept_keys_unlocked(cx, move |event, _window, cx| {
             let armed = ptt_app
-                .update(cx, |this, _| this.group_call.ptt_capture)
+                .update(cx, |this, _| {
+                    this.preferences.keybinding.capture.push_to_talk_armed()
+                })
                 .unwrap_or(false);
             if !armed || event.keystroke.is_modifier_key() {
                 return;

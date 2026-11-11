@@ -10,6 +10,7 @@ mod passkeys;
 mod purpose;
 mod quick_replies;
 mod state;
+mod storage_save;
 mod tone_upload;
 
 pub use business::*;
@@ -21,3 +22,4 @@ pub use purpose::*;
 pub use quick_replies::*;
 
 pub use state::*;
+pub use storage_save::*;

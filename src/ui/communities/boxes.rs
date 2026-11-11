@@ -258,11 +258,15 @@ impl QuillApp {
                     session.is_some_and(|s| s.community_add_in_flight(*community_id, *chat_id)),
                     tr(keys::COMMUNITY_ADD_TO),
                 ),
-                Some(CommunityBox::CreateVisibility { hidden, .. }) => (
+                Some(CommunityBox::CreateVisibility {
+                    chat_id, hidden, ..
+                }) => (
                     *hidden,
                     session.is_some_and(|s| {
-                        s.requests
-                            .has_purpose(quill::state::RequestPurpose::CreateCommunity)
+                        s.requests.has_purpose_for_chat(
+                            quill::state::RequestPurpose::CreateCommunity,
+                            quill::ids::ChatId(*chat_id),
+                        )
                     }),
                     tr(keys::CREATE_GROUP_CREATE),
                 ),

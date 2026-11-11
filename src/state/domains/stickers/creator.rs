@@ -332,7 +332,6 @@ impl Session {
         self.media.media_library.remove(&set_id);
         if !matches!(purpose, StickerCreatorPurpose::MoveSticker { .. }) {
             self.invalidate_installed_sticker_sets();
-            self.stickers.emoji.outdated_packs.insert(set_id);
             self.stickers.creator_refetch_sets = true;
         }
     }

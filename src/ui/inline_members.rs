@@ -4,7 +4,6 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use crate::ui::inline_members_state::{AdminsFallback, Paging};
 use crate::ui::scroll_load::scrolled_near_end;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
@@ -83,7 +82,11 @@ impl QuillApp {
         };
         // Every open starts from the first page: a failed page or the
         // administrators fallback of an earlier visit does not stay latched.
-        self.inline_members.reset(Some(shape.chat));
+        self.inline_members.reset();
+        if let Some(session) = self.session_mut() {
+            session.groups.forget_member_more(shape.chat.0);
+            session.groups.forget_failed_member_lists(shape.chat.0);
+        }
         self.inline_members_fetch(shape, cx);
         cx.notify();
     }
@@ -115,8 +118,9 @@ impl QuillApp {
             return;
         };
         if stale.contains(&shape.chat.0) {
-            self.inline_members.paging = Paging::Idle;
-            self.inline_members.admins = AdminsFallback::NotAsked;
+            if let Some(session) = self.session_mut() {
+                session.groups.forget_member_more(shape.chat.0);
+            }
             self.inline_members_fetch(shape, cx);
             cx.notify();
         }
@@ -166,27 +170,36 @@ impl QuillApp {
         let Some(shape) = self.inline_members_current() else {
             return;
         };
-        let failed_page = self
-            .session_mut()
-            .is_some_and(|session| session.groups.take_member_more_failures(shape.chat.0));
-        if failed_page && let Some(offset) = self.inline_members.paging.blocked() {
-            self.inline_members.paging = Paging::Failed { offset };
+        if scrolled && let Some(session) = self.session_mut() {
+            session.groups.rearm_failed_member_more(shape.chat.0);
         }
-        if scrolled && matches!(self.inline_members.paging, Paging::Failed { .. }) {
-            self.inline_members.paging = Paging::Idle;
-        }
-        // Members hidden from the viewer: show the administrators, asked
-        // once per open (or Retry), so a failing list is not asked every
-        // frame.
+        // Members hidden from the viewer: show the administrators. The list
+        // is asked while the cache has no entry for it: a failed answer
+        // stays an entry (Retry and a reopen drop it), so a failing list is
+        // not asked every frame.
         if self.inline_members_filter(shape) == MemberListFilter::Administrators
-            && self.inline_members.admins != AdminsFallback::Asked(shape.chat)
+            && self.session().is_some_and(|session| {
+                !session
+                    .groups
+                    .supergroup_members
+                    .contains_key(&(shape.chat.0, MemberListFilter::Administrators))
+            })
         {
-            self.inline_members.admins = AdminsFallback::Asked(shape.chat);
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.fetch_supergroup_members(
+            let sent = self.live.as_mut().map(|live| {
+                live.driver.fetch_supergroup_members(
                     shape.chat,
                     MemberListFilter::Administrators,
                     "",
+                )
+            });
+            if let Some(Err(_)) = sent
+                && let Some(session) = self.session_mut()
+            {
+                session.groups.supergroup_members.insert(
+                    (shape.chat.0, MemberListFilter::Administrators),
+                    SupergroupMembersFetch::Failed(
+                        tr(keys::Q_MEDIA_COULD_NOT_LOAD_MEMBERS).to_string(),
+                    ),
                 );
             }
         }
@@ -205,13 +218,10 @@ impl QuillApp {
             live.driver
                 .supergroup_members_more_in_flight(shape.chat, filter)
         });
-        let action = next_more(
-            shown,
-            loaded,
-            total,
-            in_flight,
-            self.inline_members.paging.blocked(),
-        );
+        let blocked = self
+            .session()
+            .and_then(|session| session.groups.member_more_blocked((shape.chat.0, filter)));
+        let action = next_more(shown, loaded, total, in_flight, blocked);
         match action {
             MoreAction::Nothing => {}
             MoreAction::Reveal(count) => {
@@ -222,15 +232,17 @@ impl QuillApp {
                 if shape.is_basic {
                     return;
                 }
-                self.inline_members.paging = Paging::Asked { offset };
-                if let Some(live) = self.live.as_mut()
-                    && live
-                        .driver
+                let sent = self.live.as_mut().map(|live| {
+                    live.driver
                         .fetch_supergroup_members_more(shape.chat, filter, "", offset)
-                        .is_err()
+                });
+                if let Some(Err(_)) = sent
+                    && let Some(session) = self.session_mut()
                 {
                     // The send failed: the next scroll asks again.
-                    self.inline_members.paging = Paging::Failed { offset };
+                    session
+                        .groups
+                        .member_more_send_failed((shape.chat.0, filter), offset);
                 }
                 cx.notify();
             }

@@ -243,8 +243,8 @@ impl QuillApp {
         // The tab follows the folder's end: the live app leaves it when
         // `updateChatFolders` no longer lists the folder (the poll), so a
         // delete that failed keeps the folder and its tab.
-        if self.live.is_none() && self.folders.tab == Some(confirm.folder_id) {
-            self.set_chat_list_view(self.chat_list.filter, None);
+        if self.live.is_none() && self.chat_list.view.folder() == Some(confirm.folder_id) {
+            self.set_chat_list_view(self.chat_list.view.filter(), None);
         }
         cx.notify();
     }

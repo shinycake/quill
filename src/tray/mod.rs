@@ -679,21 +679,27 @@ impl Tray {
         if self.last_shown == Some(key) {
             return;
         }
-        self.last_shown = Some(key);
         let (rgba, w, h, template) = render_platform_icon(unread, muted, dark);
-        if let Ok(icon) = tray_icon::Icon::from_rgba(rgba, w, h) {
-            #[cfg(target_os = "macos")]
-            let _ = if template {
-                self.icon.set_icon_templated(Some(icon))
-            } else {
-                self.icon.set_icon(Some(icon))
-            };
-            #[cfg(not(target_os = "macos"))]
-            let _ = {
-                let _ = template;
-                self.icon.set_icon(Some(icon))
-            };
+        let Ok(icon) = tray_icon::Icon::from_rgba(rgba, w, h) else {
+            return;
+        };
+        #[cfg(target_os = "macos")]
+        let set = if template {
+            self.icon.set_icon_templated(Some(icon))
+        } else {
+            self.icon.set_icon(Some(icon))
+        };
+        #[cfg(not(target_os = "macos"))]
+        let set = {
+            let _ = template;
+            self.icon.set_icon(Some(icon))
+        };
+        // Recorded only once the icon is on screen, so a failed set is retried
+        // on the next tick instead of waiting for the count to change.
+        if set.is_err() {
+            return;
         }
+        self.last_shown = Some(key);
         let _ = self.icon.set_tooltip(Some(tray_tooltip(unread)));
     }
 }
@@ -754,7 +760,9 @@ pub fn sync_tray(session: Option<&Session>, locked: bool) {
     let (unread, muted) = (total.count, total.muted);
     let toggles = TrayToggles::for_session(session, locked);
     TRAY.with(|cell| {
-        let mut slot = cell.borrow_mut();
+        let Ok(mut slot) = cell.try_borrow_mut() else {
+            return;
+        };
         if !tray_enabled() {
             // "Show tray icon" is off: dropping the handle removes the icon.
             *slot = None;
@@ -785,7 +793,9 @@ pub fn sync_tray(session: Option<&Session>, locked: bool) {
     let unread = crate::notify_accounts::total_unread(session).count;
     let toggles = TrayToggles::for_session(session, locked);
     TRAY.with(|cell| {
-        let mut state = cell.borrow_mut();
+        let Ok(mut state) = cell.try_borrow_mut() else {
+            return;
+        };
         if tray_enabled() {
             state.poll(unread, toggles);
         } else {
@@ -817,7 +827,7 @@ pub fn tray_registering() -> bool {
 
 #[cfg(all(feature = "ui", target_os = "linux"))]
 pub fn tray_registering() -> bool {
-    TRAY.with(|cell| cell.borrow().registering())
+    TRAY.with(|cell| cell.try_borrow().is_ok_and(|state| state.registering()))
 }
 
 /// How long start-in-tray waits for the tray host before revealing the window.
@@ -840,12 +850,12 @@ pub fn tray_startup_reveal(available: bool, registering: bool, waited_ms: u64) -
 /// switches are only offered when this is true ([`tray_setting_switches`]).
 #[cfg(all(feature = "ui", not(target_os = "linux")))]
 pub fn tray_available() -> bool {
-    TRAY.with(|cell| cell.borrow().is_some())
+    TRAY.with(|cell| cell.try_borrow().is_ok_and(|slot| slot.is_some()))
 }
 
 #[cfg(all(feature = "ui", target_os = "linux"))]
 pub fn tray_available() -> bool {
-    TRAY.with(|cell| cell.borrow().available())
+    TRAY.with(|cell| cell.try_borrow().is_ok_and(|state| state.available()))
 }
 
 /// Ids of the tray menu items clicked since the last drain (the menu

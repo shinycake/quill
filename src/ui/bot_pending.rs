@@ -29,7 +29,7 @@ impl QuillApp {
             return None;
         }
         let draft_id = draft.draft_id;
-        let can_stop = draft.can_stop;
+        let can_stop = draft.can_stop();
         let failed = draft.stop == BotStopStage::Failed;
         let stopped = draft.stop == BotStopStage::Stopped;
         let stopping = matches!(draft.stop, BotStopStage::Stopping(_));

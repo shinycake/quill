@@ -137,7 +137,7 @@ fn a_color_circle_recolors_the_box_and_esc_closes_only_the_panel(cx: &mut TestAp
     click(vcx, "peer-qr-swatch-2");
     app.read_with(vcx, |app, _| {
         let open = app.peer_qr.open.as_ref().expect("open");
-        assert_eq!(open.state.color, SwatchKey::Backdrop(id));
+        assert_eq!(open.state.color(), SwatchKey::Backdrop(id));
         let view = app.qr_view().expect("view");
         assert_eq!(view.appearance.center, Rgb::hex(center));
         assert_eq!(view.appearance.edge, Rgb::hex(edge));
@@ -147,7 +147,7 @@ fn a_color_circle_recolors_the_box_and_esc_closes_only_the_panel(cx: &mut TestAp
     app.read_with(vcx, |app, _| {
         let open = app.peer_qr.open.as_ref().expect("the box stays");
         assert_eq!(open.state.panel, None);
-        assert_eq!(open.state.color, SwatchKey::Backdrop(id));
+        assert_eq!(open.state.color(), SwatchKey::Backdrop(id));
     });
     vcx.simulate_keystrokes("escape");
     frames(vcx);
@@ -169,7 +169,7 @@ fn an_emoji_toggles_in_and_out_of_the_pattern(cx: &mut TestAppContext) {
             app.peer_qr
                 .open
                 .as_ref()
-                .map(|open| super::plain_picks(&open.state.emoji))
+                .map(|open| super::plain_picks(open.state.emoji()))
                 .unwrap_or_default()
         })
     };

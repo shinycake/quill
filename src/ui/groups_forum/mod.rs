@@ -23,8 +23,6 @@ use quill::local_path::sandboxed_display_path;
 use quill::state::{RequestPurpose, Submit, SubmitView};
 use quill::telegram::envelope::ForumTopic;
 use quill::telegram::requests::TOPIC_ICON_COLORS;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 impl QuillApp {
     /// Slice G2: open the forum-topic management dialog.
@@ -89,6 +87,21 @@ impl QuillApp {
             .session()
             .map(|s| s.ordered_forum_topics(chat_id))
             .unwrap_or_default();
+        // A save is on its way: its answer lands in this editor, so a new
+        // form must not replace it (the duplicate would send again).
+        if self
+            .admin
+            .forum_manage_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.editor.as_ref())
+            .is_some_and(|editor| {
+                editor
+                    .submit
+                    .is_sending(self.session().map(|session| &session.requests))
+            })
+        {
+            return;
+        }
         let existing = topic_id.and_then(|id| topics.iter().find(|t| t.forum_topic_id == id));
         let (name, color, emoji) = match existing {
             Some(topic) => (
@@ -119,7 +132,6 @@ impl QuillApp {
                 target: topic_id,
                 color,
                 icon_emoji: emoji,
-                original_emoji: emoji,
                 submit: Submit::default(),
             });
         }
@@ -354,13 +366,12 @@ impl QuillApp {
             QuillShell::on_close_kind(app, shell, DialogKind::ForumManage, |this, _, cx| {
                 this.close_forum_manage_dialog(cx);
             });
-        app.update(cx, |this, cx| {
+        app.update(cx, |this, _| {
             let Some(dialog_state) = this.admin.forum_manage_dialog.as_ref() else {
                 return dialog.overlay(true).on_close(on_close);
             };
-            let chat_id = dialog_state.chat_id;
-            let editor = dialog_state.editor.clone();
-            let title = match &editor {
+            let editor = dialog_state.editor.as_ref();
+            let title = match editor {
                 None => tr(keys::RIGHTS_GROUP_TOPICS),
                 Some(e) if e.target.is_none() => tr(keys::FORUM_TOPIC_NEW),
                 Some(_) => tr(keys::FORUM_TOPIC_EDIT),
@@ -368,55 +379,63 @@ impl QuillApp {
             let dialog = dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(title));
-            let body = match editor {
-                Some(editor) => this.topic_editor_body(&editor, cx),
-                None => {
-                    let topics: Vec<ForumTopic> = this
-                        .session()
-                        .map(|session| session.ordered_forum_topics(chat_id))
-                        .unwrap_or_default();
-                    let mut list = div()
-                        .id("g2-topic-list")
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .max_h(px(320.))
-                        .overflow_y_scroll();
-                    for topic in &topics {
-                        list = list.child(this.forum_topic_manage_row(chat_id, topic, cx));
-                    }
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .child(
-                            div().flex().justify_end().child(
-                                Button::new("g2-topic-new")
-                                    .label(tr(keys::FORUM_TOPIC_NEW))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.begin_topic_editor(None, window, cx);
-                                    })),
-                            ),
-                        )
-                        .child(list)
-                        .into_any_element()
-                }
-            };
+            let app = app.clone();
             dialog
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body)));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                .content(crate::ui::shell::scrollable_dialog_content(
+                    move |content, _, cx| {
+                        // Built where it is drawn, so any number of draws gets
+                        // the body (the closure is `Fn`).
+                        let body = app.update(cx, |this, cx| this.forum_manage_body(cx));
                         content.child(body)
-                    }
-                }))
+                    },
+                ))
                 .on_close(on_close)
         })
+    }
+
+    /// The body of the manage dialog: the topic list, or the editor form
+    /// while one is open.
+    fn forum_manage_body(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(dialog_state) = self.admin.forum_manage_dialog.as_ref() else {
+            return div().into_any_element();
+        };
+        let chat_id = dialog_state.chat_id;
+        let editor = dialog_state.editor.clone();
+        let this = self;
+        match editor {
+            Some(editor) => this.topic_editor_body(&editor, cx),
+            None => {
+                let topics: Vec<ForumTopic> = this
+                    .session()
+                    .map(|session| session.ordered_forum_topics(chat_id))
+                    .unwrap_or_default();
+                let mut list = div()
+                    .id("g2-topic-list")
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .max_h(px(320.))
+                    .overflow_y_scroll();
+                for topic in &topics {
+                    list = list.child(this.forum_topic_manage_row(chat_id, topic, cx));
+                }
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div().flex().justify_end().child(
+                            Button::new("g2-topic-new")
+                                .label(tr(keys::FORUM_TOPIC_NEW))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.begin_topic_editor(None, window, cx);
+                                })),
+                        ),
+                    )
+                    .child(list)
+                    .into_any_element()
+            }
+        }
     }
 
     /// The create / edit form (tdesktop `EditForumTopicBox`): the icon
@@ -900,3 +919,8 @@ mod forum_editor_tests {
         assert_eq!(topic_letter(""), "#");
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "topic_editor_tests.rs"]
+mod tests;

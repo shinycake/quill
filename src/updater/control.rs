@@ -27,6 +27,9 @@ pub enum UpdateControl {
     Restart,
     /// The helper is installing it and Quill is quitting.
     Restarting,
+    /// "Updated to Quill X" waits for the user to read the changelog: no
+    /// check starts over it, so the button is drawn disabled.
+    ChangelogPending,
     /// A newer release this copy cannot install over itself (it runs from a
     /// disk image, a read-only or foreign folder): its download page.
     OpenRelease(String),
@@ -37,7 +40,7 @@ impl UpdateControl {
     /// is `availability` (`update_install::self_update_availability`).
     pub fn of(state: &UpdateState, availability: Result<(), Unavailable>) -> Self {
         match state {
-            UpdateState::Checking => Self::Check { busy: true },
+            UpdateState::Checking(_) => Self::Check { busy: true },
             UpdateState::Available(release)
             | UpdateState::DownloadFailed(release, _)
             | UpdateState::InstallFailed(release, _) => match availability {
@@ -49,14 +52,14 @@ impl UpdateControl {
                 | Err(Unavailable::Checking) => Self::Check { busy: false },
                 Err(_) => Self::OpenRelease(release.url.clone()),
             },
-            UpdateState::Downloading(release, progress) => Self::Downloading {
+            UpdateState::Downloading(release, progress, _) => Self::Downloading {
                 progress: progress.clone(),
                 total: release_size(release),
             },
             UpdateState::Staged(..) => Self::Restart,
-            UpdateState::Installing(_) => Self::Restarting,
+            UpdateState::Installing(..) => Self::Restarting,
+            UpdateState::Installed(..) => Self::ChangelogPending,
             UpdateState::Idle
-            | UpdateState::Installed(_)
             | UpdateState::UpToDate
             | UpdateState::NoRelease
             | UpdateState::Failed(_) => Self::Check { busy: false },
@@ -80,7 +83,7 @@ impl UpdateControl {
     /// Whether the title bar shows it: only while there is an update to act
     /// on, as tdesktop's "Update Telegram" button under the chat list.
     pub fn in_title_bar(&self) -> bool {
-        !matches!(self, Self::Check { .. })
+        !matches!(self, Self::Check { .. } | Self::ChangelogPending)
     }
 
     /// The share of the package downloaded, 0 to 1.
@@ -99,7 +102,7 @@ impl UpdateControl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::updater::{RELEASES_URL, ReleaseAsset, update_asset_name};
+    use crate::updater::{Job, RELEASES_URL, ReleaseAsset, update_asset_name};
 
     fn release(with_asset: bool) -> ReleaseInfo {
         ReleaseInfo {
@@ -115,6 +118,16 @@ mod tests {
     }
 
     #[test]
+    fn the_updated_notice_disables_the_check_button() {
+        let control = UpdateControl::of(
+            &UpdateState::Installed(release(true), Default::default()),
+            Ok(()),
+        );
+        assert_eq!(control, UpdateControl::ChangelogPending);
+        assert!(!control.in_title_bar());
+    }
+
+    #[test]
     fn the_button_walks_from_check_to_install_to_restart() {
         let found = UpdateState::Available(release(true));
         assert_eq!(
@@ -122,7 +135,7 @@ mod tests {
             UpdateControl::Check { busy: false }
         );
         assert_eq!(
-            UpdateControl::of(&UpdateState::Checking, Ok(())),
+            UpdateControl::of(&UpdateState::Checking(Job::default()), Ok(())),
             UpdateControl::Check { busy: true }
         );
         assert_eq!(
@@ -132,7 +145,7 @@ mod tests {
         let progress = DownloadProgress::default();
         progress.add(50);
         let downloading = UpdateControl::of(
-            &UpdateState::Downloading(release(true), progress.clone()),
+            &UpdateState::Downloading(release(true), progress.clone(), Job::default()),
             Ok(()),
         );
         assert_eq!(downloading.fraction(), Some(0.25));
@@ -146,7 +159,10 @@ mod tests {
             UpdateControl::Restart
         );
         assert_eq!(
-            UpdateControl::of(&UpdateState::Installing(release(true)), Ok(())),
+            UpdateControl::of(
+                &UpdateState::Installing(release(true), Job::default()),
+                Ok(())
+            ),
             UpdateControl::Restarting
         );
     }
@@ -182,7 +198,7 @@ mod tests {
     #[test]
     fn the_title_bar_shows_it_only_with_an_update_to_act_on() {
         assert!(!UpdateControl::of(&UpdateState::UpToDate, Ok(())).in_title_bar());
-        assert!(!UpdateControl::of(&UpdateState::Checking, Ok(())).in_title_bar());
+        assert!(!UpdateControl::of(&UpdateState::Checking(Job::default()), Ok(())).in_title_bar());
         assert!(UpdateControl::of(&UpdateState::Available(release(true)), Ok(())).in_title_bar());
         assert!(
             UpdateControl::of(
@@ -218,10 +234,10 @@ mod tests {
         );
         for other in [
             UpdateState::UpToDate,
-            UpdateState::Checking,
+            UpdateState::Checking(Job::default()),
             UpdateState::DownloadFailed(release(true), "x"),
             UpdateState::Staged(release(true), "plan.json".into()),
-            UpdateState::Downloading(release(true), DownloadProgress::default()),
+            UpdateState::Downloading(release(true), DownloadProgress::default(), Job::default()),
         ] {
             assert_eq!(UpdateControl::auto_download(&other, Ok(())), None);
         }

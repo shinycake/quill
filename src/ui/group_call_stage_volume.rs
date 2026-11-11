@@ -14,6 +14,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::{Icon, Sizable};
 use gpui_kit::*;
+use quill::ids::RequestId;
 use quill::lang::{keys, tr_with};
 use quill::state::ActiveGroupCall;
 use quill::telegram::envelope::MessageSender;
@@ -41,20 +42,32 @@ enum SliderStage {
     Made(i32),
     /// A change was seen and no release yet.
     Dragging(i32),
+    /// Released and sent; the slider keeps the dragged value while
+    /// `request` is out. Its answer, whichever it is, ends the stage: the
+    /// slider is made again from the server's level, so a change the server
+    /// refused snaps back instead of showing a level it does not have.
+    Sent {
+        made: i32,
+        request: RequestId,
+    },
 }
 
 impl SliderStage {
-    /// Whether the slider still serves the server's `level`.
-    fn serves(self, level: i32) -> bool {
+    /// Whether the slider still serves the server's `level`;
+    /// `in_flight` tells whether a request is still out.
+    fn serves(self, level: i32, in_flight: impl Fn(RequestId) -> bool) -> bool {
         match self {
             SliderStage::Made(made) => made == level,
             SliderStage::Dragging(_) => true,
+            SliderStage::Sent { request, .. } => in_flight(request),
         }
     }
 
     fn made(self) -> i32 {
         match self {
-            SliderStage::Made(level) | SliderStage::Dragging(level) => level,
+            SliderStage::Made(level)
+            | SliderStage::Dragging(level)
+            | SliderStage::Sent { made: level, .. } => level,
         }
     }
 }
@@ -75,6 +88,13 @@ fn level_for_percent(percent: f32) -> i32 {
 }
 
 impl QuillApp {
+    /// The stage closed or shows no slider: the slider goes.
+    pub(super) fn clear_stage_volume(&mut self) {
+        if let Some(view) = self.call_view_mut() {
+            view.stage_volume = None;
+        }
+    }
+
     /// The stage's volume slider for `sender`, `None` when the
     /// participant has left.
     pub(super) fn stage_volume_slider(
@@ -89,10 +109,15 @@ impl QuillApp {
             .find(|participant| participant.participant_id == sender)?
             .volume_level;
         let current = self
-            .group_call
-            .stage_volume
-            .as_ref()
-            .filter(|volume| volume.sender == sender && volume.stage.serves(level))
+            .call_view()
+            .and_then(|view| view.stage_volume.as_ref())
+            .filter(|volume| {
+                volume.sender == sender
+                    && volume.stage.serves(level, |id| {
+                        self.session()
+                            .is_some_and(|session| session.requests.get(id).is_some())
+                    })
+            })
             .map(|volume| volume.slider.clone());
         let slider = match current {
             Some(slider) => slider,
@@ -110,29 +135,37 @@ impl QuillApp {
                         ))
                 });
                 let events = cx.subscribe(&slider, move |this, _, event: &SliderEvent, cx| {
-                    let release = matches!(event, SliderEvent::Release(_));
-                    if let Some(volume) = this.group_call.stage_volume.as_mut() {
+                    let stage = match event {
+                        SliderEvent::Release(value) => {
+                            let request = this.set_group_call_participant_volume(
+                                sender,
+                                level_for_percent(value.end()),
+                                cx,
+                            );
+                            (request, true)
+                        }
+                        _ => (None, false),
+                    };
+                    if let Some(volume) = this
+                        .call_view_mut()
+                        .and_then(|view| view.stage_volume.as_mut())
+                    {
                         let made = volume.stage.made();
-                        volume.stage = if release {
-                            SliderStage::Made(made)
-                        } else {
-                            SliderStage::Dragging(made)
+                        volume.stage = match stage {
+                            (Some(request), _) => SliderStage::Sent { made, request },
+                            (None, true) => SliderStage::Made(made),
+                            (None, false) => SliderStage::Dragging(made),
                         };
                     }
-                    if let SliderEvent::Release(value) = event {
-                        this.set_group_call_participant_volume(
-                            sender,
-                            level_for_percent(value.end()),
-                            cx,
-                        );
-                    }
                 });
-                self.group_call.stage_volume = Some(StageVolume {
-                    sender,
-                    stage: SliderStage::Made(level),
-                    slider: slider.clone(),
-                    _events: events,
-                });
+                if let Some(view) = self.call_view_mut() {
+                    view.stage_volume = Some(StageVolume {
+                        sender,
+                        stage: SliderStage::Made(level),
+                        slider: slider.clone(),
+                        _events: events,
+                    });
+                }
                 slider
             }
         };
@@ -158,7 +191,29 @@ impl QuillApp {
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod tests {
-    use super::{LEVEL_MAX, LEVEL_MIN, level_for_percent, percent_for_level};
+    use super::{LEVEL_MAX, LEVEL_MIN, SliderStage, level_for_percent, percent_for_level};
+    use quill::ids::RequestId;
+
+    #[test]
+    fn a_sent_level_snaps_back_once_its_answer_is_in() {
+        let request = RequestId(7);
+        let sent = SliderStage::Sent {
+            made: 10000,
+            request,
+        };
+        assert!(
+            sent.serves(10000, |_| true),
+            "the drag shows while it is out"
+        );
+        assert!(
+            !sent.serves(10000, |_| false),
+            "answered, level unchanged: the slider is made from the server's level"
+        );
+        assert!(!sent.serves(15000, |_| false), "answered with a new level");
+        assert!(SliderStage::Dragging(10000).serves(15000, |_| false));
+        assert!(SliderStage::Made(10000).serves(10000, |_| false));
+        assert!(!SliderStage::Made(10000).serves(15000, |_| false));
+    }
 
     #[test]
     fn levels_map_to_percents_and_back() {

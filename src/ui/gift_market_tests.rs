@@ -126,7 +126,7 @@ fn closing_the_buy_box_mid_purchase_keeps_the_purchase(cx: &mut TestAppContext) 
             .as_mut()
             .and_then(|s| s.payments.gift_market.buy.as_mut())
         {
-            buy.phase = quill::gift_market::BuyPhase::Sending { request: 41 };
+            buy.begin_send(41);
         }
         app.market_back(cx);
         assert_eq!(app.gift_market.top(), Some(&MarketBox::Resale));
@@ -148,10 +148,10 @@ fn hide_my_name_does_not_carry_to_the_next_auction(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     app.update_in(vcx, |app, _, cx| {
         app.gift_market.stack = vec![MarketBox::bid(AUCTION_GIFT)];
-        app.gift_market.hide_name = true;
+        app.gift_market.flow.set_hide_name(true);
         app.market_back(cx);
         assert!(app.gift_market.stack.is_empty());
-        assert!(!app.gift_market.hide_name);
+        assert!(!app.gift_market.flow.hide_name());
     });
 }
 
@@ -165,10 +165,10 @@ fn the_custom_amount_survives_a_slider_rebuild(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, window, cx| {
         app.gift_market.stack = vec![MarketBox::bid(AUCTION_GIFT)];
         let _ = app.auction_bid_box(AUCTION_GIFT, cx);
-        app.open_custom_bid(window, cx);
+        app.open_custom_bid(AUCTION_GIFT, window, cx);
         let before = app
             .gift_market
-            .bid_mut()
+            .bid_mut(AUCTION_GIFT)
             .and_then(|ui| {
                 ui.bounds = (0, 0);
                 ui.custom.as_mut()
@@ -181,7 +181,7 @@ fn the_custom_amount_survives_a_slider_rebuild(cx: &mut TestAppContext) {
         let _ = app.auction_bid_box(AUCTION_GIFT, cx);
         let custom = app
             .gift_market
-            .bid()
+            .bid(AUCTION_GIFT)
             .and_then(|ui| ui.custom.as_ref())
             .expect("the field stayed");
         assert_eq!(custom.input, before);
@@ -197,7 +197,7 @@ fn the_bid_slider_sets_the_button(cx: &mut TestAppContext) {
     let slider = app.update_in(vcx, |app, _, cx| {
         app.gift_market.stack = vec![MarketBox::bid(AUCTION_GIFT)];
         let _ = app.auction_bid_box(AUCTION_GIFT, cx);
-        let slider = app.gift_market.bid().expect("the slider");
+        let slider = app.gift_market.bid(AUCTION_GIFT).expect("the slider");
         // It starts on the user's bid: nothing to raise.
         assert_eq!(slider.chosen, 4_000);
         slider.state.clone()
@@ -207,7 +207,7 @@ fn the_bid_slider_sets_the_button(cx: &mut TestAppContext) {
         cx.emit(SliderEvent::Change(SliderValue::Single(BID_SLIDER_STEPS)));
     });
     app.update_in(vcx, |app, window, cx| {
-        let chosen = app.gift_market.bid().map_or(0, |ui| ui.chosen);
+        let chosen = app.gift_market.bid(AUCTION_GIFT).map_or(0, |ui| ui.chosen);
         assert_eq!(chosen, 30_000);
         let state = app
             .session()
@@ -220,7 +220,7 @@ fn the_bid_slider_sets_the_button(cx: &mut TestAppContext) {
         );
         // The minimum-bid block: one step above the current bid.
         app.set_bid_amount(AUCTION_GIFT, state.min_bid_for_me(), window, cx);
-        let chosen = app.gift_market.bid().map_or(0, |ui| ui.chosen);
+        let chosen = app.gift_market.bid(AUCTION_GIFT).map_or(0, |ui| ui.chosen);
         assert_eq!(chosen, 4_050);
         assert_eq!(
             state.bid_action(chosen).label(state.my_stars()),
@@ -228,7 +228,7 @@ fn the_bid_slider_sets_the_button(cx: &mut TestAppContext) {
         );
         // Leaving the bid box drops the slider.
         app.market_back(cx);
-        assert!(app.gift_market.bid().is_none());
+        assert!(app.gift_market.bid(AUCTION_GIFT).is_none());
     });
 }
 
@@ -337,17 +337,91 @@ fn a_replaced_or_closed_bid_box_takes_its_choices_with_it(cx: &mut TestAppContex
     app.update_in(vcx, |app, _, _| {
         let market = &mut app.gift_market;
         market.stack.clear();
-        market.hide_name = true;
+        market.flow.set_hide_name(true);
         market.push(MarketBox::bid(1));
         market.push(MarketBox::AuctionSend { gift_id: 1 });
         assert_eq!(market.pop(), Some(MarketBox::AuctionSend { gift_id: 1 }));
-        assert!(market.hide_name, "the bid box below still uses it");
+        assert!(market.flow.hide_name(), "the bid box below still uses it");
         // Replace the bid box by another box: nothing of it stays.
         assert_eq!(market.pop(), Some(MarketBox::bid(1)));
-        assert!(!market.hide_name, "no box is left to own the choice");
-        market.hide_name = true;
+        assert!(!market.flow.hide_name(), "no box is left to own the choice");
+        market.flow.set_hide_name(true);
         market.push(MarketBox::AuctionSend { gift_id: 2 });
         market.clear();
-        assert!(!market.hide_name);
+        assert!(!market.flow.hide_name());
+    });
+}
+
+/// Sweep r2-27 (10-005, 10-007): clearing the boxes ends an auction that
+/// was waiting to open and forgets the recipient, whichever way they
+/// closed.
+#[gpui_kit::test]
+fn clearing_the_boxes_ends_a_pending_open_and_forgets_the_recipient(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-gift-auction");
+    let vcx = &mut vcx;
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, _| {
+        let market = &mut app.gift_market;
+        market.stack = vec![MarketBox::ActiveAuctions];
+        market
+            .flow
+            .set_recipient(Some(quill::gift_manage::GiftRecipient {
+                sender: quill::telegram::envelope::MessageSender::User { user_id: 5 },
+                name: "Maya".into(),
+                is_self: false,
+                is_channel: false,
+            }));
+        market.flow.begin_opening(quill::ids::RequestId(9));
+        assert_eq!(
+            market.flow.opening(),
+            Some((quill::ids::RequestId(9), true))
+        );
+        market.clear();
+        assert_eq!(market.flow.opening(), None);
+        assert!(market.flow.recipient().is_none());
+    });
+}
+
+/// Sweep r2-27 (10-005): an auction state that answers another ask does
+/// not open this ask's box, and is left for its own asker.
+#[gpui_kit::test]
+fn another_asks_auction_answer_does_not_open_this_asks_box(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-gift-auction");
+    let vcx = &mut vcx;
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, window, cx| {
+        app.gift_market.stack = vec![MarketBox::ActiveAuctions];
+        app.gift_market.flow.begin_opening(quill::ids::RequestId(7));
+        let other = quill::gift_market::AuctionFetch::Ready {
+            gift_id: AUCTION_GIFT,
+            request: 8,
+        };
+        if let Some(session) = app.demo_session.as_mut() {
+            session.payments.gift_market.auction = other;
+        }
+        app.gift_market_frame_upkeep(window, cx);
+        assert_eq!(app.gift_market.flow.opening(), None, "the ask is over");
+        assert_eq!(app.gift_market.stack, vec![MarketBox::ActiveAuctions]);
+        let left = app
+            .demo_session
+            .as_ref()
+            .map(|session| session.payments.gift_market.auction);
+        assert_eq!(left, Some(other), "not this ask's to take");
+    });
+}
+
+/// Sweep r2-27 (10-008): a bid box reads its own slider, not the topmost
+/// bid box's.
+#[gpui_kit::test]
+fn a_bid_box_reads_its_own_slider(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-gift-auction");
+    let vcx = &mut vcx;
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, cx| {
+        app.gift_market.stack = vec![MarketBox::bid(AUCTION_GIFT)];
+        let _ = app.auction_bid_box(AUCTION_GIFT, cx);
+        assert!(app.gift_market.bid(AUCTION_GIFT).is_some());
+        assert!(app.gift_market.bid(AUCTION_GIFT + 1).is_none());
+        assert!(app.gift_market.bid_mut(AUCTION_GIFT + 1).is_none());
     });
 }

@@ -248,13 +248,15 @@ fn play_once_and_lock_end_with_the_recording_whoever_takes_it(cx: &mut TestAppCo
 fn a_press_that_needs_no_prompt_leaves_an_earlier_prompt_alone(cx: &mut TestAppContext) {
     use crate::ui::recording_state::PermissionAsk;
     let (app, mut vcx) = open_chat(cx);
-    let asking = PermissionAsk::Asking { id: 7, call: None };
     app.update(&mut vcx, |app, cx| {
-        app.recording.permission = asking;
+        app.recording.permission = PermissionAsk::Asking {
+            id: 7,
+            _task: gpui_kit::Task::ready(()),
+        };
         // Linux reports every device granted: the start runs at once.
         app.with_capture_access(false, |_, _| {}, cx);
-        assert_eq!(
-            app.recording.permission, asking,
+        assert!(
+            app.recording.permission.is_asking(7),
             "the other press's ask is still the one waiting"
         );
     });

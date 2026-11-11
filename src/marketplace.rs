@@ -246,6 +246,9 @@ impl GiftPurchase {
     /// The send answered. A higher price never submits by itself: it goes
     /// back to the quote with the new amount.
     pub fn accept_result(&mut self, result: GiftPurchaseResult) {
+        if !matches!(self.stage, GiftPurchaseStage::Sending { .. }) {
+            return;
+        }
         let GiftPurchaseStage::Sending { quote, .. } =
             std::mem::replace(&mut self.stage, GiftPurchaseStage::Failed(String::new()))
         else {
@@ -277,8 +280,15 @@ impl GiftPurchase {
     }
 
     /// A request failed: loading ends with no quote, a send goes back to the
-    /// quote it was sent from.
+    /// quote it was sent from. A quote, a receipt or an earlier failure has
+    /// no request to fail and stays as it is.
     pub fn fail(&mut self, line: String) {
+        if !matches!(
+            self.stage,
+            GiftPurchaseStage::Loading(_) | GiftPurchaseStage::Sending { .. }
+        ) {
+            return;
+        }
         self.stage =
             match std::mem::replace(&mut self.stage, GiftPurchaseStage::Failed(String::new())) {
                 GiftPurchaseStage::Sending { quote, price, .. } => GiftPurchaseStage::Quoted {
@@ -343,6 +353,14 @@ mod stage_tests {
         // An answer with nothing sent is ignored.
         gift.accept_result(GiftPurchaseResult::Sent(String::new()));
         assert!(!gift.is_completed());
+        assert_eq!(gift.price(), Some(GiftPrice::Stars(25)), "the quote stays");
+        gift.fail("stray".into());
+        assert_eq!(
+            gift.price(),
+            Some(GiftPrice::Stars(25)),
+            "no request failed"
+        );
+        assert_eq!(gift.note(), None);
         gift.stage = GiftPurchaseStage::Sending {
             quote: quote(),
             price: GiftPrice::Stars(25),

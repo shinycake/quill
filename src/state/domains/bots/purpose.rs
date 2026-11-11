@@ -23,13 +23,9 @@ pub enum BotsPurpose {
     },
     /// Bots slice: `searchPublicChat` for `@botname` → bot user id
     /// resolution (schema 1.8.67, line 11603). Response is `chat`; the
-    /// outcome lands in `Session::inline_bot_resolve`. `generation`
-    /// matches `InlineBotResolve::Resolving::generation` so a stale
-    /// answer (a newer username is already being resolved) is ignored —
-    /// a `u64` keeps the `Copy` purpose enum intact.
-    ResolveInlineBot {
-        generation: u64,
-    },
+    /// outcome lands on the `BotsState::inline_bots` entry whose
+    /// `InlineBotResolve::Resolving` holds this request.
+    ResolveInlineBot,
     /// Bots slice: `sendInlineQueryResultMessage` (schema 1.8.67, line
     /// 12226). Response is the sent `message`; failures surface through
     /// the normal message-send failure path.

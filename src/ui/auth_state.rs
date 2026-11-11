@@ -33,9 +33,6 @@ pub(crate) struct AuthUi {
     /// is never stored beyond the input widget — it is zeroized after
     /// submit (the A2 rule).
     pub(super) recovery_code_input: Entity<TextareaState>,
-    /// Batch 4: the attempts the user just terminated from the new-login
-    /// alert ("New Login Prevented" box), until acknowledged.
-    pub(super) login_prevented: Option<Vec<String>>,
     /// Batch 4: terms of service prompt state (decline flow, age check).
     pub(super) terms_prompt: Option<TermsPrompt>,
     /// Slice A1: decoded QR-login bitmap cached by link, rebuilt only when
@@ -198,7 +195,6 @@ impl AuthUi {
             code_input,
             password_input,
             recovery_code_input,
-            login_prevented: None,
             terms_prompt: None,
             qr_login_cache: None,
         }

@@ -84,10 +84,8 @@ impl QuillApp {
         let private_user = chat_id.and_then(|id| session?.private_chat_user_id(id));
         let entries = chat
             .map(|c| {
-                let is_saved = session.is_some_and(|s| s.is_saved_messages(c.id));
                 header_entries(&HeaderFacts {
                     kind: &c.kind,
-                    is_saved_messages: is_saved,
                     is_self: private_user.is_some()
                         && private_user == session.and_then(|s| s.my_user_id),
                     is_bot: private_user.is_some_and(|u| session.is_some_and(|s| s.is_bot_user(u))),

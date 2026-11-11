@@ -27,9 +27,12 @@ impl Session {
                 }
             }
             TonWalletPayload::ExchangeRates(rates) => {
-                if purpose == Some(TonWalletPurpose::ExchangeRates) {
+                // Only the answer the fetch waits for: one that outlived a
+                // wallet switched off and on lands nowhere.
+                if purpose == Some(TonWalletPurpose::ExchangeRates)
+                    && wallet.rates_fetch.answered(pending.map(|p| p.id), ())
+                {
                     wallet.rates = rates;
-                    wallet.rates_fetch.succeed(());
                 }
             }
             TonWalletPayload::Transactions(page) => {
@@ -38,11 +41,13 @@ impl Session {
                 }
                 // Only the page the list waits for: a late answer of an
                 // earlier list changes neither the rows nor the balance.
-                if !wallet.money.history.apply(
-                    pending.map(|p| p.id),
-                    page.transactions,
-                    page.next_offset,
-                ) {
+                let Some(money) = wallet.money.as_mut() else {
+                    return;
+                };
+                if !money
+                    .history
+                    .apply(pending.map(|p| p.id), page.transactions, page.next_offset)
+                {
                     return;
                 }
                 if let Some(own) = wallet.own.as_mut() {
@@ -54,8 +59,10 @@ impl Session {
                 if purpose != Some(TonWalletPurpose::Nfts) {
                     return;
                 }
-                if !wallet
-                    .money
+                let Some(money) = wallet.money.as_mut() else {
+                    return;
+                };
+                if !money
                     .nfts
                     .apply(pending.map(|p| p.id), page.nfts, page.next_offset)
                 {
@@ -67,28 +74,42 @@ impl Session {
                 if purpose != Some(TonWalletPurpose::UserAddress) {
                     return;
                 }
+                // Only the lookups this answer is for: a late one of a wallet
+                // that was switched off and on finds no `Loading` under its
+                // request.
+                let Some(request) = pending.map(|p| p.id) else {
+                    return;
+                };
+                let waits = |wallet: &crate::ton_wallet::TonWalletState, user_id: &i64| {
+                    matches!(
+                        wallet.profile_addresses.get(user_id),
+                        Some(ProfileAddress::Loading { request: asked }) if *asked == request
+                    )
+                };
                 for (user_id, address) in found {
-                    wallet
-                        .profile_addresses
-                        .insert(user_id, ProfileAddress::Found(address));
+                    if waits(wallet, &user_id) {
+                        wallet
+                            .profile_addresses
+                            .insert(user_id, ProfileAddress::Found(address));
+                    }
                 }
                 // TDLib leaves out a user without a wallet.
                 if let Some(user_id) = pending.and_then(|p| p.user_id)
-                    && matches!(
-                        wallet.profile_addresses.get(&user_id),
-                        Some(ProfileAddress::Loading)
-                    )
+                    && waits(wallet, &user_id)
                 {
                     wallet
                         .profile_addresses
-                        .insert(user_id, ProfileAddress::None);
+                        .insert(user_id, ProfileAddress::NoWallet);
                 }
             }
             TonWalletPayload::Transaction(tx) => {
                 // The answer of the card that was clicked last; a click on
                 // another card, or "back", dropped this one.
                 if purpose != Some(TonWalletPurpose::Transaction)
-                    || !wallet.money.tx_lookup_waits_for(pending.map(|p| p.id))
+                    || !wallet
+                        .money
+                        .as_ref()
+                        .is_some_and(|money| money.tx_lookup_waits_for(pending.map(|p| p.id)))
                 {
                     return;
                 }
@@ -107,15 +128,19 @@ impl Session {
                 .suggestions
                 .actions
                 .contains(crate::ton_wallet::FIRST_TRANSFER_HINT);
-        self.ton_wallet.money.detail = MoneyDetail::Tx {
-            tx: Box::new(tx),
-            hint,
-        };
+        if let Some(money) = self.ton_wallet.money.as_mut() {
+            money.detail = MoneyDetail::Tx {
+                tx: Box::new(tx),
+                hint,
+            };
+        }
     }
 
     /// The NFT thumbnails not on disk yet (the next ingest downloads them).
     fn want_wallet_thumbs(&mut self) {
-        let money = &self.ton_wallet.money;
+        let Some(money) = self.ton_wallet.money.as_ref() else {
+            return;
+        };
         let files: Vec<_> = money
             .nfts
             .items()
@@ -149,31 +174,44 @@ impl Session {
         let reason = error_reason(err);
         let wallet = &mut self.ton_wallet;
         match purpose {
-            TonWalletPurpose::LoadState => wallet.state_fetch.fail(reason),
-            TonWalletPurpose::ExchangeRates => wallet.rates_fetch.fail(reason),
+            TonWalletPurpose::LoadState => {
+                wallet.state_fetch.failed(request, reason, false);
+            }
+            TonWalletPurpose::ExchangeRates => {
+                wallet.rates_fetch.failed(request, reason, false);
+            }
             TonWalletPurpose::Transactions => {
-                wallet
-                    .money
-                    .history
-                    .fail(request, format!("Couldn't load transactions: {reason}"));
+                if let Some(money) = wallet.money.as_mut() {
+                    money
+                        .history
+                        .fail(request, format!("Couldn't load transactions: {reason}"));
+                }
             }
             TonWalletPurpose::Nfts => {
-                wallet
-                    .money
-                    .nfts
-                    .fail(request, format!("Couldn't load collectibles: {reason}"));
+                if let Some(money) = wallet.money.as_mut() {
+                    money
+                        .nfts
+                        .fail(request, format!("Couldn't load collectibles: {reason}"));
+                }
             }
-            // A failed lookup is the same as no wallet: no row.
+            // The row stays off, and the next open of the profile asks
+            // again. A late error of an earlier lookup changes nothing.
             TonWalletPurpose::UserAddress => {
-                if let Some(user_id) = user_id {
-                    wallet
-                        .profile_addresses
-                        .insert(user_id, ProfileAddress::None);
+                if let Some(user_id) = user_id
+                    && let Some(slot) = wallet.profile_addresses.get_mut(&user_id)
+                    && matches!(
+                        slot,
+                        ProfileAddress::Loading { request: asked } if Some(*asked) == request
+                    )
+                {
+                    *slot = ProfileAddress::Failed;
                 }
             }
             TonWalletPurpose::Transaction => {
-                if wallet.money.tx_lookup_waits_for(request) {
-                    wallet.money.detail =
+                if let Some(money) = wallet.money.as_mut()
+                    && money.tx_lookup_waits_for(request)
+                {
+                    money.detail =
                         MoneyDetail::LookupFailed(format!("Couldn't load the transfer: {reason}"));
                 }
             }
@@ -187,7 +225,9 @@ impl Session {
             TonWalletPurpose::LoadState,
         ))) = pending.map(|p| p.purpose)
         {
-            self.ton_wallet.state_fetch.succeed(());
+            self.ton_wallet
+                .state_fetch
+                .answered(pending.map(|p| p.id), ());
         }
     }
 }

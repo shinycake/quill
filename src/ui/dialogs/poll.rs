@@ -132,14 +132,13 @@ pub(crate) enum QuizLock {
 }
 
 impl QuizLock {
-    /// What a request-poll button asks for (`force_quiz` wins).
-    pub(crate) fn from_button(force_regular: bool, force_quiz: bool) -> Self {
-        if force_quiz {
-            Self::Quiz
-        } else if force_regular {
-            Self::Regular
-        } else {
-            Self::Free
+    /// What a request-poll button asks for.
+    pub(crate) fn from_button(request: quill::telegram::envelope::PollRequest) -> Self {
+        use quill::telegram::envelope::PollRequest;
+        match request {
+            PollRequest::QuizOnly => Self::Quiz,
+            PollRequest::RegularOnly => Self::Regular,
+            PollRequest::Any => Self::Free,
         }
     }
 }

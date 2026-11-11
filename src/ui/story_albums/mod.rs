@@ -89,7 +89,7 @@ impl QuillApp {
         if let Some(session) = session {
             session.settle_story_page_op();
             if let Some(chat_id) = chat_id {
-                session.leave_story_page(chat_id);
+                session.leave_story_page(ChatId(chat_id));
             }
         }
         cx.notify();
@@ -169,7 +169,7 @@ impl QuillApp {
         ) -> Result<(), quill::connect::ConnectSendError>,
         cx: &mut Context<Self>,
     ) -> Option<Vec<quill::ids::RequestId>> {
-        let chat = self.stories.page.as_ref().map(|page| page.chat_id.0);
+        let chat = self.stories.page.as_ref().map(|page| page.chat_id);
         let busy = chat
             .zip(self.session())
             .is_some_and(|(chat, session)| session.stories.page_ops.mutating(chat));

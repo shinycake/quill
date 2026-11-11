@@ -19,7 +19,9 @@ use crate::settings::{
     CallPrefs, ContactPrefs, LanguagePrefs, MediaPrefs,
 };
 use crate::sticker_suggest::StickerSuggestMode;
-use crate::story_page::{ArchivedStories, ChatPageStories, StoryPageOp, StoryPageOpState};
+use crate::story_page::{
+    ArchivedStories, ChatPageStories, StoryPageOp, StoryPageOpKind, StoryPageOpState,
+};
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
     AnimationItem, AuthorizationState, Background, BotCommand, BotInfo, CallbackQueryAnswer,
@@ -33,16 +35,16 @@ use crate::telegram::envelope::{
     MessageAutoDelete, MessageContent, MessageExtras, MessageForwardInfo, MessageInteractionInfo,
     MessageOrigin, MessageReaction, MessageReplyTo, MessageSelfDestruct, MessageSender,
     NotificationSettingsScope, NotificationSound, OptionValue, ParsedCall, ParsedChatEvent,
-    ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember, ParsedCommunity,
-    ParsedCommunityFullInfo, ParsedFile, ParsedGroupCall, ParsedGroupCallMessage,
-    ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedSession, ParsedStory,
-    ParsedUser, ParsedVideoChat, ParsedWebsite, ParsedWelcomeMessage, PasswordState,
-    PaymentFormData, PaymentReceiptData, Poll, ReactionNotificationSettings, RecommendedChatFolder,
-    ReplyKeyboard, ReplyMarkup, ReportChatOutcome, ReportOption, ReportSponsoredResult,
-    ReportStoryResult, RichMessageContent, ScopeNotificationSettings, SecretChatState,
-    SponsoredMessage, StickerItem, StickerSetInfo, StorageStats, StoryAvailableReactionView,
-    StoryInteractionView, StoryInteractionsView, StoryListView, TdError, UsernameCheckResult,
-    ValidatedOrderInfoData, effective_content, reply_markup_demands_reply,
+    ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember, ParsedCommunity, ParsedFile,
+    ParsedGroupCall, ParsedGroupCallMessage, ParsedGroupCallParticipant, ParsedMessage,
+    ParsedSecretChat, ParsedSession, ParsedStory, ParsedUser, ParsedVideoChat, ParsedWebsite,
+    ParsedWelcomeMessage, PasswordState, PaymentFormData, PaymentReceiptData, Poll,
+    ReactionNotificationSettings, RecommendedChatFolder, ReplyKeyboard, ReplyMarkup,
+    ReportChatOutcome, ReportOption, ReportSponsoredResult, ReportStoryResult, RichMessageContent,
+    ScopeNotificationSettings, SecretChatState, SponsoredMessage, StickerItem, StickerSetInfo,
+    StorageStats, StoryAvailableReactionView, StoryInteractionView, StoryInteractionsView,
+    StoryListView, TdError, UsernameCheckResult, ValidatedOrderInfoData, effective_content,
+    reply_markup_demands_reply,
 };
 use crate::telegram::envelope::{AvailableMessageSender, CallState, ReadyParams};
 use crate::telegram::envelope_story::ParsedStoryAlbum;
@@ -63,6 +65,7 @@ mod business_bot_bar;
 mod call_types;
 mod chat_activity;
 mod chat_order;
+mod chat_search_types;
 mod chat_types;
 mod composer_link_preview;
 mod composer_targets;
@@ -84,6 +87,7 @@ mod info_types;
 mod logout_notes;
 mod map_thumbs;
 mod media_library;
+mod member_fetch_types;
 mod member_list;
 mod notify_shown;
 mod open_view;
@@ -197,6 +201,7 @@ pub use acks::{Answer, RequestAcks};
 pub use bot_stop::BotStopStage;
 pub use call_types::*;
 pub use chat_activity::*;
+pub use chat_search_types::*;
 pub use chat_types::*;
 pub use composer_link_preview::*;
 pub use composer_targets::{ComposerReplyFetch, ReplyFetches};
@@ -219,6 +224,7 @@ pub use map_thumbs::{
 pub use media_library::{
     MAX_LIBRARY_LOADS, MediaLibrary, MessageReactionOptions, MessageReactionsState, ReactionChoice,
 };
+pub use member_fetch_types::*;
 pub use member_list::*;
 pub use notify_shown::{NotifyShown, ShownNotifications};
 pub use open_view::OpenView;
@@ -244,9 +250,9 @@ pub use session_history_window::MentionSearch;
 pub(crate) use session_history_window::WindowEdge;
 pub use session_links_boosts::*;
 pub use session_message_menu::{
-    Audience, CustomEmojiPreview, MessageAudience, MessageReportFlow, MessageReportStage,
-    PollOptionMenu, SetChange, SetChangeStage, SetFiles, StickerSetView, StickerSetViewStage,
-    poll_option_key, reaction_filter_key,
+    Audience, CustomEmojiAnswer, CustomEmojiAnswers, CustomEmojiPreview, MessageAudience,
+    MessageReportFlow, MessageReportStage, PollOptionMenu, SetChange, SetChangeStage, SetFiles,
+    StickerSetView, StickerSetViewStage, poll_option_key, reaction_filter_key,
 };
 pub use session_message_story::{
     StoryCardState, StoryPreview, media_unlocked_note, message_story_key,
@@ -260,7 +266,9 @@ pub use session_reply::{
 pub use session_reply_keyboard::*;
 pub use session_saved::{SAVED_PAGE, SAVED_TOPICS_PAGE};
 pub use session_share::{SearchPart, ShareSearch};
-pub use session_subsection_tabs::{BotTopics, ROW_TOPIC_COUNT, RowForum, RowTopic, TopicBadge};
+pub use session_subsection_tabs::{
+    BotTopics, ROW_TOPIC_COUNT, RowForum, RowTopic, RowTopicsView, TopicBadge,
+};
 pub use session_translate::*;
 pub use shared_media_meta::*;
 pub use shared_media_months::*;

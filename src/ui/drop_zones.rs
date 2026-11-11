@@ -23,25 +23,33 @@ use quill::lang::{keys, tr, trn};
 use std::path::PathBuf;
 
 /// The folder zip behind "Send as archive": at most one per composer, for
-/// the chat it was dropped in. It ends with the answer (landed or dropped)
-/// or with the screen, whose task and composer go together.
-#[derive(Debug, Default, PartialEq, Eq)]
+/// the chat it was dropped in. It ends with the answer (landed or dropped),
+/// with a drop of another chat (which replaces it, dropping its task), or
+/// with the screen, whose task and composer go together.
+#[derive(Default)]
 pub(super) enum ArchiveJob {
     #[default]
     Idle,
-    Building(SendSlot),
+    Building {
+        slot: SendSlot,
+        _task: Task<()>,
+    },
 }
 
 /// A file drag over the conversation. The paths are looked at off the UI
-/// thread, and an answer applies only while the drag still holds the paths
-/// it was asked for. A drag leaves to `Idle` when it ends (no active drag at
-/// the next draw) or its files are dropped.
-#[derive(Debug, Default, PartialEq, Eq)]
+/// thread by the task of the `Probing` stage, so a drag that ends, is
+/// replaced or dropped takes its probe with it and a late answer never
+/// lands in another drag. A drag leaves to `Idle` when it ends (no active
+/// drag at the next draw) or its files are dropped.
+#[derive(Default)]
 pub(super) enum FileDrag {
     #[default]
     Idle,
     /// Asked: what the paths hold is being probed.
-    Probing(Vec<PathBuf>),
+    Probing {
+        paths: Vec<PathBuf>,
+        _probe: Task<()>,
+    },
     /// Answered: the zones to offer (`None` when nothing is offered).
     Probed {
         paths: Vec<PathBuf>,
@@ -54,7 +62,7 @@ pub(super) enum FileDrag {
 impl FileDrag {
     fn paths(&self) -> &[PathBuf] {
         match self {
-            FileDrag::Probing(paths) | FileDrag::Probed { paths, .. } => paths,
+            FileDrag::Probing { paths, .. } | FileDrag::Probed { paths, .. } => paths,
             FileDrag::Idle | FileDrag::Preview(_) => &[],
         }
     }
@@ -75,38 +83,39 @@ impl QuillApp {
         if !self.file_drop_enabled() || self.composer_ui.file_drag.paths() == paths {
             return;
         }
-        self.composer_ui.file_drag = FileDrag::Probing(paths.to_vec());
         // Each path is looked at on disk, which can stall on a network drive.
         let probed = paths.to_vec();
-        self.run_off_ui_scoped_then(
-            move || {
-                let entries: Vec<DragEntry> = probed.iter().map(|p| DragEntry::probe(p)).collect();
-                (probed, classify(&entries))
-            },
-            |this, (probed, state), cx| {
-                if this.composer_ui.file_drag.paths() == probed {
-                    this.composer_ui.file_drag = FileDrag::Probed {
-                        paths: probed,
-                        state,
-                    };
-                    cx.notify();
-                }
-            },
-            cx,
-        );
+        let work = cx.background_spawn(async move {
+            let entries: Vec<DragEntry> = probed.iter().map(|p| DragEntry::probe(p)).collect();
+            (probed, classify(&entries))
+        });
+        let probe = self.spawn_scoped(cx, async move |this, cx| {
+            let (probed, state) = work.await;
+            let _ = this.update(cx, |this, cx| {
+                this.composer_ui.file_drag = FileDrag::Probed {
+                    paths: probed,
+                    state,
+                };
+                cx.notify();
+            });
+        });
+        self.composer_ui.file_drag = FileDrag::Probing {
+            paths: paths.to_vec(),
+            _probe: probe,
+        };
     }
 
     /// The zones to draw now: a live file drag, or a demo's fixed state.
     pub(super) fn visible_drop_state(&mut self, cx: &App) -> Option<DragState> {
-        if let FileDrag::Preview(state) = self.composer_ui.file_drag {
-            return Some(state);
+        if let FileDrag::Preview(state) = &self.composer_ui.file_drag {
+            return Some(*state);
         }
         if !cx.has_active_drag() {
             self.composer_ui.file_drag = FileDrag::Idle;
         }
-        match self.composer_ui.file_drag {
-            FileDrag::Probed { state, .. } => state.filter(|_| self.file_drop_enabled()),
-            FileDrag::Idle | FileDrag::Probing(_) | FileDrag::Preview(_) => None,
+        match &self.composer_ui.file_drag {
+            FileDrag::Probed { state, .. } => (*state).filter(|_| self.file_drop_enabled()),
+            FileDrag::Idle | FileDrag::Probing { .. } | FileDrag::Preview(_) => None,
         }
     }
 
@@ -188,16 +197,19 @@ impl QuillApp {
                 let Some(slot) = self.send_slot() else {
                     return;
                 };
-                // One zip at a time; its note is still showing.
-                if self.composer_ui.archive != ArchiveJob::Idle {
+                // One zip at a time for the chat; its note is still showing.
+                // A zip of another chat is no longer wanted: this one
+                // replaces it, and the replaced one's task goes with it.
+                if matches!(&self.composer_ui.archive, ArchiveJob::Building { slot: building, .. } if *building == slot)
+                {
                     return;
                 }
-                self.composer_ui.archive = ArchiveJob::Building(slot.clone());
                 self.set_note(StatusNote::silent(tr(keys::Q_MISC_PREPARING_THE_ARCHIVE)));
                 cx.notify();
                 let dir = quill::local_path::media_cache_base().join("archives");
                 quill::local_path::ensure_private_dir(&dir);
-                self.spawn_scoped(cx, async move |this, cx| {
+                let building = slot.clone();
+                let task = self.spawn_scoped(cx, async move |this, cx| {
                     let built = cx
                         .background_spawn(async move {
                             build_archive(&source, &dir, ARCHIVE_SIZE_LIMIT)
@@ -206,8 +218,11 @@ impl QuillApp {
                         // Removed with its folder when the screen is gone.
                         .map(quill::scratch::OwnedFile::with_folder);
                     let _ = this.update(cx, |this, cx| this.archive_ready(slot, built, cx));
-                })
-                .detach();
+                });
+                self.composer_ui.archive = ArchiveJob::Building {
+                    slot: building,
+                    _task: task,
+                };
             }
         }
     }

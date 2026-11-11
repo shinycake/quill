@@ -218,8 +218,18 @@ pub trait SpellBackend: Send + Sync {
     fn judge(&self, word: &str) -> Option<bool> {
         Some(self.is_correct(word))
     }
+    /// [`Self::judge`] for the UI thread: `None` instead of waiting for a
+    /// dictionary that is still being parsed.
+    fn judge_now(&self, word: &str) -> Option<bool> {
+        self.judge(word)
+    }
     /// Up to `limit` replacements, best first.
     fn suggestions(&self, word: &str, limit: usize) -> Vec<String>;
+    /// [`Self::suggestions`] for the UI thread: none instead of waiting for
+    /// a dictionary that is still being parsed.
+    fn suggestions_now(&self, word: &str, limit: usize) -> Vec<String> {
+        self.suggestions(word, limit)
+    }
     /// Learn into the backend's own persistent dictionary. `false` when
     /// the backend has none (the caller then keeps the word itself).
     fn learn(&self, _word: &str) -> bool {
@@ -287,6 +297,16 @@ impl SpellChecker {
     /// True when the word needs no correction: skipped words (other
     /// scripts, acronyms, digits…) are always "correct".
     pub fn is_correct(&self, word: &str) -> bool {
+        self.verdict(word, true)
+    }
+
+    /// [`Self::is_correct`] for the UI thread: a word the backend cannot
+    /// judge without waiting for a dictionary to load counts as correct.
+    pub fn is_correct_now(&self, word: &str) -> bool {
+        self.verdict(word, false)
+    }
+
+    fn verdict(&self, word: &str, may_wait: bool) -> bool {
         let word = normalize_apostrophes(word);
         if is_skippable_word(&word) {
             return true;
@@ -308,7 +328,12 @@ impl SpellChecker {
             }
             words.cache.generation
         };
-        let Some(correct) = self.backend.judge(&word) else {
+        let judged = if may_wait {
+            self.backend.judge(&word)
+        } else {
+            self.backend.judge_now(&word)
+        };
+        let Some(correct) = judged else {
             return true;
         };
         let mut words = lock(&self.words);
@@ -343,12 +368,27 @@ impl SpellChecker {
 
     /// Up to `limit` replacements for a misspelled word.
     pub fn suggestions(&self, word: &str, limit: usize) -> Vec<String> {
-        if limit == 0 || self.is_correct(word) {
+        self.suggest(word, limit, true)
+    }
+
+    /// [`Self::suggestions`] for the UI thread: nothing while the
+    /// dictionary is still being parsed.
+    pub fn suggestions_now(&self, word: &str, limit: usize) -> Vec<String> {
+        self.suggest(word, limit, false)
+    }
+
+    fn suggest(&self, word: &str, limit: usize, may_wait: bool) -> Vec<String> {
+        if limit == 0 || self.verdict(word, may_wait) {
             return Vec::new();
         }
         let word = normalize_apostrophes(word);
         let mut out: Vec<String> = Vec::new();
-        for s in self.backend.suggestions(&word, limit) {
+        let found = if may_wait {
+            self.backend.suggestions(&word, limit)
+        } else {
+            self.backend.suggestions_now(&word, limit)
+        };
+        for s in found {
             if s != *word && !out.contains(&s) {
                 out.push(s);
             }

@@ -85,14 +85,14 @@ fn the_call_window_settings_box_opens_and_escape_closes_it(cx: &mut TestAppConte
             "the main window's Escape leaves the call window's box"
         );
         assert!(app.group_call_window_escape(cx), "Escape closes the box");
-        assert!(!app.group_call_screen.settings_open);
+        assert!(!app.settings_open());
         assert!(app.group_call_settings_overlay(cx).is_none());
     });
 }
 
 /// A video chat with all three boxes open over its window.
 fn open_boxes(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
-    app.update_in(vcx, |app, window, cx| {
+    app.update_in(vcx, |app, _window, cx| {
         let Some(session) = app.demo_session.as_mut() else {
             panic!("the demo has a session");
         };
@@ -102,10 +102,7 @@ fn open_boxes(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
             ..ActiveGroupCall::fresh(77)
         });
         app.sync_call_windows(cx);
-        app.group_call_screen.title_dialog = Some(
-            crate::ui::dialogs::group_call::GroupCallTitleDialog::new(window, cx, "x"),
-        );
-        app.group_call_screen.settings_open = true;
+        app.open_call_box(crate::ui::group_call_state::CallBox::Settings);
         app.screen_share.chooser = crate::ui::screen_share_state::Chooser::PrivacyBox(
             crate::ui::screen_share_state::ChooserTarget {
                 for_call: ScreenFor::Group,
@@ -120,8 +117,8 @@ fn boxes(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> (bool, bool, bo
     app.read_with(vcx, |app, _| {
         (
             app.screen_share.chooser.privacy_for().is_some(),
-            app.group_call_screen.settings_open,
-            app.group_call_screen.title_dialog.is_some(),
+            app.settings_open(),
+            app.title_dialog().is_some(),
         )
     })
 }
@@ -137,11 +134,22 @@ fn esc_in_the_video_chat_window_closes_its_boxes_topmost_first(cx: &mut TestAppC
     let mut call = VisualTestContext::from_window(handle, cx);
     call.update(|window, cx| window.render_frame(cx));
     call.simulate_keystrokes("escape");
-    assert_eq!(boxes(&app, &mut vcx), (false, true, true), "privacy first");
+    assert_eq!(boxes(&app, &mut vcx), (false, true, false), "privacy first");
     call.simulate_keystrokes("escape");
-    assert_eq!(boxes(&app, &mut vcx), (false, false, true), "then Settings");
+    assert_eq!(
+        boxes(&app, &mut vcx),
+        (false, false, false),
+        "then Settings"
+    );
+    // One box at a time: the rename box takes the window's Esc likewise.
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.open_call_box(crate::ui::group_call_state::CallBox::Rename(
+            crate::ui::dialogs::group_call::GroupCallTitleDialog::new(window, cx, "x"),
+        ));
+    });
+    assert_eq!(boxes(&app, &mut vcx), (false, false, true), "rename");
     call.simulate_keystrokes("escape");
-    assert_eq!(boxes(&app, &mut vcx), (false, false, false), "then rename");
+    assert_eq!(boxes(&app, &mut vcx), (false, false, false), "then nothing");
     let still = app.read_with(&vcx, |app, _| {
         app.session()
             .is_some_and(|session| session.calls.active_group_call.is_some())
@@ -160,4 +168,27 @@ fn closing_the_video_chat_window_closes_its_boxes(cx: &mut TestAppContext) {
         app.sync_group_call_boxes();
     });
     assert_eq!(boxes(&app, &mut vcx), (false, false, false));
+}
+
+#[gpui_kit::test]
+fn esc_in_the_video_chat_window_closes_the_invite_and_share_boxes(cx: &mut TestAppContext) {
+    use crate::ui::group_call_state::CallBox;
+    let (app, mut vcx) = new_app(cx);
+    open_boxes(&app, &mut vcx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.screen_share.chooser = Default::default();
+        assert!(app.open_call_box(CallBox::Share {
+            speaker: false,
+            copied: false,
+        }));
+        assert!(app.group_call_window_escape(cx), "Esc closes the share box");
+        assert!(matches!(app.call_box(), Some(CallBox::None)));
+        assert!(app.open_call_box(CallBox::Invite));
+        assert!(
+            app.group_call_window_escape(cx),
+            "Esc closes the invite box"
+        );
+        assert!(matches!(app.call_box(), Some(CallBox::None)));
+        assert!(!app.group_call_window_escape(cx), "nothing left to close");
+    });
 }

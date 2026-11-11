@@ -117,9 +117,15 @@ pub enum FolderShareView {
     List {
         confirm_delete: Option<String>,
         copied: CopyMark,
+        /// The delete request this list waits on.
+        op: LinkOp,
     },
     /// Naming a link and choosing its chats; `None` creates a new link.
-    Edit { link: Option<String> },
+    Edit {
+        link: Option<String>,
+        /// The create / edit request this form waits on.
+        op: LinkOp,
+    },
 }
 
 impl FolderShareView {
@@ -128,14 +134,57 @@ impl FolderShareView {
         FolderShareView::List {
             confirm_delete: None,
             copied: CopyMark::Idle,
+            op: LinkOp::Idle,
         }
+    }
+
+    /// The form for `link` (`None` creates one), nothing sent yet.
+    pub(crate) fn edit(link: Option<String>) -> Self {
+        FolderShareView::Edit {
+            link,
+            op: LinkOp::Idle,
+        }
+    }
+
+    /// The form's Cancel: back to the list. A request still out goes with
+    /// it, so the list's busy state and its answer (the error line, or the
+    /// quiet success) belong to the request that was sent.
+    pub(crate) fn cancelled_form(&self) -> Self {
+        FolderShareView::List {
+            confirm_delete: None,
+            copied: CopyMark::Idle,
+            op: match self.op() {
+                LinkOp::Saving(request) => LinkOp::Saving(*request),
+                LinkOp::Idle | LinkOp::Failed(_) => LinkOp::Idle,
+            },
+        }
+    }
+
+    /// The request this view waits on, or the line it failed with.
+    pub(crate) fn op(&self) -> &LinkOp {
+        match self {
+            FolderShareView::List { op, .. } | FolderShareView::Edit { op, .. } => op,
+        }
+    }
+
+    /// A request went out from this view, or it ended: the answer settles
+    /// this view's `op` only, and leaving the view drops it.
+    pub(crate) fn set_op(&mut self, next: LinkOp) {
+        match self {
+            FolderShareView::List { op, .. } | FolderShareView::Edit { op, .. } => *op = next,
+        }
+    }
+
+    /// A link request is out: the list's delete and edit buttons wait.
+    pub(crate) fn is_busy(&self) -> bool {
+        matches!(self.op(), LinkOp::Saving(_))
     }
 }
 
-/// The link request the Share Folder box waits on. Only the answer to this
-/// request settles it; leaving the form lets go of it, so a late answer
-/// does not land in the next form. A failed request is `Failed`, the line
-/// the box shows; the next request or leaving the view clears it.
+/// The link request a Share Folder view waits on (it lives in the view, so
+/// leaving the view lets go of it). Only the answer to this request settles
+/// it. A failed request is `Failed`, the line the box shows; the next
+/// request or leaving the view clears it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinkOp {
     Idle,
@@ -161,8 +210,6 @@ pub struct FolderShareDialog {
     pub(crate) name_input: Entity<TextareaState>,
     /// Chats ticked in the create / edit form.
     pub(crate) selected: HashSet<i64>,
-    /// The create / edit / delete request the box waits on.
-    pub(crate) op: LinkOp,
 }
 
 impl FolderShareDialog {
@@ -178,7 +225,6 @@ impl FolderShareDialog {
             view: FolderShareView::list(),
             name_input,
             selected: HashSet::new(),
-            op: LinkOp::Idle,
         }
     }
 
@@ -198,17 +244,42 @@ impl FolderShareDialog {
     }
 }
 
-/// The copy button's check mark. A timer clears it by the time of its copy,
-/// so a second copy of the same link keeps its own full time.
+/// The copy button's check mark. The mark owns the timer that clears it:
+/// a second copy, leaving the list or closing the box drops the mark and
+/// with it the timer, so no timer is matched to its mark by time.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum CopyMark {
     #[default]
     Idle,
     Copied {
         link: String,
-        at: std::time::Instant,
+        timer: CopyTimer,
     },
 }
+
+/// The task that takes the check mark back; dropping it cancels the timer.
+#[derive(Clone)]
+pub struct CopyTimer(std::rc::Rc<Task<()>>);
+
+impl CopyTimer {
+    pub(crate) fn new(task: Task<()>) -> Self {
+        Self(std::rc::Rc::new(task))
+    }
+}
+
+impl std::fmt::Debug for CopyTimer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CopyTimer")
+    }
+}
+
+impl PartialEq for CopyTimer {
+    fn eq(&self, other: &Self) -> bool {
+        std::rc::Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for CopyTimer {}
 
 impl CopyMark {
     pub(crate) fn is_copied(&self, url: &str) -> bool {

@@ -43,16 +43,29 @@ pub(super) enum CaptureStart {
 /// The system prompt for the camera or microphone, asked for one press. A
 /// second press while it is up is ignored, and its answer starts the press
 /// that asked only while the call that press was for is still the active
-/// one (`capture_access.rs`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// one (`capture_access.rs`). The stage owns the task that waits for the
+/// answer, so replacing it (the screen going, a window closing) ends the
+/// wait too.
 pub(super) enum PermissionAsk {
     Idle,
     Asking {
         /// Told apart from any ask that came after it.
         id: u64,
-        /// The call the press was for (answer, camera, dial), if any.
-        call: Option<i32>,
+        /// Waits for the system prompt's answer; it is held, never read,
+        /// so that ending the stage ends the wait.
+        _task: gpui_kit::Task<()>,
     },
+}
+
+impl PermissionAsk {
+    pub(super) fn is_idle(&self) -> bool {
+        matches!(self, Self::Idle)
+    }
+
+    /// Whether `ask` is the prompt now waiting.
+    pub(super) fn is_asking(&self, ask: u64) -> bool {
+        matches!(self, Self::Asking { id, .. } if *id == ask)
+    }
 }
 
 /// Which start a device answer belongs to. An answer for any start but the

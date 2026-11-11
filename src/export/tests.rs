@@ -57,6 +57,8 @@ struct Fake {
     /// started using the file meanwhile.
     touched_after_download: Option<Value>,
     fail_history: bool,
+    /// `deleteFile` is never answered.
+    delete_times_out: bool,
     leftovers: Option<super::leftovers::Leftovers>,
 }
 
@@ -71,6 +73,7 @@ impl Fake {
             cancel_after: None,
             touched_after_download: None,
             fail_history: false,
+            delete_times_out: false,
             leftovers: None,
         }
     }
@@ -145,6 +148,9 @@ impl Tdlib for Fake {
                     "remote": {"id": format!("remote-{id}")}})
             }
             "deleteFile" => {
+                if self.delete_times_out {
+                    return Err(ExportError::Tdlib("the request timed out".into()));
+                }
                 let id = request["file_id"].as_i64().unwrap();
                 if let Some(path) = self.files.get(&id) {
                     std::fs::remove_file(path).unwrap();
@@ -255,10 +261,12 @@ fn long_chats_split_into_numbered_files_oldest_first() {
     // The spool is gone.
     assert!(!run.out.join(".spool").exists());
     // The last report is the final write; the thread's wrapper marks it done.
-    assert_eq!(run.last.stage, Stage::Writing);
     assert_eq!(
-        (run.last.done, run.last.total),
-        (summary.messages, summary.messages)
+        run.last.stage,
+        Stage::Writing {
+            done: summary.messages,
+            total: summary.messages
+        }
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -489,12 +497,12 @@ fn progress_labels_and_fraction() {
     let mut p = Progress::starting();
     assert_eq!(p.label(), "Starting the export…");
     assert_eq!(p.fraction(), None);
-    p.stage = Stage::Collecting;
-    p.done = 120;
+    p.stage = Stage::Collecting { read: 120 };
     assert_eq!(p.label(), "Reading messages… 120");
-    p.stage = Stage::Writing;
-    p.total = 200;
-    p.done = 50;
+    p.stage = Stage::Writing {
+        done: 50,
+        total: 200,
+    };
     p.files = 3;
     assert_eq!(p.label(), "Saving messages… 50 of 200 · 3 files");
     assert_eq!(p.fraction(), Some(0.25));
@@ -677,6 +685,21 @@ fn a_stop_during_the_copy_leaves_no_file_and_still_releases_the_cache() {
         }],
         "listed for the next start in case the delete never lands"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The file is in the export by then: the cache copy stays listed as a
+/// leftover, and the chat keeps its message and its file.
+#[test]
+fn a_release_tdlib_never_answers_does_not_cost_the_chat_its_file() {
+    let dir = scratch("unanswered-release");
+    let (mut fake, s, td) = one_photo(&dir);
+    fake.local.insert(10, not_local());
+    fake.delete_times_out = true;
+    let run = export(&mut fake, &s, &td);
+    assert_eq!(run.result.unwrap().files, 1);
+    assert_eq!(fake.count("deleteFile"), 1);
+    assert_eq!(std::fs::read(run.out.join(PHOTO)).unwrap(), b"jpeg");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

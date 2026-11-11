@@ -123,9 +123,10 @@ pub trait StreamPort {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeederState {
-    /// Created, nothing asked yet.
+    /// Created, no stream seen yet. A `getGroupCallStreams` in flight is
+    /// [`StreamsSync::Asking`], not a state of its own.
     Idle,
-    /// Waiting for `getGroupCallStreams`.
+    /// The stream list names a stream and no segment has arrived yet.
     Syncing,
     Streaming,
     NoStream,
@@ -241,8 +242,11 @@ impl StreamFeeder {
             waiters.push(request);
             return;
         }
-        if self.state == FeederState::Idle {
-            self.state = FeederState::Syncing;
+        if matches!(self.state, FeederState::Failed | FeederState::Ended) {
+            // Terminal: no request goes out; the engine asks again in a
+            // second until the rejoin replaces this feeder or the call ends.
+            self.answer_time_waiters(vec![request], 0, port);
+            return;
         }
         match port.request_streams(self.group_call_id) {
             Some(id) => {
@@ -275,6 +279,17 @@ impl StreamFeeder {
             timestamp_ms,
             requested_at: now,
         };
+        // Failed (the rejoin replaces this feeder) and Ended send nothing:
+        // a failed segment would only fail again, every 100 ms.
+        let terminal = match self.state {
+            FeederState::Failed => Some(BroadcastPartStatus::NotReady),
+            FeederState::Ended => Some(BroadcastPartStatus::ResyncNeeded),
+            _ => None,
+        };
+        if let Some(status) = terminal {
+            self.answer(port, &pending, status, Vec::new(), None);
+            return;
+        }
         if self.pending.len() >= MAX_PENDING_PARTS {
             self.answer(
                 port,
@@ -528,25 +543,6 @@ fn part_error_status(error: StreamFetchError) -> (BroadcastPartStatus, ReplyOutc
         StreamFetchError::RejoinNeeded => (BroadcastPartStatus::NotReady, ReplyOutcome::Rejoin),
         StreamFetchError::CallLeft => (BroadcastPartStatus::ResyncNeeded, ReplyOutcome::Left),
         StreamFetchError::Other => (BroadcastPartStatus::ResyncNeeded, ReplyOutcome::Handled),
-    }
-}
-
-/// Reports a stream tile's size as a quality bucket, once per change.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct StreamQualityTracker {
-    last: Option<StreamQuality>,
-}
-
-impl StreamQualityTracker {
-    /// The bucket for `width`, or `None` when it is the one already
-    /// reported.
-    pub fn observe(&mut self, width: f32) -> Option<StreamQuality> {
-        let quality = StreamQuality::for_tile_width(width);
-        if self.last == Some(quality) {
-            return None;
-        }
-        self.last = Some(quality);
-        Some(quality)
     }
 }
 

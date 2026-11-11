@@ -212,7 +212,7 @@ impl QuillApp {
         bar.expanded = !bar.expanded;
         bar.grid.set_offset(point(px(0.), px(0.)));
         // Keep the highlighted tile in view in the new layout.
-        if let Some(at) = self.composer_ui.suggest.selected {
+        if let Some(at) = self.composer_ui.suggest.selected() {
             self.composer_ui.suggest.bar.handle().scroll_to_item(at);
         }
         cx.notify();
@@ -450,11 +450,11 @@ impl QuillApp {
     /// hovered word's. Place it inside the input row (`relative()`).
     pub(super) fn emoji_bar_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let suggest = &self.composer_ui.suggest;
-        let spec = match suggest.active.as_ref() {
+        let spec = match suggest.active() {
             Some(active) if active.query.kind != quill::suggest::SuggestKind::Hashtag => BarSpec {
                 id: "suggest-item",
-                items: &active.items,
-                selected: suggest.selected,
+                items: active.items,
+                selected: active.selected,
                 pick: QuillApp::pick_suggest_index,
                 bounds_out: None,
                 on_leave: None,
