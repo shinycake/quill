@@ -8043,3 +8043,39 @@ whose variants carry the data, with a way out of every stage.
 - **A refused refetch of a stale proxy list** lands in
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
+
+### Sweep fixes (r2-26)
+
+Round 2, files `earn_state` to `fragment_password` (ids are the register-r2
+ids `09-NNN`).
+
+| id | result |
+| --- | --- |
+| 09-081 | Fixed: `EarnLayer { Closed, Open { back, restore, fade } }` replaces the three fields; `drop_earn_layer` closes the value and gets `restore` back from it. |
+| 09-082 | Fixed: `EarnUi::learn: Option<LearnBox { diamonds }>`; closing the box drops the count. |
+| 09-083 | Fixed: `MediaEdit::image: EditImageFetch::Downloading { file_id, request }` lives with the edit; `edit_image_upkeep` opens the editor when the photo lands or says it failed. |
+| 09-084 | Fixed: `BarOwner { Free, Suggest, Word }` on the one `EmojiBarUi`; `restart` for a new list, `release` by its own owner only (no closer repeats the "unless suggestions use it" rule). |
+| 09-085 | Fixed: a failed installed-sets list is asked again from a new list opening (`retry_suggestion_emoji_sets`), not from every rebuild. |
+| 09-086, 09-087 | Fixed: `SetsView { Tab(tab), Typing { tab, _pause } }` replaces `emoji_set_return_tab` and the keystroke counter; the pause `Task` is held in the value. |
+| 09-088, 09-089 | Fixed: `Sheet::Loading { _decode }` holds the decode, which retries a failed read after 1 s and 2 s; `Failed` after three reads; the atlas going away cancels it. |
+| 09-090 | Fixed: no data folder puts `SetStage::Failed` on the row. |
+| 09-091 | Fixed: `Startup::Reading` is set only when the task exists; `Done` comes from the task. |
+| 09-092 | `open` skipped: it is the box's presence for `DialogSpec` (one source, nothing mirrors it). `Switching { id, task }` now carries its set and the answer is applied only while it is the stage in place. |
+| 09-093 | Fixed: `WordBar::Asking { request }` carries the lookup in flight and follows its retry. |
+| 09-094 | Fixed: `RightClickedLink` holds its clearing `Task`. |
+| 09-101 | Fixed: `FolderPick::Choosing` holds the picker task inside the draft. |
+| 09-102 | Fixed: closing a draft never hides a running export; asking for the box drops a draft over a run. |
+| 09-103 | Fixed: `QuitGate { Open, Asking { exit } }` ends with the exports as well as the alert (`quit_gate_upkeep`). |
+| 09-104, 09-105 | Fixed: `FirstRun { Writing { _write }, Playing, Leaving, Notice, .. }`; a replay or skip drops the write task. |
+| 09-106 | Fixed: `JoinStage { Choosing, Joining { request } }`; the box closes on the offer going, or returns to choosing with the ticks kept. |
+| 09-107 | Fixed: `ContextMenu { None, Chat, Archive, FolderTab }` in `ChatListUi`. |
+| 09-119 | Fixed: `ChatListView { Main, Folder, Unread { folder }, Archived, Community }` replaces the filter and tab pair. |
+| 09-117 | Fixed: the success note of a topic action is shown from the answer (`TopicAction::Waiting`, `Session::topic_action_answered`). |
+| 09-120 | Fixed: `ShareAt` lives in `ForwardStage::Picking`. |
+| 09-123 | Allowed: `DestRow::saved` is a per-row fact. |
+| 09-121 | Fixed: a lifted message drag is read from the active drag's payload (`App::active_drag_is`, a one-method addition to the vendored gpui). |
+| 09-124, 09-125 | Fixed: `PasswordView { Idle, Sending, Failed }`. |
+
+Also: the emoji style download no longer polls (the open row asks the frame
+clock for frames), the sets and open-link boxes use `Cell`, the sprite and
+preview cells use `try_borrow`.

@@ -559,3 +559,14 @@ fn default_icons_keep_only_custom_emoji_stickers() {
         Some(5005)
     );
 }
+
+#[test]
+fn a_topic_action_answer_waits_for_the_request_that_asked() {
+    let (mut session, _) = session();
+    session.topic_action_answered(RequestId(7), true);
+    session.topic_action_answered(RequestId(8), false);
+    assert_eq!(session.take_topic_action_answer(RequestId(9)), None);
+    assert_eq!(session.take_topic_action_answer(RequestId(8)), Some(false));
+    assert_eq!(session.take_topic_action_answer(RequestId(7)), Some(true));
+    assert_eq!(session.take_topic_action_answer(RequestId(7)), None, "once");
+}

@@ -13,7 +13,6 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use super::app::QuillApp;
 use super::folder_share::finish_dialog;
@@ -135,6 +134,7 @@ impl FileInstall {
 /// The box and the set choice, on `SettingsUi`.
 #[derive(Default)]
 pub(super) struct EmojiStyleUi {
+    /// The box is shown: the `DialogSpec` predicate, the one source of its presence.
     pub(super) open: bool,
     startup: Startup,
     /// The set in use.
@@ -411,20 +411,7 @@ impl QuillApp {
             worker_progress.finish();
             result
         });
-        let watched = progress.clone();
         let task = cx.spawn(async move |this, cx| {
-            while !watched.is_finished() {
-                cx.background_executor()
-                    .timer(Duration::from_millis(120))
-                    .await;
-                // Progress is drawn only by the open box: a download that
-                // goes on behind a closed one redraws nothing.
-                let _ = this.update(cx, |this, cx| {
-                    if this.preferences.emoji_style.open {
-                        cx.notify();
-                    }
-                });
-            }
             let result = worker.await;
             let _ = this.update(cx, |this, cx| {
                 let state = &mut this.preferences.emoji_style;
@@ -544,6 +531,11 @@ impl QuillApp {
 
     fn emoji_set_row(&self, id: EmojiSetId, cx: &mut Context<Self>) -> AnyElement {
         let state = self.emoji_set_state(id);
+        // The percentage moves while the box draws it: the frame clock
+        // asks for the next frame only while this row is on screen.
+        if state.progress().is_some() {
+            self.request_animation_tick(30, cx);
+        }
         let status_color = match &state {
             SetState::Active => cx.theme().primary,
             SetState::Failed(_) => cx.theme().danger,
@@ -714,10 +706,12 @@ fn preview_images(id: EmojiSetId) -> Option<Vec<Arc<RenderImage>>> {
         }
     };
     if let Some(found) = PREVIEWS.with(|p| {
-        p.borrow()
-            .iter()
-            .find(|(set, _)| *set == id)
-            .map(|(_, images)| images.clone())
+        p.try_borrow().ok().and_then(|previews| {
+            previews
+                .iter()
+                .find(|(set, _)| *set == id)
+                .map(|(_, images)| images.clone())
+        })
     }) {
         return Some(found);
     }
@@ -738,7 +732,11 @@ fn preview_images(id: EmojiSetId) -> Option<Vec<Arc<RenderImage>>> {
             image::Frame::new(cell),
         ]))));
     }
-    PREVIEWS.with(|p| p.borrow_mut().push((id, images.clone())));
+    PREVIEWS.with(|p| {
+        if let Ok(mut previews) = p.try_borrow_mut() {
+            previews.push((id, images.clone()));
+        }
+    });
     Some(images)
 }
 

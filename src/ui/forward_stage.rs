@@ -328,6 +328,37 @@ mod tests {
         assert!(!ForwardStage::None.open_picker());
     }
 
+    /// "Share at" lasts as long as the box it was set for: whichever way
+    /// the box ends, the next box over the same message holds no position.
+    #[test]
+    fn the_share_at_position_ends_with_the_box() {
+        let at = ShareAt {
+            chat_id: ChatId(1),
+            message_id: MessageId(5),
+            secs: 83,
+        };
+        let mut stage = ForwardStage::Selecting(draft());
+        stage.set_share_at(at);
+        assert_eq!(
+            stage.take_share_at(ChatId(1), MessageId(5)),
+            None,
+            "no box, no position"
+        );
+        assert!(stage.open_picker());
+        stage.set_share_at(at);
+        assert_eq!(stage.take_share_at(ChatId(1), MessageId(6)), None);
+        stage.drop_bar();
+        assert_eq!(stage.take_share_at(ChatId(1), MessageId(5)), Some(83));
+        assert_eq!(stage.take_share_at(ChatId(1), MessageId(5)), None, "once");
+        stage.set_share_at(at);
+        stage.close_picker();
+        assert!(stage.open_picker());
+        assert_eq!(stage.take_share_at(ChatId(1), MessageId(5)), None);
+        let mut gone = ForwardStage::None;
+        gone.set_share_at(at);
+        assert_eq!(gone.take_share_at(ChatId(1), MessageId(5)), None);
+    }
+
     #[test]
     fn picking_again_turns_a_bar_back_into_a_selection() {
         let mut stage = ForwardStage::Bar {

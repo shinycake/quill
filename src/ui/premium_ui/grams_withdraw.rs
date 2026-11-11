@@ -11,7 +11,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
-use crate::ui::fragment_password::{PasswordBox, PasswordView, SecurityCheck, Showing};
+use crate::ui::fragment_password::{PasswordBox, PasswordView, SecurityCheck, ShowingView};
 use crate::ui::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
@@ -160,13 +160,13 @@ impl QuillApp {
                         .as_ref()
                         .is_some_and(GramWithdraw::can_submit);
                 let field = match (showing, idle) {
-                    (false, _) => Showing::Off,
-                    (true, true) => Showing::Idle,
-                    (true, false) => Showing::Sending,
+                    (false, _) => ShowingView::Off,
+                    (true, true) => ShowingView::Idle,
+                    (true, false) => ShowingView::Sending,
                 };
                 (grams.withdraw_outcome.take(), field)
             }
-            None => (None, Showing::Off),
+            None => (None, ShowingView::Off),
         };
         self.screen
             .payments

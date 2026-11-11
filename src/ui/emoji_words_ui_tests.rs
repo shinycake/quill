@@ -491,3 +491,37 @@ fn sending_closes_a_hovered_words_bar(cx: &mut TestAppContext) {
     assert_eq!(text(&app, vcx), "");
     assert_eq!(hovered_word(&app, vcx), None);
 }
+
+/// A word bar closing lets go of the shared bar only while its own list is
+/// the one showing: suggestions that took the bar over keep their grid.
+#[gpui_kit::test]
+fn a_word_bar_closing_leaves_the_bar_the_suggestions_took_over(cx: &mut TestAppContext) {
+    use crate::ui::emoji_bar::BarOwner;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.simulate_input("we got pizza and cake for the party later tonight with friends ");
+    frame(vcx);
+    app.update(vcx, |app, _| {
+        app.hover_highlight(0);
+        let ui = &mut app.screen.composer_ui;
+        ui.suggest.bar.restart(BarOwner::Suggest);
+        ui.suggest.bar.expanded = true;
+        ui.emoji_words.unhover(&mut ui.suggest);
+    });
+    app.read_with(vcx, |app, _| {
+        assert!(
+            app.composer_ui.suggest.bar.expanded,
+            "the suggestions' grid stays"
+        );
+    });
+    app.update(vcx, |app, _| {
+        let ui = &mut app.screen.composer_ui;
+        ui.suggest.bar.release(BarOwner::Suggest);
+    });
+    app.read_with(vcx, |app, _| {
+        assert!(
+            !app.composer_ui.suggest.bar.expanded,
+            "released by its owner"
+        );
+    });
+}

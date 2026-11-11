@@ -19,7 +19,7 @@ use super::app::QuillApp;
 use super::gift_manage_ui::{hint, stars};
 use super::gift_transfer_view::{StageView, stage_view};
 use super::shell::{DialogKind, QuillShell};
-use crate::ui::fragment_password::Showing;
+use crate::ui::fragment_password::ShowingView;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::*;
@@ -274,9 +274,9 @@ impl QuillApp {
             }
         }
         let field = match (in_password, idle_password) {
-            (false, _) => Showing::Off,
-            (true, true) => Showing::Idle,
-            (true, false) => Showing::Sending,
+            (false, _) => ShowingView::Off,
+            (true, true) => ShowingView::Idle,
+            (true, false) => ShowingView::Sending,
         };
         self.screen
             .payments

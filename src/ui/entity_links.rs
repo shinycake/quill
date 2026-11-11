@@ -30,7 +30,7 @@ use quill::lang::{keys, tr, tr_with};
 use quill::link_policy::{OpenDecision, open_decision};
 use quill::telegram::envelope::{ChatKind, MessageContent, MessageSender};
 use quill::text::LinkTarget;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::ops::Range;
 use std::rc::Rc;
 
@@ -766,12 +766,9 @@ impl QuillApp {
                     tr(keys::Q_OPS_OPEN_THIS_LINK)
                 }))
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
+                    let body = Rc::new(Cell::new(Some(body)));
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))

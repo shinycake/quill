@@ -118,3 +118,42 @@ fn a_hidden_export_stays_hidden_until_the_box_is_asked_for_again(cx: &mut TestAp
     });
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Closing an options draft leaves a running export as it was; closing
+/// its progress box hides it.
+#[gpui_kit::test]
+fn closing_a_draft_does_not_hide_a_running_export(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let dir = std::env::temp_dir().join(format!("quill-chat-draft-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let settings = quill::export::ExportSettings::new(16, "Export".into(), dir.clone());
+    let export = quill::export::ChatExport::start(settings, dir.clone(), None).unwrap();
+    let view = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.session()
+                .and_then(|s| s.settings.chat_export.as_ref())
+                .map(|export| export.view)
+        })
+    };
+    // A draft is open when an export starts elsewhere and is shown.
+    app.update_in(vcx, |app, _, cx| app.start_chat_export(ChatId(1), cx));
+    app.update_in(vcx, |app, _, _| {
+        app.demo_session.as_mut().unwrap().settings.chat_export = Some(export);
+        app.set_chat_export_view(quill::export::ExportView::Shown);
+    });
+    app.read_with(vcx, |app, _| assert!(app.dialogs.chat_export.is_options()));
+    app.update_in(vcx, |app, _, _| app.close_chat_export_box());
+    assert_eq!(view(&app, vcx), Some(quill::export::ExportView::Shown));
+    // Closing the progress box hides the run.
+    app.update_in(vcx, |app, _, _| app.close_chat_export_box());
+    assert_eq!(view(&app, vcx), Some(quill::export::ExportView::Hidden));
+    // Asking for the box while the run exists drops a draft over it.
+    app.update_in(vcx, |app, _, cx| app.start_chat_export(ChatId(1), cx));
+    assert_eq!(view(&app, vcx), Some(quill::export::ExportView::Shown));
+    app.read_with(vcx, |app, _| assert!(!app.dialogs.chat_export.is_options()));
+    app.update_in(vcx, |app, _, _| {
+        app.demo_session.as_mut().unwrap().settings.chat_export = None;
+    });
+    let _ = std::fs::remove_dir_all(&dir);
+}

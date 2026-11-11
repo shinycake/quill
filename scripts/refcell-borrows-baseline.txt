@@ -86,7 +86,6 @@ QuillApp::build_direct_messages_dialog::body.borrow_mut 1
 QuillApp::build_drop_topic_dialog::body.borrow_mut 1
 QuillApp::build_earn_withdraw_dialog::body.borrow_mut 1
 QuillApp::build_edit_profile_dialog::body.borrow_mut 1
-QuillApp::build_emoji_sets_dialog::body.borrow_mut 1
 QuillApp::build_fact_check_dialog::body.borrow_mut 1
 QuillApp::build_file_open_dialog::body.borrow_mut 1
 QuillApp::build_folder_delete_dialog::body.borrow_mut 1
@@ -115,7 +114,6 @@ QuillApp::build_member_dialog::body.borrow_mut 1
 QuillApp::build_message_report_dialog::body.borrow_mut 1
 QuillApp::build_money_dialog::body.borrow_mut 1
 QuillApp::build_new_contact_dialog::body.borrow_mut 1
-QuillApp::build_open_link_dialog::body.borrow_mut 1
 QuillApp::build_ownership_dialog::body.borrow_mut 1
 QuillApp::build_paid_confirm_dialog::body.borrow_mut 1
 QuillApp::build_paid_reaction_dialog::body.borrow_mut 1
@@ -332,8 +330,6 @@ paint_stamp_in::scope.borrow 1
 paint_text_specks::painted.borrow_mut 1
 parsed_chart::charts.borrow_mut 1
 premium_playing::active.borrow 1
-preview_images::p.borrow 1
-preview_images::p.borrow_mut 1
 push_message::active.borrow_mut 1
 push_premium::active.borrow_mut 1
 release_media_tile::tile.borrow_mut 1

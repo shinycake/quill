@@ -59,7 +59,6 @@ bare:Entry::Probing 1
 bare:ExpandRun::Running 1
 bare:ExtractionStage::Starting 1
 bare:FeederState::Syncing 1
-bare:FieldStage::Waiting 1
 bare:FolderLoad::Loading 1
 bare:Found::Loading 1
 bare:GiftsLayout::Loading 1
@@ -137,7 +136,6 @@ bare:Sent::Queued 1
 bare:SetFiles::Asked 1
 bare:ShareLink::Fetching 1
 bare:SharedMediaTabStatus::Loading 1
-bare:Showing::Sending 1
 bare:ShutdownPhase::Running 1
 bare:SimilarBotsFetch::Loading 1
 bare:Slot::Loading 2

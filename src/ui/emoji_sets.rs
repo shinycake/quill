@@ -18,9 +18,8 @@ use gpui_kit::*;
 use quill::emoji::EmojiSetTab;
 use quill::lang::{keys, tr, trn};
 use quill::local_path::sandboxed_display_path;
-use quill::state::RequestPurpose;
 use quill::telegram::envelope::StickerSetInfo;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -333,13 +332,7 @@ impl QuillApp {
         let session = self.session();
         let no_panel = quill::emoji::EmojiPanel::default();
         let panel = session.map_or(&no_panel, |s| &s.stickers.emoji);
-        let loading = session.is_some_and(|s| {
-            s.requests.has_purpose(match panel.tab {
-                EmojiSetTab::Installed => RequestPurpose::GetInstalledEmojiSets,
-                EmojiSetTab::Trending => RequestPurpose::GetTrendingEmojiSets,
-                EmojiSetTab::Search => RequestPurpose::SearchEmojiSets,
-            })
-        });
+        let loading = panel.lists.of(panel.tab).is_loading();
         let owner = cx.entity().downgrade();
         let tabs = TabBar::new("emoji-sets-tabs")
             .underline()
@@ -423,18 +416,14 @@ impl QuillApp {
             if let Some(live) = this.live.as_mut() {
                 let _ = live.driver.ensure_emoji_pack_covers();
             }
-            let body = Rc::new(RefCell::new(Some(this.emoji_sets_panel(cx))));
+            let body = Rc::new(Cell::new(Some(this.emoji_sets_panel(cx))));
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(
                     keys::Q_MEDIA_EMOJI_PACKS,
                 )))
                 .content(move |content, _, _| {
-                    content.child(
-                        body.borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element()),
-                    )
+                    content.child(body.take().unwrap_or_else(|| div().into_any_element()))
                 })
                 .on_close(close)
         })

@@ -224,10 +224,10 @@ pub(super) fn export_error_text(error: &ExportError) -> SharedString {
     }
 }
 
-/// What a password box shows this frame. The box is shown with its field
+/// What a password box shows this frame (a view of the caller's own stage). The box is shown with its field
 /// ready for a password (`Idle`), or shown while a try is out (`Sending`).
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum Showing {
+pub(super) enum ShowingView {
     Off,
     Sending,
     Idle,
@@ -245,8 +245,8 @@ pub(super) struct PasswordField {
 enum FieldStage {
     /// The box is off screen; the field is empty.
     Away,
-    /// A try is out; the field waits for its answer.
-    Waiting,
+    /// A try is out; the field is disabled until its answer.
+    Disabled,
     /// Idle, and the field has taken the keyboard.
     Typing,
 }
@@ -269,17 +269,17 @@ impl PasswordField {
     /// Per frame: the field takes the keyboard when the idle box opens and
     /// after each answer (tdesktop `PasscodeBox` focuses the field), and is
     /// emptied whenever the box is not on screen.
-    pub(super) fn keep(&mut self, showing: Showing, window: &mut Window, cx: &mut App) {
+    pub(super) fn keep(&mut self, showing: ShowingView, window: &mut Window, cx: &mut App) {
         self.stage = match (showing, &self.stage) {
-            (Showing::Idle, FieldStage::Typing) => FieldStage::Typing,
-            (Showing::Idle, _) => {
+            (ShowingView::Idle, FieldStage::Typing) => FieldStage::Typing,
+            (ShowingView::Idle, _) => {
                 self.input.update(cx, |input, cx| input.focus(window, cx));
                 FieldStage::Typing
             }
-            (Showing::Sending, _) => FieldStage::Waiting,
-            (Showing::Off, _) => FieldStage::Away,
+            (ShowingView::Sending, _) => FieldStage::Disabled,
+            (ShowingView::Off, _) => FieldStage::Away,
         };
-        if showing == Showing::Off && !self.input.read(cx).value().is_empty() {
+        if showing == ShowingView::Off && !self.input.read(cx).value().is_empty() {
             self.input
                 .update(cx, |input, cx| input.set_value("", window, cx));
         }
