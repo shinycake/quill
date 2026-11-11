@@ -118,10 +118,8 @@ fn another_page_starts_at_the_top_and_the_same_page_keeps_its_place(cx: &mut Tes
                 .shared_media
                 .chat_id()
                 .map_or(1, |chat| chat.0);
-            session
-                .media
-                .shared_media
-                .open_for(quill::ids::ChatId(chat + 1));
+            session.media.shared_media.view =
+                quill::state::SharedMediaView::Gallery(quill::ids::ChatId(chat + 1));
         }
         cx.notify();
     });
