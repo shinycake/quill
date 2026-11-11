@@ -95,11 +95,15 @@ pub enum ExportError {
 pub enum ExportSend {
     Idle,
     Out(crate::ids::RequestId),
+    /// `createTemporaryPassword` answered: the driver sends
+    /// `getUpgradedGiftWithdrawalUrl` next (`continue_gift_export`).
+    Unlocked,
 }
 
 impl ExportSend {
+    /// A request is out, or about to go: the buttons wait.
     pub fn is_out(self) -> bool {
-        matches!(self, Self::Out(_))
+        matches!(self, Self::Out(_) | Self::Unlocked)
     }
 }
 
@@ -195,8 +199,16 @@ impl TransferPicker {
     pub fn exporting(&self) -> bool {
         matches!(
             self.stage,
+            TransferStage::Password { send, .. } if send.is_out()
+        )
+    }
+
+    /// The temporary password arrived and the URL request has not gone out.
+    pub fn export_unlocked(&self) -> bool {
+        matches!(
+            self.stage,
             TransferStage::Password {
-                send: ExportSend::Out(_),
+                send: ExportSend::Unlocked,
                 ..
             }
         )

@@ -255,12 +255,17 @@ impl Session {
         {
             return;
         }
-        if has_password {
-            manage.export_unlocked = true;
-        } else if let Some(picker) = manage.transfer_mut() {
-            picker.stage = TransferStage::Password {
-                send: ExportSend::Idle,
-                error: Some(ExportError::ServerError),
+        if let Some(picker) = manage.transfer_mut() {
+            picker.stage = if has_password {
+                TransferStage::Password {
+                    send: ExportSend::Unlocked,
+                    error: None,
+                }
+            } else {
+                TransferStage::Password {
+                    send: ExportSend::Idle,
+                    error: Some(ExportError::ServerError),
+                }
             };
         }
     }

@@ -383,12 +383,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// fails, the idle password box comes back.
     pub(crate) fn continue_gift_export(&mut self) -> Result<(), ConnectSendError> {
         let manage = &mut self.session.payments.gifts_manage;
-        if !std::mem::take(&mut manage.export_unlocked) {
-            return Ok(());
-        }
         let Some(id) = manage
             .transfer()
-            .filter(|picker| picker.exporting())
+            .filter(|picker| picker.export_unlocked())
             .map(|picker| picker.id.clone())
         else {
             return Ok(());
