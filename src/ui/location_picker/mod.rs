@@ -36,13 +36,13 @@ const LOCATE_TIMEOUT: Duration = Duration::from_secs(30);
 const GEOCODE_TIMEOUT: Duration = Duration::from_secs(15);
 
 async fn poll_answer<T>(receiver: Receiver<T>, timeout: Duration, cx: &mut AsyncApp) -> Option<T> {
-    poll_answer_unless(receiver, timeout, None, cx).await
+    poll_answer_unless(&receiver, timeout, None, cx).await
 }
 
 /// [`poll_answer`] whose time limit does not run while `paused` is set
 /// (the system's permission prompt is open).
 async fn poll_answer_unless<T>(
-    receiver: Receiver<T>,
+    receiver: &Receiver<T>,
     timeout: Duration,
     paused: Option<&AtomicBool>,
     cx: &mut AsyncApp,
@@ -66,7 +66,7 @@ async fn poll_answer_unless<T>(
 /// Wait for a "where am I" answer; `Unavailable` when it never comes.
 async fn locate_outcome(locating: geolocation::Locating, cx: &mut AsyncApp) -> GeoOutcome {
     poll_answer_unless(
-        locating.answer,
+        &locating.answer,
         LOCATE_TIMEOUT,
         Some(&locating.permission_prompt),
         cx,
