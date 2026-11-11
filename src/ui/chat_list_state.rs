@@ -90,8 +90,10 @@ impl PeekPreview {
 }
 
 /// The pinned-row gesture: nothing, a press waiting for the drag threshold
-/// (where it went down, so the dragged row starts under the pointer), or
-/// the drag itself. One value, so a press cannot outlive or contradict a drag.
+/// (where it went down, so the dragged row starts under the pointer), the
+/// drag itself with the row held, or the slide of the released row into its
+/// slot. One value, so a press cannot outlive or contradict a drag and held
+/// versus sliding is told by the variant alone.
 #[derive(Default)]
 pub(crate) enum PinStage {
     #[default]
@@ -100,7 +102,31 @@ pub(crate) enum PinStage {
         chat: i64,
         y: f32,
     },
+    /// The pointer holds the dragged row.
     Dragging(PinDrag),
+    /// Released: the row slides into its slot, then the stage settles.
+    Sliding(PinDrag),
+}
+
+/// What the list draws of a pinned drag, in either of its two stages.
+pub(crate) struct PinView<'a> {
+    pub(super) reorder: &'a quill::pin_reorder::PinReorder,
+    held: bool,
+}
+
+impl PinView<'_> {
+    pub(super) fn offset(&self, id: i64, now: Instant) -> f32 {
+        self.reorder.offset(id, now, self.held)
+    }
+
+    pub(super) fn lift(&self, id: i64, now: Instant) -> f32 {
+        self.reorder.lift(id, now, self.held)
+    }
+
+    /// The drag is held, or a slide still runs: the list needs frames.
+    pub(super) fn settled(&self, now: Instant) -> bool {
+        !self.reorder.animating(now, self.held)
+    }
 }
 
 impl PinStage {
@@ -108,40 +134,82 @@ impl PinStage {
     /// cut by another press: the press waits in it for the drag it may become.
     pub(super) fn press(&mut self, chat: i64, y: f32) {
         match self {
-            Self::Dragging(drag) => drag.next_press = Some((chat, y)),
+            Self::Dragging(drag) | Self::Sliding(drag) => drag.next_press = Some((chat, y)),
             _ => *self = Self::Pressed { chat, y },
         }
     }
 
     /// The release slide settled: the drag ends, but a press made during it
-    /// stays pressed.
+    /// stays pressed. A held drag is not settled.
     pub(super) fn settle(&mut self) {
         *self = match std::mem::take(self) {
-            Self::Dragging(PinDrag {
+            Self::Sliding(PinDrag {
                 next_press: Some((chat, y)),
                 ..
             }) => Self::Pressed { chat, y },
-            _ => Self::Idle,
+            Self::Sliding(_) => Self::Idle,
+            other => other,
         };
     }
 
+    /// The drag in either stage (for what the list draws).
+    pub(super) fn view(&self) -> Option<(&PinDrag, PinView<'_>)> {
+        match self {
+            Self::Dragging(drag) => Some((
+                drag,
+                PinView {
+                    reorder: &drag.reorder,
+                    held: true,
+                },
+            )),
+            Self::Sliding(drag) => Some((
+                drag,
+                PinView {
+                    reorder: &drag.reorder,
+                    held: false,
+                },
+            )),
+            _ => None,
+        }
+    }
+
+    /// The drag in either stage.
+    #[cfg(test)]
     pub(super) fn drag(&self) -> Option<&PinDrag> {
+        self.view().map(|(drag, _)| drag)
+    }
+
+    /// The drag while the pointer holds the row.
+    pub(super) fn held(&self) -> Option<&PinDrag> {
         match self {
             Self::Dragging(drag) => Some(drag),
             _ => None,
         }
     }
 
-    pub(super) fn drag_mut(&mut self) -> Option<&mut PinDrag> {
+    pub(super) fn held_mut(&mut self) -> Option<&mut PinDrag> {
         match self {
             Self::Dragging(drag) => Some(drag),
             _ => None,
         }
     }
 
-    /// Ends a drag (a press is kept); true when one was running.
+    /// The pointer let go: the row starts its slide. Returns the pinned
+    /// list's side and the dragged order to save; `None` when no row was held.
+    pub(super) fn release(&mut self, now: Instant) -> Option<(bool, Vec<i64>)> {
+        let Self::Dragging(mut drag) = std::mem::take(self) else {
+            return None;
+        };
+        let order = drag.reorder.release(now);
+        let archived = drag.archived;
+        *self = Self::Sliding(drag);
+        Some((archived, order))
+    }
+
+    /// Ends a drag in either stage (a press is kept); true when one was
+    /// running.
     pub(super) fn end_drag(&mut self) -> bool {
-        if matches!(self, Self::Dragging(_)) {
+        if matches!(self, Self::Dragging(_) | Self::Sliding(_)) {
             *self = Self::Idle;
             true
         } else {
@@ -156,7 +224,7 @@ impl PinStage {
                 *self = Self::Idle;
                 Some(y)
             }
-            Self::Dragging(ref mut drag) => match drag.next_press {
+            Self::Dragging(ref mut drag) | Self::Sliding(ref mut drag) => match drag.next_press {
                 Some((id, y)) if id == chat => {
                     drag.next_press = None;
                     Some(y)
@@ -166,6 +234,72 @@ impl PinStage {
             _ => None,
         }
     }
+}
+
+/// The chat list's one context menu: a chat row's, or the "Archived chats"
+/// row's. One value, so opening one replaces the other.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) enum ChatListMenu {
+    #[default]
+    Closed,
+    Row(ChatMenuState),
+    /// The archive row's menu, at the pointer.
+    Archive(Point<Pixels>),
+}
+
+impl ChatListMenu {
+    /// A chat row's menu, if that is the one open.
+    pub(super) fn row(&self) -> Option<&ChatMenuState> {
+        match self {
+            Self::Row(menu) => Some(menu),
+            _ => None,
+        }
+    }
+
+    pub(super) fn row_mut(&mut self) -> Option<&mut ChatMenuState> {
+        match self {
+            Self::Row(menu) => Some(menu),
+            _ => None,
+        }
+    }
+
+    /// A chat row's menu by value, for drawing it.
+    pub(super) fn row_copy(&self) -> Option<ChatMenuState> {
+        self.row().copied()
+    }
+
+    /// Where the archive row's menu is, if that is the one open.
+    pub(super) fn archive(&self) -> Option<Point<Pixels>> {
+        match self {
+            Self::Archive(at) => Some(*at),
+            _ => None,
+        }
+    }
+
+    pub(super) fn is_open(&self) -> bool {
+        *self != Self::Closed
+    }
+
+    pub(super) fn close(&mut self) {
+        *self = Self::Closed;
+    }
+
+    pub(super) fn open_row(&mut self, menu: ChatMenuState) {
+        *self = Self::Row(menu);
+    }
+
+    pub(super) fn open_archive(&mut self, at: Point<Pixels>) {
+        *self = Self::Archive(at);
+    }
+}
+
+/// Which of the main menu's chat lists is open.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum MyChats {
+    #[default]
+    Closed,
+    Groups,
+    Channels,
 }
 
 pub(crate) struct ChatListUi {
@@ -184,11 +318,9 @@ pub(crate) struct ChatListUi {
     /// snaps on first sight instead of animating from another account's
     /// state (a chat id alone does not name the same chat across accounts).
     pub(super) row_fx: std::cell::RefCell<quill::row_fx::RowFxMap>,
-    /// Slice CL1: right-click chat-row context menu target + window
-    /// position.
-    pub(super) menu: Option<ChatMenuState>,
-    /// Right-click menu of the "Archived chats" row (window position).
-    pub(super) archive_menu: Option<Point<Pixels>>,
+    /// Slice CL1: the right-click context menu of a chat row (target +
+    /// window position) or of the "Archived chats" row.
+    pub(super) menu: ChatListMenu,
     /// Contacts tab, stories menu, suggestions and search tabs.
     pub(super) global: super::chatlist_global::ChatlistGlobal,
     /// The pinned-row gesture: press, drag (or its release slide).
@@ -211,8 +343,8 @@ pub(crate) struct ChatListUi {
     pub(super) downloads_panel_open: bool,
     /// The Archive menu's "How does it work?" box is open.
     pub(super) archive_hint_open: bool,
-    /// The main menu's My Groups (`false`) or My Channels (`true`) list is open.
-    pub(super) my_chats_open: Option<bool>,
+    /// The main menu's My Groups or My Channels list.
+    pub(super) my_chats: MyChats,
     /// The sidebar tab: the chat list, the contacts list, or the
     /// recent-calls list with its call settings. One value, so a view
     /// change sets it in one write.
@@ -252,15 +384,14 @@ impl ChatListUi {
             swipe: Default::default(),
             downloads_panel_open: false,
             row_fx: Default::default(),
-            menu: None,
-            archive_menu: None,
+            menu: ChatListMenu::Closed,
             global,
             pin: PinStage::Idle,
             peek: PeekPreview::Idle,
             selected: HashSet::new(),
             filter: ChatListFilter::All,
             archive_hint_open: false,
-            my_chats_open: None,
+            my_chats: MyChats::Closed,
             tab: SidebarTab::Chats,
             pending_close_secret_chat: None,
             pending_story_open: None,

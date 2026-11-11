@@ -261,10 +261,9 @@ impl QuillApp {
             // A live pinned drag shows its swapped order (tdesktop moves
             // rows while dragging); stable, so unpinned rows keep their
             // place.
-            if let Some(drag) = self.chat_list.pin.drag()
+            if let Some(drag) = self.chat_list.pin.held()
                 && !drag.archived
                 && let reorder = &drag.reorder
-                && reorder.dragging().is_some()
             {
                 chats.sort_by_key(|chat| reorder.position(chat.id.0).unwrap_or(usize::MAX));
             }
@@ -311,10 +310,9 @@ impl QuillApp {
         // more" button: paging is automatic, not user-triggered.
         if folder.is_none() && matches!(filter, ChatListFilter::Archived | ChatListFilter::Unread) {
             if filter != ChatListFilter::Unread
-                && let Some(drag) = self.chat_list.pin.drag()
+                && let Some(drag) = self.chat_list.pin.held()
                 && drag.archived
                 && let reorder = &drag.reorder
-                && reorder.dragging().is_some()
             {
                 archived.sort_by_key(|chat| reorder.position(chat.id.0).unwrap_or(usize::MAX));
             }
@@ -336,13 +334,13 @@ impl QuillApp {
         }
         // Pinned-drag animation: keep frames coming while rows slide, drop
         // the state once everything settled.
-        if let Some(reorder) = self.chat_list.pin.drag().map(|drag| &drag.reorder) {
+        if let Some((_, view)) = self.chat_list.pin.view() {
             let now = std::time::Instant::now();
             // A deactivated window never gets the release: the drag ends
             // there, unsaved, instead of redrawing at 60 Hz for good.
             if !self.frame.window_active.get() {
                 self.chat_list.pin.end_drag();
-            } else if reorder.settled(now) {
+            } else if view.settled(now) {
                 self.chat_list.pin.settle();
             } else {
                 self.request_animation_tick(60, cx);
@@ -455,6 +453,7 @@ impl QuillApp {
             "chat-list",
             sizes,
             |this: &mut QuillApp, range, _window, cx| {
+                this.chat_list.keys.note_rendered_items(&range);
                 range
                     .map(|ix| this.chat_list_item_element(ix, cx))
                     .collect::<Vec<_>>()
@@ -482,8 +481,8 @@ impl QuillApp {
         let reordering = self
             .chat_list
             .pin
-            .drag()
-            .is_some_and(|drag| drag.reorder.dragging().is_some());
+            .held()
+            .is_some();
         div()
             .id("chat-rows")
             .role(gpui_kit::Role::Group)

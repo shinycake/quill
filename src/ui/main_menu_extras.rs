@@ -5,6 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::chat_list_state::MyChats;
 use super::folder_share::finish_dialog;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
@@ -53,7 +54,11 @@ impl QuillApp {
     }
 
     pub(super) fn open_my_chats(&mut self, channels: bool, cx: &mut Context<Self>) {
-        self.chat_list.my_chats_open = Some(channels);
+        self.chat_list.my_chats = if channels {
+            MyChats::Channels
+        } else {
+            MyChats::Groups
+        };
         self.open_box(DialogKind::MyChats);
         cx.notify();
     }
@@ -131,11 +136,11 @@ impl QuillApp {
         cx: &mut App,
     ) -> Dialog {
         let on_close = QuillShell::on_close_kind(app, shell, DialogKind::MyChats, |this, _, cx| {
-            this.chat_list.my_chats_open = None;
+            this.chat_list.my_chats = MyChats::Closed;
             cx.notify();
         });
         app.update(cx, |this, cx| {
-            let channels = this.chat_list.my_chats_open.unwrap_or(false);
+            let channels = this.chat_list.my_chats == MyChats::Channels;
             let rows = this.my_chat_rows(channels);
             let muted = cx.theme().muted_foreground;
             let mut body = div().id("my-chats").flex().flex_col().gap_1();
@@ -153,7 +158,7 @@ impl QuillApp {
                         .label(format!("{} · {}", row.title, row.kind))
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.chat_list.my_chats_open = None;
+                            this.chat_list.my_chats = MyChats::Closed;
                             this.select_listed_chat(chat_id, window, cx);
                             this.close_kit_dialog_if_done(DialogKind::MyChats, window, cx);
                         })),
@@ -163,7 +168,7 @@ impl QuillApp {
                 Button::new("my-chats-close")
                     .label(tr(keys::CLOSE))
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.chat_list.my_chats_open = None;
+                        this.chat_list.my_chats = MyChats::Closed;
                         cx.notify();
                         this.close_kit_dialog_if_done(DialogKind::MyChats, window, cx);
                     })),
@@ -188,11 +193,11 @@ crate::ui::shell::register_dialogs! {
     /// The main menu's My Groups / My Channels list.
     MyChats => DialogSpec::new(
         1410,
-        |app| app.chat_list.my_chats_open.is_some(),
+        |app| app.chat_list.my_chats != MyChats::Closed,
         QuillApp::build_my_chats_dialog,
     )
     .close(|app, _, cx| {
-            app.chat_list.my_chats_open = None;
+            app.chat_list.my_chats = MyChats::Closed;
             cx.notify();
         }),
 }

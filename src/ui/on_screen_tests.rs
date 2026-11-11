@@ -60,7 +60,7 @@ struct Surfaces {
 fn surfaces(app: &QuillApp) -> Surfaces {
     Surfaces {
         rich_editor: app.chat_ui.rich.editor_open(),
-        context_menu: app.chat_list.archive_menu.is_some(),
+        context_menu: app.chat_list.menu.archive().is_some(),
         selection: app.chat_list.selected.len(),
         player_chat: app.playback.player.chat,
     }
@@ -92,7 +92,7 @@ fn open_everything(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     frames(vcx);
     app.update(vcx, |app, cx| {
         app.chat_ui.rich.set_editor(true);
-        app.chat_list.archive_menu = Some(point(px(10.), px(10.)));
+        app.chat_list.menu.open_archive(point(px(10.), px(10.)));
         app.chat_list.selected.insert(CHAT.0);
         app.playback.active = crate::ui::playback_state::ActiveTrack::Audio(MessageId(1));
         app.playback.player.chat = Some(CHAT);

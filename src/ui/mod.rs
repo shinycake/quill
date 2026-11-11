@@ -274,6 +274,7 @@ mod chat_bars;
 mod chat_click_focus_tests;
 mod chat_header_menu_ui;
 mod chat_list;
+mod chat_list_pick;
 mod chat_list_keys;
 mod chat_list_keys_tests;
 mod chat_look_ui;

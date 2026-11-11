@@ -175,6 +175,14 @@ impl QuillApp {
     /// live progress + cancel, and recently completed downloads with
     /// open / reveal actions. Sits beside the conversation like the info
     /// panel; toggled from the sidebar "Downloads" entry.
+    pub(super) fn close_downloads_panel(&mut self) {
+        self.chat_list.downloads_panel_open = false;
+    }
+
+    pub(super) fn toggle_downloads_panel(&mut self) {
+        self.chat_list.downloads_panel_open = !self.chat_list.downloads_panel_open;
+    }
+
     pub(super) fn downloads_panel_open(&self) -> bool {
         self.session().is_some() && self.chat_list.downloads_panel_open
     }
@@ -229,7 +237,7 @@ impl QuillApp {
                             .ghost()
                             .tooltip(tr(keys::Q_OPS_CLOSE_DOWNLOADS))
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.chat_list.downloads_panel_open = false;
+                                this.close_downloads_panel();
                                 cx.notify();
                             })),
                     ),

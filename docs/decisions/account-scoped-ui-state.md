@@ -8043,3 +8043,36 @@ whose variants carry the data, with a way out of every stage.
 - **A refused refetch of a stale proxy list** lands in
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
+
+### Sweep fixes (r2-24)
+
+Files: capture_block, chat_appearance_dialog, chat_bars, chat_header_menu_ui,
+chat_list_keys, chat_list_state, chat_look_ui, chat_setting_dialogs,
+chat_swipe_ui, chat_ui_state, chatlist_global, command_shortcuts.
+
+| id | result |
+| --- | --- |
+| 08-062 | `apply_sharing` returns whether the platform took the setting; the main and chat windows record `capture_blocked` only then, so a window with no handle yet is retried on the next render. |
+| 08-056 | While `Applying` the Appearance draft is locked (`edit_chat_appearance` refuses). A box closed during Apply leaves its answers to `drain_chat_appearance`, which now takes them all and shows a refusal as a note. |
+| 08-057 | The level line has three arms read from the request table: the level, "checking" while `getChatBoostStatus` is out, and "unavailable" with Retry once it ended without an answer. |
+| 08-081 | The contact bar is dismissed only after both the unarchive and the notification reset were accepted. |
+| 08-083, 08-086 | The take-once `Rc<RefCell<Option<body>>>` slot is `dialog_once_body::once_dialog_body`, a `Cell` that is taken, so no `RefCell` borrow; used by chat bars (block box, join requests), the look box and Appearance. |
+| 08-087 | `HeaderFacts::is_saved_messages` is gone; the profile entry reads `is_self`, which is the same fact. Baseline line dropped. |
+| 08-096 | `ChatSwipeFacts::is_saved` is allow-listed: it is a fact of the chat (the user's own chat cannot be muted), not a stage. Baseline lines dropped. |
+| 08-071, 08-072 | `Pick<R>` (`chat_list_pick.rs`) is one value per list: none, the pointer's row, or the keys' row over the pointer's. A mouse move hands the selection back to the pointer's row. The pointer's row in the chat list counts only while inside the items the last frame laid out. |
+| 08-073 | `search_order` and `search_bounds` are `Cell`s that are taken and put back: no `RefCell` borrow in render. |
+| 04-040 | `PinStage::Sliding` replaces `PinReorder`'s inner stage: `PinReorder` has no stage, the owner's variant says held or sliding (`PinView`). |
+| 08-067 | `MyChats { Closed, Groups, Channels }` replaces `Option<bool>`. |
+| 08-068 | `close_archive_hint` is the box's one closer; the downloads panel has `close_downloads_panel` and `toggle_downloads_panel`. `pending_close_secret_chat` carries the chat, so it is the box's value. |
+| 08-069 | Skipped: the open holds only the intent. The fetch's stage (cache, in flight, failed with its retry clock) lives in `story_fetch`, read by the story's key, which is the fetch's own identity; every exit (ready, gone, failed, a newer open, the viewer closing, the account going) clears the open. |
+| 08-070 | `ChatListMenu { Closed, Row, Archive }`: opening one replaces the other. |
+| 08-077 | `Dimming::Slider` is the only dimming: no mirrored field and no subscription writing it; Apply and the preview read the slider. |
+| 08-078 | The wallpaper picker's task is held by the dialog (`WallpaperPick::Choosing`), so closing the box drops it; a second press while it is open does nothing. |
+| 08-079 | Every edit of theme, wallpaper or dimming calls `choices_changed`, which returns a `Blocked` stage to `Editing`. |
+| 08-100 | `close_ttl_picker` is the one closer (box close, Esc, leaving the chat, a picked timer). |
+| 08-088 | `enter_chat_ui` forgets the request of a `Sending` edit it does not carry to the next chat. |
+| 08-089, 08-090 | `EditStage { Editing, ConfirmingCancel, Sending }` replaces `confirm_cancel`; a sent edit refuses Esc and the box (the answer decides); sending closes an open box. tdesktop cancels its request locally and the edit lands anyway, which is the case this refuses. |
+| 08-091 | `ScheduledBox { Closed, Open { selected }, Rescheduling { selected } }`: the ticks live and die with the box, and wait through the picker. |
+| 08-092 | `ReplyBar { Plain, PickingQuote }` carries the reply. |
+| 08-101 | `IndexBar { Away, Over, Scrubbing }` with one reset per way off the bar. |
+| 08-102 | `ScheduleTarget::ComposerThenSend { effect }` replaces `send_after` and `send_effect`. |

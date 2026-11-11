@@ -634,9 +634,9 @@ impl QuillApp {
             }
             return;
         }
-        if let Some(pin) = self.chat_list.pin.drag_mut()
+        if let Some(pin) = self.chat_list.pin.held_mut()
             && pin.archived == drag.archived
-            && pin.reorder.dragging() == Some(drag.chat_id.0)
+            && pin.reorder.dragged() == drag.chat_id.0
         {
             pin.reorder.drag_to(y, now);
         } else {
@@ -681,12 +681,7 @@ impl QuillApp {
     /// A pinned drag whose release never came (the pointer moves with no
     /// button down): it ends where it is, and nothing is saved.
     pub(super) fn cancel_pin_drag(&mut self, cx: &mut Context<Self>) {
-        let dragging = self
-            .chat_list
-            .pin
-            .drag()
-            .is_some_and(|pin| pin.reorder.dragging().is_some());
-        if dragging {
+        if self.chat_list.pin.held().is_some() {
             self.chat_list.pin.end_drag();
             self.notify_sidebar(cx);
         }
@@ -696,14 +691,10 @@ impl QuillApp {
     /// `savePinnedOrder`): the dragged row slides into its slot and the
     /// full order goes out as `setPinnedChats`.
     pub(super) fn finish_pin_drag(&mut self, cx: &mut Context<Self>) {
-        let Some(pin) = self.chat_list.pin.drag_mut() else {
+        let Some((archived, dragged)) = self.chat_list.pin.release(std::time::Instant::now())
+        else {
             return;
         };
-        if pin.reorder.dragging().is_none() {
-            return;
-        }
-        let archived = pin.archived;
-        let dragged = pin.reorder.release(std::time::Instant::now());
         // Another device may have pinned or unpinned chats while the row was
         // held: what is pinned now keeps its place, the dragged order only
         // decides the order of the chats both lists have.

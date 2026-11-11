@@ -228,9 +228,10 @@ fn a_press_during_the_release_slide_starts_its_drag_under_the_pointer(cx: &mut T
     );
     drag(&app, &mut vcx, second, 110.0);
     let offset = app.read_with(&vcx, |app, _| {
-        app.chat_list.pin.drag().map(|drag| {
-            assert_eq!(drag.reorder.dragging(), Some(second));
-            drag.reorder.offset(second, std::time::Instant::now())
+        app.chat_list.pin.held().map(|drag| {
+            assert_eq!(drag.reorder.dragged(), second);
+            drag.reorder
+                .offset(second, std::time::Instant::now(), true)
         })
     });
     assert!(

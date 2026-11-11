@@ -338,7 +338,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         "downloads-panel",
         |app| app.downloads_panel_open(),
         |app, _, cx| {
-            app.chat_list.downloads_panel_open = false;
+            app.close_downloads_panel();
             cx.notify();
         }
     ),
@@ -628,7 +628,7 @@ mod dispatch_tests {
                 });
             }),
             ("context-menus", |app, _, _| {
-                app.chat_list.archive_menu = Some(point(px(10.), px(10.)));
+                app.chat_list.menu.open_archive(point(px(10.), px(10.)));
             }),
             ("downloads-panel", |app, _, _| {
                 app.chat_list.downloads_panel_open = true;
