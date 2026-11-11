@@ -253,37 +253,36 @@ impl MessagesState {
     }
 }
 
-/// The ad being reported and the `reportChatSponsoredMessage` request the
-/// flow waits on. An answer for any other request (a report the user
-/// dismissed, or an earlier step) is dropped.
+/// The ad being reported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SponsoredReportTarget {
     pub chat_id: ChatId,
     pub message_id: i64,
-    /// `None` between choosing the target and the request going out.
-    pub request: Option<RequestId>,
 }
 
 /// The `reportChatSponsoredMessage` flow, one stage at a time.
 ///
-/// `Asking` leaves on the answer of its request (`Picking` when TDLib
-/// wants an option, `Done` otherwise), on the request's error (`Idle`), or
-/// on Cancel / a failed send (`Idle`, `dismiss`). `Picking` leaves on the
-/// answer of the option sent from it, on Cancel, or on an error. `Done`
-/// leaves when the UI dismisses the note or a new report starts. An answer
-/// for any other request is dropped.
+/// `Choosing` is the target picked before the request is sent; it leaves
+/// when the send succeeds (`Asking`) or fails (`dismiss`, `Idle`). `Asking`
+/// leaves on the answer of its request (`Picking` when TDLib wants an
+/// option, `Done` otherwise), on the request's error (`Idle`), or on Cancel
+/// (`Idle`). `Picking` holds no request: choosing an option starts a new
+/// flow (`Choosing`), Cancel leaves it. `Done` leaves when the UI dismisses
+/// the note or a new report starts. An answer for any other request is
+/// dropped.
 #[derive(Debug, Clone, Default)]
 pub enum SponsoredReportFlow {
     #[default]
     Idle,
+    /// The ad being reported; the request has not gone out yet.
+    Choosing(SponsoredReportTarget),
     /// The ad being reported and the request its answer is awaited as.
-    Asking(SponsoredReportTarget),
-    /// TDLib wants an option; the option sent from here is the request in
-    /// the target.
-    Picking {
-        flight: SponsoredReportFlight,
+    Asking {
         target: SponsoredReportTarget,
+        request: RequestId,
     },
+    /// TDLib wants an option; nothing is in flight.
+    Picking(SponsoredReportFlight),
     /// The last outcome note (also `AdsHidden` from "Hide ads").
     Done(SponsoredReportOutcome),
 }
@@ -292,7 +291,7 @@ impl SponsoredReportFlow {
     /// The report waiting on an option choice.
     pub fn flight(&self) -> Option<&SponsoredReportFlight> {
         match self {
-            Self::Picking { flight, .. } => Some(flight),
+            Self::Picking(flight) => Some(flight),
             _ => None,
         }
     }
@@ -307,15 +306,20 @@ impl SponsoredReportFlow {
 
     pub fn target(&self) -> Option<SponsoredReportTarget> {
         match self {
-            Self::Asking(target) | Self::Picking { target, .. } => Some(*target),
+            Self::Choosing(target) | Self::Asking { target, .. } => Some(*target),
+            Self::Picking(flight) => Some(SponsoredReportTarget {
+                chat_id: flight.chat_id,
+                message_id: flight.message_id,
+            }),
             Self::Idle | Self::Done(_) => None,
         }
     }
 
-    pub fn target_mut(&mut self) -> Option<&mut SponsoredReportTarget> {
+    /// The request the flow waits on, if one is out.
+    pub fn awaited(&self) -> Option<RequestId> {
         match self {
-            Self::Asking(target) | Self::Picking { target, .. } => Some(target),
-            Self::Idle | Self::Done(_) => None,
+            Self::Asking { request, .. } => Some(*request),
+            _ => None,
         }
     }
 
