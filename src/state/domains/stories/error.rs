@@ -17,6 +17,14 @@ impl Session {
             Some(RequestPurpose::Stories(StoriesPurpose::Live(purpose))) => {
                 self.apply_live_story_error(purpose, pending.map(|p| p.id), err);
             }
+            // The picker shows no options and the next open asks again.
+            Some(RequestPurpose::GetStoryAvailableReactions) => {
+                self.stories.available_reactions.failed(
+                    pending.map(|p| p.id),
+                    error_reason(err),
+                    false,
+                );
+            }
             Some(RequestPurpose::PostStory) => {
                 if let Some(request) = pending.map(|p| p.id) {
                     self.stories.post.outcomes.record(StoryPostOutcome::Failed {

@@ -167,9 +167,17 @@ impl Session {
     }
 
     /// The answer to the buy `request`, for the box that sent it only.
-    pub(crate) fn apply_gift_market_purchase(&mut self, result: GiftPurchaseResult, request: u64) {
+    pub(crate) fn apply_gift_market_purchase(
+        &mut self,
+        result: GiftPurchaseResult,
+        request: Option<crate::ids::RequestId>,
+    ) {
         let market = &mut self.payments.gift_market;
-        let Some(buy) = market.buy.as_mut().filter(|buy| buy.waits_for(request)) else {
+        let Some(buy) = market
+            .buy
+            .as_mut()
+            .filter(|buy| request.is_some_and(|id| buy.waits_for(id.0)))
+        else {
             return;
         };
         buy.send_failed();
@@ -263,9 +271,9 @@ impl Session {
         &mut self,
         err: &TdError,
         purpose: GiftMarketPurpose,
-        request: u64,
+        asked: Option<crate::ids::RequestId>,
     ) {
-        let asked = (request != 0).then_some(crate::ids::RequestId(request));
+        let request = asked.map(|id| id.0);
         let market = &mut self.payments.gift_market;
         let note = error_note(purpose, &error_reason(err));
         let low = err.earn_hint == Some(crate::earn::EarnErrorHint::BalanceTooLow);
@@ -278,13 +286,17 @@ impl Session {
                 {
                     // Only the search that sent this request fails; a newer
                     // filter's search (or the other box's) keeps loading.
-                    if search.load.waits_for(request) {
+                    if request.is_some_and(|id| search.load.waits_for(id)) {
                         search.load = PageLoad::Failed(note.clone());
                     }
                 }
             }
             GiftMarketPurpose::BuyResale => {
-                let Some(buy) = market.buy.as_mut().filter(|buy| buy.waits_for(request)) else {
+                let Some(buy) = market
+                    .buy
+                    .as_mut()
+                    .filter(|buy| request.is_some_and(|id| buy.waits_for(id)))
+                else {
                     return;
                 };
                 buy.send_failed();
@@ -295,7 +307,10 @@ impl Session {
                 }
             }
             GiftMarketPurpose::AuctionState { .. } => {
-                if request == 0 || market.auction != (AuctionFetch::Loading { request }) {
+                let Some(request) = request else {
+                    return;
+                };
+                if market.auction != (AuctionFetch::Loading { request }) {
                     return;
                 }
                 market.auction = AuctionFetch::Idle;
@@ -304,7 +319,7 @@ impl Session {
             GiftMarketPurpose::PlaceBid { .. } | GiftMarketPurpose::IncreaseBid { .. } => {
                 if market
                     .bidding
-                    .is_some_and(|(_, waiting)| request != 0 && waiting.0 == request)
+                    .is_some_and(|(_, waiting)| request == Some(waiting.0))
                 {
                     market.bidding = None;
                 }
@@ -318,7 +333,7 @@ impl Session {
                 let Some(craft) = market
                     .craft
                     .as_mut()
-                    .filter(|craft| craft.candidates_load.waits_for(request))
+                    .filter(|craft| request.is_some_and(|id| craft.candidates_load.waits_for(id)))
                 else {
                     return;
                 };
@@ -326,11 +341,9 @@ impl Session {
                 market.notes.push(note);
             }
             GiftMarketPurpose::Craft => {
-                let Some(craft) = market
-                    .craft
-                    .as_mut()
-                    .filter(|craft| request != 0 && craft.run == (CraftRun::Crafting { request }))
-                else {
+                let Some(craft) = market.craft.as_mut().filter(|craft| {
+                    request.is_some_and(|request| craft.run == (CraftRun::Crafting { request }))
+                }) else {
                     return;
                 };
                 craft.run = CraftRun::Idle;
@@ -348,8 +361,7 @@ impl Session {
                     gift_id,
                     request: asked,
                 } = market.follow
-                    && request != 0
-                    && asked == request
+                    && request == Some(asked)
                 {
                     market.follow = AuctionFollow::Failed(gift_id);
                 }

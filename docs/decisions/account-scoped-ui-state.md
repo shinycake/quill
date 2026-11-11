@@ -9209,3 +9209,50 @@ and the readers of the chat list view (`folder_tabs`, `folder_extras`, `chat_lis
   `no_key_until_the_timeout` runs `run_register` on a `ManualPace`
   (exactly four looks).
 - **Fresh review.** Every touched file re-read: 0 findings left.
+
+### Sweep fixes (r2-20)
+
+Round 2, bundle 20: the state of messages, payments, settings, stickers,
+stories, threads and users. Every fetch answer and error lands only in the
+stage whose request it is. The branch was merged with the integration branch
+(`claude/sweep-r2-followup`) and every duplicate was settled in favour of its
+shape: the checkout (`CheckoutForm`), gift manage and giveaway launches, the
+chatbot lookup legs (`Fetch` per search), `ForumTopicsMap::answered`,
+`DeviceLogin`, the sessions list, `data_storage_dirty`, the auto-download
+answers (`AutoDownloadAnswers`). What follows is what this bundle adds on top.
+
+| id | what changed |
+| --- | --- |
+| 05-039 | `SponsoredReportFlow` has `Choosing(target)` (before the send) and `Asking { target, request }`; the request is never an `Option` in a stage, `Picking` holds the flight only |
+| 03-A007, 05-036 | `EarnPage::ad_account_url` is a `Load<String>` with the `RequestId` inside `Loading` (ton and stars already were on the integration branch); an answer or error settles only its own request. A refused link is `Failed`, drawn next to the withdraw buttons with a Retry (`retry_earn_ad_account_url`), and a send that never left is `Failed` too, not `Idle`; an empty link is `Unavailable` and leaves the row out. tdesktop asks the link once per page and shows nothing when it fails; the Retry is the smallest safe addition, since the stage was stored but never drawn |
+| 05-031 | gift collections: the integration branch's `Fetch` shape stands |
+| 05-034, 05-035 | giveaway options and launches: the integration shape stands. `apply_gift_market_purchase` and `apply_gift_market_error` take the `Option<RequestId>` from `payments/apply.rs` and `error.rs` (no `map_or(0, ..)` sentinel at the call sites); a request nobody tracked fails nothing. Covered by `a_gift_market_error_with_no_request_fails_nothing_it_does_not_wait_for`. The u64 request fields inside `gift_market/state.rs` stay with the gift market's own state (they hold real ids, compared by `waits_for`) |
+| 05-032 | the checkout is the integration branch's `CheckoutForm` (invoice inside `Loading`/`Ready`/`Verifying`/`Paid`); this bundle's own `Checkout.request` is gone |
+| 05-033 | "Media Unlocked", receipts and verification pages: the integration branch's shapes stand (`unlocked_notice`, `verification_url`) |
+| 05-042 | sessions, websites, storage statistics, account TTL, auto-delete and saved sounds are matched by request id at every answer and error site; every `begin()` is followed by `sent(extra)` |
+| 05-043, 08-033 | Business saves are `(RequestId, kind)` removed by id; the refusal carries its `BusinessArea` and a screen draws only its own; chat links, the connected bot and the time zones answer through `Fetch::answered`/`failed` |
+| 05-040 | the chatbot lookup: the integration branch's `Fetch` per leg stands (a refused search is `Failed`, not "not found") |
+| 08-031 | a bot save does not rewrite the `connected_bot` fetch; `ConnectedBotSave::Saving(request)` holds the newest save, and only its answer or error forgets the bot it wrote ahead (an older save's answer finds another request there). No scan of the request registry |
+| 05-045 | `SetOption { generation }` and `Synchronize { generation }` belong to their switch; their error ends it with `SwitchFailed` |
+| 05-044 | quick reply `sending`/`changing` mirrors are deleted; the request registry carries what each request is for (`subject_id`) |
+| 05-041 | `ScopeSettings`: one `Fetch` per scope (no loading set beside the data); a refused scope shows Retry and is asked again when the page opens, not on every ingest |
+| 05-046 | `pending_attention: bool` stays, as on the integration branch (r2-18, 05-080): it is a one-shot dock-bounce edge that `take` consumes, nothing reads which chat asked, and its line is in `scripts/implicit-state-allow.txt`. The `attention_chats: Vec<ChatId>` this bundle had was the same flag in a new type |
+| 05-047 | the integration branch's `data_storage_dirty` stands, with one change: the driver makes one write attempt per mark. A failed write is said on the Data & Storage page (`StorageSaveKind::Persist`) and tried again when the settings change next, not on every ingest |
+| 05-057 | `AttachedSets { Idle, Asked(request), Answered(first) }` replaces `attached_request` + `attached_answer` |
+| 05-063 | `ManagerCommit::stage: CommitStage { Idle, Sent(request) }`: `Sent` leaves on the step's own answer (`StickersManager::step_answered`, called after every `apply`) or failure, and "a step is out" is that stage, no longer a scan of the request registry (`manager_change_pending` is gone). The failure the manager records is read by the poll and shown once |
+| 05-058 | `MasksPanel::archived` is `Fetch<ArchivedMasks>` with the next offset inside |
+| 05-054 | one `active_reactions` list |
+| 05-055 | the stale marks are `Fetch::Outdated` on their lists (`recent`, `favorites`, `trending`, saved GIFs, both installed sets) and `MessageReactionsState::Stale` for the open picker; a refused refetch keeps the mark. After a set edit each installed list (sticker and emoji) is refetched on its own mark: a refused emoji send marks its list `Outdated` again instead of waiting for an unrelated refresh |
+| 05-051 | `StoriesState::available_reactions` is a `Fetch` answered only by `GetStoryAvailableReactions` under its request; a failure is stored and the next open asks again |
+| 05-059 | the integration branch's `ForumTopicsMap::begin`/`sent`/`answered`/`failed_request`: an older ask's answer or error finds another request waiting and lands nowhere. After the cached list is dropped (`remove`, a created or edited topic) nothing waits, so a late older answer is taken as an untracked one; the integration tests rely on untracked answers being taken |
+| 05-052 | `CloseFriendsList::answered(request, ids)` |
+| 05-053 | contact changes `outdate()` the list in place (it no longer blanks under a spinner); `fetch_contacts` reads the list's own stage instead of asking the request registry, so a fetch out from before the change is ignored when it lands |
+| 05-060 | `SaveWatch::take_outcome` reads the request registry itself instead of a caller-supplied `in_flight` |
+
+Files read again from the top with the re-sweep criteria and left with no
+finding: every file of the bundle. Kept as they are, with the reason: the
+one-shot UI notes in `MessagesState` (`Notes`, `message_link`,
+`instant_view`, AI results) are each drained by the one surface that asked
+and their register entries were all closed in round 1;
+`StickersManager::open` and `sponsored_hidden` are a box's visibility and a
+fact the server confirmed.

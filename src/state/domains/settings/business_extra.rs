@@ -66,6 +66,15 @@ impl BotLookup {
     }
 }
 
+/// Where the newest `setBusinessConnectedBot` / delete stands.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ConnectedBotSave {
+    #[default]
+    Idle,
+    /// Out as this request; it answered or was refused when this leaves.
+    Saving(RequestId),
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BusinessExtraState {
     /// `getBusinessChatLinks`, newest first. A failed load keeps the row
@@ -75,6 +84,10 @@ pub struct BusinessExtraState {
     /// `getBusinessConnectedBot`: ready with `None` when no bot is
     /// connected.
     pub connected_bot: Fetch<Option<ConnectedBot>>,
+    /// The newest bot save and the request it waits for: only its answer
+    /// forgets the bot it wrote ahead (an older save's answer finds
+    /// another request here and leaves the shown bot alone).
+    pub bot_save: ConnectedBotSave,
     pub lookup: BotLookup,
     /// TDLib options; tdesktop's defaults until reported.
     pub title_max: Option<usize>,
@@ -112,8 +125,11 @@ impl Session {
         }
     }
 
-    pub(crate) fn apply_chat_links(&mut self, links: Vec<ChatLink>) {
-        self.settings.business_extra.chat_links.succeed(links);
+    pub(crate) fn apply_chat_links(&mut self, links: Vec<ChatLink>, request: Option<RequestId>) {
+        self.settings
+            .business_extra
+            .chat_links
+            .answered(request, links);
     }
 
     /// A created or edited link: an edit replaces its row, a new link goes
@@ -135,8 +151,17 @@ impl Session {
         }
     }
 
-    pub(crate) fn apply_connected_bot(&mut self, bot: Option<ConnectedBot>) {
-        self.settings.business_extra.connected_bot.succeed(bot);
+    /// `getBusinessConnectedBot` answered: only the fetch that asked takes
+    /// it (a save since then wrote the bot ahead and dropped that fetch).
+    pub(crate) fn apply_connected_bot(
+        &mut self,
+        bot: Option<ConnectedBot>,
+        pending: Option<&PendingRequest>,
+    ) {
+        self.settings
+            .business_extra
+            .connected_bot
+            .answered(pending.map(|p| p.id), bot);
     }
 
     /// `ok` of a bot save: the bot was written ahead of the answer, which
@@ -147,7 +172,25 @@ impl Session {
         if let Some(RequestPurpose::Settings(SettingsPurpose::SaveConnectedBot)) =
             pending.map(|p| p.purpose)
         {
-            self.settings.business_extra.connected_bot = Fetch::Idle;
+            self.forget_written_bot(pending.map(|p| p.id));
+        }
+    }
+
+    /// A bot save answered (`ok` or refused): the bot it wrote ahead is
+    /// forgotten so the next visit asks TDLib, when it was the newest save
+    /// (a newer one wrote the shown bot) and no fetch started since (its
+    /// answer is the truth).
+    fn forget_written_bot(&mut self, request: Option<RequestId>) {
+        let extra = &mut self.settings.business_extra;
+        let Some(request) = request else {
+            return;
+        };
+        if extra.bot_save != ConnectedBotSave::Saving(request) {
+            return;
+        }
+        extra.bot_save = ConnectedBotSave::Idle;
+        if matches!(extra.connected_bot, Fetch::Ready(_)) {
+            extra.connected_bot = Fetch::Idle;
         }
     }
 
@@ -223,11 +266,11 @@ impl Session {
         };
         let reason = error_reason(err);
         let extra = &mut self.settings.business_extra;
-        let error = match purpose {
+        let (area, error) = match purpose {
             SettingsPurpose::GetChatLinks => {
                 let error = format!("Couldn't load the links: {reason}");
-                extra.chat_links.fail(error.clone());
-                error
+                extra.chat_links.failed(extra_id, error.clone(), false);
+                (BusinessArea::ChatLinks, error)
             }
             SettingsPurpose::MutateChatLink { op } => {
                 if op != ChatLinkOp::Delete
@@ -235,24 +278,32 @@ impl Session {
                 {
                     extra.chat_link_save = ChatLinkSave::Idle;
                 }
-                format!("Couldn't save the link: {reason}")
+                (
+                    BusinessArea::ChatLinks,
+                    format!("Couldn't save the link: {reason}"),
+                )
             }
             // No connected bot answers "Not Found".
             SettingsPurpose::GetConnectedBot if err.code == 404 => {
-                extra.connected_bot.succeed(None);
+                extra.connected_bot.answered(extra_id, None);
                 return true;
             }
             SettingsPurpose::GetConnectedBot => {
                 let error = format!("Couldn't load the chatbot: {reason}");
-                extra.connected_bot.fail(error.clone());
-                error
+                if !extra.connected_bot.failed(extra_id, error.clone(), false) {
+                    return true;
+                }
+                (BusinessArea::Chatbot, error)
             }
             SettingsPurpose::SaveConnectedBot => {
                 // The save wrote its bot ahead of the answer: forget it, so
                 // the next visit asks TDLib what is connected instead of
                 // showing the refused bot as saved.
-                extra.connected_bot = Fetch::Idle;
-                format!("Couldn't save the chatbot: {reason}")
+                self.forget_written_bot(extra_id);
+                (
+                    BusinessArea::Chatbot,
+                    format!("Couldn't save the chatbot: {reason}"),
+                )
             }
             SettingsPurpose::LookupBusinessBot { generation, part } => {
                 let lookup = &mut extra.lookup;
@@ -266,12 +317,13 @@ impl Session {
                 }
                 return true;
             }
-            SettingsPurpose::SetSponsoredEnabled => {
-                format!("Couldn't change the ads setting: {reason}")
-            }
+            SettingsPurpose::SetSponsoredEnabled => (
+                BusinessArea::Ads,
+                format!("Couldn't change the ads setting: {reason}"),
+            ),
             _ => return false,
         };
-        self.settings.business.error = Some(error);
+        self.settings.business.refuse(area, error);
         true
     }
 }

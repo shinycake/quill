@@ -42,15 +42,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let kind = BusinessSettingKind::StartPage;
         self.session.settings.business.error = None;
-        self.send_business_extra(SettingsPurpose::SaveBusinessSetting { kind }, |extra| {
-            crate::business_start_page::set_start_page_request(
-                extra,
-                title,
-                message,
-                sticker_file_id,
-            )
-        })?;
-        self.session.settings.business.saving.push(kind);
+        let extra =
+            self.send_business_extra(SettingsPurpose::SaveBusinessSetting { kind }, |extra| {
+                crate::business_start_page::set_start_page_request(
+                    extra,
+                    title,
+                    message,
+                    sticker_file_id,
+                )
+            })?;
+        self.session.settings.business.saving.push((extra, kind));
         Ok(())
     }
 
@@ -75,6 +76,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.settings.business_extra.chat_links.begin();
         let sent =
             self.send_business_extra(SettingsPurpose::GetChatLinks, links::get_links_request);
+        if let Ok(extra) = sent {
+            self.session.settings.business_extra.chat_links.sent(extra);
+        }
         // A send that never left lands in `Failed` (drawn with Retry), not
         // back in `Idle`, which a page draws as a spinner and asks again.
         if sent.is_err() {
@@ -184,6 +188,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             SettingsPurpose::GetConnectedBot,
             bots::get_connected_bot_request,
         );
+        if let Ok(extra) = sent {
+            self.session
+                .settings
+                .business_extra
+                .connected_bot
+                .sent(extra);
+        }
         if sent.is_err() {
             self.session
                 .settings
@@ -201,19 +212,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         previous: Option<i64>,
     ) -> Result<(), ConnectSendError> {
         self.session.settings.business.error = None;
-        match (bot, previous) {
+        let sent = match (bot, previous) {
             (Some(bot), _) => self
                 .send_business_extra(SettingsPurpose::SaveConnectedBot, |extra| {
                     bots::set_connected_bot_request(extra, bot)
-                })
-                .map(|_| ())?,
+                })?,
             (None, Some(previous)) => self
                 .send_business_extra(SettingsPurpose::SaveConnectedBot, |extra| {
                     bots::delete_connected_bot_request(extra, previous)
-                })
-                .map(|_| ())?,
+                })?,
             (None, None) => return Ok(()),
-        }
+        };
+        self.session.settings.business_extra.bot_save =
+            crate::state::ConnectedBotSave::Saving(sent);
         self.session
             .settings
             .business_extra

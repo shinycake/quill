@@ -273,7 +273,7 @@ impl Session {
                 self.apply_suggested_post_error(err, purpose, pending.map(|p| p.id))
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GiftMarket(purpose))) => {
-                self.apply_gift_market_error(err, purpose, pending.map_or(0, |p| p.id.0))
+                self.apply_gift_market_error(err, purpose, pending.map(|p| p.id))
             }
             // The explorer stays the default; the next wallet or address
             // menu asks again.

@@ -410,3 +410,48 @@ fn a_failed_launch_reports_the_reason() {
     );
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn an_older_stars_options_answer_or_error_does_not_touch_the_newer_fetch() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    driver.request_giveaway_options(-100).unwrap();
+    driver.request_giveaway_options(-100).unwrap();
+    let asked: Vec<serde_json::Value> = recorder
+        .snapshot()
+        .iter()
+        .filter_map(|j| serde_json::from_str::<serde_json::Value>(j).ok())
+        .filter(|v| v["@type"] == "getStarGiveawayPaymentOptions")
+        .collect();
+    let (old, new) = (asked[0]["@extra"].clone(), asked[1]["@extra"].clone());
+    let options = |extra: &serde_json::Value, stars: i64| {
+        json!({"@type":"starGiveawayPaymentOptions","@extra":extra,"options":[{
+            "currency":"USD","amount":100,"star_count":stars,"yearly_boost_count":1,
+            "winner_options":[],"is_default":true,"is_extended":false}]})
+    };
+    feed(&mut driver, &seq, &sink, options(&new, 500));
+    feed(&mut driver, &seq, &sink, options(&old, 1));
+    let held = driver.session.payments.giveaway.options.stars_options();
+    assert_eq!(held.len(), 1);
+    assert_eq!(held[0].star_count, 500);
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type":"error","@extra":old,"code":500,"message":"BOOM"}),
+    );
+    assert_eq!(
+        driver
+            .session
+            .payments
+            .giveaway
+            .options
+            .stars_options()
+            .len(),
+        1
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}

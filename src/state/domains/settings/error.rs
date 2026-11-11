@@ -12,7 +12,7 @@ impl Session {
         _seq: u64,
     ) {
         if self.apply_quick_replies_error(err, pending.map(|p| p.purpose))
-            || self.apply_business_error(err, pending.map(|p| p.purpose))
+            || self.apply_business_error(err, pending.map(|p| p.purpose), pending.map(|p| p.id))
             || self.apply_business_extra_error(err, pending.map(|p| p.purpose), extra)
             || self.apply_passkeys_error(err, pending.map(|p| (p.id, p.purpose)))
             || self.apply_tone_upload_error(err, pending)
@@ -142,10 +142,11 @@ impl Session {
             // in-flight flag so the overlay shows "No storage data
             // yet." instead of spinning forever.
             Some(RequestPurpose::GetStorageStatistics) => {
-                self.settings.storage_stats.fail(format!(
-                    "Couldn't load storage usage: {}",
-                    error_reason(err)
-                ));
+                self.settings.storage_stats.failed(
+                    extra,
+                    format!("Couldn't load storage usage: {}", error_reason(err)),
+                    false,
+                );
             }
             // Slice A3: a failed sessions fetch or terminate
             // clears the in-flight flags and parks the honest,
@@ -198,9 +199,11 @@ impl Session {
             ) => self.apply_privacy_data_error(purpose, pending, err),
             Some(RequestPurpose::GetActiveSessions) => {
                 self.settings.sessions_op.refetched();
-                self.settings
-                    .sessions
-                    .fail(sessions_error_line("load the sessions list", err));
+                self.settings.sessions.failed(
+                    extra,
+                    sessions_error_line("load the sessions list", err),
+                    false,
+                );
             }
             Some(
                 RequestPurpose::Settings(SettingsPurpose::TerminateSession { .. })
@@ -230,27 +233,32 @@ impl Session {
             // `sessions_error_line` is reused: it is a pure
             // (action, error-class) formatter, not session-bound.
             Some(RequestPurpose::GetDefaultAutoDelete) => {
-                self.settings.default_auto_delete.fail(sessions_error_line(
-                    "load the default auto-delete timer",
-                    err,
-                ));
+                self.settings.default_auto_delete.failed(
+                    extra,
+                    sessions_error_line("load the default auto-delete timer", err),
+                    false,
+                );
             }
             Some(RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { .. })) => {
-                self.settings.default_auto_delete.fail(sessions_error_line(
-                    "change the default auto-delete timer",
-                    err,
-                ));
+                self.settings.default_auto_delete.failed(
+                    extra,
+                    sessions_error_line("change the default auto-delete timer", err),
+                    false,
+                );
             }
             Some(RequestPurpose::GetAccountTtl) => {
-                self.settings.account_ttl.fail(sessions_error_line(
-                    "load the account inactivity timer",
-                    err,
-                ));
+                self.settings.account_ttl.failed(
+                    extra,
+                    sessions_error_line("load the account inactivity timer", err),
+                    false,
+                );
             }
             Some(RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { .. })) => {
-                self.settings
-                    .account_ttl
-                    .fail(sessions_error_line("update the account", err));
+                self.settings.account_ttl.failed(
+                    extra,
+                    sessions_error_line("update the account", err),
+                    false,
+                );
             }
             Some(RequestPurpose::DeleteAccount) => {
                 self.settings
@@ -260,9 +268,11 @@ impl Session {
             // A refused saved-sound list is not asked for again by itself;
             // the next change of the list does.
             Some(RequestPurpose::GetSavedNotificationSounds) => {
-                self.settings
-                    .saved_sounds
-                    .fail(sessions_error_line("load the saved sounds", err));
+                self.settings.saved_sounds.failed(
+                    extra,
+                    sessions_error_line("load the saved sounds", err),
+                    false,
+                );
             }
             // Slice A4: a failed websites fetch or disconnect
             // parks the honest,
@@ -274,9 +284,11 @@ impl Session {
             // cache stays visible.
             Some(RequestPurpose::GetConnectedWebsites) => {
                 self.settings.websites_op.refetched();
-                self.settings
-                    .connected_websites
-                    .fail(sessions_error_line("load the websites list", err));
+                self.settings.connected_websites.failed(
+                    extra,
+                    sessions_error_line("load the websites list", err),
+                    false,
+                );
             }
             Some(
                 RequestPurpose::Settings(SettingsPurpose::DisconnectWebsite { .. })
@@ -290,15 +302,17 @@ impl Session {
             _ => {}
         }
         self.settle_notification_save(pending, true);
-        // Parity slice: a failed `getScopeNotificationSettings` must
-        // not leave the scope in `scope_settings_loading` — otherwise
-        // `maybe_fetch_scope_notification_settings` skips it on every
-        // later ingest and every "Defaults for all chats…" open.
-        // Dropping it here means the next fetch retries.
+        // A failed `getScopeNotificationSettings` leaves its scope refused:
+        // nothing asks again by itself (every ingest would), the
+        // Notifications page asks again when it opens.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetScopeNotificationSettings)
             && let Some(scope) = pending.and_then(|p| p.scope)
         {
-            self.settings.scope_settings_loading.remove(&scope);
+            self.settings.scope_notification_settings.failed(
+                &scope,
+                pending.map(|p| p.id),
+                error_reason(err),
+            );
         }
         // A failed `getChatNotificationSettingsExceptions` ends its
         // loading stage: the list says so, with a Retry, and nothing asks

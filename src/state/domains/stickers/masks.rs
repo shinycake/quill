@@ -54,6 +54,15 @@ impl MasksWanted {
     }
 }
 
+/// The archived mask sets loaded so far and where the next page starts.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArchivedMasks {
+    pub sets: Vec<StickerSetInfo>,
+    /// The set id the next page follows; `None` when the last page was the
+    /// end.
+    pub next_offset: Option<i64>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct MasksPanel {
     /// Which surfaces want the lists: the manage dialog, the strip.
@@ -62,9 +71,7 @@ pub struct MasksPanel {
     /// Installed mask sets, in TDLib's order. A failed list request or
     /// change leaves the list `Failed`, which the dialog offers a retry for.
     pub installed: Fetch<Vec<StickerSetInfo>>,
-    pub archived: Fetch<Vec<StickerSetInfo>>,
-    pub archived_has_more: bool,
-    pub archived_next_offset: i64,
+    pub archived: Fetch<ArchivedMasks>,
     /// Stickers of each mask set (`getStickerSet`), by set id: asked once
     /// per set, so a set that failed stays failed and the strip skips it.
     pub sets: HashMap<i64, Fetch<Vec<StickerItem>>>,
@@ -91,6 +98,20 @@ impl MasksPanel {
         self.wanted = MasksWanted::with(self.dialog_open(), wanted);
     }
 
+    /// The archived mask sets held, oldest page first.
+    pub fn archived_sets(&self) -> &[StickerSetInfo] {
+        self.archived
+            .data()
+            .map_or(&[], |archived| archived.sets.as_slice())
+    }
+
+    /// Where the next archived page starts, when there is one.
+    pub fn archived_next_offset(&self) -> Option<i64> {
+        self.archived
+            .data()
+            .and_then(|archived| archived.next_offset)
+    }
+
     /// The loaded stickers of a mask set.
     pub fn set_stickers(&self, set_id: i64) -> &[StickerItem] {
         self.sets.get(&set_id).map(Fetch::items).unwrap_or(&[])
@@ -105,17 +126,22 @@ impl Session {
     pub fn accept_archived_mask_sets(&mut self, sets: Vec<StickerSetInfo>, first_page: bool) {
         let masks = &mut self.stickers.masks;
         let last = sets.last().map(|set| set.id).unwrap_or(0);
-        masks.archived_has_more =
-            sets.len() == ARCHIVED_MASK_PAGE && last > 0 && last != masks.archived_next_offset;
-        masks.archived_next_offset = last;
-        let mut all = if first_page {
-            Vec::new()
+        let held = if first_page {
+            ArchivedMasks::default()
         } else {
             masks.archived.take_data().unwrap_or_default()
         };
+        // A full page that moved on has a next one.
+        let next_offset =
+            (sets.len() == ARCHIVED_MASK_PAGE && last > 0 && Some(last) != held.next_offset)
+                .then_some(last);
+        let mut all = held.sets;
         let mut seen: std::collections::HashSet<i64> = all.iter().map(|set| set.id).collect();
         all.extend(sets.into_iter().filter(|set| seen.insert(set.id)));
-        masks.archived.succeed(all);
+        masks.archived.succeed(ArchivedMasks {
+            sets: all,
+            next_offset,
+        });
     }
 
     pub(crate) fn accept_mask_set(&mut self, set_id: i64, stickers: Vec<StickerItem>) {
@@ -190,8 +216,6 @@ impl Session {
             let masks = &mut self.stickers.masks;
             masks.installed = Fetch::Idle;
             masks.archived = Fetch::Idle;
-            masks.archived_has_more = false;
-            masks.archived_next_offset = 0;
             masks.confirm_remove = None;
             masks.sets.clear();
         }

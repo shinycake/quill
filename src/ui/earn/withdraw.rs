@@ -139,7 +139,7 @@ impl QuillApp {
         let available = stats.status.available;
         let enabled = stats.status.withdrawal_enabled;
         let max = withdraw_max(limits, available.stars.max(0));
-        let ad_url = page.ad_account_url.clone();
+        let ad_url = page.ad_account_url.ready().cloned();
         let now = quill::local_time::now_unix();
         let left = (stats.status.next_withdrawal_at - now).max(0);
         let locked = stats.status.next_withdrawal_at != 0 && left > 0;
@@ -227,6 +227,35 @@ impl QuillApp {
                         ),
                 )
                 .child(buttons);
+        }
+        if let Load::Failed(line) = &page.ad_account_url {
+            // The Buy Ads link was refused: what failed and a Retry.
+            block = block.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(line.clone()),
+                    )
+                    .child(
+                        Button::new("earn-buy-ads-retry")
+                            .label(tr(keys::Q_CHAT_RETRY))
+                            .ghost()
+                            .small()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.earn_call(
+                                    tr(keys::Q_MONEY_COULD_NOT_LOAD_REVENUE),
+                                    cx,
+                                    |driver| driver.retry_earn_ad_account_url(peer),
+                                );
+                            })),
+                    ),
+            );
         }
         let is_self = matches!(peer, EarnPeer::User(id) if session.my_user_id == Some(id));
         block.child(learn_more_band(

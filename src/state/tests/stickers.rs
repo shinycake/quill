@@ -200,6 +200,8 @@ fn sound_list_refetch_prunes_file_ids() {
     session.settings.sound_file_ids.insert(91, 7); // dropped from the list
     session.settings.sound_file_ids.insert(92, 8); // still saved
     let extra = session.request(RequestPurpose::GetSavedNotificationSounds, None);
+    session.settings.saved_sounds.begin();
+    session.settings.saved_sounds.sent(extra);
     let sound_file = r#"{"@type":"file","id":92,"size":12,"expected_size":12,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":12}}"#;
     apply_json(
         &mut session,
@@ -334,7 +336,7 @@ fn attached_sticker_sets_fail_the_box_and_drop_an_earlier_answer() {
     let ask = |session: &mut Session| {
         session.stickers.sticker_set_view = Some(StickerSetView::loading(0));
         let extra = session.request(purpose, None);
-        session.stickers.stickers.attached_request = Some(extra);
+        session.stickers.stickers.attached = crate::state::AttachedSets::Asked(extra);
         extra
     };
     let failed = ask(&mut session);
@@ -366,11 +368,15 @@ fn attached_sticker_sets_fail_the_box_and_drop_an_earlier_answer() {
     };
     apply_json(&mut session, &seq, &sink, &sets(earlier));
     assert_eq!(
-        session.stickers.stickers.attached_answer, None,
+        session.stickers.stickers.attached,
+        crate::state::AttachedSets::Asked(later),
         "an earlier ask's answer"
     );
     apply_json(&mut session, &seq, &sink, &sets(later));
-    assert_eq!(session.stickers.stickers.attached_answer, Some(None));
+    assert_eq!(
+        session.stickers.stickers.attached,
+        crate::state::AttachedSets::Answered(None)
+    );
 }
 
 /// A box already showing its set keeps it when a refetch fails (one sent
@@ -423,12 +429,14 @@ fn an_update_during_the_request_survives_its_answer_and_asks_again() {
     gifs.saved_asked();
     // `updateSavedAnimations` while the request is out: the answer may
     // predate the change.
-    gifs.stale = true;
+    gifs.saved_outdated();
     gifs.saved_answered(vec![saved_gif(1)]);
-    assert!(gifs.loaded() && gifs.stale, "the list is asked for again");
+    assert!(
+        gifs.loaded() && gifs.saved_is_outdated(),
+        "the list is asked for again"
+    );
     assert_eq!(gifs.animations.len(), 1, "the list does not blank");
     // A failure keeps the list and counts as loaded until the next opening.
-    gifs.stale = false;
     gifs.saved_failed();
     assert!(gifs.failed() && gifs.loaded());
     assert_eq!(gifs.animations.len(), 1);

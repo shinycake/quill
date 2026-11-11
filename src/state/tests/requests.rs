@@ -374,6 +374,7 @@ fn storage_statistics_answer_cached_by_purpose() {
     let seq = AtomicU64::new(0);
     let extra = with_purpose.request(RequestPurpose::GetStorageStatistics, None);
     with_purpose.settings.storage_stats.begin();
+    with_purpose.settings.storage_stats.sent(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -415,6 +416,7 @@ fn storage_statistics_error_clears_loading() {
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetStorageStatistics, None);
     session.settings.storage_stats.begin();
+    session.settings.storage_stats.sent(extra);
     apply_json(
         &mut session,
         &seq,

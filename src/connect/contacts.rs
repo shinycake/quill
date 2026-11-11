@@ -11,8 +11,7 @@ use crate::telegram::requests::{
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase 6: `getContacts` for the contacts tab. Fires once per list
-    /// (deduped by a settled `Session::contacts` + in-flight purpose); a
-    /// failed attempt clears its error flag on retry. The `users` response
+    /// (the list's own stage dedupes it); a failed attempt clears its error flag on retry. The `users` response
     /// lands the id list; user objects arrive via `updateUser`.
     pub fn fetch_contacts(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
@@ -25,12 +24,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.users_state.contacts.can_ask()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetContacts)
-        {
+        let contacts = &self.session.users_state.contacts;
+        // The list's own stage says whether a fetch is out: an older request
+        // an `Outdated` list no longer waits for is ignored when it lands.
+        if !(contacts.can_ask() || contacts.is_outdated()) {
             return Ok(None);
         }
         self.session.users_state.contacts.begin();
@@ -54,13 +51,16 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// failed waits for Retry; a send that fails ends the loading with
     /// Retry instead of leaving "Loading contacts..." up.
     pub fn refetch_invalidated_contacts(&mut self) {
-        if !self.session.users_state.contacts.is_idle() {
+        if !self.session.users_state.contacts.is_outdated() {
             return;
         }
+        // A fetch out from before the change is no longer waited for
+        // (`outdate` dropped its request), so the refetch below goes out
+        // and the old answer lands nowhere.
         // A fetch refused before it began (the chats path is not active)
         // leaves the list idle: it ends in the error line and its Retry
         // too, not in a tab that stays on "Loading contacts...".
-        if self.fetch_contacts().is_err() && self.session.users_state.contacts.is_idle() {
+        if self.fetch_contacts().is_err() && self.session.users_state.contacts.is_outdated() {
             self.session
                 .users_state
                 .contacts

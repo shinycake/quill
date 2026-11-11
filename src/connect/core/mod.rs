@@ -530,6 +530,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let send_outcome = Self::send_outcome(&owned.envelope.payload);
         let answer_extra = owned.envelope.extra;
         self.session.apply(owned);
+        self.session.stickers.manager.step_answered(answer_extra);
         self.run_deferred_caption(send_outcome);
         // The answers captured above are stashed before any step that can
         // fail: a send error later in this ingest returns early with `?`,
@@ -630,13 +631,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             self.save_media_prefs();
         }
-        // Slice S4: persist per-network settings seeded from
-        // `getAutoDownloadSettingsPresets` (the reducer cannot touch the
-        // filesystem, so it marks them dirty instead).
-        if self.session.settings.data_storage_dirty && self.save_data_storage_prefs().is_ok() {
-            // Kept while the save fails: the next ingest writes again.
-            self.session.settings.data_storage_dirty = false;
-        }
+        self.persist_data_storage_if_dirty();
         if cleared_download_cache {
             let _ = self.maybe_fetch_storage_statistics();
         }

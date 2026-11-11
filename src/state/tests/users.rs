@@ -231,7 +231,7 @@ fn add_contact_ok_invalidates_contacts() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, add_extra.0),
     );
-    assert!(session.users_state.contacts.data().is_none());
+    assert!(session.users_state.contacts.is_outdated());
 }
 
 #[test]
@@ -252,7 +252,7 @@ fn a6_imported_contacts_response_invalidates_and_notices() {
             extra.0
         ),
     );
-    assert!(session.users_state.contacts.data().is_none());
+    assert!(session.users_state.contacts.is_outdated());
     assert_eq!(
         session.users_state.contacts_notice.as_deref(),
         Some("Contacts imported.")
@@ -281,7 +281,7 @@ fn a6_remove_contact_ok_clears_cached_is_contact() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(session.users_state.contacts.data().is_none());
+    assert!(session.users_state.contacts.is_outdated());
     assert!(!session.users.get(&31).expect("user").is_contact);
     assert_eq!(
         session.users_state.contacts_notice.as_deref(),
@@ -493,7 +493,7 @@ fn an_older_contacts_answer_does_not_bring_back_a_dropped_list() {
     session.users_state.contacts.begin();
     session.users_state.contacts.sent(old);
     // A contact change dropped the list while the fetch was out.
-    session.users_state.contacts = crate::state::fetch::Fetch::Idle;
+    session.users_state.contacts.outdate();
     apply_json(
         &mut session,
         &seq,
@@ -503,6 +503,6 @@ fn an_older_contacts_answer_does_not_bring_back_a_dropped_list() {
             old.0
         ),
     );
-    assert!(session.users_state.contacts.is_idle());
+    assert!(session.users_state.contacts.is_outdated());
     assert!(session.users_state.contacts.data().is_none());
 }

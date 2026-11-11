@@ -147,7 +147,9 @@ impl Session {
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds })) =
             pending.map(|p| p.purpose)
         {
-            self.settings.default_auto_delete.succeed(seconds);
+            self.settings
+                .default_auto_delete
+                .answered(pending.map(|p| p.id), seconds);
         }
         // Slice A7: a `setAccountTtl` succeeded — the server
         // confirmed the write of exactly the sent value, so it
@@ -160,7 +162,9 @@ impl Session {
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days })) =
             pending.map(|p| p.purpose)
         {
-            self.settings.account_ttl.succeed(days);
+            self.settings
+                .account_ttl
+                .answered(pending.map(|p| p.id), days);
         }
         if matches!(
             pending.map(|p| p.purpose),
@@ -201,7 +205,7 @@ impl Session {
         // Slice S4: a `setAutoDownloadSettings` succeeded — apply
         // the confirmed sent settings (the `ok` carries none, so
         // they ride the purpose); the error clears and the driver
-        // persists on this ingest via `data_storage_dirty`.
+        // persists on this ingest (`data_storage_dirty`).
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetAutoDownloadSettings {
             network,
             settings,
@@ -778,14 +782,14 @@ impl Session {
             // Phase 6: the new contact arrives via `updateUser`
             // (`is_contact` flips); invalidate the list so the
             // contacts tab refetches it.
-            self.users_state.contacts = crate::state::fetch::Fetch::Idle;
+            self.users_state.contacts.outdate();
         }
         // Slice A6: a contacts mutation landed — never optimistic:
         // the new list arrives via the `getContacts` refetch the
         // tab triggers.
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::RemoveContact) => {
-                self.users_state.contacts = crate::state::fetch::Fetch::Idle;
+                self.users_state.contacts.outdate();
                 // The delete-synced-contacts batch remove shares
                 // this purpose but carries no user_id — its notice
                 // must not read as a single delete (or overwrite
@@ -819,11 +823,11 @@ impl Session {
                 }
             }
             Some(RequestPurpose::ImportContacts) => {
-                self.users_state.contacts = crate::state::fetch::Fetch::Idle;
+                self.users_state.contacts.outdate();
                 self.users_state.contacts_notice = Some("Contacts imported.".to_string());
             }
             Some(RequestPurpose::ClearImportedContacts) => {
-                self.users_state.contacts = crate::state::fetch::Fetch::Idle;
+                self.users_state.contacts.outdate();
                 self.users_state.contacts_notice =
                     Some("Synced contacts deleted from the servers.".to_string());
             }

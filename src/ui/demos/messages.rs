@@ -152,8 +152,7 @@ impl QuillApp {
                 session
                     .settings
                     .scope_notification_settings
-                    .entry(scope)
-                    .or_default();
+                    .insert(scope, Default::default());
             }
         }
         self.open_mute_menu(cx);

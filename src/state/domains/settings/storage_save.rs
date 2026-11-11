@@ -13,6 +13,9 @@ pub enum StorageSaveKind {
     Limits,
     /// The network statistics reset.
     ResetStatistics,
+    /// Writing the settings to `data_storage.json` (the driver's write
+    /// after a seed or a save).
+    Persist,
 }
 
 /// The failure line of each kind of save. A failure stays until the next

@@ -140,7 +140,7 @@ impl QuillApp {
         }
         if self.stories.viewer_ui().is_open(PanelKind::ReactionPicker) {
             if let Some(live) = self.live.as_mut() {
-                if live.driver.session.stories.available_reactions.is_none() {
+                if live.driver.session.stories.available_reactions.can_ask() {
                     match live.driver.get_story_available_reactions() {
                         Ok(_) => {}
                         Err(_) => self.set_note(StatusNote::error(tr(
@@ -210,8 +210,8 @@ impl QuillApp {
         let mut ids: Vec<i64> = session
             .stories
             .available_reactions
+            .items()
             .iter()
-            .flatten()
             .filter_map(|reaction| match reaction.kind {
                 StoryAvailableReactionKind::CustomEmoji(id) => Some(id),
                 _ => None,

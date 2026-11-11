@@ -68,8 +68,13 @@ impl Session {
             }
             // "Attached Stickers": the box it opened (set 0) says it failed.
             Some(RequestPurpose::Stickers(StickersPurpose::GetAttachedStickerSets { .. })) => {
-                if pending.map(|p| p.id) == self.stickers.stickers.attached_request {
-                    self.stickers.stickers.attached_request = None;
+                if self
+                    .stickers
+                    .stickers
+                    .attached
+                    .waits_for(pending.map(|p| p.id))
+                {
+                    self.stickers.stickers.attached = AttachedSets::Idle;
                     self.fail_sticker_set_view(0);
                 }
             }

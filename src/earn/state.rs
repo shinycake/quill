@@ -239,8 +239,10 @@ pub struct EarnPage {
     pub stars_tab: bool,
     /// The Stars page's history tab.
     pub star_filter: TxFilter,
-    /// `getStarAdAccountUrl` (tdesktop's "Buy Ads").
-    pub ad_account_url: Option<String>,
+    /// `getStarAdAccountUrl` (tdesktop's "Buy Ads"). `Unavailable`: the
+    /// server sent an empty link, so the row is left out; `Failed` is drawn
+    /// with a Retry.
+    pub ad_account_url: Load<String>,
 }
 
 impl EarnPage {
@@ -254,7 +256,7 @@ impl EarnPage {
             star_history: Default::default(),
             stars_tab: false,
             star_filter: TxFilter::All,
-            ad_account_url: None,
+            ad_account_url: Load::Idle,
         }
     }
 

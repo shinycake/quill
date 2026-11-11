@@ -87,6 +87,39 @@ impl StickerSetStage {
     }
 }
 
+/// `getAttachedStickerSets` of the open "Attached Stickers" box, one stage
+/// at a time. `Asked` leaves on its request's answer (`Answered`) or error
+/// (`Idle`, the box fails); `Answered` leaves when the driver opens the
+/// first set (`take_answer`). A new ask replaces any stage, so an answer or
+/// error of an earlier request finds nothing waiting for it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AttachedSets {
+    #[default]
+    Idle,
+    /// The request the box waits for.
+    Asked(RequestId),
+    /// The first set of the answer (`None`: the media has none).
+    Answered(Option<i64>),
+}
+
+impl AttachedSets {
+    /// `request` is the one the box waits for.
+    pub fn waits_for(&self, request: Option<RequestId>) -> bool {
+        matches!((self, request), (Self::Asked(asked), Some(id)) if *asked == id)
+    }
+
+    /// The answer, once, leaving the stage.
+    pub fn take_answer(&mut self) -> Option<Option<i64>> {
+        match *self {
+            Self::Answered(first) => {
+                *self = Self::Idle;
+                Some(first)
+            }
+            _ => None,
+        }
+    }
+}
+
 /// One fetch per list tab of the sticker panel.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StickerLists {
@@ -288,15 +321,8 @@ pub struct StickerPanel {
     /// Asked once per session from `Idle`; a failure stays `Failed`, so a
     /// redraw never asks again.
     pub greeting: Fetch<Vec<StickerItem>>,
-    /// `getAttachedStickerSets` answered: the sets (first opens in the
-    /// sticker set dialog; `None` inside: the media has none).
-    pub attached_answer: Option<Option<i64>>,
-    /// The `getAttachedStickerSets` the open "Attached Stickers" box waits
-    /// for. An answer or error of an earlier one is dropped.
-    pub attached_request: Option<RequestId>,
-    pub recent_stale: bool,
-    pub favorites_stale: bool,
-    pub trending_stale: bool,
+    /// The "Attached Stickers" lookup of the open box ([`AttachedSets`]).
+    pub attached: AttachedSets,
     /// Slice S8: favorite stickers (`getFavoriteStickers`).
     pub favorites: Vec<StickerItem>,
     /// Slice S8: recent stickers (`getRecentStickers`).
@@ -335,8 +361,6 @@ pub struct GifPanel {
     pub search_chat: Option<crate::ids::ChatId>,
     pub search_bot_username: String,
     pub search_bot_user_id: Option<i64>,
-    /// `updateSavedAnimations` arrived; refresh even if the panel was closed.
-    pub stale: bool,
     // The search's results and paging live in its stage ([`GifSearch`]):
     // a new search replaces them whole.
     /// Slice S9: `updateAnimationSearchParameters` (schema 1.8.67, line
@@ -468,7 +492,22 @@ impl GifPanel {
     /// predate the change, so the list is asked for again.
     pub fn saved_answered(&mut self, animations: Vec<AnimationItem>) {
         self.animations = animations;
-        self.saved.succeed(());
+        // Kept `Outdated` (now with a list held) when
+        // `updateSavedAnimations` arrived meanwhile: asked for again.
+        if !self.saved.answer(()) {
+            self.saved = Fetch::Outdated(Some(()));
+        }
+    }
+
+    /// `updateSavedAnimations` arrived: the list is asked for again, also
+    /// when the panel was closed.
+    pub fn saved_outdated(&mut self) {
+        self.saved.outdate();
+    }
+
+    /// The list is out of date and no request for it is out.
+    pub fn saved_is_outdated(&self) -> bool {
+        self.saved.is_outdated()
     }
 
     /// `getSavedAnimations` failed, or could not be sent: counted as loaded,

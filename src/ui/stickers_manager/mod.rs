@@ -139,7 +139,7 @@ impl QuillApp {
                     tab,
                     masks.installed.items().to_vec(),
                     Vec::new(),
-                    masks.archived.items().to_vec(),
+                    masks.archived_sets().to_vec(),
                     loading,
                     masks.installed.error().is_some() || masks.archived.error().is_some(),
                 )
@@ -266,7 +266,7 @@ impl QuillApp {
                     StatusNote::error(tr(keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN)),
                 );
                 // Said here: not again from the drain.
-                live.driver.session.stickers.manager.failure = None;
+                live.driver.session.stickers.manager.take_failure();
             }
             live.driver.set_sticker_manager_open(false);
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -389,7 +389,9 @@ impl QuillApp {
             {
                 live.driver.fetch_archived_stickers(true).map(drop)
             }
-            (Kind::Masks, ManagerTab::Archived) if session.stickers.masks.archived_has_more => {
+            (Kind::Masks, ManagerTab::Archived)
+                if session.stickers.masks.archived_next_offset().is_some() =>
+            {
                 live.driver.more_archived_masks().map(drop)
             }
             _ => return,

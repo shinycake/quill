@@ -65,14 +65,13 @@ fn installed_and_archived_masks_stay_out_of_the_regular_panel() {
     let ids: Vec<_> = session
         .stickers
         .masks
-        .archived
-        .items()
+        .archived_sets()
         .iter()
         .map(|s| s.id)
         .collect();
     assert_eq!(ids, [21, 22]);
     assert!(session.stickers.stickers.archived.is_empty());
-    assert!(!session.stickers.masks.archived_has_more);
+    assert!(session.stickers.masks.archived_next_offset().is_none());
 }
 
 #[test]
@@ -117,8 +116,10 @@ fn a_confirmed_change_drops_both_lists_and_an_error_marks_failure() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.stickers.masks.installed = Fetch::Ready(Vec::new());
-    session.stickers.masks.archived = Fetch::Ready(Vec::new());
-    session.stickers.masks.archived_has_more = true;
+    session.stickers.masks.archived = Fetch::Ready(crate::state::ArchivedMasks {
+        sets: Vec::new(),
+        next_offset: Some(5),
+    });
     session.stickers.masks.sets.insert(
         11,
         Fetch::Loading {
@@ -143,7 +144,7 @@ fn a_confirmed_change_drops_both_lists_and_an_error_marks_failure() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
     let masks = &session.stickers.masks;
-    assert!(masks.installed.is_idle() && masks.archived.is_idle() && !masks.archived_has_more);
+    assert!(masks.installed.is_idle() && masks.archived.is_idle());
     assert!(masks.sets.is_empty());
 
     let extra = session.request(StickersPurpose::ReorderInstalledMaskSets.into(), None);

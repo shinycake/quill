@@ -12,6 +12,7 @@ use super::super::app::QuillApp;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// Drain what the last ingest left for the UI. Returns whether anything
@@ -266,6 +267,18 @@ impl QuillApp {
             self.as_asked_by(asker, |this| {
                 this.present_login_url_info(info, Some(request), cx)
             });
+            progressed = true;
+        }
+        // A saved sticker-set change that did not go through: said once.
+        if self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.stickers.manager.take_failure())
+            .is_some()
+        {
+            self.set_note(StatusNote::error(tr(
+                keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN,
+            )));
             progressed = true;
         }
         // Slice P1: a `paymentResult` verification URL — the provider's

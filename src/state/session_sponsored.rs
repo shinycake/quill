@@ -347,7 +347,9 @@ impl Session {
         // A report in flight keeps its place: its answer is still awaited.
         if matches!(
             self.messages.sponsored_report,
-            SponsoredReportFlow::Asking(_) | SponsoredReportFlow::Picking { .. }
+            SponsoredReportFlow::Choosing(_)
+                | SponsoredReportFlow::Asking { .. }
+                | SponsoredReportFlow::Picking(_)
         ) {
             return;
         }
@@ -391,18 +393,17 @@ impl Session {
         if !reportable {
             return None;
         }
-        self.messages.sponsored_report = SponsoredReportFlow::Asking(SponsoredReportTarget {
+        self.messages.sponsored_report = SponsoredReportFlow::Choosing(SponsoredReportTarget {
             chat_id,
             message_id,
-            request: None,
         });
         Some((chat_id, message_id))
     }
 
     /// The report request went out as `request`: only its answer applies.
     pub fn note_sponsored_report_request(&mut self, request: RequestId) {
-        if let Some(target) = self.messages.sponsored_report.target_mut() {
-            target.request = Some(request);
+        if let SponsoredReportFlow::Choosing(target) = self.messages.sponsored_report {
+            self.messages.sponsored_report = SponsoredReportFlow::Asking { target, request };
         }
     }
 
@@ -417,11 +418,14 @@ impl Session {
         // Only the answer to the request the flow waits on: after Cancel (or
         // a newer report) the target is gone or waits on another request,
         // and a late answer re-arms nothing and reports no ad.
-        let Some(SponsoredReportTarget {
-            chat_id,
-            message_id,
-            request: Some(request),
-        }) = self.messages.sponsored_report.target()
+        let SponsoredReportFlow::Asking {
+            target:
+                SponsoredReportTarget {
+                    chat_id,
+                    message_id,
+                },
+            request,
+        } = self.messages.sponsored_report
         else {
             return;
         };
@@ -430,20 +434,14 @@ impl Session {
         }
         match result {
             ReportSponsoredResult::OptionRequired { title, options } => {
-                self.messages.sponsored_report = SponsoredReportFlow::Picking {
-                    flight: SponsoredReportFlight {
+                self.messages.sponsored_report =
+                    SponsoredReportFlow::Picking(SponsoredReportFlight {
                         extra: pending.id,
                         chat_id,
                         message_id,
                         title,
                         options,
-                    },
-                    target: SponsoredReportTarget {
-                        chat_id,
-                        message_id,
-                        request: Some(request),
-                    },
-                };
+                    });
             }
             result => {
                 self.messages.sponsored_report = SponsoredReportFlow::Idle;

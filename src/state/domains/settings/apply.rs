@@ -144,6 +144,7 @@ impl Session {
                 // Parity slice: `getSavedNotificationSounds` answer.
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetSavedNotificationSounds)
+                    && pending.is_some_and(|p| self.settings.saved_sounds.waits_for(p.id))
                 {
                     let files: Vec<ParsedFile> = sounds.iter().map(|s| s.sound.clone()).collect();
                     self.remember_files(&files);
@@ -155,7 +156,9 @@ impl Session {
                     self.settings
                         .sound_file_ids
                         .retain(|_, sound_id| live_ids.contains(sound_id));
-                    self.settings.saved_sounds.succeed(sounds);
+                    self.settings
+                        .saved_sounds
+                        .answered(pending.map(|p| p.id), sounds);
                 }
             }
             SettingsPayload::UpdateSavedNotificationSounds { .. } => {
@@ -170,11 +173,14 @@ impl Session {
                 // Phase S2: `getStorageStatistics` answer — only our own
                 // in-flight request writes the cache (matched by `@extra`).
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStorageStatistics) {
-                    self.settings.storage_stats.succeed(StorageStats {
-                        total_size,
-                        by_file_type,
-                        by_chat,
-                    });
+                    self.settings.storage_stats.answered(
+                        pending.map(|p| p.id),
+                        StorageStats {
+                            total_size,
+                            by_file_type,
+                            by_chat,
+                        },
+                    );
                 }
                 // Batch 6: `optimizeStorage` answers with the statistics
                 // of the files it deleted. Drop the usage cache so the
@@ -292,7 +298,9 @@ impl Session {
                 // The answer is authoritative: it replaces the list and
                 // clears any stale error. No optimistic mutation ever
                 // happens client-side.
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetActiveSessions) {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetActiveSessions)
+                    && pending.is_some_and(|p| self.settings.sessions.waits_for(p.id))
+                {
                     self.resolve_unconfirmed_entries(&sessions);
                     self.settings.sessions.succeed(sessions);
                     if inactive_session_ttl_days.is_some() {
@@ -307,7 +315,9 @@ impl Session {
                 // `@extra`). Authoritative: replaces the cached days and
                 // clears any stale error.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetAccountTtl) {
-                    self.settings.account_ttl.succeed(days);
+                    self.settings
+                        .account_ttl
+                        .answered(pending.map(|p| p.id), days);
                 }
             }
             SettingsPayload::ConnectedWebsites { websites } => {
@@ -317,7 +327,9 @@ impl Session {
                 // clears any stale error. No optimistic mutation ever
                 // happens client-side.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetConnectedWebsites) {
-                    self.settings.connected_websites.succeed(websites);
+                    self.settings
+                        .connected_websites
+                        .answered(pending.map(|p| p.id), websites);
                 }
             }
             SettingsPayload::ScopeNotificationSettings { settings } => {
@@ -327,10 +339,11 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetScopeNotificationSettings)
                     && let Some(scope) = pending.and_then(|p| p.scope)
                 {
-                    self.settings
-                        .scope_notification_settings
-                        .insert(scope, settings);
-                    self.settings.scope_settings_loading.remove(&scope);
+                    self.settings.scope_notification_settings.answered(
+                        scope,
+                        pending.map(|p| p.id),
+                        settings,
+                    );
                 }
             }
             SettingsPayload::UpdateScopeNotificationSettings { scope, settings } => {
@@ -343,7 +356,6 @@ impl Session {
                         .scope_notification_settings
                         .insert(scope, settings);
                 }
-                self.settings.scope_settings_loading.remove(&scope);
             }
             SettingsPayload::UpdateReactionNotificationSettings { settings } => {
                 // Parity slice: no getter exists — the update stream is the
@@ -354,10 +366,10 @@ impl Session {
                 }
             }
             SettingsPayload::QuickReplies(update) => self.apply_quick_replies(update),
-            SettingsPayload::TimeZones(zones) => self.apply_time_zones(zones),
-            SettingsPayload::BusinessChatLinks(links) => self.apply_chat_links(links),
+            SettingsPayload::TimeZones(zones) => self.apply_time_zones(zones, extra),
+            SettingsPayload::BusinessChatLinks(links) => self.apply_chat_links(links, extra),
             SettingsPayload::BusinessChatLink(link) => self.apply_chat_link(link, extra),
-            SettingsPayload::BusinessConnectedBot(bot) => self.apply_connected_bot(bot),
+            SettingsPayload::BusinessConnectedBot(bot) => self.apply_connected_bot(bot, pending),
         }
     }
 }

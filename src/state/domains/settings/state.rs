@@ -295,15 +295,13 @@ pub struct SettingsState {
     /// Parity slice: `getScopeNotificationSettings` results per scope; used
     /// for `use_default_*` fallback (e.g. default sound) and the scope
     /// defaults settings view.
-    pub scope_notification_settings: HashMap<NotificationSettingsScope, ScopeNotificationSettings>,
+    pub scope_notification_settings: ScopeSettings,
     /// Parity slice: `getChatNotificationSettingsExceptions` answers —
     /// chat ids with non-default notification settings per scope (the
     /// exceptions list view). No entry: never asked, or dropped as stale
     /// by `updateChatNotificationSettings`, so the page asks again; a
     /// failure stays failed until its Retry.
     pub notification_exceptions: HashMap<NotificationSettingsScope, Fetch<Vec<i64>>>,
-    /// Parity slice: scopes with a `getScopeNotificationSettings` in flight.
-    pub scope_settings_loading: HashSet<NotificationSettingsScope>,
     /// Parity slice: `updateReactionNotificationSettings` cache. No getter
     /// exists — this stays `None` until the first update arrives.
     pub reaction_notification_settings: Option<ReactionNotificationSettings>,
@@ -558,9 +556,8 @@ impl SettingsState {
             default_auto_delete: Fetch::Idle,
             saved_sounds: Fetch::Idle,
             tone_upload: crate::tone_upload::ToneUpload::Idle,
-            scope_notification_settings: HashMap::new(),
+            scope_notification_settings: ScopeSettings::default(),
             notification_exceptions: HashMap::new(),
-            scope_settings_loading: HashSet::new(),
             reaction_notification_settings: None,
             scope_saves: Default::default(),
             reaction_saves: Default::default(),

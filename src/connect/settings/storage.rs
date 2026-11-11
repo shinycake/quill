@@ -294,6 +294,27 @@ impl<S: JsonSender> ConnectDriver<S> {
         let _ = self.save_data_storage_prefs();
     }
 
+    /// Slice S4: persist per-network settings seeded from
+    /// `getAutoDownloadSettingsPresets` or saved (the reducer cannot touch
+    /// the filesystem, so it marks them dirty instead). One write attempt
+    /// per mark: a write that fails (a read-only folder, a full disk) is
+    /// said on the Data & Storage page and tried again when the settings
+    /// change next, not on every ingest.
+    pub(crate) fn persist_data_storage_if_dirty(&mut self) {
+        if !std::mem::take(&mut self.session.settings.data_storage_dirty) {
+            return;
+        }
+        let written = self.save_data_storage_prefs();
+        let save = &mut self.session.settings.data_storage_save;
+        match written {
+            Ok(()) => save.begin(StorageSaveKind::Persist),
+            Err(_) => save.fail(
+                StorageSaveKind::Persist,
+                "Couldn't save the Data and Storage settings.",
+            ),
+        }
+    }
+
     /// Slice S4: persist the per-network auto-download settings
     /// (`data_storage.json`) next to the account.
     pub fn save_data_storage_prefs(&mut self) -> std::io::Result<()> {

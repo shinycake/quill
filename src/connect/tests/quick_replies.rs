@@ -242,6 +242,25 @@ fn choosing_a_shortcut_sends_it_to_the_chat() {
 }
 
 #[test]
+fn a_send_whose_request_was_lost_does_not_block_the_next_tap() {
+    let (mut driver, recorder, _sink, _seq) = driver_parts();
+    driver.send_quick_reply(ChatId(31), 2).unwrap();
+    // The request was lost (a logout sweep dropped it): nothing mirrors it.
+    let lost = driver
+        .session
+        .requests
+        .take_purpose(crate::state::RequestPurpose::SendMessageAlbum);
+    assert!(lost.is_some());
+    driver.send_quick_reply(ChatId(31), 2).unwrap();
+    let sent = recorder
+        .snapshot()
+        .iter()
+        .filter(|json| json.contains("sendQuickReplyShortcutMessages"))
+        .count();
+    assert_eq!(sent, 2);
+}
+
+#[test]
 fn a_double_click_on_add_creates_the_message_once() {
     let (mut driver, recorder, _sink, _seq) = driver_parts();
     driver.add_quick_reply_text("hours", "Hi").unwrap();

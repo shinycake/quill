@@ -567,6 +567,7 @@ fn set_account_ttl_ok_stores_confirmed_days() {
         RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days: 365 }),
         None,
     );
+    session.settings.account_ttl.sent(extra);
     apply_json(
         &mut session,
         &seq,

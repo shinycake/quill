@@ -63,7 +63,9 @@ impl Session {
                         .answered(pending.map(|p| p.id), user_ids);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCloseFriends) {
                     // B14: `getCloseFriends` answer.
-                    self.stories.close_friends = CloseFriendsList::Ready(user_ids);
+                    self.stories
+                        .close_friends
+                        .answered(pending.map(|p| p.id), user_ids);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetRecentInlineBots) {
                     self.bots
                         .reply_keyboards
@@ -262,7 +264,7 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::AddContactByPhone) {
                     // tdesktop `AddContactBox::save`: a user id means the
                     // phone is on Telegram (open the chat), 0 means not.
-                    self.users_state.contacts = crate::state::fetch::Fetch::Idle;
+                    self.users_state.contacts.outdate();
                     // A box closed before its answer opens nothing.
                     let Some(id) = pending.map(|p| p.id) else {
                         return;
@@ -279,7 +281,7 @@ impl Session {
                         NewContact::Done(id, NewContactOutcome::NotJoined)
                     };
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::ImportContacts) {
-                    self.users_state.contacts = crate::state::fetch::Fetch::Idle;
+                    self.users_state.contacts.outdate();
                     self.users_state.contacts_notice = Some("Contacts imported.".to_string());
                 }
             }

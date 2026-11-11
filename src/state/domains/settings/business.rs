@@ -6,15 +6,34 @@
 use crate::business_settings::{BusinessSettingKind, TimeZone, save_error_line};
 use crate::state::*;
 
+/// The part of the Business screens a refusal belongs to: a screen draws
+/// only the refusals of its own part (the hub draws all of them).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BusinessArea {
+    Save(BusinessSettingKind),
+    ChatLinks,
+    Chatbot,
+    Ads,
+}
+
+/// The last refused request of the Business screens, in words.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BusinessRefusal {
+    pub area: BusinessArea,
+    pub line: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BusinessSettingsState {
     /// `getTimeZones`, sorted for the picker: asked once per session, again
     /// only after it failed.
     pub time_zones: crate::state::fetch::Fetch<Vec<TimeZone>>,
-    /// Saves sent and not answered yet.
-    pub saving: Vec<BusinessSettingKind>,
-    /// The last refused save, in words.
-    pub error: Option<String>,
+    /// Saves sent and not answered yet, each under its request: only that
+    /// request's answer or error ends it, so a second save of the same
+    /// setting keeps the screen "Saving…" until it answers.
+    pub saving: Vec<(RequestId, BusinessSettingKind)>,
+    /// The last refused request, with the part it belongs to.
+    pub error: Option<BusinessRefusal>,
     /// Why the last own `getUserFullInfo` failed (or a lost request), for
     /// the Retry the Business screens show instead of "Loading…". Asking
     /// again clears it. Whether the info is in or on its way is never kept
@@ -24,24 +43,42 @@ pub struct BusinessSettingsState {
 }
 
 impl BusinessSettingsState {
-    /// The refusal the Business screens draw: the last refused save, else
-    /// why the time zones failed to load.
-    pub fn refusal(&self) -> Option<&str> {
-        self.error.as_deref().or_else(|| self.time_zones.error())
+    /// A save is out.
+    pub fn is_saving(&self) -> bool {
+        !self.saving.is_empty()
+    }
+
+    /// The refusal a screen draws: the last refusal of a part `shows`
+    /// picks, else why the time zones failed to load.
+    pub fn refusal(&self, shows: impl Fn(BusinessArea) -> bool) -> Option<&str> {
+        self.error
+            .as_ref()
+            .filter(|refusal| shows(refusal.area))
+            .map(|refusal| refusal.line.as_str())
+            .or_else(|| self.time_zones.error())
+    }
+
+    /// Record a refusal of `area`.
+    pub fn refuse(&mut self, area: BusinessArea, line: String) {
+        self.error = Some(BusinessRefusal { area, line });
     }
 }
 
 impl Session {
-    pub(crate) fn apply_time_zones(&mut self, zones: Vec<TimeZone>) {
-        self.settings.business.time_zones.succeed(zones);
+    pub(crate) fn apply_time_zones(&mut self, zones: Vec<TimeZone>, request: Option<RequestId>) {
+        self.settings.business.time_zones.answered(request, zones);
     }
 
     /// `ok` of a `setBusiness*` request.
     pub(crate) fn apply_business_ok(&mut self, pending: Option<&PendingRequest>) {
-        if let Some(RequestPurpose::Settings(SettingsPurpose::SaveBusinessSetting { kind })) =
+        if let Some(RequestPurpose::Settings(SettingsPurpose::SaveBusinessSetting { .. })) =
             pending.map(|p| p.purpose)
         {
-            self.settings.business.saving.retain(|k| *k != kind);
+            let id = pending.map(|p| p.id);
+            self.settings
+                .business
+                .saving
+                .retain(|(request, _)| Some(*request) != id);
         }
     }
 
@@ -91,20 +128,27 @@ impl Session {
         &mut self,
         err: &TdError,
         purpose: Option<RequestPurpose>,
+        pending_id: Option<RequestId>,
     ) -> bool {
         let state = &mut self.settings.business;
         match purpose {
             Some(RequestPurpose::Settings(SettingsPurpose::GetTimeZones)) => {
                 // The failure line lives in the fetch only; the screens read
                 // it from there ([`BusinessSettingsState::refusal`]).
-                state.time_zones.fail(format!(
-                    "Couldn't load the time zones: {}",
-                    error_reason(err)
-                ));
+                state.time_zones.failed(
+                    pending_id,
+                    format!("Couldn't load the time zones: {}", error_reason(err)),
+                    false,
+                );
             }
             Some(RequestPurpose::Settings(SettingsPurpose::SaveBusinessSetting { kind })) => {
-                state.saving.retain(|k| *k != kind);
-                state.error = Some(save_error_line(kind, &error_reason(err)));
+                state
+                    .saving
+                    .retain(|(request, _)| Some(*request) != pending_id);
+                state.refuse(
+                    BusinessArea::Save(kind),
+                    save_error_line(kind, &error_reason(err)),
+                );
             }
             _ => return false,
         }

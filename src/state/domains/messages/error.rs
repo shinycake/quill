@@ -385,12 +385,8 @@ impl Session {
             // A TDLib error dismisses the option picker; no outcome is shown.
             // Only for the request the flow waits on: a report already
             // dismissed, or an earlier step, has nothing left to dismiss.
-            let waits = pending.is_some_and(|p| {
-                self.messages
-                    .sponsored_report
-                    .target()
-                    .is_some_and(|target| target.request == Some(p.id))
-            });
+            let waits =
+                pending.is_some_and(|p| self.messages.sponsored_report.awaited() == Some(p.id));
             if waits {
                 self.messages.sponsored_report = SponsoredReportFlow::Idle;
             }
