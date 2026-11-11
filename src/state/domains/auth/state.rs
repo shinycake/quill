@@ -36,9 +36,10 @@ pub struct AuthState {
     /// verification overlay. Replaced only by our own
     /// `PasswordStateOp` answers — never mutated optimistically.
     pub password_state: Option<PasswordState>,
-    /// Slice A2: a 2FA management round trip is in flight (fetch or
-    /// mutation); the overlay shows progress and disables submits.
-    pub password_state_loading: bool,
+    /// Slice A2: the 2FA management round trip in flight (fetch or
+    /// mutation) under its request; the overlay shows progress and
+    /// disables submits. Only that request's answer or error ends it.
+    pub password_op: PasswordFlight,
     /// Slice A2: honest one-line failure of the last 2FA management
     /// request (TDLib's actual error, classified — never a fake
     /// success). Cleared on the next attempt and on success.
@@ -63,10 +64,38 @@ impl AuthState {
             change_number_error: None,
             twofa_flow: TwofaFlow::default(),
             password_state: None,
-            password_state_loading: false,
+            password_op: PasswordFlight::Idle,
             password_op_error: None,
             logout_request: None,
             logout_refused: None,
+        }
+    }
+}
+
+/// The 2FA management request in flight, if any.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PasswordFlight {
+    #[default]
+    Idle,
+    InFlight(RequestId),
+}
+
+impl AuthState {
+    /// A 2FA management round trip is out.
+    pub fn password_state_loading(&self) -> bool {
+        matches!(self.password_op, PasswordFlight::InFlight(_))
+    }
+
+    /// `request` answered (or failed): ends the round trip when it is the
+    /// one in flight. An older request's late answer leaves a newer one
+    /// waiting. Returns whether it was the one.
+    pub fn settle_password_op(&mut self, request: Option<RequestId>) -> bool {
+        match (self.password_op, request) {
+            (PasswordFlight::InFlight(waiting), Some(id)) if waiting == id => {
+                self.password_op = PasswordFlight::Idle;
+                true
+            }
+            _ => false,
         }
     }
 }

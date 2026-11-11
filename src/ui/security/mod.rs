@@ -41,7 +41,7 @@ impl QuillApp {
             let state = session
                 .as_ref()
                 .and_then(|s| s.auth_state.password_state.clone());
-            let loading = session.is_some_and(|s| s.auth_state.password_state_loading);
+            let loading = session.is_some_and(|s| s.auth_state.password_state_loading());
             let error = session
                 .as_ref()
                 .and_then(|s| s.auth_state.password_op_error.clone());
@@ -516,7 +516,7 @@ impl QuillApp {
         // cached state skips the fetch that would clear it. One still in
         // flight keeps its answer's line.
         if let Some(auth) = self.session_mut().map(|session| &mut session.auth_state)
-            && !auth.password_state_loading
+            && !auth.password_state_loading()
         {
             auth.password_op_error = None;
         }

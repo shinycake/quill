@@ -275,7 +275,7 @@ impl Session {
         };
         // Only a state that is not being reloaded counts; the reload sent
         // with the probe routes when it lands.
-        let has_password = (!self.auth_state.password_state_loading)
+        let has_password = (!self.auth_state.password_state_loading())
             .then(|| {
                 self.auth_state
                     .password_state

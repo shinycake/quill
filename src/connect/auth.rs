@@ -328,7 +328,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.auth_state.password_state_loading {
+        if self.session.auth_state.password_state_loading() {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.auth_state.password_op_error = None;
@@ -336,12 +336,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Auth(AuthPurpose::PasswordStateOp { op }),
             None,
         );
-        self.session.auth_state.password_state_loading = true;
+        self.session.auth_state.password_op = crate::state::PasswordFlight::InFlight(extra);
         match self.sender.send_json(&build(extra)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.auth_state.password_state_loading = false;
+                self.session.auth_state.settle_password_op(Some(extra));
                 Err(err)
             }
         }
@@ -353,7 +353,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `Ok(None)` = no request needed.
     pub fn fetch_password_state(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         if self.session.auth_state.password_state.is_some()
-            || self.session.auth_state.password_state_loading
+            || self.session.auth_state.password_state_loading()
         {
             return Ok(None);
         }

@@ -247,7 +247,7 @@ impl QuillApp {
             .and_then(|s| s.auth_state.twofa_flow.recovery_code_sent_to.clone());
         let loading = session
             .as_ref()
-            .is_some_and(|s| s.auth_state.password_state_loading);
+            .is_some_and(|s| s.auth_state.password_state_loading());
         let Some(state) = state else {
             return body.child(muted_line(cx, tr(keys::Q_PREFS_LOADING)));
         };
@@ -552,7 +552,7 @@ impl QuillApp {
             .and_then(|s| s.auth_state.twofa_flow.login_email_code_sent_to.clone());
         let loading = session
             .as_ref()
-            .is_some_and(|s| s.auth_state.password_state_loading);
+            .is_some_and(|s| s.auth_state.password_state_loading());
         let body = if let Some(pattern) = code_sent_to {
             body.child(heading(tr(keys::SETTINGS_CLOUD_LOGIN_EMAIL_CODE_TITLE)))
                 .child(div().text_sm().child(tr_with(

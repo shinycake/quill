@@ -317,7 +317,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.export_allowed(&id)?;
         // tdesktop `cloudPassword().reload()`: TDLib answers the empty
         // password itself, so the fresh state tells "no password" apart.
-        if !self.session.auth_state.password_state_loading {
+        if !self.session.auth_state.password_state_loading() {
             let _ = self.refresh_password_state();
         }
         let extra = self.session.request(
