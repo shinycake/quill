@@ -441,8 +441,7 @@ impl QuillApp {
                                         // which the box draws.
                                         let _ = live.driver.accept_terms();
                                     } else if let Some(demo) = this.demo_session.as_mut() {
-                                        demo.settings.notices.terms =
-                                            quill::state::TermsState::None;
+                                        demo.settings.notices.terms.dismiss();
                                     }
                                     cx.notify();
                                 })

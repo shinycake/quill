@@ -160,6 +160,11 @@ impl TermsState {
         }
     }
 
+    /// The terms are gone (a demo session answers them directly).
+    pub fn dismiss(&mut self) {
+        *self = Self::None;
+    }
+
     /// The failure of the accept for `id`; an older terms' answer is not
     /// the current box's.
     pub fn fail_accept_of(&mut self, id: Option<&str>, error: &str) {
