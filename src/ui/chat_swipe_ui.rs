@@ -345,3 +345,22 @@ impl QuillApp {
         cx.notify();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ChatSwipeState;
+    use quill::chat_swipe::{Phase, SLIDE_MS, SwipeLabel};
+
+    #[test]
+    fn locking_drops_a_released_swipe_before_it_fires() {
+        let mut state = ChatSwipeState::default();
+        let key = Some((7, SwipeLabel::Mute));
+        let machine = &mut state.machine;
+        machine.feed(Phase::Started, 0.0, 0.0, key, 0);
+        machine.feed(Phase::Moved, -10.0, 0.0, key, 8);
+        machine.feed(Phase::Moved, -1000.0, 0.0, key, 24);
+        machine.feed(Phase::Ended, 0.0, 0.0, key, 400);
+        state.drop_gestures();
+        assert_eq!(state.machine.poll(400 + SLIDE_MS), None);
+    }
+}

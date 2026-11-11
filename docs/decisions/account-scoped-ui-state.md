@@ -5468,8 +5468,8 @@ land and the typed form was gone.
 ### Sweep fixes (s4-chat-list)
 
 Twenty-four S4 entries. Each was read end to end against the integration
-branch first; eleven were real and fixed, five were already fixed by the S3
-chat-list sweep, one was a duplicate.
+branch first; eighteen were real and fixed, five were already fixed by the S3
+chat-list sweep, and 09-X059 duplicates 09-101.
 
 - **A swipe runs what the panel showed.** `SwipeMachine<K, A>` carries the
   action the row offered at its latest event; the release stores it and `poll`
