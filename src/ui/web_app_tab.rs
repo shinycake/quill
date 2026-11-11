@@ -5,6 +5,7 @@
 
 use super::app::QuillApp;
 use super::search_ui::search_result_row;
+use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
@@ -52,6 +53,14 @@ impl QuillApp {
                     || row.subtitle.to_lowercase().contains(&needle)
             })
             .collect()
+    }
+
+    /// Retry of the failed Apps list.
+    fn retry_grossing_apps(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.fetch_grossing_web_app_bots();
+        }
+        cx.notify();
     }
 
     /// The tab's body.
@@ -136,6 +145,15 @@ impl QuillApp {
                 tr_with(keys::Q_MEDIA_NO_APPS_MATCH, &[("trim", (query.trim()))])
             };
             block = block.child(div().text_xs().text_color(muted).child(note));
+            if grossing.error().is_some() {
+                block = block.child(
+                    Button::new("search-apps-retry")
+                        .label(tr(keys::Q_MEDIA_RETRY))
+                        .ghost()
+                        .small()
+                        .on_click(cx.listener(|this, _, _, cx| this.retry_grossing_apps(cx))),
+                );
+            }
         }
         block
             .child(

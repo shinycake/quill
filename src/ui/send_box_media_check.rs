@@ -59,14 +59,17 @@ impl QuillApp {
             });
             let timer = cx.background_executor().timer(GIVE_UP_AFTER);
             let waited = path.clone();
-            self.spawn_scoped(cx, async move |this, cx| {
+            // The reads are the account's (`TrayReads`), not the window's:
+            // the answer settles them whichever window asked, or the file
+            // would stay "being read" and block Send.
+            Self::spawn_app(cx, async move |this, cx| {
                 timer.await;
                 let _ = this.update(cx, |this, cx| {
                     this.finish_media_check(&waited, job, MediaCheck::FileOnly, cx);
                 });
             })
             .detach();
-            self.spawn_scoped(cx, async move |this, cx| {
+            Self::spawn_app(cx, async move |this, cx| {
                 let check = worker.await;
                 let _ = this.update(cx, |this, cx| {
                     this.finish_media_check(&path, job, check, cx);
@@ -96,8 +99,8 @@ impl QuillApp {
             return;
         }
         self.apply_media_check(path, &check);
-        // A file now needs its thumbnail.
-        self.prepare_tray_file_thumbnails(cx);
+        // A file now needs its thumbnail (for the screen now showing).
+        self.defer_screen(cx, |this, cx| this.prepare_tray_file_thumbnails(cx));
         cx.notify();
     }
 

@@ -151,7 +151,11 @@ impl Session {
                     (pending.chat_id, pending.around_message_id)
                 && let Some(scores) = self.bots.game_scores.get_mut(&(chat_id.0, message_id.0))
             {
-                scores.fail("couldn't load the scores");
+                scores.failed(
+                    Some(pending.id),
+                    crate::lang::tr(crate::lang::keys::Q_MISC_COULDNT_LOAD_THE_SCORES),
+                    false,
+                );
             }
             self.note_callback_answer(
                 pending.and_then(|p| p.chat_id),

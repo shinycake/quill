@@ -201,7 +201,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         purpose: GroupsPurpose,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         let polling = purpose == GroupsPurpose::PollChatEventLog;
+        let first_page = from_event_id == 0 && !polling;
         if !self.chats_path_active() {
+            if first_page {
+                self.fail_event_log_send(chat_id);
+            }
             return Err(ConnectSendError::InvalidRequest);
         }
         if !self.session.chat_can_view_event_log(chat_id) {
@@ -244,8 +248,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             &user_ids,
         )) {
             self.session.requests.take(extra);
-            if from_event_id == 0 && !polling {
-                self.session.groups.reset_event_log_fetch(chat_id.0);
+            if first_page {
+                self.fail_event_log_send(chat_id);
             }
             return Err(err);
         }
@@ -262,6 +266,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             wait.page = Some(extra);
         }
         Ok(Some(extra))
+    }
+
+    /// A first page that could not be sent ends in the failed stage, so the
+    /// page draws its Retry instead of a spinner nothing will end.
+    fn fail_event_log_send(&mut self, chat_id: ChatId) {
+        self.session.groups.reset_event_log_fetch(chat_id.0);
+        self.session.groups.set_event_log_fetch(
+            chat_id.0,
+            ChatEventLogFetch::Failed(send_failed_line("Could not load recent actions")),
+        );
     }
 
     /// The requests `chat_id`'s event log waits for.

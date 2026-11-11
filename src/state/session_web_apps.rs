@@ -138,7 +138,11 @@ impl Session {
         pending: Option<&PendingRequest>,
     ) -> bool {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetGrossingWebAppBots) {
-            self.bots.web_apps.grossing.succeed(user_ids.to_vec());
+            // Only the request the list waits for fills it.
+            self.bots
+                .web_apps
+                .grossing
+                .answered(pending.map(|p| p.id), user_ids.to_vec());
             return true;
         }
         false
@@ -251,10 +255,11 @@ impl Session {
                     });
             }
             RequestPurpose::GetGrossingWebAppBots => {
-                self.bots
-                    .web_apps
-                    .grossing
-                    .fail(format!("error {}", err.code));
+                self.bots.web_apps.grossing.failed(
+                    Some(p.id),
+                    crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_LOAD_APPS),
+                    false,
+                );
             }
             RequestPurpose::SendWebAppCustomRequest => {
                 if let Some(req_id) = self.bots.web_apps.custom_requests.remove(&p.id.0) {

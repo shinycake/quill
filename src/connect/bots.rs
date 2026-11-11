@@ -348,6 +348,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         user_id: i64,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
+            self.session
+                .bots
+                .game_scores
+                .entry((chat_id.0, message_id.0))
+                .or_default()
+                .fail(crate::lang::tr(
+                    crate::lang::keys::Q_MISC_COULDNT_LOAD_THE_SCORES,
+                ));
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request_for_message(
@@ -356,7 +364,28 @@ impl<S: JsonSender> ConnectDriver<S> {
             message_id,
         );
         let json = get_game_high_scores(extra, chat_id, message_id, user_id);
-        self.send_json_request(extra, &json)
+        // The panel waits for this request's answer and no other.
+        let scores = self
+            .session
+            .bots
+            .game_scores
+            .entry((chat_id.0, message_id.0))
+            .or_default();
+        scores.begin();
+        scores.sent(extra);
+        let sent = self.send_json_request(extra, &json);
+        if sent.is_err()
+            && let Some(scores) = self
+                .session
+                .bots
+                .game_scores
+                .get_mut(&(chat_id.0, message_id.0))
+        {
+            scores.fail(crate::lang::tr(
+                crate::lang::keys::Q_MISC_COULDNT_LOAD_THE_SCORES,
+            ));
+        }
+        sent
     }
 
     /// Slice bots-games: `sendMessage` + `inputMessageGame` (TDLib 1.8.67,

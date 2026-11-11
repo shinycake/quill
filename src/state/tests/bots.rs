@@ -384,7 +384,7 @@ fn bots_games_high_scores_answer_lands_in_panel() {
         (7, 301),
         crate::state::fetch::Fetch::Loading {
             stale: None,
-            request: None,
+            request: Some(extra),
         },
     );
     apply_json(
@@ -419,7 +419,7 @@ fn a_refused_game_scores_request_leaves_the_panel_failed_to_retry() {
         (7, 301),
         crate::state::fetch::Fetch::Loading {
             stale: None,
-            request: None,
+            request: Some(extra),
         },
     );
     apply_json(
@@ -435,6 +435,42 @@ fn a_refused_game_scores_request_leaves_the_panel_failed_to_retry() {
     assert!(
         matches!(panel, Some(crate::state::fetch::Fetch::Failed { .. })),
         "the panel stays, failed, so it can draw Retry: {panel:?}"
+    );
+}
+
+/// Sweep 11-019: an answer of an older request (the panel was closed and
+/// opened again) does not fill the panel waiting for the newer one.
+#[test]
+fn a_game_scores_answer_of_an_older_request_is_ignored() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let old =
+        session.request_for_message(RequestPurpose::GetGameHighScores, ChatId(7), MessageId(301));
+    let new =
+        session.request_for_message(RequestPurpose::GetGameHighScores, ChatId(7), MessageId(301));
+    session.bots.game_scores.insert(
+        (7, 301),
+        crate::state::fetch::Fetch::Loading {
+            stale: None,
+            request: Some(new),
+        },
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"gameHighScores","@extra":"{}","scores":[{{"@type":"gameHighScore","position":1,"user_id":21,"score":1}}]}}"#,
+            old.0
+        ),
+    );
+    assert!(
+        session
+            .bots
+            .game_scores
+            .get(&(7, 301))
+            .is_some_and(|panel| panel.is_loading()),
+        "the newer request is still the one awaited"
     );
 }
 

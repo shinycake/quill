@@ -243,7 +243,37 @@ impl QuillApp {
             );
             shown += 1;
         }
-        if shown == 0 {
+        let contacts_error = self
+            .session()
+            .is_some_and(|s| s.users_state.contacts.error().is_some());
+        let contacts_loading = self
+            .session()
+            .is_some_and(|s| s.users_state.contacts.data().is_none())
+            && !contacts_error;
+        if shown == 0 && contacts_error {
+            panel = panel
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(tr(keys::Q_PEOPLE_COULDN_T_LOAD_CONTACTS)),
+                )
+                .child(
+                    Button::new("group-call-invite-retry")
+                        .label(tr(keys::Q_PEOPLE_RETRY))
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.retry_group_call_contacts(cx);
+                        })),
+                );
+        } else if shown == 0 && contacts_loading {
+            panel = panel.child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr(keys::Q_PEOPLE_LOADING_CONTACTS)),
+            );
+        } else if shown == 0 {
             panel = panel.child(
                 div()
                     .text_sm()

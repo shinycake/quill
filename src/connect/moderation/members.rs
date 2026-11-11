@@ -1,5 +1,6 @@
 //! Connect driver: member lists, adding, restricting, banning and removing members.
 use super::*;
+use crate::state::send_failed_line;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase D3b / slice G1: `getSupergroupMembers` (TDLib 1.8.67,
@@ -17,6 +18,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         query: &str,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            self.session.groups.supergroup_members.insert(
+                (chat_id.0, filter),
+                SupergroupMembersFetch::Failed(send_failed_line("Could not load members")),
+            );
             return Err(ConnectSendError::InvalidRequest);
         }
         if filter.requires_restrict_right() && !self.session.chat_can_restrict_members(chat_id) {
@@ -64,7 +69,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             200,
         )) {
             self.session.requests.take(extra);
-            self.session.groups.supergroup_members.remove(&key);
+            // A refused send is a failed list with its Retry, not a
+            // "Loading members" nothing will end.
+            self.session.groups.supergroup_members.insert(
+                key,
+                SupergroupMembersFetch::Failed(send_failed_line("Could not load members")),
+            );
             self.session.groups.member_asks.remove(&key);
             return Err(err);
         }
@@ -94,6 +104,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            self.session.groups.basic_group_members.insert(
+                chat_id.0,
+                SupergroupMembersFetch::Failed(send_failed_line("Could not load members")),
+            );
             return Err(ConnectSendError::InvalidRequest);
         }
         let basic_group_id = match self.session.chats.get(&chat_id.0) {
@@ -121,7 +135,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&get_basic_group_full_info(extra, basic_group_id))
         {
             self.session.requests.take(extra);
-            self.session.groups.basic_group_members.remove(&chat_id.0);
+            self.session.groups.basic_group_members.insert(
+                chat_id.0,
+                SupergroupMembersFetch::Failed(send_failed_line("Could not load members")),
+            );
             return Err(err);
         }
         Ok(Some(extra))

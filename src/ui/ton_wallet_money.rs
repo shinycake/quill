@@ -78,6 +78,17 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Retry of a failed first page of the Money list.
+    fn retry_money(&mut self, tab: MoneyTab, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = match tab {
+                MoneyTab::Transactions => live.driver.fetch_wallet_history(false),
+                MoneyTab::Collectibles => live.driver.fetch_wallet_nfts(false),
+            };
+        }
+        cx.notify();
+    }
+
     fn load_more_money(&mut self, tab: MoneyTab, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let _ = match tab {
@@ -409,6 +420,17 @@ fn overview(
     };
     if let Some(error) = error {
         body = body.child(div().text_sm().child(error));
+        // A first page that failed has nothing shown to page from: Retry asks
+        // for it again (a failed next page retries through Load more).
+        if empty && !loading {
+            let tab = money.tab;
+            body = body.child(
+                Button::new("money-retry")
+                    .label(tr(keys::Q_MONEY_RETRY))
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| this.retry_money(tab, cx))),
+            );
+        }
     }
     if loading && empty {
         body = body.child(

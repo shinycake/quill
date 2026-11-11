@@ -236,6 +236,7 @@ impl QuillApp {
             return false;
         }
         if self.frame.window_active.get()
+            && !self.refused_while_locked()
             && let Some(live) = self.live.as_mut()
         {
             let _ = live.driver.poll_chat_event_log(chat_id);
@@ -459,9 +460,13 @@ impl QuillApp {
         if let Some(page) = self.admin.event_log_page.as_ref() {
             page.autoload.set(None);
         }
-        let mut shown = self.admin.event_log_ids.borrow_mut();
-        if !shown.is_empty() {
+        let was_shown = {
+            let mut shown = self.admin.event_log_ids.borrow_mut();
+            let was_shown = !shown.is_empty();
             shown.clear();
+            was_shown
+        };
+        if was_shown {
             self.admin.event_log_list.reset(0);
         }
     }
@@ -479,25 +484,27 @@ impl QuillApp {
         let entries: Rc<Vec<LogEntry>> = Rc::new(self.event_log_entries(&chronological));
         let ids: Vec<i64> = entries.iter().map(|entry| entry.id).collect();
         let state = self.admin.event_log_list.clone();
-        {
-            let mut shown = self.admin.event_log_ids.borrow_mut();
-            match plan_sync(&shown, &ids) {
-                ListSync::Keep => {}
-                ListSync::Reset => state.reset(ids.len()),
-                ListSync::Grow { older, newer } => {
-                    let before = shown.len();
-                    if older > 0 {
-                        state.splice(0..0, older);
-                        // The old first row may have lost its day label.
-                        state.remeasure_items(older..older.saturating_add(1));
-                    }
-                    if newer > 0 {
-                        let end = older.saturating_add(before);
-                        state.splice(end..end, newer);
-                    }
+        // The borrow ends before the list is touched.
+        let (plan, before) = {
+            let shown = self.admin.event_log_ids.borrow();
+            (plan_sync(&shown, &ids), shown.len())
+        };
+        let count = ids.len();
+        *self.admin.event_log_ids.borrow_mut() = ids;
+        match plan {
+            ListSync::Keep => {}
+            ListSync::Reset => state.reset(count),
+            ListSync::Grow { older, newer } => {
+                if older > 0 {
+                    state.splice(0..0, older);
+                    // The old first row may have lost its day label.
+                    state.remeasure_items(older..older.saturating_add(1));
+                }
+                if newer > 0 {
+                    let end = older.saturating_add(before);
+                    state.splice(end..end, newer);
                 }
             }
-            *shown = ids;
         }
         // Only once the list has been laid out: before that every offset is 0.
         let laid_out = state.viewport_bounds().size.height > px(0.);

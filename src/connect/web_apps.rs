@@ -357,11 +357,31 @@ impl<S: JsonSender> ConnectDriver<S> {
         if grossing.is_loading() || grossing.data().is_some_and(|bots| !bots.is_empty()) {
             return Ok(None);
         }
-        let extra = self.web_app_extra(RequestPurpose::GetGrossingWebAppBots, None)?;
+        let extra = match self.web_app_extra(RequestPurpose::GetGrossingWebAppBots, None) {
+            Ok(extra) => extra,
+            Err(err) => {
+                self.fail_grossing_send();
+                return Err(err);
+            }
+        };
         let json = get_grossing_web_app_bots(extra, GROSSING_APPS_LIMIT);
-        let id = self.send_json_request(extra, &json)?;
+        // The list waits for this request's answer and no other; a refused
+        // send is a failed list with its Retry, not "Loading apps".
         self.session.bots.web_apps.grossing.begin();
-        Ok(Some(id))
+        self.session.bots.web_apps.grossing.sent(extra);
+        match self.send_json_request(extra, &json) {
+            Ok(id) => Ok(Some(id)),
+            Err(err) => {
+                self.fail_grossing_send();
+                Err(err)
+            }
+        }
+    }
+
+    fn fail_grossing_send(&mut self) {
+        self.session.bots.web_apps.grossing.fail(crate::lang::tr(
+            crate::lang::keys::Q_MEDIA_COULD_NOT_LOAD_APPS,
+        ));
     }
 
     /// `sendWebAppCustomRequest` for `web_app_invoke_custom_method`;
