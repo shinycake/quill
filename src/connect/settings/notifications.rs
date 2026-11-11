@@ -339,7 +339,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .sender
             .send_json(&set_scope_notification_settings(extra, scope, settings))
         {
-            Ok(()) => Ok(extra),
+            Ok(()) => {
+                self.session.show_scope_save(scope, extra, settings);
+                Ok(extra)
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)
@@ -364,7 +367,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .sender
             .send_json(&set_reaction_notification_settings(extra, settings))
         {
-            Ok(()) => Ok(extra),
+            Ok(()) => {
+                self.session.show_reaction_save(extra, settings);
+                Ok(extra)
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)

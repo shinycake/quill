@@ -24,8 +24,6 @@ pub(crate) struct ShareUi {
     pub(super) forward_result: Option<ForwardResult>,
     /// Text of a share link while its chat chooser is open.
     pub(super) link_text: Option<String>,
-    /// The attach menu's Contact / Location panel.
-    pub(super) content_dialog: Option<ShareContentDialog>,
 }
 
 impl ShareUi {
@@ -48,7 +46,6 @@ impl ShareUi {
             focus_search: false,
             forward_result: None,
             link_text: None,
-            content_dialog: None,
         }
     }
 }

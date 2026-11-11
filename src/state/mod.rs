@@ -58,6 +58,7 @@ use std::time::Instant;
 
 mod account_notices;
 mod acks;
+pub mod answers;
 mod business_bot_bar;
 mod call_types;
 mod chat_activity;
@@ -80,6 +81,7 @@ mod logout_notes;
 mod map_thumbs;
 mod media_library;
 mod member_list;
+pub mod optimistic;
 mod ownership_types;
 mod paging;
 mod photo_gallery;

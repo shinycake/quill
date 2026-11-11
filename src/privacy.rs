@@ -7,7 +7,9 @@
 
 pub mod prefs;
 
+use crate::ids::RequestId;
 use crate::telegram::requests::PrivacyWho;
+use crate::telegram::requests_privacy::PrivacySettingKey;
 use serde_json::Value;
 
 /// Slice S3: one parsed `UserPrivacySettingRule` — the constructor name
@@ -182,12 +184,186 @@ impl PrivacyRuleDetail {
 
 /// Slice S3: fetch state for one privacy rule key — the Privacy screen
 /// keys "still loading" vs "loaded" vs "failed" off this, never off the
-/// rule map.
+/// rule map. A request in the state carries its id, and its answer applies
+/// only while that id is still the key's live request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrivacyKeyState {
-    Loading,
+    /// `getUserPrivacySettingRules` is out.
+    Loading(RequestId),
     Ready(PrivacyRuleDetail),
+    /// `setUserPrivacySettingRules` is out: `detail` shows at once (the
+    /// live save, under `request`). `confirmed` is the last rule the
+    /// server is known to hold (the one before the first unanswered save,
+    /// moved forward as an older save's `ok` arrives) and comes back if the
+    /// live save is refused. `earlier` are the older saves still out.
+    Saving {
+        detail: PrivacyRuleDetail,
+        confirmed: PrivacyRuleDetail,
+        request: RequestId,
+        earlier: Vec<(RequestId, PrivacyRuleDetail)>,
+    },
+    /// The last save was refused; `detail` is what the server kept, so the
+    /// rule stays editable and the editor shows `error`.
+    SaveFailed {
+        detail: PrivacyRuleDetail,
+        error: String,
+    },
+    /// The rule could not be loaded.
     Failed,
+}
+
+impl PrivacyKeyState {
+    /// The rule as it shows now: settled, being saved, or kept after a
+    /// refused save.
+    pub fn detail(&self) -> Option<&PrivacyRuleDetail> {
+        match self {
+            Self::Ready(detail) | Self::Saving { detail, .. } | Self::SaveFailed { detail, .. } => {
+                Some(detail)
+            }
+            Self::Loading(_) | Self::Failed => None,
+        }
+    }
+
+    /// The refusal of the last save, until the next edit.
+    pub fn save_error(&self) -> Option<&str> {
+        match self {
+            Self::SaveFailed { error, .. } => Some(error),
+            _ => None,
+        }
+    }
+
+    /// The load or save request that decides this state's next answer.
+    fn request(&self) -> Option<RequestId> {
+        match self {
+            Self::Loading(request) | Self::Saving { request, .. } => Some(*request),
+            _ => None,
+        }
+    }
+}
+
+impl crate::state::SettingsState {
+    /// A load answer for `key` applies only while it is the key's live
+    /// request: a save or an update since then made it stale.
+    pub fn finish_privacy_load(
+        &mut self,
+        key: PrivacySettingKey,
+        request: Option<RequestId>,
+        detail: PrivacyRuleDetail,
+    ) -> bool {
+        let live = matches!(self.privacy.get(&key), Some(PrivacyKeyState::Loading(id)) if Some(*id) == request);
+        if live {
+            self.privacy.insert(key, PrivacyKeyState::Ready(detail));
+        }
+        live
+    }
+
+    /// A save answered `ok`. The live save's rule is the server's now; an
+    /// older save's `ok` moves `confirmed` up to that save's rule (and past
+    /// every save sent before it).
+    pub fn finish_privacy_save(&mut self, key: PrivacySettingKey, request: Option<RequestId>) {
+        let Some(PrivacyKeyState::Saving {
+            detail,
+            confirmed,
+            request: live,
+            earlier,
+        }) = self.privacy.get_mut(&key)
+        else {
+            return;
+        };
+        if Some(*live) == request {
+            let detail = detail.clone();
+            self.privacy.insert(key, PrivacyKeyState::Ready(detail));
+        } else if let Some(at) = earlier.iter().position(|(id, _)| Some(*id) == request)
+            && let Some((_, accepted)) = earlier.drain(..=at).next_back()
+        {
+            *confirmed = accepted;
+        }
+    }
+
+    /// A save was refused. The live save's refusal puts the key back to
+    /// `confirmed`, what the server kept, and says why; it returns the
+    /// detail the key shows now (the call rules mirror it). An older save's
+    /// refusal only forgets that save: the live one is still out.
+    pub fn fail_privacy_save(
+        &mut self,
+        key: PrivacySettingKey,
+        request: Option<RequestId>,
+        error: String,
+    ) -> Option<PrivacyRuleDetail> {
+        let Some(PrivacyKeyState::Saving {
+            confirmed,
+            request: live,
+            earlier,
+            ..
+        }) = self.privacy.get_mut(&key)
+        else {
+            return None;
+        };
+        if Some(*live) != request {
+            earlier.retain(|(id, _)| Some(*id) != request);
+            return None;
+        }
+        let detail = confirmed.clone();
+        self.privacy.insert(
+            key,
+            PrivacyKeyState::SaveFailed {
+                detail: detail.clone(),
+                error,
+            },
+        );
+        Some(detail)
+    }
+
+    /// An edit goes out: the new rule shows at once. A save already in
+    /// flight stays in `earlier` and the confirmed rule is kept, so a
+    /// refusal restores what the server holds, never an edit it has not
+    /// accepted.
+    pub fn begin_privacy_save(
+        &mut self,
+        key: PrivacySettingKey,
+        detail: PrivacyRuleDetail,
+        request: RequestId,
+    ) {
+        let (confirmed, earlier) = match self.privacy.remove(&key) {
+            Some(PrivacyKeyState::Saving {
+                detail: older,
+                confirmed,
+                request: older_request,
+                mut earlier,
+            }) => {
+                earlier.push((older_request, older));
+                (confirmed, earlier)
+            }
+            Some(state) => (
+                state.detail().cloned().unwrap_or_else(|| detail.clone()),
+                Vec::new(),
+            ),
+            None => (detail.clone(), Vec::new()),
+        };
+        self.privacy.insert(
+            key,
+            PrivacyKeyState::Saving {
+                detail,
+                confirmed,
+                request,
+                earlier,
+            },
+        );
+    }
+
+    /// A load goes out. A rule being saved, or already loading, is left
+    /// alone: its own answer settles it.
+    pub fn begin_privacy_load(&mut self, key: PrivacySettingKey, request: RequestId) -> bool {
+        if self
+            .privacy
+            .get(&key)
+            .is_some_and(|s| s.request().is_some())
+        {
+            return false;
+        }
+        self.privacy.insert(key, PrivacyKeyState::Loading(request));
+        true
+    }
 }
 
 /// B13: `giftSettings` (schema 1.8.67, :1445) — whether the gift button
@@ -299,7 +475,8 @@ pub fn session_ttl_label(days: i32) -> String {
 /// B13: fetch state of the new-chat privacy row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NewChatPrivacyState {
-    Loading,
+    /// The first fetch is out; only its answer (or error) leaves the stage.
+    Loading(RequestId),
     Ready(NewChatPrivacy),
     Failed,
 }
@@ -338,6 +515,9 @@ mod tests {
             }),
             None,
         );
+        session
+            .settings
+            .begin_privacy_load(PrivacySettingKey::ShowStatus, extra);
         apply_json(
             &mut session,
             &seq,
@@ -378,37 +558,167 @@ mod tests {
         );
     }
 
-    /// Slice S3: a failed privacy `set` marks the key Failed so the UI
-    /// shows it instead of the stale optimistic value.
+    fn error_json(extra: RequestId) -> String {
+        format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"PRIVACY_TOO_LONG"}}"#,
+            extra.0,
+        )
+    }
+
+    fn who(who: PrivacyWho) -> PrivacyRuleDetail {
+        PrivacyRuleDetail {
+            who: Some(who),
+            ..Default::default()
+        }
+    }
+
+    /// Sweep 04-046, 12-013, 04-045: a refused save puts back what the
+    /// server kept, keeps the rule editable and says why; the mirrored call
+    /// rule goes back too.
     #[test]
-    fn privacy_set_failure_marks_failed() {
+    fn privacy_set_failure_restores_the_kept_rule_and_stays_editable() {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
-        session.settings.privacy.insert(
-            PrivacySettingKey::ShowPhoneNumber,
-            PrivacyKeyState::Ready(PrivacyRuleDetail {
-                who: Some(PrivacyWho::Nobody),
-                ..Default::default()
-            }),
-        );
+        let key = PrivacySettingKey::AllowCalls;
+        session
+            .settings
+            .privacy
+            .insert(key, PrivacyKeyState::Ready(who(PrivacyWho::Nobody)));
+        session.calls.privacy_allow_calls = Some(PrivacyWho::Nobody);
         let extra = session.request(
-            RequestPurpose::Settings(SettingsPurpose::SetPrivacyRules {
-                key: PrivacySettingKey::ShowPhoneNumber,
-            }),
+            RequestPurpose::Settings(SettingsPurpose::SetPrivacyRules { key }),
             None,
         );
+        session
+            .settings
+            .begin_privacy_save(key, who(PrivacyWho::Everybody), extra);
+        session.mirror_call_privacy(key, &who(PrivacyWho::Everybody));
+        apply_json(&mut session, &seq, &sink, &error_json(extra));
+        let state = &session.settings.privacy[&key];
+        assert_eq!(state.detail(), Some(&who(PrivacyWho::Nobody)));
+        assert!(state.save_error().is_some());
+        assert_eq!(session.calls.privacy_allow_calls, Some(PrivacyWho::Nobody));
+    }
+
+    /// Two saves in flight: the first one's refusal does not touch the
+    /// second one's value, and the second one's `ok` settles it.
+    #[test]
+    fn an_older_privacy_save_does_not_decide_the_newer_one() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let key = PrivacySettingKey::ShowStatus;
+        session
+            .settings
+            .privacy
+            .insert(key, PrivacyKeyState::Ready(who(PrivacyWho::Nobody)));
+        let purpose = RequestPurpose::Settings(SettingsPurpose::SetPrivacyRules { key });
+        let first = session.request(purpose, None);
+        session
+            .settings
+            .begin_privacy_save(key, who(PrivacyWho::Contacts), first);
+        let second = session.request(purpose, None);
+        session
+            .settings
+            .begin_privacy_save(key, who(PrivacyWho::Everybody), second);
+        apply_json(&mut session, &seq, &sink, &error_json(first));
+        assert_eq!(
+            session.settings.privacy[&key].detail(),
+            Some(&who(PrivacyWho::Everybody))
+        );
+        assert!(matches!(
+            session.settings.privacy[&key],
+            PrivacyKeyState::Saving { .. }
+        ));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, second.0),
+        );
+        assert_eq!(
+            session.settings.privacy[&key],
+            PrivacyKeyState::Ready(who(PrivacyWho::Everybody))
+        );
+    }
+
+    /// Two quick edits, both refused: the key goes back to what the server
+    /// kept, not to the first edit (04-046). An accepted first edit is the
+    /// rule the second one's refusal restores.
+    #[test]
+    fn a_refused_second_save_restores_what_the_server_kept() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let key = PrivacySettingKey::ShowStatus;
+        let purpose = RequestPurpose::Settings(SettingsPurpose::SetPrivacyRules { key });
+        for first_accepted in [false, true] {
+            session
+                .settings
+                .privacy
+                .insert(key, PrivacyKeyState::Ready(who(PrivacyWho::Nobody)));
+            let first = session.request(purpose, None);
+            session
+                .settings
+                .begin_privacy_save(key, who(PrivacyWho::Contacts), first);
+            let second = session.request(purpose, None);
+            session
+                .settings
+                .begin_privacy_save(key, who(PrivacyWho::Everybody), second);
+            if first_accepted {
+                apply_json(
+                    &mut session,
+                    &seq,
+                    &sink,
+                    &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, first.0),
+                );
+            } else {
+                apply_json(&mut session, &seq, &sink, &error_json(first));
+            }
+            apply_json(&mut session, &seq, &sink, &error_json(second));
+            let kept = if first_accepted {
+                PrivacyWho::Contacts
+            } else {
+                PrivacyWho::Nobody
+            };
+            assert_eq!(session.settings.privacy[&key].detail(), Some(&who(kept)));
+            assert!(session.settings.privacy[&key].save_error().is_some());
+        }
+    }
+
+    /// A late `getUserPrivacySettingRules` answer never overwrites a newer
+    /// optimistic value (04-046).
+    #[test]
+    fn a_late_privacy_load_does_not_overwrite_a_newer_save() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let key = PrivacySettingKey::ShowStatus;
+        let load = session.request(
+            RequestPurpose::Settings(SettingsPurpose::GetPrivacyRules { key }),
+            None,
+        );
+        session.settings.begin_privacy_load(key, load);
+        let set = session.request(
+            RequestPurpose::Settings(SettingsPurpose::SetPrivacyRules { key }),
+            None,
+        );
+        session
+            .settings
+            .privacy
+            .insert(key, PrivacyKeyState::Ready(who(PrivacyWho::Nobody)));
+        session
+            .settings
+            .begin_privacy_save(key, who(PrivacyWho::Everybody), set);
         apply_json(
             &mut session,
             &seq,
             &sink,
             &format!(
-                r#"{{"@type":"error","@extra":"{}","code":400,"message":"PRIVACY_TOO_LONG"}}"#,
-                extra.0,
+                r#"{{"@type":"userPrivacySettingRules","@extra":"{}","rules":[{{"@type":"userPrivacySettingRuleAllowContacts"}}]}}"#,
+                load.0
             ),
         );
         assert_eq!(
-            session.settings.privacy[&PrivacySettingKey::ShowPhoneNumber],
-            PrivacyKeyState::Failed
+            session.settings.privacy[&key].detail(),
+            Some(&who(PrivacyWho::Everybody))
         );
     }
 
@@ -512,6 +822,57 @@ mod tests {
         assert_eq!(session.settings.read_date_stage, ReadDateStage::Idle);
     }
 
+    /// A page of a list that restarted since (or whose data was dropped)
+    /// never extends the new one (05-132).
+    #[test]
+    fn a_late_blocked_page_is_matched_to_its_list() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let old = session.request(
+            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
+                offset: 2,
+                generation: 0,
+            }),
+            None,
+        );
+        // The list restarted: page 0 of generation 1 is in.
+        session.settings.restart_blocked_list();
+        session.settings.blocked_senders.succeed(vec![61, 62]);
+        session.settings.blocked_total = 2;
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"messageSenders","@extra":"{}","total_count":9,"senders":[{{"@type":"messageSenderUser","user_id":62}},{{"@type":"messageSenderUser","user_id":70}}]}}"#,
+                old.0,
+            ),
+        );
+        assert_eq!(session.settings.blocked_senders.data(), Some(&vec![61, 62]));
+        assert_eq!(session.settings.blocked_total, 2);
+        // A page of the live list appends without repeating an id.
+        let live = session.request(
+            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
+                offset: 2,
+                generation: session.settings.blocked_generation,
+            }),
+            None,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"messageSenders","@extra":"{}","total_count":3,"senders":[{{"@type":"messageSenderUser","user_id":62}},{{"@type":"messageSenderUser","user_id":63}}]}}"#,
+                live.0,
+            ),
+        );
+        assert_eq!(
+            session.settings.blocked_senders.data(),
+            Some(&vec![61, 62, 63])
+        );
+    }
+
     /// Slice S3: blocked-senders paging — page 0 replaces, later pages
     /// append; `total_count` tracks the server total.
     #[test]
@@ -519,7 +880,10 @@ mod tests {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
         let extra = session.request(
-            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders { offset: 0 }),
+            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
+                offset: 0,
+                generation: 0,
+            }),
             None,
         );
         apply_json(
@@ -536,7 +900,10 @@ mod tests {
         assert!(!session.settings.blocked_senders.is_loading());
 
         let extra = session.request(
-            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders { offset: 2 }),
+            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
+                offset: 2,
+                generation: 0,
+            }),
             None,
         );
         apply_json(

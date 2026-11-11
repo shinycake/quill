@@ -135,10 +135,8 @@ impl QuillApp {
         let current: Option<PrivacyWho> = self
             .session()
             .and_then(|s| s.settings.privacy.get(&key))
-            .and_then(|st| match st {
-                quill::privacy::PrivacyKeyState::Ready(d) => d.who,
-                _ => None,
-            });
+            .and_then(|st| st.detail())
+            .and_then(|d| d.who);
         let mut block = div().flex().flex_col().gap_1().mt_2();
         block = block.child(
             div()
@@ -871,7 +869,7 @@ impl QuillApp {
                     Button::new("password-check-submit")
                         .label(tr(keys::Q_PREFS_CHECK))
                         .primary()
-                        .disabled(check == PasswordCheck::Checking)
+                        .disabled(check.is_checking())
                         .on_click({
                             let field = field.clone();
                             cx.listener(move |this, _, window, cx| {
@@ -980,7 +978,7 @@ mod dispatch_tests {
     use gpui_kit::component::Root;
     use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
     use quill::file_prefs::{self, FilePrefs, OpenWarning};
-    use quill::privacy::{NewChatPrivacyState, PrivacyKeyState};
+    use quill::privacy::NewChatPrivacyState;
     use quill::telegram::requests::PrivacyWho;
     use quill::telegram::requests_privacy::PrivacySettingKey;
 
@@ -1008,10 +1006,13 @@ mod dispatch_tests {
     }
 
     fn rule_who(app: &QuillApp, key: PrivacySettingKey) -> Option<PrivacyWho> {
-        match app.demo_session.as_ref()?.settings.privacy.get(&key)? {
-            PrivacyKeyState::Ready(detail) => detail.who,
-            _ => None,
-        }
+        app.demo_session
+            .as_ref()?
+            .settings
+            .privacy
+            .get(&key)?
+            .detail()?
+            .who
     }
 
     #[gpui_kit::test]
@@ -1127,7 +1128,9 @@ mod dispatch_tests {
         app.read_with(vcx, |app, _| {
             let session = app.demo_session.as_ref().unwrap();
             let detail = |key| match session.settings.privacy.get(&key) {
-                Some(PrivacyKeyState::Ready(d)) => d.clone(),
+                Some(state) if state.detail().is_some() => {
+                    state.detail().cloned().unwrap_or_default()
+                }
                 other => panic!("{other:?}"),
             };
             let invites = detail(PrivacySettingKey::AllowChatInvites);

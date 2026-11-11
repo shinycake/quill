@@ -47,6 +47,8 @@ impl Session {
         self.apply_hang_up_ok(pending);
         self.apply_communities_ok(pending);
         self.settle_permissions_save(pending);
+        self.apply_backgrounds_ok(pending);
+        self.settle_notification_save(pending, false);
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::Messages(MessagesPurpose::EditMessageSchedulingState {
                 message_id,

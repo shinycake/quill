@@ -50,6 +50,11 @@ pub(crate) struct DialogUi {
     pub(super) chat_look_dialog: Option<super::chat_look_ui::ChatLookDialog>,
     /// The account wallpaper preview (gallery, `bg/` link, file).
     pub(super) wallpaper_preview: Option<super::wallpaper_preview::WallpaperPreview>,
+    /// `setDefaultBackground` requests sent by Apply, still unanswered.
+    /// They outlive the preview box (it closes at Apply, like tdesktop's),
+    /// so the answer still flips the appearance; the account leaving the
+    /// screen drops them with this struct.
+    pub(super) wallpaper_applies: Vec<quill::ids::RequestId>,
     /// An installed wallpaper waiting for "Delete" to be confirmed.
     pub(super) wallpaper_remove: Option<i64>,
     /// The "Export chat history" box.
@@ -138,6 +143,7 @@ impl DialogUi {
             block_bar_dialog: None,
             chat_look_dialog: None,
             wallpaper_preview: None,
+            wallpaper_applies: Vec::new(),
             wallpaper_remove: None,
             chat_export_dialog: None,
             chat_export_progress_hidden: false,

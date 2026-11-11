@@ -31,7 +31,6 @@ CallSummary::log_sent
 CallUi::window_opening
 CameraDraft::starting
 Ceremony::finished
-ChatAppearanceDialog::sent
 ChatListState::archive_settings_loading
 ChatSummary::my_rights_fetched
 ChatSwipeFacts::is_saved

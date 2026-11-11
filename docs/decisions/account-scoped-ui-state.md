@@ -4906,8 +4906,8 @@ Links, mini apps, location, and TDLib state and connection.
   (`OlderEnd::Failed`; 05-261, 05-263, 05-262). A sponsored report answer is
   taken only for the request the flow waits on (05-249). A deletion in another
   chat leaves the search jump alone (06-005). `updateDefaultBackground` with a
-  null background removes the wallpaper and a refused delete puts it back
-  (06-032). A replacement hub takes over a stopped one's routes and stopped
+  null background removes the wallpaper, and a refused delete keeps it
+  (06-032; since the s3-settings merge the delete applies on `ok`, 02-087). A replacement hub takes over a stopped one's routes and stopped
   flag and its `seq` counter, which the sessions' out-of-order check needs
   (06-065). A profile change that fails after Save closed its dialog
   shows as a note (05-155).
@@ -5383,3 +5383,84 @@ land and the typed form was gone.
   `deferred_caption`, the effect and reply-target units, `paid_messages_guard`,
   `notes` and `send_to_menu_section`. None waits on time: waits
   are compared against explicit instants.
+### Sweep fixes (s3-settings)
+
+- **Answers under their request.** `state::answers::Answers<T>` files the
+  answer of a request a box waits for under that request's id; the box takes
+  its own and everything else is dropped. The wallpaper preview is one
+  `PreviewStage` (`Editing`, `Sharing { request }`, `Copied`, `Failed`).
+  Apply closes the box at once, like tdesktop's `applyForEveryone`; its
+  request lives in `DialogUi::wallpaper_applies` (per account, dropped with
+  the screen), so the `setDefaultBackground` answer flips the Telegram
+  wallpaper whether or not the box is still open, and a refusal is a
+  status note. Opening or closing a preview no longer clears
+  `background_answers` (answers are matched by id). A Share link lands only for the preview that asked, so a
+  closed or reopened preview never copies a stale link (14-020, 14-021,
+  02-089). Wallpaper deletions (`deleteDefaultBackground`,
+  `removeInstalledBackground`, `deleteChatBackground`) change the lists when
+  `ok` arrives, so a refusal leaves them (02-087; the first two purposes now
+  carry what they remove). At merge time this replaced the earlier sweep's
+  optimistic remove (`removed_default_backgrounds`, restored on refusal);
+  its test now checks that a refusal keeps the wallpaper. The chat look
+  box kept the earlier sweep's acks-matched `LookStage`; this branch's
+  counter-based `LookStage::Awaiting(LookWait)` was dropped.
+- **Chat Appearance.** `AppearanceStage` (`Editing`, `NeedsBoosts`,
+  `Applying { waiting, failed }`, `Applied`, `Failed`) replaces `sent`,
+  `needs_boosts` and the session-wide `appearance_error`. The driver checks the
+  whole plan (values, and that the emoji pack may be set) before sending any
+  part, returns every request it sent, and the four purposes (name, profile,
+  status, pack) answer under their own ids; editing the draft ends the stage
+  (08-050, 08-052). The boost-level message of a boosted chat's wallpaper is
+  `LookStage::Blocked` of the chat look box, not the wallpaper pages' shared
+  error (08-053).
+- **Privacy rules.** `PrivacyKeyState` is `Loading(request)`, `Ready`,
+  `Saving { detail, confirmed, request, earlier }`, `SaveFailed { detail, error }` or
+  `Failed`. A refused save puts back what the server kept (and the call rules
+  mirrored from it), keeps the rule editable and says why in the editor;
+  a load answer or error applies only to the key's live request; an update
+  while a save is out is its echo (04-046, 04-045, 12-013). `confirmed` is the rule the server is
+  known to hold: it stays through a second save, moves forward when an
+  older save's `ok` arrives (`earlier` keeps what those saves sent) and is
+  what a refusal of the live save restores, never an unconfirmed edit. The remembered
+  password check is `Checking { request }` and dismissing drops it (05-255).
+  New-chat privacy keeps its value while it refreshes and drops a refresh
+  that is older than the last save (02-177). A blocked-senders page carries
+  the list generation it extends; pages of an older list are dropped and
+  appended ids are deduped (05-132).
+- **Notification saves.** `OptimisticSaves` keeps scope and reaction
+  notification settings sent whole: the edit shows at once, so a second edit
+  starts from it, updates are the echo while a save is out, and the last
+  save's refusal puts back the settings the server holds: the value of the
+  last accepted save of the burst, else the one from before it (11-p5-016). The tray's
+  Disable notifications is the app's setting: every connected account takes it
+  (11-p5-009). Leaving the Notifications page ends the corner preview
+  (11-p5-008). A mute preset closes the mute box only for its own chat
+  (08-102; the four mute flags are one `Option<MuteBox>` with a
+  `MuteSection` — collapsed, custom row or sound picker, one at a time); the custom-duration fields are
+  made in the window that asked (11-p5-015).
+- **Language page.** The pack list is asked whenever this session was never
+  asked, not once per visit, and a failed list is drawn with Retry (a failed
+  send is `Failed`, so nothing asks again from render) (10-156, 10-157). A
+  deleted recent pack leaves `LanguageUi::recent` at once; the box keeps it
+  with its place for Restore, so every save writes one list (10-155).
+- **Settings window.** The log-out box closes only when the request went out
+  (13-065). Undo of an agent's reaction or send marks the entry only when the
+  change went out, and the delete does not touch the user's forward draft:
+  `delete_messages` is the delete, `delete_selection` adds the selection-mode
+  exit (13-066, 13-067, 13-068). The contact chooser is a field of `ChatUi`,
+  so it goes with its chat and sends to it (13-071). The composer's context
+  menu is built in the window of the click (13-056).
+- **Off the UI thread.** A wallpaper render that panics finishes its job as a
+  wallpaper that cannot be drawn, in the worker and in the inline fallback
+  (14-023). Switching a downloading dictionary off ends the row at once and
+  drops the progress loop; the blocking read finishes alone and its result is
+  not used (05-003). The Windows spell backend's `judge` answers `None` when
+  its thread did not answer in time, and `SpellChecker` neither flags nor
+  caches that word (05-007).
+- **Review fixes.** A failed installed wallpaper list shows only its Retry
+  row in the chat look box (the page-level error line is hidden while the
+  list failed); a failed language list request carries a translated generic
+  message.
+- **Skipped.** 13-069: `AgentUi::pick_account` already resets the activity
+  filter wherever `picked` changes, with a test
+  (`picking_another_account_resets_the_activity_filter`).

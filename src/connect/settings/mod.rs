@@ -45,14 +45,25 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session
+        let busy = self
+            .session
             .settings
             .privacy
-            .insert(key, PrivacyKeyState::Loading);
+            .get(&key)
+            .is_some_and(|state| {
+                matches!(
+                    state,
+                    PrivacyKeyState::Loading(_) | PrivacyKeyState::Saving { .. }
+                )
+            });
+        if busy {
+            return Ok(());
+        }
         let extra = self.session.request(
             RequestPurpose::Settings(SettingsPurpose::GetPrivacyRules { key }),
             None,
         );
+        self.session.settings.begin_privacy_load(key, extra);
         if let Err(err) = self
             .sender
             .send_json(&get_privacy_rules(extra, key.td_type()))
@@ -88,17 +99,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&set_privacy_rules(extra, key.td_type(), rules))
         {
             self.session.requests.take(extra);
-            self.session
-                .settings
-                .privacy
-                .insert(key, PrivacyKeyState::Failed);
             return Err(err);
         }
         self.session.mirror_call_privacy(key, &detail);
-        self.session
-            .settings
-            .privacy
-            .insert(key, PrivacyKeyState::Ready(detail));
+        self.session.settings.begin_privacy_save(key, detail, extra);
         Ok(extra)
     }
 
@@ -164,6 +168,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // One page at a time: the answer of the one out decides the next.
+        if self.session.settings.blocked_senders.is_loading() {
+            return Ok(());
+        }
         let offset = self
             .session
             .settings
@@ -171,10 +179,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .data()
             .map(|list| list.len())
             .unwrap_or(0);
+        if offset == 0 {
+            self.session.settings.restart_blocked_list();
+        }
         self.session.settings.blocked_senders.begin();
         let extra = self.session.request(
             RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
                 offset: offset as i32,
+                generation: self.session.settings.blocked_generation,
             }),
             None,
         );

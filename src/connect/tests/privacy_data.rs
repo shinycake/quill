@@ -56,10 +56,10 @@ fn new_chat_privacy_round_trip_keeps_the_paid_price() {
     // Writing before the answer would reset the paid-message price.
     assert_invalid(f.1.set_new_chat_privacy(false));
     f.1.fetch_new_chat_privacy().unwrap();
-    assert_eq!(
+    assert!(matches!(
         f.1.session.settings.privacy_data.new_chat,
-        Some(NewChatPrivacyState::Loading)
-    );
+        Some(NewChatPrivacyState::Loading(_))
+    ));
     let request = last_request(&f);
     assert_eq!(request["@type"], "getNewChatPrivacySettings");
     ingest(
@@ -96,6 +96,45 @@ fn new_chat_privacy_round_trip_keeps_the_paid_price() {
         Some(NewChatPrivacyState::Ready(s)) if s.allow_from_unknown
     ));
     assert!(f.1.session.settings.privacy_data.error.is_some());
+    cleanup(f);
+}
+
+#[test]
+fn a_refresh_keeps_the_value_and_an_older_answer_never_beats_a_save() {
+    let mut f = fixture();
+    f.1.fetch_new_chat_privacy().unwrap();
+    let first = last_request(&f);
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"newChatPrivacySettings","allow_new_chats_from_unknown_users":true,"incoming_paid_message_star_count":"25","@extra":"{}"}}"#,
+            extra_of(&first)
+        ),
+    );
+    // Reopening refreshes without turning the row back into Loading, and
+    // a second open while it is out sends nothing.
+    f.1.fetch_new_chat_privacy().unwrap();
+    let refresh = last_request(&f);
+    f.1.fetch_new_chat_privacy().unwrap();
+    assert_eq!(last_request(&f), refresh);
+    assert!(matches!(
+        f.1.session.settings.privacy_data.new_chat,
+        Some(NewChatPrivacyState::Ready(_))
+    ));
+    // A save goes out while the refresh is in flight; the refresh then
+    // answers with the old server value and must not overwrite the save.
+    f.1.set_new_chat_privacy(false).unwrap();
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"newChatPrivacySettings","allow_new_chats_from_unknown_users":true,"incoming_paid_message_star_count":"25","@extra":"{}"}}"#,
+            extra_of(&refresh)
+        ),
+    );
+    assert!(matches!(
+        f.1.session.settings.privacy_data.new_chat,
+        Some(NewChatPrivacyState::Ready(s)) if !s.allow_from_unknown
+    ));
     cleanup(f);
 }
 
@@ -242,6 +281,41 @@ fn network_usage_fetch_and_reset() {
 }
 
 #[test]
+fn a_late_password_answer_after_dismissing_changes_nothing() {
+    let mut f = fixture();
+    f.1.check_remembered_password("late").unwrap();
+    let request = last_request(&f);
+    // The box was dismissed before the answer: the check is Idle again.
+    f.1.session.settings.privacy_data.password_check = PasswordCheck::Idle;
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"recoveryEmailAddress","recovery_email_address":"a@b.c","@extra":"{}"}}"#,
+            extra_of(&request)
+        ),
+    );
+    assert_eq!(
+        f.1.session.settings.privacy_data.password_check,
+        PasswordCheck::Idle
+    );
+    f.1.check_remembered_password("late").unwrap();
+    let request = last_request(&f);
+    f.1.session.settings.privacy_data.password_check = PasswordCheck::Idle;
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"error","code":400,"message":"PASSWORD_HASH_INVALID","@extra":"{}"}}"#,
+            extra_of(&request)
+        ),
+    );
+    assert_eq!(
+        f.1.session.settings.privacy_data.password_check,
+        PasswordCheck::Idle
+    );
+    cleanup(f);
+}
+
+#[test]
 fn password_check_distinguishes_wrong_from_right_and_dismisses() {
     let mut f = fixture();
     assert_invalid(f.1.check_remembered_password(""));
@@ -255,9 +329,12 @@ fn password_check_distinguishes_wrong_from_right_and_dismisses() {
     let request = last_request(&f);
     assert_eq!(request["@type"], "getRecoveryEmailAddress");
     assert_eq!(request["password"], "wrong");
-    assert_eq!(
-        f.1.session.settings.privacy_data.password_check,
-        PasswordCheck::Checking
+    assert!(
+        f.1.session
+            .settings
+            .privacy_data
+            .password_check
+            .is_checking()
     );
     ingest(
         &mut f,

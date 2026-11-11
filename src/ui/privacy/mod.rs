@@ -585,10 +585,8 @@ impl QuillApp {
         let current: Option<PrivacyWho> = match target {
             PrivacyEditorTarget::Rule(key) => session
                 .and_then(|s| s.settings.privacy.get(&key))
-                .and_then(|st| match st {
-                    PrivacyKeyState::Ready(d) => d.who,
-                    _ => None,
-                }),
+                .and_then(|st| st.detail())
+                .and_then(|d| d.who),
             PrivacyEditorTarget::NewChat | PrivacyEditorTarget::FileOpen => None,
         };
         let mut body = div().flex().flex_col().gap_1();
@@ -601,6 +599,19 @@ impl QuillApp {
                     .text_color(cx.theme().muted_foreground)
                     .child(key.header()),
             );
+            if let Some(error) = session
+                .and_then(|s| s.settings.privacy.get(&key))
+                .and_then(|st| st.save_error())
+            {
+                body = body.child(
+                    div()
+                        .id("privacy-save-error")
+                        .text_xs()
+                        .px_1()
+                        .text_color(super::danger())
+                        .child(error.to_string()),
+                );
+            }
         }
         let options: &[PrivacyWho] = match target {
             PrivacyEditorTarget::Rule(key) => key.options(),
@@ -626,10 +637,7 @@ impl QuillApp {
             if key.has_exceptions() {
                 let detail = session
                     .and_then(|s| s.settings.privacy.get(&key))
-                    .and_then(|st| match st {
-                        PrivacyKeyState::Ready(d) => Some(d.clone()),
-                        _ => None,
-                    })
+                    .and_then(|st| st.detail().cloned())
                     .unwrap_or_default();
                 let (always, never) = detail.exception_counts();
                 body = body.child(self.privacy_exception_row(
@@ -846,9 +854,13 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
 /// `SettingsPrivacyKeyController` shows the mode plus exceptions).
 pub(crate) fn privacy_key_value(session: &Session, key: PrivacySettingKey) -> String {
     match session.settings.privacy.get(&key) {
-        None | Some(PrivacyKeyState::Loading) => tr(keys::Q_PREFS_LOADING).to_string(),
+        None | Some(PrivacyKeyState::Loading(_)) => tr(keys::Q_PREFS_LOADING).to_string(),
         Some(PrivacyKeyState::Failed) => tr(keys::Q_PREFS_COULDNT_LOAD).to_string(),
-        Some(PrivacyKeyState::Ready(detail)) => {
+        Some(
+            PrivacyKeyState::Ready(detail)
+            | PrivacyKeyState::Saving { detail, .. }
+            | PrivacyKeyState::SaveFailed { detail, .. },
+        ) => {
             let mut value = detail
                 .who
                 .map(|w| w.label().to_string())
@@ -865,7 +877,7 @@ pub(crate) fn privacy_key_value(session: &Session, key: PrivacySettingKey) -> St
 /// B13: the "Who can message me" row value (tdesktop Messages privacy).
 pub(crate) fn new_chat_privacy_value(session: &Session) -> String {
     match session.settings.privacy_data.new_chat {
-        None | Some(quill::privacy::NewChatPrivacyState::Loading) => {
+        None | Some(quill::privacy::NewChatPrivacyState::Loading(_)) => {
             tr(keys::Q_PREFS_LOADING).to_string()
         }
         Some(quill::privacy::NewChatPrivacyState::Failed) => {

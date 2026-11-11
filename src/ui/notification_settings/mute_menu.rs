@@ -6,10 +6,7 @@ use quill::lang::{keys, tr, tr_with, trn};
 
 impl QuillApp {
     pub(in crate::ui) fn close_mute_menu(&mut self, cx: &mut Context<Self>) {
-        self.notify.mute_menu_open = false;
-        self.notify.mute_chat = None;
-        self.notify.mute_custom_open = false;
-        self.notify.notif_sound_picker_open = false;
+        self.notify.mute_box = None;
         cx.notify();
     }
 
@@ -22,10 +19,16 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.open_mute_menu(cx);
-        self.notify.mute_chat = Some(chat_id);
+        // box-host: `open_mute_menu` above opened the box; this retargets it.
+        self.notify.mute_box = Some(MuteBox {
+            chat: Some(chat_id),
+            section: if custom {
+                MuteSection::Custom
+            } else {
+                MuteSection::SoundPicker
+            },
+        });
         self.ensure_chat_volume_slider(chat_id, cx);
-        self.notify.mute_custom_open = custom;
-        self.notify.notif_sound_picker_open = !custom;
         self.queue_mute_time_inputs(cx);
         cx.notify();
     }
@@ -35,12 +38,13 @@ impl QuillApp {
     /// window) does not retarget it.
     pub(in crate::ui) fn open_mute_menu(&mut self, cx: &mut Context<Self>) {
         let chat = self.session().and_then(|session| session.open_chat);
-        self.notify.mute_menu_open = true;
+        self.notify.mute_box = Some(MuteBox {
+            chat,
+            section: MuteSection::Collapsed,
+        });
         self.open_box(crate::ui::shell::DialogKind::MuteMenu);
-        self.notify.mute_chat = chat;
         self.notify.ttl_picker = None;
         self.folders.menu_chat = None;
-        self.notify.mute_custom_open = false;
         self.queue_mute_time_inputs(cx);
         if let Some(chat_id) = chat {
             self.ensure_chat_volume_slider(chat_id, cx);
@@ -54,8 +58,11 @@ impl QuillApp {
         mute_for: i32,
         cx: &mut Context<Self>,
     ) {
-        self.notify.mute_menu_open = false;
-        self.notify.mute_chat = None;
+        // A preset of this chat's own box closes it; muting a chat from a
+        // row, a swipe or a profile leaves another chat's box open.
+        if self.notify.mute_chat() == Some(chat_id) {
+            self.close_mute_menu(cx);
+        }
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.set_chat_mute_for(chat_id, mute_for);
             self.set_note(match result {
@@ -88,7 +95,7 @@ impl QuillApp {
     pub(in crate::ui) fn mute_menu_title(&self) -> String {
         let row_chat = self
             .notify
-            .mute_chat
+            .mute_chat()
             .and_then(|id| self.session()?.chats.get(&id.0));
         match row_chat {
             Some(chat) => format!("{} · {}", tr(keys::CHART_TITLE_MUTE), chat.title),
@@ -105,7 +112,7 @@ impl QuillApp {
     /// `NotificationChannelSecretChat` label with the peer's name.
     pub(in crate::ui) fn mute_menu_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let session = self.session();
-        let open_chat = self.notify.mute_chat;
+        let open_chat = self.notify.mute_chat();
         let open_chat_summary: Option<&ChatSummary> =
             open_chat.and_then(|id| session.as_ref()?.chats.get(&id.0));
         let chat_settings: ChatNotificationSettings = open_chat_summary
@@ -162,7 +169,7 @@ impl QuillApp {
             (tr(keys::Q_PREFS_FOREVER).to_string(), MUTE_FOREVER),
         ];
         let sound_disabled = !chat_settings.use_default_sound && chat_settings.sound_id == 0;
-        let custom_open = self.notify.mute_custom_open;
+        let custom_open = self.notify.mute_section() == MuteSection::Custom;
         let mut preset_row = div().id("mute-presets").flex().flex_wrap().gap_1();
         for (label, seconds) in presets {
             preset_row = preset_row.child(
@@ -186,8 +193,7 @@ impl QuillApp {
                 .label(tr(keys::Q_PREFS_CUSTOM))
                 .outline()
                 .on_click(cx.listener(|this, _, window, cx| {
-                    this.notify.mute_custom_open = !this.notify.mute_custom_open;
-                    if this.notify.mute_custom_open {
+                    if this.notify.toggle_mute_section(MuteSection::Custom) {
                         this.reset_mute_time_inputs(window, cx);
                     }
                     cx.notify();
@@ -239,7 +245,7 @@ impl QuillApp {
                                         let mute_for = this
                                             .mute_time_value(cx)
                                             .map_or(0, |custom| custom.mute_for());
-                                        this.notify.mute_custom_open = false;
+                                        this.notify.set_mute_section(MuteSection::Collapsed);
                                         this.apply_chat_mute(chat_id, mute_for, cx);
                                     }
                                 })),
@@ -322,16 +328,14 @@ impl QuillApp {
                     .child(
                         Button::new("notif-sound-picker-toggle")
                             .small()
-                            .label(if self.notify.notif_sound_picker_open {
+                            .label(if self.notify.mute_section() == MuteSection::SoundPicker {
                                 tr(keys::Q_PREFS_HIDE)
                             } else {
                                 tr(keys::Q_PREFS_CHANGE)
                             })
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.notify.notif_sound_picker_open =
-                                    !this.notify.notif_sound_picker_open;
-                                if this.notify.notif_sound_picker_open
+                                if this.notify.toggle_mute_section(MuteSection::SoundPicker)
                                     && let Some(live) = this.live.as_mut()
                                 {
                                     let _ = live.driver.maybe_fetch_notification_sounds();
@@ -340,7 +344,7 @@ impl QuillApp {
                             })),
                     ),
             );
-        if self.notify.notif_sound_picker_open
+        if self.notify.mute_section() == MuteSection::SoundPicker
             && let Some(chat_id) = open_chat
         {
             let current = if chat_settings.use_default_sound {

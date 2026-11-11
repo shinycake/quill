@@ -497,13 +497,16 @@ impl QuillApp {
         let account = shown.clone();
         match undo {
             Undo::Unreact { message_id, emoji } => {
-                self.toggle_reaction(
+                // Marked only when the change went out: Premium opening
+                // instead, or a failed send, leaves the reaction on.
+                if self.toggle_reaction(
                     ChatId(chat_id),
                     MessageId(*message_id),
                     ReactionChoice::Emoji(emoji.clone()),
                     cx,
-                );
-                activity::mark_undone(&account, entry);
+                ) {
+                    activity::mark_undone(&account, entry);
+                }
             }
             Undo::Delete(ids) => {
                 let ids: Vec<MessageId> = ids.iter().copied().map(MessageId).collect();
@@ -528,8 +531,12 @@ impl QuillApp {
                                 if active_account() != account {
                                     return;
                                 }
-                                this.delete_selection(ChatId(chat_id), &ids, true, cx);
-                                activity::mark_undone(&account, entry);
+                                // The user's own selection and forward in
+                                // another chat are not this undo's to end;
+                                // the entry is marked once the delete went out.
+                                if this.delete_messages(ChatId(chat_id), &ids, true) {
+                                    activity::mark_undone(&account, entry);
+                                }
                                 cx.notify();
                             });
                             true

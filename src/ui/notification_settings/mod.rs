@@ -4,6 +4,7 @@
 use super::app::QuillApp;
 use super::chat_theme::{danger, danger_bg};
 use super::dialogs::NotificationsConfirm;
+use crate::ui::notify_state::{MuteBox, MuteSection};
 use gpui_kit::component::button::*;
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::switch::Switch;

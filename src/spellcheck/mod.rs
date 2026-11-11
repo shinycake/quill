@@ -208,6 +208,13 @@ pub trait SpellBackend: Send + Sync {
     /// dictionary are skipped).
     fn handles(&self, script: Script, word: &str) -> bool;
     fn is_correct(&self, word: &str) -> bool;
+    /// The judgement of [`Self::is_correct`], or `None` when the backend
+    /// could not give one now (a check that timed out). [`SpellChecker`]
+    /// shows no underline for it and does not remember it, so the word is
+    /// asked again.
+    fn judge(&self, word: &str) -> Option<bool> {
+        Some(self.is_correct(word))
+    }
     /// Up to `limit` replacements, best first.
     fn suggestions(&self, word: &str, limit: usize) -> Vec<String>;
     /// Learn into the backend's own persistent dictionary. `false` when
@@ -299,7 +306,9 @@ impl SpellChecker {
         if let Some(&known) = lock(&self.cache).get(&*word) {
             return known;
         }
-        let correct = self.backend.is_correct(&word);
+        let Some(correct) = self.backend.judge(&word) else {
+            return true;
+        };
         let mut cache = lock(&self.cache);
         if cache.len() >= CACHE_LIMIT {
             cache.clear();

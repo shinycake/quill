@@ -44,18 +44,31 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.share.content_dialog = Some(ShareContentDialog::contact(window, cx));
+        self.chat_ui.contact_dialog = Some(ShareContentDialog::contact(window, cx));
         cx.notify();
     }
 
     pub(super) fn close_share_content_dialog(&mut self, cx: &mut Context<Self>) {
-        self.share.content_dialog = None;
+        self.chat_ui.contact_dialog = None;
         cx.notify();
     }
 
-    /// Send the picked address-book entry as a contact card.
+    /// The chat the open contact chooser belongs to (its `ChatUi` was made
+    /// for it), while the user may still post there.
+    fn share_dialog_target(&self) -> Option<ChatId> {
+        self.chat_ui.contact_dialog.as_ref()?;
+        let chat_id = self.chat_ui.made_for()?;
+        self.session()?
+            .chats
+            .get(&chat_id.0)?
+            .can_post()
+            .then_some(chat_id)
+    }
+
+    /// Send the picked address-book entry as a contact card, to the chat
+    /// the chooser was opened for.
     pub(super) fn submit_share_contact(&mut self, user_id: i64, cx: &mut Context<Self>) {
-        let Some(chat_id) = self.share_target() else {
+        let Some(chat_id) = self.share_dialog_target() else {
             return;
         };
         if self.slow_mode_blocked(chat_id, cx) {
@@ -76,7 +89,7 @@ impl QuillApp {
         let reply_to = self.send_reply_for(chat_id, cx);
         let options = self.send_options_to(chat_id);
         let Some(live) = self.live.as_mut() else {
-            self.share.content_dialog = None;
+            self.chat_ui.contact_dialog = None;
             self.set_note(StatusNote::info(tr(
                 keys::Q_OPS_SHARING_NEEDS_A_LIVE_CONNECTION,
             )));
@@ -88,7 +101,7 @@ impl QuillApp {
             .share_contact_to_chat(chat_id, &contact, reply_to, &options)
         {
             Ok(_) => {
-                self.share.content_dialog = None;
+                self.chat_ui.contact_dialog = None;
                 self.chat_ui.set_reply(None);
                 self.set_note(StatusNote::silent(tr(keys::Q_OPS_SENDING_CONTACT)));
             }
@@ -152,7 +165,7 @@ impl QuillApp {
     /// The contact chooser's body: the search field and up to
     /// `CONTACT_LIST_MAX` contacts, one click sends.
     fn share_content_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let dialog = self.share.content_dialog.as_ref()?;
+        let dialog = self.chat_ui.contact_dialog.as_ref()?;
         let query = &dialog.query;
         let typed = query.read(cx).value().to_string();
         let rows = self.share_contact_rows(&typed);
@@ -257,7 +270,7 @@ impl QuillApp {
             .content(crate::ui::shell::scrollable_dialog_content(
                 move |content, window, cx| {
                     let body = body_app.update(cx, |this, cx| {
-                        let focus = this.share.content_dialog.as_mut().and_then(|dialog| {
+                        let focus = this.chat_ui.contact_dialog.as_mut().and_then(|dialog| {
                             std::mem::take(&mut dialog.focus_on_mount).then(|| dialog.query.clone())
                         });
                         focus_after_mount(focus, window, cx);
@@ -274,7 +287,7 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     ShareContact => DialogSpec::new(
         2947,
-        |app| app.share.content_dialog.is_some(),
+        |app| app.chat_ui.contact_dialog.is_some(),
         QuillApp::build_share_contact_dialog,
     )
     .per_window()

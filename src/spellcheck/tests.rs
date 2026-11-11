@@ -278,3 +278,33 @@ fn word_at_offset() {
     assert_eq!(word_at(text, 6), Some(6..9));
     assert_eq!(word_at("a @mention", 5), None);
 }
+
+/// A backend whose first answer for a word is "could not tell" (a check
+/// that timed out): nothing is cached, and the next ask gets the real one.
+struct SlowOnceBackend(std::sync::atomic::AtomicUsize);
+impl SpellBackend for SlowOnceBackend {
+    fn handles(&self, _: Script, _: &str) -> bool {
+        true
+    }
+    fn is_correct(&self, word: &str) -> bool {
+        word != "bad"
+    }
+    fn judge(&self, word: &str) -> Option<bool> {
+        let asked = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        (asked > 0).then(|| self.is_correct(word))
+    }
+    fn suggestions(&self, _: &str, _: usize) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+#[test]
+fn an_unanswered_check_is_not_cached_as_correct() {
+    let sc = SpellChecker::new(Arc::new(SlowOnceBackend(Default::default())));
+    assert!(sc.is_correct("bad"), "no underline while the check is out");
+    assert!(
+        !sc.is_correct("bad"),
+        "the word is asked again and flagged once the backend answers"
+    );
+    assert!(!sc.is_correct("bad"), "and now it is remembered");
+}

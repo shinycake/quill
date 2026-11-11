@@ -1,7 +1,6 @@
 //! Where your own QR code's link stands, from the session's user, phone
 //! privacy rules and contact link.
 use crate::peer_qr::link::{OwnLinkInputs, OwnLinkState, own_link};
-use crate::privacy::PrivacyKeyState;
 use crate::state::*;
 use crate::telegram::requests_privacy::PrivacySettingKey;
 
@@ -11,9 +10,12 @@ impl Session {
     /// shows it.
     pub fn own_qr_link(&self, phone_label: &str, now: i64) -> Option<OwnLinkState> {
         let user = self.user(self.my_user_id?)?;
-        let who = |key| match self.settings.privacy.get(&key) {
-            Some(PrivacyKeyState::Ready(detail)) => detail.who,
-            _ => None,
+        let who = |key| {
+            self.settings
+                .privacy
+                .get(&key)
+                .and_then(|state| state.detail())
+                .and_then(|detail| detail.who)
         };
         Some(own_link(OwnLinkInputs {
             username: &user.username,

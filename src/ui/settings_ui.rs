@@ -278,15 +278,13 @@ impl QuillApp {
             self.session()
                 .and_then(|session| session.settings.privacy.get(&key).cloned())
         };
-        let who_of = |key: PrivacySettingKey| match rule_state(key) {
-            Some(PrivacyKeyState::Ready(detail)) => detail.who,
-            _ => None,
-        };
+        let who_of =
+            |key: PrivacySettingKey| rule_state(key).and_then(|s| s.detail().and_then(|d| d.who));
         let allow_calls = who_of(PrivacySettingKey::AllowCalls);
         let p2p = who_of(PrivacySettingKey::PeerToPeer);
         let privacy_loading = [PrivacySettingKey::AllowCalls, PrivacySettingKey::PeerToPeer]
             .into_iter()
-            .any(|key| matches!(rule_state(key), None | Some(PrivacyKeyState::Loading)));
+            .any(|key| matches!(rule_state(key), None | Some(PrivacyKeyState::Loading(_))));
         let privacy_failed = [PrivacySettingKey::AllowCalls, PrivacySettingKey::PeerToPeer]
             .into_iter()
             .any(|key| matches!(rule_state(key), Some(PrivacyKeyState::Failed)));

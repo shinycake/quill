@@ -106,8 +106,8 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|d| d.code == code);
         if downloading {
-            if !enable && let Some(d) = &self.spell.dict_manager.download {
-                d.progress.cancel();
+            if !enable {
+                self.cancel_dictionary_download(cx);
             }
             return;
         }
@@ -124,6 +124,20 @@ impl QuillApp {
         );
         // Switching off the last language falls back to "automatic".
         self.set_spell_languages(next, cx);
+    }
+
+    /// Switching a downloading dictionary off ends it at once, as
+    /// tdesktop's destroyed loader does: the row is a plain off switch
+    /// again and the progress loop and the worker's answer are dropped. The
+    /// blocking read the worker may be stuck in cannot be interrupted; the
+    /// flag ends it at the next chunk and nothing it produces is used, so a
+    /// stalled server holds nothing but its own thread.
+    fn cancel_dictionary_download(&mut self, cx: &mut Context<Self>) {
+        if let Some(download) = self.spell.dict_manager.download.take() {
+            download.progress.cancel();
+        }
+        self.spell.dict_manager.task = None;
+        cx.notify();
     }
 
     fn start_dictionary_download(&mut self, code: &str, cx: &mut Context<Self>) {

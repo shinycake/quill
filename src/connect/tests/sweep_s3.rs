@@ -181,10 +181,10 @@ fn a_removed_default_wallpaper_is_removed_here_too() {
     assert!(driver.session.chats_state.default_backgrounds.is_empty());
 }
 
-/// Sweep 06-032: the optimistic delete of the default wallpaper is put
-/// back when TDLib refuses it.
+/// Sweep 06-032 / 02-087: the default wallpaper leaves only when TDLib
+/// confirms its delete, so a refusal keeps it.
 #[test]
-fn a_refused_default_wallpaper_delete_puts_it_back() {
+fn a_refused_default_wallpaper_delete_keeps_it() {
     let (_dir, mut driver, _sender, sink, seq) = toggle_driver();
     let feed = |driver: &mut crate::connect::ConnectDriver<_>, json: &str| {
         driver
@@ -193,7 +193,14 @@ fn a_refused_default_wallpaper_delete_puts_it_back() {
     };
     feed(&mut driver, NIGHT);
     let delete = driver.delete_default_background(true).expect("sent");
-    assert!(driver.session.chats_state.default_backgrounds.is_empty());
+    assert!(
+        driver
+            .session
+            .chats_state
+            .default_backgrounds
+            .contains_key(&true),
+        "still shown while the delete is on its way"
+    );
     feed(
         &mut driver,
         &format!(

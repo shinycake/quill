@@ -21,8 +21,8 @@ impl ChatsPurpose {
             | Self::CreatePrivateChat
             | Self::EnsurePrivateChat
             | Self::SetDefaultBackground
-            | Self::DeleteDefaultBackground
-            | Self::RemoveInstalledBackground
+            | Self::DeleteDefaultBackground { .. }
+            | Self::RemoveInstalledBackground { .. }
             | Self::SetDefaultBackgroundLocal
             | Self::SetChatBackground
             | Self::DeleteChatBackground

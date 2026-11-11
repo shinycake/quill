@@ -22,11 +22,10 @@ use quill::chat_appearance::{
     AppearanceRules, ApplyOutcome, ChatAppearanceDraft, ChatAppearanceKind, ChatAppearanceTab,
     FeatureLevels, name_color_level, profile_color_level,
 };
-use quill::ids::ChatId;
+use quill::ids::{ChatId, RequestId};
 use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::peer_color::{name_swatches, profile_swatches};
-use quill::state::RequestPurpose;
 use quill::telegram::envelope::ChatKind;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -36,10 +35,29 @@ pub(crate) struct ChatAppearanceDialog {
     pub(super) chat_id: ChatId,
     pub(super) tab: ChatAppearanceTab,
     pub(super) draft: ChatAppearanceDraft,
-    /// Apply sent at least one request.
-    pub(super) sent: bool,
-    /// The last Apply was refused for too few boosts: `(required, have)`.
-    pub(super) needs_boosts: Option<(i32, i32)>,
+    pub(super) stage: AppearanceStage,
+}
+
+/// Where Apply stands. Each request of the plan answers under its own id
+/// (`ChatsState::appearance_answers`); editing the draft, closing the box
+/// or the account going away ends the stage, and a late answer finds
+/// nothing to match.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum AppearanceStage {
+    Editing,
+    /// The last Apply was refused for too few boosts.
+    NeedsBoosts {
+        required: i32,
+        have: i32,
+    },
+    /// The plan's requests are out. `failed` is the first refusal, shown
+    /// when the last one answers.
+    Applying {
+        waiting: Vec<RequestId>,
+        failed: Option<String>,
+    },
+    Applied,
+    Failed(String),
 }
 
 impl QuillApp {
@@ -149,8 +167,7 @@ impl QuillApp {
                 ChatAppearanceKind::Supergroup => ChatAppearanceTab::Profile,
             },
             draft,
-            sent: false,
-            needs_boosts: None,
+            stage: AppearanceStage::Editing,
         });
         self.open_box(DialogKind::ChatAppearance);
         cx.notify();
@@ -173,8 +190,7 @@ impl QuillApp {
         if let Some(dialog) = self.dialogs.chat_appearance_dialog.as_mut() {
             let tab = dialog.tab;
             edit(&mut dialog.draft, tab);
-            dialog.sent = false;
-            dialog.needs_boosts = None;
+            dialog.stage = AppearanceStage::Editing;
         }
         cx.notify();
     }
@@ -185,6 +201,7 @@ impl QuillApp {
             .dialogs
             .chat_appearance_dialog
             .as_ref()
+            .filter(|d| !matches!(d.stage, AppearanceStage::Applying { .. }))
             .map(|d| (d.chat_id, d.draft))
         else {
             return;
@@ -219,9 +236,7 @@ impl QuillApp {
                 )));
             }
             ApplyOutcome::NeedsBoosts { required, have } => {
-                if let Some(dialog) = self.dialogs.chat_appearance_dialog.as_mut() {
-                    dialog.needs_boosts = Some((required, have));
-                }
+                self.set_appearance_stage(AppearanceStage::NeedsBoosts { required, have });
             }
             ApplyOutcome::Send(plan) => {
                 let Some(live) = self.live.as_mut() else {
@@ -231,19 +246,70 @@ impl QuillApp {
                     cx.notify();
                     return;
                 };
-                let result = live.driver.apply_chat_appearance(chat_id, plan);
-                self.set_note(if result.is_err() {
-                    StatusNote::error(tr(keys::Q_MISC_COULD_NOT_CHANGE_THE_APPEARANCE))
-                } else {
-                    StatusNote::silent(tr(keys::Q_MISC_APPEARANCE_UPDATE_REQUESTED))
-                });
-                if let Some(dialog) = self.dialogs.chat_appearance_dialog.as_mut() {
-                    dialog.sent = result.is_ok();
-                    dialog.needs_boosts = None;
+                let could_not = || tr(keys::Q_MISC_COULD_NOT_CHANGE_THE_APPEARANCE).to_string();
+                match live.driver.apply_chat_appearance(chat_id, plan) {
+                    Err(_) => {
+                        self.set_note(StatusNote::error(could_not()));
+                        self.set_appearance_stage(AppearanceStage::Failed(could_not()));
+                    }
+                    Ok(sent) => {
+                        self.set_note(StatusNote::silent(tr(
+                            keys::Q_MISC_APPEARANCE_UPDATE_REQUESTED,
+                        )));
+                        self.set_appearance_stage(AppearanceStage::Applying {
+                            waiting: sent.requests,
+                            failed: sent.error.map(|_| could_not()),
+                        });
+                    }
                 }
             }
         }
         cx.notify();
+    }
+
+    fn set_appearance_stage(&mut self, stage: AppearanceStage) {
+        if let Some(dialog) = self.dialogs.chat_appearance_dialog.as_mut() {
+            dialog.stage = stage;
+        }
+    }
+
+    /// Poll-loop half of Apply: settle the stage with the answers to the
+    /// requests it waits for. Answers for anything else are dropped.
+    pub(super) fn drain_chat_appearance(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(AppearanceStage::Applying { waiting, failed }) = self
+            .dialogs
+            .chat_appearance_dialog
+            .as_ref()
+            .map(|d| d.stage.clone())
+        else {
+            return false;
+        };
+        let Some(session) = self.session_mut() else {
+            return false;
+        };
+        let answers = &mut session.chats_state.appearance_answers;
+        if answers.is_empty() {
+            return false;
+        }
+        let answered = answers.take_for(&waiting);
+        if answered.is_empty() {
+            return false;
+        }
+        let mut waiting = waiting;
+        let mut failed = failed;
+        for (request, answer) in answered {
+            waiting.retain(|w| *w != request);
+            if let Err(reason) = answer {
+                failed.get_or_insert(reason);
+            }
+        }
+        self.set_appearance_stage(match (waiting.is_empty(), failed) {
+            (true, Some(reason)) => AppearanceStage::Failed(reason),
+            (true, None) => AppearanceStage::Applied,
+            (false, failed) => AppearanceStage::Applying { waiting, failed },
+        });
+        cx.notify();
+        true
     }
 
     /// "Get boosts": leave the box and show the chat's Boosts page.
@@ -437,13 +503,8 @@ impl QuillApp {
 
     fn chat_appearance_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.dialogs.chat_appearance_dialog.as_ref()?;
-        let (chat_id, tab, draft, sent, needs_boosts) = (
-            dialog.chat_id,
-            dialog.tab,
-            dialog.draft,
-            dialog.sent,
-            dialog.needs_boosts,
-        );
+        let (chat_id, tab, draft) = (dialog.chat_id, dialog.tab, dialog.draft);
+        let stage = dialog.stage.clone();
         let kind = self.chat_appearance_kind(chat_id)?;
         let current = self.chat_appearance_current(chat_id)?;
         let session = self.session()?;
@@ -454,14 +515,6 @@ impl QuillApp {
             .unwrap_or_default();
         let level = self.chat_appearance_level(chat_id);
         let features = self.chat_appearance_features(chat_id, kind);
-        let busy = [
-            RequestPurpose::SetChatAccentColor,
-            RequestPurpose::SetChatProfileAccentColor,
-            RequestPurpose::SetChatEmojiStatus,
-        ]
-        .iter()
-        .any(|purpose| session.requests.has_purpose_for_chat(*purpose, chat_id));
-        let error = session.chats_state.appearance_error.clone();
         let dark = super::chat_theme::is_dark_palette();
         let theme = cx.theme();
         let muted = theme.muted_foreground;
@@ -791,7 +844,7 @@ impl QuillApp {
         }
         panel = panel.child(self.chat_appearance_wallpaper_section(chat_id, kind, level, cx));
 
-        if let Some((required, have)) = needs_boosts {
+        if let AppearanceStage::NeedsBoosts { required, have } = stage.clone() {
             panel = panel.child(
                 div()
                     .flex()
@@ -816,12 +869,17 @@ impl QuillApp {
                     ),
             );
         }
-        if busy {
-            panel = panel.child(div().text_sm().child(tr(keys::Q_MISC_APPLYING)));
-        } else if let Some(error) = error {
-            panel = panel.child(div().text_sm().text_color(danger()).child(error));
-        } else if sent {
-            panel = panel.child(div().text_sm().child(tr(keys::Q_MISC_APPEARANCE_UPDATED)));
+        match stage {
+            AppearanceStage::Applying { .. } => {
+                panel = panel.child(div().text_sm().child(tr(keys::Q_MISC_APPLYING)));
+            }
+            AppearanceStage::Failed(error) => {
+                panel = panel.child(div().text_sm().text_color(danger()).child(error));
+            }
+            AppearanceStage::Applied => {
+                panel = panel.child(div().text_sm().child(tr(keys::Q_MISC_APPEARANCE_UPDATED)));
+            }
+            AppearanceStage::Editing | AppearanceStage::NeedsBoosts { .. } => {}
         }
         Some(panel.into_any_element())
     }

@@ -47,8 +47,10 @@ impl QuillApp {
                         .label(tr(keys::SETTINGS_LOGOUT))
                         .danger()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.settings.log_out_confirm = false;
-                            this.submit_logout(cx);
+                            // The box closes only when the request went out.
+                            if this.submit_logout(cx) {
+                                this.settings.log_out_confirm = false;
+                            }
                             this.close_kit_dialog_if_done(DialogKind::LogOut, window, cx);
                         })),
                 );
