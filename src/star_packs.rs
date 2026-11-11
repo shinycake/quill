@@ -20,10 +20,8 @@ pub struct StarPack {
 /// The options list and its loading state.
 #[derive(Debug, Clone, Default)]
 pub struct StarPacksState {
-    pub options: Vec<StarPack>,
-    pub loading: bool,
-    pub loaded: bool,
-    pub error: Option<String>,
+    /// Asked once; a failure is asked again at the next open.
+    pub options: crate::state::fetch::Fetch<Vec<StarPack>>,
     /// "Buy more Stars" is expanded in the dialog.
     pub open: bool,
 }

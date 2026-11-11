@@ -75,7 +75,6 @@ pub(super) fn seed_ai_compose(session: &mut Session, seq: &AtomicU64, sink: &Arc
         style("pirate", "Pirate", 0, CREATOR),
         style("poem", "Poem", 0, 0),
     ]);
-    ai.styles_received = true;
 }
 
 fn text_result(text: &str, bold: Option<&str>) -> AiResult {

@@ -1,5 +1,5 @@
 use super::{
-    Aim, FADE_IN, FADE_OUT, Facts, GLIDE, HOLD, JITTER_PX, Live, PULSE, PauseReason, Phase,
+    Aim, FADE_IN, FADE_OUT, Facts, GLIDE, HOLD, Hold, JITTER_PX, Live, PULSE, PauseReason, Phase,
     RESUME_GRACE, RealInput, aim, answered, command, ghost_arrival, ghost_point, moving,
     next_change_ms, observe, pauses_on, phase, press, press_pulse, resume, stop,
 };
@@ -62,7 +62,10 @@ fn real_input_pauses_and_let_it_continue_hands_back() {
         assert!(pauses_on(&facts, &shown, input, true, 200));
         assert!(pauses_on(&facts, &shown, input, false, 200), "{input:?}");
     }
-    facts.paused = Some(PauseReason::Input);
+    facts.hold = Hold::Paused {
+        reason: PauseReason::Input,
+        since_ms: 0,
+    };
     // Paused holds past the hold: the agent waits for the user.
     let later = 100 + ms(HOLD) * 10;
     assert!(matches!(
@@ -136,14 +139,14 @@ fn stop_ends_the_session_now_and_holds_until_the_switch_goes_off() {
     let mut facts = Facts::default();
     command(&mut facts, "Claude Code", 100);
     stop(&mut facts, 500);
-    assert!(facts.stopped);
+    assert!(facts.hold == Hold::Stopped);
     assert!(matches!(
         phase(&facts, ON, 510),
         Phase::FadingOut { ended_ms: 500, .. }
     ));
     assert_eq!(phase(&facts, ON, 500 + ms(FADE_OUT)), Phase::Idle);
     observe(&mut facts, ON, 2000);
-    assert!(facts.stopped, "still connected: Stop holds");
+    assert!(facts.hold == Hold::Stopped, "still connected: Stop holds");
     observe(
         &mut facts,
         Live {
@@ -152,9 +155,12 @@ fn stop_ends_the_session_now_and_holds_until_the_switch_goes_off() {
         },
         3000,
     );
-    assert!(facts.stopped, "a disconnect does not undo Stop");
+    assert!(
+        facts.hold == Hold::Stopped,
+        "a disconnect does not undo Stop"
+    );
     observe(&mut facts, ON, 4000);
-    assert!(facts.stopped, "nor does a reconnect");
+    assert!(facts.hold == Hold::Stopped, "nor does a reconnect");
     assert_eq!(phase(&facts, ON, 4000), Phase::Idle, "and nothing shows");
     observe(
         &mut facts,
@@ -164,20 +170,23 @@ fn stop_ends_the_session_now_and_holds_until_the_switch_goes_off() {
         },
         5000,
     );
-    assert!(!facts.stopped, "the switch going off lifts it");
+    assert!(facts.hold != Hold::Stopped, "the switch going off lifts it");
 }
 
 #[test]
 fn a_pause_outlives_a_reconnect_and_shows_again() {
     let mut facts = Facts::default();
     command(&mut facts, "Claude Code", 100);
-    facts.paused = Some(PauseReason::Input);
+    facts.hold = Hold::Paused {
+        reason: PauseReason::Input,
+        since_ms: 0,
+    };
     let gone = Live {
         connected: false,
         allowed: true,
     };
     observe(&mut facts, gone, 300);
-    assert_eq!(facts.paused, Some(PauseReason::Input), "kept");
+    assert_eq!(facts.hold.paused(), Some(PauseReason::Input), "kept");
     assert!(matches!(
         phase(&facts, gone, 310),
         Phase::FadingOut { ended_ms: 300, .. }
@@ -198,7 +207,10 @@ fn a_pause_outlives_a_reconnect_and_shows_again() {
     resume(&mut facts, 6000);
     assert!(matches!(phase(&facts, ON, 6000), Phase::Driving { .. }));
     // The switch going off forgets it.
-    facts.paused = Some(PauseReason::Escape);
+    facts.hold = Hold::Paused {
+        reason: PauseReason::Escape,
+        since_ms: 0,
+    };
     observe(
         &mut facts,
         Live {
@@ -207,7 +219,7 @@ fn a_pause_outlives_a_reconnect_and_shows_again() {
         },
         7000,
     );
-    assert_eq!(facts.paused, None);
+    assert_eq!(facts.hold.paused(), None);
 }
 
 #[test]
@@ -236,13 +248,16 @@ fn an_interrupted_fade_in_carries_on_from_where_it_got_to() {
     let half = ms(FADE_IN) / 2;
     let reached = phase(&facts, ON, half).presence(half);
     // Paused halfway: the fade-in keeps going, it does not jump to full.
-    facts.paused = Some(PauseReason::Escape);
+    facts.hold = Hold::Paused {
+        reason: PauseReason::Escape,
+        since_ms: 0,
+    };
     let paused = phase(&facts, ON, half);
     assert_eq!(paused.presence(half), reached);
     assert!(moving(&paused, half), "still fading in");
     assert!(!moving(&paused, ms(FADE_IN)));
     // Stopped halfway: the fade-out starts at the value reached.
-    facts.paused = None;
+    facts.hold = Hold::None;
     stop(&mut facts, half);
     let fading = phase(&facts, ON, half);
     assert_eq!(fading.presence(half), reached);
@@ -254,7 +269,10 @@ fn an_interrupted_fade_in_carries_on_from_where_it_got_to() {
 fn a_disconnect_fades_out_from_the_moment_it_is_seen() {
     let mut facts = Facts::default();
     command(&mut facts, "Claude Code", 100);
-    facts.paused = Some(PauseReason::Escape);
+    facts.hold = Hold::Paused {
+        reason: PauseReason::Escape,
+        since_ms: 0,
+    };
     let gone = Live {
         connected: false,
         allowed: true,

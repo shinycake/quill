@@ -53,7 +53,7 @@ fn the_join_answer_tracks_the_conference_with_its_payload() {
     assert_eq!(call.id, 77);
     assert!(call.is_conference());
     assert!(call.is_muted_self);
-    assert_eq!(call.join_payload, "{}");
+    assert_eq!(call.transport.answer(), "{}");
     assert_eq!(
         call.conference_input(),
         Some(ConferenceInput::Message {

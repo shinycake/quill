@@ -136,17 +136,39 @@ impl Tdlib for ChannelTdlib {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ExportId(u64);
 
+/// Where the worker's current request stands on the session's side. It
+/// leaves `Awaiting` by TDLib's answer or a send error (`fail_send`), and
+/// goes back to `Idle` when the worker takes nothing more.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Handoff {
+    /// Nothing handed out, or the last answer went back.
+    Idle,
+    /// The worker's request was taken (it is the worker call `call`) and
+    /// the driver has not registered it with TDLib yet.
+    Handed(CallId),
+    /// The driver sent the request as `request` and awaits its answer,
+    /// which goes back under `call`.
+    Awaiting { request: RequestId, call: CallId },
+}
+
+impl Handoff {
+    fn call(self) -> CallId {
+        match self {
+            Self::Idle => UNANSWERED,
+            Self::Handed(call) | Self::Awaiting { call, .. } => call,
+        }
+    }
+}
+
 /// The session's end of a worker: its next request, the one the driver
 /// sent and awaits, and the cancel flag.
 pub struct WorkerLink {
     id: ExportId,
     requests: mpsc::Receiver<(CallId, Value)>,
     replies: mpsc::Sender<(CallId, Value)>,
-    /// The request the driver sent and awaits an answer for.
-    pub pending: Option<RequestId>,
-    /// The worker call of the request handed out last: its answer goes
-    /// back under that number.
-    asked: CallId,
+    handoff: Handoff,
+    /// Shared with the worker thread, which reads it between steps; the
+    /// stop signal is the one fact both sides need at once.
     cancelled: Arc<AtomicBool>,
     /// Disconnected once the worker ended.
     ended: mpsc::Receiver<()>,
@@ -172,8 +194,7 @@ impl WorkerLink {
             id: ExportId(NEXT.fetch_add(1, Ordering::Relaxed)),
             requests,
             replies,
-            pending: None,
-            asked: UNANSWERED,
+            handoff: Handoff::Idle,
             cancelled,
             ended,
         };
@@ -189,8 +210,24 @@ impl WorkerLink {
         !self.is_cancelled() && !self.worker_ended()
     }
 
+    /// The request the driver sent and awaits an answer for.
+    pub fn pending(&self) -> Option<RequestId> {
+        match self.handoff {
+            Handoff::Awaiting { request, .. } => Some(request),
+            Handoff::Idle | Handoff::Handed(_) => None,
+        }
+    }
+
+    /// The driver sent the request just taken as `request`.
+    pub fn await_answer(&mut self, request: RequestId) {
+        self.handoff = Handoff::Awaiting {
+            request,
+            call: self.handoff.call(),
+        };
+    }
+
     pub fn idle_or_cancelled(&self) -> bool {
-        self.pending.is_none() || self.is_cancelled()
+        self.pending().is_none() || self.is_cancelled()
     }
 
     pub fn is_cancelled(&self) -> bool {
@@ -200,7 +237,7 @@ impl WorkerLink {
     /// The next request for TDLib, if the worker has one waiting.
     pub fn next_request(&mut self) -> Option<Value> {
         let (call, request) = self.requests.try_recv().ok()?;
-        self.asked = call;
+        self.handoff = Handoff::Handed(call);
         Some(request)
     }
 
@@ -208,14 +245,16 @@ impl WorkerLink {
     pub fn answer_ok(&self) {
         let _ = self
             .replies
-            .send((self.asked, serde_json::json!({"@type": "ok"})));
+            .send((self.handoff.call(), serde_json::json!({"@type": "ok"})));
     }
 
     /// Hand TDLib's answer to the worker.
     pub fn reply(&mut self, id: RequestId, value: Value) {
-        if self.pending == Some(id) {
-            self.pending = None;
-            let _ = self.replies.send((self.asked, value));
+        if let Handoff::Awaiting { request, call } = self.handoff
+            && request == id
+        {
+            self.handoff = Handoff::Idle;
+            let _ = self.replies.send((call, value));
         }
     }
 
@@ -388,15 +427,15 @@ mod tests {
             .send(serde_json::json!({"@type": "getChat"}))
             .unwrap();
         assert!(export.link.next_request().is_some());
-        export.link.pending = Some(RequestId(1));
+        export.link.await_answer(RequestId(1));
         export
             .link
             .reply(RequestId(1), serde_json::json!({"@type": "chat"}));
         let (call, _) = worker.answer().expect("answered");
         assert_eq!(call, worker.last_call());
-        assert!(export.link.pending.is_none());
+        assert!(export.link.pending().is_none());
 
-        export.link.pending = Some(RequestId(2));
+        export.link.await_answer(RequestId(2));
         export
             .link
             .reply(RequestId(9), serde_json::json!({"@type": "chat"}));
@@ -431,7 +470,7 @@ mod tests {
         let (mut link, mut tdlib) = WorkerLink::pair(None);
         tdlib.post_unanswered(serde_json::json!({"@type": "deleteFile"}));
         assert!(link.next_request().is_some());
-        link.pending = Some(RequestId(1));
+        link.await_answer(RequestId(1));
         link.reply(RequestId(1), serde_json::json!({"@type": "ok"}));
         link.replies
             .send((1, serde_json::json!({"@type": "messages"})))

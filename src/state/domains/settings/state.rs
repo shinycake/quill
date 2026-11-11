@@ -114,9 +114,7 @@ pub struct SettingsState {
     /// Phase S2: cached `getStorageStatistics` answer (aggregated by file
     /// type, TGX `TGStorageStats` style); drives the storage-usage overlay,
     /// including the "Secret media and files" category.
-    pub storage_stats: Option<StorageStats>,
-    /// Phase S2: a `getStorageStatistics` round trip is in flight.
-    pub storage_stats_loading: bool,
+    pub storage_stats: crate::state::fetch::Fetch<StorageStats>,
     /// Slice S4: per-network auto-download settings, the local source of
     /// truth (TDLib has no getter for the current values). Loaded from
     /// `data_storage.json` at session setup; seeded once from
@@ -367,8 +365,7 @@ impl SettingsState {
             reaction_notification_settings: None,
             scope_saves: Default::default(),
             reaction_saves: Default::default(),
-            storage_stats: None,
-            storage_stats_loading: false,
+            storage_stats: Default::default(),
             data_storage: DataStoragePrefs::default(),
             data_storage_dirty: false,
             auto_download_presets_loading: false,

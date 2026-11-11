@@ -20,13 +20,13 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::screen::{
-    PreviewSlot, ScreenAccess, ScreenBackend, ScreenCapture, ScreenOptions, ScreenSource, SourceId,
-    SourceKind, Thumbnail, fit_capture_size,
+    PreviewSlot, ScreenAccess, ScreenBackend, ScreenCapture, ScreenOptions, ScreenSource,
+    ShareVisibility, SourceId, SourceKind, Thumbnail, fit_capture_size,
 };
 use super::screen_bgra::{FramePacer, bgra_thumbnail, bgra_to_i420};
 use super::{CaptureError, CaptureEvent, FrameSink, VideoFrame};
 use crate::locks::LockExt;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -150,7 +150,7 @@ impl ScreenBackend for WinScreen {
         let shared = Arc::new(Shared {
             sink: sink.clone(),
             preview,
-            stopped: AtomicBool::new(false),
+            stage: StageCell::new(),
             stream: Mutex::new(StreamState {
                 gpu,
                 staging: None,
@@ -188,7 +188,6 @@ impl ScreenBackend for WinScreen {
             frame_token,
             closed_token,
             monitor,
-            closed: false,
         }))
     }
 }
@@ -341,8 +340,39 @@ struct StreamState {
 struct Shared {
     sink: FrameSink<VideoFrame>,
     preview: Arc<PreviewSlot>,
-    stopped: AtomicBool,
+    stage: StageCell,
     stream: Mutex<StreamState>,
+}
+
+/// Whether the capture still runs. It only ever moves to `Stopped`, by the
+/// owner's `stop` or the source closing, whichever comes first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CaptureStage {
+    Running,
+    Stopped,
+}
+
+struct StageCell(AtomicU8);
+
+impl StageCell {
+    const RUNNING: u8 = 0;
+    const STOPPED: u8 = 1;
+
+    fn new() -> Self {
+        Self(AtomicU8::new(Self::RUNNING))
+    }
+
+    fn get(&self) -> CaptureStage {
+        match self.0.load(Ordering::Acquire) {
+            Self::RUNNING => CaptureStage::Running,
+            _ => CaptureStage::Stopped,
+        }
+    }
+
+    /// Move to `Stopped`; `true` when this call is the one that did.
+    fn stop(&self) -> bool {
+        self.0.swap(Self::STOPPED, Ordering::AcqRel) == Self::RUNNING
+    }
 }
 
 impl Shared {
@@ -351,7 +381,7 @@ impl Shared {
         let Ok(frame) = pool.TryGetNextFrame() else {
             return;
         };
-        if self.stopped.load(Ordering::Acquire) {
+        if self.stage.get() == CaptureStage::Stopped {
             return;
         }
         let now = Instant::now();
@@ -401,7 +431,7 @@ impl Shared {
 
     /// The source closed: `Ended`, once.
     fn end(&self) {
-        if !self.stopped.swap(true, Ordering::AcqRel) {
+        if self.stage.stop() {
             self.sink.push_event(CaptureEvent::Ended);
         }
     }
@@ -416,16 +446,13 @@ struct WinCapture {
     frame_token: i64,
     closed_token: i64,
     monitor: Option<WindowMonitor>,
-    closed: bool,
 }
 
 impl ScreenCapture for WinCapture {
     fn stop(&mut self) {
-        if self.closed {
-            return;
-        }
-        self.closed = true;
-        self.shared.stopped.store(true, Ordering::Release);
+        // Safe to repeat (the source may have closed first, and `Drop` runs
+        // this again): the removals and closes ignore their errors.
+        self.shared.stage.stop();
         self.monitor = None;
         let _ = self.pool.RemoveFrameArrived(self.frame_token);
         let _ = self.item.RemoveClosed(self.closed_token);
@@ -456,9 +483,9 @@ impl WindowMonitor {
         let (stop, stopped) = mpsc::channel::<()>();
         let worker = crate::thread_guard::spawn_guarded("quill-screen-pause", move || {
             let window = HWND(hwnd as *mut core::ffi::c_void);
-            let mut paused = false;
+            let mut visibility = ShareVisibility::default();
             while let Err(mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(PAUSE_POLL) {
-                if shared.stopped.load(Ordering::Acquire) {
+                if shared.stage.get() == CaptureStage::Stopped {
                     return;
                 }
                 // SAFETY: plain queries on a window handle; a stale
@@ -469,13 +496,8 @@ impl WindowMonitor {
                     shared.end();
                     return;
                 }
-                if minimised != paused {
-                    paused = minimised;
-                    sink.push_event(if paused {
-                        CaptureEvent::Paused
-                    } else {
-                        CaptureEvent::Resumed
-                    });
+                if let Some(event) = visibility.seen(!minimised) {
+                    sink.push_event(event);
                 }
             }
         })?;

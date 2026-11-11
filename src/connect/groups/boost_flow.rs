@@ -1,6 +1,6 @@
 //! Connect driver: the boost box (`crate::boost_box`).
 use super::*;
-use crate::boost_box::{BoostBoxState, BoostPhase, ReassignSummary, sources};
+use crate::boost_box::{BoostBoxState, BoostPhase, BoostWork, ReassignSummary, sources};
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// The open boost box, if it is for this chat.
@@ -28,9 +28,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return Ok(false);
         };
-        // The old chat's pending intent and stashed slots go with its box.
-        self.session.groups.boost_intent = None;
-        self.session.groups.boost_slots_by_chat.clear();
+        // The old chat's pending boost and its slots go with its box.
         self.session.groups.boost_box = Some(BoostBoxState::new(chat_id.0, !is_channel));
         self.session.groups.chat_boost_status.remove(&chat_id.0);
         self.session.groups.chat_boost_details.remove(&chat_id.0);
@@ -45,8 +43,6 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// ignores its box.
     pub fn close_boost_box(&mut self) {
         self.session.groups.boost_box = None;
-        self.session.groups.boost_intent = None;
-        self.session.groups.boost_slots_by_chat.clear();
     }
 
     /// Back from the reassign list to the counters.
@@ -86,9 +82,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         let before = state.phase.clone();
         if let Some(state) = self.boost_box_for(chat) {
-            state.phase = BoostPhase::Working;
+            state.phase = BoostPhase::Working(BoostWork::Boosting {
+                reassign: Some(summary),
+            });
             state.note = None;
-            state.reassigning = Some(summary);
         }
         // A click that never left puts the list back, so the user can pick
         // again or go back instead of facing a box that is stuck working.

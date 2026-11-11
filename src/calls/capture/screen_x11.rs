@@ -15,8 +15,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::screen::{
-    PreviewSlot, ScreenCapture, ScreenOptions, ScreenSource, SourceId, SourceKind, Thumbnail,
-    fit_capture_size,
+    PreviewSlot, ScreenCapture, ScreenOptions, ScreenSource, ShareVisibility, SourceId, SourceKind,
+    Thumbnail, fit_capture_size,
 };
 use super::screen_bgra::{bgra_thumbnail, bgra_to_i420};
 use super::{CaptureError, CaptureEvent, FrameSink, VideoFrame};
@@ -378,7 +378,7 @@ fn run(
     let interval = Duration::from_secs(1) / u32::from(options.fps.max(1));
     let state = display.atom("_NET_WM_STATE");
     let hidden = display.atom("_NET_WM_STATE_HIDDEN");
-    let mut paused = false;
+    let mut visibility = ShareVisibility::default();
     let mut checked: Option<Instant> = None;
     while let Err(mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(interval) {
         if let Target::Window(window) = target
@@ -389,16 +389,11 @@ fn run(
                 sink.push_event(CaptureEvent::Ended);
                 break;
             };
-            if visible == paused {
-                paused = !visible;
-                sink.push_event(if paused {
-                    CaptureEvent::Paused
-                } else {
-                    CaptureEvent::Resumed
-                });
+            if let Some(event) = visibility.seen(visible) {
+                sink.push_event(event);
             }
         }
-        if paused {
+        if visibility.hidden() {
             continue;
         }
         let now = Instant::now();

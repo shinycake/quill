@@ -664,11 +664,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                 RequestPurpose::AddChatWelcomeMessage
                 | RequestPurpose::Groups(GroupsPurpose::EditChatWelcomeMessage { .. })
                 | RequestPurpose::Groups(GroupsPurpose::DeleteChatWelcomeMessage { .. })
-                    if !self
+                    if self
                         .session
                         .groups
                         .welcome_messages
-                        .contains_key(&chat_id.0) =>
+                        .get(&chat_id.0)
+                        .is_none_or(|pack| pack.can_ask()) =>
                 {
                     let _ = self.load_chat_welcome_messages(chat_id);
                 }

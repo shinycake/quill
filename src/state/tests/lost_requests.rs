@@ -214,8 +214,8 @@ fn sweeping_a_lost_transfer_check_lets_the_next_open_ask_again() {
 
     assert!(sweep(&mut session));
 
-    assert!(!session.groups.ownership.check_in_flight);
-    assert!(session.groups.ownership.check_error.is_some());
+    assert!(!session.groups.ownership.check.is_loading());
+    assert!(session.groups.ownership.check.error().is_some());
 }
 
 /// Sweep 05-202: a lost recommended-channels answer ends its loading state.

@@ -72,7 +72,7 @@ fn a_lost_export_request_frees_the_link() {
         .unwrap();
     driver.pump_chat_export();
     let link = &driver.session.settings.chat_export.as_ref().unwrap().link;
-    let pending = link.pending.expect("the request is out");
+    let pending = link.pending().expect("the request is out");
     assert!(!link.idle_or_cancelled());
 
     let lost = driver.session.requests.take(pending).expect("registered");
@@ -428,7 +428,7 @@ fn open_chat_shows_a_file_the_export_holds(arrives: PageArrives, photo: &str) ->
     }
 
     let link = &mut driver.session.settings.chat_export.as_mut().unwrap().link;
-    let download = link.pending.expect("the export's download went out");
+    let download = link.pending().expect("the export's download went out");
     link.reply(download, serde_json::json!({"@type": "ok"}));
     worker
         .send(serde_json::json!({"@type": "deleteFile", "file_id": 1, "chat_id": 7}))
