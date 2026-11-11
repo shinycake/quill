@@ -1109,3 +1109,48 @@ fn inline_mode_forgets_a_failed_lookup_and_keeps_the_query_without_a_connection(
     let text = app.read_with(vcx, |app, cx| app.composer.read(cx).value().to_string());
     assert_eq!(text, "@somebot hi", "the pick had no connection to go over");
 }
+
+/// Sweep 12-A001: the render of a message edit's photo lands only while the
+/// edit still waits for it: cancelling the edit and entering it again before
+/// the render finishes leaves the new edit without the stale picture.
+#[gpui_kit::test]
+fn a_stale_render_does_not_land_in_a_new_edit_of_the_same_message(cx: &mut TestAppContext) {
+    use crate::ui::photo_editor::{EditorPurpose, PhotoEditor};
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat(&app, vcx, GROUP);
+    begin_edit(&app, vcx);
+    let (chat, message) = app.read_with(vcx, |app, _| {
+        let edit = app.chat_ui.pending_edit().expect("editing");
+        (edit.chat_id, edit.message_id)
+    });
+    let as_photo = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.update(vcx, |app, _| {
+            if let Some(edit) = app.chat_ui.pending_edit_mut() {
+                edit.media_edit.media = Some(quill::composer::EditableMedia::Photo);
+            }
+        });
+    };
+    as_photo(&app, vcx);
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            let pixels = image::RgbaImage::from_pixel(47, 13, image::Rgba([1, 2, 3, 255]));
+            app.viewer.photo_editor.open(PhotoEditor::new(
+                EditorPurpose::MessageEdit { chat, message },
+                pixels,
+            ));
+            app.save_photo_editor(window, cx);
+            app.clear_edit(window, cx);
+        });
+    });
+    begin_edit(&app, vcx);
+    as_photo(&app, vcx);
+    vcx.run_until_parked();
+    let staged = app.read_with(vcx, |app, _| {
+        app.chat_ui
+            .pending_edit()
+            .and_then(|edit| edit.media_edit.replacement.as_ref())
+            .map(|replacement| replacement.path.clone())
+    });
+    assert_eq!(staged, None, "the stale render is not the new edit's photo");
+}
