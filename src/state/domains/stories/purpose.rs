@@ -122,8 +122,8 @@ pub enum StoriesPurpose {
     /// B14: `getCloseFriends`. Response is `users`; the ids land in
     /// `Session::close_friends` (user objects arrive via `updateUser`).
     GetCloseFriends,
-    /// B14: `setCloseFriends`. Response is `ok`; the sent ids (staged in
-    /// `Session::close_friends_pending`) become `Session::close_friends`.
+    /// B14: `setCloseFriends`. Response is `ok`; the sent ids (carried by
+    /// `PendingRequest::user_ids`) become `Session::close_friends`.
     SetCloseFriends,
     /// B14: `setChatActiveStoriesList` (hide / unhide a peer's stories).
     /// Response is `ok`; the tray moves via `updateChatActiveStories`.

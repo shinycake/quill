@@ -38,8 +38,9 @@ pub struct StoryViewersState {
     pub total_count: i32,
     pub rows: Vec<StoryInteractionView>,
     pub next_offset: String,
-    pub loading: bool,
-    pub error: Option<String>,
+    /// The page in flight, or why it failed. Only the answer of the
+    /// request it holds lands in `rows`.
+    pub page: PageFetch,
 }
 
 impl StoryViewersState {
@@ -47,7 +48,7 @@ impl StoryViewersState {
     /// left, none is on its way, and the last one did not fail (a failed
     /// page waits for the Retry button, not for the next scroll).
     pub fn wants_next_page(&self) -> bool {
-        !self.loading && self.error.is_none() && !self.next_offset.is_empty()
+        self.page == PageFetch::Idle && !self.next_offset.is_empty()
     }
 }
 
@@ -225,15 +226,14 @@ pub enum InfoPanelTarget {
 mod viewers_page_tests {
     use super::*;
 
-    fn viewers(loading: bool, error: Option<&str>, next: &str) -> StoryViewersState {
+    fn viewers(page: PageFetch, next: &str) -> StoryViewersState {
         StoryViewersState {
             chat_id: 1,
             story_id: 2,
             total_count: 10,
             rows: Vec::new(),
             next_offset: next.to_string(),
-            loading,
-            error: error.map(str::to_string),
+            page,
         }
     }
 
@@ -241,9 +241,9 @@ mod viewers_page_tests {
     /// by the next scroll (sweep 13-144).
     #[test]
     fn a_failed_page_does_not_ask_again_on_scroll() {
-        assert!(viewers(false, None, "n").wants_next_page());
-        assert!(!viewers(true, None, "n").wants_next_page());
-        assert!(!viewers(false, Some("boom"), "n").wants_next_page());
-        assert!(!viewers(false, None, "").wants_next_page());
+        assert!(viewers(PageFetch::Idle, "n").wants_next_page());
+        assert!(!viewers(PageFetch::Loading(None), "n").wants_next_page());
+        assert!(!viewers(PageFetch::Failed("boom".into()), "n").wants_next_page());
+        assert!(!viewers(PageFetch::Idle, "").wants_next_page());
     }
 }

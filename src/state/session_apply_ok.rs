@@ -506,7 +506,7 @@ impl Session {
             // B14: `setCloseFriends` confirmed — the staged ids are the
             // new list.
             Some(RequestPurpose::SetCloseFriends) => {
-                if let Some(ids) = self.stories.close_friends_pending.take() {
+                if let Some(ids) = pending.and_then(|p| p.user_ids.clone()) {
                     self.stories.close_friends = CloseFriendsList::Ready(ids);
                 }
                 self.succeed_story_page_op(pending);

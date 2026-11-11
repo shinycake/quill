@@ -92,7 +92,6 @@ GramsHub::loading
 GroupCallUi::window_opening
 HdrViewer::in_flight
 HeaderFacts::is_saved_messages
-HistoryCalendar::loading
 HistoryState::load_failed
 HistoryState::loaded_complete
 HistoryState::newer_failed
@@ -228,14 +227,8 @@ StorageScroll::pending
 StoryComposer::check_sent
 StoryComposer::check_sent+local_error
 StoryComposer::post_sent
-StoryInsightsState::forwards_loading
-StoryInsightsState::forwards_loading+forwards_error
 StoryManageState::pending
 StoryManageState::pending+error
-StorySearchState::loading
-StorySearchState::loading+error
-StoryViewersState::loading
-StoryViewersState::loading+error
 StreamFacts::transport_failed
 StyleExamples::loading
 Tempo::done

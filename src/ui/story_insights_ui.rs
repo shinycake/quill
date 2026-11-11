@@ -20,7 +20,7 @@ use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::stat_chart::ChartKind;
 use quill::state::{
-    StorySearchQuery, StoryStatsFetch, event_log_relative_time, private_share_count,
+    PageFetch, StorySearchQuery, StoryStatsFetch, event_log_relative_time, private_share_count,
     story_search_tag,
 };
 use quill::story_viewer::collect_found_story_items;
@@ -87,11 +87,11 @@ impl QuillApp {
             return;
         };
         if !self.stories.viewer_ui().stats_open
-            || (state.forwards_error.is_some() && !scrolled)
+            || (state.forwards_page.error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.stories.stats_scroll),
                 !state.forwards_next_offset.is_empty(),
-                state.forwards_loading,
+                state.forwards_page.is_loading(),
             )
             || !self
                 .stories
@@ -112,11 +112,11 @@ impl QuillApp {
         let Some(search) = self.session().and_then(|s| s.stories.search.as_ref()) else {
             return;
         };
-        if (search.error.is_some() && !scrolled)
+        if (search.page.error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.stories.found_scroll),
                 !search.next_offset.is_empty(),
-                search.loading,
+                search.page.is_loading(),
             )
             || !self
                 .stories
@@ -364,10 +364,15 @@ impl QuillApp {
                 PublicForwardKind::Story { .. } => row.into_any_element(),
             });
         }
-        if let Some(error) = state.forwards_error.clone() {
-            panel = panel.child(div().text_sm().text_color(danger()).child(error));
+        if let Some(error) = state.forwards_page.error() {
+            panel = panel.child(
+                div()
+                    .text_sm()
+                    .text_color(danger())
+                    .child(error.to_string()),
+            );
         }
-        if state.forwards_loading {
+        if state.forwards_page.is_loading() {
             panel = panel.child(loading_row("story-forwards-loading", cx));
         } else if state.forwards.is_empty()
             && state.forwards_next_offset.is_empty()
@@ -568,21 +573,21 @@ impl QuillApp {
                     ),
             );
         }
-        if search.loading && !search.stories.is_empty() {
+        if search.page.is_loading() && !search.stories.is_empty() {
             rows = rows.child(loading_row("found-stories-loading", cx));
         }
         block = block.child(rows);
-        if let Some(error) = search.error.clone() {
-            block = block.child(div().text_sm().text_color(danger()).child(error));
+        if let Some(error) = search.page.error() {
+            block = block.child(div().text_sm().text_color(danger()).child(error.to_string()));
         }
-        if search.loading && search.stories.is_empty() {
+        if search.page.is_loading() && search.stories.is_empty() {
             block = block.child(
                 div()
                     .text_sm()
                     .text_color(text_muted())
                     .child(tr(keys::Q_MEDIA_SEARCHING_STORIES)),
             );
-        } else if search.stories.is_empty() && !search.loading && search.error.is_none() {
+        } else if search.stories.is_empty() && search.page == PageFetch::Idle {
             block = block.child(
                 div()
                     .text_sm()

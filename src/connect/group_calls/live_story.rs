@@ -266,10 +266,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !live.pending_reaction.is_some_and(|p| p.due(now_ms)) {
             return false;
         }
-        let Some(pending) = live.commit_reaction() else {
+        let group_call_id = live.group_call_id;
+        let extra = self.session.request(
+            RequestPurpose::Stories(StoriesPurpose::Live(
+                LiveStoryPurpose::CommitPendingReactions { group_call_id },
+            )),
+            None,
+        );
+        let Some(live) = self.session.live_story_mut(group_call_id) else {
             return false;
         };
-        let group_call_id = live.group_call_id;
+        let Some(pending) = live.commit_reaction(extra) else {
+            self.session.requests.take(extra);
+            return false;
+        };
         // tdesktop `addStars(from, stars, mine)` at send time: your Stars
         // fly up from the button as the reaction goes out.
         if let Some(sender) = self.session.live_story_sender()
@@ -278,14 +288,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             live.push_effect(sender, pending.stars);
         }
         if self
-            .live_story_request(
-                LiveStoryPurpose::CommitPendingReactions { group_call_id },
-                |extra| commit_pending_live_story_reactions(extra, group_call_id),
+            .send_json_request(
+                extra,
+                &commit_pending_live_story_reactions(extra, group_call_id),
             )
             .is_err()
             && let Some(live) = self.session.live_story_mut(group_call_id)
         {
-            live.committed_stars = live.committed_stars.saturating_sub(pending.stars);
+            live.commit_failed(extra);
             live.note = Some(Refusal::NotEnough.message().to_string());
         }
         true

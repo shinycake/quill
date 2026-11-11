@@ -139,6 +139,20 @@ impl Session {
         id
     }
 
+    /// Like `request`, but stamps the user ids a `setCloseFriends` sent
+    /// (`PendingRequest::user_ids`); its `ok` carries none.
+    pub fn request_for_user_ids(
+        &mut self,
+        purpose: RequestPurpose,
+        user_ids: &[i64],
+    ) -> RequestId {
+        let id = self.request(purpose, None);
+        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
+            pending.user_ids = Some(user_ids.to_vec());
+        }
+        id
+    }
+
     /// Like `request`, but stamps the invite link a link-scoped request
     /// acts on (`PendingRequest::invite_link`); its `ok` carries none.
     pub fn request_for_invite_link(

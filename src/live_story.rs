@@ -275,24 +275,28 @@ impl CommentsTracker {
 
     /// The toggle button was clicked.
     pub fn toggle(&mut self) {
-        if self.state != CommentsState::Shown {
-            self.last_read_id = self.last_id;
-            if self.has == CommentsHas::WithUnread {
-                self.has = CommentsHas::AllRead;
-            }
-        }
-        self.state = if self.state == CommentsState::Shown {
-            CommentsState::Hidden
+        if self.state == CommentsState::Shown {
+            self.state = CommentsState::Hidden;
         } else {
-            CommentsState::Shown
-        };
+            self.show();
+        }
     }
 
-    /// A pinned comment was clicked: show the list again.
+    /// A pinned comment was clicked: show the list again, the same way the
+    /// toggle does.
     pub fn show_from_pinned(&mut self) {
-        if self.state != CommentsState::Empty {
-            self.state = CommentsState::Shown;
+        if !matches!(self.state, CommentsState::Empty | CommentsState::Shown) {
+            self.show();
         }
+    }
+
+    /// The list opens: everything up to the last comment counts as read.
+    fn show(&mut self) {
+        self.last_read_id = self.last_id;
+        if self.has == CommentsHas::WithUnread {
+            self.has = CommentsHas::AllRead;
+        }
+        self.state = CommentsState::Shown;
     }
 }
 

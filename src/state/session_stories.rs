@@ -148,14 +148,17 @@ impl Session {
     /// reaction picker — keyed by sticker id (= custom emoji id).
     pub fn accept_story_custom_emoji_stickers(&mut self, stickers: Vec<StickerItem>) {
         self.stories.custom_emoji_retry = None;
+        // Bounded: when this answer would pass the cap, the cache restarts
+        // empty before any of it goes in (never in the middle of the
+        // batch); the story viewer refetches the ids it still shows.
+        let fresh = stickers
+            .iter()
+            .filter(|s| !self.stories.custom_emoji_stickers.contains_key(&s.id))
+            .count();
+        if self.stories.custom_emoji_stickers.len().saturating_add(fresh) > STORY_CUSTOM_EMOJI_CAP {
+            self.stories.custom_emoji_stickers.clear();
+        }
         for sticker in stickers {
-            // Bounded: past the cap the cache restarts empty; the story
-            // viewer refetches the ids it still shows.
-            if self.stories.custom_emoji_stickers.len() >= STORY_CUSTOM_EMOJI_CAP
-                && !self.stories.custom_emoji_stickers.contains_key(&sticker.id)
-            {
-                self.stories.custom_emoji_stickers.clear();
-            }
             self.stories
                 .custom_emoji_stickers
                 .insert(sticker.id, sticker);
@@ -179,8 +182,10 @@ impl Session {
         if state.chat_id != chat_id.0 || state.story_id != story_id {
             return;
         }
-        state.loading = false;
-        state.error = None;
+        if !state.page.waits_for(pending.id) {
+            return;
+        }
+        state.page = PageFetch::Idle;
         state.total_count = view.total_count;
         state.next_offset = view.next_offset;
         state.rows.extend(view.interactions);
@@ -195,9 +200,30 @@ impl Session {
         if let Some(state) = self.stories.viewers.as_mut()
             && state.chat_id == chat_id.0
             && state.story_id == story_id
+            && state.page.waits_for(pending.id)
         {
-            state.loading = false;
-            state.error = Some(message);
+            state.page = PageFetch::Failed(message);
+        }
+    }
+
+    /// The viewers panel of this story sent `request` for a page.
+    pub fn story_viewers_sent(&mut self, chat_id: i64, story_id: i32, request: RequestId) {
+        if let Some(state) = self.stories.viewers.as_mut()
+            && state.chat_id == chat_id
+            && state.story_id == story_id
+        {
+            state.page = PageFetch::Loading(Some(request));
+        }
+    }
+
+    /// The page request of this story's viewers panel could not be sent:
+    /// the panel offers the retry.
+    pub fn story_viewers_send_failed(&mut self, chat_id: i64, story_id: i32, message: String) {
+        if let Some(state) = self.stories.viewers.as_mut()
+            && state.chat_id == chat_id
+            && state.story_id == story_id
+        {
+            state.page = PageFetch::Failed(message);
         }
     }
 

@@ -49,6 +49,21 @@ impl ViewJump {
     }
 }
 
+/// Where the calendar's paging back through the history is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CalendarPaging {
+    /// Nothing in flight; the next older page may be asked for.
+    Idle,
+    /// A page is on its way.
+    Loading,
+    /// The last page failed (a timeout, a flood wait, offline): moving to
+    /// another month asks for it again.
+    Failed,
+    /// An empty page: the history has no older days (or the `All` filter,
+    /// which cannot be fetched).
+    Exhausted,
+}
+
 /// One open calendar box.
 #[derive(Debug, Clone)]
 pub struct HistoryCalendar {
@@ -61,8 +76,7 @@ pub struct HistoryCalendar {
     pub days: BTreeMap<i64, CalendarDay>,
     /// `from_message_id` for the next older page.
     pub oldest_loaded: MessageId,
-    pub exhausted: bool,
-    pub loading: bool,
+    pub paging: CalendarPaging,
     pub generation: u64,
     /// Set when the box was opened from the shared-media gallery: a picked
     /// day reloads that tab instead of jumping in the history.
@@ -77,8 +91,11 @@ impl HistoryCalendar {
             month: YearMonth::of(now),
             days: BTreeMap::new(),
             oldest_loaded: MessageId(0),
-            exhausted: media == SearchMediaKind::All,
-            loading: false,
+            paging: if media == SearchMediaKind::All {
+                CalendarPaging::Exhausted
+            } else {
+                CalendarPaging::Idle
+            },
             generation,
             shared_tab: None,
         }
@@ -91,7 +108,7 @@ impl HistoryCalendar {
     /// Whether the displayed month needs an older page: the data loaded so
     /// far does not reach back before the month begins.
     pub fn needs_older_page(&self) -> bool {
-        if self.exhausted || self.loading {
+        if matches!(self.paging, CalendarPaging::Exhausted | CalendarPaging::Loading) {
             return false;
         }
         match self.days.keys().next() {
@@ -100,10 +117,19 @@ impl HistoryCalendar {
         }
     }
 
+    pub fn is_loading(&self) -> bool {
+        self.paging == CalendarPaging::Loading
+    }
+
+    /// A page request went out.
+    pub fn begin_page(&mut self) {
+        self.paging = CalendarPaging::Loading;
+    }
+
     /// Merge one page. `days` come newest first; an empty page (or the
     /// same cursor again) ends the list.
     pub fn accept(&mut self, days: Vec<CalendarDay>) {
-        self.loading = false;
+        self.paging = CalendarPaging::Idle;
         let before = self.oldest_loaded;
         let mut oldest = self.oldest_loaded;
         for day in days {
@@ -122,13 +148,13 @@ impl HistoryCalendar {
         }
         self.oldest_loaded = oldest;
         if oldest == before {
-            self.exhausted = true;
+            self.paging = CalendarPaging::Exhausted;
         }
     }
 
+    /// The page failed: the list stays as it is and a later ask retries.
     pub fn fail(&mut self) {
-        self.loading = false;
-        self.exhausted = true;
+        self.paging = CalendarPaging::Failed;
     }
 
     pub fn show_month(&mut self, month: YearMonth) {
@@ -163,27 +189,40 @@ mod tests {
     fn pages_until_the_month_is_covered() {
         let mut c = calendar();
         assert!(c.needs_older_page());
-        c.loading = true;
+        c.begin_page();
         // Early October: the loaded days do not reach back before the 1st.
         c.accept(vec![day(500 << 20, 1_791_000_000, 3)]);
         assert!(c.needs_older_page());
-        c.loading = true;
+        c.begin_page();
         // A day in August covers the displayed month.
         c.accept(vec![day(100 << 20, 1_788_000_000, 1)]);
         assert_eq!(c.oldest_loaded, MessageId(100 << 20));
-        assert!(!c.exhausted);
+        assert_eq!(c.paging, CalendarPaging::Idle);
         assert!(!c.needs_older_page());
     }
 
     #[test]
     fn an_empty_page_ends_the_list() {
         let mut c = calendar();
-        c.loading = true;
+        c.begin_page();
         c.accept(vec![day(5 << 20, 1_791_000_000, 1)]);
-        c.loading = true;
+        c.begin_page();
         c.accept(Vec::new());
-        assert!(c.exhausted);
+        assert_eq!(c.paging, CalendarPaging::Exhausted);
         assert!(!c.needs_older_page());
+    }
+
+    #[test]
+    fn a_failed_page_is_asked_for_again() {
+        let mut c = calendar();
+        c.begin_page();
+        assert!(!c.needs_older_page(), "one page at a time");
+        c.fail();
+        assert_eq!(c.paging, CalendarPaging::Failed);
+        assert!(c.needs_older_page(), "a failure does not end the paging");
+        c.begin_page();
+        c.accept(vec![day(5 << 20, 1_788_000_000, 1)]);
+        assert_eq!(c.paging, CalendarPaging::Idle);
     }
 
     #[test]

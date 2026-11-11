@@ -479,6 +479,9 @@ pub struct PendingRequest {
     /// story ids) and `ReorderStoryAlbums` (the sent album id order) so
     /// the id-less `ok` response applies to the right list.
     pub story_ids: Option<Vec<i32>>,
+    /// `user_ids` for `SetCloseFriends` (the sent list), so its `ok`
+    /// applies the list this request sent and not a later one.
+    pub user_ids: Option<Vec<i64>>,
     /// Phase 9.7: `story_album_id` for `DeleteStoryAlbum` so the `ok`
     /// response drops the right album from `Session::story_albums`.
     pub story_album_id: Option<i32>,
@@ -566,6 +569,7 @@ impl RequestRegistry {
             community_id: None,
             story_id: None,
             story_ids: None,
+            user_ids: None,
             story_album_id: None,
             folder_id: None,
             scope: None,

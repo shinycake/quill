@@ -334,7 +334,7 @@ fn story_manage_state_transitions() {
             extra.0
         ),
     );
-    assert_eq!(session.stories.post_as_chats, vec![111, 222]);
+    assert_eq!(session.stories.post_as.data(), Some(&vec![111, 222]));
 
     // Review fix-up: a failed `getChatsToPostStories` surfaces a
     // transient error instead of silently leaving only "Myself".
@@ -348,13 +348,12 @@ fn story_manage_state_transitions() {
             extra.0
         ),
     );
-    let error = session
-        .stories
-        .post
-        .check_error
-        .clone()
-        .expect("post-as error");
+    let error = session.stories.post_as.error().expect("post-as error");
     assert!(error.contains("Could not load"), "{error}");
+    // It is not the eligibility check's answer.
+    assert!(session.stories.post.check_error.is_none());
+    // The chats loaded before stay for the picker.
+    assert_eq!(session.stories.post_as.data(), Some(&vec![111, 222]));
 }
 
 #[test]
@@ -600,8 +599,7 @@ fn b14_close_friends_load_and_save_round_trip() {
     assert!(session.stories.page_op.is_none());
 
     // `setCloseFriends` applies the staged ids on `ok`.
-    session.stories.close_friends_pending = Some(vec![33]);
-    let extra = session.request(RequestPurpose::SetCloseFriends, None);
+    let extra = session.request_for_user_ids(RequestPurpose::SetCloseFriends, &[33]);
     apply_json(
         &mut session,
         &seq,
@@ -609,16 +607,36 @@ fn b14_close_friends_load_and_save_round_trip() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
     assert_eq!(session.stories.close_friends.ids(), Some(&vec![33]));
-    assert!(session.stories.close_friends_pending.is_none());
 }
 
 #[test]
-fn b14_close_friends_error_drops_staged_ids() {
+fn b14_close_friends_ok_applies_its_own_list_not_a_later_one() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let first = session.request_for_user_ids(RequestPurpose::SetCloseFriends, &[1]);
+    let second = session.request_for_user_ids(RequestPurpose::SetCloseFriends, &[2]);
+    let err = |extra: crate::state::RequestId| {
+        format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"USER_NOT_MUTUAL_CONTACT"}}"#,
+            extra.0
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &err(first));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, second.0),
+    );
+    assert_eq!(session.stories.close_friends.ids(), Some(&vec![2]));
+}
+
+#[test]
+fn b14_close_friends_error_keeps_the_list() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.stories.close_friends = CloseFriendsList::Ready(vec![31]);
-    session.stories.close_friends_pending = Some(vec![31, 32]);
-    let extra = session.request(RequestPurpose::SetCloseFriends, None);
+    let extra = session.request_for_user_ids(RequestPurpose::SetCloseFriends, &[31, 32]);
     session.begin_story_page_op(
         crate::story_page::story_page_op_label(RequestPurpose::SetCloseFriends),
         extra,
@@ -633,7 +651,6 @@ fn b14_close_friends_error_drops_staged_ids() {
         ),
     );
     assert_eq!(session.stories.close_friends.ids(), Some(&vec![31]));
-    assert!(session.stories.close_friends_pending.is_none());
     assert!(matches!(
         session.stories.page_op.as_ref().map(|op| &op.state),
         Some(crate::story_page::StoryPageOpState::Failed(_))
@@ -777,6 +794,16 @@ fn story_custom_emoji_stickers_are_bounded() {
         );
     }
     assert!(session.stories.custom_emoji_stickers.contains_key(&total));
+
+    // An answer that crosses the cap keeps every sticker it brought.
+    let cap = crate::state::STORY_CUSTOM_EMOJI_CAP as i64;
+    session.stories.custom_emoji_stickers.clear();
+    session.accept_story_custom_emoji_stickers((1..cap - 1).map(sticker).collect());
+    let batch: Vec<_> = (1_000..1_005).map(sticker).collect();
+    session.accept_story_custom_emoji_stickers(batch);
+    for id in 1_000..1_005 {
+        assert!(session.stories.custom_emoji_stickers.contains_key(&id));
+    }
 }
 
 /// A later story-page op overwrites the viewer's single op; the

@@ -1,7 +1,7 @@
 //! Connect driver: story statistics, public forwards and public story search.
 use super::*;
 use crate::ids::{ChatId, RequestId};
-use crate::state::{RequestPurpose, StorySearchQuery, StoryStatsFetch};
+use crate::state::{PageFetch, RequestPurpose, StorySearchQuery, StoryStatsFetch};
 use crate::telegram::requests_story_insights::{
     get_story_public_forwards, get_story_statistics, search_public_stories_by_location,
     search_public_stories_by_tag, search_public_stories_by_venue,
@@ -39,19 +39,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         ) {
             // Its answer is on the way: the insights wait for this story
             // again (they may show another story opened since), so the
-            // answer lands (`insights_for`).
+            // answer lands (`insights_for`). A forwards page sent for an
+            // earlier visit does not match the new state (`PageFetch`), so
+            // the first page is asked for again.
             self.session.begin_story_insights(chat_id.0, story_id);
-            let forwards_pending = self.session.requests.has_purpose_for_story(
-                RequestPurpose::GetStoryPublicForwards,
-                chat_id,
-                story_id,
-            );
-            if forwards_pending && let Some(state) = self.session.stories.insights.as_mut() {
-                state.forwards_loading = true;
-            }
-            // The forwards came while another story was shown, and that
-            // story's insights replaced them: ask for the first page again.
-            if !forwards_pending {
+            let needs_first_page = self.session.stories.insights.as_ref().is_some_and(|state| {
+                state.forwards_page == PageFetch::Idle
+                    && state.forwards.is_empty()
+                    && state.forwards_next_offset.is_empty()
+            });
+            if needs_first_page {
                 let _ = self.fetch_story_public_forwards(chat_id, story_id, "");
             }
             return Ok(None);
@@ -84,11 +81,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.requests.has_purpose_for_story(
-            RequestPurpose::GetStoryPublicForwards,
-            chat_id,
-            story_id,
-        ) {
+        // This story's own page in flight holds the next one back; a page
+        // sent for an earlier visit answers into nothing.
+        let waiting = self
+            .session
+            .stories
+            .insights
+            .as_ref()
+            .filter(|state| state.chat_id == chat_id.0 && state.story_id == story_id)
+            .is_some_and(|state| {
+                matches!(state.forwards_page, PageFetch::Loading(Some(id))
+                    if self.session.requests.get(id).is_some())
+            });
+        if waiting {
             return Ok(None);
         }
         let extra = self.session.request_for_story(
@@ -100,12 +105,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra, chat_id, story_id, offset, PAGE,
         )) {
             Ok(()) => {
-                if let Some(state) = self.session.stories.insights.as_mut()
-                    && state.chat_id == chat_id.0
-                    && state.story_id == story_id
-                {
-                    state.forwards_loading = true;
-                }
+                self.session
+                    .story_forwards_sent(chat_id.0, story_id, extra);
                 Ok(Some(extra))
             }
             Err(err) => {
@@ -156,7 +157,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(search) = self.session.stories.search.as_ref() else {
             return Ok(None);
         };
-        if search.loading || search.next_offset.is_empty() {
+        if search.page.is_loading() || search.next_offset.is_empty() {
             return Ok(None);
         }
         let offset = search.next_offset.clone();
@@ -173,13 +174,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .stories
             .search
             .as_ref()
-            .map(|search| (search.query.clone(), search.request))
+            .map(|search| (search.query.clone(), search.page.clone()))
         else {
             return Ok(None);
         };
         // Only this search's own page in flight holds the next one back; an
         // earlier search's answer lands in nothing (`story_search_sent`).
-        if waiting.is_some_and(|id| self.session.requests.get(id).is_some()) {
+        if matches!(waiting, PageFetch::Loading(Some(id)) if self.session.requests.get(id).is_some())
+        {
             return Ok(None);
         }
         let extra = self
@@ -199,7 +201,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.clear_story_search();
+                self.session
+                    .story_search_send_failed("Could not search stories".to_string());
                 Err(err)
             }
         }

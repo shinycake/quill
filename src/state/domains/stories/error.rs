@@ -15,7 +15,7 @@ impl Session {
         // composer shows it instead of spinning forever.
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::Stories(StoriesPurpose::Live(purpose))) => {
-                self.apply_live_story_error(purpose, err);
+                self.apply_live_story_error(purpose, pending.map(|p| p.id), err);
             }
             Some(RequestPurpose::PostStory) => {
                 self.stories.post.outcome =
@@ -110,10 +110,11 @@ impl Session {
                 }
             }
             // Phase 9.5 (review fix-up): `getChatsToPostStories`
-            // failed — surface a transient error so the "Post as"
-            // picker doesn't silently show only "Myself".
+            // failed — the "Post as" picker draws the error instead of
+            // silently showing only "Myself"; it is not the eligibility
+            // check's error.
             Some(RequestPurpose::GetChatsToPostStories) => {
-                self.stories.post.check_error = Some(format!(
+                self.stories.post_as.fail(format!(
                     "Could not load \"Post as\" chats: {}",
                     error_reason(err)
                 ));
@@ -138,9 +139,6 @@ impl Session {
                 | RequestPurpose::SetChatActiveStoriesList
                 | RequestPurpose::ToggleStoryIsPostedToChatPage),
             ) => {
-                if purpose == RequestPurpose::SetCloseFriends {
-                    self.stories.close_friends_pending = None;
-                }
                 if purpose == RequestPurpose::GetCloseFriends
                     && let Some(pending) = pending
                 {

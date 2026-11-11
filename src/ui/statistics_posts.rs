@@ -694,8 +694,8 @@ impl QuillApp {
             "story-forward",
             state.forwards_total,
             &state.forwards,
-            state.forwards_loading,
-            state.forwards_error.clone(),
+            state.forwards_page.is_loading(),
+            state.forwards_page.error().map(str::to_owned),
             more,
             cx,
         ))
