@@ -400,10 +400,7 @@ fn deleting_a_gift_sends_delete_gift_and_removes_it_on_ok() {
     let hub = &p.0.session.payments.hub;
     assert!(!hub.gifts_op.is_mutating());
     assert_eq!(
-        hub.gifts
-            .iter()
-            .map(|g| g.id.as_str())
-            .collect::<Vec<_>>(),
+        hub.gifts.iter().map(|g| g.id.as_str()).collect::<Vec<_>>(),
         ["b", "c"]
     );
     assert_eq!(hub.gifts_total, 2);

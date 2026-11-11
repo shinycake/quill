@@ -18,6 +18,9 @@ use std::time::Instant;
 pub(crate) struct PinDrag {
     pub(super) archived: bool,
     pub(super) reorder: quill::pin_reorder::PinReorder,
+    /// A press on another pinned row that went down during the release
+    /// slide: the slide goes on, and that row's drag starts under the pointer.
+    pub(super) next_press: Option<(i64, f32)>,
 }
 
 /// The peek preview of a chat-list row: a long press in progress (the
@@ -102,11 +105,24 @@ pub(crate) enum PinStage {
 
 impl PinStage {
     /// A mouse-down on a pinned row. A drag (or its release slide) is not
-    /// cut by another press: only an idle or pressed stage takes it.
+    /// cut by another press: the press waits in it for the drag it may become.
     pub(super) fn press(&mut self, chat: i64, y: f32) {
-        if matches!(self, Self::Idle | Self::Pressed { .. }) {
-            *self = Self::Pressed { chat, y };
+        match self {
+            Self::Dragging(drag) => drag.next_press = Some((chat, y)),
+            _ => *self = Self::Pressed { chat, y },
         }
+    }
+
+    /// The release slide settled: the drag ends, but a press made during it
+    /// stays pressed.
+    pub(super) fn settle(&mut self) {
+        *self = match std::mem::take(self) {
+            Self::Dragging(PinDrag {
+                next_press: Some((chat, y)),
+                ..
+            }) => Self::Pressed { chat, y },
+            _ => Self::Idle,
+        };
     }
 
     pub(super) fn drag(&self) -> Option<&PinDrag> {
@@ -140,6 +156,13 @@ impl PinStage {
                 *self = Self::Idle;
                 Some(y)
             }
+            Self::Dragging(ref mut drag) => match drag.next_press {
+                Some((id, y)) if id == chat => {
+                    drag.next_press = None;
+                    Some(y)
+                }
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -292,6 +315,7 @@ mod tests {
             let mut dragging = PinStage::Dragging(PinDrag {
                 archived: false,
                 reorder,
+                next_press: None,
             });
             dragging.press(6, 1.);
             assert!(dragging.drag().is_some(), "the drag or its slide stays");

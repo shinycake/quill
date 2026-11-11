@@ -3,11 +3,10 @@ use super::*;
 use crate::telegram::envelope::MessageSchedulingState;
 
 impl Session {
-    /// Phase 3.1: bot chats ride the ordinary private-chat path
-    /// (`is_supported_chat` / `can_post`) — no special gate. This
-    /// resolves the peer bot user id for a private chat whose user is a
-    /// known `userTypeBot`, feeding the lazy `getUserFullInfo` fetch.
-    /// `None` for every other chat kind.
+    /// Bot chats ride the ordinary private-chat path (`is_supported_chat` /
+    /// `can_post`). This resolves the peer bot user id of a private chat
+    /// whose user is a known `userTypeBot`, feeding the lazy
+    /// `getUserFullInfo` fetch. `None` for every other chat kind.
     pub fn bot_user_id_for_chat(&self, chat_id: ChatId) -> Option<i64> {
         let chat = self.chats.get(&chat_id.0)?;
         match chat.kind {

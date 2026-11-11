@@ -53,7 +53,13 @@ pub(super) fn collect_button(cx: &mut Context<QuillApp>) -> Button {
 
 impl QuillApp {
     fn grams_withdraw(&self) -> Option<GramWithdraw> {
-        self.session()?.payments.hub.grams.withdraw.as_ref().cloned()
+        self.session()?
+            .payments
+            .hub
+            .grams
+            .withdraw
+            .as_ref()
+            .cloned()
     }
 
     fn clear_grams_withdraw_password(&mut self, window: &mut Window, cx: &mut Context<Self>) {

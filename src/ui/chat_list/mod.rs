@@ -668,6 +668,7 @@ impl QuillApp {
                             crate::ui::chat_list_state::PinDrag {
                                 archived: drag.archived,
                                 reorder,
+                                next_press: None,
                             },
                         )
                     });
