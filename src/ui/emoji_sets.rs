@@ -15,7 +15,7 @@ use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::emoji::EmojiSetTab;
+use quill::emoji::{EmojiMutation, EmojiSetTab};
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, trn};
 use quill::local_path::sandboxed_display_path;
@@ -43,7 +43,6 @@ impl QuillApp {
         self.pickers
             .emoji_set_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.pickers.emoji_set_return_tab = EmojiSetTab::Installed;
         self.open_box(DialogKind::EmojiSets);
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_emoji_sets().is_err() {
@@ -73,7 +72,6 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.pickers.emoji_set_keystroke = self.pickers.emoji_set_keystroke.wrapping_add(1);
-        self.pickers.emoji_set_return_tab = tab;
         self.pickers
             .emoji_set_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -107,11 +105,12 @@ impl QuillApp {
             .trim()
             .to_string();
         if query.is_empty() {
-            let tab = self.pickers.emoji_set_return_tab;
-            if self
+            let back = self
                 .session()
-                .is_some_and(|s| s.stickers.emoji.tab == EmojiSetTab::Search)
-            {
+                .map(|s| s.stickers.emoji.tab)
+                .filter(|tab| tab.is_search())
+                .map(EmojiSetTab::back);
+            if let Some(tab) = back {
                 self.show_emoji_sets_tab(tab, cx);
             }
             return;
@@ -140,7 +139,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             let needle = query.to_lowercase();
             let emoji = &mut session.stickers.emoji;
-            emoji.tab = EmojiSetTab::Search;
+            emoji.tab = emoji.tab.searching();
             emoji.search_query = query.to_string();
             emoji.found_sets = emoji
                 .installed_sets
@@ -222,7 +221,7 @@ impl QuillApp {
         &self,
         set: &StickerSetInfo,
         tab: EmojiSetTab,
-        busy: Option<(i64, bool)>,
+        busy: EmojiMutation,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let id = set.id;
@@ -231,7 +230,8 @@ impl QuillApp {
         } else {
             set.title.clone()
         };
-        let working = busy.is_some_and(|(set_id, _)| set_id == id);
+        let working =
+            matches!(busy, EmojiMutation::Changing { set: changing, .. } if changing == id);
         let action = if tab == EmojiSetTab::Installed {
             Button::new(format!("emoji-pack-remove-{id}"))
                 .icon(gpui_kit::assets::IconName::X)
@@ -321,7 +321,7 @@ impl QuillApp {
             s.requests.has_purpose(match panel.tab {
                 EmojiSetTab::Installed => RequestPurpose::GetInstalledEmojiSets,
                 EmojiSetTab::Trending => RequestPurpose::GetTrendingEmojiSets,
-                EmojiSetTab::Search => RequestPurpose::SearchEmojiSets,
+                EmojiSetTab::Search { .. } => RequestPurpose::SearchEmojiSets,
             })
         });
         let owner = cx.entity().downgrade();
@@ -335,7 +335,7 @@ impl QuillApp {
             }))
             .selected_index(
                 TABS.iter()
-                    .position(|tab| *tab == self.pickers.emoji_set_return_tab)
+                    .position(|tab| *tab == panel.tab.back())
                     .unwrap_or(0),
             )
             .on_click(move |ix, window, cx| {
@@ -347,14 +347,16 @@ impl QuillApp {
         let sets: Vec<&StickerSetInfo> = match panel.tab {
             EmojiSetTab::Installed => session.map(|s| s.ordered_emoji_packs()).unwrap_or_default(),
             EmojiSetTab::Trending => panel.trending_sets.iter().collect(),
-            EmojiSetTab::Search => panel.found_sets.iter().collect(),
+            EmojiSetTab::Search { .. } => panel.found_sets.iter().collect(),
         };
         let rows = sets.iter().fold(v_flex().w_full(), |rows, set| {
-            rows.child(self.emoji_pack_row(set, panel.tab, panel.mutating_set, cx))
+            rows.child(self.emoji_pack_row(set, panel.tab, panel.mutation, cx))
         });
         let status = if loading && sets.is_empty() {
             Some(tr(keys::Q_MEDIA_LOADING_EMOJI_PACKS))
-        } else if panel.lists.of(panel.tab).error().is_some() || panel.mutation_failed {
+        } else if panel.lists.of(panel.tab).error().is_some()
+            || panel.mutation == EmojiMutation::Failed
+        {
             Some(tr(keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS))
         } else if sets.is_empty() && !loading {
             Some(tr(keys::Q_MEDIA_NO_EMOJI_PACKS_FOUND))

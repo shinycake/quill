@@ -459,11 +459,7 @@ fn websites_answer_replaces_cache_for_matching_request() {
             extra.0,
         ),
     );
-    let websites = session
-        .settings
-        .connected_websites
-        .data()
-        .expect("cached");
+    let websites = session.settings.connected_websites.data().expect("cached");
     assert_eq!(websites.len(), 1);
     let site = &websites[0];
     assert_eq!(site.id, 55);
@@ -490,10 +486,7 @@ fn websites_answer_ignored_without_matching_request() {
         &sink,
         r#"{"@type":"connectedWebsites","websites":[{"@type":"connectedWebsite","id":55,"domain_name":"example.com"}]}"#,
     );
-    assert_eq!(
-        session.settings.connected_websites.data().unwrap().len(),
-        0
-    );
+    assert_eq!(session.settings.connected_websites.data().unwrap().len(), 0);
 }
 
 #[test]
@@ -524,10 +517,7 @@ fn disconnect_website_ok_keeps_cache_and_marks_stale() {
     );
     // The old cache stays visible until the authoritative refetch
     // replaces it — no optimistic deletion.
-    assert_eq!(
-        session.settings.connected_websites.data().unwrap().len(),
-        1
-    );
+    assert_eq!(session.settings.connected_websites.data().unwrap().len(), 1);
     assert!(session.settings.websites_edit.needs_refetch());
     assert!(!session.settings.websites_edit.in_flight());
     assert!(session.settings.connected_websites.error().is_none());

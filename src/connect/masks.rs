@@ -30,14 +30,25 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.session.request(purpose, None);
         if let Err(err) = self.sender.send_json(&build(extra)) {
             self.session.requests.take(extra);
-            self.session.stickers.masks.failed = true;
+            // The list the request was for says so.
+            let masks = &mut self.session.stickers.masks;
+            let error = "The mask sets request was not sent.";
+            match purpose {
+                RequestPurpose::Stickers(StickersPurpose::GetInstalledMaskSets) => {
+                    masks.installed.fail(error)
+                }
+                RequestPurpose::Stickers(StickersPurpose::GetArchivedMaskSets { .. }) => {
+                    masks.archived.fail(error)
+                }
+                _ => {}
+            }
             return Err(err);
         }
         Ok(Some(extra))
     }
 
     fn request_installed_masks(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        self.session.stickers.masks.failed = false;
+        self.session.stickers.masks.installed.begin();
         self.mask_request(
             StickersPurpose::GetInstalledMaskSets.into(),
             get_installed_mask_sets,
@@ -49,11 +60,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         more: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         let masks = &self.session.stickers.masks;
-        if more && !masks.archived_has_more {
-            return Ok(None);
-        }
-        let offset = if more { masks.archived_next_offset } else { 0 };
-        self.session.stickers.masks.failed = false;
+        let offset = if more {
+            let Some(offset) = masks.archived_more else {
+                return Ok(None);
+            };
+            offset
+        } else {
+            0
+        };
+        self.session.stickers.masks.archived.begin();
         self.mask_request(
             StickersPurpose::GetArchivedMaskSets { first_page: !more }.into(),
             |id| get_archived_mask_sets(id, offset),
@@ -126,7 +141,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .stickers
             .masks
-            .installed
+            .installed_sets()
             .iter()
             .map(|set| set.id)
             .collect();
@@ -191,11 +206,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         let masks = &self.session.stickers.masks;
-        if (strip || tab == MasksTab::Installed) && !masks.installed_loaded && !masks.failed {
+        // Asked when never asked or owed again; a failed list waits for a
+        // retry.
+        let wants = |list: &crate::state::fetch::Fetch<_>| list.is_idle() || list.is_loading();
+        if (strip || tab == MasksTab::Installed) && wants(&masks.installed) {
             self.request_installed_masks()?;
         }
         let masks = &self.session.stickers.masks;
-        if open && tab == MasksTab::Archived && !masks.archived_loaded && !masks.failed {
+        if open && tab == MasksTab::Archived && wants(&masks.archived) {
             self.request_archived_masks(false)?;
         }
         if !strip {
@@ -205,7 +223,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .stickers
             .masks
-            .installed
+            .installed_sets()
             .iter()
             .take(STRIP_SETS)
             .map(|set| set.id)
@@ -227,7 +245,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .stickers
             .masks
-            .installed
+            .installed_sets()
             .iter()
             .take(STRIP_SETS)
             .filter_map(|set| self.session.stickers.masks.set_stickers.get(&set.id))

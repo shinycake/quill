@@ -219,25 +219,26 @@ pub struct StickerPanel {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GifPanel {
     pub open: bool,
-    pub animations: Vec<AnimationItem>,
-    pub loaded: bool,
+    /// The saved list: one value for its fetch. `Loading` with no request
+    /// in flight means a refetch is wanted (an `updateSavedAnimations`
+    /// arrived, a save or remove took, the panel was reopened after a
+    /// failure): the driver sends it once the panel is open. A failed
+    /// fetch is not asked again until the panel is reopened.
+    pub saved: crate::state::fetch::Fetch<Vec<AnimationItem>>,
     pub search_mode: bool,
-    pub search_loading: bool,
-    pub search_failed: bool,
+    /// The GIF search's results, paged: in flight (`Loading`, the pages so
+    /// far stay), answered, or failed.
+    pub search: crate::state::fetch::Fetch<Vec<AnimationItem>>,
     pub search_query: String,
     /// The chat of the window that asked (the inline query's chat); paging
     /// keeps it.
     pub search_chat: Option<crate::ids::ChatId>,
     pub search_bot_username: String,
     pub search_bot_user_id: Option<i64>,
-    pub loading: bool,
-    pub failed: bool,
-    /// `updateSavedAnimations` arrived; refresh even if the panel was closed.
-    pub stale: bool,
     /// Slice S9: GIF search via the animation search bot
     /// (`getInlineQueryResults`; schema 1.8.67, lines 6483, 13019).
-    /// First page replaces; later pages append, deduped by file id.
-    pub search_results: Vec<AnimationItem>,
+    /// First page replaces; later pages append, deduped by file id (in
+    /// `search`).
     /// Slice S9: `next_offset` of the last search page ("" = exhausted).
     pub search_next_offset: String,
     pub search_offset: String,
@@ -247,7 +248,7 @@ pub struct GifPanel {
     pub search_provider: String,
     pub provider_emojis: Vec<String>,
     /// The searches answered lately, so a window's GIF tab shows its own
-    /// search while another window's is the one in `search_results`.
+    /// search while another window's is the one in `search`.
     pub searches_kept: GifSearches,
 }
 
@@ -261,6 +262,34 @@ pub struct GifSearches(Vec<GifSearchKept>);
 pub struct GifSearchKept {
     pub query: String,
     pub results: Vec<AnimationItem>,
+}
+
+impl GifPanel {
+    /// The saved GIFs held.
+    pub fn animations(&self) -> &[AnimationItem] {
+        self.saved.data().map(Vec::as_slice).unwrap_or_default()
+    }
+
+    /// The GIF search results held.
+    pub fn search_results(&self) -> &[AnimationItem] {
+        self.search.data().map(Vec::as_slice).unwrap_or_default()
+    }
+
+    /// The saved list was fetched at least once (or failed to be).
+    pub fn loaded(&self) -> bool {
+        self.saved.data().is_some()
+    }
+
+    /// The saved list changed on the server (or by a save / remove): it
+    /// is fetched again, keeping what shows meanwhile.
+    pub fn want_saved_again(&mut self) {
+        if matches!(
+            self.saved,
+            crate::state::fetch::Fetch::Ready(_) | crate::state::fetch::Fetch::Failed { .. }
+        ) {
+            self.saved.begin();
+        }
+    }
 }
 
 impl GifSearches {
@@ -290,9 +319,9 @@ impl GifSearches {
 impl GifPanel {
     pub fn visible_animations(&self) -> &[AnimationItem] {
         if self.search_mode {
-            &self.search_results
+            self.search_results()
         } else {
-            &self.animations
+            self.animations()
         }
     }
 

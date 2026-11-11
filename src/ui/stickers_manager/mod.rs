@@ -127,16 +127,16 @@ impl QuillApp {
                         StickersPurpose::GetArchivedMaskSets { first_page: false }.into(),
                     )
                     || match tab {
-                        ManagerTab::Installed => !masks.installed_loaded,
-                        _ => !masks.archived_loaded,
+                        ManagerTab::Installed => masks.installed.data().is_none(),
+                        _ => masks.archived.data().is_none(),
                     };
                 (
                     tab,
-                    masks.installed.clone(),
+                    masks.installed_sets().to_vec(),
                     Vec::new(),
-                    masks.archived.clone(),
+                    masks.archived_sets().to_vec(),
                     loading,
-                    masks.failed,
+                    masks.failed(),
                 )
             }
         };
@@ -374,7 +374,9 @@ impl QuillApp {
             {
                 live.driver.fetch_archived_stickers(true).map(drop)
             }
-            (Kind::Masks, ManagerTab::Archived) if session.stickers.masks.archived_has_more => {
+            (Kind::Masks, ManagerTab::Archived)
+                if session.stickers.masks.archived_more.is_some() =>
+            {
                 live.driver.more_archived_masks().map(drop)
             }
             _ => return,
@@ -560,7 +562,10 @@ fn apply_demo_commit(
 ) {
     let sets = match kind {
         Kind::Stickers => &mut session.stickers.stickers.sets,
-        Kind::Masks => &mut session.stickers.masks.installed,
+        Kind::Masks => match session.stickers.masks.installed.data_mut() {
+            Some(sets) => sets,
+            None => return,
+        },
     };
     sets.retain(|set| !removed.contains(&set.id));
     if let Some(order) = order {

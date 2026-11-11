@@ -19,12 +19,57 @@ pub use keyword_lookup::KeywordLookups;
 /// Most resolved custom emoji kept in `EmojiPanel::custom_emoji_stickers`.
 pub const CUSTOM_EMOJI_CACHE_CAP: usize = 4000;
 
+/// The tab of the Emoji Sets box. A search remembers the tab it came from,
+/// so clearing the field brings that tab back.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum EmojiSetTab {
     #[default]
     Installed,
     Trending,
-    Search,
+    Search {
+        back: SetsBrowseTab,
+    },
+}
+
+/// The tabs a search can return to.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SetsBrowseTab {
+    #[default]
+    Installed,
+    Trending,
+}
+
+impl EmojiSetTab {
+    /// The tab shown, or the one a search returns to.
+    pub fn back(self) -> Self {
+        match self {
+            Self::Installed
+            | Self::Search {
+                back: SetsBrowseTab::Installed,
+            } => Self::Installed,
+            Self::Trending
+            | Self::Search {
+                back: SetsBrowseTab::Trending,
+            } => Self::Trending,
+        }
+    }
+
+    /// The search tab reached from this one.
+    pub fn searching(self) -> Self {
+        match self {
+            Self::Search { .. } => self,
+            Self::Installed => Self::Search {
+                back: SetsBrowseTab::Installed,
+            },
+            Self::Trending => Self::Search {
+                back: SetsBrowseTab::Trending,
+            },
+        }
+    }
+
+    pub fn is_search(self) -> bool {
+        matches!(self, Self::Search { .. })
+    }
 }
 
 /// Slice S10: custom-emoji backend (packs + statuses + picker search).
@@ -80,20 +125,23 @@ impl EmojiLists {
         match tab {
             EmojiSetTab::Installed => &self.installed,
             EmojiSetTab::Trending => &self.trending,
-            EmojiSetTab::Search => &self.search,
+            EmojiSetTab::Search { .. } => &self.search,
         }
     }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct EmojiPanel {
-    pub mutating_set: Option<(i64, bool)>,
+    /// The install / remove of one pack: in flight, or failed until the
+    /// next try or the box is opened again.
+    pub mutation: EmojiMutation,
     /// Sets whose cover previews were asked for, so a repaint never asks twice.
     pub covers_requested: HashSet<i64>,
-    pub pending_status_emoji: Option<i64>,
     pub outdated_packs: std::collections::HashSet<i64>,
     pub status_open: bool,
-    pub status_note: Option<String>,
+    /// The status change in flight, or the line the last status action
+    /// ended with.
+    pub status: EmojiStatusStage,
     /// Where each custom emoji id's `getCustomEmojiStickers` stands: asked,
     /// answered, failed or given up ([`custom_lookup`]).
     pub custom_lookups: CustomEmojiLookups,
@@ -101,7 +149,6 @@ pub struct EmojiPanel {
     /// Each set list's own fetch: a failure shows on its tab only, and no
     /// other request clears it.
     pub lists: EmojiLists,
-    pub mutation_failed: bool,
     pub tab: EmojiSetTab,
     pub search_query: String,
     pub trending_offset: i32,
@@ -156,6 +203,67 @@ pub struct EmojiPanel {
     /// One value: not asked, in flight, answered, or failed (the strip
     /// stays hidden and the next panel open asks again).
     pub sticker_categories: crate::state::fetch::Fetch<Vec<EmojiCategory>>,
+}
+
+/// The install / remove of one emoji pack.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum EmojiMutation {
+    #[default]
+    Idle,
+    /// `changeStickerSet` for `set` is in flight (`install`: add, else
+    /// remove).
+    Changing { set: i64, install: bool },
+    /// The last change was refused.
+    Failed,
+}
+
+/// The emoji status picker's action: a change in flight, or the line its
+/// last action (or a failed fetch) left.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum EmojiStatusStage {
+    #[default]
+    Idle,
+    /// `setEmojiStatus` is in flight; `emoji` joins the recent packs when
+    /// it is confirmed (`None` removes the status).
+    Changing { emoji: Option<i64> },
+    /// How the last action ended.
+    Note(String),
+}
+
+impl EmojiPanel {
+    /// The line the last status action left.
+    pub fn status_note(&self) -> Option<&str> {
+        match &self.status {
+            EmojiStatusStage::Note(note) => Some(note),
+            _ => None,
+        }
+    }
+
+    /// A line for the status picker. A change in flight keeps its stage:
+    /// its own answer ends it with a line.
+    pub fn set_status_note(&mut self, note: impl Into<String>) {
+        if !matches!(self.status, EmojiStatusStage::Changing { .. }) {
+            self.status = EmojiStatusStage::Note(note.into());
+        }
+    }
+
+    /// The picker forgets the last line; a change in flight stays.
+    pub fn clear_status_note(&mut self) {
+        if matches!(self.status, EmojiStatusStage::Note(_)) {
+            self.status = EmojiStatusStage::Idle;
+        }
+    }
+
+    /// The status change in flight is answered; the emoji it set, if any.
+    pub fn finish_status_change(&mut self) -> Option<i64> {
+        match self.status {
+            EmojiStatusStage::Changing { emoji } => {
+                self.status = EmojiStatusStage::Idle;
+                emoji
+            }
+            _ => None,
+        }
+    }
 }
 
 /// B11: input-language codes for `getKeywordEmojis`: the script of what
@@ -664,15 +772,15 @@ impl Session {
     /// affected cache so the next fetch shows the server-confirmed state.
     pub fn invalidate_emoji_caches(&mut self, purpose: Option<RequestPurpose>) {
         if purpose == Some(RequestPurpose::ChangeEmojiSet) {
-            self.stickers.emoji.mutation_failed = false;
-            self.stickers.emoji.mutating_set = None;
+            self.stickers.emoji.mutation = EmojiMutation::Idle;
         }
         if matches!(
             purpose,
             Some(RequestPurpose::SetEmojiStatus | RequestPurpose::ClearRecentEmojiStatuses)
         ) {
+            let confirmed = self.stickers.emoji.finish_status_change();
             if purpose == Some(RequestPurpose::SetEmojiStatus)
-                && let Some(id) = self.stickers.emoji.pending_status_emoji.take()
+                && let Some(id) = confirmed
             {
                 self.remember_emoji_pack_usage(&[id]);
             }
@@ -681,13 +789,12 @@ impl Session {
                 self.requests
                     .take_purpose(RequestPurpose::GetRecentEmojiStatuses),
             );
-            self.stickers.emoji.status_note = Some(
+            self.stickers.emoji.set_status_note(
                 if purpose == Some(RequestPurpose::SetEmojiStatus) {
                     "Emoji status updated."
                 } else {
                     "Recent emoji statuses cleared."
-                }
-                .into(),
+                },
             );
         }
         if matches!(

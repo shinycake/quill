@@ -47,7 +47,7 @@ fn masks_dialog_requests_mask_lists_and_serializes_changes() {
     driver
         .ingest(copy_and_parse(&sets_answer(installed, &[11, 12]), &seq, &sink).unwrap())
         .unwrap();
-    assert_eq!(driver.session.stickers.masks.installed.len(), 2);
+    assert_eq!(driver.session.stickers.masks.installed_sets().len(), 2);
     assert_eq!(count_sent(&recorder, "getInstalledStickerSets"), 1);
 
     let archived_request = driver.select_mask_tab(MasksTab::Archived).unwrap().unwrap();
@@ -57,7 +57,7 @@ fn masks_dialog_requests_mask_lists_and_serializes_changes() {
     driver
         .ingest(copy_and_parse(&sets_answer(archived_request, &[21]), &seq, &sink).unwrap())
         .unwrap();
-    assert_eq!(driver.session.stickers.masks.archived.len(), 1);
+    assert_eq!(driver.session.stickers.masks.archived_sets().len(), 1);
 
     let reorder = driver.reorder_mask_set(12, 11).unwrap().unwrap();
     let sent = sent_request(&recorder, "reorderInstalledStickerSets");
@@ -79,7 +79,7 @@ fn masks_dialog_requests_mask_lists_and_serializes_changes() {
             .unwrap(),
         )
         .unwrap();
-    assert!(!driver.session.stickers.masks.installed_loaded);
+    assert!(driver.session.stickers.masks.installed.is_loading());
     assert_eq!(count_sent(&recorder, "getArchivedStickerSets"), 2);
 
     driver.change_mask_set(11, false, true).unwrap().unwrap();

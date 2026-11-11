@@ -138,7 +138,7 @@ fn adding_a_new_sticker_uploads_it_and_refreshes_the_set() {
 
     feed(&mut driver, &seq, &sink, ok(extra));
     assert!(!edits(&driver).busy());
-    assert!(edits(&driver).refresh_needed);
+    assert!(edits(&driver).refresh_needed());
     assert_eq!(
         driver.session.take_sticker_set_edit_note().as_deref(),
         Some(ADDED_NOTE)
@@ -152,7 +152,7 @@ fn adding_a_new_sticker_uploads_it_and_refreshes_the_set() {
     let refresh = driver.sync_sticker_set_view().unwrap().unwrap();
     let request = sent_request(&recorder, "getStickerSet");
     assert_eq!(request["set_id"], "77");
-    assert!(!edits(&driver).refresh_needed);
+    assert!(!edits(&driver).refresh_needed());
     assert_eq!(
         viewed_ids(&driver),
         vec![1, 2, 3],
@@ -189,7 +189,7 @@ fn a_failed_upload_shows_tdesktops_wording() {
     assert_eq!(request["sticker"]["sticker"]["path"], "/tmp/s.webm");
     feed(&mut driver, &seq, &sink, error(extra));
     assert!(!edits(&driver).busy());
-    assert!(!edits(&driver).refresh_needed);
+    assert!(!edits(&driver).refresh_needed());
     assert_eq!(
         driver.session.take_sticker_set_edit_note().as_deref(),
         Some(UPLOAD_FAILED_NOTE)
@@ -220,7 +220,7 @@ fn an_existing_sticker_is_added_under_its_emoji_or_the_default() {
         .unwrap();
     let request = sent_request(&recorder, "addStickerToSet");
     assert_eq!(request["sticker"]["emojis"], "🙂");
-    assert_eq!(edits(&driver).in_flight.len(), 2);
+    assert_eq!(edits(&driver).in_flight().len(), 2);
     drop(dir);
 }
 
@@ -251,7 +251,7 @@ fn removing_a_sticker_drops_it_from_the_box_once_confirmed() {
     );
     feed(&mut driver, &seq, &sink, ok(extra));
     assert_eq!(viewed_ids(&driver), vec![1, 3]);
-    assert!(edits(&driver).refresh_needed);
+    assert!(edits(&driver).refresh_needed());
     assert!(
         !driver
             .session
@@ -288,14 +288,14 @@ fn moving_a_sticker_reorders_the_box_at_once_and_tells_tdlib() {
     assert_eq!(request["position"], 2);
     feed(&mut driver, &seq, &sink, ok(extra));
     assert!(
-        !edits(&driver).refresh_needed,
+        !edits(&driver).refresh_needed(),
         "a confirmed move does not blink the box"
     );
 
     let extra = driver.move_sticker_in_set(77, 2, 0).unwrap().unwrap();
     feed(&mut driver, &seq, &sink, error(extra));
     assert!(
-        edits(&driver).refresh_needed,
+        edits(&driver).refresh_needed(),
         "a failed move asks for the server's order"
     );
     assert!(driver.session.take_sticker_set_edit_note().is_some());
@@ -317,7 +317,7 @@ fn renaming_and_deleting_name_the_set_by_its_short_name() {
     assert_eq!(request["name"], "mine_by_me");
     assert_eq!(request["title"], "Cats");
     feed(&mut driver, &seq, &sink, ok(extra));
-    assert!(edits(&driver).refresh_needed);
+    assert!(edits(&driver).refresh_needed());
     assert!(
         !driver.session.stickers.stickers.installed_loaded,
         "the installed list is fetched again so the panel shows the new name"
@@ -328,10 +328,10 @@ fn renaming_and_deleting_name_the_set_by_its_short_name() {
         sent_request(&recorder, "deleteStickerSet")["name"],
         "mine_by_me"
     );
-    assert!(!edits(&driver).deleted);
+    assert!(!edits(&driver).deleted());
     feed(&mut driver, &seq, &sink, ok(extra));
     assert!(
-        edits(&driver).deleted,
+        edits(&driver).deleted(),
         "the box closes once the set is gone"
     );
     drop(dir);
@@ -423,7 +423,7 @@ fn a_refresh_answered_during_a_move_asks_again() {
         set_payload(&refresh.as_extra(), true, &[1, 2, 3]),
     );
     assert_eq!(viewed_ids(&driver), vec![1, 2, 3], "the stale answer lands");
-    assert!(edits(&driver).refresh_needed, "but a refresh is owed");
+    assert!(edits(&driver).refresh_needed(), "but a refresh is owed");
     feed(&mut driver, &seq, &sink, ok(moved));
     assert!(driver.sync_sticker_set_view().unwrap().is_some());
     drop(dir);

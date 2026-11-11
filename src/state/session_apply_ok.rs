@@ -363,8 +363,7 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::AddSavedAnimation | RequestPurpose::RemoveSavedAnimation)
         ) {
-            self.stickers.gifs.animations.clear();
-            self.stickers.gifs.loaded = false;
+            self.stickers.gifs.saved = crate::state::fetch::Fetch::Idle;
         }
         // Phase C3a: a successful `leaveGroupCall` /
         // `endGroupCall` drops the tracked call (the `ok`

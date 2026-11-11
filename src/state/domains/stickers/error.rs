@@ -56,7 +56,7 @@ impl Session {
                     }
                 }
                 if emoji.status_open || emoji.chat_status_open {
-                    emoji.status_note = Some(call_request_error_line(
+                    emoji.set_status_note(call_request_error_line(
                         err,
                         "Could not update emoji statuses. Retry the action",
                     ));
@@ -70,7 +70,10 @@ impl Session {
                 | RequestPurpose::GetDefaultEmojiStatuses
                 | RequestPurpose::GetDefaultChatEmojiStatuses,
             ) => {
-                self.stickers.emoji.status_note = Some(call_request_error_line(
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::SetEmojiStatus) {
+                    self.stickers.emoji.finish_status_change();
+                }
+                self.stickers.emoji.set_status_note(call_request_error_line(
                     err,
                     "Could not update emoji statuses. Retry the action",
                 ));
@@ -110,8 +113,7 @@ impl Session {
         self.fail_mask_request(pending);
         self.fail_sticker_creator(err, pending);
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ChangeEmojiSet) {
-            self.stickers.emoji.mutation_failed = true;
-            self.stickers.emoji.mutating_set = None;
+            self.stickers.emoji.mutation = crate::emoji::EmojiMutation::Failed;
         }
         // Suggestions that waited for the installed sets stop waiting: the
         // next emoji typed asks again.
@@ -124,9 +126,6 @@ impl Session {
         let emoji_purpose = pending.map(|p| p.purpose);
         if emoji_purpose == Some(RequestPurpose::GetInstalledEmojiSets) {
             self.stickers.emoji.installed.fail(error_reason(err));
-        }
-        if emoji_purpose == Some(RequestPurpose::SetEmojiStatus) {
-            self.stickers.emoji.pending_status_emoji = None;
         }
         if let Some(list) = emoji_purpose.and_then(|p| self.stickers.emoji.lists.for_purpose(p)) {
             list.fail(crate::lang::tr(
@@ -172,20 +171,25 @@ impl Session {
                     | RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { .. })
             )
         ) {
-            self.stickers.gifs.search_failed = true;
-            self.stickers.gifs.search_loading = false;
+            self.stickers
+                .gifs
+                .search
+                .fail("The GIF search request failed.");
         }
         if matches!(
             pending.map(|p| p.purpose),
             Some(RequestPurpose::AddSavedAnimation | RequestPurpose::RemoveSavedAnimation)
         ) {
-            self.stickers.gifs.failed = true;
+            self.stickers
+                .gifs
+                .saved
+                .fail("The saved GIFs request failed.");
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedAnimations) {
-            self.stickers.gifs.loading = false;
-            self.stickers.gifs.loaded = true;
-            self.stickers.gifs.failed = true;
-            self.stickers.gifs.stale = false;
+            self.stickers
+                .gifs
+                .saved
+                .fail("The saved GIFs request failed.");
         }
     }
 }

@@ -139,8 +139,6 @@ impl MessageAudience {
 pub struct StickerSetView {
     pub set_id: i64,
     pub stage: StickerSetViewStage,
-    /// The sticker files were asked to download.
-    pub files_requested: bool,
     /// Edits of an owned set in flight and their outcome.
     pub edits: StickerSetEdits,
     /// The box's Add / Remove / Archive of this set: asked, then answered
@@ -187,7 +185,6 @@ impl StickerSetView {
         Self {
             set_id,
             stage: StickerSetViewStage::Loading,
-            files_requested: false,
             edits: StickerSetEdits::default(),
             change: SetChangeStage::Idle,
         }
@@ -208,8 +205,19 @@ pub enum StickerSetViewStage {
         /// box offers editing.
         is_owned: bool,
         stickers: Vec<StickerItem>,
+        /// Whether the sticker previews were asked to download. A set
+        /// that arrives anew (an edit refreshed it) starts unasked.
+        files: SetFiles,
     },
     Failed,
+}
+
+/// Whether the viewed set's sticker previews were asked to download.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SetFiles {
+    #[default]
+    Unasked,
+    Asked,
 }
 
 /// A tapped custom emoji and the pack it comes from (tdesktop's emoji
@@ -275,7 +283,7 @@ impl Session {
             // An edit still in flight (a move applied locally) may have
             // changed the set after this answer was built: ask again once
             // it is answered.
-            view.edits.refresh_needed = view.edits.busy();
+            view.edits.set_arrived();
         }
     }
 

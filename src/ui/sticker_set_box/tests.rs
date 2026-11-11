@@ -707,7 +707,8 @@ fn the_chooser_lists_saved_gifs_except_when_adapting(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.stickers.gifs.animations.push(AnimationItem {
+            let mut saved = session.stickers.gifs.animations().to_vec();
+            saved.push(AnimationItem {
                 duration: 2,
                 width: 320,
                 height: 240,
@@ -720,6 +721,7 @@ fn the_chooser_lists_saved_gifs_except_when_adapting(cx: &mut TestAppContext) {
                 minithumbnail: None,
                 thumb_still: true,
             });
+            session.stickers.gifs.saved.succeed(saved);
         }
         app.sticker_box.pick = Some(PickExisting {
             set_id: 78,

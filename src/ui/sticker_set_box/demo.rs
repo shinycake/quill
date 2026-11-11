@@ -83,8 +83,8 @@ impl QuillApp {
                 is_emoji: false,
                 is_owned: true,
                 stickers,
+                files: quill::state::SetFiles::Asked,
             };
-            view.files_requested = true;
             session.stickers.sticker_set_view = Some(view);
         }
         self.message_ui.menu_ui.sticker_set_open = true;

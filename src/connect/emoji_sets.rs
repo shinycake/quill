@@ -1,6 +1,6 @@
 //! Custom emoji pack browser; independent of regular sticker picker state.
 use super::*;
-use crate::emoji::EmojiSetTab;
+use crate::emoji::{EmojiMutation, EmojiSetTab, EmojiStatusStage};
 use crate::ids::RequestId;
 use crate::state::RequestPurpose;
 use crate::sticker_suggest::suggest_emoji_for;
@@ -15,7 +15,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.stickers.emoji.status_open = true;
-        self.session.stickers.emoji.status_note = None;
+        self.session.stickers.emoji.clear_status_note();
         self.session.stickers.emoji.reset_custom_emoji_lookups();
         for (purpose, build) in [
             (
@@ -98,8 +98,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.status_change_busy() {
             return Ok(None);
         }
-        self.session.stickers.emoji.status_note = None;
-        self.session.stickers.emoji.pending_status_emoji = None;
+        self.session.stickers.emoji.clear_status_note();
         self.emoji_set_request(RequestPurpose::SetEmojiStatus, |extra| {
             crate::telegram::requests_emoji::set_collectible_emoji_status(extra, &gift, expiration)
         })
@@ -115,12 +114,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.status_change_busy() {
             return Ok(None);
         }
-        self.session.stickers.emoji.status_note = None;
+        self.session.stickers.emoji.clear_status_note();
         let request = self.emoji_set_request(RequestPurpose::SetEmojiStatus, |extra| {
             crate::telegram::requests_emoji::set_emoji_status(extra, custom_emoji_id, expiration)
         })?;
         if request.is_some() {
-            self.session.stickers.emoji.pending_status_emoji = custom_emoji_id;
+            self.session.stickers.emoji.status = EmojiStatusStage::Changing {
+                emoji: custom_emoji_id,
+            };
         }
         Ok(request)
     }
@@ -133,7 +134,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.session.stickers.emoji.status_note = None;
+        self.session.stickers.emoji.clear_status_note();
         self.emoji_set_request(
             RequestPurpose::ClearRecentEmojiStatuses,
             crate::telegram::requests_emoji::clear_recent_emoji_statuses,
@@ -193,8 +194,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             let emoji = &mut self.session.stickers.emoji;
             emoji.custom_emoji_lookup_not_sent(extra);
             if emoji.status_open || emoji.chat_status_open {
-                emoji.status_note =
-                    Some("Could not update emoji statuses. Retry the action.".into());
+                emoji.set_status_note("Could not update emoji statuses. Retry the action.");
             }
             return Err(err);
         }
@@ -328,8 +328,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                     | RequestPurpose::GetDefaultChatEmojiStatuses
                     | RequestPurpose::GetCustomEmojiStickers
             ) {
-                self.session.stickers.emoji.status_note =
-                    Some("Could not update emoji statuses. Retry the action.".into());
+                self.session
+                    .stickers
+                    .emoji
+                    .set_status_note("Could not update emoji statuses. Retry the action.");
             }
             return Err(err);
         }
@@ -365,8 +367,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.stickers.emoji.open = true;
         // "Could not update emoji packs" was the last box's; a change
         // still in flight sets it again if it fails.
-        if self.session.stickers.emoji.mutating_set.is_none() {
-            self.session.stickers.emoji.mutation_failed = false;
+        if self.session.stickers.emoji.mutation == EmojiMutation::Failed {
+            self.session.stickers.emoji.mutation = EmojiMutation::Idle;
         }
         self.select_emoji_set_tab(EmojiSetTab::Installed)
     }
@@ -396,7 +398,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     get_trending_emoji_sets(id, 0, 100)
                 })
             }
-            EmojiSetTab::Search => Ok(None),
+            EmojiSetTab::Search { .. } => Ok(None),
         }
     }
 
@@ -406,7 +408,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let listed: &[crate::telegram::envelope::StickerSetInfo] = match emoji.tab {
             EmojiSetTab::Installed => &emoji.installed_sets,
             EmojiSetTab::Trending => &emoji.trending_sets,
-            EmojiSetTab::Search => &emoji.found_sets,
+            EmojiSetTab::Search { .. } => &emoji.found_sets,
         };
         let wanted: Vec<(i64, Vec<crate::ids::FileId>)> = listed
             .iter()
@@ -551,7 +553,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.select_emoji_set_tab(EmojiSetTab::Search)?;
+        let searching = self.session.stickers.emoji.tab.searching();
+        self.select_emoji_set_tab(searching)?;
         drop(
             self.session
                 .requests
@@ -595,12 +598,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || set_id <= 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.stickers.emoji.mutation_failed = false;
+        if self.session.stickers.emoji.mutation == EmojiMutation::Failed {
+            self.session.stickers.emoji.mutation = EmojiMutation::Idle;
+        }
         let request = self.emoji_set_request(RequestPurpose::ChangeEmojiSet, |id| {
             change_sticker_set(id, set_id, installed, false)
         })?;
         if request.is_some() {
-            self.session.stickers.emoji.mutating_set = Some((set_id, installed));
+            self.session.stickers.emoji.mutation = EmojiMutation::Changing {
+                set: set_id,
+                install: installed,
+            };
         }
         Ok(request)
     }
@@ -640,7 +648,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         match self.session.stickers.emoji.tab {
-            EmojiSetTab::Search => {
+            EmojiSetTab::Search { .. } => {
                 let query = self.session.stickers.emoji.search_query.clone();
                 self.search_emoji_packs(&query)?;
             }

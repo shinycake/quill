@@ -856,7 +856,10 @@ fn default_auto_delete_roundtrip_and_failure() {
             extra.0
         ),
     );
-    assert_eq!(session.settings.default_auto_delete.data().copied(), Some(604_800));
+    assert_eq!(
+        session.settings.default_auto_delete.data().copied(),
+        Some(604_800)
+    );
     assert!(!session.settings.default_auto_delete.is_loading());
 
     let extra = session.request(
@@ -870,7 +873,10 @@ fn default_auto_delete_roundtrip_and_failure() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert_eq!(session.settings.default_auto_delete.data().copied(), Some(86_400));
+    assert_eq!(
+        session.settings.default_auto_delete.data().copied(),
+        Some(86_400)
+    );
 
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds: 0 }),

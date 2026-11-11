@@ -146,7 +146,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             // The box shows an order the server never got: ask for the
             // server's order.
-            view.edits.refresh_needed = true;
+            view.edits.need_refresh();
         }
         sent.map(Some)
     }
@@ -185,7 +185,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(view) = self.session.stickers.sticker_set_view.as_ref() else {
             return Ok(None);
         };
-        if !view.edits.refresh_needed || view.edits.busy() {
+        if !view.edits.refresh_needed() || view.edits.busy() {
             return Ok(None);
         }
         let set_id = view.set_id;
@@ -202,8 +202,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         if let Some(view) = self.session.stickers.sticker_set_view.as_mut() {
-            view.edits.refresh_needed = false;
-            view.files_requested = false;
+            view.edits.refreshed();
         }
         Ok(Some(extra))
     }

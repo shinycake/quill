@@ -264,10 +264,16 @@ fn masks_open_in_their_own_box_with_masks_and_archived_tabs(cx: &mut TestAppCont
             is_viewed: true,
         };
         if let Some(session) = app.demo_session.as_mut() {
-            session.stickers.masks.installed = vec![set(501, "Party hats"), set(502, "Beards")];
-            session.stickers.masks.installed_loaded = true;
-            session.stickers.masks.archived = vec![set(503, "Old masks")];
-            session.stickers.masks.archived_loaded = true;
+            session
+                .stickers
+                .masks
+                .installed
+                .succeed(vec![set(501, "Party hats"), set(502, "Beards")]);
+            session
+                .stickers
+                .masks
+                .archived
+                .succeed(vec![set(503, "Old masks")]);
         }
         app.open_mask_sets(cx);
     });
@@ -297,7 +303,7 @@ fn masks_open_in_their_own_box_with_masks_and_archived_tabs(cx: &mut TestAppCont
             .expect("s")
             .stickers
             .masks
-            .installed
+            .installed_sets()
             .iter()
             .map(|set| set.id)
             .collect()

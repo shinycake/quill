@@ -201,37 +201,27 @@ fn stopping_a_poll_finds_it_in_a_topic_history() {
 
 #[test]
 fn a_failed_stickers_manager_step_keeps_the_commits_behind_it() {
-    use crate::state::ManagerCommit;
+    use crate::state::{CommitStep, ManagerCommit};
     let mut rig = Rig::new();
     rig.driver
         .session
         .stickers
         .manager
         .commits
-        .push_back(ManagerCommit {
-            masks: false,
-            removals: [11, 12].into(),
-            order: None,
-            sent: None,
-        });
+        .push_back(ManagerCommit::new(false, [11, 12], None));
     rig.driver
         .session
         .stickers
         .manager
         .commits
-        .push_back(ManagerCommit {
-            masks: false,
-            removals: [21].into(),
-            order: None,
-            sent: None,
-        });
+        .push_back(ManagerCommit::new(false, [21], None));
     rig.refuse(true);
     assert!(rig.driver.advance_manager_commit().is_err());
     // Only the step that did not go out is lost.
     let commits = &rig.driver.session.stickers.manager.commits;
     assert_eq!(commits.len(), 2);
-    assert_eq!(commits[0].removals, [12]);
-    assert_eq!(commits[1].removals, [21]);
+    assert_eq!(commits[0].steps, [CommitStep::Remove(12)]);
+    assert_eq!(commits[1].steps, [CommitStep::Remove(21)]);
     assert!(rig.driver.session.stickers.manager.failure.is_some());
     // The queue goes on once the sender is back.
     rig.refuse(false);

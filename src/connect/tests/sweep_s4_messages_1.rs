@@ -170,7 +170,7 @@ fn a_sticker_set_edit_answer_ends_only_its_own_edit_and_every_toast_shows() {
     let second = rename(session);
     t.feed(json!({"@type":"ok","@extra":first.as_extra()}));
     let view = t.driver.session.stickers.sticker_set_view.as_ref().unwrap();
-    assert_eq!(view.edits.in_flight, [second]);
+    assert_eq!(view.edits.in_flight(), [second]);
     // An answer of an edit made under an earlier box ends none of these.
     t.feed(json!({"@type":"ok","@extra":RequestId(9_999).as_extra()}));
     let view = t.driver.session.stickers.sticker_set_view.as_ref().unwrap();
@@ -213,8 +213,7 @@ fn a_mask_list_asked_before_a_change_does_not_land_after_it() {
         {"@type":"stickerSetInfo","id":"3","size":1,"is_installed":true}]}),
     );
     let masks = &t.driver.session.stickers.masks;
-    assert!(!masks.installed_loaded);
-    assert!(masks.installed.is_empty());
+    assert!(masks.installed.data().is_none());
 }
 
 #[test]

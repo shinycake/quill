@@ -91,7 +91,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let settled = self.session().is_none_or(|session| {
-            session.settings.data_storage.seeded || !session.settings.auto_download_presets.is_loading()
+            session.settings.data_storage.seeded
+                || !session.settings.auto_download_presets.is_loading()
         });
         let scroll = &mut self.settings.storage_scroll;
         let user_moved = scroll

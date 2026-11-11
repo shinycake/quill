@@ -144,7 +144,8 @@ impl Session {
             // flood state worsens; retry is user-driven via the
             // Refresh button. The old cache stays visible.
             Some(RequestPurpose::ConfirmDeviceLogin) => {
-                self.settings.device_login = DeviceLogin::Done(crate::auth::DeviceLoginResult::Failed);
+                self.settings.device_login =
+                    DeviceLogin::Done(crate::auth::DeviceLoginResult::Failed);
                 self.settings
                     .sessions
                     .fail(sessions_error_line("link the device", err));
@@ -211,20 +212,16 @@ impl Session {
             // `sessions_error_line` is reused: it is a pure
             // (action, error-class) formatter, not session-bound.
             Some(RequestPurpose::GetDefaultAutoDelete) => {
-                self.settings
-                    .default_auto_delete
-                    .fail(sessions_error_line(
-                        "load the default auto-delete timer",
-                        err,
-                    ));
+                self.settings.default_auto_delete.fail(sessions_error_line(
+                    "load the default auto-delete timer",
+                    err,
+                ));
             }
             Some(RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { .. })) => {
-                self.settings
-                    .default_auto_delete
-                    .fail(sessions_error_line(
-                        "change the default auto-delete timer",
-                        err,
-                    ));
+                self.settings.default_auto_delete.fail(sessions_error_line(
+                    "change the default auto-delete timer",
+                    err,
+                ));
             }
             Some(RequestPurpose::GetAccountTtl) => {
                 self.settings.account_ttl.fail(sessions_error_line(

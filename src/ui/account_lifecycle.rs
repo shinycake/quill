@@ -354,7 +354,8 @@ impl QuillApp {
             let auto_delete = session
                 .as_ref()
                 .and_then(|s| s.settings.default_auto_delete.data().copied());
-            let auto_delete_busy = session.is_some_and(|s| s.settings.default_auto_delete.is_loading());
+            let auto_delete_busy =
+                session.is_some_and(|s| s.settings.default_auto_delete.is_loading());
             let auto_delete_error = session
                 .as_ref()
                 .and_then(|s| s.settings.default_auto_delete.error().map(str::to_owned));

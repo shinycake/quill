@@ -81,7 +81,7 @@ impl QuillApp {
             .map(|s| s.stickers.masks.clone())
             .unwrap_or_default();
         let thumbs: Vec<_> = panel
-            .installed
+            .installed_sets()
             .iter()
             .filter_map(|set| panel.set_stickers.get(&set.id))
             .flatten()
@@ -97,9 +97,9 @@ impl QuillApp {
             })
             .take(STRIP_LIMIT)
             .collect();
-        let empty_note = if panel.failed {
+        let empty_note = if panel.failed() {
             Some(tr(keys::Q_MISC_COULD_NOT_LOAD_MASKS))
-        } else if panel.installed_loaded && panel.installed.is_empty() {
+        } else if panel.installed.data().is_some_and(Vec::is_empty) {
             Some(tr(keys::Q_MISC_NO_MASKS_INSTALLED))
         } else {
             None

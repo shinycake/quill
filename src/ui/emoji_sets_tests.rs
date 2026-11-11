@@ -99,7 +99,7 @@ fn typing_searches_after_a_pause_and_clearing_goes_back(cx: &mut TestAppContext)
     assert_eq!(tab(&app, vcx), EmojiSetTab::Installed, "waits for a pause");
     vcx.executor().advance_clock(Duration::from_millis(400));
     frames(vcx);
-    assert_eq!(tab(&app, vcx), EmojiSetTab::Search);
+    assert!(tab(&app, vcx).is_search());
     assert!(has(vcx, "emoji-pack-open-4".into()));
     assert!(!has(vcx, "emoji-pack-open-1".into()));
     vcx.update(|window, cx| {

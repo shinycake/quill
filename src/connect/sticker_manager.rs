@@ -26,8 +26,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .iter()
             .chain(&stickers.stickers.trending)
             .chain(&stickers.stickers.archived)
-            .chain(&stickers.masks.installed)
-            .chain(&stickers.masks.archived)
+            .chain(stickers.masks.installed_sets())
+            .chain(stickers.masks.archived_sets())
         {
             if stickers.manager.covers_requested.contains(&set.id) || asked.contains(&set.id) {
                 continue;
@@ -101,12 +101,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .stickers
             .manager
             .commits
-            .push_back(ManagerCommit {
+            .push_back(ManagerCommit::new(
                 masks,
-                removals: removed.into_iter().filter(|id| *id > 0).collect(),
+                removed.into_iter().filter(|id| *id > 0),
                 order,
-                sent: None,
-            });
+            ));
         self.advance_manager_commit()
     }
 

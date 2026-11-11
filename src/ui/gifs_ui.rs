@@ -46,7 +46,7 @@ fn empty_tile(color: Hsla) -> AnyElement {
 
 /// An answer for the session's GIF list is on its way.
 fn gifs_on_their_way(panel: &GifPanel) -> bool {
-    panel.loading || panel.search_loading
+    panel.saved.is_loading() || panel.search.is_loading()
 }
 
 /// What the footer's sections choose.
@@ -278,9 +278,7 @@ impl QuillApp {
             return GifShown::Live;
         }
         match &self.pickers.gif_wanted {
-            GifWanted::Saved if panel.loaded || !panel.animations.is_empty() => {
-                GifShown::Saved(&panel.animations)
-            }
+            GifWanted::Saved if panel.loaded() => GifShown::Saved(panel.animations()),
             GifWanted::Saved => GifShown::Missing,
             GifWanted::Search(query) => panel
                 .searches_kept
@@ -318,7 +316,7 @@ impl QuillApp {
             viewport,
             content as f32,
             panel.search_mode && !panel.search_next_offset.is_empty(),
-            panel.search_loading,
+            panel.search.is_loading(),
         ) {
             return;
         }
@@ -403,9 +401,14 @@ impl QuillApp {
             Some(tr(keys::Q_MISC_NO_GIFS_FOUND))
         } else if matches!(shown, GifShown::Missing) || gifs_on_their_way(panel) {
             None
-        } else if panel.search_mode && panel.search_failed && panel.search_bot_username.is_empty() {
+        } else if panel.search_mode
+            && panel.search.error().is_some()
+            && panel.search_bot_username.is_empty()
+        {
             Some(tr(keys::Q_MISC_GIF_SEARCH_IS_NOT_AVAILABLE))
-        } else if panel.failed || panel.search_mode && panel.search_failed {
+        } else if panel.saved.error().is_some()
+            || panel.search_mode && panel.search.error().is_some()
+        {
             Some(tr(keys::Q_MISC_COULD_NOT_UPDATE_GIFS_TRY))
         } else if panel.search_mode {
             Some(tr(keys::Q_MISC_NO_GIFS_FOUND))
@@ -456,7 +459,7 @@ impl QuillApp {
                     continue;
                 };
                 let saved = panel
-                    .animations
+                    .animations()
                     .iter()
                     .any(|item| item.file_id == animation.file_id);
                 line = line.child(self.gif_tile(animation, cell, saved, pending, &roots, cx));

@@ -233,7 +233,7 @@ pub(crate) use session_history_window::WindowEdge;
 pub use session_links_boosts::*;
 pub use session_message_menu::{
     Audience, CustomEmojiPreview, MessageAudience, MessageReportFlow, MessageReportStage,
-    PollOptionMenu, SetChange, SetChangeStage, StickerSetView, StickerSetViewStage,
+    PollOptionMenu, SetChange, SetChangeStage, SetFiles, StickerSetView, StickerSetViewStage,
     poll_option_key, reaction_filter_key,
 };
 pub use session_message_story::{

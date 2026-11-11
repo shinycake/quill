@@ -259,11 +259,7 @@ impl Session {
     }
 
     pub fn accept_saved_animations(&mut self, animations: Vec<AnimationItem>) {
-        self.stickers.gifs.loading = false;
-        self.stickers.gifs.failed = false;
-        self.stickers.gifs.stale = false;
-        self.stickers.gifs.animations = animations;
-        self.stickers.gifs.loaded = true;
+        self.stickers.gifs.saved.succeed(animations);
     }
 
     /// Slice S9: store a GIF-search `inlineQueryResults` page. A first page
@@ -277,22 +273,16 @@ impl Session {
         next_offset: String,
         first_page: bool,
     ) {
-        self.stickers.gifs.search_loading = false;
-        self.stickers.gifs.search_failed = false;
         if first_page {
-            self.stickers.gifs.search_results = animations;
+            self.stickers.gifs.search.succeed(animations);
         } else {
+            let mut results = self.stickers.gifs.search.take_data().unwrap_or_default();
             for item in animations {
-                if !self
-                    .stickers
-                    .gifs
-                    .search_results
-                    .iter()
-                    .any(|r| r.file_id == item.file_id)
-                {
-                    self.stickers.gifs.search_results.push(item);
+                if !results.iter().any(|r| r.file_id == item.file_id) {
+                    results.push(item);
                 }
             }
+            self.stickers.gifs.search.succeed(results);
         }
         self.stickers.gifs.search_next_offset =
             if !next_offset.is_empty() && next_offset == self.stickers.gifs.search_offset {
@@ -301,8 +291,10 @@ impl Session {
                 next_offset
             };
         let gifs = &mut self.stickers.gifs;
-        gifs.searches_kept
-            .keep(&gifs.search_query, &gifs.search_results);
+        gifs.searches_kept.keep(
+            &gifs.search_query,
+            gifs.search.data().map_or(&[], Vec::as_slice),
+        );
     }
 
     /// The answer of `request`; one for a set that is no longer the asked

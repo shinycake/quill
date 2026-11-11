@@ -107,8 +107,11 @@ fn s9_gif_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.gifs.search_results.len(), 1);
-    assert_eq!(with_purpose.stickers.gifs.search_results[0].file_id.0, 101);
+    assert_eq!(with_purpose.stickers.gifs.search_results().len(), 1);
+    assert_eq!(
+        with_purpose.stickers.gifs.search_results()[0].file_id.0,
+        101
+    );
     assert_eq!(with_purpose.stickers.gifs.search_next_offset, "50");
     assert!(with_purpose.bots.inline_query.is_none());
 
@@ -129,8 +132,11 @@ fn s9_gif_backend_purpose_gated_dispatch() {
     );
     // g1 (file 101) was already on page one — deduped; g2 (file 102)
     // appends; the offset advances to "" (exhausted).
-    assert_eq!(with_purpose.stickers.gifs.search_results.len(), 2);
-    assert_eq!(with_purpose.stickers.gifs.search_results[1].file_id.0, 102);
+    assert_eq!(with_purpose.stickers.gifs.search_results().len(), 2);
+    assert_eq!(
+        with_purpose.stickers.gifs.search_results()[1].file_id.0,
+        102
+    );
     assert_eq!(with_purpose.stickers.gifs.search_next_offset, "");
 
     // A stray inlineQueryResults (no matching purpose) is ignored.
@@ -142,11 +148,15 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         &sink2,
         r#"{"@type":"inlineQueryResults","inline_query_id":7,"button":null,"results":[],"next_offset":"9"}"#,
     );
-    assert!(without_purpose.stickers.gifs.search_results.is_empty());
+    assert!(without_purpose.stickers.gifs.search_results().is_empty());
 
     // An addSavedAnimation `ok` clears the saved-GIF cache so it
     // refetches the server-confirmed list.
-    with_purpose.stickers.gifs.animations = with_purpose.stickers.gifs.search_results.clone();
+    with_purpose
+        .stickers
+        .gifs
+        .saved
+        .succeed(with_purpose.stickers.gifs.search_results().to_vec());
     let extra = with_purpose.request(RequestPurpose::AddSavedAnimation, None);
     apply_json(
         &mut with_purpose,
@@ -154,10 +164,14 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.stickers.gifs.animations.is_empty());
+    assert!(with_purpose.stickers.gifs.animations().is_empty());
 
     // A removeSavedAnimation `ok` invalidates the same way.
-    with_purpose.stickers.gifs.animations = with_purpose.stickers.gifs.search_results.clone();
+    with_purpose
+        .stickers
+        .gifs
+        .saved
+        .succeed(with_purpose.stickers.gifs.search_results().to_vec());
     let extra = with_purpose.request(RequestPurpose::RemoveSavedAnimation, None);
     apply_json(
         &mut with_purpose,
@@ -165,7 +179,7 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.stickers.gifs.animations.is_empty());
+    assert!(with_purpose.stickers.gifs.animations().is_empty());
 
     // updateAnimationSearchParameters stores provider + emojis.
     apply_json(
@@ -292,14 +306,14 @@ fn gif_panel_downloads_stills_then_preview_loops_then_unpreviewed_clips() {
         minithumbnail: None,
         thumb_still: still,
     };
-    session.stickers.gifs.animations = vec![
+    session.stickers.gifs.saved.succeed(vec![
         // An MP4 preview loop: the loop plays, the GIF itself waits.
         gif(1, Some(11), false),
         // A still JPEG and no loop: the GIF itself plays.
         gif(2, Some(12), true),
         // Nothing but the GIF.
         gif(3, None, true),
-    ];
+    ]);
     // A closed panel fetches nothing.
     assert!(session.gif_panel_file_ids_to_download().is_empty());
     session.stickers.gifs.open = true;
@@ -374,6 +388,7 @@ fn a_failed_refetch_keeps_the_shown_sticker_set() {
         is_emoji: false,
         is_owned: true,
         stickers: Vec::new(),
+        files: Default::default(),
     };
     let mut view = StickerSetView::loading(5);
     view.stage = ready.clone();
@@ -390,4 +405,36 @@ fn a_failed_refetch_keeps_the_shown_sticker_set() {
     session.stickers.sticker_set_view = Some(StickerSetView::loading(5));
     session.fail_sticker_set_view(5);
     assert_eq!(stage(&session), Some(StickerSetViewStage::Failed));
+}
+
+/// The set box's edits are one stage: a confirmed edit owes a refresh that
+/// waits for the edits still out, a refresh sent leaves the stage, and a
+/// deleted set stays deleted.
+#[test]
+fn set_edits_walk_their_stages() {
+    use crate::state::StickerSetEdits;
+    let (a, b) = (RequestId(1), RequestId(2));
+    let mut edits = StickerSetEdits::default();
+    edits.begin(a);
+    edits.begin(b);
+    assert_eq!(edits.in_flight(), [a, b]);
+    edits.finish(Some(a), true);
+    assert!(edits.refresh_needed() && edits.busy(), "b is still out");
+    edits.finish(Some(b), false);
+    assert!(edits.refresh_needed() && !edits.busy());
+    edits.refreshed();
+    assert_eq!(edits, StickerSetEdits::Idle);
+
+    edits.begin(a);
+    edits.set_arrived();
+    assert!(
+        edits.refresh_needed(),
+        "an answer built under an edit in flight"
+    );
+    edits.finish(Some(a), false);
+    edits.refreshed();
+    edits.delete();
+    edits.begin(b);
+    edits.need_refresh();
+    assert!(edits.deleted() && !edits.refresh_needed() && !edits.busy());
 }

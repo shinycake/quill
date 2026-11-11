@@ -585,7 +585,7 @@ impl QuillApp {
             .stickers
             .sticker_set_view
             .as_ref()
-            .is_some_and(|view| view.edits.deleted);
+            .is_some_and(|view| view.edits.deleted());
         if deleted {
             // tdesktop just closes the box once the set is gone.
             self.close_sticker_set_dialog(cx);
