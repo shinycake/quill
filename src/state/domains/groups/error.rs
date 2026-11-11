@@ -197,11 +197,16 @@ impl Session {
             Some(RequestPurpose::Groups(GroupsPurpose::GetMessagePublicForwards {
                 chat_id,
                 message_id,
-            })) => self.groups.stats.fail_message_forwards(
-                chat_id,
-                message_id,
-                call_request_error_line(err, "Could not load public shares"),
-            ),
+            })) => {
+                if let Some(pending) = pending {
+                    self.groups.stats.fail_message_forwards(
+                        chat_id,
+                        message_id,
+                        pending.id,
+                        call_request_error_line(err, "Could not load public shares"),
+                    );
+                }
+            }
             Some(RequestPurpose::Groups(GroupsPurpose::GetStatsPost {
                 chat_id,
                 message_id,

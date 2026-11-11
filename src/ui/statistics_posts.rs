@@ -541,7 +541,7 @@ impl QuillApp {
                 "message-forward",
                 forwards.total,
                 &forwards.forwards,
-                forwards.loading,
+                forwards.loading(),
                 forwards.error.clone(),
                 more,
                 cx,

@@ -157,6 +157,10 @@ fn an_old_bot_message_loaded_after_the_start_does_not_bring_the_user_back(cx: &m
             .histories
             .remove(&bot_chat);
         app.begin_inline_return(bot_id, "somebot", "param");
+        // The bot's chat is the open one when its start goes, as it is
+        // when the chat just opened; a frame drawn in between must not
+        // find the user still in the origin chat and end the trip.
+        app.demo_session.as_mut().expect("a demo session").open_chat = Some(ChatId(bot_chat));
         assert!(
             app.take_inline_start(ChatId(bot_chat), cx),
             "the start goes"

@@ -153,6 +153,12 @@ impl QuillApp {
         // in `switchToPip`); this runs with the main window minimized or
         // hidden too. A chat window's viewer keeps its own link.
         self.close_every_video_pip(cx);
+        // A replayed intro clip is drawn only by the unlocked window: its
+        // curtain, volume fade and pause stop running under the lock, so
+        // the clip would play its sound on behind it. It ends here.
+        if self.first_run.intro_player().is_some() || self.first_run.awaits_intro() {
+            self.first_run.finish();
+        }
         // The device-linking scanner is a helper window with the camera on.
         self.clear_device_qr();
         // A passkey ceremony box closes and its key is told to stop; its

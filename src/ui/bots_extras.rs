@@ -206,9 +206,7 @@ impl QuillApp {
                         .accessibility_label(tr(keys::Q_MEDIA_FAST_BUTTONS_MODE))
                         .on_click(cx.listener(move |this, &next: &bool, _, cx| {
                             quill::fast_buttons::set_enabled(user_id, next);
-                            // Rows are cached per message revision; the
-                            // digits appear on the next history refresh.
-                            this.history.rows_key = None;
+                            this.rebuild_rows_in_every_window(cx);
                             cx.notify();
                         })),
                 ),

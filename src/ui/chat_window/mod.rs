@@ -136,6 +136,10 @@ pub(crate) struct MainWindow {
     /// An account switch closed every kit dialog in the main window: its
     /// shell forgets the one it showed (`QuillShell::sync_kit_dialogs_in`).
     pub(super) dialogs_closed: bool,
+    /// The exit a Quit left waiting behind the "Stop and quit" alert. The
+    /// alert is the window's and the Quit is the app's, so an account
+    /// switch under the alert does not take the exit with it.
+    pub(super) export_stop: Option<super::export_quit::ExitAfterStop>,
     /// Keys go to the window that received them: the interceptor runs
     /// before any handler and puts that window's state in place.
     _key_scope: Subscription,
@@ -156,6 +160,7 @@ impl MainWindow {
             place: None,
             cascade: 0,
             dialogs_closed: false,
+            export_stop: None,
             _key_scope: key_scope,
         }
     }

@@ -65,7 +65,6 @@ FastShareFacts::sent
 FieldResult::finished
 FirstRunPrefs::completed
 FooterMeta::pending
-FrameUi::window_state_save_pending
 GifPanel::failed
 GifPanel::loaded
 GifPanel::loading
@@ -172,8 +171,6 @@ PrivacyData::network_loading+error
 ProfileModal::closing
 ProxyState::loading
 ProxyState::loading+error
-PublicForwardsList::loading
-PublicForwardsList::loading+error
 PublicLinkRevoke::failed
 PullMachine::expand_pending
 Queued::failed
