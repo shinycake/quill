@@ -473,12 +473,78 @@ pub fn session_ttl_label(days: i32) -> String {
 }
 
 /// B13: fetch state of the new-chat privacy row.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NewChatPrivacyState {
     /// The first fetch is out; only its answer (or error) leaves the stage.
     Loading(RequestId),
     Ready(NewChatPrivacy),
+    /// Saves are out over the confirmed value; the row shows the newest.
+    Saving(crate::state::saves::Saves<NewChatPrivacy>),
     Failed,
+}
+
+impl NewChatPrivacyState {
+    /// What the row shows, once a value is known.
+    pub fn value(&self) -> Option<NewChatPrivacy> {
+        match self {
+            Self::Ready(value) => Some(*value),
+            Self::Saving(saves) => Some(saves.value()),
+            Self::Loading(_) | Self::Failed => None,
+        }
+    }
+
+    /// The stage a row draws: saves in flight show as the value they ask for.
+    pub fn shown(&self) -> Self {
+        match self.value() {
+            Some(value) => Self::Ready(value),
+            None => self.clone(),
+        }
+    }
+
+    /// A save goes out under `request` over the value shown.
+    pub fn save(&mut self, request: RequestId, next: NewChatPrivacy) {
+        match self {
+            Self::Ready(confirmed) => {
+                *self = Self::Saving(crate::state::saves::Saves::first(*confirmed, request, next));
+            }
+            Self::Saving(saves) => saves.push(request, next),
+            Self::Loading(_) | Self::Failed => {}
+        }
+    }
+
+    /// `request` was refused: its value goes, the row falls back.
+    pub fn save_failed(&mut self, request: RequestId) {
+        if let Self::Saving(saves) = self
+            && !saves.fail(request)
+        {
+            *self = Self::Ready(saves.confirmed());
+        }
+    }
+
+    /// `request` landed: the server holds its value.
+    pub fn save_landed(&mut self, request: RequestId) {
+        if let Self::Saving(saves) = self
+            && !saves.land(request)
+        {
+            *self = Self::Ready(saves.confirmed());
+        }
+    }
+
+    /// The fetch `fetch` answered `server`: it replaces what is shown
+    /// unless a save asked after it is still out. The first fetch of this
+    /// stage always lands.
+    pub fn fetched(&mut self, fetch: RequestId, server: NewChatPrivacy) {
+        match self {
+            Self::Loading(live) if *live == fetch => *self = Self::Ready(server),
+            Self::Ready(_) => *self = Self::Ready(server),
+            Self::Saving(saves) => {
+                if let Some(value) = saves.fetched(fetch, server) {
+                    *self = Self::Ready(value);
+                }
+            }
+            Self::Loading(_) | Self::Failed => {}
+        }
+    }
 }
 
 #[cfg(test)]

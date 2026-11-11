@@ -5,6 +5,7 @@
 use super::*;
 use crate::network_usage::NetworkUsage;
 use crate::privacy::{NewChatPrivacy, NewChatPrivacyState};
+use crate::state::saves::Optimistic;
 use crate::telegram::envelope::SettingsPayload;
 
 /// The controls of this block, each with a line of its own for the last
@@ -46,16 +47,12 @@ impl PasswordCheck {
 
 #[derive(Debug, Clone, Default)]
 pub struct PrivacyData {
-    /// `getNewChatPrivacySettings` state; `None` = never asked.
+    /// `getNewChatPrivacySettings` state; `None` = never asked. Saves in
+    /// flight live inside the stage.
     pub new_chat: Option<NewChatPrivacyState>,
-    /// The newest save of `new_chat`. A fetch asked before it answers with
-    /// the older server value and is dropped.
-    pub new_chat_saved_at: Option<RequestId>,
-    /// Days of inactivity before sessions end (`getActiveSessions`).
-    pub inactive_session_ttl_days: Option<i32>,
-    /// The newest `setInactiveSessionTtl`: only its failure rolls the row
-    /// back; an older save's failure hands its `previous` to it.
-    pub inactive_session_ttl_saved_at: Option<RequestId>,
+    /// Days of inactivity before sessions end (`getActiveSessions`), with
+    /// the `setInactiveSessionTtl` saves in flight.
+    pub inactive_session_ttl: Optimistic<i32>,
     /// `ignore_sensitive_content_restrictions` as TDLib last reported it.
     pub ignore_sensitive: Option<bool>,
     /// `can_ignore_sensitive_content_restrictions`: the server lets this
@@ -64,9 +61,6 @@ pub struct PrivacyData {
     /// `getNetworkStatistics`: the answer, a refetch under it, or why it
     /// failed (a failed reset lands here too).
     pub network: crate::state::fetch::Fetch<NetworkUsage>,
-    /// The server asked the client to check the password
-    /// (`suggestedActionCheckPassword`).
-    pub check_password_suggested: bool,
     pub password_check: PasswordCheck,
     /// The last failure of each control's request, shown where that
     /// control is (never as a toast). A control's success or retry clears
@@ -89,6 +83,16 @@ impl PrivacyData {
 }
 
 impl Session {
+    /// The server asked the client to check the password
+    /// (`suggestedActionCheckPassword`): the chat-list suggestion is the one
+    /// copy of that fact.
+    pub fn check_password_suggested(&self) -> bool {
+        self.chat_list
+            .suggestions
+            .actions
+            .contains(crate::chatlist_suggestions::ACTION_PASSWORD)
+    }
+
     /// Fold the options this block reads.
     pub(crate) fn apply_privacy_option(&mut self, name: &str, value: &OptionValue) {
         match (name, value) {
@@ -114,16 +118,9 @@ impl Session {
             SettingsPayload::NewChatPrivacySettings(settings) => {
                 if purpose == Some(RequestPurpose::GetNewChatPrivacy)
                     && let Some(id) = pending.map(|p| p.id)
+                    && let Some(state) = self.settings.privacy_data.new_chat.as_mut()
                 {
-                    let data = &mut self.settings.privacy_data;
-                    let first = matches!(data.new_chat, Some(NewChatPrivacyState::Loading(live)) if live == id);
-                    let newer_than_save = data.new_chat_saved_at.is_none_or(|saved| id.0 > saved.0);
-                    if first
-                        || (newer_than_save
-                            && matches!(data.new_chat, Some(NewChatPrivacyState::Ready(_))))
-                    {
-                        data.new_chat = Some(NewChatPrivacyState::Ready(*settings));
-                    }
+                    state.fetched(id, *settings);
                 }
                 true
             }
@@ -180,13 +177,6 @@ impl Session {
                     self.chat_list.suggestions.remove_action(name);
                 }
                 self.chat_list.archive_mute.note_suggested(added);
-                const CHECK: &str = "suggestedActionCheckPassword";
-                if added.iter().any(|name| name == CHECK) {
-                    self.settings.privacy_data.check_password_suggested = true;
-                }
-                if removed.iter().any(|name| name == CHECK) {
-                    self.settings.privacy_data.check_password_suggested = false;
-                }
                 true
             }
             _ => false,
@@ -209,12 +199,23 @@ impl Session {
                 };
             }
             Some(RequestPurpose::HideCheckPasswordSuggestion) => {
-                self.settings.privacy_data.check_password_suggested = false;
+                self.chat_list
+                    .suggestions
+                    .remove_action(crate::chatlist_suggestions::ACTION_PASSWORD);
             }
-            Some(RequestPurpose::Settings(SettingsPurpose::SetInactiveSessionTtl { .. })) => {
-                self.settings
-                    .privacy_data
-                    .clear_error(PrivacyControl::SessionTtl);
+            Some(RequestPurpose::Settings(SettingsPurpose::SetInactiveSessionTtl)) => {
+                let data = &mut self.settings.privacy_data;
+                if let Some(id) = pending.map(|p| p.id) {
+                    data.inactive_session_ttl.landed(id);
+                }
+                data.clear_error(PrivacyControl::SessionTtl);
+            }
+            Some(RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy)) => {
+                if let Some(id) = pending.map(|p| p.id)
+                    && let Some(state) = self.settings.privacy_data.new_chat.as_mut()
+                {
+                    state.save_landed(id);
+                }
             }
             Some(RequestPurpose::Settings(SettingsPurpose::SetPrivacyRules { key })) => {
                 self.settings
@@ -258,6 +259,16 @@ impl Session {
                 ));
                 return;
             }
+            RequestPurpose::HideCheckPasswordSuggestion => {
+                self.chat_list
+                    .suggestions
+                    .add_action(crate::chatlist_suggestions::ACTION_PASSWORD);
+                self.chats_state.chat_action_error.push(format!(
+                    "could not hide the suggestion (error {})",
+                    err.code
+                ));
+                return;
+            }
             RequestPurpose::HideContactCloseBirthdays => {
                 if pending.is_some_and(|p| self.chat_list.suggestions.birthdays_hide_failed(p.id)) {
                     self.chats_state.chat_action_error.push(format!(
@@ -281,31 +292,13 @@ impl Session {
                     data.new_chat = Some(NewChatPrivacyState::Failed);
                 }
             }
-            RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy {
-                previous_allow,
-                previous_stars,
-            }) => {
-                // Roll the optimistic choice back to what the server had, but
-                // only for the newest save: an older one failing under a
-                // newer save hands its value to the newer save's rollback.
-                let mine = pending.map(|p| p.id);
-                let newest = data.new_chat_saved_at;
-                if newest.is_none() || newest == mine {
-                    if matches!(data.new_chat, Some(NewChatPrivacyState::Ready(_))) {
-                        data.new_chat = Some(NewChatPrivacyState::Ready(NewChatPrivacy {
-                            allow_from_unknown: previous_allow,
-                            incoming_paid_message_star_count: previous_stars,
-                        }));
-                    }
-                } else if let Some(newest) = newest
-                    && let Some(newer) = self.requests.pending_mut(newest)
-                    && let RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy {
-                        previous_allow: allow,
-                        previous_stars: stars,
-                    }) = &mut newer.purpose
+            RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy) => {
+                // The row falls back to the next save still out, or to what
+                // the server had, whichever order the saves fail in.
+                if let Some(id) = pending.map(|p| p.id)
+                    && let Some(state) = data.new_chat.as_mut()
                 {
-                    *allow = previous_allow;
-                    *stars = previous_stars;
+                    state.save_failed(id);
                 }
                 data.fail(
                     PrivacyControl::NewChat,
@@ -318,21 +311,9 @@ impl Session {
                     sessions_error_line("change the gift settings", err),
                 );
             }
-            RequestPurpose::Settings(SettingsPurpose::SetInactiveSessionTtl { previous }) => {
-                // Back to what the server had: `None` reads as still
-                // loading, and nothing refetches it. Only the newest save
-                // rolls back; an older one failing under it hands its
-                // value to the newer save's rollback.
-                let newest = data.inactive_session_ttl_saved_at;
-                if newest.is_none() || newest == pending.map(|p| p.id) {
-                    data.inactive_session_ttl_days = previous;
-                } else if let Some(newest) = newest
-                    && let Some(newer) = self.requests.pending_mut(newest)
-                    && let RequestPurpose::Settings(SettingsPurpose::SetInactiveSessionTtl {
-                        previous: newer_previous,
-                    }) = &mut newer.purpose
-                {
-                    *newer_previous = previous;
+            RequestPurpose::Settings(SettingsPurpose::SetInactiveSessionTtl) => {
+                if let Some(id) = pending.map(|p| p.id) {
+                    data.inactive_session_ttl.failed(id);
                 }
                 data.fail(
                     PrivacyControl::SessionTtl,

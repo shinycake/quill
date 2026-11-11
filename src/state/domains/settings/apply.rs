@@ -291,9 +291,13 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetActiveSessions) {
                     self.resolve_unconfirmed_entries(&sessions);
                     self.settings.sessions.succeed(sessions);
-                    if inactive_session_ttl_days.is_some() {
-                        self.settings.privacy_data.inactive_session_ttl_days =
-                            inactive_session_ttl_days;
+                    if let (Some(days), Some(id)) =
+                        (inactive_session_ttl_days, pending.map(|p| p.id))
+                    {
+                        self.settings
+                            .privacy_data
+                            .inactive_session_ttl
+                            .read(id, days);
                     }
                 }
             }

@@ -42,6 +42,16 @@ fn ingest(f: &mut Fixture, json: &str) {
     f.1.ingest(owned).unwrap();
 }
 
+/// What the "Who can message me" row shows.
+fn new_chat_value(f: &Fixture) -> Option<crate::privacy::NewChatPrivacy> {
+    f.1.session
+        .settings
+        .privacy_data
+        .new_chat
+        .as_ref()
+        .and_then(NewChatPrivacyState::value)
+}
+
 fn last_request(f: &Fixture) -> Value {
     serde_json::from_str(f.2.snapshot().last().unwrap()).unwrap()
 }
@@ -70,8 +80,8 @@ fn new_chat_privacy_round_trip_keeps_the_paid_price() {
         ),
     );
     assert!(matches!(
-        f.1.session.settings.privacy_data.new_chat,
-        Some(NewChatPrivacyState::Ready(s))
+        new_chat_value(&f),
+        Some(s)
             if s.allow_from_unknown && s.incoming_paid_message_star_count == 25
     ));
     f.1.set_new_chat_privacy(false).unwrap();
@@ -80,8 +90,8 @@ fn new_chat_privacy_round_trip_keeps_the_paid_price() {
     assert_eq!(set["settings"]["allow_new_chats_from_unknown_users"], false);
     assert_eq!(set["settings"]["incoming_paid_message_star_count"], 25);
     assert!(matches!(
-        f.1.session.settings.privacy_data.new_chat,
-        Some(NewChatPrivacyState::Ready(s)) if !s.allow_from_unknown
+        new_chat_value(&f),
+        Some(s) if !s.allow_from_unknown
     ));
     // A refusal rolls the optimistic choice back and says so.
     ingest(
@@ -92,8 +102,8 @@ fn new_chat_privacy_round_trip_keeps_the_paid_price() {
         ),
     );
     assert!(matches!(
-        f.1.session.settings.privacy_data.new_chat,
-        Some(NewChatPrivacyState::Ready(s)) if s.allow_from_unknown
+        new_chat_value(&f),
+        Some(s) if s.allow_from_unknown
     ));
     assert!(
         f.1.session
@@ -123,10 +133,7 @@ fn a_refresh_keeps_the_value_and_an_older_answer_never_beats_a_save() {
     let refresh = last_request(&f);
     f.1.fetch_new_chat_privacy().unwrap();
     assert_eq!(last_request(&f), refresh);
-    assert!(matches!(
-        f.1.session.settings.privacy_data.new_chat,
-        Some(NewChatPrivacyState::Ready(_))
-    ));
+    assert!(matches!(new_chat_value(&f), Some(_)));
     // A save goes out while the refresh is in flight; the refresh then
     // answers with the old server value and must not overwrite the save.
     f.1.set_new_chat_privacy(false).unwrap();
@@ -138,8 +145,8 @@ fn a_refresh_keeps_the_value_and_an_older_answer_never_beats_a_save() {
         ),
     );
     assert!(matches!(
-        f.1.session.settings.privacy_data.new_chat,
-        Some(NewChatPrivacyState::Ready(s)) if !s.allow_from_unknown
+        new_chat_value(&f),
+        Some(s) if !s.allow_from_unknown
     ));
     cleanup(f);
 }
@@ -188,7 +195,11 @@ fn inactive_session_ttl_comes_from_sessions_and_is_set_optimistically() {
         ),
     );
     assert_eq!(
-        f.1.session.settings.privacy_data.inactive_session_ttl_days,
+        f.1.session
+            .settings
+            .privacy_data
+            .inactive_session_ttl
+            .value(),
         Some(180)
     );
     f.1.set_inactive_session_ttl(30).unwrap();
@@ -196,7 +207,11 @@ fn inactive_session_ttl_comes_from_sessions_and_is_set_optimistically() {
     assert_eq!(set["@type"], "setInactiveSessionTtl");
     assert_eq!(set["inactive_session_ttl_days"], 30);
     assert_eq!(
-        f.1.session.settings.privacy_data.inactive_session_ttl_days,
+        f.1.session
+            .settings
+            .privacy_data
+            .inactive_session_ttl
+            .value(),
         Some(30)
     );
     // A refusal puts the server's value back and reports it.
@@ -208,7 +223,11 @@ fn inactive_session_ttl_comes_from_sessions_and_is_set_optimistically() {
         ),
     );
     assert_eq!(
-        f.1.session.settings.privacy_data.inactive_session_ttl_days,
+        f.1.session
+            .settings
+            .privacy_data
+            .inactive_session_ttl
+            .value(),
         Some(180)
     );
     assert!(
@@ -383,7 +402,7 @@ fn password_check_distinguishes_wrong_from_right_and_dismisses() {
         &mut f,
         r#"{"@type":"updateSuggestedActions","added_actions":[{"@type":"suggestedActionCheckPassword"}],"removed_actions":[]}"#,
     );
-    assert!(f.1.session.settings.privacy_data.check_password_suggested);
+    assert!(f.1.session.check_password_suggested());
 
     f.1.check_remembered_password("wrong").unwrap();
     let request = last_request(&f);
@@ -422,12 +441,12 @@ fn password_check_distinguishes_wrong_from_right_and_dismisses() {
         PasswordCheck::Remembered
     );
     // The card stays for the finish step; Done hides the suggestion.
-    assert!(f.1.session.settings.privacy_data.check_password_suggested);
+    assert!(f.1.session.check_password_suggested());
     f.1.hide_check_password_suggestion().unwrap();
     let hide = last_request(&f);
     assert_eq!(hide["@type"], "hideSuggestedAction");
     assert_eq!(hide["action"]["@type"], "suggestedActionCheckPassword");
-    assert!(!f.1.session.settings.privacy_data.check_password_suggested);
+    assert!(!f.1.session.check_password_suggested());
     // The server may also withdraw it from another device.
     ingest(
         &mut f,
@@ -437,7 +456,7 @@ fn password_check_distinguishes_wrong_from_right_and_dismisses() {
         &mut f,
         r#"{"@type":"updateSuggestedActions","added_actions":[],"removed_actions":[{"@type":"suggestedActionCheckPassword"}]}"#,
     );
-    assert!(!f.1.session.settings.privacy_data.check_password_suggested);
+    assert!(!f.1.session.check_password_suggested());
     cleanup(f);
 }
 
@@ -586,13 +605,82 @@ fn an_older_ttl_save_failing_does_not_roll_back_a_newer_one() {
     let second = last_request(&f);
     error_for(&mut f, &first);
     let data = &f.1.session.settings.privacy_data;
-    assert_eq!(data.inactive_session_ttl_days, Some(60));
+    assert_eq!(data.inactive_session_ttl.value(), Some(60));
     // The newer save failing too goes back to what the server still has.
     error_for(&mut f, &second);
     assert_eq!(
-        f.1.session.settings.privacy_data.inactive_session_ttl_days,
+        f.1.session
+            .settings
+            .privacy_data
+            .inactive_session_ttl
+            .value(),
         Some(180)
     );
+    cleanup(f);
+}
+
+#[test]
+fn the_newest_ttl_save_failing_first_falls_back_to_the_older_save_then_the_server() {
+    let mut f = fixture();
+    // Nothing is saved before the server's value is known: a refusal would
+    // have nothing to fall back to.
+    assert_invalid(f.1.set_inactive_session_ttl(30));
+    sessions_answer(&mut f, 180);
+    f.1.set_inactive_session_ttl(30).unwrap();
+    let first = last_request(&f);
+    f.1.set_inactive_session_ttl(60).unwrap();
+    let second = last_request(&f);
+    error_for(&mut f, &second);
+    assert_eq!(
+        f.1.session
+            .settings
+            .privacy_data
+            .inactive_session_ttl
+            .value(),
+        Some(30)
+    );
+    error_for(&mut f, &first);
+    assert_eq!(
+        f.1.session
+            .settings
+            .privacy_data
+            .inactive_session_ttl
+            .value(),
+        Some(180)
+    );
+    cleanup(f);
+}
+
+#[test]
+fn the_newest_new_chat_save_failing_first_falls_back_to_the_older_save_then_the_server() {
+    let mut f = fixture();
+    f.1.fetch_new_chat_privacy().unwrap();
+    let request = last_request(&f);
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"newChatPrivacySettings","allow_new_chats_from_unknown_users":true,"incoming_paid_message_star_count":"0","@extra":"{}"}}"#,
+            extra_of(&request)
+        ),
+    );
+    f.1.set_new_chat_privacy(false).unwrap();
+    let first = last_request(&f);
+    f.1.set_new_chat_settings(crate::privacy::NewChatPrivacy {
+        allow_from_unknown: false,
+        incoming_paid_message_star_count: 40,
+    })
+    .unwrap();
+    let second = last_request(&f);
+    error_for(&mut f, &second);
+    assert!(matches!(
+        new_chat_value(&f),
+        Some(s) if !s.allow_from_unknown && s.incoming_paid_message_star_count == 0
+    ));
+    error_for(&mut f, &first);
+    assert!(matches!(
+        new_chat_value(&f),
+        Some(s) if s.allow_from_unknown && s.incoming_paid_message_star_count == 0
+    ));
     cleanup(f);
 }
 
@@ -618,13 +706,13 @@ fn an_older_new_chat_save_failing_does_not_roll_back_a_newer_one() {
     let second = last_request(&f);
     error_for(&mut f, &first);
     assert!(matches!(
-        f.1.session.settings.privacy_data.new_chat,
-        Some(NewChatPrivacyState::Ready(s)) if s.incoming_paid_message_star_count == 40
+        new_chat_value(&f),
+        Some(s) if s.incoming_paid_message_star_count == 40
     ));
     error_for(&mut f, &second);
     assert!(matches!(
-        f.1.session.settings.privacy_data.new_chat,
-        Some(NewChatPrivacyState::Ready(s))
+        new_chat_value(&f),
+        Some(s)
             if s.allow_from_unknown && s.incoming_paid_message_star_count == 0
     ));
     cleanup(f);

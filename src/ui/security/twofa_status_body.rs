@@ -45,11 +45,7 @@ impl QuillApp {
         }
         // B13: the server asked whether the user still remembers the
         // password (`suggestedActionCheckPassword`).
-        if state.has_password
-            && self
-                .session()
-                .is_some_and(|s| s.settings.privacy_data.check_password_suggested)
-        {
+        if state.has_password && self.session().is_some_and(|s| s.check_password_suggested()) {
             let field = self.twofa.status_check_password.clone();
             body = body.child(self.password_check_card(&field, cx));
         }

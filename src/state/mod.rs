@@ -99,6 +99,7 @@ mod request_purpose;
 mod request_rollback;
 mod requests;
 mod saved_types;
+pub mod saves;
 mod scroll_memory;
 mod search_tabs_state;
 mod search_types;

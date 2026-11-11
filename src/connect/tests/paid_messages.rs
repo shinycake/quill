@@ -338,8 +338,13 @@ fn new_chat_settings_save_the_price_and_roll_it_back_on_failure() {
         ),
     );
     assert!(matches!(
-        f.1.session.settings.privacy_data.new_chat,
-        Some(crate::privacy::NewChatPrivacyState::Ready(s))
+        f.1.session
+            .settings
+            .privacy_data
+            .new_chat
+            .as_ref()
+            .and_then(crate::privacy::NewChatPrivacyState::value),
+        Some(s)
             if s.incoming_paid_message_star_count == 0 && s.allow_from_unknown
     ));
     cleanup(f);

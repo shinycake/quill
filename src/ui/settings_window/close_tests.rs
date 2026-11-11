@@ -255,7 +255,10 @@ fn the_password_check_on_the_page_and_in_the_2fa_box_has_a_field_each(cx: &mut T
         app.show_settings_page(Page::Privacy, cx);
         app.open_twofa(cx);
         if let Some(session) = app.demo_session.as_mut() {
-            session.settings.privacy_data.check_password_suggested = true;
+            session
+                .chat_list
+                .suggestions
+                .add_action(quill::chatlist_suggestions::ACTION_PASSWORD);
             session.auth_state.password_state = Some(PasswordState {
                 has_password: true,
                 password_hint: String::new(),
@@ -348,7 +351,10 @@ fn a_typed_password_check_is_emptied_when_the_page_is_left(cx: &mut TestAppConte
         app.demo_settings(Page::Account, cx);
         app.show_settings_page(Page::Privacy, cx);
         if let Some(session) = app.demo_session.as_mut() {
-            session.settings.privacy_data.check_password_suggested = true;
+            session
+                .chat_list
+                .suggestions
+                .add_action(quill::chatlist_suggestions::ACTION_PASSWORD);
         }
         cx.notify();
     });

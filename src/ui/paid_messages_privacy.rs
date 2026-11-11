@@ -78,7 +78,8 @@ impl QuillApp {
 
     fn new_chat_settings(&self) -> Option<NewChatPrivacyState> {
         self.session()
-            .and_then(|s| s.settings.privacy_data.new_chat)
+            .and_then(|s| s.settings.privacy_data.new_chat.as_ref())
+            .map(NewChatPrivacyState::shown)
     }
 
     fn can_restrict_new_chats(&self) -> bool {
@@ -465,10 +466,12 @@ impl QuillApp {
                 )));
             }
         } else if let Some(demo) = self.demo_session.as_mut()
-            && matches!(
-                demo.settings.privacy_data.new_chat,
-                Some(NewChatPrivacyState::Ready(_))
-            )
+            && demo
+                .settings
+                .privacy_data
+                .new_chat
+                .as_ref()
+                .is_some_and(|state| state.value().is_some())
         {
             demo.set_new_chat_privacy_local(settings);
         }

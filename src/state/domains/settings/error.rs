@@ -165,16 +165,15 @@ impl Session {
             ) => self.apply_proxy_error(purpose, pending, err),
             Some(
                 purpose @ (RequestPurpose::GetNewChatPrivacy
-                | RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy { .. })
+                | RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy)
                 | RequestPurpose::CanSendMessageToUser
                 | RequestPurpose::GetPaidMessageRevenue
                 | RequestPurpose::AllowUnpaidMessages
                 | RequestPurpose::SetDirectMessagesGroup
                 | RequestPurpose::LoadDirectMessagesChat
                 | RequestPurpose::SetGiftSettings
-                | RequestPurpose::Settings(SettingsPurpose::SetInactiveSessionTtl {
-                    ..
-                })
+                | RequestPurpose::Settings(SettingsPurpose::SetInactiveSessionTtl)
+                | RequestPurpose::HideCheckPasswordSuggestion
                 | RequestPurpose::SetSensitiveContent
                 | RequestPurpose::SetContactJoinedNotifications
                 | RequestPurpose::GetNetworkStatistics
