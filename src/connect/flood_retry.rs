@@ -186,6 +186,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Your own level's next read while the tap is open.
         let level = self.call_audio_deadline(now);
         let microphone = self.call_capture.until_reopen(now);
+        let screen_wait = self.call_screen.wait_deadline(now);
         let paid = self
             .session
             .payments
@@ -207,7 +208,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             .and_then(|secs| u64::try_from(secs).ok())
             .map(Duration::from_secs);
         [
-            retry, emoji_hold, bot, levels, hint, level, microphone, paid, live_stars, ring,
+            retry,
+            emoji_hold,
+            bot,
+            levels,
+            hint,
+            level,
+            microphone,
+            screen_wait,
+            paid,
+            live_stars,
+            ring,
         ]
         .into_iter()
         .flatten()

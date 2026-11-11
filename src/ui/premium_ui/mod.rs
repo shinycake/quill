@@ -290,9 +290,7 @@ impl QuillApp {
 
     pub(super) fn close_gifts(&mut self, cx: &mut Context<Self>) {
         if let Some(hub) = self.hub_mut() {
-            hub.gifts_open = false;
-            hub.gift_view.select(None);
-            hub.gift_view.confirm_convert(None);
+            hub.close_gifts();
         }
         cx.notify();
     }

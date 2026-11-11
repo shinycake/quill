@@ -76,7 +76,6 @@ bare:LinkHandlerState::Checking 1
 bare:LinkPreviewFetch::Asked 1
 bare:LinkStatus::Pending 1
 bare:ListStatus::Loading 1
-bare:LiveBursts::Requested 1
 bare:Load::Loading 1
 bare:Lookup::Pending 1
 bare:Lookup::Waiting 1
@@ -228,7 +227,6 @@ unkeyed:LanguageStage::Fetching 1
 unkeyed:Lifecycle::Loading 1
 unkeyed:Lifecycle::Running 1
 unkeyed:Lifecycle::Waiting 1
-unkeyed:LinkFlow::Asking 1
 unkeyed:LinkFlow::Running 1
 unkeyed:ListEdit::InFlight 1
 unkeyed:LiveOverlay::Opening 1
@@ -269,7 +267,6 @@ unkeyed:Translation::Pending 1
 unkeyed:UpdateControl::Downloading 1
 unkeyed:UpdateState::Downloading 1
 unkeyed:UpdateState::Installing 1
-unkeyed:UsernameCheck::Checking 1
 unkeyed:VcardImport::Reading 1
 unkeyed:WaitingCheck::Pending 1
 unkeyed:Watch::Running 1

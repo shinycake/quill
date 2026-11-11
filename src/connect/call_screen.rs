@@ -76,8 +76,16 @@ enum Share {
     /// Nothing picked: the next share asks for a source.
     #[default]
     Idle,
-    /// Picked, and waiting for the call's engine to offer its frame sender.
-    Picked { pick: Pick, wait: EngineWait },
+    /// Picked, and no engine wait has started: the next look at the call
+    /// starts one.
+    Picked { pick: Pick },
+    /// Picked, and waiting for the call's engine to offer its frame sender
+    /// since `since`. The wait has an end ([`ENGINE_WAIT`]), or the share
+    /// would read as live with nothing sent.
+    Waiting {
+        pick: Pick,
+        since: std::time::Instant,
+    },
     /// Opening or running. `pick` is the chooser's latest pick: a different
     /// source than `active.source` switches on the next pump. `audio_note`
     /// is why the system audio stopped while the screen goes on.
@@ -101,33 +109,8 @@ pub struct CallScreen {
     preview_seq: u64,
 }
 
-/// Waiting for the engine to take the shared screen: a call whose engine is
-/// gone or has not made its source yet. The wait has an end, or the share
-/// would read as live with nothing sent.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-enum EngineWait {
-    #[default]
-    Idle,
-    Waiting {
-        since: std::time::Instant,
-    },
-}
-
 /// How long the engine may take to offer its frame sender.
 const ENGINE_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
-
-impl EngineWait {
-    /// Counts one more look at `now`; true once the wait is over.
-    fn expired(&mut self, now: std::time::Instant) -> bool {
-        match *self {
-            Self::Idle => {
-                *self = Self::Waiting { since: now };
-                false
-            }
-            Self::Waiting { since } => now.saturating_duration_since(since) >= ENGINE_WAIT,
-        }
-    }
-}
 
 struct ActiveScreen {
     target: CaptureTarget,
@@ -206,7 +189,9 @@ impl CallScreen {
 
     fn pick(&self) -> Option<&Pick> {
         match &self.share {
-            Share::Picked { pick, .. } | Share::Running { pick, .. } => Some(pick),
+            Share::Picked { pick } | Share::Waiting { pick, .. } | Share::Running { pick, .. } => {
+                Some(pick)
+            }
             Share::Idle | Share::Ended { .. } => None,
         }
     }
@@ -225,6 +210,45 @@ impl CallScreen {
         }
     }
 
+    /// How long until the wait for the call's engine is over, so the poll
+    /// loop wakes for it.
+    pub(crate) fn wait_deadline(&self, now: std::time::Instant) -> Option<std::time::Duration> {
+        match &self.share {
+            Share::Waiting { since, .. } => {
+                Some(ENGINE_WAIT.saturating_sub(now.saturating_duration_since(*since)))
+            }
+            _ => None,
+        }
+    }
+
+    /// Counts one more look at the call's engine at `now`: the first starts
+    /// the wait; true once it is over.
+    fn engine_wait_expired(&mut self, now: std::time::Instant) -> bool {
+        match std::mem::take(&mut self.share) {
+            Share::Picked { pick } => {
+                self.share = Share::Waiting { pick, since: now };
+                false
+            }
+            Share::Waiting { pick, since } => {
+                self.share = Share::Waiting { pick, since };
+                now.saturating_duration_since(since) >= ENGINE_WAIT
+            }
+            other => {
+                self.share = other;
+                false
+            }
+        }
+    }
+
+    /// The call has no engine to wait for (no target): the next look starts
+    /// a fresh wait.
+    fn stop_waiting(&mut self) {
+        self.share = match std::mem::take(&mut self.share) {
+            Share::Waiting { pick, .. } => Share::Picked { pick },
+            other => other,
+        };
+    }
+
     /// Why the share stopped or could not start, for the call window.
     pub fn error(&self) -> Option<&str> {
         match &self.share {
@@ -241,10 +265,7 @@ impl CallScreen {
     /// goes with the call (`keep_pick` false).
     fn close_active(&mut self, keep_pick: bool) {
         self.share = match std::mem::take(&mut self.share) {
-            Share::Running { pick, .. } if keep_pick => Share::Picked {
-                pick,
-                wait: EngineWait::Idle,
-            },
+            Share::Running { pick, .. } if keep_pick => Share::Picked { pick },
             Share::Running { .. } => Share::Idle,
             other => other,
         };
@@ -432,10 +453,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 pick,
                 audio_note: None,
             },
-            _ => Share::Picked {
-                pick,
-                wait: EngineWait::Idle,
-            },
+            _ => Share::Picked { pick },
         };
     }
 
@@ -554,8 +572,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         }
         let Some(target) = wanted else {
-            if let Share::Picked { wait, .. } = &mut self.call_screen.share {
-                *wait = EngineWait::Idle;
+            self.call_screen.stop_waiting();
+            if self.session.calls.active_call.is_none()
+                && self.session.calls.active_group_call.is_none()
+            {
+                // The calls are over: a pick or an ended share's error does
+                // not carry into the next call.
+                self.call_screen.share = Share::Idle;
             }
             if let Some(call) = self.session.calls.active_group_call.as_mut() {
                 call.screen_share_paused = false;
@@ -572,10 +595,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .filter(|engine| engine.is_available())
                 .and_then(|engine| engine.external_frame_sender(target))
             else {
-                let expired = match &mut self.call_screen.share {
-                    Share::Picked { wait, .. } => wait.expired(now),
-                    _ => false,
-                };
+                let expired = self.call_screen.engine_wait_expired(now);
                 if expired {
                     self.call_screen.end(Some(
                         crate::lang::tr(crate::lang::keys::Q_OPS_SCREEN_SHARING_CALL_NOT_READY)
@@ -666,6 +686,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             .is_err()
         {
             self.session.requests.take(extra);
+            // The server never got the edge: the call keeps what it still has
+            // (as the error arm of the request does), so the next edge goes
+            // out instead of being taken for a repeat.
+            if let Some(call) = self
+                .session
+                .calls
+                .active_group_call
+                .as_mut()
+                .filter(|call| call.id == group_call_id)
+            {
+                call.screen_share_paused = was;
+            }
         }
     }
 
@@ -759,9 +791,28 @@ mod wait_tests {
     #[test]
     fn the_engine_wait_ends_after_its_limit_and_not_before() {
         let start = Instant::now();
-        let mut wait = EngineWait::Idle;
-        assert!(!wait.expired(start), "the first look starts the wait");
-        assert!(!wait.expired(start + (ENGINE_WAIT / 2)));
-        assert!(wait.expired(start + ENGINE_WAIT));
+        let mut screen = CallScreen {
+            share: Share::Picked {
+                pick: Pick {
+                    source: SourceId("window:1".into()),
+                    audio: false,
+                },
+            },
+            ..CallScreen::default()
+        };
+        assert!(
+            !screen.engine_wait_expired(start),
+            "the first look starts the wait"
+        );
+        assert!(!screen.engine_wait_expired(start + (ENGINE_WAIT / 2)));
+        assert_eq!(
+            screen.wait_deadline(start + (ENGINE_WAIT / 2)),
+            Some(ENGINE_WAIT / 2)
+        );
+        assert!(screen.engine_wait_expired(start + ENGINE_WAIT));
+        // Leaving the call drops the wait but keeps the pick.
+        screen.stop_waiting();
+        assert!(screen.chosen().is_some());
+        assert_eq!(screen.wait_deadline(start), None);
     }
 }

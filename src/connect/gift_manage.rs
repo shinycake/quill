@@ -112,7 +112,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.payments.gifts_manage.limits_ask =
                 crate::state::fetch::BatchAsk::sent(waiting, refused);
         }
-        let _ = self.fetch_gift_collections(owner);
+        if self.fetch_gift_collections(owner).is_err() {
+            // A refused send keeps the wish: the next ingest asks again.
+            self.session.payments.gifts_manage.collections_fetch = CollectionsFetch::Stale;
+        }
     }
 
     fn fetch_gift_collections(
@@ -144,7 +147,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(owner) = self.session.payments.hub.gifts_owner else {
             return Ok(None);
         };
-        self.session.payments.gifts_manage.collections_fetch = CollectionsFetch::Idle;
+        // `Stale` stays until the send went out (`Loading` is set there), so a
+        // refused send keeps the mark.
         self.fetch_gift_collections(owner).map(Some)
     }
 
@@ -168,13 +172,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         manage.flow = None;
         manage.note = None;
         let hub = &mut self.session.payments.hub;
-        hub.gifts.clear();
-        hub.gifts_total = 0;
-        hub.gifts_offset.clear();
-        hub.gifts_page = crate::premium_hub::page_stage::PageStage::Idle;
-        hub.gift_notice = None;
-        hub.gift_view.select(None);
-        hub.gift_view.confirm_convert(None);
+        hub.reset_gifts_list();
         self.fetch_received_gifts_page(false).map(Some)
     }
 

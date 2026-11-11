@@ -69,7 +69,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             call_sound_watch: None,
             credentials,
             paths: prepared.paths,
-            claimed_owner: None,
+            owner_claim: OwnerClaim::Unclaimed,
             database_key: prepared.database_key,
             outgoing_typing: None,
             outgoing_voice: None,

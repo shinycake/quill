@@ -83,13 +83,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             open: true,
             ..MoneyPage::default()
         };
-        if wallet.state_fetch.can_ask() {
-            wallet.state_fetch.begin();
+        // Each ask is independent: a refused one leaves its own stage to be
+        // asked again, and never keeps the history from being requested.
+        let mut first_error = None;
+        if self.session.ton_wallet.state_fetch.can_ask() {
+            self.session.ton_wallet.state_fetch.begin();
             if let Err(err) =
                 self.send_wallet(TonWalletPurpose::LoadState, None, load_ton_wallet_state)
             {
                 self.session.ton_wallet.state_fetch.cancel();
-                return Err(err);
+                first_error.get_or_insert(err);
             }
         }
         if self.session.ton_wallet.rates_fetch.can_ask() {
@@ -100,11 +103,16 @@ impl<S: JsonSender> ConnectDriver<S> {
                 get_currency_exchange_rates,
             ) {
                 self.session.ton_wallet.rates_fetch.cancel();
-                return Err(err);
+                first_error.get_or_insert(err);
             }
         }
-        self.fetch_ton_explorer_url()?;
-        self.fetch_wallet_history(false)
+        if let Err(err) = self.fetch_ton_explorer_url() {
+            first_error.get_or_insert(err);
+        }
+        if let Err(err) = self.fetch_wallet_history(false) {
+            first_error.get_or_insert(err);
+        }
+        first_error.map_or(Ok(()), Err)
     }
 
     /// Close the Money page (its lists are dropped; the state is kept).

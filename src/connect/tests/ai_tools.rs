@@ -36,6 +36,33 @@ fn ai_harness() -> AiHarness {
 }
 
 #[test]
+fn two_ai_answers_in_one_batch_both_wait_for_their_drain() {
+    let (dir, mut driver, _recorder, _sink, dyn_sink, seq) = ai_harness();
+    for (chat, text) in [(7, "first"), (7, "second")] {
+        let extra = driver.fix_text_with_ai(ChatId(chat), "teh").expect("fix");
+        let json = format!(
+            r#"{{"@type":"fixedText","text":{{"@type":"formattedText","text":"{text}","entities":[]}},"diff_text":{{"@type":"diffText","text":"","entities":[]}},"@extra":"{id}"}}"#,
+            id = extra.0,
+        );
+        driver
+            .ingest(copy_and_parse(&json, &seq, &dyn_sink).expect("parse"))
+            .expect("ingest");
+    }
+    let texts: Vec<&str> = driver
+        .session
+        .messages
+        .ai_answers
+        .iter()
+        .filter_map(|answer| match &answer.result {
+            crate::state::AiResult::Text(text) => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(texts, ["first", "second"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn fix_text_with_ai_applies_fixed_text() {
     let (dir, mut driver, recorder, _sink, dyn_sink, seq) = ai_harness();
     let extra = driver

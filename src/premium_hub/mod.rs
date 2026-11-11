@@ -835,6 +835,30 @@ impl PremiumHub {
         }
     }
 
+    /// The gifts dialog closed: no owner, list, page or refetch mark outlives
+    /// it, so nothing asks for or mutates a list nobody sees. A change in
+    /// flight keeps its lock until its own answer (its late `changed` mark is
+    /// dropped by the next open).
+    pub fn close_gifts(&mut self) {
+        self.gifts_open = false;
+        self.gifts_owner = None;
+        self.reset_gifts_list();
+        self.gifts_op.refetched();
+    }
+
+    /// The list of one owner and collection starts over: the one place that
+    /// knows which fields describe it (opening, switching collection and
+    /// closing all go through here).
+    pub fn reset_gifts_list(&mut self) {
+        self.gifts.clear();
+        self.gifts_total = 0;
+        self.gifts_offset.clear();
+        self.gifts_page = page_stage::PageStage::Idle;
+        self.gift_notice = None;
+        self.gift_view.select(None);
+        self.gift_view.confirm_convert(None);
+    }
+
     pub fn apply_gifts(&mut self, page: GiftsPage, append: bool) {
         self.gifts_page = page_stage::PageStage::Ready;
         self.gift_notice = None;

@@ -259,7 +259,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // (`fixTextWithAi` → `fixedText`, `composeTextWithAi` →
         // `formattedText`) before `apply` takes the pending request. The
         // chat id rides `PendingRequest::chat_id` (the purposes are unit
-        // variants); the UI drains `Session::ai_composer_text` into the
+        // variants); the UI drains `MessagesState::ai_answers` into the
         // composer draft.
         let ai_text_answer: Option<AiAnswer> = match &owned.envelope.payload {
             EnvelopePayload::Messages(MessagesPayload::AiCompose(
@@ -623,9 +623,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Slice S4: persist per-network settings seeded from
         // `getAutoDownloadSettingsPresets` (the reducer cannot touch the
         // filesystem, so it marks them dirty instead).
-        if self.session.settings.data_storage_dirty {
+        if self.session.settings.data_storage_dirty && self.save_data_storage_prefs().is_ok() {
+            // Kept while the save fails: the next ingest writes again.
             self.session.settings.data_storage_dirty = false;
-            let _ = self.save_data_storage_prefs();
         }
         if cleared_download_cache {
             let _ = self.maybe_fetch_storage_statistics();
@@ -646,9 +646,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(chat_id) = pins_changed.filter(|chat| self.session.chat_is_shown(*chat)) {
             let _ = self.fetch_pinned_messages(chat_id);
         }
-        self.run_post_ingest_pumps(active_call_before, bridge_signaling, group_calls_before)?;
-        // Slice G2: chain `boostChat` once the slots answer arrives.
-        self.maybe_continue_boost()?;
+        // A refused send here is returned at the end: the one-shot work below
+        // (the Ready kickoff, the next chat page) has no second chance.
+        let pumped = self
+            .run_post_ingest_pumps(active_call_before, bridge_signaling, group_calls_before)
+            .and(self.maybe_continue_boost());
         // A channel's boost level moved: refresh the status shown for it.
         self.refresh_moved_boost_statuses();
         // Slice G2: refetch caches the state dropped after a confirmed
@@ -848,8 +850,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if installed_stickers_answer
             && let crate::state::SuggestFor::WaitingForSets(emoji) =
-                std::mem::take(&mut self.session.stickers.stickers.suggest_for)
+                &self.session.stickers.stickers.suggest_for
         {
+            let emoji = emoji.clone();
+            self.session.stickers.stickers.suggest_for = crate::state::SuggestFor::Nothing;
             self.update_sticker_suggestions(&emoji)?;
         }
         if thumbs_after
@@ -950,7 +954,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // Unigram ChatSearchViewModel: first hit → LoadMessageSliceAsync.
             self.jump_selected_chat_search_hit()?;
         }
-        Ok(())
+        pumped
     }
 
     fn maybe_send_parameters(&mut self) -> Result<(), ConnectSendError> {

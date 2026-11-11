@@ -53,17 +53,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(ChatKind::BasicGroup { .. }) => 0,
             _ => return Ok(None),
         };
-        let state = &mut self.session.groups.group_type;
-        state.check_generation = state.check_generation.wrapping_add(1);
-        let generation = state.check_generation;
-        let extra = self.session.request(
-            purpose(GroupTypePurpose::CheckChatUsername { generation }),
-            Some(chat_id),
-        );
+        let extra = self
+            .session
+            .request(purpose(GroupTypePurpose::CheckChatUsername), Some(chat_id));
         self.send_json_request(extra, &check_chat_username(extra, ChatId(target), username))?;
         // Only a check that went out is "in flight": a failed send leaves
         // the field as it was, with no answer to wait for.
         self.session.groups.group_type.check = UsernameCheck::Checking {
+            request: extra,
             chat_id,
             username: username.to_string(),
         };
