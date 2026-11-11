@@ -171,20 +171,16 @@ impl Session {
                     | RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { .. })
             )
         ) {
-            self.stickers.gifs.search_failed = true;
-            self.stickers.gifs.search_loading = false;
+            self.stickers.gifs.search.fail();
         }
         if matches!(
             pending.map(|p| p.purpose),
             Some(RequestPurpose::AddSavedAnimation | RequestPurpose::RemoveSavedAnimation)
         ) {
-            self.stickers.gifs.failed = true;
+            self.stickers.gifs.saved.mark_failed();
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedAnimations) {
-            self.stickers.gifs.loading = false;
-            self.stickers.gifs.loaded = true;
-            self.stickers.gifs.failed = true;
-            self.stickers.gifs.stale = false;
+            self.stickers.gifs.saved = crate::state::SavedGifs::Failed;
         }
     }
 }

@@ -259,11 +259,8 @@ impl Session {
     }
 
     pub fn accept_saved_animations(&mut self, animations: Vec<AnimationItem>) {
-        self.stickers.gifs.loading = false;
-        self.stickers.gifs.failed = false;
-        self.stickers.gifs.stale = false;
         self.stickers.gifs.animations = animations;
-        self.stickers.gifs.loaded = true;
+        self.stickers.gifs.saved = crate::state::SavedGifs::Loaded;
     }
 
     /// Slice S9: store a GIF-search `inlineQueryResults` page. A first page
@@ -277,8 +274,7 @@ impl Session {
         next_offset: String,
         first_page: bool,
     ) {
-        self.stickers.gifs.search_loading = false;
-        self.stickers.gifs.search_failed = false;
+        self.stickers.gifs.search.answered();
         if first_page {
             self.stickers.gifs.search_results = animations;
         } else {

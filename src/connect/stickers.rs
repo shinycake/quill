@@ -1,5 +1,6 @@
 //! Connect driver: sticker and GIF panels.
 use super::*;
+use crate::state::{GifSearch, SavedGifs};
 use crate::ids::FileId;
 use crate::ids::RequestId;
 use crate::state::StickersPurpose;
@@ -713,15 +714,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.stickers.gifs.open = true;
-        if self.session.stickers.gifs.failed {
-            self.session.stickers.gifs.loaded = false;
+        if self.session.stickers.gifs.saved == SavedGifs::Failed {
+            self.session.stickers.gifs.saved.forget();
         }
-        if self.session.stickers.gifs.search_mode && self.session.stickers.gifs.search_failed {
-            self.session.stickers.gifs.search_loading = true;
+        if self.session.stickers.gifs.search.failed() {
+            self.session.stickers.gifs.search = GifSearch::Loading;
         }
-        self.session.stickers.gifs.failed = false;
         let saved = self.maybe_refresh_saved_animations()?;
-        if self.session.stickers.gifs.search_mode && self.session.stickers.gifs.search_loading {
+        if self.session.stickers.gifs.search.is_loading() {
             Ok(self.maybe_search_gifs(false)?.or(saved))
         } else {
             Ok(saved)
@@ -819,12 +819,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        let needs = !self.session.stickers.gifs.loaded || self.session.stickers.gifs.stale;
-        if !needs {
+        if !self.session.stickers.gifs.saved.needs_fetch() {
             return Ok(None);
         }
-        self.session.stickers.gifs.loading = true;
-        self.session.stickers.gifs.stale = false;
+        let held = self.session.stickers.gifs.saved.loaded();
+        self.session.stickers.gifs.saved = SavedGifs::Loading { loaded: held };
         let extra = self
             .session
             .request(RequestPurpose::GetSavedAnimations, None);
@@ -832,9 +831,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.stickers.gifs.loading = false;
-                self.session.stickers.gifs.loaded = true;
-                self.session.stickers.gifs.failed = true;
+                self.session.stickers.gifs.saved = SavedGifs::Failed;
                 Err(err)
             }
         }

@@ -371,7 +371,7 @@ impl Session {
             Some(RequestPurpose::AddSavedAnimation | RequestPurpose::RemoveSavedAnimation)
         ) {
             self.stickers.gifs.animations.clear();
-            self.stickers.gifs.loaded = false;
+            self.stickers.gifs.saved.forget();
         }
         // Phase C3a: a successful `leaveGroupCall` /
         // `endGroupCall` drops the tracked call (the `ok`

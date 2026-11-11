@@ -720,7 +720,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
     let saved = driver.open_gif_panel().unwrap().unwrap();
     driver.search_gifs("before bot option", None).unwrap();
-    assert!(driver.session.stickers.gifs.search_failed);
+    assert!(driver.session.stickers.gifs.search.failed());
     driver
         .ingest(
             copy_and_parse(
@@ -732,8 +732,8 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.gifs.loaded);
-    assert!(driver.session.stickers.gifs.search_failed); // Saved loading must not hide a search failure.
+    assert!(driver.session.stickers.gifs.saved.loaded());
+    assert!(driver.session.stickers.gifs.search.failed()); // Saved loading must not hide a search failure.
     driver.ingest(copy_and_parse(&json!({"@type":"updateOption","name":"animation_search_bot_username","value":{"@type":"optionValueString","value":"gif"}}).to_string(),&seq,&sink).unwrap()).unwrap();
     let count_saved = || {
         recorder
@@ -828,7 +828,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(!driver.session.stickers.gifs.loaded);
+    assert!(!driver.session.stickers.gifs.saved.loaded());
     driver
         .ingest(
             copy_and_parse(
@@ -853,7 +853,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
         )
         .unwrap();
     assert_eq!(driver.session.stickers.gifs.animations.len(), 1);
-    assert!(driver.session.stickers.gifs.failed);
+    assert!(driver.session.stickers.gifs.saved == crate::state::SavedGifs::Failed);
     let remove = driver.set_gif_saved(FileId(9), false).unwrap().unwrap();
     driver
         .ingest(
@@ -891,7 +891,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.gifs.stale);
+    assert!(driver.session.stickers.gifs.saved == crate::state::SavedGifs::Stale);
     assert!(driver.open_gif_panel().unwrap().is_some());
     let failed_fetch = sent_request(&recorder, "getSavedAnimations")["@extra"].clone();
     driver
@@ -905,7 +905,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.gifs.failed);
+    assert!(driver.session.stickers.gifs.saved == crate::state::SavedGifs::Failed);
     let count = count_saved();
     driver
         .ingest(

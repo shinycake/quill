@@ -3,6 +3,7 @@ use super::*;
 use crate::ids::{ChatId, FileId, RequestId};
 use crate::state::RequestPurpose;
 use crate::state::StickersPurpose;
+use crate::state::{GifSearch};
 use crate::telegram::requests::{
     add_saved_animation, get_inline_query_results, remove_saved_animation, search_public_chat,
 };
@@ -24,19 +25,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::ResolveGifSearchBot
                 | RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { .. })
         );
-        if search {
-            self.session.stickers.gifs.search_failed = false;
-        } else {
-            self.session.stickers.gifs.failed = false;
-        }
         let extra = self.session.request(purpose, None);
         if let Err(error) = self.sender.send_json(&build(extra)) {
             self.session.requests.take(extra);
             if search {
-                self.session.stickers.gifs.search_failed = true;
-                self.session.stickers.gifs.search_loading = false;
+                self.session.stickers.gifs.search.fail();
             } else {
-                self.session.stickers.gifs.failed = true;
+                self.session.stickers.gifs.saved.mark_failed();
             }
             return Err(error);
         }
@@ -67,8 +62,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.stickers.gifs.search_results.clear();
         self.session.stickers.gifs.search_next_offset.clear();
         self.session.stickers.gifs.search_offset.clear();
-        self.session.stickers.gifs.search_mode = true;
-        self.session.stickers.gifs.search_loading = true;
+        self.session.stickers.gifs.search = GifSearch::Loading;
         self.maybe_search_gifs(false)
     }
 
@@ -77,9 +71,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.cancel_gif_search_requests();
-        self.session.stickers.gifs.search_mode = false;
-        self.session.stickers.gifs.search_loading = false;
-        self.session.stickers.gifs.loaded = false;
+        self.session.stickers.gifs.search = GifSearch::Off;
+        self.session.stickers.gifs.saved.forget();
         self.maybe_refresh_saved_animations()
     }
 
@@ -90,13 +83,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.stickers.gifs.search_mode {
+        if !self.session.stickers.gifs.search.on() {
             return Ok(None);
         }
         let username = self.session.stickers.gifs.search_bot_username.clone();
         if username.is_empty() {
-            self.session.stickers.gifs.search_failed = true;
-            self.session.stickers.gifs.search_loading = false;
+            self.session.stickers.gifs.search.fail();
             return Ok(None);
         }
         if self.session.requests.has_purpose(RequestPurpose::Stickers(
@@ -127,7 +119,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .search_chat
             .or(self.session.open_chat)
             .unwrap_or(ChatId(0));
-        self.session.stickers.gifs.search_loading = true;
+        self.session.stickers.gifs.search = GifSearch::Loading;
         self.session.stickers.gifs.search_offset = offset.clone();
         self.gif_request(
             RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { first_page: !more }),

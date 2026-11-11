@@ -220,20 +220,16 @@ pub struct StickerPanel {
 pub struct GifPanel {
     pub open: bool,
     pub animations: Vec<AnimationItem>,
-    pub loaded: bool,
-    pub search_mode: bool,
-    pub search_loading: bool,
-    pub search_failed: bool,
+    /// Where the saved collection stands.
+    pub saved: SavedGifs,
+    /// Where the search stands.
+    pub search: GifSearch,
     pub search_query: String,
     /// The chat of the window that asked (the inline query's chat); paging
     /// keeps it.
     pub search_chat: Option<crate::ids::ChatId>,
     pub search_bot_username: String,
     pub search_bot_user_id: Option<i64>,
-    pub loading: bool,
-    pub failed: bool,
-    /// `updateSavedAnimations` arrived; refresh even if the panel was closed.
-    pub stale: bool,
     /// Slice S9: GIF search via the animation search bot
     /// (`getInlineQueryResults`; schema 1.8.67, lines 6483, 13019).
     /// First page replaces; later pages append, deduped by file id.
@@ -249,6 +245,114 @@ pub struct GifPanel {
     /// The searches answered lately, so a window's GIF tab shows its own
     /// search while another window's is the one in `search_results`.
     pub searches_kept: GifSearches,
+}
+
+/// Where the saved GIF collection (`getSavedAnimations`) stands.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SavedGifs {
+    /// Never fetched, or dropped for a refetch.
+    #[default]
+    NotLoaded,
+    /// A fetch is out; `loaded` is whether an earlier answer is held.
+    Loading { loaded: bool },
+    Loaded,
+    /// `updateSavedAnimations` arrived (another device changed the
+    /// collection): refresh even if the panel was closed.
+    Stale,
+    /// The fetch or a change to the collection failed.
+    Failed,
+}
+
+impl SavedGifs {
+    /// A fetch is out.
+    pub fn is_loading(self) -> bool {
+        matches!(self, Self::Loading { .. })
+    }
+
+    /// An answer is held (a failure also ends the first wait).
+    pub fn loaded(self) -> bool {
+        match self {
+            Self::NotLoaded => false,
+            Self::Loading { loaded } => loaded,
+            Self::Loaded | Self::Stale | Self::Failed => true,
+        }
+    }
+
+    /// The collection needs fetching: never loaded, or out of date.
+    pub fn needs_fetch(self) -> bool {
+        match self {
+            Self::NotLoaded | Self::Stale => true,
+            // A fetch in flight is deduped by the request registry; one
+            // dropped for a refetch has nothing held to show meanwhile.
+            Self::Loading { loaded } => !loaded,
+            Self::Loaded | Self::Failed => false,
+        }
+    }
+
+    /// The collection changed elsewhere. A fetch in flight answers anyway.
+    pub fn mark_stale(&mut self) {
+        if matches!(self, Self::Loaded | Self::Failed) {
+            *self = Self::Stale;
+        }
+    }
+
+    /// A change to the collection failed. A fetch in flight keeps going.
+    pub fn mark_failed(&mut self) {
+        if !self.is_loading() {
+            *self = Self::Failed;
+        }
+    }
+
+    /// What is held is dropped and fetched again.
+    pub fn forget(&mut self) {
+        *self = match self {
+            Self::Loading { .. } => Self::Loading { loaded: false },
+            _ => Self::NotLoaded,
+        };
+    }
+}
+
+/// Where the GIF search stands.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GifSearch {
+    /// The panel lists the saved GIFs.
+    #[default]
+    Off,
+    /// A search is shown, answered or not asked yet.
+    Shown,
+    /// A page of the search is wanted or out.
+    Loading,
+    /// The last search page failed (or no search bot is known).
+    Failed,
+}
+
+impl GifSearch {
+    /// The panel lists a search.
+    pub fn on(self) -> bool {
+        self != Self::Off
+    }
+
+    pub fn is_loading(self) -> bool {
+        self == Self::Loading
+    }
+
+    pub fn failed(self) -> bool {
+        self == Self::Failed
+    }
+
+    /// A search page failed; nothing changes while the saved GIFs show.
+    pub fn fail(&mut self) {
+        if self.on() {
+            *self = Self::Failed;
+        }
+    }
+
+    /// A search page arrived.
+    pub fn answered(&mut self) {
+        if self.on() {
+            *self = Self::Shown;
+        }
+    }
 }
 
 /// GIF searches answered lately, by query: each window's GIF tab asks for
@@ -289,7 +393,7 @@ impl GifSearches {
 
 impl GifPanel {
     pub fn visible_animations(&self) -> &[AnimationItem] {
-        if self.search_mode {
+        if self.search.on() {
             &self.search_results
         } else {
             &self.animations
