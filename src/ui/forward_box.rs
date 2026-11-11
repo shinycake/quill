@@ -260,8 +260,7 @@ impl QuillApp {
     fn forward_box_body(&self, viewport: Pixels, cx: &mut Context<Self>) -> AnyElement {
         if self
             .chat_ui
-            .schedule_picker
-            .as_ref()
+            .schedule_picker()
             .is_some_and(|picker| picker.target == ScheduleTarget::Share)
         {
             // Schedule is a step of the box, not a second dialog over it.
@@ -475,8 +474,7 @@ impl QuillApp {
         let scheduling = app
             .read(cx)
             .chat_ui
-            .schedule_picker
-            .as_ref()
+            .schedule_picker()
             .is_some_and(|picker| picker.target == ScheduleTarget::Share);
         let footer = (!scheduling)
             .then(|| app.update(cx, |this, cx| this.forward_box_footer(owner.clone(), cx)));

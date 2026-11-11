@@ -162,8 +162,7 @@ impl QuillApp {
     pub(super) fn close_forward_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self
             .chat_ui
-            .schedule_picker
-            .as_ref()
+            .schedule_picker()
             .is_some_and(|picker| picker.target == super::scheduled::ScheduleTarget::Share)
         {
             self.close_schedule_picker(cx);

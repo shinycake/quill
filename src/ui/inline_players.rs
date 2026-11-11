@@ -715,6 +715,37 @@ impl InlineVideos {
         }
     }
 
+    /// The mouse button went up somewhere: no drag along any seek ring is
+    /// still going, whether or not its overlay is on screen to hear it
+    /// (the row scrolled away, the chat changed). Every held clip resumes
+    /// as it was.
+    pub(in crate::ui) fn end_all_seeks(&self) -> bool {
+        let ended = self.with(|state| {
+            let mut commands = Vec::new();
+            let mut ended = false;
+            for slot in state.players.values_mut() {
+                let Audio::Seeking { was_playing } = slot.audio else {
+                    continue;
+                };
+                ended = true;
+                slot.audio = Audio::Sounding {
+                    paused: !was_playing,
+                };
+                if was_playing {
+                    commands.push((slot.player.clone(), Command::Play));
+                }
+            }
+            (ended, commands)
+        });
+        let Some((ended, commands)) = ended else {
+            return false;
+        };
+        if !commands.is_empty() {
+            run(commands);
+        }
+        ended
+    }
+
     pub(super) fn is_seeking(&self, chat_id: i64, message_id: i64) -> bool {
         self.with(|state| {
             state

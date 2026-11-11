@@ -109,8 +109,8 @@ impl QuillApp {
             return false;
         }
         self.open_schedule_picker(super::scheduled::ScheduleTarget::Composer, window, cx);
-        if let Some(picker) = self.chat_ui.schedule_picker.as_mut() {
-            picker.send_after = true;
+        if let Some(picker) = self.chat_ui.schedule_picker_mut() {
+            picker.on_confirm = super::scheduled::OnConfirm::SendNow { effect: 0 };
         }
         true
     }

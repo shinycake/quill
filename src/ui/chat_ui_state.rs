@@ -267,15 +267,12 @@ pub(crate) struct ChatUi {
     /// Scheduled messages ticked in the scheduled-messages dialog (send
     /// now, reschedule or delete together).
     pub(super) scheduled_selected: Vec<MessageId>,
-    /// M1: the scheduled-messages dialog (view/delete). Here so that a
-    /// chat change closes it: its rows act on the chat shown.
-    pub(super) scheduled_dialog_open: bool,
-    /// M1: the schedule picker popup above the composer: `Some` while it is
-    /// open, with the date+time picker it holds (created when the popup
-    /// opens, see `open_schedule_picker`). Its Reschedule target is a message
-    /// id of this chat, so the picker goes with the chat. The share box's
-    /// schedule step is a picker of its own target in the same slot.
-    pub(super) schedule_picker: Option<super::scheduled::SchedulePicker>,
+    /// M1: the scheduled-messages dialog (view/delete) or the schedule
+    /// picker popup above the composer, one at a time (`ScheduleFlow`). Here
+    /// so that a chat change closes it: the rows act on the chat shown, and
+    /// a Reschedule target is a message id of this chat. The share box's
+    /// schedule step is a picker of its own target.
+    pub(super) schedule: super::scheduled::ScheduleFlow,
     /// Phase 4.2: poll creation dialog (open above the composer). Here so
     /// that a chat change closes it: Create posts to the chat shown.
     pub(super) poll_dialog: Option<super::PollDialog>,
@@ -309,18 +306,25 @@ impl ChatUi {
     /// step is not that popup and stays.
     pub(super) fn hide_schedule_popup(&mut self) {
         if self
-            .schedule_picker
-            .as_ref()
+            .schedule_picker()
             .is_some_and(|picker| picker.target != super::scheduled::ScheduleTarget::Share)
         {
-            self.schedule_picker = None;
+            self.schedule = super::scheduled::ScheduleFlow::Closed;
         }
+    }
+
+    /// The schedule picker, while it is open.
+    pub(super) fn schedule_picker(&self) -> Option<&super::scheduled::SchedulePicker> {
+        self.schedule.picker()
+    }
+
+    pub(super) fn schedule_picker_mut(&mut self) -> Option<&mut super::scheduled::SchedulePicker> {
+        self.schedule.picker_mut()
     }
 
     /// The popup above the composer is showing.
     pub(super) fn schedule_popup_shown(&self) -> bool {
-        self.schedule_picker
-            .as_ref()
+        self.schedule_picker()
             .is_some_and(|picker| picker.target != super::scheduled::ScheduleTarget::Share)
     }
 

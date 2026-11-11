@@ -209,6 +209,36 @@ fn a_clicked_round_video_plays_with_sound_once_downloaded(cx: &mut TestAppContex
     });
 }
 
+/// Sweep 12-C016: a drag along a round video's seek ring ends at the mouse
+/// button going up anywhere (the window's own handler), not only through a
+/// handler the ring registers while it paints.
+#[gpui_kit::test]
+fn a_seek_drag_ends_at_any_mouse_up_even_with_no_ring_painted(cx: &mut TestAppContext) {
+    let _scripts = queue_scripts(16);
+    let (app, mut vcx) = autoplay_off(cx);
+    let vcx = &mut vcx;
+    set_local(&app, vcx, ROUND_FILE, false);
+    let MessageContent::VideoNote(note) = round_note(&app, vcx) else {
+        panic!("message 611 is a round video");
+    };
+    app.update_in(vcx, |app, _, cx| {
+        app.play_video_note(ChatId(ROUND.0), MessageId(ROUND.1), &note, cx);
+    });
+    settle(&app, vcx);
+    set_local(&app, vcx, ROUND_FILE, true);
+    land(&app, vcx);
+    app.read_with(vcx, |app, _| {
+        let videos = &app.players.inline_videos;
+        assert!(videos.is_sounding(ROUND), "plays with sound");
+        assert!(videos.seek_to(ROUND.0, ROUND.1, 0.5), "the drag holds it");
+        assert!(videos.is_seeking(ROUND.0, ROUND.1));
+        assert!(videos.end_all_seeks(), "a release ends it");
+        assert!(!videos.is_seeking(ROUND.0, ROUND.1));
+        assert!(videos.is_sounding(ROUND), "it plays on as it was");
+        assert!(!videos.end_all_seeks(), "nothing left to end");
+    });
+}
+
 #[gpui_kit::test]
 fn a_clicked_mp4_gif_loops_on_the_inline_player(cx: &mut TestAppContext) {
     let scripts = queue_scripts(16);

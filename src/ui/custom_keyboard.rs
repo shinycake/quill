@@ -314,7 +314,7 @@ impl QuillApp {
                     this.open_request_share(
                         chat_id,
                         message_id,
-                        RequestShareKind::Users(spec.clone()),
+                        RequestShareKind::users(spec.clone()),
                         cx,
                     );
                 }))
@@ -325,7 +325,7 @@ impl QuillApp {
                     this.open_request_share(
                         chat_id,
                         message_id,
-                        RequestShareKind::Chat(spec.clone()),
+                        RequestShareKind::chat(spec.clone()),
                         cx,
                     );
                 }))

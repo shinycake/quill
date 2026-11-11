@@ -493,6 +493,7 @@ pub(in crate::ui) fn scope_probe(
     canvas(
         |_, _, _| {},
         move |_, _, window, _| {
+            let app_for_up = app.clone();
             let press = {
                 let app = app.clone();
                 move |cx: &mut App| {
@@ -508,9 +509,18 @@ pub(in crate::ui) fn scope_probe(
                     on(cx);
                 }
             });
+            let released = app_for_up;
             window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {
                 if phase == DispatchPhase::Capture {
                     press(cx);
+                    // A drag along a round video's seek ring ends with the
+                    // button, wherever the pointer is and whether or not
+                    // the ring is still painted to hear it.
+                    let _ = released.update(cx, |app, cx| {
+                        if app.players.inline_videos.end_all_seeks() {
+                            cx.notify();
+                        }
+                    });
                 }
             });
             let on = pointer.clone();

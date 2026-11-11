@@ -83,6 +83,71 @@ pub(super) enum ScheduleTarget {
     Share,
 }
 
+/// The scheduled-messages dialog and the schedule picker are two boxes of
+/// one flow (Reschedule leaves the list for the picker, and Cancel comes
+/// back), never open together: one value on the chat.
+#[derive(Default)]
+pub(super) enum ScheduleFlow {
+    #[default]
+    Closed,
+    /// The scheduled-messages dialog.
+    List,
+    /// The picker popup with the date+time picker it holds (created when
+    /// the popup opens, see `open_schedule_picker`).
+    Picking(SchedulePicker),
+}
+
+impl ScheduleFlow {
+    pub(super) fn picker(&self) -> Option<&SchedulePicker> {
+        match self {
+            Self::Picking(picker) => Some(picker),
+            Self::Closed | Self::List => None,
+        }
+    }
+
+    pub(super) fn picker_mut(&mut self) -> Option<&mut SchedulePicker> {
+        match self {
+            Self::Picking(picker) => Some(picker),
+            Self::Closed | Self::List => None,
+        }
+    }
+
+    /// The picker goes (the flow is closed); the list is not the picker's
+    /// to close.
+    pub(super) fn take_picker(&mut self) -> Option<SchedulePicker> {
+        match std::mem::take(self) {
+            Self::Picking(picker) => Some(picker),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+
+    pub(super) fn list_open(&self) -> bool {
+        matches!(self, Self::List)
+    }
+
+    /// The list closes; a picker that replaced it stays.
+    pub(super) fn close_list(&mut self) {
+        if self.list_open() {
+            *self = Self::Closed;
+        }
+    }
+}
+
+/// What confirming the picker's time does besides setting it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum OnConfirm {
+    /// Keep the time on the composer (or apply it to the message).
+    Keep,
+    /// Send the composer's message as soon as the time is confirmed (the
+    /// "Schedule" shortcut; tdesktop's schedule box sends on Schedule),
+    /// carrying `effect` (the "Send with Effect" card's Schedule item; zero
+    /// for none).
+    SendNow { effect: i64 },
+}
+
 /// The date+time picker popup (tdesktop's `ChooseDateTimeBox`).
 pub(super) struct SchedulePicker {
     pub target: ScheduleTarget,
@@ -90,12 +155,7 @@ pub(super) struct SchedulePicker {
     pub error: Option<&'static str>,
     /// The "Repeat" choice in seconds (zero: never), Premium only.
     pub repeat: i32,
-    /// Send the composer's message as soon as the time is confirmed (the
-    /// "Schedule" shortcut; tdesktop's schedule box sends on Schedule).
-    pub send_after: bool,
-    /// With `send_after`: the effect that send carries (the "Send with
-    /// Effect" card's Schedule item); zero for none.
-    pub send_effect: i64,
+    pub on_confirm: OnConfirm,
     /// For the composer: the chat the picker was opened in, which the
     /// chosen time goes to.
     pub slot: Option<SendSlot>,
@@ -214,8 +274,7 @@ impl QuillApp {
         // The share box schedules to several chats at once.
         if self
             .chat_ui
-            .schedule_picker
-            .as_ref()
+            .schedule_picker()
             .is_some_and(|picker| picker.target == ScheduleTarget::Share)
         {
             return false;
@@ -276,13 +335,12 @@ impl QuillApp {
             ScheduleTarget::Composer => self.send_slot(),
             _ => None,
         };
-        self.chat_ui.schedule_picker = Some(SchedulePicker {
+        self.chat_ui.schedule = ScheduleFlow::Picking(SchedulePicker {
             target,
             date,
             error: None,
             repeat,
-            send_after: false,
-            send_effect: 0,
+            on_confirm: OnConfirm::Keep,
             slot,
         });
         cx.notify();
@@ -291,10 +349,10 @@ impl QuillApp {
     /// Closes the picker; a reschedule returns to the scheduled list.
     pub(super) fn close_schedule_picker(&mut self, cx: &mut Context<Self>) {
         let reopen = matches!(
-            self.chat_ui.schedule_picker.as_ref().map(|p| p.target),
+            self.chat_ui.schedule_picker().map(|p| p.target),
             Some(ScheduleTarget::Reschedule(_) | ScheduleTarget::RescheduleSelected)
         );
-        self.chat_ui.schedule_picker = None;
+        self.chat_ui.schedule.take_picker();
         if reopen {
             self.open_scheduled_dialog(cx);
         }
@@ -304,7 +362,7 @@ impl QuillApp {
     /// Reads the picker, validates it like `ChooseDateTimeBox::collect`
     /// and applies it.
     pub(super) fn confirm_schedule_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(picker) = self.chat_ui.schedule_picker.as_ref() else {
+        let Some(picker) = self.chat_ui.schedule_picker() else {
             return;
         };
         let target = picker.target;
@@ -316,7 +374,7 @@ impl QuillApp {
                 self.apply_schedule(target, ComposerScheduling::at(send_date), window, cx)
             }
             Err(err) => {
-                if let Some(picker) = self.chat_ui.schedule_picker.as_mut() {
+                if let Some(picker) = self.chat_ui.schedule_picker_mut() {
                     picker.error = Some(err.message());
                 }
                 cx.notify();
@@ -335,19 +393,12 @@ impl QuillApp {
         let kind = self.schedule_kind();
         // The Repeat choice counts for Premium only (the locked button never
         // sets it, and a lapsed subscription drops it).
-        let (repeat, send_after, send_effect, picker_slot) = self
+        let (repeat, on_confirm, picker_slot) = self
             .chat_ui
-            .schedule_picker
-            .take()
-            .map(|picker| {
-                (
-                    picker.repeat,
-                    picker.send_after,
-                    picker.send_effect,
-                    picker.slot,
-                )
-            })
-            .unwrap_or((0, false, 0, None));
+            .schedule
+            .take_picker()
+            .map(|picker| (picker.repeat, picker.on_confirm, picker.slot))
+            .unwrap_or((0, OnConfirm::Keep, None));
         let scheduling = if self.repeat_allowed(target) {
             scheduling.repeating(repeat)
         } else {
@@ -364,7 +415,10 @@ impl QuillApp {
                     send.scheduling = scheduling;
                 });
                 // Sending now would send another chat's text.
-                let send_after = send_after && open.as_ref() == Some(&slot);
+                let send_now = match on_confirm {
+                    OnConfirm::SendNow { effect } if open.as_ref() == Some(&slot) => Some(effect),
+                    _ => None,
+                };
                 self.set_note(match (scheduling, kind) {
                     (ComposerScheduling::SendAtDate { date, .. }, ScheduleKind::Reminder) => {
                         StatusNote::silent(tr_with(
@@ -387,9 +441,9 @@ impl QuillApp {
                     _ => StatusNote::info(tr(keys::Q_OPS_WILL_SEND_WHEN_THE_CONTACT)),
                 });
                 cx.notify();
-                if send_after {
+                if let Some(effect) = send_now {
                     let once = super::composer_sends::SendOnce {
-                        effect: send_effect,
+                        effect,
                         ..Default::default()
                     };
                     self.send_composer_after_schedule(once, window, cx);
@@ -456,7 +510,7 @@ impl QuillApp {
     /// `ScheduleBox`): title, date and time field, "Send when online" where
     /// the chat allows it, Cancel and Schedule/Remind.
     pub(super) fn schedule_popup(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(picker) = self.chat_ui.schedule_picker.as_ref() else {
+        let Some(picker) = self.chat_ui.schedule_picker() else {
             return div().into_any_element();
         };
         let kind = self.schedule_kind();
@@ -568,7 +622,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::Scheduled, |this, _, cx| {
-                this.chat_ui.scheduled_dialog_open = false;
+                this.chat_ui.schedule.close_list();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
@@ -700,7 +754,6 @@ impl QuillApp {
                     .ghost()
                     .small()
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.chat_ui.scheduled_dialog_open = false;
                         this.open_schedule_picker(ScheduleTarget::RescheduleSelected, window, cx);
                         this.close_kit_dialog_if_done(DialogKind::Scheduled, window, cx);
                     })),
@@ -792,7 +845,6 @@ impl QuillApp {
                         .label(tr(keys::Q_OPS_RESCHEDULE))
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.chat_ui.scheduled_dialog_open = false;
                             this.open_schedule_picker(ScheduleTarget::Reschedule(id), window, cx);
                             this.close_kit_dialog_if_done(DialogKind::Scheduled, window, cx);
                         })),
@@ -803,7 +855,7 @@ impl QuillApp {
                         .label(tr(keys::Q_OPS_EDIT))
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.chat_ui.scheduled_dialog_open = false;
+                            this.chat_ui.schedule.close_list();
                             this.begin_edit(edit.clone(), window, cx);
                             this.close_kit_dialog_if_done(DialogKind::Scheduled, window, cx);
                         })),
@@ -874,12 +926,12 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     Scheduled => DialogSpec::new(
         300,
-        |app| app.chat_ui.scheduled_dialog_open,
+        |app| app.chat_ui.schedule.list_open(),
         QuillApp::build_scheduled_dialog,
     )
     .per_window()
     .close(|app, _, cx| {
-            app.chat_ui.scheduled_dialog_open = false;
+            app.chat_ui.schedule.close_list();
             cx.notify();
         }),
 }

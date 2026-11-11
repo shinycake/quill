@@ -448,14 +448,14 @@ fn a_schedule_picker_left_by_a_chat_switch_is_dropped_and_sends_nothing(cx: &mut
         app.select_listed_chat(A, window, cx);
         app.open_schedule_picker(ScheduleTarget::Composer, window, cx);
         // The "Schedule" shortcut sends once a time is confirmed.
-        if let Some(picker) = app.chat_ui.schedule_picker.as_mut() {
-            picker.send_after = true;
+        if let Some(picker) = app.chat_ui.schedule_picker_mut() {
+            picker.on_confirm = crate::ui::scheduled::OnConfirm::SendNow { effect: 0 };
         }
         app.select_listed_chat(B, window, cx);
         app.composer
             .update(cx, |input, cx| input.set_value("for B", window, cx));
         assert!(
-            app.chat_ui.schedule_picker.is_none(),
+            app.chat_ui.schedule_picker().is_none(),
             "A's picker went with A"
         );
         let before = history_len(app, B);
@@ -504,13 +504,12 @@ fn a_time_picked_just_before_its_first_showing_takes_the_second(cx: &mut TestApp
         let value = picker_value(first_pass, cx).expect("a picker value");
         let date = app
             .chat_ui
-            .schedule_picker
-            .as_ref()
+            .schedule_picker()
             .map(|picker| picker.date.state.clone())
             .expect("the picker");
         date.update(cx, |state, cx| state.set_date_time(value, window, cx));
         app.confirm_schedule_picker(window, cx);
-        assert!(app.chat_ui.schedule_picker.is_none(), "no \"too soon\"");
+        assert!(app.chat_ui.schedule_picker().is_none(), "no \"too soon\"");
         assert_eq!(
             app.pending_send().scheduling,
             ComposerScheduling::at(WallClock::CHICAGO_FALL_BACK + 1800)

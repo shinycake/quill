@@ -278,6 +278,36 @@ fn clear_jump(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
     });
 }
 
+/// Sweep 12-C014: the quote picker and the chat chooser are never open
+/// together, whichever opens first, and closing leaves neither.
+#[gpui_kit::test]
+fn the_quote_picker_and_the_reply_chooser_are_never_open_together(cx: &mut TestAppContext) {
+    use crate::ui::reply_options_ui::ReplyPanel;
+    use quill::reply_options::ReplyOption;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    reply_to_ada(&app, vcx);
+    let panel = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| app.reply_panel())
+    };
+    app.update_in(vcx, |app, window, cx| {
+        app.apply_reply_option(ReplyOption::UpdateQuote, window, cx);
+    });
+    assert_eq!(panel(&app, vcx), ReplyPanel::QuotePicker);
+    app.update_in(vcx, |app, window, cx| {
+        app.apply_reply_option(ReplyOption::ReplyInAnotherChat, window, cx);
+    });
+    assert_eq!(panel(&app, vcx), ReplyPanel::Chooser);
+    assert!(app.read_with(vcx, |app, _| !app.reply_quote_open()));
+    app.update_in(vcx, |app, window, cx| {
+        app.apply_reply_option(ReplyOption::UpdateQuote, window, cx);
+    });
+    assert_eq!(panel(&app, vcx), ReplyPanel::QuotePicker);
+    assert!(app.read_with(vcx, |app, _| !app.share.forward.reply_chooser_open()));
+    app.update_in(vcx, |app, window, cx| app.close_reply_panels(window, cx));
+    assert_eq!(panel(&app, vcx), ReplyPanel::None);
+}
+
 #[gpui_kit::test]
 fn clicking_the_reply_bar_opens_the_quote_picker(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);

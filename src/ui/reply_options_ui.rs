@@ -22,7 +22,61 @@ use quill::quote_source::QuotableText;
 use quill::reply_options::{ReplyOption, reply_options};
 use quill::telegram::envelope::{ChatKind, effective_content};
 
+/// Which panel of the reply bar is open: the quote picker, or the chat
+/// chooser behind "Reply in Another Chat". The picker is the reply bar's
+/// and the chooser is the share box's stage (shared with the forward box),
+/// so every opening and closing goes through [`QuillApp::show_reply_panel`],
+/// the one place that keeps at most one of them open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::ui) enum ReplyPanel {
+    None,
+    QuotePicker,
+    Chooser,
+}
+
 impl QuillApp {
+    /// The panel open now.
+    pub(in crate::ui) fn reply_panel(&self) -> ReplyPanel {
+        if self.share.forward.reply_chooser_open() {
+            ReplyPanel::Chooser
+        } else if self.chat_ui.quote_picker_open() {
+            ReplyPanel::QuotePicker
+        } else {
+            ReplyPanel::None
+        }
+    }
+
+    /// Open `panel` (or none), closing the other one. The chooser's search
+    /// field starts empty each time it opens and is emptied when it closes.
+    pub(in crate::ui) fn show_reply_panel(
+        &mut self,
+        panel: ReplyPanel,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let was_chooser = self.reply_panel() == ReplyPanel::Chooser;
+        match panel {
+            ReplyPanel::None => {
+                self.share.forward.close_reply_chooser();
+                self.chat_ui.close_quote_picker();
+            }
+            ReplyPanel::QuotePicker => {
+                self.share.forward.close_reply_chooser();
+                self.chat_ui.open_quote_picker();
+            }
+            ReplyPanel::Chooser => {
+                self.chat_ui.close_quote_picker();
+                self.share.forward.open_reply_chooser();
+            }
+        }
+        if was_chooser || panel == ReplyPanel::Chooser {
+            self.share
+                .search_input
+                .update(cx, |input, cx| input.set_value("", window, cx));
+        }
+        cx.notify();
+    }
+
     /// The quotable text of a loaded message, with its formatting.
     pub(in crate::ui) fn message_quotable(
         &self,
@@ -118,8 +172,7 @@ impl QuillApp {
         };
         match option {
             ReplyOption::UpdateQuote => {
-                self.share.forward.close_reply_chooser();
-                self.chat_ui.open_quote_picker();
+                self.show_reply_panel(ReplyPanel::QuotePicker, window, cx);
                 self.set_note(StatusNote::silent(tr(keys::Q_OPS_PICK_THE_PART_TO_QUOTE)));
             }
             ReplyOption::ReplyInAnotherChat => {
@@ -153,24 +206,12 @@ impl QuillApp {
         if self.chat_ui.reply().is_none() {
             return;
         }
-        self.chat_ui.close_quote_picker();
         // One stage with the forward box: that box closes as this opens.
-        self.share.forward.open_reply_chooser();
-        self.share
-            .search_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        cx.notify();
+        self.show_reply_panel(ReplyPanel::Chooser, window, cx);
     }
 
     pub(super) fn close_reply_panels(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let was_open = self.share.forward.close_reply_chooser();
-        self.chat_ui.close_quote_picker();
-        if was_open {
-            self.share
-                .search_input
-                .update(cx, |input, cx| input.set_value("", window, cx));
-        }
-        cx.notify();
+        self.show_reply_panel(ReplyPanel::None, window, cx);
     }
 
     /// A chat was picked: open it with the reply attached to its composer.
@@ -204,10 +245,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.share.forward.close_reply_chooser();
-        self.share
-            .search_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.show_reply_panel(ReplyPanel::None, window, cx);
         // The reply leaves this composer and rides with the open to the
         // window that shows `dest`.
         self.chat_ui.set_reply(None);
