@@ -593,3 +593,61 @@ fn unread_thread_opens_at_the_read_position_and_jumps_to_the_latest_replies() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A first page that cannot be sent leaves the thread `Failed` (drawn with
+/// its retry), not `LoadingHistory` with nothing in flight.
+#[test]
+fn a_first_page_that_cannot_be_sent_fails_the_thread() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    };
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":14,"title":"Group","type":{"@type":"chatTypeSupergroup","supergroup_id":14,"is_channel":false},"unread_count":0}}"#,
+    );
+    driver.select_chat(ChatId(14)).unwrap();
+    let extra = driver
+        .open_thread(ChatId(14), MessageId(40))
+        .unwrap()
+        .unwrap();
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"messageThreadInfo","@extra":"{}","chat_id":14,"message_thread_id":40,"reply_info":{{"@type":"messageReplyInfo","reply_count":1,"recent_replier_ids":[],"last_read_inbox_message_id":0,"last_read_outbox_message_id":0,"last_message_id":90}},"unread_message_count":0,"messages":[{}]}}"#,
+            extra.0,
+            text_message(40, 14, 40, "root")
+        ),
+    );
+    recorder.refuse(Some("getMessageThreadHistory"));
+    assert!(driver.start_thread_in_open_chat().is_err());
+    let thread = driver.session.threads.thread.as_ref().unwrap();
+    assert!(matches!(thread.status, ThreadStatus::Failed(_)));
+    assert!(!driver.thread_needs_start(), "no per-frame resend");
+
+    // A sent page carries its request id.
+    recorder.refuse(None);
+    let extra = driver.retry_thread().unwrap().unwrap();
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"messageThreadInfo","@extra":"{}","chat_id":14,"message_thread_id":40,"reply_info":{{"@type":"messageReplyInfo","reply_count":1,"recent_replier_ids":[],"last_read_inbox_message_id":0,"last_read_outbox_message_id":0,"last_message_id":90}},"unread_message_count":0,"messages":[{}]}}"#,
+            extra.0,
+            text_message(40, 14, 40, "root")
+        ),
+    );
+    let page = driver.start_thread_in_open_chat().unwrap().unwrap();
+    assert_eq!(
+        driver.session.threads.thread.as_ref().unwrap().status,
+        ThreadStatus::LoadingHistory(page)
+    );
+    drop(dir);
+}

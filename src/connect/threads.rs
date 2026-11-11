@@ -109,8 +109,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.leave_open_chat();
             return Err(err);
         }
-        self.begin_thread_reading(chat_id);
-        self.fetch_thread_history()
+        self.begin_thread_reading(chat_id)
     }
 
     /// The thread is in the open chat already (a group message's replies):
@@ -129,17 +128,53 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.open_chat != Some(chat_id) {
             return Ok(None);
         }
-        self.begin_thread_reading(chat_id);
-        self.fetch_thread_history()
+        self.begin_thread_reading(chat_id)
     }
 
-    fn begin_thread_reading(&mut self, chat_id: ChatId) {
+    /// Start reading the thread and request its first page. The thread
+    /// is `LoadingHistory` only once that request went out; a failed
+    /// send ends it `Failed` (drawn with the status pane), never a
+    /// spinner with nothing in flight.
+    fn begin_thread_reading(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         self.session.prepare_thread_marks(chat_id);
-        if let Some(thread) = self.session.threads.thread.as_mut()
-            && thread.status.needs_start()
-        {
-            thread.status = ThreadStatus::LoadingHistory;
+        let sent = self.fetch_thread_history();
+        let starting = self
+            .session
+            .threads
+            .thread
+            .as_ref()
+            .is_some_and(|thread| thread.status.needs_start());
+        if !starting {
+            return sent;
         }
+        let next = match &sent {
+            Ok(Some(id)) => ThreadStatus::LoadingHistory(*id),
+            // Nothing to send: the page is already out, or there is none.
+            Ok(None) => match self.thread_page_in_flight() {
+                Some(id) => ThreadStatus::LoadingHistory(id),
+                None => ThreadStatus::Ready,
+            },
+            Err(_) => ThreadStatus::Failed("Could not open the thread.".into()),
+        };
+        if let Some(thread) = self.session.threads.thread.as_mut() {
+            thread.status = next;
+        }
+        sent
+    }
+
+    fn thread_page_in_flight(&self) -> Option<RequestId> {
+        let thread = self.session.threads.thread.as_ref()?;
+        let purpose = RequestPurpose::GetMessageThreadHistory {
+            message_id: thread.origin_message_id.0,
+        };
+        self.session
+            .requests
+            .ids_for_chat(&[purpose], thread.origin_chat_id)
+            .into_iter()
+            .next()
     }
 
     /// Whether the open thread still needs its chat opened or its first

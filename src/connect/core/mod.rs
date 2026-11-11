@@ -976,7 +976,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.handshake = Handshake::Sent(extra);
         self.send_language_options()
     }
 }

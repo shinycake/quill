@@ -357,7 +357,6 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) claimed_owner: Option<i64>,
     pub(crate) database_key: DatabaseKey,
     /// Whether `setTdlibParameters` went out, and as which request.
-    pub(crate) handshake: Handshake,
     /// The typed chat-list search waiting out its quiet window.
     pub(crate) typed_search: super::debounce::Debounce<String>,
     /// The typed in-chat search waiting out its quiet window.
@@ -383,15 +382,6 @@ pub struct ConnectDriver<S: JsonSender> {
     /// Where this client's web proxy carriers run (`connect::proxy_carrier`);
     /// `None` refuses them.
     pub(crate) carrier_host: Option<Box<dyn crate::proxy_carrier::CarrierHost>>,
-}
-
-/// The `setTdlibParameters` call of one client. Its error (a wrong key,
-/// an unusable folder) ends the start-up in `StartupFailed`; the client
-/// is rebuilt to try again, so `Sent` has no other way out.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Handshake {
-    NotSent,
-    Sent(RequestId),
 }
 
 pub(crate) struct OutgoingTyping {

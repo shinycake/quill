@@ -16,9 +16,10 @@ pub enum ThreadStatus {
     /// The thread's chat is open; reading and the first
     /// `getMessageThreadHistory` page are still to be started.
     Starting,
-    /// The first `getMessageThreadHistory` page is in flight. Its answer
-    /// makes the thread `Ready`, its error `Failed`.
-    LoadingHistory,
+    /// The first `getMessageThreadHistory` page is in flight (the
+    /// request that went out). Its answer makes the thread `Ready`, its
+    /// error `Failed`; it is entered only once the send succeeded.
+    LoadingHistory(RequestId),
     Ready,
     /// The reducer replaced the window (an own send while newer replies
     /// were unloaded); the driver has to request the newest page, which
@@ -44,7 +45,7 @@ impl ThreadStatus {
     pub fn is_opening(&self) -> bool {
         matches!(
             self,
-            Self::SwitchingChat | Self::Starting | Self::LoadingHistory
+            Self::SwitchingChat | Self::Starting | Self::LoadingHistory(_)
         )
     }
 

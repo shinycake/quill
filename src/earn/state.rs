@@ -654,6 +654,14 @@ impl EarnState {
             .retain(|_, ask| !matches!(ask, crate::state::fetch::BatchAsk::Failed));
     }
 
+    /// A failed app-config ask is forgotten, so the next profile open asks
+    /// again (the per-frame upkeep only asks a config never asked).
+    pub fn forget_failed_app_config(&mut self) {
+        if self.limits.app_config.error().is_some() {
+            self.limits.app_config = Fetch::Idle;
+        }
+    }
+
     pub fn note(&mut self, text: impl Into<String>) {
         self.notes.push(text.into());
     }
