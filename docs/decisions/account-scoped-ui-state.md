@@ -4107,7 +4107,7 @@ and 10 are widget items another fixer owns).
   `BoostsListState` is one `BoostsStage` (`Loading(request)`, `Ready`,
   `Failed`) and the Show more page is `Loading` too (02-126). A star
   reaction keeps each tap's request (`PaidTap`), so a refused tap rolls back
-  only its own Stars (04-058).
+  only its own Stars, never a newer entry's (04-058).
 - **A failed next page keeps the rows.** Boosts, invite-link members and
   link join requests keep what is loaded and show their error when only the
   next page did not leave; a first page shows its error. A join-request
@@ -4118,14 +4118,17 @@ and 10 are widget items another fixer owns).
   checkout closed (05-110), a gift sent or refused after its box closed
   (03-065), a commit of Star reactions that TDLib refused, and an add, undo
   or commit that failed (11-p7-004) all land there. A reaction is `PaidStage`
-  (`Waiting { attempts }`, `Committing(request)`): it stays until TDLib
-  answers its commit, a commit that cannot be sent starts its Undo window
-  again and the user is told once (02-159). A paid send the guard holds
+  (`Waiting`, `Committing(request)`, `Undoing(request)`; one design, merged
+  with the integration branch's): it stays until TDLib answers its commit or
+  undo. A refused commit or undo, and a commit that cannot be sent, release
+  the Stars and tell the user once; nothing is sent again on its own, so a
+  low balance cannot loop (02-159). A paid send the guard holds
   leaves the guard only after the send went out (02-162).
 - **Locks are not reset by an open.** Reopening the gifts box keeps
   `gift_mutating` of a toggle or sale still out; its own answer clears it
   (02-173, 10-014). `open_gift_resale`, `start_gift_resale_buy` and
-  `open_gift_craft` refuse while a purchase or craft is in flight (02-065).
+  `open_gift_craft` refuse while a purchase or craft is in flight (02-065): a
+  new `CraftSession` never orphans a craft whose answer is out.
   A failed first page of the Stars history, the gifts list or Grams ends in
   the error line, not an empty box (04-040).
 - **An auction follow is `AuctionFollow`** (`None`, `Following { gift_id,
@@ -4134,11 +4137,15 @@ and 10 are widget items another fixer owns).
   `Farewell` of `GiftMarketUi` already closes the follow on an account switch
   (03-062, 02-066).
 - **The gate follows the viewer's Premium.** `PaidMessages::gates` is
-  `GateFetch` per user (`Asking`, `Known { viewer_premium }`, `Failed`): an
-  answer given under another Premium is old and the open chat asks again when
-  `is_premium` changes; an error answer ends the ask, so the next open asks
-  at once instead of after 30 s (04-053, 04-056). The send path does not
-  refuse while the gate is `Failed`: tdesktop shows no such state, so the
+  `GateFetch` per user (`Asking { before }`, `Known { viewer_premium }`,
+  `Failed { before }`): the open chat asks again when `is_premium` changes,
+  and an error answer ends the ask, so the next open asks at once instead of
+  after 30 s. `before` is the answer ahead of the ask (`Prior`, with the
+  Premium it was given under). A failed refresh keeps it, so a known price
+  does not vanish and the next send is still confirmed (04-056). Under
+  another Premium only "restricts new chats" and "ok" are old; a price stands,
+  so buying Premium keeps the guard's prices (04-053). The send path does not
+  refuse while nothing is known: tdesktop shows no such state, so the
   smallest safe choice was to leave the composer as it was.
 - **Smaller.** The Premium gift message is kept whole when
   `gift_text_length_max` is not known yet (04-060). The Collect and Withdraw
