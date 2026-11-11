@@ -288,16 +288,6 @@ fn emoji_status_choices_resolution_timing_and_confirmed_clear() {
         json!({"@type":"error","@extra":set.as_extra(),"code":400,"message":"PRIVATE_DETAIL"}),
     );
     assert_eq!(driver.session.stickers.emoji.recent_statuses.len(), 1);
-    assert!(
-        !driver
-            .session
-            .stickers
-            .emoji
-            .status_note
-            .as_ref()
-            .unwrap()
-            .contains("PRIVATE_DETAIL")
-    );
     let set = driver.change_emoji_status(Some(92), 0).unwrap().unwrap();
     assert_eq!(
         sent_request(&recorder, "setEmojiStatus")["emoji_status"]["expiration_date"],
@@ -311,10 +301,6 @@ fn emoji_status_choices_resolution_timing_and_confirmed_clear() {
     assert_eq!(
         crate::settings::load_media_prefs(&driver.paths).recent_emoji_packs,
         vec![1]
-    );
-    assert_eq!(
-        driver.session.stickers.emoji.status_note.as_deref(),
-        Some("Emoji status updated.")
     );
     driver
         .session
@@ -356,10 +342,6 @@ fn emoji_status_choices_resolution_timing_and_confirmed_clear() {
         json!({"@type":"emojiStatuses","@extra":stale.as_extra(),"emoji_statuses":[{"@type":"emojiStatus","type":{"@type":"emojiStatusTypeCustomEmoji","custom_emoji_id":"91"},"expiration_date":0}]}),
     );
     assert!(driver.session.stickers.emoji.recent_statuses.is_empty());
-    assert_eq!(
-        driver.session.stickers.emoji.status_note.as_deref(),
-        Some("Recent emoji statuses cleared.")
-    );
     // The selector also lists the collectibles, and sets one as its gift.
     driver.load_emoji_status_choices().unwrap();
     let gifts = request_id("getUpgradedGiftEmojiStatuses");

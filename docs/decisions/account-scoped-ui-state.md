@@ -6832,8 +6832,8 @@ whose variants carry the data, with a way out of every stage.
   timed-out send's late answer is nobody's. `WebApps.pending` is a list of
   independent launches. 03-032: `EmojiPanel.open` is the box's visibility,
   and `tab` is also read by other consumers while it is closed (the profile
-  photo sources), so the two are not one stage; `status_note` is a result
-  line that no stage waits on. 03-037: see the row above. 03-038:
+  photo sources), so the two are not one stage; `status_note` is deleted: six paths wrote
+  it and nothing read it. 03-037: see the row above. 03-038:
   `SetState` is a pure function of `SetStage`, the active set (a setting)
   and the sets on disk (an inventory); it is computed per draw and never
   stored, so there is no copy to keep in step.

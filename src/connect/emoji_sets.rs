@@ -15,7 +15,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.stickers.emoji.status_picker = StatusPicker::Profile;
-        self.session.stickers.emoji.status_note = None;
         self.session.stickers.emoji.reset_custom_emoji_lookups();
         for (purpose, build) in [
             (
@@ -100,7 +99,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.status_change_busy() {
             return Ok(None);
         }
-        self.session.stickers.emoji.status_note = None;
         self.session.stickers.emoji.status_change = StatusChange::Idle;
         self.emoji_set_request(RequestPurpose::SetEmojiStatus, |extra| {
             crate::telegram::requests_emoji::set_collectible_emoji_status(extra, &gift, expiration)
@@ -117,7 +115,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.status_change_busy() {
             return Ok(None);
         }
-        self.session.stickers.emoji.status_note = None;
         let request = self.emoji_set_request(RequestPurpose::SetEmojiStatus, |extra| {
             crate::telegram::requests_emoji::set_emoji_status(extra, custom_emoji_id, expiration)
         })?;
@@ -138,7 +135,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.session.stickers.emoji.status_note = None;
         self.emoji_set_request(
             RequestPurpose::ClearRecentEmojiStatuses,
             crate::telegram::requests_emoji::clear_recent_emoji_statuses,
@@ -197,10 +193,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             let emoji = &mut self.session.stickers.emoji;
             emoji.custom_emoji_lookup_not_sent(extra);
-            if emoji.status_picker != StatusPicker::Closed {
-                emoji.status_note =
-                    Some("Could not update emoji statuses. Retry the action.".into());
-            }
             return Err(err);
         }
         Ok(Some(extra))
@@ -321,19 +313,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 list.fail(crate::lang::tr(
                     crate::lang::keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS,
                 ));
-            }
-            if matches!(
-                purpose,
-                RequestPurpose::SetEmojiStatus
-                    | RequestPurpose::ClearRecentEmojiStatuses
-                    | RequestPurpose::GetRecentEmojiStatuses
-                    | RequestPurpose::GetThemedEmojiStatuses
-                    | RequestPurpose::GetDefaultEmojiStatuses
-                    | RequestPurpose::GetDefaultChatEmojiStatuses
-                    | RequestPurpose::GetCustomEmojiStickers
-            ) {
-                self.session.stickers.emoji.status_note =
-                    Some("Could not update emoji statuses. Retry the action.".into());
             }
             return Err(err);
         }

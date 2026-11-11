@@ -534,7 +534,6 @@ fn a_failed_custom_emoji_lookup_asks_again() {
     );
     assert!(session.custom_emoji_needs_resolving(41));
     assert!(session.custom_emoji_needs_resolving(42));
-    assert!(session.stickers.emoji.status_note.is_none());
 }
 
 #[test]

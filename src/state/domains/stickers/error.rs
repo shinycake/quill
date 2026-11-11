@@ -43,8 +43,7 @@ impl Session {
                     self.fail_sticker_set_view(0);
                 }
             }
-            // The lookup's ids are asked for again; the note shows only
-            // where it is read, in the status picker. A rate limit is no
+            // The lookup's ids are asked for again. A rate limit is no
             // failure: the connect layer holds lookups until it is over.
             Some(RequestPurpose::GetCustomEmojiStickers) => {
                 let emoji = &mut self.stickers.emoji;
@@ -55,25 +54,6 @@ impl Session {
                         emoji.custom_emoji_lookup_failed(pending.id);
                     }
                 }
-                if emoji.status_picker != crate::emoji::StatusPicker::Closed {
-                    emoji.status_note = Some(call_request_error_line(
-                        err,
-                        "Could not update emoji statuses. Retry the action",
-                    ));
-                }
-            }
-            Some(
-                RequestPurpose::SetEmojiStatus
-                | RequestPurpose::ClearRecentEmojiStatuses
-                | RequestPurpose::GetRecentEmojiStatuses
-                | RequestPurpose::GetThemedEmojiStatuses
-                | RequestPurpose::GetDefaultEmojiStatuses
-                | RequestPurpose::GetDefaultChatEmojiStatuses,
-            ) => {
-                self.stickers.emoji.status_note = Some(call_request_error_line(
-                    err,
-                    "Could not update emoji statuses. Retry the action",
-                ));
             }
             _ => {}
         }

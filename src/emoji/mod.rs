@@ -168,7 +168,6 @@ pub struct EmojiPanel {
     pub status_change: StatusChange,
     pub outdated_packs: std::collections::HashSet<i64>,
     pub status_picker: StatusPicker,
-    pub status_note: Option<String>,
     /// Where each custom emoji id's `getCustomEmojiStickers` stands: asked,
     /// answered, failed or given up ([`custom_lookup`]).
     pub custom_lookups: CustomEmojiLookups,
@@ -763,14 +762,6 @@ impl Session {
             drop(
                 self.requests
                     .take_purpose(RequestPurpose::GetRecentEmojiStatuses),
-            );
-            self.stickers.emoji.status_note = Some(
-                if purpose == Some(RequestPurpose::SetEmojiStatus) {
-                    "Emoji status updated."
-                } else {
-                    "Recent emoji statuses cleared."
-                }
-                .into(),
             );
         }
         if matches!(
