@@ -158,3 +158,38 @@ impl Default for SendBoxUi {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_path_has_one_stage_and_only_its_current_job_settles_it() {
+        let mut reads: Reads<u8> = Reads::default();
+        let path = PathBuf::from("a.mp4");
+        assert!(reads.is_unread(&path));
+        reads.start(path.clone(), 1);
+        assert!(reads.is_reading(&path) && reads.done(&path).is_none());
+        // The file was removed and added again: job 2 supersedes job 1.
+        reads.start(path.clone(), 2);
+        assert!(!reads.finish(&path, 1, 9), "a stale job changes nothing");
+        assert!(reads.is_reading(&path));
+        assert!(reads.finish(&path, 2, 7));
+        assert_eq!(reads.done(&path), Some(&7));
+        assert!(!reads.is_reading(&path));
+        assert!(
+            !reads.finish(&path, 2, 8),
+            "a done read is not settled twice"
+        );
+    }
+
+    #[test]
+    fn clearing_the_done_reads_keeps_those_still_running() {
+        let mut reads: Reads<()> = Reads::default();
+        reads.set_done(PathBuf::from("done"), ());
+        reads.start(PathBuf::from("running"), 3);
+        reads.clear_done();
+        assert!(reads.is_unread(Path::new("done")));
+        assert!(reads.is_reading(Path::new("running")));
+    }
+}

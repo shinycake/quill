@@ -624,9 +624,12 @@ mod dispatch_tests {
             app.update_in(vcx, open);
             assert_eq!(top(&app, vcx), Some(name), "{name} should be on top");
             vcx.simulate_keystrokes("escape");
-            // The privacy picker peels first; a second press closes the rest.
-            if top(&app, vcx) == Some("privacy") {
-                vcx.simulate_keystrokes("escape");
+            // The privacy picker peels first, then the exceptions list, then
+            // the editor: one press each.
+            for _ in 0..3 {
+                if top(&app, vcx) == Some("privacy") {
+                    vcx.simulate_keystrokes("escape");
+                }
             }
             assert_eq!(top(&app, vcx), None, "Escape should close {name}");
         }
