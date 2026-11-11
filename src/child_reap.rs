@@ -76,14 +76,25 @@ pub fn wait_in_background(child: Child) -> Receiver<()> {
         let _ = done.try_send(());
     });
     if spawned.is_err() {
-        // No thread to wait on: reap it now if it already exited, and
-        // never block the caller for one that has not.
+        // No thread to wait on: reap it now if it already exited, and never
+        // block the caller for one that has not. That one is kept, and the
+        // next call looks at it again, instead of being dropped as a zombie.
         let child = slot.lock().ok().and_then(|mut slot| slot.take());
-        if let Some(mut child) = child {
-            let _ = child.try_wait();
+        if let Some(child) = child {
+            park(child);
         }
     }
     notice
+}
+
+/// Children no thread could wait on; each call to [`wait_in_background`]
+/// that cannot start a thread polls them once more.
+static PARKED: Mutex<Vec<Child>> = Mutex::new(Vec::new());
+
+fn park(child: Child) {
+    let mut parked = crate::locks::lock_or_recover(&PARKED);
+    parked.push(child);
+    parked.retain_mut(|child| matches!(child.try_wait(), Ok(None)));
 }
 
 fn reap(mut child: Child, grace: Duration) {

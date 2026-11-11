@@ -5514,7 +5514,11 @@ S4 entries, each proved against the code before it was fixed.
   the codes on the settings page of the sign-in screen, not in its fields.
 - **Launcher badge (03-069).** Linux: `Launcher::{Idle, Pending, Delivered,
   Failed}`; the dedupe records a count only after the worker emitted it, and
-  a failed emit is asked again on the next tick.
+  a failed emit is asked again on the next tick. `invalidate_icon_badge`
+  (dock restart, account switch) also resets `Delivered` to `Idle`
+  (`Launcher::invalidate`), so the same count is handed over again. A failed
+  emit is still asked again every tick, not backed off: the ask is a slot
+  write and the worker's connect is the only cost.
 - **Launch lines (03-081).** macOS: the process-wide once-cells are one
   `Slot::{Empty, Open, Forgotten}`; each account's open replaces the file to
   write, and a log-out forgets only the account whose file is open. The
@@ -5528,10 +5532,13 @@ S4 entries, each proved against the code before it was fixed.
 - **Key store (04-026).** A failed `FileSecretStore::put` removes the temp
   key file.
 - **Open-link child (04-027).** `answer_on_exit` keeps the child in a slot a
-  failed thread start can take back and hand to `wait_in_background`, which
-  itself tries a `try_wait` when it cannot start a thread.
+  failed thread start can take back and hand to `wait_in_background`. When
+  that cannot start a thread either, the child is parked (`PARKED`) and
+  polled again by the next such call, not dropped as a zombie.
 - **Screen reader (04-035).** The Linux watcher is restarted by `running()`
-  after `RETRY_AFTER` once it ended (`Watch::{Idle, Watching, Ended}`) and
+  after `RETRY_AFTER` once it ended (`Watch::{Idle, Watching, Ended}`; the
+  pause doubles with each watch in a row that never reached the bus, up to
+  64 times `RETRY_AFTER`, and a read resets it) and
   clears its value when it ends.
 - **Tray registration (07-014).** The registration worker shuts a handle
   down itself when nobody waits for it (the tray was turned off while it
@@ -5543,6 +5550,7 @@ S4 entries, each proved against the code before it was fixed.
   the single-instance check (`begin_app_run` runs after it, and says so);
   the only way past is an I/O error from the check, where TDLib's database
   lock stops a second client as well.
+
 ### Sweep fixes (s4-media-2)
 
 - **Viewer.** A Shared Media viewer merges older pages and asks for more only

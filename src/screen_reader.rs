@@ -65,18 +65,22 @@ mod platform {
 mod watcher {
     use std::time::{Duration, Instant};
 
-    /// How long after a failed or ended watch the next may start.
+    /// How long after a watch that never reached the bus the next may start;
+    /// it doubles with each miss in a row, up to `MAX_DOUBLINGS` times.
     pub(super) const RETRY_AFTER: Duration = Duration::from_secs(10);
+    const MAX_DOUBLINGS: u32 = 6;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub(super) enum Watch {
         /// Nothing started yet.
         Idle,
-        /// A thread is reading the property and waiting for its changes.
-        Watching,
+        /// A thread is reading the property and waiting for its changes;
+        /// `misses` is the run of misses it follows.
+        Watching { misses: u32 },
         /// The watch ended (no bus, AT-SPI gone, thread did not start) at
-        /// this instant.
-        Ended(Instant),
+        /// this instant; `misses` watches in a row ended without ever
+        /// reading the value.
+        Ended { at: Instant, misses: u32 },
     }
 
     impl Watch {
@@ -85,17 +89,32 @@ mod watcher {
         pub(super) fn start_if_due(&mut self, now: Instant) -> bool {
             let due = match *self {
                 Watch::Idle => true,
-                Watch::Watching => false,
-                Watch::Ended(at) => now.saturating_duration_since(at) >= RETRY_AFTER,
+                Watch::Watching { .. } => false,
+                Watch::Ended { at, misses } => {
+                    now.saturating_duration_since(at)
+                        >= RETRY_AFTER * (1 << misses.min(MAX_DOUBLINGS))
+                }
             };
             if due {
-                *self = Watch::Watching;
+                let misses = match *self {
+                    Watch::Ended { misses, .. } => misses,
+                    Watch::Idle | Watch::Watching { .. } => 0,
+                };
+                *self = Watch::Watching { misses };
             }
             due
         }
 
-        pub(super) fn ended(&mut self, now: Instant) {
-            *self = Watch::Ended(now);
+        /// The watch ended; `reached` is whether it read the value first.
+        pub(super) fn ended(&mut self, now: Instant, reached: bool) {
+            let misses = match *self {
+                _ if reached => 0,
+                Watch::Watching { misses } | Watch::Ended { misses, .. } => {
+                    misses.saturating_add(1)
+                }
+                Watch::Idle => 1,
+            };
+            *self = Watch::Ended { at: now, misses };
         }
     }
 
@@ -110,13 +129,30 @@ mod watcher {
             let mut watch = Watch::Idle;
             assert!(watch.start_if_due(t0), "the first call starts it");
             assert!(!watch.start_if_due(t0), "one at a time");
-            watch.ended(t0);
+            watch.ended(t0, true);
             assert!(
                 !watch.start_if_due(t0 + RETRY_AFTER / 2),
                 "not hammering the bus"
             );
             assert!(watch.start_if_due(t0 + RETRY_AFTER), "then it tries again");
-            assert_eq!(watch, Watch::Watching);
+            assert_eq!(watch, Watch::Watching { misses: 0 });
+        }
+
+        #[test]
+        fn a_bus_that_stays_away_is_tried_less_and_less_often() {
+            let t0 = Instant::now();
+            let mut watch = Watch::Idle;
+            assert!(watch.start_if_due(t0));
+            watch.ended(t0, false);
+            assert!(watch.start_if_due(t0 + RETRY_AFTER * 2), "after one miss");
+            watch.ended(t0, false);
+            assert!(
+                !watch.start_if_due(t0 + RETRY_AFTER * 2),
+                "two misses wait longer"
+            );
+            assert!(watch.start_if_due(t0 + RETRY_AFTER * 4));
+            watch.ended(t0, true);
+            assert!(watch.start_if_due(t0 + RETRY_AFTER), "a read resets it");
         }
     }
 }
@@ -135,7 +171,7 @@ mod platform {
         if crate::locks::lock_or_recover(&WATCH).start_if_due(Instant::now())
             && crate::thread_guard::spawn_guarded("quill-screen-reader", watch).is_err()
         {
-            crate::locks::lock_or_recover(&WATCH).ended(Instant::now());
+            crate::locks::lock_or_recover(&WATCH).ended(Instant::now(), false);
         }
         ON.load(Ordering::Relaxed)
     }
@@ -144,24 +180,30 @@ mod platform {
     /// goes away. Returns at once without a session bus or AT-SPI; either
     /// way [`running`] starts another watch after a pause.
     fn watch() {
-        read_and_follow();
+        let reached = read_and_follow();
         // The value can no longer be trusted: the next watch reads it again.
         ON.store(false, Ordering::Relaxed);
-        crate::locks::lock_or_recover(&WATCH).ended(Instant::now());
+        crate::locks::lock_or_recover(&WATCH).ended(Instant::now(), reached);
     }
 
-    fn read_and_follow() {
+    /// Whether the property could be read (the bus and AT-SPI were there).
+    fn read_and_follow() -> bool {
         let Some(proxy) = proxy() else {
-            return;
+            return false;
         };
-        if let Ok(on) = proxy.get_property::<bool>("ScreenReaderEnabled") {
-            ON.store(on, Ordering::Relaxed);
-        }
+        let reached = match proxy.get_property::<bool>("ScreenReaderEnabled") {
+            Ok(on) => {
+                ON.store(on, Ordering::Relaxed);
+                true
+            }
+            Err(_) => false,
+        };
         for change in proxy.receive_property_changed::<bool>("ScreenReaderEnabled") {
             if let Ok(on) = change.get() {
                 ON.store(on, Ordering::Relaxed);
             }
         }
+        reached
     }
 
     fn proxy() -> Option<zbus::blocking::Proxy<'static>> {

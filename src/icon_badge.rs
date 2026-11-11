@@ -76,6 +76,9 @@ fn trace(line: &str) {
 pub fn sync_icon_badge(session: Option<&Session>) {
     let unread = crate::notify_accounts::total_unread(session).count;
     let forced = INVALIDATED.swap(false, std::sync::atomic::Ordering::SeqCst);
+    if forced {
+        forget_pushed_badge();
+    }
     sync_with(unread, forced, push_badge);
 }
 
@@ -104,6 +107,13 @@ fn sync_with(unread: u32, forced: bool, push: impl FnOnce(u32) -> bool) {
             last.set(Some(unread));
         }
     });
+}
+
+/// Drops the platform's own record of what it showed (Linux: the launcher
+/// worker's `Delivered` count), so a forced push is not deduped away there.
+fn forget_pushed_badge() {
+    #[cfg(all(target_os = "linux", feature = "ui"))]
+    crate::locks::lock_or_recover(&LAUNCHER).invalidate();
 }
 
 #[cfg(target_os = "linux")]
@@ -374,6 +384,15 @@ impl Launcher {
         }
     }
 
+    /// The OS may have lost the badge: forget that anything was shown, so
+    /// the next `request` hands the count over again even if it is equal.
+    /// A count still in flight stays in flight.
+    fn invalidate(&mut self) {
+        if matches!(*self, Launcher::Delivered(_)) {
+            *self = Launcher::Idle;
+        }
+    }
+
     /// The worker's answer for `count`; a newer request that overtook it
     /// stays pending.
     fn answered(&mut self, count: u32, emitted: bool) {
@@ -483,6 +502,15 @@ mod tests {
             (false, Some(0)),
             "a new count goes out"
         );
+    }
+
+    #[test]
+    fn an_invalidated_badge_is_handed_over_again_at_the_same_count() {
+        let mut launcher = Launcher::Idle;
+        let _ = launcher.request(3);
+        launcher.answered(3, true);
+        launcher.invalidate();
+        assert_eq!(launcher.request(3), (false, Some(3)));
     }
 
     #[test]

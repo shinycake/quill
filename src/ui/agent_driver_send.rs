@@ -71,13 +71,13 @@ impl QuillApp {
             .and_then(|session| session.chats.get(&chat_id.0))
             .map(|chat| chat.title.clone())
             .unwrap_or_default();
-        self.agent_bridge.ui_send = Some(UiSend {
+        self.agent_bridge.ui_send = Some(Box::new(UiSend {
             account,
             chat_id: chat_id.0,
             chat_title,
             text,
             request,
-        });
+        }));
         cx.notify();
     }
 

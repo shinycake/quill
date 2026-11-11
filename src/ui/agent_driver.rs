@@ -285,7 +285,7 @@ impl QuillApp {
                                 takeover::note_press();
                             }
                             if let Ok(Some(send)) = send {
-                                ui_send = Some(send);
+                                ui_send = Some(*send);
                             }
                         }
                     }

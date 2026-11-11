@@ -92,7 +92,7 @@ pub(crate) struct AgentBridge {
     pub(super) activity_shown: usize,
     /// A send the composer handed to the agent path while the UI driver
     /// injected input (`agent_driver_send`), until the task picks it up.
-    pub(super) ui_send: Option<quill::agent::ui_driver::bridge::UiSend>,
+    pub(super) ui_send: Option<Box<quill::agent::ui_driver::bridge::UiSend>>,
     /// The input command that runs, and those waiting behind it.
     pub(super) driver: Driver,
 }
