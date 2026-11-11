@@ -619,9 +619,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // Slice S4: persist per-network settings seeded from
         // `getAutoDownloadSettingsPresets` (the reducer cannot touch the
-        // filesystem, so it marks them dirty instead).
-        if self.session.settings.data_storage_dirty {
-            self.session.settings.data_storage_dirty = false;
+        // filesystem, so they differ from `data_storage_persisted` instead).
+        if self.session.settings.data_storage != self.session.settings.data_storage_persisted {
             let _ = self.save_data_storage_prefs();
         }
         if cleared_download_cache {

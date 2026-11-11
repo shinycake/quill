@@ -93,7 +93,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// only on the confirmed `ok` (the `ok` carries none, so they ride
     /// the request purpose — the setAccountTtl precedent, state.rs:8383,
     /// which applies on `ok` too), and the driver persists via
-    /// `data_storage_dirty` on the next ingest. A send failure or
+    /// the next ingest. A send failure or
     /// TDLib error leaves the local prefs untouched.
     pub fn set_auto_download_settings(
         &mut self,
@@ -257,6 +257,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Slice S4: persist the per-network auto-download settings
     /// (`data_storage.json`) next to the account.
     pub fn save_data_storage_prefs(&mut self) -> std::io::Result<()> {
-        save_data_storage_prefs(&self.paths, &self.session.settings.data_storage)
+        save_data_storage_prefs(&self.paths, &self.session.settings.data_storage)?;
+        self.session.settings.data_storage_persisted = self.session.settings.data_storage.clone();
+        Ok(())
     }
 }

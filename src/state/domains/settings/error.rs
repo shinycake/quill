@@ -31,7 +31,10 @@ impl Session {
                     "Couldn't save auto-download settings: {}",
                     error_reason(err)
                 ));
-                self.settings.auto_download_answer = extra.map(AutoDownloadAnswer::Refused);
+                if let Some(request) = extra {
+                    self.settings
+                        .note_auto_download_answer(AutoDownloadAnswer::Refused(request));
+                }
             }
             Some(RequestPurpose::OptimizeStorage) => {
                 self.settings.storage_clear = StorageClear::Failed(format!(

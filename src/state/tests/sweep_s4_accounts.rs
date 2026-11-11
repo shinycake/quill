@@ -85,18 +85,20 @@ fn an_auto_download_save_is_answered_by_the_request_that_asked() {
             first.0
         ),
     );
-    assert_eq!(
-        session.settings.auto_download_answer,
-        Some(AutoDownloadAnswer::Refused(first))
-    );
     apply_json(
         &mut session,
         &seq,
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, second.0),
     );
+    // Each editor takes its own answer, once, whichever came last.
     assert_eq!(
-        session.settings.auto_download_answer,
+        session.settings.take_auto_download_answer(first),
+        Some(AutoDownloadAnswer::Refused(first))
+    );
+    assert_eq!(session.settings.take_auto_download_answer(first), None);
+    assert_eq!(
+        session.settings.take_auto_download_answer(second),
         Some(AutoDownloadAnswer::Saved(second))
     );
 }

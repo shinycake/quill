@@ -198,7 +198,7 @@ impl Session {
                 // only our own in-flight request seeds the local
                 // per-network settings (matched by `@extra`), and only
                 // when nothing was loaded from disk. The driver persists
-                // the seed on the next ingest (`data_storage_dirty`).
+                // the seed on the next ingest (it then differs from `data_storage_persisted`).
                 if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetAutoDownloadSettingsPresets)
                     && !self.settings.data_storage.seeded.is_seeded()
@@ -206,7 +206,6 @@ impl Session {
                     self.settings
                         .data_storage
                         .seed_from_presets(low, medium, high);
-                    self.settings.data_storage_dirty = true;
                     self.settings.auto_download_presets.succeed(());
                 }
             }

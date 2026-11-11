@@ -238,9 +238,35 @@ impl StorageClear {
     }
 }
 
+impl SettingsState {
+    /// How many saved-answer records are kept for editors to take.
+    const AUTO_DOWNLOAD_ANSWERS_KEPT: usize = 8;
+
+    /// Record how the save `answer` names ended.
+    pub(crate) fn note_auto_download_answer(&mut self, answer: AutoDownloadAnswer) {
+        self.auto_download_answers.push(answer);
+        let extra = self
+            .auto_download_answers
+            .len()
+            .saturating_sub(Self::AUTO_DOWNLOAD_ANSWERS_KEPT);
+        self.auto_download_answers.drain(..extra);
+    }
+
+    /// The answer of the save `request`, once, for the editor that sent it.
+    pub fn take_auto_download_answer(&mut self, request: RequestId) -> Option<AutoDownloadAnswer> {
+        let at = self.auto_download_answers.iter().position(|answer| {
+            matches!(answer, AutoDownloadAnswer::Saved(id) | AutoDownloadAnswer::Refused(id) if *id == request)
+        })?;
+        Some(self.auto_download_answers.remove(at))
+    }
+}
+
 pub struct SettingsState {
-    /// See [`AutoDownloadAnswer`].
-    pub auto_download_answer: Option<AutoDownloadAnswer>,
+    /// How the `setAutoDownloadSettings` saves ended, oldest first, one per
+    /// request: the editor that sent a save takes its own answer
+    /// ([`SettingsState::take_auto_download_answer`]). Only the newest few
+    /// are kept (an editor that was left never takes its answer).
+    pub auto_download_answers: Vec<AutoDownloadAnswer>,
     /// Mirror of `settings::Preferences::notify_view` (tdesktop "Name" /
     /// "Text"), loaded from `prefs.json` at connect time.
     pub notify_view: crate::notify::NotifyView,
@@ -258,11 +284,12 @@ pub struct SettingsState {
     /// Phase 8.1: notifications decided by the reducer, drained by the UI for
     /// OS dispatch. Same-chat bursts coalesce into one entry ("N new messages").
     pub pending_notifications: Vec<QueuedNotification>,
-    /// A notification-worthy message arrived: the UI bounces the Dock icon /
-    /// flashes the taskbar (when the user wants it and the OS is not in
-    /// Do Not Disturb). Set independently of the "Desktop notifications"
-    /// switch, like tdesktop's alert.
-    pub pending_attention: bool,
+    /// Chats whose notification-worthy message asked for attention: the UI
+    /// bounces the Dock icon / flashes the taskbar (when the user wants it
+    /// and the OS is not in Do Not Disturb) once for the queue. Queued
+    /// independently of the "Desktop notifications" switch, like tdesktop's
+    /// alert; drained by the notifier with the other OS events.
+    pub attention_chats: Vec<ChatId>,
     /// TDLib option `disable_contact_registered_notifications`: the inverse
     /// of tdesktop's "Contact joined Telegram" event switch.
     pub disable_contact_registered_notifications: bool,
@@ -317,10 +344,11 @@ pub struct SettingsState {
     /// `data_storage.json` at session setup; seeded once from
     /// `getAutoDownloadSettingsPresets` when unseeded.
     pub data_storage: DataStoragePrefs,
-    /// Slice S4: the presets answer seeded `data_storage` — the driver
-    /// persists it on the next ingest (the reducer cannot touch the
-    /// filesystem).
-    pub data_storage_dirty: bool,
+    /// What `data_storage.json` holds. The driver writes `data_storage`
+    /// on an ingest where it differs from this (the reducer cannot touch
+    /// the filesystem) and records it here only once the write worked, so a
+    /// failed write is tried again and nothing is marked by hand.
+    pub data_storage_persisted: DataStoragePrefs,
     /// Slice S4: last Data & Storage failure, shown on the screen
     /// (failures surface there, never as toasts — the S3 pattern).
     /// Slice S4: the `getAutoDownloadSettingsPresets` round trip: in
@@ -552,7 +580,7 @@ impl SettingsState {
             inapp_sounds_enabled: true,
             desktop_notifications: true,
             pending_notifications: Vec::new(),
-            pending_attention: false,
+            attention_chats: Vec::new(),
             disable_contact_registered_notifications: false,
             notified: ShownNotifications::default(),
             default_auto_delete: Fetch::Idle,
@@ -565,8 +593,8 @@ impl SettingsState {
             reaction_saves: Default::default(),
             storage_stats: Fetch::Idle,
             data_storage: DataStoragePrefs::default(),
-            data_storage_dirty: false,
-            auto_download_answer: None,
+            data_storage_persisted: DataStoragePrefs::default(),
+            auto_download_answers: Vec::new(),
             auto_download_presets: Fetch::Idle,
             data_storage_save: Fetch::Idle,
             storage_clear: StorageClear::Idle,

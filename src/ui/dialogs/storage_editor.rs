@@ -76,9 +76,14 @@ impl QuillApp {
         if !self.settings.data_storage_editor.is_saving() {
             return false;
         }
+        let crate::ui::dialogs::storage_editor::StorageEditor::Saving { request, .. } =
+            self.settings.data_storage_editor
+        else {
+            return false;
+        };
         let answer = self
-            .session()
-            .and_then(|session| session.settings.auto_download_answer);
+            .session_mut()
+            .and_then(|session| session.settings.take_auto_download_answer(request));
         let next = self.settings.data_storage_editor.after_answer(answer);
         let changed = next != self.settings.data_storage_editor;
         self.settings.data_storage_editor = next;

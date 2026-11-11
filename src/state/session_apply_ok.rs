@@ -205,7 +205,7 @@ impl Session {
         // Slice S4: a `setAutoDownloadSettings` succeeded — apply
         // the confirmed sent settings (the `ok` carries none, so
         // they ride the purpose); the error clears and the driver
-        // persists on this ingest via `data_storage_dirty`.
+        // persists on this ingest (it differs from `data_storage_persisted`).
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetAutoDownloadSettings {
             network,
             settings,
@@ -214,8 +214,10 @@ impl Session {
             *self.settings.data_storage.for_network_mut(network) = settings;
             self.settings.data_storage.seeded = crate::data_settings::Seed::Seeded;
             self.settings.data_storage_save.succeed(());
-            self.settings.data_storage_dirty = true;
-            self.settings.auto_download_answer = extra.map(AutoDownloadAnswer::Saved);
+            if let Some(request) = extra {
+                self.settings
+                    .note_auto_download_answer(AutoDownloadAnswer::Saved(request));
+            }
         }
         // Batch 4: a `confirmSession` / `terminateSession` for the
         // new-login alert succeeded.

@@ -69,7 +69,8 @@ fn set_auto_download_settings_ok_applies_confirmed_settings() {
             .is_auto_download_enabled
     );
     assert!(session.settings.data_storage.seeded.is_seeded());
-    assert!(session.settings.data_storage_dirty);
+    // The driver persists what differs from the copy on disk.
+    assert!(session.settings.data_storage != session.settings.data_storage_persisted);
     assert!(session.settings.data_storage_error().is_none());
 }
 
