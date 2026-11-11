@@ -147,7 +147,6 @@ pub struct EmojiPanel {
     /// Sets whose cover previews were asked for, so a repaint never asks twice.
     pub covers_requested: HashSet<i64>,
     pub status_change: StatusChange,
-    pub outdated_packs: std::collections::HashSet<i64>,
     pub status_picker: StatusPicker,
     /// Where each custom emoji id's `getCustomEmojiStickers` stands: asked,
     /// answered, failed or given up ([`custom_lookup`]).

@@ -176,11 +176,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         };
         if self.session.chats.get(&chat_id.0).is_some_and(|chat| {
-            if chat.is_channel() {
-                chat.member_status().is_some()
-            } else {
-                chat.rights_fetched()
-            }
+            // A refused probe also settles it (`note_no_member_record`), so
+            // the poll does not send it again after a failure.
+            chat.rights_fetched() || (chat.is_channel() && chat.member_status().is_some())
         }) {
             return Ok(());
         }

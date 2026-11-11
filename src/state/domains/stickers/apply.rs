@@ -214,14 +214,9 @@ impl Session {
                     payload.into(),
                 );
             }
-            StickersPayload::UpdateStickerSet {
-                id,
-                is_custom_emoji,
-            } => {
-                if is_custom_emoji && id > 0 {
-                    self.stickers.emoji.outdated_packs.insert(id);
-                }
-            }
+            // A set changed: the lists that show it are refetched by their
+            // own marks; nothing is kept per set.
+            StickersPayload::UpdateStickerSet { .. } => {}
             StickersPayload::StickerSet {
                 id,
                 stickers,

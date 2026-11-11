@@ -761,9 +761,10 @@ pub struct EarnState {
     pub notes: Vec<String>,
     /// A URL the UI opens in the browser (a Fragment withdrawal page).
     pub open_url: Option<String>,
-    /// `getStarRevenueStatistics` for the user worked: the Stars dialog
-    /// shows "View Statistics" (tdesktop `Credits::statsEnabled`).
-    pub self_stats: Option<bool>,
+    /// `getStarRevenueStatistics` for the user: once it worked (`Ready`) the
+    /// Stars dialog shows "View Statistics" (tdesktop
+    /// `Credits::statsEnabled`); a failed one is not asked again.
+    pub self_stats: crate::state::fetch::Fetch<()>,
 }
 
 impl EarnState {

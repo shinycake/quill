@@ -286,3 +286,27 @@ fn an_animated_emoji_answer_for_a_replaced_ask_is_dropped() {
         crate::emoji::AnimatedSuggestion::Asking { ref emoji, .. } if emoji == "😀"
     ));
 }
+
+#[test]
+fn a_refused_member_probe_is_not_sent_again_by_the_poll() {
+    let mut rig = Rig::new();
+    rig.ingest(
+        r#"{"@type":"updateNewChat","chat":{"id":9,"title":"news","type":{"@type":"chatTypeSupergroup","supergroup_id":9,"is_channel":true},"unread_count":0}}"#,
+    );
+    rig.driver.session.my_user_id = Some(5);
+    rig.driver.session.open_chat(ChatId(9));
+    rig.driver.maybe_probe_channel_membership().unwrap();
+    let asks = rig.sent("getChatMember");
+    assert_eq!(asks.len(), 1);
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHANNEL_PRIVATE"}}"#,
+        extra_of(&asks[0])
+    ));
+    rig.driver.maybe_probe_channel_membership().unwrap();
+    rig.driver.maybe_probe_channel_membership().unwrap();
+    assert_eq!(
+        rig.sent("getChatMember").len(),
+        1,
+        "no re-ask after the refusal"
+    );
+}

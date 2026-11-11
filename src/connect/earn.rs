@@ -91,15 +91,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         };
         let peer = EarnPeer::User(me);
-        if self.session.payments.earn.self_stats.is_some()
+        if !self.session.payments.earn.self_stats.is_idle()
             || self.earn_in_flight(EarnPurpose::StarStats { peer })
         {
             return Ok(());
         }
         self.send_earn(EarnPurpose::StarStats { peer }, |extra| {
             get_star_revenue_statistics(extra, peer, false)
-        })
-        .map(|_| ())
+        })?;
+        self.session.payments.earn.self_stats.begin();
+        Ok(())
     }
 
     /// Open a revenue page and load it the way tdesktop does: TON
