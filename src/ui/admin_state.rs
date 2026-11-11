@@ -6,11 +6,13 @@ use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::ids::ChatId;
 
-/// The recent-actions search box and whose stored query it shows: it is
-/// refilled whenever the open log's chat is another one.
+/// The recent-actions search box of one page: it shows that chat's stored
+/// query from the moment it is built, and goes with the page.
 pub(crate) struct EventLogSearch {
     pub(super) input: Entity<TextareaState>,
-    pub(super) shows: Option<ChatId>,
+    /// Typing in the box searches once it pauses; held so the page's end
+    /// ends the subscription.
+    pub(super) _typed: Subscription,
 }
 
 pub(crate) struct AdminUi {
@@ -28,6 +30,9 @@ pub(crate) struct AdminUi {
     pub(super) permissions_dialog: Option<PermissionsDialog>,
     /// The "Add exception" / "Remove user" picker over the member dialog.
     pub(super) add_special: Option<AddSpecialDialog>,
+    /// Unbans and "Remove user" bans sent from the member boxes and not
+    /// answered yet.
+    pub(super) member_changes: Vec<super::group_moderation::MemberChange>,
     /// Slice G1: public username editor.
     pub(super) username_dialog: Option<UsernameDialog>,
     /// Slice G1: restrict/ban dialog.
@@ -37,14 +42,11 @@ pub(crate) struct AdminUi {
     pub(super) group_confirm_dialog: Option<GroupConfirmDialog>,
     /// Slice G2: forum-topic management dialog.
     pub(super) forum_manage_dialog: Option<ForumManageDialog>,
-    /// Slice G2: event-log search input for the info panel's
-    /// "Recent actions" section (created lazily when the panel opens).
-    pub(super) event_log_search: Option<EventLogSearch>,
     /// The recent-actions list (oldest event first, newest at the bottom):
     /// earlier events load when it is scrolled to its top.
     pub(super) event_log_list: ListState,
     /// The event ids the list was last built for (`event_log_list::plan_sync`).
-    pub(super) event_log_ids: std::cell::RefCell<Vec<i64>>,
+    pub(super) event_log_ids: std::cell::Cell<Vec<i64>>,
     /// The recent-actions page last opened, with the timers that belong to
     /// it. Opening it for another chat replaces it, and its timers stop.
     pub(super) event_log_page: Option<EventLogPage>,
@@ -64,13 +66,16 @@ pub(crate) struct AdminUi {
 /// them, and a newer one replaces an older one of its kind.
 pub(super) struct EventLogPage {
     pub(super) chat: ChatId,
+    /// The page's search box, built once the window it shows in is known.
+    pub(super) search: Option<EventLogSearch>,
     /// The list length an automatic "load earlier" was last asked for in
     /// this page (cleared when the list starts over).
     pub(super) autoload: std::cell::Cell<Option<usize>>,
     /// The search debounce: each edit replaces it, so only the last one
     /// searches.
     pub(super) typed: Option<gpui_kit::Task<()>>,
-    /// The poll timer, which ends by itself when the page closes.
+    /// The poll timer, which ends by itself when the page closes or the app
+    /// goes inactive (`resume_event_log_poll` starts it again).
     pub(super) poll: Option<gpui_kit::Task<()>>,
 }
 
@@ -78,6 +83,7 @@ impl EventLogPage {
     pub(super) fn new(chat: ChatId) -> Self {
         Self {
             chat,
+            search: None,
             autoload: std::cell::Cell::new(None),
             typed: None,
             poll: None,
@@ -120,14 +126,14 @@ impl AdminUi {
             member_dialog: None,
             permissions_dialog: None,
             add_special: None,
+            member_changes: Vec::new(),
             username_dialog: None,
             restrict_dialog: None,
             ownership_dialog: None,
             group_confirm_dialog: None,
             forum_manage_dialog: None,
-            event_log_search: None,
             event_log_list: super::event_log::new_event_log_list(),
-            event_log_ids: std::cell::RefCell::new(Vec::new()),
+            event_log_ids: std::cell::Cell::new(Vec::new()),
             event_log_page: None,
             group_settings_dialog: None,
             join_requests_dialog: None,

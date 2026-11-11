@@ -5,6 +5,7 @@ use super::messages::{self, Detail, Names, user_name};
 use super::target::{Target, chat_schema, granted, my_user_id, require};
 use super::{Ctx, ToolError, ToolOutput, int_arg};
 use crate::agent::grants::{ChatClass, Scope};
+use crate::agent::td::{self, TdError};
 use serde_json::{Value, json};
 
 /// Chats looked at per list request.
@@ -91,25 +92,87 @@ fn chat_entry(chat: &Value, target: &Target) -> Value {
     })
 }
 
-/// Granted chats of a chat list, in the list's order, with their TDLib chat.
-fn granted_chats(ctx: &Ctx, list: Value, scan: i64) -> Result<Vec<(Value, Target)>, ToolError> {
-    let me = my_user_id(ctx)?;
-    let answer = ctx.call(json!({"@type": "getChats", "chat_list": list, "limit": scan}))?;
-    let ids: Vec<i64> = answer
-        .get("chat_ids")
-        .and_then(Value::as_array)
-        .map(|ids| ids.iter().filter_map(Value::as_i64).collect())
-        .unwrap_or_default();
-    let mut out = Vec::new();
-    for id in ids {
-        let Some(target) = granted(ctx, id, me)? else {
-            continue;
-        };
-        let chat = ctx.call(json!({"@type": "getChat", "chat_id": id}))?;
-        out.push((chat, target));
-    }
-    Ok(out)
+/// The most chats one call looks through; past it the answer says it
+/// stopped.
+const MAX_SCAN: i64 = 2000;
+
+/// How a scan of a chat list ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Scanned {
+    /// The visitor had enough, or every chat of the list was looked at.
+    Done,
+    /// [`MAX_SCAN`] chats were looked at and the list goes on.
+    Capped,
 }
+
+/// What to ask TDLib next after `got` chat ids came back for `scan`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Next {
+    /// The page was full: ask for a longer one.
+    Widen(i64),
+    /// Fewer than asked: TDLib may not have loaded the rest yet.
+    Load,
+    /// The page was full and the cap is reached.
+    Capped,
+}
+
+fn next_step(scan: i64, got: usize) -> Next {
+    if i64::try_from(got).unwrap_or(i64::MAX) < scan {
+        Next::Load
+    } else if scan >= MAX_SCAN {
+        Next::Capped
+    } else {
+        Next::Widen((scan + SCAN).min(MAX_SCAN))
+    }
+}
+
+/// Walk the granted chats of a chat list in its order, with their TDLib
+/// chat, loading further pages until `visit` returns false, the list ends or
+/// [`MAX_SCAN`] chats were looked at.
+fn scan_granted(
+    ctx: &Ctx,
+    list: &Value,
+    mut visit: impl FnMut(Value, Target) -> Result<bool, ToolError>,
+) -> Result<Scanned, ToolError> {
+    let me = my_user_id(ctx)?;
+    let mut scan = SCAN;
+    let mut seen = 0usize;
+    loop {
+        let answer = ctx.call(json!({"@type": "getChats", "chat_list": list, "limit": scan}))?;
+        let ids: Vec<i64> = answer
+            .get("chat_ids")
+            .and_then(Value::as_array)
+            .map(|ids| ids.iter().filter_map(Value::as_i64).collect())
+            .unwrap_or_default();
+        for id in ids.iter().skip(seen) {
+            let Some(target) = granted(ctx, *id, me)? else {
+                continue;
+            };
+            let chat = ctx.call(json!({"@type": "getChat", "chat_id": id}))?;
+            if !visit(chat, target)? {
+                return Ok(Scanned::Done);
+            }
+        }
+        seen = ids.len();
+        match next_step(scan, ids.len()) {
+            Next::Widen(wider) => scan = wider,
+            Next::Capped => return Ok(Scanned::Capped),
+            Next::Load => {
+                let loaded = td::call(
+                    &ctx.client,
+                    json!({"@type": "loadChats", "chat_list": list, "limit": SCAN}),
+                );
+                match loaded {
+                    Ok(_) => {}
+                    Err(TdError::Td { code: 404, .. }) => return Ok(Scanned::Done),
+                    Err(err) => return Err(ToolError::from(err)),
+                }
+            }
+        }
+    }
+}
+
+const CAPPED_NOTE: &str = "Only the first 2000 chats of this list were looked at; granted chats further down are not shown.";
 
 pub fn list_chats_schema() -> Value {
     json!({
@@ -136,22 +199,20 @@ pub fn list_chats(args: &Value) -> Result<ToolOutput, ToolError> {
         .map(|q| q.trim().to_lowercase())
         .filter(|q| !q.is_empty());
     let mut entries = Vec::new();
-    for (chat, target) in granted_chats(&ctx, list, SCAN)? {
+    let scanned = scan_granted(&ctx, &list, |chat, target| {
         let entry = chat_entry(&chat, &target);
         if unread_only && entry.get("unread").and_then(Value::as_i64) == Some(0) {
-            continue;
+            return Ok(true);
         }
         if query
             .as_ref()
             .is_some_and(|q| !target.title.to_lowercase().contains(q))
         {
-            continue;
+            return Ok(true);
         }
         entries.push(entry);
-        if entries.len() >= limit {
-            break;
-        }
-    }
+        Ok(entries.len() < limit)
+    })?;
     let mut text = format!("{list_name}: {} granted chat(s).\n", entries.len());
     for entry in &entries {
         text.push_str(&format!(
@@ -183,9 +244,13 @@ pub fn list_chats(args: &Value) -> Result<ToolOutput, ToolError> {
     if entries.is_empty() {
         text.push_str("No granted chats here. Call quill_status to see the grants, or request_access to ask for a chat.");
     }
+    let truncated = scanned == Scanned::Capped;
+    if truncated {
+        text.push_str(&format!("\n{CAPPED_NOTE}"));
+    }
     Ok(ToolOutput {
         text,
-        data: json!({"list": list_name, "chats": entries}),
+        data: json!({"list": list_name, "chats": entries, "truncated": truncated}),
         images: Vec::new(),
     })
 }
@@ -483,13 +548,14 @@ pub fn list_unread(args: &Value) -> Result<ToolOutput, ToolError> {
     let mut names = Names::new(&ctx);
     let mut digest = Vec::new();
     let mut text = String::new();
-    for (chat, target) in granted_chats(&ctx, json!({"@type": "chatListMain"}), SCAN)? {
+    let main = json!({"@type": "chatListMain"});
+    let scanned = scan_granted(&ctx, &main, |chat, target| {
         let unread = chat
             .get("unread_count")
             .and_then(Value::as_i64)
             .unwrap_or(0);
         if unread == 0 {
-            continue;
+            return Ok(true);
         }
         let last = chat
             .get("last_message")
@@ -519,16 +585,32 @@ pub fn list_unread(args: &Value) -> Result<ToolOutput, ToolError> {
             text.push_str(&format!("  {}\n", messages::line(message)));
         }
         digest.push(json!({"chat": target.summary(), "unread": unread, "messages": shaped}));
-        if digest.len() >= max_chats {
-            break;
-        }
-    }
+        Ok(digest.len() < max_chats)
+    })?;
     if digest.is_empty() {
         text.push_str("Nothing unread in granted chats.");
     }
+    let truncated = scanned == Scanned::Capped;
+    if truncated {
+        text.push_str(&format!("\n{CAPPED_NOTE}"));
+    }
     Ok(ToolOutput {
         text,
-        data: json!({"chats": digest}),
+        data: json!({"chats": digest, "truncated": truncated}),
         images: Vec::new(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_SCAN, Next, SCAN, next_step};
+
+    #[test]
+    fn a_full_page_widens_until_the_cap_and_a_short_one_loads_more() {
+        assert_eq!(next_step(SCAN, 200), Next::Widen(400));
+        assert_eq!(next_step(MAX_SCAN - 100, 1900), Next::Widen(MAX_SCAN));
+        assert_eq!(next_step(MAX_SCAN, 2000), Next::Capped);
+        assert_eq!(next_step(SCAN, 150), Next::Load);
+        assert_eq!(next_step(SCAN, 0), Next::Load);
+    }
 }

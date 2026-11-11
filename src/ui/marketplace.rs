@@ -63,7 +63,7 @@ impl QuillApp {
     /// to (a user's private chat has the user's id).
     pub(super) fn send_gift_recipient_chat(&self) -> Option<ChatId> {
         let send = &self.session()?.payments.gifts_manage.send;
-        let recipient = send.recipient.as_ref().filter(|_| send.open)?;
+        let recipient = send.recipient.as_ref().filter(|_| send.is_open())?;
         Some(match recipient.sender {
             MessageSender::User { user_id } => ChatId(user_id),
             MessageSender::Chat { chat_id } => ChatId(chat_id),
@@ -78,15 +78,20 @@ impl QuillApp {
             .value()
             .trim()
             .to_string();
-        let chat = self.payments.marketplace.chat();
-        let result = chat.and_then(|chat| {
-            self.live
-                .as_mut()
-                .map(|live| live.driver.fetch_marketplace_gift(chat, &name))
-        });
-        let error = (!matches!(result, Some(Ok(_))))
-            .then(|| tr(keys::Q_OPS_CHOOSE_A_PRIVATE_CHAT_OR).into());
-        self.payments.marketplace.set_error(error);
+        // Each cause says its own reason: no chat to buy for, no connection
+        // (a demo, or signed out), a request that could not be sent.
+        let error = match (self.payments.marketplace.chat(), self.live.as_mut()) {
+            (None, _) => Some(tr(keys::Q_OPS_CHOOSE_A_PRIVATE_CHAT_OR)),
+            (Some(_), None) => Some(tr(keys::Q_MONEY_BUYING_GIFTS_NEEDS_A_SIGNED)),
+            (Some(chat), Some(live)) => live
+                .driver
+                .fetch_marketplace_gift(chat, &name)
+                .is_err()
+                .then(|| tr(keys::Q_MONEY_COULD_NOT_LOAD_GIFTS)),
+        };
+        self.payments
+            .marketplace
+            .set_error(error.map(|text| text.to_string()));
         cx.notify();
     }
     pub(super) fn build_marketplace_dialog(

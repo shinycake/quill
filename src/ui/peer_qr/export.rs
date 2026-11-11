@@ -336,14 +336,14 @@ impl QuillApp {
             }
         };
         let card = card_layout(CARD_WIDTH, view.peer_box());
-        let (stills, tiles) = match &open.state.gift {
+        let (stills, tiles) = match open.state.gift() {
             Some(gift) => gift_picture(
                 self.qr_gift_model(gift).map(|(image, _)| image),
                 self.qr_gift_symbol(gift).map(|(image, _)| image),
                 &card,
             ),
             None => {
-                let stills = super::plain_picks(&open.state.emoji)
+                let stills = super::plain_picks(open.state.emoji())
                     .iter()
                     .filter_map(|emoji| self.qr_emoji_still(emoji))
                     .collect::<Vec<_>>();

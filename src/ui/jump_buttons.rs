@@ -69,9 +69,16 @@ impl QuillApp {
         } else {
             0.
         };
+        // A re-entrant frame skips the stack for one frame instead of
+        // ending the process.
+        let surfaces = &self.frame.surfaces;
+        let (Ok(mut corners), Ok(mut lift)) = (
+            surfaces.corners.try_borrow_mut(),
+            surfaces.corner_lift.try_borrow_mut(),
+        ) else {
+            return None;
+        };
         let (drawn, lift, moving) = {
-            let mut corners = self.frame.surfaces.corners.borrow_mut();
-            let mut lift = self.frame.surfaces.corner_lift.borrow_mut();
             lift.go(lift_to, surface_reveal::CORNER, animate, now);
             let mut moving = lift.animating(now);
             let mut drawn = Vec::with_capacity(3);

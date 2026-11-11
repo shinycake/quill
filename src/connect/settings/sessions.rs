@@ -17,7 +17,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let id = self
             .session
             .request(RequestPurpose::ConfirmDeviceLogin, None);
-        self.session.settings.device_login = DeviceLogin::InFlight;
+        self.session.settings.device_login = DeviceLogin::Idle;
         self.session.settings.sessions_op.begin(id);
         self.session.settings.sessions.clear_error();
         let request = zeroize::Zeroizing::new(
@@ -25,7 +25,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         if let Err(error) = self.sender.send_json(&request) {
             self.session.requests.take(id);
-            self.session.settings.device_login = DeviceLogin::Idle;
             self.session.settings.sessions_op.failed(Some(id));
             return Err(error);
         }
@@ -61,7 +60,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.sessions.cancel();
+                // The list says so with its Refresh; the sections that ask
+                // for it when they show ask nothing while it is failed.
+                self.session
+                    .settings
+                    .sessions
+                    .fail("could not send the request");
                 if was_stale {
                     self.session.settings.sessions_op.mark_stale();
                 }

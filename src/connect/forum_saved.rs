@@ -2,7 +2,7 @@
 //! sublists and tags (batch B16).
 use super::*;
 use crate::ids::{ChatId, FileId, RequestId};
-use crate::state::{OlderEnd, SavedPage, SavedTopicsLoad, ThreadsPurpose};
+use crate::state::{OlderEnd, SavedTopicsLoad, ThreadsPurpose};
 use crate::state::{RequestPurpose, SAVED_PAGE, SAVED_TOPICS_PAGE};
 use crate::telegram::envelope::ReactionType;
 use crate::telegram::requests::{TOPIC_ICON_COLORS, valid_topic_icon_color};
@@ -195,7 +195,10 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// A new thread in a bot chat that lets users create them, for a
     /// message sent from its "All" view (tdesktop `reserveNewBotTopic`:
-    /// "New Chat" with a random icon color). One at a time per chat.
+    /// "New Chat" with a random icon color). Every call is a thread of its
+    /// own, answered to its own request: a window waits on its own stage
+    /// (`BotThreadStart`), so a second window sending in the same chat
+    /// gets its own thread, not a refusal.
     pub fn start_bot_thread(&mut self, chat_id: ChatId, name: &str) -> Sent {
         if !self
             .session
@@ -203,13 +206,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             .is_some_and(|bot| bot.allows_users_to_create_topics)
         {
             return Err(ConnectSendError::InvalidRequest);
-        }
-        if self
-            .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::StartBotThread, chat_id)
-        {
-            return Ok(None);
         }
         let color = {
             use rand::RngExt as _;
@@ -329,10 +325,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A failed page waits for Retry; a page out for this view is not
         // asked again. (A page out for a view that was left is no reason
         // to hold this one back: its answer is dropped on arrival.)
-        if view.history.loaded_complete()
-            || view.history.older == OlderEnd::Failed
-            || view.page != SavedPage::Idle
-        {
+        if view.history.older != OlderEnd::Open {
             return Ok(None);
         }
         let (topic_id, from) = (view.topic_id, view.history.next_from_message_id.0);
@@ -341,7 +334,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             get_saved_messages_topic_history(extra, topic_id, from, 0, SAVED_PAGE)
         })?;
         if let (Some(extra), Some(view)) = (sent, self.session.threads.saved.sublist.as_mut()) {
-            view.page = SavedPage::Asking(extra);
+            view.history.ask_older(extra);
         }
         Ok(sent)
     }
@@ -440,12 +433,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(search) = self.session.threads.saved.tag_search.as_ref() else {
             return Ok(None);
         };
-        if search.history.loaded_complete() || search.history.older == OlderEnd::Failed {
-            return Ok(None);
-        }
-        // A page for this filter is out. One asked for another tag does not
-        // hold this one back: its answer is dropped on arrival.
-        if search.page != SavedPage::Idle {
+        // Complete, failed, or a page for this filter out. One asked for
+        // another tag does not hold this one back: it left with that filter.
+        if search.history.older != OlderEnd::Open {
             return Ok(None);
         }
         let topic_id = search.topic_id;
@@ -457,7 +447,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         })?;
         if let (Some(extra), Some(search)) = (sent, self.session.threads.saved.tag_search.as_mut())
         {
-            search.page = SavedPage::Asking(extra);
+            search.history.ask_older(extra);
         }
         Ok(sent)
     }

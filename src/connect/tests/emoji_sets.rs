@@ -64,7 +64,7 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
         &mut driver,
         json!({"@type":"trendingStickerSets","@extra":first.as_extra(),"total_count":3,"sets":[set(1,true),set(2,false)],"is_premium":false}),
     );
-    assert!(driver.session.stickers.emoji.trending_has_more);
+    assert!(driver.session.stickers.emoji.lists.trending.has_more());
     assert_eq!(
         sent_request(&recorder, "viewTrendingStickerSets")["sticker_set_ids"],
         json!([1, 2])
@@ -78,8 +78,8 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
         &mut driver,
         json!({"@type":"trendingStickerSets","@extra":more.as_extra(),"total_count":3,"sets":[set(2,false)]}),
     );
-    assert_eq!(driver.session.stickers.emoji.trending_sets.len(), 2);
-    assert!(!driver.session.stickers.emoji.trending_has_more); // Raw page length, not deduped count.
+    assert_eq!(driver.session.stickers.emoji.lists.trending.sets().len(), 2);
+    assert!(!driver.session.stickers.emoji.lists.trending.has_more()); // Raw page length, not deduped count.
     assert!(
         driver
             .session
@@ -159,7 +159,9 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
             .session
             .stickers
             .emoji
-            .trending_sets
+            .lists
+            .trending
+            .sets()
             .iter()
             .all(|set| !set.is_installed)
     );
@@ -430,14 +432,14 @@ fn animated_emoji_suggestion_requests_once_per_emoji_and_clears() {
         &mut driver,
         json!({"@type":"animatedEmoji","@extra":first.as_extra(),"sticker":null,"sticker_width":0,"sticker_height":0,"fitzpatrick_type":0,"sound":null}),
     );
-    assert!(driver.session.stickers.emoji.animated_emoji.is_none());
+    assert!(driver.session.stickers.emoji.animated.sticker().is_none());
     // No trailing emoji clears the suggestion and the dedupe marker.
     assert_eq!(
         driver.update_animated_emoji_suggestion("hello").unwrap(),
         None
     );
-    assert!(driver.session.stickers.emoji.animated_emoji.is_none());
-    assert!(driver.session.stickers.emoji.animated_emoji_for.is_none());
+    assert!(driver.session.stickers.emoji.animated.sticker().is_none());
+    assert!(driver.session.stickers.emoji.animated.emoji_for().is_none());
     drop(driver);
     let _ = std::fs::remove_dir_all(dir);
 }

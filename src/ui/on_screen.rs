@@ -206,6 +206,8 @@ on_screen_fields! {
     profile_cover: super::profile_cover::ProfileCoverUi,
     /// The info cover's video profile photo (`ui/video_avatar`).
     video_avatar: super::video_avatar::VideoAvatarUi,
+    /// The secret-chat inline-bot warning's confirmation, for every window (`ui/inline_bot_state.rs`).
+    inline_bot: super::inline_bot_state::InlineBotUi,
     /// The `#` popup's recent hashtags, one list for every window (`ui/recent_hashtags_state.rs`).
     recent_hashtags: super::recent_hashtags_state::RecentHashtagsUi,
     /// Empties the message effect badge registries when this screen goes (`ui/message_effect_badge.rs`).
@@ -369,6 +371,7 @@ impl OnScreen {
             peer_qr: super::peer_qr::PeerQrUi::new(cx),
             profile_cover: Default::default(),
             video_avatar: Default::default(),
+            inline_bot: Default::default(),
             recent_hashtags: Default::default(),
             inline_members: super::inline_members_state::InlineMembersUi::new(),
             common_groups: Default::default(),
@@ -506,7 +509,11 @@ impl QuillApp {
             self.screen.client != ScreenClient::Filled,
             "the client leaves the screen before its UI is replaced"
         );
-        self.live.take()
+        let mut live = self.live.take()?;
+        // The debounced draft belongs to this client and the one timer only
+        // commits the client on screen: it goes out now, not never.
+        let _ = live.driver.flush_pending_draft();
+        Some(live)
     }
 
     /// A client fills the empty screen: the chat list, folders and counters
@@ -577,10 +584,7 @@ impl QuillApp {
         } else {
             let _ = main.update(cx, |_, window, cx| window.close_all_dialogs(cx));
         }
-        self.main_window
-            .dialogs_closed
-            .borrow_mut()
-            .insert(main.window_id());
+        self.main_window.dialogs_closed.mark(main.window_id());
     }
 }
 

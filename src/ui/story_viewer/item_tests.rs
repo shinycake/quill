@@ -49,7 +49,7 @@ fn the_open_menu_and_the_composer_pause_the_story(cx: &mut TestAppContext) {
         app.stories.with_viewer_ui(|open| open.menu_open = true);
         assert!(app.story_playback_paused(), "the menu is open");
         app.stories.with_viewer_ui(|open| open.menu_open = false);
-        app.stories.composer.open = true;
+        *app.stories.composer = quill::story_composer::StoryComposer::open();
         assert!(
             app.story_playback_paused(),
             "Edit or Repost is open over it"
@@ -125,7 +125,7 @@ fn a_release_cancels_the_story_reply_being_recorded(cx: &mut TestAppContext) {
 fn a_finished_page_op_goes_with_the_story(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_app(cx, "ready-story-viewer");
     let op = |state| StoryPageOp {
-        label: "Saving".into(),
+        kind: quill::story_page::StoryPageOpKind::Other,
         state,
         request: quill::ids::RequestId(1),
         chat_id: None,
@@ -178,7 +178,7 @@ fn a_late_story_answer_stays_with_its_story(cx: &mut TestAppContext) {
             manage.story = Some((LEO.0, 3));
             manage.request = Some(request);
             session.stories.page_ops.begin(StoryPageOp {
-                label: "hiding stories".into(),
+                kind: quill::story_page::StoryPageOpKind::Other,
                 state: StoryPageOpState::Sending,
                 request,
                 chat_id: None,
@@ -207,7 +207,7 @@ fn a_late_story_answer_stays_with_its_story(cx: &mut TestAppContext) {
             manage.request = None;
             manage.error = Some("Story update failed: STORY_ID_INVALID".into());
             session.stories.page_ops.begin(StoryPageOp {
-                label: "hiding stories".into(),
+                kind: quill::story_page::StoryPageOpKind::Other,
                 state: StoryPageOpState::Failed("PEER_ID_INVALID".into()),
                 request,
                 chat_id: None,

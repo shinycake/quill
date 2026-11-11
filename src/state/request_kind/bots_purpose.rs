@@ -7,7 +7,7 @@ impl BotsPurpose {
     pub(crate) fn kind(&self) -> RequestKind {
         match self {
             Self::GetInlineQueryResults { .. }
-            | Self::ResolveInlineBot { .. }
+            | Self::ResolveInlineBot
             | Self::GetCommands
             | Self::GetCallbackQueryAnswer
             | Self::GetCallbackQueryAnswerWithPassword

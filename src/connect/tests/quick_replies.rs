@@ -357,31 +357,42 @@ fn a_successful_request_clears_the_last_refusal() {
     assert!(driver.session.settings.quick_replies.error.is_none());
 }
 
+/// r2-05 (12-B002): a change is answered by its own request (`acks`), not by
+/// whatever error the dialog shows.
 #[test]
-fn a_change_may_be_sent_again_once_its_answer_or_error_came() {
+fn a_change_is_answered_by_its_own_request() {
+    use crate::state::Answer;
     let (mut driver, recorder, sink, seq) = driver_parts();
-    let sent = |recorder: &Recorder| count_sent(recorder, "addQuickReplyShortcutMessage");
-    driver.add_quick_reply_text("hours", "Hi").unwrap();
-    let request = sent_request(&recorder, "addQuickReplyShortcutMessage");
-    let extra = request["@extra"].as_str().unwrap().to_string();
+    let add = driver
+        .add_quick_reply_text("hours", "Hi")
+        .unwrap()
+        .expect("sent");
+    driver.session.acks.expect(add);
+    driver.delete_quick_reply_shortcut(9).unwrap();
+    let delete = sent_request(&recorder, "deleteQuickReplyShortcut");
+    let extra = delete["@extra"].as_str().unwrap().to_string();
     feed(
         &mut driver,
         &seq,
         &sink,
-        &format!(r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"BAD"}}"#),
+        &format!(
+            r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"SHORTCUT_INVALID"}}"#
+        ),
     );
-    assert!(driver.session.settings.quick_replies.in_flight.is_empty());
-    driver.add_quick_reply_text("hours", "Hi").unwrap();
-    assert_eq!(sent(&recorder), 2, "a refused change is sent again");
-    let request = sent_request(&recorder, "addQuickReplyShortcutMessage");
-    let extra = request["@extra"].as_str().unwrap().to_string();
+    assert!(driver.session.settings.quick_replies.error.is_some());
+    assert_eq!(driver.session.acks.take(add), None, "the add is still out");
     feed(
         &mut driver,
         &seq,
         &sink,
-        &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
+        &format!(
+            r#"{{"@type":"quickReplyMessage","@extra":"{}","id":5,"can_be_edited":true,"content":{{"@type":"messageText","text":{{"text":"Hi","entities":[]}}}}}}"#,
+            add.0
+        ),
     );
-    assert!(driver.session.settings.quick_replies.in_flight.is_empty());
+    // Accepted, though the delete's refusal is still showing.
+    assert!(driver.session.settings.quick_replies.error.is_some());
+    assert_eq!(driver.session.acks.take(add), Some(Answer::Done));
 }
 
 #[test]

@@ -23,6 +23,10 @@ impl QuillApp {
         {
             quill::wake::isolate_current_thread();
             quill::power_saving::isolate_for_tests();
+            // The Linux handler read runs on its own thread and wakes the UI
+            // from there, which the deterministic test executor rejects:
+            // tests answer it instead, so no read ever starts.
+            quill::link_handler::demo_pin(Some(quill::link_handler::LinkHandlerState::Unset));
         }
         super::tooltip_timing::install(cx);
         super::image_budget::start_sweeper(cx);
@@ -42,11 +46,7 @@ impl QuillApp {
                 }
                 (None, note, stage)
             }
-            None => (
-                None,
-                "Connecting to Telegram…".into(),
-                ConnectStage::Connecting,
-            ),
+            None => (None, "Connecting to Telegram…".into(), ConnectStage::Idle),
         };
         let screen = super::on_screen::OnScreen::new(
             Default::default(),
@@ -163,7 +163,9 @@ impl QuillApp {
         let ptt_app = cx.weak_entity();
         super::passcode::intercept_keys_unlocked(cx, move |event, _window, cx| {
             let armed = ptt_app
-                .update(cx, |this, _| this.group_call.ptt_capture)
+                .update(cx, |this, _| {
+                    this.preferences.keybinding.capture.push_to_talk_armed()
+                })
                 .unwrap_or(false);
             if !armed || event.keystroke.is_modifier_key() {
                 return;

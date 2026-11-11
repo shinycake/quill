@@ -18,25 +18,34 @@ impl Session {
             return;
         }
         if let Some(RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
-            chat_id,
-            bot_user_id,
-            first_page,
+            first_page, ..
         })) = pending.map(|p| p.purpose)
         {
-            let slot_ok = match (first_page, self.bots.inline_query.as_ref()) {
-                (true, Some(slot)) => {
-                    slot.chat_id == chat_id
-                        && slot.bot_user_id == bot_user_id
-                        && matches!(slot.fetch, InlineQueryFetch::Loading)
-                }
-                (false, Some(slot)) => {
-                    slot.chat_id == chat_id
-                        && slot.bot_user_id == bot_user_id
-                        && matches!(slot.fetch, InlineQueryFetch::Loaded { .. })
-                }
+            // Only the request the slot waits for settles it: the first page
+            // under `Loading`, a next page under `Loaded.more`.
+            let asked = pending.map(|p| p.id);
+            let waits = match (first_page, self.bots.inline_query.as_ref()) {
+                (
+                    true,
+                    Some(InlineQuerySlot {
+                        fetch: InlineQueryFetch::Loading { request },
+                        ..
+                    }),
+                ) => Some(*request) == asked,
+                (
+                    false,
+                    Some(InlineQuerySlot {
+                        fetch:
+                            InlineQueryFetch::Loaded {
+                                more: InlineMore::Asking { request },
+                                ..
+                            },
+                        ..
+                    }),
+                ) => Some(*request) == asked,
                 _ => false,
             };
-            if slot_ok {
+            if waits {
                 // The grid shows these images; the download pass finds
                 // them through the stored results.
                 self.remember_files(&page.files);
@@ -69,6 +78,7 @@ impl Session {
                             button: page.button.or_else(|| old_button.clone()),
                             results,
                             next_offset,
+                            more: InlineMore::Idle,
                         }
                     }
                     _ => InlineQueryFetch::Loaded {
@@ -80,6 +90,7 @@ impl Session {
                             page.next_offset
                         },
                         results: page.results,
+                        more: InlineMore::Idle,
                     },
                 };
                 if let Some(slot) = self.bots.inline_query.as_mut() {
@@ -122,35 +133,30 @@ impl Session {
         })) = pending.map(|p| p.purpose)
         {
             let key = (chat_id.0, message_id.0, option_id);
-            // Only the page the stage waits for lands: an older reload's or
-            // a dropped dialog's answer changes nothing.
-            let Some(request) = pending.map(|p| p.id) else {
-                return;
-            };
-            if !self
-                .messages
-                .poll_voters
-                .get(&key)
-                .is_some_and(|fetch| fetch.waits_for(request, offset == 0))
-            {
-                return;
-            }
             let page_len = voters.len();
-            let merged = if offset == 0 {
-                voters
-            } else {
-                match self.messages.poll_voters.get(&key) {
-                    Some(PollVotersFetch::Loaded { voters: old, .. }) => {
-                        let mut merged = old.clone();
-                        for voter in voters {
-                            if !merged.contains(&voter) {
-                                merged.push(voter);
-                            }
+            // Only the page the entry waits for: the first page by its
+            // `Loading` request, a later one by the `more` request, and
+            // none once an update of the poll dropped the entry.
+            let asked = pending.map(|p| p.id);
+            let merged = match (offset, self.messages.poll_voters.get(&key)) {
+                (0, Some(PollVotersFetch::Loading(id))) if Some(*id) == asked => voters,
+                (
+                    1..,
+                    Some(PollVotersFetch::Loaded {
+                        voters: old,
+                        more: VotersMore::Asking(id),
+                        ..
+                    }),
+                ) if Some(*id) == asked => {
+                    let mut merged = old.clone();
+                    for voter in voters {
+                        if !merged.contains(&voter) {
+                            merged.push(voter);
                         }
-                        merged
                     }
-                    _ => voters,
+                    merged
                 }
+                _ => return,
             };
             // B4: a short page is the honest exhaustion signal —
             // `total_count` is approximate per the schema, so on a
@@ -167,7 +173,7 @@ impl Session {
                 PollVotersFetch::Loaded {
                     voters: merged,
                     total_count,
-                    more: PollVotersMore::Idle,
+                    more: VotersMore::Ready,
                 },
             );
         }
@@ -214,6 +220,7 @@ impl Session {
                 remote_audio_muted: false,
                 remote_battery_low: false,
                 signal_bars: None,
+                media_note: None,
                 state: CallState::Pending {
                     is_created: true,
                     is_received: false,

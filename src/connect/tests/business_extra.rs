@@ -380,10 +380,23 @@ fn the_bot_lookup_collects_three_answers() {
     );
     let lookup = &driver.session.settings.business_extra.lookup;
     assert!(lookup.done());
-    assert_eq!(lookup.exact, Some(Some(42)));
-    assert_eq!(lookup.mine.as_deref(), Some(&[42][..]));
-    assert_eq!(lookup.global.as_deref(), Some(&[][..]));
-    assert!(driver.session.settings.business.error.is_none());
+    assert_eq!(lookup.exact.data(), Some(&Some(42)));
+    assert_eq!(lookup.mine.items(), &[42][..]);
+    // A refused search is a failure the screen can show, not "no match".
+    assert!(lookup.global.error().is_some());
+    assert!(lookup.error().is_some());
+    // The same query after a failure asks again (Retry).
+    driver.lookup_business_bot("shop_bot").unwrap();
+    assert_eq!(count_sent(&recorder, "searchPublicChat"), 2);
+    assert!(
+        driver
+            .session
+            .settings
+            .business_extra
+            .lookup
+            .exact
+            .is_loading()
+    );
     // An invalid query clears it without sending.
     driver.lookup_business_bot("@").unwrap();
     assert!(
@@ -395,7 +408,7 @@ fn the_bot_lookup_collects_three_answers() {
             .query
             .is_empty()
     );
-    assert_eq!(count_sent(&recorder, "searchPublicChat"), 1);
+    assert_eq!(count_sent(&recorder, "searchPublicChat"), 2);
 }
 
 #[test]

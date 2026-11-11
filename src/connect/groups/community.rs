@@ -60,27 +60,33 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let purpose = RequestPurpose::GetCommunityFullInfo;
-        if self
+        if !self
             .session
             .groups
             .community_full_infos
-            .contains_key(&community_id)
-            || self
-                .session
-                .requests
-                .has_purpose_for_community(purpose, community_id)
+            .may_ask(community_id)
         {
             return Ok(None);
         }
-        let extra = self.session.request_for_community(purpose, community_id);
+        let extra = self
+            .session
+            .request_for_community(RequestPurpose::GetCommunityFullInfo, community_id);
+        self.session.groups.community_full_infos.begin(community_id);
         if let Err(err) = self
             .sender
             .send_json(&get_community_full_info(extra, community_id))
         {
             self.session.requests.take(extra);
+            self.session
+                .groups
+                .community_full_infos
+                .cancel(community_id);
             return Err(err);
         }
+        self.session
+            .groups
+            .community_full_infos
+            .sent(community_id, extra);
         Ok(Some(extra))
     }
 
@@ -91,11 +97,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         community_id: i64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if self
+        if !self
             .session
-            .communities
-            .full_info_failed
-            .contains(&community_id)
+            .groups
+            .community_full_infos
+            .wants_fetch(community_id)
         {
             return Ok(None);
         }

@@ -977,14 +977,14 @@ fn inline_query_results_parses() {
     assert_eq!(page.next_offset, "25");
     assert_eq!(page.results.len(), 3);
     assert_eq!(page.results[0].id, "a1");
-    assert_eq!(page.results[0].kind, "article");
+    assert_eq!(page.results[0].kind.name(), "article");
     assert_eq!(page.results[0].title, "An article");
     assert_eq!(page.results[0].description, "A description");
-    assert_eq!(page.results[1].kind, "photo");
+    assert_eq!(page.results[1].kind.name(), "photo");
     assert_eq!(page.results[1].title, "A photo");
     // Sticker has no title/description fields — lenient empty strings.
     assert_eq!(page.results[2].id, "s1");
-    assert_eq!(page.results[2].kind, "sticker");
+    assert_eq!(page.results[2].kind.name(), "sticker");
     assert_eq!(page.results[2].title, "");
     assert_eq!(page.results[2].description, "");
 
@@ -1006,9 +1006,9 @@ fn inline_query_results_parses() {
                 page.button,
                 Some(InlineQueryResultsButton {
                     text: "More".to_string(),
-                    kind: "web_app".to_string(),
-                    parameter: String::new(),
-                    url: "https://x.test".to_string(),
+                    kind: InlineQueryResultsButtonKind::WebApp {
+                        url: "https://x.test".to_string(),
+                    },
                 })
             );
             assert!(page.results.is_empty());

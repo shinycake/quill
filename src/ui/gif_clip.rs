@@ -294,14 +294,6 @@ impl GifClip {
         collect(decoder.into_frames(), max_edge, cancel, started)
     }
 
-    /// Tests: a clip still decoding, with one picture in.
-    #[cfg(test)]
-    pub(super) fn decoding_with_one_picture() -> Arc<Self> {
-        let mut builder = ClipBuilder::default();
-        builder.push(RgbaImage::new(8, 4), Duration::from_millis(100));
-        builder.clip
-    }
-
     /// How many distinct pictures are held.
     #[cfg(test)]
     pub(super) fn held(&self) -> usize {

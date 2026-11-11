@@ -98,25 +98,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// M1: load the chat's scheduled sends and open the dialog.
-    pub(in crate::ui) fn open_scheduled_dialog(&mut self, cx: &mut Context<Self>) {
-        self.chat_ui.hide_schedule_popup();
-        if let Some(live) = self.live.as_mut()
-            && let Some(chat_id) = live.driver.session.open_chat_id()
-        {
-            match live.driver.get_chat_scheduled_messages(chat_id) {
-                Ok(_) => self.set_note(StatusNote::silent(tr(
-                    keys::Q_CHAT_LOADING_SCHEDULED_MESSAGES,
-                ))),
-                Err(_) => self.set_note(StatusNote::error(tr(
-                    keys::Q_CHAT_COULD_NOT_LOAD_SCHEDULED_MESSAGES,
-                ))),
-            }
-        }
-        self.chat_ui.scheduled_dialog_open = true;
-        cx.notify();
-    }
-
     /// M1: delete a scheduled send (`deleteMessages`, revoke false —
     /// scheduled messages are not in history, so this goes through the
     /// driver's scheduled-message path, not the confirm dialog).
@@ -132,7 +113,16 @@ impl QuillApp {
             return;
         };
         match live.driver.delete_scheduled_message(chat_id, message_id) {
-            Ok(_) => {
+            Ok(request) => {
+                // The row leaves as the delete goes out, as in tdesktop;
+                // a refusal brings the list back (`settle_scheduled_deletes`).
+                live.driver.session.acks.expect(request);
+                self.chat_ui
+                    .scheduled_deletes
+                    .push(ScheduledDelete { request, chat_id });
+                let Some(live) = self.live.as_mut() else {
+                    return;
+                };
                 live.driver
                     .session
                     .messages
@@ -495,8 +485,9 @@ impl QuillApp {
             && let Some(chat_id) = live.driver.session.open_chat_id()
         {
             let sent = send(live, chat_id, &text);
-            if sent.is_ok() {
+            if let Ok(request) = sent {
                 self.chat_ui.ai_ask = super::AiAsk::Asked {
+                    request,
                     markup: text.clone(),
                 };
             }

@@ -31,7 +31,7 @@ fn window_view(
                 let session = app.session()?;
                 let jump = match session.search.chat_search.jump {
                     ChatSearchJump::Ready { message_id }
-                    | ChatSearchJump::Loading { message_id }
+                    | ChatSearchJump::Loading { message_id, .. }
                     | ChatSearchJump::Missing { message_id } => Some(message_id),
                     _ => None,
                 };

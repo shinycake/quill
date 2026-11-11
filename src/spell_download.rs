@@ -10,20 +10,48 @@ use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 
 use crate::spell_catalog::DOWNLOAD_HOST;
 
-/// Where the download is, as one atomic so a stop request and the
-/// worker's completion cannot disagree: it only moves forward.
-const RUNNING: u8 = 0;
-/// The UI asked to stop; the worker ends at the next chunk.
-const CANCELLING: u8 = 1;
-/// The download thread has finished, either way.
-const FINISHED: u8 = 2;
+/// Where the download is. It only moves forward, so a stop request and the
+/// worker's completion cannot disagree: a download that finished after a
+/// stop was asked for reads [`Cancelled`](DownloadStage::Cancelled), not
+/// [`Done`](DownloadStage::Done).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum DownloadStage {
+    Running = 0,
+    /// The UI asked to stop; the worker ends at the next chunk.
+    Cancelling = 1,
+    /// The worker finished without a stop request.
+    Done = 2,
+    /// The worker finished after a stop request.
+    Cancelled = 3,
+}
+
+impl DownloadStage {
+    fn from_raw(raw: u8) -> Self {
+        match raw {
+            0 => Self::Running,
+            1 => Self::Cancelling,
+            2 => Self::Done,
+            _ => Self::Cancelled,
+        }
+    }
+
+    /// The stage after the worker ends.
+    fn finished(self) -> Self {
+        match self {
+            Self::Running | Self::Done => Self::Done,
+            Self::Cancelling | Self::Cancelled => Self::Cancelled,
+        }
+    }
+}
 
 /// Shared between the download thread and the UI.
 #[derive(Debug, Default)]
 pub struct Progress {
     /// Bytes received over both files.
     pub received: AtomicU64,
-    /// `RUNNING`, `CANCELLING` or `FINISHED`.
+    /// A [`DownloadStage`], moved only by [`Progress::cancel`] and
+    /// [`Progress::finish`].
     stage: AtomicU8,
 }
 
@@ -32,24 +60,47 @@ impl Progress {
         self.received.load(Ordering::Relaxed)
     }
 
-    /// Asks the worker to stop; a finished download stays finished.
-    pub fn cancel(&self) {
-        let _ =
-            self.stage
-                .compare_exchange(RUNNING, CANCELLING, Ordering::AcqRel, Ordering::Acquire);
+    pub fn stage(&self) -> DownloadStage {
+        DownloadStage::from_raw(self.stage.load(Ordering::Acquire))
     }
 
-    /// A stop was asked for and the worker has not finished yet.
+    /// Asks the worker to stop; a finished download stays finished.
+    pub fn cancel(&self) {
+        let _ = self.stage.compare_exchange(
+            DownloadStage::Running as u8,
+            DownloadStage::Cancelling as u8,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+    }
+
+    /// A stop was asked for, whether or not the worker has finished.
     pub fn is_cancelled(&self) -> bool {
-        self.stage.load(Ordering::Acquire) == CANCELLING
+        matches!(
+            self.stage(),
+            DownloadStage::Cancelling | DownloadStage::Cancelled
+        )
     }
 
     pub fn is_finished(&self) -> bool {
-        self.stage.load(Ordering::Acquire) == FINISHED
+        matches!(self.stage(), DownloadStage::Done | DownloadStage::Cancelled)
     }
 
     pub fn finish(&self) {
-        self.stage.store(FINISHED, Ordering::Release);
+        let mut raw = self.stage.load(Ordering::Acquire);
+        loop {
+            let next = DownloadStage::from_raw(raw).finished() as u8;
+            if next == raw {
+                return;
+            }
+            match self
+                .stage
+                .compare_exchange(raw, next, Ordering::AcqRel, Ordering::Acquire)
+            {
+                Ok(_) => return,
+                Err(seen) => raw = seen,
+            }
+        }
     }
 
     /// Marks the download finished when dropped, so a worker that panics
@@ -202,11 +253,20 @@ mod tests {
         p.received.fetch_add(5, Ordering::Relaxed);
         p.cancel();
         assert!(p.is_cancelled() && !p.is_finished());
+        assert_eq!(p.stage(), DownloadStage::Cancelling);
         p.finish();
-        assert!(!p.is_cancelled() && p.is_finished());
-        p.cancel();
-        assert!(p.is_finished(), "a finished download stays finished");
+        assert!(p.is_cancelled() && p.is_finished());
+        assert_eq!(p.stage(), DownloadStage::Cancelled, "a cancelled finish");
         assert_eq!(p.received(), 5);
+    }
+
+    #[test]
+    fn a_finished_download_stays_finished_when_cancel_comes_late() {
+        let p = Progress::default();
+        p.finish();
+        p.cancel();
+        assert_eq!(p.stage(), DownloadStage::Done);
+        assert!(!p.is_cancelled() && p.is_finished());
     }
 
     #[test]

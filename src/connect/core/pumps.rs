@@ -45,24 +45,19 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// The account's user id is known: a folder last signed in as someone
     /// else drops what they left (`account_data::claim`), once per user.
-    fn claim_account_owner(&mut self) {
+    pub(in crate::connect) fn claim_account_owner(&mut self) {
         let Some(me) = self.session.my_user_id else {
             return;
         };
-        let retry = match self.owner_claim {
-            OwnerClaim::Claimed(claimed) if claimed == me => return,
-            OwnerClaim::Unsaved(claimed) => claimed == me,
-            OwnerClaim::Claimed(_) | OwnerClaim::Unclaimed => false,
-        };
+        if self.owner_claim == OwnerClaim::Saved(me) {
+            return;
+        }
         // `<app root>/accounts/<key>`.
         let Some(app_root) = self.paths.root.parent().and_then(std::path::Path::parent) else {
-            self.owner_claim = OwnerClaim::Unsaved(me);
             return;
         };
-        let owner_error = if retry {
-            // What the folder held was settled by the first try: only the
-            // owner file is left to write.
-            crate::account_data::save_owner(app_root, &self.session.account, me).err()
+        let owner_error = if self.owner_claim == OwnerClaim::Unsaved(me) {
+            crate::account_data::write_owner(app_root, &self.session.account, me).err()
         } else {
             crate::account_data::claim(
                 app_root,
@@ -72,17 +67,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             )
             .owner_error
         };
-        match owner_error {
-            None => self.owner_claim = OwnerClaim::Claimed(me),
+        self.owner_claim = match owner_error {
+            None => OwnerClaim::Saved(me),
             Some(err) => {
                 // Not silent: without the owner file the next start cannot
                 // tell whose the folder is, so it drops what is in it. The
-                // next ingest writes it again; the line shows once.
-                if !retry {
+                // next ingest retries the write; it is reported once, not
+                // on every ingest while the folder cannot be written.
+                if self.owner_claim != OwnerClaim::Unsaved(me) {
                     eprintln!("quill: could not save the account owner: {err}");
                 }
-                self.owner_claim = OwnerClaim::Unsaved(me);
+                OwnerClaim::Unsaved(me)
             }
-        }
+        };
     }
 }

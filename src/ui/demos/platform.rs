@@ -78,7 +78,9 @@ impl QuillApp {
             }),
         };
         self.preferences.update_state = match demo {
-            UpdateDemo::Changelog => quill::updater::UpdateState::Installed(release),
+            UpdateDemo::Changelog => {
+                quill::updater::UpdateState::Installed(release, Default::default())
+            }
             UpdateDemo::Failure => quill::updater::UpdateState::DownloadFailed(
                 release,
                 "Download interrupted. Retry the update.",
@@ -87,7 +89,7 @@ impl QuillApp {
             UpdateDemo::Downloading => {
                 let progress = quill::updater::DownloadProgress::default();
                 progress.add(19 * 1024 * 1024);
-                quill::updater::UpdateState::Downloading(release, progress)
+                quill::updater::UpdateState::Downloading(release, progress, Default::default())
             }
             UpdateDemo::Staged => quill::updater::UpdateState::Staged(
                 quill::updater::ReleaseInfo {

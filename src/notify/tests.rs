@@ -380,7 +380,10 @@ fn failed_spawn_never_clicks() {
         args: Vec::new(),
         report_click: true,
     };
-    assert!(!run_notification_command(&cmd).clicked);
+    assert!(matches!(
+        run_notification_command(&cmd),
+        NotificationOutcome::Dismissed
+    ));
 }
 
 fn sound_input(app_active: bool) -> SoundInput {

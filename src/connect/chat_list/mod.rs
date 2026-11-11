@@ -117,6 +117,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Parity slice: channel/supergroup header extras.
         self.maybe_fetch_supergroup_profile(chat_id)?;
         self.maybe_fetch_supergroup_full_info_for_header(chat_id)?;
+        // Opening the chat retries a failed topic list; the rows never do.
+        self.session.threads.forum_topics.clear_failure(chat_id.0);
         self.maybe_fetch_forum_topics(chat_id)?;
         self.retry_direct_topics_on_open(chat_id);
         Ok(())
@@ -386,6 +388,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chat_list
             .archive_chat_list_settings()
             .is_some()
+            || self.session.chat_list.archive_settings_loading()
         {
             return Ok(None);
         }
@@ -394,30 +397,30 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// `getArchiveChatListSettings` even when a copy is cached, as
     /// tdesktop reloads its global privacy settings for the "Hide new
-    /// chats?" suggestion. `Ok(None)` = a fetch in flight.
+    /// chats?" suggestion. A fetch already in flight predates the
+    /// suggestion, so a new one goes out and takes its place (the older
+    /// answer no longer matches the stage).
     pub fn reload_archive_chat_list_settings(
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
-            self.session.chat_list.archive_mute.note_reload_failed();
+            self.session.chat_list.archive_mute.note_reload_failed(None);
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::GetArchiveChatListSettings;
-        if self.session.requests.has_purpose(purpose) {
-            return Ok(None);
-        }
         let extra = self.session.request(purpose, None);
         if let Err(err) = self
             .sender
             .send_json(&get_archive_chat_list_settings(extra))
         {
             self.session.requests.take(extra);
-            self.session.chat_list.archive_mute.note_reload_failed();
+            self.session.chat_list.archive_mute.note_reload_failed(None);
             return Err(err);
         }
         // A cached copy stays on screen while it reloads.
         self.session.chat_list.archive_settings.begin();
         self.session.chat_list.archive_settings.sent(extra);
+        self.session.chat_list.archive_mute.note_sent(extra);
         Ok(Some(extra))
     }
 
@@ -463,8 +466,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// id (schema 1.8.67, line 9590: "Call createPrivateChat with
     /// getOption(\"my_id\") and open the chat"). The `chat` answer opens
     /// the chat via the `CreatePrivateChat` pending purpose. `Ok(None)`
-    /// = own id unknown (call `getMe` first) or a creation already in
-    /// flight; the UI prefers the already-listed self chat when one
+    /// = own id unknown (call `getMe` first) or a creation for the
+    /// own user already in flight; the UI prefers the already-listed self chat when one
     /// exists.
     pub fn create_private_chat_with_self(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         let Some(my_id) = self.session.my_user_id else {
@@ -476,8 +479,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// B1: `createPrivateChat` with an arbitrary user id (schema 1.8.67,
     /// line 9588) — the user button on an inline keyboard. The `chat`
     /// answer opens the chat via the `CreatePrivateChat` pending purpose.
-    /// `Ok(None)` = a creation for this user already in flight; the UI
-    /// prefers an already-listed private chat with the user when one exists.
+    /// `Ok(None)` = a creation for the same user already in flight; the UI prefers an
+    /// already-listed private chat with the user when one exists.
     pub fn create_private_chat_for(
         &mut self,
         user_id: i64,
@@ -485,12 +488,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        // One creation per user at a time; another user's goes out beside it.
         let purpose = RequestPurpose::CreatePrivateChat;
-        if self.session.requests.has_purpose_for_user(purpose, user_id) {
+        // A private chat's id is its user's id, so the request is keyed by
+        // the chat it creates: another user's creation in flight does not
+        // swallow this one, and only the same user's does.
+        let chat = ChatId(user_id);
+        if self.session.requests.has_purpose_for_chat(purpose, chat) {
             return Ok(None);
         }
-        let extra = self.session.request_for_user(purpose, user_id);
+        let extra = self.session.request(purpose, Some(chat));
         if let Err(err) = self
             .sender
             .send_json(&create_private_chat(extra, user_id, false))

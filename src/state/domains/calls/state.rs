@@ -38,6 +38,11 @@ pub struct CallsState {
     /// `joinVideoChat` rejected), shown on the group-call overlay and
     /// cleared when dismissed. Never a secret.
     pub group_call_error: Option<String>,
+    /// Calls whose `getGroupCall` failed, by call id. The one who asked
+    /// for such a call (a stream wish) takes its entry
+    /// ([`CallsState::take_group_call_fetch_failure`]), so a failure ends
+    /// the wish of that call and no other.
+    pub group_call_fetch_failures: Vec<i32>,
     /// Phase C1: incoming calls that arrived while another call was
     /// active — the driver discards them (busy) via `discardCall`.
     /// Entries are `(call_id, user_id, is_video)` so the decline
@@ -199,12 +204,29 @@ impl CallsState {
             .is_some_and(|call| call.id == group_call_id)
     }
 
+    /// A `getGroupCall` for `group_call_id` failed.
+    pub fn note_group_call_fetch_failed(&mut self, group_call_id: i32) {
+        if !self.group_call_fetch_failures.contains(&group_call_id) {
+            self.group_call_fetch_failures.push(group_call_id);
+        }
+    }
+
+    /// Whether the fetch of `group_call_id` failed since it was last taken
+    /// or asked again; taking it clears the mark.
+    pub fn take_group_call_fetch_failure(&mut self, group_call_id: i32) -> bool {
+        let before = self.group_call_fetch_failures.len();
+        self.group_call_fetch_failures
+            .retain(|id| *id != group_call_id);
+        self.group_call_fetch_failures.len() != before
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             active_call: None,
             summary: None,
             error: None,
             group_call_error: None,
+            group_call_fetch_failures: Vec::new(),
             busy_decline_queue: Vec::new(),
             created_call_discards: Vec::new(),
             busy_declined_calls: std::collections::VecDeque::new(),

@@ -125,7 +125,7 @@ fn a_repost_whose_origin_turns_out_gone_opens_the_poster_on_the_first_press(
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert_eq!(
-            app.chat_list.pending_story_open,
+            app.stories.viewer.waiting(),
             Some(super::PendingStoryOpen {
                 chat_id: CHANNEL,
                 story_id: GONE_ORIGIN,
@@ -144,7 +144,7 @@ fn a_repost_whose_origin_turns_out_gone_opens_the_poster_on_the_first_press(
     });
     frames(vcx);
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.chat_list.pending_story_open, None);
+        assert_eq!(app.stories.viewer.waiting(), None);
         assert!(!app.stories.viewer.is_open(), "the viewer closed");
         assert!(app.dialogs.profile_modal.is_some(), "the poster's profile");
     });
@@ -166,10 +166,7 @@ fn a_step_drops_a_repost_press_still_waiting_and_playback_runs(cx: &mut TestAppC
     app.update(vcx, |app, cx| app.step_story_viewer(-1, cx));
     frames(vcx);
     app.read_with(vcx, |app, _| {
-        assert_eq!(
-            app.chat_list.pending_story_open, None,
-            "the press is dropped"
-        );
+        assert_eq!(app.stories.viewer.waiting(), None, "the press is dropped");
         assert!(!app.story_playback_paused(), "playback runs again");
         assert_eq!(
             app.stories.viewer.current().map(|item| item.story_id),

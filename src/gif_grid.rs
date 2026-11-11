@@ -27,8 +27,11 @@ pub fn layout_gifs(animations: &[AnimationItem], full_width: i32) -> Mosaic {
 fn gif_shape(animation: &AnimationItem) -> (i32, i32) {
     if animation.width > 0 && animation.height > 0 {
         (animation.width, animation.height)
-    } else if animation.thumb_width > 0 && animation.thumb_height > 0 {
-        (animation.thumb_width, animation.thumb_height)
+    } else if let (width, height) = animation.thumb.size()
+        && width > 0
+        && height > 0
+    {
+        (width, height)
     } else {
         (1, 1)
     }
@@ -48,11 +51,8 @@ mod tests {
             file_name: "clip.mp4".into(),
             mime_type: "video/mp4".into(),
             file_id: FileId(1),
-            thumb_file_id: None,
-            thumb_width: 0,
-            thumb_height: 0,
+            thumb: crate::telegram::envelope::Thumb::of(None, 0, 0, true),
             minithumbnail: None,
-            thumb_still: true,
         }
     }
 
@@ -75,8 +75,7 @@ mod tests {
     #[test]
     fn a_gif_without_a_size_still_gets_a_tile() {
         let mut thumbed = gif(0, 0);
-        thumbed.thumb_width = 90;
-        thumbed.thumb_height = 45;
+        thumbed.thumb = crate::telegram::envelope::Thumb::of(Some(FileId(7)), 90, 45, true);
         let mosaic = layout_gifs(&[gif(0, 0), thumbed], 400);
         assert_eq!(mosaic.order(), vec![0, 1]);
         let cells: Vec<i32> = mosaic

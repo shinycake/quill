@@ -150,6 +150,8 @@ impl QuillApp {
                 let _ = live.driver.fetch_privacy_rules(key);
             }
             let _ = live.driver.fetch_auto_download_presets();
+            // The "Accept calls on this device" row reads the sessions.
+            let _ = live.driver.maybe_fetch_active_sessions();
         }
     }
 
@@ -179,7 +181,7 @@ impl QuillApp {
             // anywhere and bound push-to-talk to it.
             Page::Calls => {
                 self.call_boxes.mic_test = Default::default();
-                self.group_call.ptt_capture = false;
+                self.preferences.keybinding.end_ptt_capture();
             }
             _ => {}
         }

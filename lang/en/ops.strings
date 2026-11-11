@@ -390,6 +390,7 @@
 "qll_ops_chat_automation" = "Chat Automation";
 "qll_ops_chat_types" = "Chat types";
 "qll_ops_chats_could_not_be_read" = "{failed_chats} chats could not be read and have no messages in the export.";
+"qll_ops_chats_stopped_early" = "{partial_chats} chats stopped early and have only the messages saved before the error.";
 "qll_ops_chats_selected#one" = "{count} chat selected";
 "qll_ops_chats_selected#other" = "{count} chats selected";
 "qll_ops_chats_with_protected_content_were" = "{protected_chats} chats with protected content were left out.";

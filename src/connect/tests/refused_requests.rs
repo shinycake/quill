@@ -7,7 +7,8 @@ use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::platform::MemorySecretStore;
-use crate::state::{SimilarBotsFetch, StickerTab};
+use crate::state::StickerTab;
+use crate::state::fetch::Fetch;
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::MessageContent;
 use serde_json::Value;
@@ -91,14 +92,32 @@ fn a_failed_similar_bots_load_can_be_asked_again() {
     let mut rig = Rig::new();
     let asked = rig.driver.fetch_similar_bots(42).unwrap().unwrap();
     // The driver marks the section loading once the request is out.
-    assert!(matches!(
-        rig.driver.session.bots.similar_bots.get(&42),
-        Some(SimilarBotsFetch::Loading)
-    ));
+    assert!(
+        rig.driver
+            .session
+            .bots
+            .similar_bots
+            .get(&42)
+            .is_some_and(|fetch| fetch.waits_for(asked))
+    );
     assert!(rig.driver.fetch_similar_bots(42).unwrap().is_none());
     rig.refuse(asked, "BOT_INVALID");
-    assert!(!rig.driver.session.bots.similar_bots.contains_key(&42));
-    assert!(rig.driver.fetch_similar_bots(42).unwrap().is_some());
+    // The refusal lands with its reason; a press asks again.
+    assert!(matches!(
+        rig.driver.session.bots.similar_bots.get(&42),
+        Some(Fetch::Failed { .. })
+    ));
+    let again = rig.driver.fetch_similar_bots(42).unwrap().unwrap();
+    // The first request's late answer leaves the new one waiting.
+    rig.refuse(asked, "BOT_INVALID");
+    assert!(
+        rig.driver
+            .session
+            .bots
+            .similar_bots
+            .get(&42)
+            .is_some_and(|fetch| fetch.waits_for(again))
+    );
 }
 
 fn chosen(rig: &Rig, message: i64) -> Vec<bool> {

@@ -497,6 +497,9 @@ fn a_topics_request_that_fails_leaves_loading_for_the_error_line(cx: &mut TestAp
     frames(vcx);
     assert!(app.read_with(vcx, |app, _| app.drop_topic_failed()));
     assert!(listed(&app, vcx).is_empty());
+    // The error line offers Retry, which asks again (it needs a live
+    // client, so the demo only shows the button).
+    assert!(vcx.update(|window, _| window.try_find("drop-topic-retry").is_some()));
 }
 
 #[gpui_kit::test]

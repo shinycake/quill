@@ -17,7 +17,7 @@ use quill::lang::{keys, tr, tr_with};
 use quill::owned_bots::{self, NAME_MAX, UsernameProblem};
 use quill::state::{DeepLinkAction, ManagedBotShare};
 use quill::telegram::envelope::{RequestManagedBotSpec, UsernameCheckResult};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -129,6 +129,20 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // An earlier createBot may still be in flight (its box was closed
+        // while "Creating..."). Resetting would bump the generation and its
+        // answer would no longer match, so it is never reported; a new box
+        // would adopt that submission and its own share would never be
+        // answered. So a second press waits: `drain_bot_create` reports the
+        // first answer, and the press says so.
+        let creating = self
+            .session()
+            .is_some_and(|session| session.bots.owned.create.creating());
+        if creating {
+            self.set_note(StatusNote::info(tr(keys::Q_MEDIA_STILL_CREATING_A_BOT)));
+            cx.notify();
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
             live.driver.reset_create_bot();
         }
@@ -473,16 +487,13 @@ impl QuillApp {
                 .child(body)
                 .child(footer)
                 .into_any_element();
-            let content = Rc::new(RefCell::new(Some(content)));
+            let content = Rc::new(Cell::new(Some(content)));
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(keys::CREATE_BOT_TITLE)))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |slot, _, _| {
-                        let body = content
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = content.take().unwrap_or_else(|| div().into_any_element());
                         slot.child(body)
                     },
                 ))
@@ -499,3 +510,8 @@ crate::ui::shell::register_dialogs! {
     )
     .close(|app, _, cx| app.close_bot_create(cx)),
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "bot_create_tests.rs"]
+mod tests;

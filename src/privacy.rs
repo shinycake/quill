@@ -188,8 +188,12 @@ impl PrivacyRuleDetail {
 /// only while that id is still the key's live request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrivacyKeyState {
-    /// `getUserPrivacySettingRules` is out.
-    Loading(RequestId),
+    /// `getUserPrivacySettingRules` is out; `stale` is the rule held before
+    /// the refetch (shown meanwhile and kept if the refetch fails).
+    Loading {
+        request: RequestId,
+        stale: Option<PrivacyRuleDetail>,
+    },
     Ready(PrivacyRuleDetail),
     /// `setUserPrivacySettingRules` is out: `detail` shows at once (the
     /// live save, under `request`). `confirmed` is the last rule the
@@ -208,8 +212,10 @@ pub enum PrivacyKeyState {
         detail: PrivacyRuleDetail,
         error: String,
     },
-    /// The rule could not be loaded.
-    Failed,
+    /// The rule could not be loaded; `stale` is the rule held before.
+    Failed {
+        stale: Option<PrivacyRuleDetail>,
+    },
 }
 
 impl PrivacyKeyState {
@@ -220,7 +226,7 @@ impl PrivacyKeyState {
             Self::Ready(detail) | Self::Saving { detail, .. } | Self::SaveFailed { detail, .. } => {
                 Some(detail)
             }
-            Self::Loading(_) | Self::Failed => None,
+            Self::Loading { stale, .. } | Self::Failed { stale } => stale.as_ref(),
         }
     }
 
@@ -235,7 +241,7 @@ impl PrivacyKeyState {
     /// The load or save request that decides this state's next answer.
     fn request(&self) -> Option<RequestId> {
         match self {
-            Self::Loading(request) | Self::Saving { request, .. } => Some(*request),
+            Self::Loading { request, .. } | Self::Saving { request, .. } => Some(*request),
             _ => None,
         }
     }
@@ -250,7 +256,7 @@ impl crate::state::SettingsState {
         request: Option<RequestId>,
         detail: PrivacyRuleDetail,
     ) -> bool {
-        let live = matches!(self.privacy.get(&key), Some(PrivacyKeyState::Loading(id)) if Some(*id) == request);
+        let live = matches!(self.privacy.get(&key), Some(PrivacyKeyState::Loading { request: id, .. }) if Some(*id) == request);
         if live {
             self.privacy.insert(key, PrivacyKeyState::Ready(detail));
         }
@@ -361,8 +367,31 @@ impl crate::state::SettingsState {
         {
             return false;
         }
-        self.privacy.insert(key, PrivacyKeyState::Loading(request));
+        let stale = self
+            .privacy
+            .get(&key)
+            .and_then(PrivacyKeyState::detail)
+            .cloned();
+        self.privacy
+            .insert(key, PrivacyKeyState::Loading { request, stale });
         true
+    }
+
+    /// The load under `request` was refused or never left: only the key's
+    /// live load fails, and the rule held before it stays.
+    pub fn fail_privacy_load(&mut self, key: PrivacySettingKey, request: Option<RequestId>) {
+        let Some(PrivacyKeyState::Loading {
+            request: live,
+            stale,
+        }) = self.privacy.get_mut(&key)
+        else {
+            return;
+        };
+        if Some(*live) != request {
+            return;
+        }
+        let stale = stale.take();
+        self.privacy.insert(key, PrivacyKeyState::Failed { stale });
     }
 }
 

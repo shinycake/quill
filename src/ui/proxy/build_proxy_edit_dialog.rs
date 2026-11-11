@@ -233,11 +233,7 @@ impl QuillApp {
                 .session()
                 .map_or(LinkCheck::Review, |s| s.settings.proxy.link_check);
             let warn = stage == LinkCheck::Warn;
-            let ping = match stage {
-                LinkCheck::Checking(id) => Some(PingStatus::Checking(id)),
-                LinkCheck::Done(status) => Some(status),
-                LinkCheck::Review | LinkCheck::Warn => None,
-            };
+            let ping = stage.status();
             let mut body = div().flex().flex_col().gap_2().child(Self::link_row(
                 tr(keys::PROXY_BOX_SERVER),
                 draft.display_address(),

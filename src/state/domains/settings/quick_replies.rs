@@ -29,19 +29,12 @@ pub struct QuickRepliesState {
     pub message_count_max: Option<usize>,
     /// Counter for `sendQuickReplyShortcutMessages.sending_id`.
     pub next_sending_id: i32,
-    /// The changes and sends on their way, by request: each leaves with
-    /// its own answer or error (`settled`), so a double tap sends once.
-    pub in_flight: HashMap<RequestId, QuickReplyWork>,
-}
-
-/// One quick reply request on its way.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum QuickReplyWork {
-    /// A change (add, edit, rename, delete), as the request it sent without
-    /// its id.
-    Change(String),
-    /// A shortcut being sent to a chat.
-    Send(ChatId, i32),
+    /// The shortcuts being sent, by request: pruned once the request is
+    /// answered, so a double tap sends once.
+    pub sending: HashMap<RequestId, (ChatId, i32)>,
+    /// The changes (add, edit, rename, delete) on their way, by request,
+    /// each as the request it sent without its id.
+    pub changing: HashMap<RequestId, String>,
 }
 
 impl QuickRepliesState {
@@ -78,25 +71,6 @@ impl QuickRepliesState {
         self.shortcuts
             .values()
             .find(|s| s.name.eq_ignore_ascii_case(name) || s.name == name)
-    }
-
-    /// This change is already on its way.
-    pub fn is_changing(&self, probe: &str) -> bool {
-        self.in_flight
-            .values()
-            .any(|work| matches!(work, QuickReplyWork::Change(sent) if sent == probe))
-    }
-
-    /// This shortcut is already on its way to this chat.
-    pub fn is_sending(&self, chat_id: ChatId, shortcut_id: i32) -> bool {
-        self.in_flight
-            .values()
-            .any(|work| *work == QuickReplyWork::Send(chat_id, shortcut_id))
-    }
-
-    /// `request` was answered, failed or was lost: its work is over.
-    pub fn settled(&mut self, request: RequestId) {
-        self.in_flight.remove(&request);
     }
 
     /// The shortcut's messages are in, or their load failed: nothing is

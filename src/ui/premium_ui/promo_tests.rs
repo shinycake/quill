@@ -39,7 +39,7 @@ fn preview_of(feature: PremiumFeature) -> PremiumHub {
 fn the_clip_is_downloaded_whenever_the_premium_state_lands() {
     let mut hub = preview_of(PremiumFeature::UniqueReactions);
     assert!(preview_downloads(&hub).is_empty(), "state not known yet");
-    hub.premium_state = Some(PremiumStateInfo {
+    hub.premium_state = quill::state::fetch::Fetch::Ready(PremiumStateInfo {
         animations: vec![PremiumAnimation {
             feature: PromoFeature::Premium(PremiumFeature::UniqueReactions),
             file_id: 77,

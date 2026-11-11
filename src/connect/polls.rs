@@ -3,7 +3,7 @@ use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::poll::{PollDraft, can_stop_poll, poll_answer_for_tap};
 use crate::state::MessagesPurpose;
-use crate::state::{PollVotersFetch, PollVotersMore, RequestPurpose, RequestRollback};
+use crate::state::{PollVotersFetch, RequestPurpose, RequestRollback, VotersMore};
 use crate::telegram::envelope::MessageContent;
 use crate::telegram::requests::{
     PollSend, PollTypeSend, SendReply, get_poll_voters, send_poll, set_poll_answer,
@@ -237,18 +237,27 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let key = (chat_id.0, message_id.0, option_index as i32);
-        // One page at a time per option: the first page while it loads, a
-        // next page while it is on its way, and a next page only on a
-        // loaded list (it must not clobber the loaded page while it flies).
-        let fetching = self.session.messages.poll_voters.get(&key);
-        let skip = match fetching {
-            Some(PollVotersFetch::Loading(_)) => true,
-            Some(PollVotersFetch::Loaded { more, .. }) => {
-                offset > 0 && *more != PollVotersMore::Idle
-            }
-            Some(PollVotersFetch::Failed(_)) | None => offset > 0,
-        };
-        if skip {
+        if matches!(
+            self.session.messages.poll_voters.get(&key),
+            Some(PollVotersFetch::Loading(_))
+        ) || self.session.requests.has_purpose_for_chat(
+            RequestPurpose::Messages(MessagesPurpose::GetPollVoters {
+                chat_id,
+                message_id,
+                option_id: option_index as i32,
+                offset,
+            }),
+            chat_id,
+        ) {
+            return Ok(None);
+        }
+        // A "load more" must not clobber the loaded page while it flies.
+        if offset > 0
+            && !matches!(
+                self.session.messages.poll_voters.get(&key),
+                Some(PollVotersFetch::Loaded { .. })
+            )
+        {
             return Ok(None);
         }
         let extra = self.session.request(
@@ -260,16 +269,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             Some(chat_id),
         );
-        match self.session.messages.poll_voters.get_mut(&key) {
-            Some(PollVotersFetch::Loaded { more, .. }) if offset > 0 => {
-                *more = PollVotersMore::Loading(extra);
-            }
-            _ => {
-                self.session
-                    .messages
-                    .poll_voters
-                    .insert(key, PollVotersFetch::Loading(extra));
-            }
+        if offset == 0 {
+            self.session
+                .messages
+                .poll_voters
+                .insert(key, PollVotersFetch::Loading(extra));
+        } else if let Some(PollVotersFetch::Loaded { more, .. }) =
+            self.session.messages.poll_voters.get_mut(&key)
+        {
+            *more = VotersMore::Asking(extra);
         }
         let json = get_poll_voters(
             extra,
@@ -283,12 +291,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                if offset == 0 {
-                    self.session.messages.poll_voters.remove(&key);
-                } else if let Some(PollVotersFetch::Loaded { more, .. }) =
-                    self.session.messages.poll_voters.get_mut(&key)
-                {
-                    *more = PollVotersMore::Idle;
+                match self.session.messages.poll_voters.get_mut(&key) {
+                    Some(PollVotersFetch::Loading(id)) if *id == extra => {
+                        self.session.messages.poll_voters.remove(&key);
+                    }
+                    Some(PollVotersFetch::Loaded { more, .. })
+                        if *more == VotersMore::Asking(extra) =>
+                    {
+                        *more = VotersMore::Ready;
+                    }
+                    _ => {}
                 }
                 Err(err)
             }

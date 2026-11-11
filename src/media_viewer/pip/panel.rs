@@ -25,6 +25,11 @@ pub const START_DRAG_DISTANCE: i32 = 10;
 /// `st::slideWrapDuration`: the snap animation (`moveAnimated`).
 pub const MOVE_ANIMATION_MS: u64 = 150;
 
+/// The largest coordinate or size a saved position may hold. The math of
+/// this module adds and subtracts a handful of such values, which cannot
+/// overflow an `i32` at this bound; no real screen comes near it.
+pub const SAVED_LIMIT: i32 = 1 << 20;
+
 /// A point in logical pixels.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PipPoint {
@@ -107,6 +112,14 @@ impl PipRect {
 
     pub fn is_empty(self) -> bool {
         self.size().is_empty()
+    }
+
+    /// The rectangle with every number inside [`SAVED_LIMIT`] (sizes not
+    /// below zero): what a file read from disk may hold.
+    pub fn bounded(self) -> Self {
+        let place = |value: i32| value.clamp(-SAVED_LIMIT, SAVED_LIMIT);
+        let extent = |value: i32| value.clamp(0, SAVED_LIMIT);
+        Self::new(place(self.x), place(self.y), extent(self.w), extent(self.h))
     }
 
     /// Qt's `QRect::contains` (the right and bottom edges are outside).
@@ -421,6 +434,16 @@ pub struct PipPosition {
 }
 
 impl PipPosition {
+    /// The position with its rectangles bounded, so geometry read from a
+    /// damaged or edited file cannot overflow the window math.
+    pub fn bounded(self) -> Self {
+        Self {
+            geometry: self.geometry.bounded(),
+            screen: self.screen.bounded(),
+            ..self
+        }
+    }
+
     /// `setPositionDefault`: the default size, snapped to the screen's
     /// top-left corner.
     pub fn default_on(screen: PipRect) -> Self {

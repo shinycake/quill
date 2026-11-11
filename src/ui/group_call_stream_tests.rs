@@ -89,7 +89,8 @@ fn a_live_stream_opens_the_stream_window(cx: &mut TestAppContext) {
     let (app, _main, mut call) = open_stream(cx, StreamState::NoStream);
     let call = &mut call;
     assert!(
-        app.read_with(call, |app, _| app.group_call.stream.window_is_stream),
+        app.read_with(call, |app, _| app.group_call.window.layout())
+            == Some(crate::ui::group_call_state::CallLayout::Stream),
         "sized as a stream window"
     );
     let viewport = find(call, "group-call-stream-viewport").expect("the picture");
@@ -285,7 +286,10 @@ fn the_settings_box_opens_and_esc_closes_it(cx: &mut TestAppContext) {
     let (app, _main, mut call) = open_stream(cx, StreamState::Live);
     let call = &mut call;
     app.update(call, |app, cx| {
-        app.open_stream_overlay(super::StreamOverlay::Settings { key_shown: false }, cx)
+        app.open_stream_overlay(
+            crate::ui::group_call_stream_boxes::StreamOverlay::Settings { key_shown: false },
+            cx,
+        )
     });
     frames(call);
     assert!(
@@ -295,7 +299,7 @@ fn the_settings_box_opens_and_esc_closes_it(cx: &mut TestAppContext) {
     call.simulate_keystrokes("escape");
     frames(call);
     assert!(
-        app.read_with(call, |app, _| app.group_call.stream.overlay.is_none()),
+        app.read_with(call, |app, _| app.stream_overlay().is_none()),
         "Esc closes the box first"
     );
 }
@@ -307,14 +311,20 @@ fn under_the_lock_only_the_leave_box_opens(cx: &mut TestAppContext) {
     app.update(call, |app, cx| {
         app.account.passcode.enabled = true;
         app.lock_by_passcode(cx);
-        app.open_stream_overlay(super::StreamOverlay::Settings { key_shown: false }, cx);
-        assert!(app.group_call.stream.overlay.is_none(), "Settings waits");
-        app.open_stream_overlay(super::StreamOverlay::Leave { end: false }, cx);
+        app.open_stream_overlay(
+            crate::ui::group_call_stream_boxes::StreamOverlay::Settings { key_shown: false },
+            cx,
+        );
+        assert!(app.stream_overlay().is_none(), "Settings waits");
+        app.open_stream_overlay(
+            crate::ui::group_call_stream_boxes::StreamOverlay::Leave { end: false },
+            cx,
+        );
     });
     frames(call);
     assert_eq!(
-        app.read_with(call, |app, _| app.group_call.stream.overlay),
-        Some(super::StreamOverlay::Leave { end: false }),
+        app.read_with(call, |app, _| app.stream_overlay()),
+        Some(crate::ui::group_call_stream_boxes::StreamOverlay::Leave { end: false }),
         "a manager can still leave or end the stream"
     );
 }
@@ -891,11 +901,15 @@ fn a_switch_to_another_stream_closes_the_boxes(cx: &mut TestAppContext) {
     let (app, _main, mut call) = open_stream(cx, StreamState::Live);
     frames(&mut call);
     app.update(&mut call, |app, cx| {
-        app.open_stream_overlay(super::StreamOverlay::Settings { key_shown: true }, cx);
+        app.open_stream_overlay(
+            crate::ui::group_call_stream_boxes::StreamOverlay::Settings { key_shown: true },
+            cx,
+        );
     });
     frames(&mut call);
     assert!(app.read_with(&call, |app, _| {
-        app.group_call.stream.overlay == Some(super::StreamOverlay::Settings { key_shown: true })
+        app.stream_overlay()
+            == Some(crate::ui::group_call_stream_boxes::StreamOverlay::Settings { key_shown: true })
     }));
     app.update(&mut call, |app, cx| {
         let session = app.demo_session.as_mut().expect("demo");
@@ -908,7 +922,7 @@ fn a_switch_to_another_stream_closes_the_boxes(cx: &mut TestAppContext) {
     });
     frames(&mut call);
     assert!(
-        app.read_with(&call, |app, _| { app.group_call.stream.overlay.is_none() }),
+        app.read_with(&call, |app, _| { app.stream_overlay().is_none() }),
         "the other stream starts with no box and the key hidden"
     );
 }

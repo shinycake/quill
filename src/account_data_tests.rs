@@ -8,6 +8,27 @@ use std::collections::BTreeSet;
 /// writer (the UI thread); these tests take turns at it the same way.
 static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// One test's turn at the app-wide stores. Each test thread has its own
+/// deferred writer, so a write a test left queued would land on the file
+/// after the next test's own writes and put an older state back. The turn
+/// ends only once this thread's writes are on disk.
+struct Turn {
+    _serial: std::sync::MutexGuard<'static, ()>,
+}
+
+fn turn() -> Turn {
+    Turn {
+        _serial: crate::locks::lock_or_recover(&SERIAL),
+    }
+}
+
+impl Drop for Turn {
+    fn drop(&mut self) {
+        // Runs before the lock is released (fields drop after this).
+        crate::settings::flush_deferred_writes();
+    }
+}
+
 /// A claim by a client that signed in in this process.
 fn claim_as(root: &Path, key: &AccountKey, user_id: i64) -> Claimed {
     claim(root, key, user_id, SignInOrigin::Fresh)
@@ -27,10 +48,8 @@ fn action(account: &AccountKey) -> Action {
         chat_id: 5,
         chat_title: "Old chat".into(),
         summary: "hello".into(),
-        ok: true,
-        declined: false,
+        outcome: crate::agent::activity::Outcome::Done,
         message_ids: Vec::new(),
-        undone: false,
     }
 }
 
@@ -117,7 +136,7 @@ fn left_behind(root: &Path, key: &AccountKey) -> Vec<&'static str> {
 /// account's.
 #[test]
 fn forgetting_an_account_drops_all_it_left_and_nothing_else() {
-    let _serial = crate::locks::lock_or_recover(&SERIAL);
+    let _turn = turn();
     let root = root();
     let gone = AccountKey::new("account-931").unwrap();
     let kept = AccountKey::new("account-932").unwrap();
@@ -139,7 +158,7 @@ fn forgetting_an_account_drops_all_it_left_and_nothing_else() {
 /// data until the helper is gone (it has the files open); the rest goes now.
 #[test]
 fn the_web_view_data_waits_for_the_mini_app_helper() {
-    let _serial = crate::locks::lock_or_recover(&SERIAL);
+    let _turn = turn();
     let root = root();
     let key = AccountKey::new("account-936").unwrap();
     fill(&root, &key);
@@ -159,7 +178,7 @@ fn the_web_view_data_waits_for_the_mini_app_helper() {
 /// again: the new session's web view folder (new salt) is not deleted.
 #[test]
 fn a_late_web_view_delete_spares_the_next_sign_ins_folder() {
-    let _serial = crate::locks::lock_or_recover(&SERIAL);
+    let _turn = turn();
     let root = root();
     let dir = webview_dir(&root, "account-937");
     let _ = std::fs::remove_dir_all(&dir);
@@ -180,7 +199,7 @@ fn a_late_web_view_delete_spares_the_next_sign_ins_folder() {
 /// when the app quit before a log-out finished; the same user keeps it.
 #[test]
 fn a_new_user_in_a_reused_slot_inherits_nothing() {
-    let _serial = crate::locks::lock_or_recover(&SERIAL);
+    let _turn = turn();
     let root = root();
     let key = AccountKey::new("account-933").unwrap();
     assert!(
@@ -203,7 +222,7 @@ fn a_new_user_in_a_reused_slot_inherits_nothing() {
 /// in the folder: the next user cannot be shown to be the same one.
 #[test]
 fn an_unreadable_owner_with_leftovers_counts_as_someone_else() {
-    let _serial = crate::locks::lock_or_recover(&SERIAL);
+    let _turn = turn();
     let root = root();
     let key = AccountKey::new("account-937").unwrap();
     assert!(!claim_as(&root, &key, 100).dropped);
@@ -224,7 +243,7 @@ fn an_unreadable_owner_with_leftovers_counts_as_someone_else() {
 /// new user's claim) hands the next sign-in under that key other stores.
 #[test]
 fn a_reused_slot_opens_other_mini_app_stores() {
-    let _serial = crate::locks::lock_or_recover(&SERIAL);
+    let _turn = turn();
     let root = root();
     let key = AccountKey::new("account-935").unwrap();
     let _ = std::fs::remove_dir_all(AccountPaths::for_root(&root, &key).root);
@@ -262,7 +281,7 @@ fn a_reused_slot_opens_other_mini_app_stores() {
 /// answered Denied, so a later Allow can't reach the next user.
 #[test]
 fn a_waiting_prompt_of_a_forgotten_account_is_denied() {
-    let _serial = crate::locks::lock_or_recover(&SERIAL);
+    let _turn = turn();
     let _guard = crate::locks::lock_or_recover(&crate::agent::access::TEST_LOCK);
     // The switch stays in memory: `quill agent` tests read it from disk.
     crate::fast_buttons::set_persistence(false);
@@ -474,7 +493,7 @@ fn every_store_is_classified() {
 /// write the owner.
 #[test]
 fn a_resumed_session_without_an_owner_file_keeps_its_data() {
-    let _serial = crate::locks::lock_or_recover(&SERIAL);
+    let _turn = turn();
     let root = root();
     let key = AccountKey::new("account-951").unwrap();
     fill(&root, &key);
@@ -493,7 +512,7 @@ fn a_resumed_session_without_an_owner_file_keeps_its_data() {
 /// owner file to say who that was, drops what is there.
 #[test]
 fn a_fresh_sign_in_without_an_owner_file_drops_leftovers() {
-    let _serial = crate::locks::lock_or_recover(&SERIAL);
+    let _turn = turn();
     let root = root();
     let key = AccountKey::new("account-952").unwrap();
     fill(&root, &key);
@@ -508,7 +527,7 @@ fn a_fresh_sign_in_without_an_owner_file_drops_leftovers() {
 /// must not look like leftovers at the next start.
 #[test]
 fn a_failing_owner_write_does_not_wipe_twice() {
-    let _serial = crate::locks::lock_or_recover(&SERIAL);
+    let _turn = turn();
     let root = root();
     let key = AccountKey::new("account-953").unwrap();
     fill(&root, &key);
@@ -524,26 +543,5 @@ fn a_failing_owner_write_does_not_wipe_twice() {
     let second = claim(&root, &key, 100, SignInOrigin::Fresh);
     assert!(!second.dropped, "no leftovers of the first wipe");
     std::fs::remove_dir_all(&owner).unwrap();
-    forget(&root, &key);
-}
-
-/// A save that failed during the claim is written again alone: what the new
-/// owner made since stays, where a second claim would take it for leftovers.
-#[test]
-fn a_failed_owner_write_is_saved_again_without_dropping_anything() {
-    let _serial = crate::locks::lock_or_recover(&SERIAL);
-    let root = root();
-    let key = AccountKey::new("account-954").unwrap();
-    let paths = AccountPaths::for_root(&root, &key);
-    let owner = paths.root.join(OWNER_FILE);
-    let _ = std::fs::remove_file(&owner);
-    std::fs::create_dir_all(&owner).unwrap();
-    assert!(save_owner(&root, &key, 100).is_err());
-    std::fs::remove_dir_all(&owner).unwrap();
-    fill(&root, &key);
-    save_owner(&root, &key, 100).unwrap();
-    assert!(owner.exists());
-    assert_eq!(left_behind(&root, &key).len(), 10, "nothing was dropped");
-    assert!(!claim_as(&root, &key, 100).dropped);
     forget(&root, &key);
 }

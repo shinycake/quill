@@ -3,7 +3,7 @@ use super::*;
 use crate::ids::{ChatId, RequestId};
 use crate::quick_replies as qr;
 use crate::state::fetch::Fetch;
-use crate::state::{QuickReplyWork, RequestPurpose, SettingsPurpose};
+use crate::state::{RequestPurpose, SettingsPurpose};
 
 impl<S: JsonSender> ConnectDriver<S> {
     fn quick_replies_ready(&self) -> Result<(), ConnectSendError> {
@@ -26,8 +26,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         // answer (or error) ends it.
         let is_change = purpose == RequestPurpose::Settings(SettingsPurpose::MutateQuickReplies);
         let probe = if is_change { build("") } else { String::new() };
-        if is_change && self.session.settings.quick_replies.is_changing(&probe) {
-            return Ok(None);
+        if is_change {
+            let requests = &self.session.requests;
+            let state = &mut self.session.settings.quick_replies;
+            state
+                .changing
+                .retain(|request, _| requests.get(*request).is_some());
+            if state.changing.values().any(|sent| *sent == probe) {
+                return Ok(None);
+            }
         }
         let extra = self.session.request(purpose, chat_id);
         let json = build(&extra.as_extra());
@@ -36,8 +43,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .settings
                 .quick_replies
-                .in_flight
-                .insert(request, QuickReplyWork::Change(probe));
+                .changing
+                .insert(request, probe);
         }
         Ok(Some(request))
     }
@@ -159,17 +166,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         .map(|_| ())
     }
 
+    /// The request, or `None` when the same delete is already on its way.
     pub fn delete_quick_reply_shortcut(
         &mut self,
         shortcut_id: i32,
-    ) -> Result<(), ConnectSendError> {
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         self.session.settings.quick_replies.error = None;
         self.send_quick_reply_request(
             RequestPurpose::Settings(SettingsPurpose::MutateQuickReplies),
             None,
             |extra| qr::delete_shortcut_request(extra, shortcut_id),
         )
-        .map(|_| ())
     }
 
     /// Send every message of the shortcut to a private chat with a user. The
@@ -182,8 +189,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A shortcut being sent to a chat is not sent there again until its
         // answer (or error) ends that request: a double tap would deliver
         // every message twice.
+        let requests = &self.session.requests;
         let state = &mut self.session.settings.quick_replies;
-        if state.is_sending(chat_id, shortcut_id) {
+        state
+            .sending
+            .retain(|request, _| requests.get(*request).is_some());
+        if state
+            .sending
+            .values()
+            .any(|key| *key == (chat_id, shortcut_id))
+        {
             return Ok(());
         }
         state.next_sending_id = state.next_sending_id.wrapping_add(1).max(1);
@@ -199,8 +214,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .settings
                 .quick_replies
-                .in_flight
-                .insert(request, QuickReplyWork::Send(chat_id, shortcut_id));
+                .sending
+                .insert(request, (chat_id, shortcut_id));
         }
         Ok(())
     }

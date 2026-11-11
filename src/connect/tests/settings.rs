@@ -168,7 +168,7 @@ fn less_data_for_calls_reaches_every_network_when_one_send_fails() {
             .unwrap(),
         )
         .unwrap();
-    driver.session.settings.data_storage.seeded = crate::data_settings::Seed::Seeded;
+    driver.session.settings.data_storage.seeded = crate::data_settings::PresetsSeed::Seeded;
     assert!(driver.set_less_data_for_calls(true).is_err());
     let sent = sender.sent.lock().expect("sent").clone();
     let sent_sets = sent
@@ -764,7 +764,7 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
     assert!(driver.session.settings.sessions_op.is_mutating());
     assert_eq!(
         driver.session.settings.device_login,
-        crate::state::DeviceLogin::InFlight
+        crate::state::DeviceLogin::Idle
     );
     driver
         .ingest(response(
@@ -774,9 +774,22 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         .unwrap();
     assert_eq!(
         driver.session.settings.device_login,
-        crate::state::DeviceLogin::Done(crate::auth::DeviceLoginResult::Linked)
+        crate::state::DeviceLogin::Done {
+            request,
+            result: crate::auth::DeviceLoginResult::Linked
+        }
     );
     assert!(!driver.session.settings.sessions_op.is_mutating());
+    // The screen that asked went away: nobody takes the answer.
+    driver.session.settings.device_login.discard();
+    assert_eq!(
+        driver
+            .session
+            .settings
+            .device_login
+            .take_result_for(request),
+        None
+    );
     assert!(
         recorder.snapshot()[sent..]
             .iter()
@@ -790,7 +803,10 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         driver.ingest(response(request, body)).unwrap();
         assert_eq!(
             driver.session.settings.device_login,
-            crate::state::DeviceLogin::Done(crate::auth::DeviceLoginResult::Failed)
+            crate::state::DeviceLogin::Done {
+                request,
+                result: crate::auth::DeviceLoginResult::Failed
+            }
         );
         assert!(!driver.session.settings.sessions_op.is_mutating());
     }
@@ -803,7 +819,27 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         .unwrap();
     assert_eq!(
         driver.session.settings.device_login,
-        crate::state::DeviceLogin::Done(crate::auth::DeviceLoginResult::PasswordRequired)
+        crate::state::DeviceLogin::Done {
+            request,
+            result: crate::auth::DeviceLoginResult::PasswordRequired
+        }
+    );
+    assert_eq!(
+        driver
+            .session
+            .settings
+            .device_login
+            .take_result_for(crate::ids::RequestId(request.0 + 1)),
+        None,
+        "another request's result is not this asker's"
+    );
+    assert_eq!(
+        driver
+            .session
+            .settings
+            .device_login
+            .take_result_for(request),
+        Some(crate::auth::DeviceLoginResult::PasswordRequired)
     );
     driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
     assert!(driver.confirm_device_login(link).is_err());

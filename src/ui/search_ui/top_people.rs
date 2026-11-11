@@ -106,7 +106,7 @@ impl QuillApp {
         } else {
             Badge::new().count(count.max(0) as usize).max(99)
         };
-        let color = if person.muted {
+        let color = if person.muted() {
             cx.theme().muted_foreground
         } else {
             accent_strong().into()
@@ -123,14 +123,14 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let id = person.chat_id;
-        let avatar = if person.saved_messages {
+        let avatar = if person.is_saved_messages() {
             super::super::chat_row::saved_messages_avatar(model::PHOTO)
         } else {
             let photo = self.chat_photo_for_row(id);
             super::super::chat_row::chat_avatar(title, photo.as_deref(), model::PHOTO)
                 .into_any_element()
         };
-        let avatar = super::super::chat_row::with_presence_dot(avatar, person.online, DOT, cx)
+        let avatar = super::super::chat_row::with_presence_dot(avatar, person.online(), DOT, cx)
             .into_any_element();
         let avatar = Self::top_tile_badge(avatar, person, cx);
         let tile = div()
@@ -181,7 +181,9 @@ impl QuillApp {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                    this.chat_list.menu = Some(ChatMenuState::top_person(id, event.position));
+                    this.chat_list
+                        .menu
+                        .open_row(ChatMenuState::top_person(id, event.position));
                     cx.notify();
                 }),
             )
@@ -235,6 +237,7 @@ impl QuillApp {
         let menu_target = self
             .chat_list
             .menu
+            .row_copy()
             .filter(|menu| menu.top_person)
             .map(|menu| menu.chat_id);
         let tiles: Vec<Stateful<Div>> = people

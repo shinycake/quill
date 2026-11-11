@@ -212,6 +212,13 @@ impl QuillApp {
         self.spell.info = info;
         // Every window's composer is checked again with the new engine.
         self.in_every_window(cx, |this, cx| {
+            if !this.chat_prefs.spellcheck_enabled {
+                // Off: nothing is seeded or checked, so turning it on later
+                // finds an unchecked draft and checks it.
+                let text = this.composer.read(cx).value().to_string();
+                this.sync_spellcheck(&text, cx);
+                return;
+            }
             this.composer_ui.spelling.underlines.found.clear();
             this.composer_ui.spelling.underlines.text = this.composer.read(cx).value().to_string();
             this.notify_composer(cx);
@@ -336,6 +343,10 @@ impl QuillApp {
     fn recheck_spelling(&mut self, accepted: Option<&str>, cx: &mut Context<Self>) {
         self.in_every_window(cx, |this, cx| {
             let text = this.composer.read(cx).value().to_string();
+            if !this.chat_prefs.spellcheck_enabled {
+                this.sync_spellcheck(&text, cx);
+                return;
+            }
             this.composer_ui.spelling.underlines.text = text;
             if let Some(word) = accepted {
                 this.composer_ui
@@ -551,7 +562,7 @@ fn spelling_menu_items(
         return menu;
     }
     let word = text.get(range.clone()).unwrap_or_default().to_string();
-    if checker.is_correct(&word) {
+    if checker.is_correct_now(&word) {
         if checker.is_learned(&word) {
             menu = menu
                 .menu(
@@ -562,7 +573,7 @@ fn spelling_menu_items(
         }
         return menu;
     }
-    let suggestions = checker.suggestions(&word, MAX_SUGGESTIONS);
+    let suggestions = checker.suggestions_now(&word, MAX_SUGGESTIONS);
     if suggestions.is_empty() {
         menu = menu.menu_with_disabled(
             tr(keys::Q_MISC_NO_GUESSES_FOUND),

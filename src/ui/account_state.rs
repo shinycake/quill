@@ -35,20 +35,20 @@ pub(crate) struct AccountBoxes {
     /// TTL). Working state lives in the named module; this is the one
     /// field the dialog machinery reads.
     pub(super) lifecycle: AccountLifecycleState,
-    /// The notice the user opened from the banner or the 18+ switch, if
-    /// any (one box, so one value).
+    /// The notice the user opened from the banner or the 18+ switch, or
+    /// the review of a new login ended in, if any (one box, so one value).
     pub(super) notice: OpenNotice,
-    /// Whether the user already started the age verification (so turning
-    /// on 18+ content goes to the server).
-    pub(super) age_check: AgeCheck,
 }
 
 /// The account notice the user has open. It ends with its box, and with
 /// the condition that asked for it (`QuillApp::drain_account_notices`).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) enum OpenNotice {
     #[default]
     None,
+    /// "New Login Prevented": the attempts the user just terminated from
+    /// the new-login alert, until acknowledged.
+    LoginPrevented(Vec<String>),
     /// The frozen-account details.
     Frozen,
     /// The age verification prompt.
@@ -62,21 +62,11 @@ impl OpenNotice {
     }
 }
 
-/// How far the user took the age verification.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum AgeCheck {
-    #[default]
-    NotStarted,
-    /// The verification bot was opened.
-    Started,
-}
-
 impl AccountBoxes {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         Self {
             lifecycle: AccountLifecycleState::new(window, cx),
             notice: OpenNotice::None,
-            age_check: AgeCheck::NotStarted,
         }
     }
 }

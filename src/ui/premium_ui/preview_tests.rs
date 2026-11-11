@@ -194,3 +194,26 @@ fn a_refused_hide_ads_opens_the_no_ads_preview(cx: &mut TestAppContext) {
     });
     assert!(!pending, "the request is taken once");
 }
+
+/// 04-028: a preview asked for and not yet opened is for the account on
+/// screen; its screen going (a switch) takes the request with it.
+#[gpui_kit::test]
+fn a_pending_preview_request_goes_with_the_account_on_screen(cx: &mut TestAppContext) {
+    use crate::ui::on_screen::Farewell;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        let session = app.demo_session.as_mut().expect("demo session");
+        let chat_id = session.open_chat_id().unwrap_or(quill::ids::ChatId(1));
+        session.payments.hub.promo_request = Some(quill::premium_hub::PromoRequest {
+            feature: PremiumFeature::DisabledAds.into(),
+            chat_id,
+        });
+        crate::ui::payments_state::PaymentUi::farewell(app, window, cx);
+        assert!(
+            app.session()
+                .is_some_and(|s| s.payments.hub.promo_request.is_none()),
+            "the request does not wait for the account to come back"
+        );
+    });
+}

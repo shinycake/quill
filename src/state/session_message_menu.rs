@@ -238,6 +238,37 @@ pub enum SetFiles {
     Asked,
 }
 
+/// What a tapped emoji's pack lookup came back with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CustomEmojiAnswer {
+    Ready(CustomEmojiPreview),
+    Failed,
+}
+
+/// The answers of the pack lookups, each under the request that asked, for
+/// the window that tapped to take. Never more than a few: a window that
+/// closed before it took its answer leaves one behind.
+#[derive(Debug, Default)]
+pub struct CustomEmojiAnswers(std::collections::VecDeque<(RequestId, CustomEmojiAnswer)>);
+
+impl CustomEmojiAnswers {
+    const KEPT: usize = 8;
+
+    fn record(&mut self, request: RequestId, answer: CustomEmojiAnswer) {
+        self.0.retain(|(kept, _)| *kept != request);
+        if self.0.len() >= Self::KEPT {
+            self.0.pop_front();
+        }
+        self.0.push_back((request, answer));
+    }
+
+    /// The answer of `request`, once; `None` while it is still out.
+    pub fn take(&mut self, request: RequestId) -> Option<CustomEmojiAnswer> {
+        let at = self.0.iter().position(|(kept, _)| *kept == request)?;
+        self.0.remove(at).map(|(_, answer)| answer)
+    }
+}
+
 /// A tapped custom emoji and the pack it comes from (tdesktop's emoji
 /// preview, `ShowReactionPreview`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -275,21 +306,32 @@ impl Session {
         sets
     }
 
-    /// The pack of a tapped custom emoji arrived.
-    pub(crate) fn accept_custom_emoji_preview(
+    /// The pack of a tapped custom emoji arrived, for the tap that sent
+    /// `request`. A pack with no title has nothing to show.
+    pub fn accept_custom_emoji_preview(
         &mut self,
+        request: RequestId,
         emoji_id: i64,
         set_id: i64,
         title: String,
     ) {
-        if title.is_empty() {
-            return;
-        }
-        self.stickers.custom_emoji_preview = Some(CustomEmojiPreview {
-            emoji_id,
-            set_id,
-            title,
-        });
+        let answer = if title.is_empty() {
+            CustomEmojiAnswer::Failed
+        } else {
+            CustomEmojiAnswer::Ready(CustomEmojiPreview {
+                emoji_id,
+                set_id,
+                title,
+            })
+        };
+        self.stickers.custom_emoji_answers.record(request, answer);
+    }
+
+    /// The lookup of `request` was refused: its tap shows no card.
+    pub(crate) fn fail_custom_emoji_preview(&mut self, request: RequestId) {
+        self.stickers
+            .custom_emoji_answers
+            .record(request, CustomEmojiAnswer::Failed);
     }
 
     /// The set's contents arrived (`stage` is the `Ready` stage).
@@ -438,7 +480,7 @@ impl Session {
         self.messages.message_audience = Some(MessageAudience::new(chat_id, message_id));
     }
 
-    fn audience_for(
+    pub(crate) fn audience_for(
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,

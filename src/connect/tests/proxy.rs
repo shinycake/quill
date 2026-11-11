@@ -139,12 +139,12 @@ fn a_list_fetch_that_predates_a_change_does_not_clear_the_stale_mark() {
     rig.feed(stale);
     let proxy = &rig.driver.session.settings.proxy;
     assert!(
-        proxy.fetch.loading(),
+        proxy.ops.loading(),
         "still waiting for the fetch after the change"
     );
     rig.answer("getProxies", proxies_json(&[(1, false), (2, true)]));
     let proxy = &rig.driver.session.settings.proxy;
-    assert_eq!(proxy.fetch, ProxyFetch::Idle);
+    assert_eq!(proxy.ops.fetch(), ProxyFetch::Idle);
     assert_eq!(proxy.enabled().map(|p| p.id), Some(2));
 }
 
@@ -167,7 +167,7 @@ fn ok_acks_refetch_and_errors_surface_without_touching_the_list() {
         json!({"@type": "error", "code": 400, "message": "PROXY_NOT_FOUND"}),
     );
     let proxy = &rig.driver.session.settings.proxy;
-    assert!(!proxy.mutation.in_flight());
+    assert!(!proxy.ops.changing());
     assert!(
         proxy
             .error
@@ -617,7 +617,7 @@ fn an_earlier_links_ping_does_not_fill_the_next_links_box() {
     );
     assert_eq!(
         rig.driver.session.settings.proxy.link_check,
-        crate::proxy::LinkCheck::Done(PingStatus::Available(50)),
+        crate::proxy::LinkCheck::Available(50),
         "the working proxy is not shown as unavailable"
     );
 }
@@ -649,7 +649,7 @@ fn a_refused_remove_keeps_the_ping_result() {
     rig.driver.ping_listed_proxy(1).unwrap();
     rig.answer("pingProxy", json!({"@type": "seconds", "seconds": 0.0423}));
     rig.driver.disable_proxy().unwrap();
-    assert!(rig.driver.session.settings.proxy.mutation.in_flight());
+    assert!(rig.driver.session.settings.proxy.ops.changing());
     assert!(rig.driver.remove_proxy(1).is_err());
     assert_eq!(
         rig.driver.session.settings.proxy.pings.get(&1),

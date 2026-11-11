@@ -354,3 +354,69 @@ fn the_edit_row_opens_the_dialog_and_clears_the_slash(cx: &mut TestAppContext) {
     let text = app.read_with(vcx, |app, cx| app.composer.read(cx).value().to_string());
     assert!(text.is_empty());
 }
+
+#[gpui_kit::test]
+fn a_new_shortcut_nobody_reported_does_not_keep_the_poll_running(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx);
+    open(&app, vcx);
+    go(
+        &app,
+        vcx,
+        View::Shortcut {
+            name: "brand-new".into(),
+            id: None,
+        },
+    );
+    let done =
+        vcx.update(|window, cx| app.update(cx, |app, cx| app.quick_replies_pump(window, cx)));
+    assert!(done, "nothing was accepted, so there is no id to wait for");
+    let waiting = vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            if let Some(dialog) = app.dialogs.quick_replies_dialog.as_mut() {
+                dialog.pane.stage = super::PaneStage::Accepted;
+            }
+            app.quick_replies_pump(window, cx)
+        })
+    });
+    assert!(!waiting, "an accepted text waits for its shortcut's id");
+}
+
+#[gpui_kit::test]
+fn the_delete_question_is_dropped_by_another_action(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx);
+    open(&app, vcx);
+    go(
+        &app,
+        vcx,
+        View::Shortcut {
+            name: "hours".into(),
+            id: Some(1),
+        },
+    );
+    let stage = |vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.dialogs
+                .quick_replies_dialog
+                .as_ref()
+                .map(|dialog| dialog.pane.stage.clone())
+        })
+    };
+    app.update(vcx, |app, _| {
+        if let Some(dialog) = app.dialogs.quick_replies_dialog.as_mut() {
+            dialog.pane.stage = super::PaneStage::ConfirmDelete { editing: None };
+        }
+    });
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.begin_quick_reply_edit(7, "text".into(), window, cx)
+        })
+    });
+    assert!(matches!(
+        stage(vcx),
+        Some(super::PaneStage::Editing { editing: Some(7) })
+    ));
+}

@@ -83,6 +83,9 @@ pub enum ExportError {
     Flood,
     /// `SRP_ID_INVALID`: the check expired; tdesktop shows a server error.
     ServerError,
+    /// The try was refused before it went out (the request could not be
+    /// sent): the field is ready again.
+    NotSent,
     /// Any other failure, with its reason ("not found", ...).
     Other(String),
 }
@@ -139,8 +142,9 @@ pub enum TransferStage {
     /// sends `inputCheckPasswordEmpty` first). It only tells whether a
     /// password exists and is old enough; a URL it might return is dropped.
     /// Since TDLib 1.8.69 the probe stops in TDLib unless a temporary
-    /// password exists, so a too fresh password shows up on Submit.
-    Probing,
+    /// password exists, so a too fresh password shows up on Submit. Only
+    /// the answer or error of this request moves the picker.
+    Probing(crate::ids::RequestId),
     /// "Two-step verification": the password box. `send` is `Out` while
     /// `createTemporaryPassword` or the URL request after it is out; the
     /// password itself is never kept here.
@@ -228,7 +232,7 @@ impl TransferPicker {
 
     /// Whether either export request (the probe or the real one) is out.
     pub fn export_busy(&self) -> bool {
-        self.exporting() || self.stage == TransferStage::Probing
+        self.exporting() || matches!(self.stage, TransferStage::Probing(_))
     }
 
     /// Whether `transferGift` is out.
@@ -311,10 +315,27 @@ impl TransferPicker {
     }
 
     /// "Open Fragment" in the confirmation: the password-less probe goes
-    /// out.
-    pub fn open_fragment(&mut self) {
+    /// out as `request`.
+    pub fn open_fragment(&mut self, request: crate::ids::RequestId) {
         if self.stage == TransferStage::ConfirmExport {
-            self.stage = TransferStage::Probing;
+            self.stage = TransferStage::Probing(request);
+        }
+    }
+
+    /// `request` is the probe this picker waits for.
+    fn probing_for(&self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(self.stage, TransferStage::Probing(waiting) if Some(waiting) == request)
+    }
+
+    /// The password try was refused before it went out: the box stays
+    /// ready for another and says so under the field.
+    pub fn export_refused(&mut self) {
+        if let TransferStage::Password {
+            send: ExportSend::Idle,
+            error,
+        } = &mut self.stage
+        {
+            *error = Some(ExportError::NotSent);
         }
     }
 
@@ -324,8 +345,13 @@ impl TransferPicker {
     /// box. `has_password` is the password state when
     /// it is known and fresh: `Some(false)` also means the security check,
     /// since TDLib never lets the probe reach the server.
-    pub fn probe_failed(&mut self, outcome: ProbeOutcome, has_password: Option<bool>) {
-        if self.stage != TransferStage::Probing {
+    pub fn probe_failed(
+        &mut self,
+        request: Option<crate::ids::RequestId>,
+        outcome: ProbeOutcome,
+        has_password: Option<bool>,
+    ) {
+        if !self.probing_for(request) {
             return;
         }
         self.stage = match (outcome, has_password) {
@@ -342,8 +368,8 @@ impl TransferPicker {
 
     /// The probe returned a URL (it should not without a password): the
     /// URL is dropped and the password box opens, as after any answer.
-    pub fn probe_answered(&mut self) {
-        if self.stage == TransferStage::Probing {
+    pub fn probe_answered(&mut self, request: Option<crate::ids::RequestId>) {
+        if self.probing_for(request) {
             self.stage = TransferStage::Password {
                 send: ExportSend::Idle,
                 error: None,

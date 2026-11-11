@@ -35,12 +35,12 @@ impl Session {
             if call.state.is_terminal() {
                 self.end_active_call(call);
             } else {
-                if matches!(call.state, CallState::Ready) {
+                if let CallState::Ready(params) = &call.state {
                     match active.ready.as_mut() {
-                        Some(ready) => ready.params = call.ready.clone(),
+                        Some(ready) => ready.params = Some(params.clone()),
                         None => {
                             active.ready = Some(CallReady {
-                                params: call.ready.clone(),
+                                params: Some(params.clone()),
                                 since: Instant::now(),
                             })
                         }
@@ -113,7 +113,6 @@ impl Session {
             call.is_outgoing,
             call.is_video,
             call.state.clone(),
-            call.ready.clone(),
         ));
         self.calls.summary = None;
         self.calls.error = None;
@@ -214,7 +213,6 @@ impl Session {
                 is_created: true,
                 is_received: false,
             },
-            None,
         ));
         self.calls.summary = None;
         self.calls.error = None;
@@ -587,13 +585,18 @@ impl Session {
         }
     }
 
-    /// Store a `getVideoChatInviteLink` `HttpUrl` answer on the tracked
-    /// call: the speaker link when the request had `can_self_unmute`.
-    pub fn set_group_call_invite_link(&mut self, group_call_id: i32, speaker: bool, link: String) {
+    /// Store the `HttpUrl` answer of the `getVideoChatInviteLink` request
+    /// `request` on the tracked call, in the slot that waits for it.
+    pub fn set_group_call_invite_link(
+        &mut self,
+        group_call_id: i32,
+        request: RequestId,
+        link: String,
+    ) {
         if let Some(tracked) = self.calls.active_group_call.as_mut()
             && tracked.id == group_call_id
         {
-            tracked.share_links.answered(speaker, link);
+            tracked.share_links.answered(request, link);
         }
     }
 }

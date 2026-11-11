@@ -17,6 +17,12 @@ use quill::chatlist_archive::{
 use quill::lang::{keys, tr};
 
 impl QuillApp {
+    /// The one closer of the box: its button, Esc, the X and "Tap to change"
+    /// all end here.
+    pub(super) fn close_archive_hint(&mut self) {
+        self.chat_list.archive_hint_open = false;
+    }
+
     pub(super) fn open_archive_hint(&mut self, cx: &mut Context<Self>) {
         self.chat_list.archive_hint_open = true;
         self.open_box(DialogKind::ArchiveHint);
@@ -42,7 +48,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::ArchiveHint, |this, _, cx| {
-                this.chat_list.archive_hint_open = false;
+                this.close_archive_hint();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
@@ -65,7 +71,7 @@ impl QuillApp {
                             .label(tr(keys::Q_CHATLIST_TAP_TO_CHANGE))
                             .ghost()
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.chat_list.archive_hint_open = false;
+                                this.close_archive_hint();
                                 this.open_archive_settings(cx);
                                 this.close_kit_dialog_if_done(DialogKind::ArchiveHint, window, cx);
                             })),
@@ -98,7 +104,7 @@ impl QuillApp {
                 Button::new("archive-hint-got-it")
                     .label(tr(keys::ARCHIVE_HINT_BUTTON))
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.chat_list.archive_hint_open = false;
+                        this.close_archive_hint();
                         cx.notify();
                         this.close_kit_dialog_if_done(DialogKind::ArchiveHint, window, cx);
                     })),
@@ -122,7 +128,7 @@ crate::ui::shell::register_dialogs! {
         QuillApp::build_archive_hint_dialog,
     )
     .close(|app, _, cx| {
-            app.chat_list.archive_hint_open = false;
+            app.close_archive_hint();
             cx.notify();
         }),
 }

@@ -356,8 +356,8 @@ fn update_group_call_participant_video_info_parsed() {
         EnvelopePayload::Calls(CallsPayload::UpdateGroupCallParticipant {
             participant, ..
         }) => {
-            assert!(participant.video_enabled);
-            assert!(participant.screen_sharing_enabled);
+            assert!(participant.video_enabled());
+            assert!(participant.screen_sharing_enabled());
             let camera = participant.video_info.expect("camera video info");
             assert_eq!(camera.endpoint_id, "ep-42");
             assert!(!camera.is_paused);
@@ -604,7 +604,7 @@ fn get_story_video_parses_thumb_and_duration() {
                     assert_eq!(thumb_width, 320);
                     assert_eq!(thumb_height, 240);
                     assert_eq!(duration_secs, 12);
-                    assert_eq!(file_id, FileId(72));
+                    assert_eq!(file_id, Some(FileId(72)));
                 }
                 other => panic!("{other:?}"),
             }

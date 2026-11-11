@@ -36,6 +36,8 @@ These rules apply to every PR, human or agent. Tests are exempt: `unwrap`,
    guard across a call into GPUI, a callback, a native player, or another
    module. Copy what you need out and drop the guard. In paint and prepaint
    closures prefer `try_borrow_mut()` with an early return.
+   CI rejects a new `borrow()`, `borrow_mut()`, `with_borrow(..)` or
+   `with_borrow_mut(..)` outside tests (see "The RefCell guard" below).
 7. **Respect GPUI's re-entrancy contract.** Never query a `ListState` or
    scroll handle from inside that list's own row closures (the #747 crash);
    read what you need before the list lays out. Never `update` or `read` an
@@ -62,6 +64,34 @@ logged as `panic-caught-<ts>.txt` and does not count as a crash.
 When something truly cannot fail and the alternative would be worse code,
 write `#[expect(clippy::<lint>, reason = "<the invariant>")]` on the smallest
 item that needs it. The reason is reviewed like code.
+
+## The RefCell guard
+
+`scripts/check-refcell-borrows.py` counts every `.borrow()`,
+`.borrow_mut()`, `.with_borrow(..)` and `.with_borrow_mut(..)` outside
+test code. These panic when the cell is already borrowed, and a guard that
+is short today is held across a GPUI call after the next edit. The calls
+that were in the tree when the check was added are in
+`scripts/refcell-borrows-baseline.txt`, listed by function and receiver
+(`QuillApp::sync_window_title::window_title_shown.borrow_mut 1`). The
+list only shrinks; a new call fails. Clippy's `disallowed_methods` could
+name the same methods, but it has no baseline: each of the 420 calls
+there today would need its own `#[expect]` in the source.
+
+Write one of these instead:
+
+- `Cell<T>` (`get`, `set`, `take`, `replace`) when the value is copied or
+  handed over whole. The dialog body that is built once and given to an
+  `Fn` closure is `Rc<Cell<Option<AnyElement>>>` and `body.take()`. There
+  is no guard, so nothing can be held.
+- `try_borrow()` / `try_borrow_mut()` with an early return. A re-entry
+  then skips one frame instead of ending the process.
+- State on an entity, read and written through `cx`.
+
+When you remove a borrow, run the check with `--prune` and commit the
+smaller baseline. A `.borrow()` that is not a `RefCell` (the `Borrow`
+trait, a watch channel) goes in `scripts/refcell-borrows-allow.txt` with
+the reason.
 
 ## Lints (phased)
 

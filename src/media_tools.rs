@@ -47,14 +47,12 @@ pub fn warm_up() {
 }
 
 fn spawn_warm_up() {
-    let _ = std::thread::Builder::new()
-        .name("quill-media-tools".into())
-        .spawn(|| {
-            for name in ["ffmpeg", "ffprobe"] {
-                let _ = candidates(name);
-            }
-            crate::video_encoder::warm_listings();
-        });
+    let _ = crate::thread_guard::spawn_guarded("quill-media-tools", || {
+        for name in ["ffmpeg", "ffprobe"] {
+            let _ = candidates(name);
+        }
+        crate::video_encoder::warm_listings();
+    });
 }
 
 /// The preferred copy of `name`. Never probes: before [`warm_up`] has
@@ -77,7 +75,7 @@ fn cached_or_unprobed(name: &str) -> Vec<PathBuf> {
 }
 
 /// Every copy of media tool `name` that can run, in the order `command`
-/// prefers them. Resolved once per process; the first call probes a bundled
+/// prefers them. A found answer is kept for the process; the first call probes a bundled
 /// copy (up to 5 s), so call it off the UI thread (see [`warm_up`]).
 pub fn candidates(name: &str) -> Vec<PathBuf> {
     if let Ok(cache) = RESOLVED.lock()
@@ -86,7 +84,12 @@ pub fn candidates(name: &str) -> Vec<PathBuf> {
         return found.clone();
     }
     let found = search(name, runs);
-    if let Ok(mut cache) = RESOLVED.lock() {
+    // An empty answer is not cached: installing the tool (or fixing `PATH`
+    // for a new launch of a child) is noticed on the next ask, and the
+    // search without a copy is only file checks.
+    if !found.is_empty()
+        && let Ok(mut cache) = RESOLVED.lock()
+    {
         cache.insert(name.to_string(), found.clone());
     }
     found
@@ -556,6 +559,14 @@ mod tests {
         );
         assert!(!is_installed("quill-no-such-media-tool"));
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_not_found_answer_is_not_cached_so_a_later_install_is_seen() {
+        let name = "quill-uncached-media-tool";
+        assert!(candidates(name).is_empty());
+        let cached = RESOLVED.lock().is_ok_and(|cache| cache.contains_key(name));
+        assert!(!cached);
     }
 
     /// The stand-in tools are checked in with their executable bit, never

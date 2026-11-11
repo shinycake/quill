@@ -8,6 +8,7 @@ use super::photo_editor::{EditorPurpose, PhotoEditor};
 use super::send_box_media_check::check_photo;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
+use quill::composer::EditRender;
 use quill::lang::{keys, tr};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -48,7 +49,14 @@ impl QuillApp {
             }
             EditorPurpose::Profile(target) => self.finish_profile_crop(editor, target, cx),
             EditorPurpose::MessageEdit { chat, message } => {
-                let edit_of = Some((chat, message));
+                let edit_of = (chat, message);
+                if self.edited_message() != Some(edit_of) {
+                    return;
+                }
+                let number = NEXT_RENDER.fetch_add(1, Ordering::Relaxed);
+                if let Some(edit) = self.chat_ui.pending_edit_mut() {
+                    edit.media_edit.render = EditRender::Rendering(number);
+                }
                 let job = editor.into_render_job();
                 let render = cx.background_spawn(async move {
                     super::edit_media_tools::write_edited_png(&job.render())
@@ -57,7 +65,14 @@ impl QuillApp {
                     let saved = render.await;
                     let kept = saved.clone();
                     let landed = app.update(cx, |this, cx| {
-                        if edit_of.is_some() && this.edited_message() == edit_of {
+                        if this.edited_message() == Some(edit_of)
+                            && this.chat_ui.pending_edit().is_some_and(|edit| {
+                                edit.media_edit.render == EditRender::Rendering(number)
+                            })
+                        {
+                            if let Some(edit) = this.chat_ui.pending_edit_mut() {
+                                edit.media_edit.render = EditRender::Idle;
+                            }
                             this.finish_edit_image(saved, cx);
                         } else if let Some(saved) = saved {
                             let _ = std::fs::remove_file(saved);

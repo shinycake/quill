@@ -104,7 +104,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         loaded.events.iter().map(|e| e.id).collect::<Vec<_>>(),
         vec![300, 299]
     );
-    assert!(!loaded.has_more);
+    assert!(!loaded.has_more());
 
     // Older page appends; the overlapping id dedupes; a full page
     // (100 events) keeps `has_more`.
@@ -122,7 +122,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
     assert_eq!(ids.len(), 101);
     assert_eq!(ids[0], 300);
     assert_eq!(ids[100], 200);
-    assert!(loaded.has_more);
+    assert!(loaded.has_more());
 
     // A short final page clears `has_more`.
     let extra = event_log_request(
@@ -135,7 +135,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         panic!("expected loaded event log");
     };
     assert_eq!(loaded.events.len(), 102);
-    assert!(!loaded.has_more);
+    assert!(!loaded.has_more());
 
     // A first-page refetch replaces everything (refresh semantics).
     let extra = event_log_request(
@@ -212,6 +212,21 @@ fn event_log_failure_states() {
         panic!("expected loaded event log");
     };
     assert_eq!(loaded.events.len(), 1);
+    assert!(
+        matches!(loaded.older, OlderEvents::Failed(_)),
+        "the failed older page draws its Retry"
+    );
+    assert!(loaded.has_more(), "Retry may ask again");
+    session.begin_older_events(13);
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
+    else {
+        panic!("expected loaded event log");
+    };
+    assert_eq!(
+        loaded.older,
+        OlderEvents::Available,
+        "asking clears the line"
+    );
 }
 
 #[test]
@@ -321,10 +336,13 @@ fn set_chat_member_status_ok_invalidates_admin_list() {
 fn adding_members_marks_the_member_list_stale() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session
-        .groups
-        .basic_group_members
-        .insert(13, crate::state::SupergroupMembersFetch::Loading);
+    session.groups.basic_group_members.insert(
+        13,
+        crate::state::SupergroupMembersFetch::Loading {
+            request: None,
+            last: None,
+        },
+    );
     let extra = session.request(RequestPurpose::AddChatMember, Some(ChatId(13)));
     apply_json(
         &mut session,
@@ -747,9 +765,7 @@ fn g2_boost_slots_stashed_for_chain() {
     let extra = session.request(RequestPurpose::GetBoostSlotsForBoost, Some(ChatId(13)));
     // Kept only while the box of that chat waits for the slots.
     let mut open = crate::boost_box::BoostBoxState::new(13, false);
-    open.phase = crate::boost_box::BoostPhase::Working(crate::boost_box::BoostWork::Slots {
-        request: extra,
-    });
+    open.reading_slots(extra);
     session.groups.boost_box = Some(open);
     apply_json(
         &mut session,
@@ -783,9 +799,7 @@ fn an_older_boost_answer_does_not_end_the_new_boxes_wait() {
     let old = session.request(RequestPurpose::BoostChat, Some(ChatId(13)));
     let asked = session.request(RequestPurpose::GetBoostSlotsForBoost, Some(ChatId(13)));
     let mut open = crate::boost_box::BoostBoxState::new(13, false);
-    open.phase = crate::boost_box::BoostPhase::Working(crate::boost_box::BoostWork::Slots {
-        request: asked,
-    });
+    open.reading_slots(asked);
     session.groups.boost_box = Some(open);
     apply_json(
         &mut session,
@@ -798,7 +812,7 @@ fn an_older_boost_answer_does_not_end_the_new_boxes_wait() {
     );
     let state = session.groups.boost_box.as_ref().expect("the box");
     assert!(state.waits_for(asked), "the new press still waits");
-    assert!(state.note.is_none());
+    assert!(state.note().is_none());
 }
 
 #[test]
@@ -992,7 +1006,7 @@ fn event_log_admin_ids_dedupes_and_skips_chat_senders() {
             event(3, MessageSender::User { user_id: 9 }),
             event(4, MessageSender::User { user_id: 7 }),
         ],
-        has_more: false,
+        older: crate::state::OlderEvents::Exhausted,
     };
     assert_eq!(page.admin_user_ids(), vec![7, 9]);
 }

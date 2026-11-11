@@ -151,21 +151,24 @@ impl StickerLists {
     }
 }
 
-/// A batch of install/archive changes, each confirmed on its own (not an
-/// atomic TDLib operation).
+/// A batch of sticker set changes: each set's `changeStickerSet` answers on
+/// its own, and a batch is not atomic. The confirmed results are what the
+/// stage keeps; a new batch replaces the finished one.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum StickerBatch {
     #[default]
     Idle,
-    /// Changes still waiting for TDLib's answer (`pending` set ids).
+    /// Changes are out as the requests in `pending` (with the set each
+    /// changes); the answer or error of one of them moves its set to
+    /// `completed` or `failed`, and no other request does.
     Running {
         total: usize,
-        pending: Vec<i64>,
         completed: usize,
         failed: usize,
+        pending: Vec<(i64, RequestId)>,
     },
-    /// Every change was answered.
-    Done {
+    /// Every set answered.
+    Finished {
         total: usize,
         completed: usize,
         failed: usize,
@@ -173,69 +176,82 @@ pub enum StickerBatch {
 }
 
 impl StickerBatch {
-    pub fn start(set_ids: Vec<i64>) -> Self {
+    /// A batch over `total` sets, of which `sent` went out as these
+    /// requests; the rest could not be sent and count as failed.
+    pub fn begin(total: usize, sent: Vec<(i64, RequestId)>) -> Self {
+        let failed = total.saturating_sub(sent.len());
+        if sent.is_empty() {
+            return Self::Finished {
+                total,
+                completed: 0,
+                failed,
+            };
+        }
         Self::Running {
-            total: set_ids.len(),
-            pending: set_ids,
+            total,
             completed: 0,
-            failed: 0,
+            failed,
+            pending: sent,
         }
     }
 
-    pub fn total(&self) -> usize {
-        match self {
-            Self::Idle => 0,
-            Self::Running { total, .. } | Self::Done { total, .. } => *total,
-        }
-    }
-
-    pub fn completed(&self) -> usize {
-        match self {
-            Self::Idle => 0,
-            Self::Running { completed, .. } | Self::Done { completed, .. } => *completed,
-        }
-    }
-
-    pub fn failed(&self) -> usize {
-        match self {
-            Self::Idle => 0,
-            Self::Running { failed, .. } | Self::Done { failed, .. } => *failed,
-        }
-    }
-
-    pub fn pending(&self) -> &[i64] {
-        match self {
-            Self::Running { pending, .. } => pending,
-            Self::Idle | Self::Done { .. } => &[],
-        }
-    }
-
-    /// `set_id`'s change was answered; the batch is done with its last one.
-    pub fn finish_item(&mut self, set_id: i64, success: bool) {
+    /// `request` answered (`success`) or failed; a request the batch does
+    /// not wait for changes nothing.
+    pub fn finish_item(&mut self, request: RequestId, success: bool) {
         let Self::Running {
             total,
-            pending,
             completed,
             failed,
+            pending,
         } = self
         else {
             return;
         };
-        let Some(index) = pending.iter().position(|id| *id == set_id) else {
+        let before = pending.len();
+        pending.retain(|(_, asked)| *asked != request);
+        if pending.len() == before {
             return;
-        };
-        pending.remove(index);
+        }
         if success {
             *completed += 1;
         } else {
             *failed += 1;
         }
         if pending.is_empty() {
-            *self = Self::Done {
+            *self = Self::Finished {
                 total: *total,
                 completed: *completed,
                 failed: *failed,
             };
+        }
+    }
+
+    pub fn total(&self) -> usize {
+        match self {
+            Self::Idle => 0,
+            Self::Running { total, .. } | Self::Finished { total, .. } => *total,
+        }
+    }
+
+    pub fn completed(&self) -> usize {
+        match self {
+            Self::Idle => 0,
+            Self::Running { completed, .. } | Self::Finished { completed, .. } => *completed,
+        }
+    }
+
+    pub fn failed(&self) -> usize {
+        match self {
+            Self::Idle => 0,
+            Self::Running { failed, .. } | Self::Finished { failed, .. } => *failed,
+        }
+    }
+
+    /// The sets still waited for.
+    pub fn pending(&self) -> Vec<i64> {
+        match self {
+            Self::Running { pending, .. } => pending.iter().map(|(set_id, _)| *set_id).collect(),
+            _ => Vec::new(),
         }
     }
 }
@@ -308,8 +324,7 @@ pub struct StickerPanel {
     /// Each list tab's own fetch: a failure of one list shows on that tab
     /// only, and a failed mutation is a note, not a list failure.
     pub lists: StickerLists,
-    /// The install/archive batch of the manage box: replaced whole when a
-    /// new one starts.
+    /// The batch of set changes (install / archive many) and how far it got.
     pub batch: StickerBatch,
     /// Slice S8: trending sets (`getTrendingStickerSets`) + premium-row flag.
     pub trending: Vec<StickerSetInfo>,
@@ -357,20 +372,15 @@ pub struct GifPanel {
     pub search_chat: Option<crate::ids::ChatId>,
     pub search_bot_username: String,
     pub search_bot_user_id: Option<i64>,
-    /// Slice S9: GIF search via the animation search bot
-    /// (`getInlineQueryResults`; schema 1.8.67, lines 6483, 13019).
-    /// First page replaces; later pages append, deduped by file id.
-    pub search_results: Vec<AnimationItem>,
-    /// Slice S9: `next_offset` of the last search page ("" = exhausted).
-    pub search_next_offset: String,
-    pub search_offset: String,
+    // The search's results and paging live in its stage ([`GifSearch`]):
+    // a new search replaces them whole.
     /// Slice S9: `updateAnimationSearchParameters` (schema 1.8.67, line
     /// 11064) — the upstream animation-search provider name and its
     /// suggested search emojis.
     pub search_provider: String,
     pub provider_emojis: Vec<String>,
     /// The searches answered lately, so a window's GIF tab shows its own
-    /// search while another window's is the one in `search_results`.
+    /// search while another window's is the one the panel holds.
     pub searches_kept: GifSearches,
 }
 
@@ -412,7 +422,7 @@ impl GifSearches {
 
 /// Which list a GIF panel holds. A search is a stage of its own: for one
 /// query, asked (`Loading`), answered (`Ready`, the results are in
-/// `search_results`), or refused (`Failed`). Its pages are matched to the
+/// its `results`), or refused (`Failed`). Its pages are matched to the
 /// request that asked, so a late page of an earlier search changes nothing.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum GifList {
@@ -428,6 +438,15 @@ pub struct GifSearch {
     pub query: String,
     pub fetch: Fetch<()>,
     pub request: Option<crate::ids::RequestId>,
+    /// Slice S9: GIF search via the animation search bot
+    /// (`getInlineQueryResults`; schema 1.8.67, lines 6483, 13019). First
+    /// page replaces; later pages append, deduped by file id.
+    pub results: Vec<AnimationItem>,
+    /// `next_offset` of the last page ("" = exhausted).
+    pub next_offset: String,
+    /// The offset the page in flight (or last asked) started at: a
+    /// `next_offset` that repeats it ends the paging.
+    pub asked_offset: String,
 }
 
 const GIF_FAILED: &str = "gif request failed";
@@ -560,7 +579,75 @@ impl GifPanel {
                 request: None,
             },
             request: None,
+            results: Vec::new(),
+            next_offset: String::new(),
+            asked_offset: String::new(),
         });
+    }
+
+    /// The search's GIFs so far (none when the panel shows the saved ones).
+    pub fn search_results(&self) -> &[AnimationItem] {
+        match &self.list {
+            GifList::Search(search) => &search.results,
+            GifList::Saved => &[],
+        }
+    }
+
+    /// Where the next page of the search starts ("" = no more).
+    pub fn search_next_offset(&self) -> &str {
+        match &self.list {
+            GifList::Search(search) => &search.next_offset,
+            GifList::Saved => "",
+        }
+    }
+
+    /// The search starts over (its bot changed): nothing found, no paging,
+    /// and it waits for a request again.
+    pub fn search_restarted(&mut self) {
+        if let GifList::Search(search) = &mut self.list {
+            search.results.clear();
+            search.next_offset.clear();
+            search.asked_offset.clear();
+        }
+        self.search_asked();
+    }
+
+    /// The page starting at `offset` is about to be asked.
+    pub fn search_page_asked(&mut self, offset: String) {
+        self.search_asked();
+        if let GifList::Search(search) = &mut self.list {
+            search.asked_offset = offset;
+        }
+    }
+
+    /// A page of the search answered (the caller checked
+    /// [`Self::search_waits_for`]): a first page replaces the results, a
+    /// later one appends the new GIFs, and a `next_offset` that repeats the
+    /// page's own start ends the paging.
+    pub fn search_page_answered(
+        &mut self,
+        animations: Vec<AnimationItem>,
+        next_offset: String,
+        first_page: bool,
+    ) {
+        self.search_answered();
+        let GifList::Search(search) = &mut self.list else {
+            return;
+        };
+        if first_page {
+            search.results = animations;
+        } else {
+            for item in animations {
+                if !search.results.iter().any(|r| r.file_id == item.file_id) {
+                    search.results.push(item);
+                }
+            }
+        }
+        search.next_offset = if !next_offset.is_empty() && next_offset == search.asked_offset {
+            String::new()
+        } else {
+            next_offset
+        };
     }
 
     /// The panel goes back to the saved GIFs.
@@ -626,7 +713,7 @@ impl GifPanel {
 
     pub fn visible_animations(&self) -> &[AnimationItem] {
         if self.search_mode() {
-            &self.search_results
+            self.search_results()
         } else {
             &self.animations
         }

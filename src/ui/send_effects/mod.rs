@@ -405,11 +405,11 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.close_send_menu(cx);
-        self.open_schedule_picker(super::scheduled::ScheduleTarget::Composer, window, cx);
-        if let Some(picker) = self.chat_ui.schedule_picker.as_mut() {
-            picker.send_after = true;
-            picker.send_effect = effect_id;
-        }
+        self.open_schedule_picker(
+            super::scheduled::ScheduleTarget::ComposerThenSend { effect: effect_id },
+            window,
+            cx,
+        );
     }
 
     /// Right-click on the card's button: send silently or on a schedule

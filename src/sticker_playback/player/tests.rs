@@ -552,14 +552,14 @@ fn the_workers_go_idle_with_frames_asked_of_a_failed_clip() {
     );
 }
 
-/// A worker that panics leaves its clip busy for good.
+/// An opener that panics fails the clip it held.
 #[test]
-fn waiting_for_the_workers_ends_when_one_panics() {
+fn an_opener_that_panics_fails_its_clip() {
     let engine = Engine::new(1, 1 << 20);
     let key = key(1, 16);
     engine.open(key, Origin::Decoded(Box::new(|_, _| panic!("decoder"))));
     engine.wait_idle();
-    assert_eq!(engine.state(&key), Some(ClipState::Opening));
+    assert!(matches!(engine.state(&key), Some(ClipState::Failed(_))));
 }
 
 #[test]

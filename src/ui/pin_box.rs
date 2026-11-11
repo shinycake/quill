@@ -15,6 +15,14 @@ use quill::telegram::envelope::ChatKind;
 use std::cell::Cell;
 use std::rc::Rc;
 
+/// Where an unpin was asked: the message menu, or the selection bar over the
+/// ticked messages (which the unpin consumes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum UnpinOrigin {
+    Menu,
+    Selection,
+}
+
 impl QuillApp {
     /// The message menu's Pin / Unpin: pinning opens the pin box, unpinning
     /// asks "Would you like to unpin this message?".
@@ -30,7 +38,7 @@ impl QuillApp {
             .and_then(|s| s.histories.get(&chat_id.0)?.messages.get(&message_id.0))
             .is_some_and(|message| message.is_pinned);
         if pinned {
-            self.confirm_unpin(chat_id, vec![message_id], window, cx);
+            self.confirm_unpin(chat_id, vec![message_id], UnpinOrigin::Menu, window, cx);
         } else {
             self.open_pin_box(chat_id, message_id, window, cx);
         }
@@ -138,6 +146,7 @@ impl QuillApp {
         &mut self,
         chat_id: ChatId,
         ids: Vec<MessageId>,
+        origin: UnpinOrigin,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -165,7 +174,11 @@ impl QuillApp {
                                 this.unpin_from_banner(chat_id, id, cx);
                             }
                         }
-                        this.share.forward = crate::ui::forward_stage::ForwardStage::None;
+                        // Only the selection that was unpinned ends with it:
+                        // a forward built elsewhere is not this box's.
+                        if origin == UnpinOrigin::Selection {
+                            this.share.forward = crate::ui::forward_stage::ForwardStage::None;
+                        }
                         cx.notify();
                     });
                     true

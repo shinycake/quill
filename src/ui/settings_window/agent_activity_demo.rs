@@ -87,8 +87,11 @@ fn demo_activity(app: &mut QuillApp, _: &mut Window, cx: &mut Context<QuillApp>)
                 chat_id: 7,
                 chat_title: chat.into(),
                 summary: summary.into(),
-                ok,
-                declined: false,
+                outcome: if chat == "Family" {
+                    activity::Outcome::Undone
+                } else {
+                    activity::Outcome::of(ok, false)
+                },
                 id: 0,
                 // Sends name the messages they made, so Undo can offer to
                 // delete them; the oldest one was undone already.
@@ -97,7 +100,6 @@ fn demo_activity(app: &mut QuillApp, _: &mut Window, cx: &mut Context<QuillApp>)
                 } else {
                     Vec::new()
                 },
-                undone: chat == "Family",
             });
         }
     }

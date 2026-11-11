@@ -72,12 +72,65 @@ fn a_picked_file_goes_up_as_a_local_input_file() {
         ToneUpload::Uploading {
             name: "Soft Bell".into(),
             target: ToneTarget::Reaction,
+            request: crate::ids::RequestId(request["@extra"].as_str().unwrap().parse().unwrap()),
         }
     );
     assert_eq!(
         driver.upload_notification_tone(&path, ToneTarget::Reaction),
         Err(ToneProblem::Unreadable),
         "one file at a time"
+    );
+}
+
+/// An answer settles the upload of its own request only: another request's
+/// answer or error neither fails the upload nor hands it a target.
+#[test]
+fn an_answer_for_another_request_does_not_settle_the_upload() {
+    let (mut driver, recorder, sink, seq) = driver();
+    let path = tone_file("Soft Bell.mp3", 4000);
+    driver
+        .upload_notification_tone(&path, ToneTarget::Reaction)
+        .unwrap();
+    let waiting = ToneUpload::Uploading {
+        request: crate::ids::RequestId(u64::MAX),
+        name: "Other".into(),
+        target: ToneTarget::Reaction,
+    };
+    driver.session.settings.tone_upload = waiting.clone();
+    answer(
+        &mut driver,
+        &recorder,
+        &seq,
+        &sink,
+        "addSavedNotificationSound",
+        r#"{"@type":"error","code":400,"message":"RINGTONE_SIZE_TOO_BIG"}"#,
+    );
+    assert_eq!(driver.session.settings.tone_upload, waiting, "its error");
+    let (mut driver, recorder, sink, seq) = self::driver();
+    driver
+        .upload_notification_tone(&path, ToneTarget::Reaction)
+        .unwrap();
+    driver.session.settings.tone_upload = waiting.clone();
+    answer(
+        &mut driver,
+        &recorder,
+        &seq,
+        &sink,
+        "addSavedNotificationSound",
+        NEW_SOUND,
+    );
+    assert!(
+        driver
+            .session
+            .settings
+            .saved_sounds
+            .data()
+            .is_some_and(|sounds| sounds.iter().any(|sound| sound.id == 900)),
+        "the sound is saved"
+    );
+    assert_eq!(
+        driver.session.settings.tone_upload, waiting,
+        "the other upload still waits for its own answer"
     );
 }
 

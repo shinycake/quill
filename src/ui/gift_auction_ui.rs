@@ -345,7 +345,7 @@ impl QuillApp {
         };
         self.request_animation_tick(1, cx);
         let now = now_unix();
-        let recipient = self.gift_market.recipient.clone();
+        let recipient = self.gift_market.flow.recipient().cloned();
         let hide_about = match recipient.as_ref() {
             Some(r) if !r.is_self => tr_with(
                 keys::GIFT_SEND_ANONYMOUS_ABOUT,
@@ -375,9 +375,9 @@ impl QuillApp {
             .child(
                 Checkbox::new("auction-send-hide-name")
                     .label(tr(keys::GIFT_SEND_ANONYMOUS))
-                    .checked(self.gift_market.hide_name)
+                    .checked(self.gift_market.flow.hide_name())
                     .on_click(cx.listener(|this, &on, _, cx| {
-                        this.gift_market.hide_name = on;
+                        this.gift_market.flow.set_hide_name(on);
                         cx.notify();
                     })),
             )
@@ -661,7 +661,7 @@ impl QuillApp {
                     })
             }
         });
-        self.gift_market.recipient = recipient;
+        self.gift_market.flow.set_recipient(recipient);
         self.market_push(MarketBox::bid(gift_id), cx);
     }
 

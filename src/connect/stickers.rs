@@ -349,19 +349,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             .copied()
             .filter(|id| seen.insert(*id))
             .collect();
-        self.session.stickers.stickers.batch = crate::state::StickerBatch::start(ids.clone());
-        let mut sent = 0;
+        // The batch holds the request of every change that went out; a set
+        // whose change could not be sent counts as failed from the start.
+        let total = ids.len();
+        let mut sent = Vec::new();
         for id in ids {
-            if self
-                .manage_sticker_set(id, installed, false)
-                .is_ok_and(|request| request.is_some())
-            {
-                sent += 1;
-            } else {
-                self.session.finish_sticker_batch_item(id, false);
+            if let Ok(Some(request)) = self.manage_sticker_set(id, installed, false) {
+                sent.push((id, request));
             }
         }
-        Ok(sent)
+        let count = sent.len();
+        self.session.stickers.stickers.batch = crate::state::StickerBatch::begin(total, sent);
+        Ok(count)
     }
 
     pub fn manage_sticker_set(
@@ -595,8 +594,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             && suggest_emoji_for(text).is_none()
             && stickers.suggestions.is_empty()
             && stickers.suggest_for.is_nothing()
-            && emoji.animated_emoji.is_none()
-            && emoji.animated_emoji_for.is_none()
+            && emoji.animated.is_idle()
             && !self
                 .session
                 .requests
@@ -783,7 +781,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // An update of the shown trending tab left its list `Idle`.
         let emoji_trending = emoji.open
             && emoji.tab == crate::emoji::EmojiSetTab::Trending
-            && emoji.lists.trending.is_idle();
+            && emoji.lists.trending.wants_fetch();
         let reactions = self
             .session
             .stickers

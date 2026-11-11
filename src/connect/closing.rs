@@ -24,6 +24,7 @@
 
 use super::*;
 use crate::ids::AccountKey;
+use crate::state::ShutdownPhase;
 use crate::telegram::client::{OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::AuthorizationState;
 use std::time::{Duration, Instant};
@@ -88,18 +89,20 @@ pub(crate) fn begin_close<S: JsonSender>(driver: &mut ConnectDriver<S>) {
         let _ = driver.set_online(false);
     }
     if driver.hang_up_pending() {
-        driver.close_held_until = Some(deadline_after(HANG_UP_HOLD));
+        driver.session.shutdown = ShutdownPhase::HoldingClose {
+            until: deadline_after(HANG_UP_HOLD),
+        };
     } else {
         let _ = driver.request_close();
     }
 }
 
 pub(crate) fn release_close<S: JsonSender>(driver: &mut ConnectDriver<S>, now: Instant) {
-    let Some(until) = driver.close_held_until else {
+    let ShutdownPhase::HoldingClose { until } = driver.session.shutdown else {
         return;
     };
     if now >= until || !driver.hang_up_pending() {
-        driver.close_held_until = None;
+        driver.session.shutdown = ShutdownPhase::Running;
         let _ = driver.request_close();
     }
 }
@@ -174,13 +177,19 @@ pub(crate) fn drain_bridged<S: JsonSender>(
     }
 }
 
+/// How long a closing client has waited: since when, and whether the slow
+/// close was logged (once).
+#[derive(Clone, Copy)]
+enum CloseWait {
+    Since(Instant),
+    SlowLogged,
+}
+
 /// One client on its way out.
 pub struct ClosingClient {
     pub key: AccountKey,
     client: Box<dyn Closable>,
-    since: Instant,
-    /// The slow close was logged.
-    warned: bool,
+    wait: CloseWait,
     /// Start the account again in the background once closed (it was
     /// closed only because of a call, not because it signed out).
     pub restart: bool,
@@ -255,8 +264,7 @@ impl ClosingSet {
         self.slots.push(Slot::Closing(ClosingClient {
             key,
             client,
-            since: Instant::now(),
-            warned: false,
+            wait: CloseWait::Since(Instant::now()),
             restart,
         }));
     }
@@ -352,8 +360,10 @@ impl ClosingSet {
                 CloseProgress::Closed => true,
                 CloseProgress::Lost => false,
                 CloseProgress::Pending => {
-                    if !entry.warned && now.saturating_duration_since(entry.since) >= CLOSE_GRACE {
-                        entry.warned = true;
+                    if let CloseWait::Since(since) = entry.wait
+                        && now.saturating_duration_since(since) >= CLOSE_GRACE
+                    {
+                        entry.wait = CloseWait::SlowLogged;
                         eprintln!(
                             "quill: TDLib has not closed account {} after {:?}; still waiting",
                             entry.key, CLOSE_GRACE

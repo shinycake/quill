@@ -15,7 +15,7 @@ use super::calls::stream_view::StreamPictureView;
 use super::frame_clock::{follow_app, trace_slice_render};
 use super::group_call_members_view::GroupCallMembers;
 use super::group_call_panel::BG;
-use super::group_call_state::CallWindow;
+use super::group_call_state::{CallLayout, CallWindow};
 use super::group_call_stream_layout::{
     leave_stream_full, stream_full, stream_viewport, uses_stream_layout,
 };
@@ -108,7 +108,7 @@ impl QuillApp {
             }
             // Sized for the other layout: reopen.
             (Some((_, stream)), Some(handle))
-                if stream != self.group_call.stream.window_is_stream =>
+                if self.group_call.window.layout() != Some(CallLayout::of(stream)) =>
             {
                 self.group_call.window = CallWindow::Closed;
                 let _ = handle.update(cx, |_, window, _| window.remove_window());
@@ -170,7 +170,7 @@ impl QuillApp {
                                 .and_then(|s| s.calls.active_group_call.as_ref())
                                 .map(|c| c.id);
                             app.group_call_screen.clear_stream_wish();
-                            app.group_call.stream.overlay = None;
+                            app.close_call_box();
                             app.sync_group_call_large_tile();
                             cx.notify();
                         });
@@ -211,8 +211,9 @@ impl QuillApp {
                                     let from = window.window_handle();
                                     let _ = visibility_owner.update(cx, |app, _| {
                                         // A replaced window still reports while it goes.
-                                        if let CallWindow::Open { handle, visible } =
-                                            &mut app.group_call.window
+                                        if let CallWindow::Open {
+                                            handle, visible, ..
+                                        } = &mut app.group_call.window
                                             && *handle == from
                                         {
                                             *visible = visibility.is_visible();
@@ -244,8 +245,8 @@ impl QuillApp {
                         app.group_call.window = CallWindow::Open {
                             handle: handle.into(),
                             visible: true,
+                            layout: CallLayout::of(stream),
                         };
-                        app.group_call.stream.window_is_stream = stream;
                         app.sync_group_call_large_tile();
                     }
                     Err(_) => {
@@ -271,7 +272,7 @@ impl QuillApp {
 
     pub(super) fn group_call_large_tile(&self) -> Option<quill::calls::tile_pin::TileKey> {
         let seen = self.group_call.window.is_visible();
-        self.group_call_screen.pin.pinned().filter(|_| seen)
+        self.call_pin().pinned().filter(|_| seen)
     }
 
     pub(super) fn sync_group_call_large_tile(&mut self) {
@@ -398,7 +399,7 @@ impl QuillApp {
         let stage = call.and_then(|call| self.group_call_stage(&call, cx));
         // The stage closed: its volume slider goes with it.
         if stage.is_none() {
-            self.group_call.stage_volume = None;
+            self.clear_stage_volume();
         }
         let body = match stage {
             Some(stage) => stage,
@@ -462,7 +463,7 @@ impl Render for GroupCallPanel {
                     // Esc closes an open box first; then the live keys
                     // (Esc leaves full screen or the maximized window,
                     // F toggles it, M mutes, Space does nothing).
-                    if exits && owner.read(cx).group_call.stream.overlay.is_some() {
+                    if exits && owner.read(cx).stream_overlay().is_some() {
                         owner.update(cx, |app, cx| app.close_stream_overlay(cx));
                         cx.stop_propagation();
                         return;

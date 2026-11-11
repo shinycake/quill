@@ -146,11 +146,8 @@ fn viewer_caption_custom_emoji_covers_media_captions() {
         has_spoiler: false,
         is_secret: false,
         file_id: crate::ids::FileId(1),
-        thumb_file_id: None,
-        thumb_width: 0,
-        thumb_height: 0,
+        thumb: crate::telegram::envelope::Thumb::of(None, 0, 0, true),
         minithumbnail: None,
-        thumb_still: true,
     });
     assert_eq!(viewer_caption_custom_emoji(&gif), vec![777]);
     assert!(
@@ -278,6 +275,10 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
 
     // getAnimatedEmoji's animatedEmoji lands under GetAnimatedEmoji.
     let extra = with_purpose.request(RequestPurpose::GetAnimatedEmoji, None);
+    with_purpose.stickers.emoji.animated = crate::emoji::AnimatedSuggestion::Asking {
+        emoji: "🔥".into(),
+        request: extra,
+    };
     apply_json(
         &mut with_purpose,
         &seq,
@@ -291,8 +292,8 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         with_purpose
             .stickers
             .emoji
-            .animated_emoji
-            .as_ref()
+            .animated
+            .sticker()
             .expect("animated")
             .emoji,
         "🔥"
@@ -416,6 +417,8 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
     assert_eq!(with_purpose.stickers.emoji.archived_sets.len(), 2);
 
     let extra = with_purpose.request(RequestPurpose::GetTrendingEmojiSets, None);
+    with_purpose.stickers.emoji.lists.trending.begin(0);
+    with_purpose.stickers.emoji.lists.trending.sent(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -426,8 +429,8 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.emoji.trending_sets.len(), 1);
-    assert!(with_purpose.stickers.emoji.trending_is_premium);
+    assert_eq!(with_purpose.stickers.emoji.lists.trending.sets().len(), 1);
+    assert!(with_purpose.stickers.emoji.lists.trending.is_premium());
     assert!(with_purpose.stickers.stickers.trending.is_empty());
 
     // A clearRecentEmojiStatuses `ok` drops the recent statuses.

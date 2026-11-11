@@ -4,7 +4,7 @@ use super::super::*;
 use super::*;
 use crate::diagnostics::DiagnosticSink;
 use crate::ids::{ChatId, MessageId, RequestId};
-use crate::state::{PollVotersFetch, PollVotersMore};
+use crate::state::{PollVotersFetch, VotersMore};
 use crate::telegram::client::copy_and_parse;
 use serde_json::Value;
 use std::sync::Arc;
@@ -75,7 +75,7 @@ fn an_older_voters_page_does_not_fill_a_reloaded_stage() {
     assert!(matches!(
         stage(&driver),
         Some(PollVotersFetch::Loaded {
-            more: PollVotersMore::Idle,
+            more: VotersMore::Ready,
             ..
         })
     ));
@@ -87,7 +87,7 @@ fn an_older_voters_page_does_not_fill_a_reloaded_stage() {
     assert_eq!(extra_of_last(&recorder), next);
     assert!(matches!(
         stage(&driver),
-        Some(PollVotersFetch::Loaded { more: PollVotersMore::Loading(id), .. }) if id == next
+        Some(PollVotersFetch::Loaded { more: VotersMore::Asking(id), .. }) if id == next
     ));
     assert_eq!(
         driver.load_more_poll_voters(chat, message, 0).unwrap(),
@@ -135,7 +135,7 @@ fn a_failed_next_page_keeps_the_list_and_frees_the_next_ask() {
     assert!(matches!(
         stage(&driver),
         Some(PollVotersFetch::Loaded {
-            more: PollVotersMore::Idle,
+            more: VotersMore::Ready,
             ..
         })
     ));

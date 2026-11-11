@@ -63,7 +63,7 @@ pub(super) fn usage_label(option: UsageOption) -> String {
 /// not name one).
 fn approval_about(form: &InviteLinkForm) -> &'static str {
     let group = form.facts.group;
-    let key = match (form.approval_locked(), form.request_approval, group) {
+    let key = match (form.approval_locked(), form.approving(), group) {
         (true, _, true) => keys::GROUP_INVITE_ABOUT_APPROVE_DISABLED,
         (true, _, false) => keys::GROUP_INVITE_ABOUT_APPROVE_DISABLED_CHANNEL,
         (false, true, true) => keys::GROUP_INVITE_ABOUT_APPROVE,
@@ -102,7 +102,7 @@ impl QuillApp {
         let mut block = div().flex().flex_col().gap_2().child(
             Switch::new("invite-link-subscription")
                 .label(tr(keys::GROUP_INVITE_SUBSCRIPTION))
-                .checked(form.subscription)
+                .checked(form.is_subscription())
                 .on_click(cx.listener(|this, _, _, cx| {
                     let mut locked = false;
                     this.edit_invite_link_form(cx, |form| {
@@ -113,7 +113,7 @@ impl QuillApp {
                     }
                 })),
         );
-        if form.subscription {
+        if form.is_subscription() {
             let rate = self
                 .session()
                 .and_then(|s| s.groups.stars_usd_rate)
@@ -127,7 +127,7 @@ impl QuillApp {
             block = block.child(
                 Input::new(&link_box.stars_input)
                     .prefix(crate::ui::earn::star_icon(14.))
-                    .disabled(form.locked_stars.is_some())
+                    .disabled(form.locked_stars().is_some())
                     .suffix(
                         div()
                             .text_sm()
@@ -245,7 +245,7 @@ fn invite_link_approval(form: &InviteLinkForm, cx: &mut Context<QuillApp>) -> Di
         .child(
             Switch::new("invite-link-approval")
                 .label(label)
-                .checked(form.request_approval)
+                .checked(form.approving())
                 .disabled(form.approval_locked())
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.edit_invite_link_form(cx, InviteLinkForm::toggle_approval);

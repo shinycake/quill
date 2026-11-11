@@ -13,7 +13,7 @@
 # Closed by the lock.
 src/ui/video_player/controls/pip/open.rs::open_pip_window | close_every_video_pip | a video PiP plays the account's media; it opens only from a viewer, which the lock closes too
 src/ui/notify_windows/mod.rs::open_popup | close_all_notify_windows | Quill's notification windows show senders and text; one shown while locked hides the sender (`hide_sender`)
-src/ui/device_qr.rs::start | clear_device_qr | the device-linking camera scanner is a helper window with the camera on, opened from Settings > Devices
+src/ui/device_qr.rs::start | leave_device_link | the device-linking camera scanner is a helper window with the camera on, opened from Settings > Devices; the lock ends a scan or a consent and keeps only a link request already out
 src/profile_photo_camera.rs::start | close_cameras_for_lock | the profile or group photo camera; `start_camera` refuses a new start while locked
 src/media_tools.rs::spawn_capture | via:start_video_capture |the round video recorder; the lock cancels a running one (`cancel_recording`)
 

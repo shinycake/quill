@@ -39,7 +39,7 @@ impl QuillApp {
         anchor: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        self.chat_list.menu = None;
+        self.chat_list.menu.close();
         self.chat_list.peek =
             crate::ui::chat_list_state::PeekPreview::Open(ChatPreviewState { chat_id, anchor });
         // Live fetch for unopened chats; already-loaded history renders

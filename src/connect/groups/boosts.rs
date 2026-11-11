@@ -87,12 +87,18 @@ impl<S: JsonSender> ConnectDriver<S> {
                     Some(crate::boost_box::BoostBoxState::new(chat_id.0, group));
             }
         }
-        // A slots read from a press whose box closed may still be out: its
-        // answer belongs to that box, so it is dropped and this press asks
-        // for its own.
-        self.session
+        // A slots read from a press whose box closed is still out: this
+        // press waits for that request, and its answer continues this boost.
+        if let Some(out) = self
+            .session
             .requests
-            .take_purpose_for_chat(RequestPurpose::GetBoostSlotsForBoost, chat_id);
+            .id_for_purpose_for_chat(RequestPurpose::GetBoostSlotsForBoost, chat_id)
+        {
+            if let Some(state) = self.boost_box_for(chat_id) {
+                state.reading_slots(out);
+            }
+            return Ok(None);
+        }
         let extra = self
             .session
             .request(RequestPurpose::GetBoostSlotsForBoost, Some(chat_id));
@@ -104,8 +110,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         if let Some(state) = self.boost_box_for(chat_id) {
-            state.phase = BoostPhase::Working(BoostWork::Slots { request: extra });
-            state.note = None;
+            state.reading_slots(extra);
         }
         Ok(Some(extra))
     }
@@ -124,7 +129,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let chat_id = state.chat_id;
         let BoostPhase::Working(BoostWork::SlotsReady(slots)) =
-            std::mem::replace(&mut state.phase, BoostPhase::Main)
+            std::mem::replace(&mut state.phase, BoostPhase::main())
         else {
             return Ok(());
         };
@@ -148,8 +153,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
-    /// `boostChat` for these slots; the answer returns the box to its
-    /// counters.
+    /// `boostChat` for these slots. Once it is out the box works on that
+    /// request, and its answer (or error) returns the box to its counters;
+    /// a send that is refused leaves the box as it was.
     pub(super) fn send_boost_chat(
         &mut self,
         chat: ChatId,
@@ -159,15 +165,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.session.request(RequestPurpose::BoostChat, Some(chat));
         if let Err(err) = self.sender.send_json(&boost_chat(extra, chat, slot_ids)) {
             self.session.requests.take(extra);
-            if let Some(state) = self.boost_box_for(chat) {
-                state.phase = BoostPhase::Main;
-            }
             return Err(err);
         }
-        // The box works under this request until its answer or error.
         if let Some(state) = self.boost_box_for(chat) {
             state.boosting(extra, reassign);
-            state.note = None;
         }
         Ok(())
     }

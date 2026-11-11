@@ -30,6 +30,23 @@ use quill::state::{
 use quill::telegram::envelope::{ChatAdminRights, ChatPermissions, MessageSender};
 use std::cell::RefCell;
 use std::rc::Rc;
+/// A member change that went out and waits for its answer: the note and
+/// the box that follow it say what TDLib answered, not what was queued.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::ui) struct MemberChange {
+    pub(in crate::ui) request: quill::ids::RequestId,
+    pub(in crate::ui) kind: MemberChangeKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::ui) enum MemberChangeKind {
+    /// A restriction or ban lifted from the member dialog.
+    Unban,
+    /// "Remove user" from the Add exception / Remove user picker: the
+    /// picker closes when the ban is answered.
+    Kick,
+}
+
 /// What the admin dialog's Submit sends.
 enum AdminAction {
     Promote(i64, ChatAdminRights),
@@ -438,19 +455,68 @@ impl QuillApp {
     /// `chatMemberStatusMember`).
     pub(super) fn unban_member(&mut self, chat_id: ChatId, user_id: i64, cx: &mut Context<Self>) {
         let note = match self.live.as_mut() {
-            // Slice G1 fix-up: `Ok(None)` is a driver refusal, not
-            // success — report it honestly.
+            // `Ok(None)` is a driver refusal, not success. A sent request
+            // is settled by its answer (`settle_member_changes`).
             Some(live) => match live.driver.unban_chat_member(chat_id, user_id) {
-                Ok(Some(_)) => StatusNote::silent(tr(keys::Q_PEOPLE_MEMBER_UNBANNED)),
-                Ok(None) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UNBAN_MEMBER)),
-                Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UNBAN_MEMBER)),
+                Ok(Some(request)) => {
+                    self.admin.member_changes.push(MemberChange {
+                        request,
+                        kind: MemberChangeKind::Unban,
+                    });
+                    cx.notify();
+                    return;
+                }
+                Ok(None) | Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UNBAN_MEMBER)),
             },
             None => StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE)),
         };
-        // The member page is fetched again when the request answers
-        // (`member_list_stale`), not before the change applies.
         self.set_note(note);
         cx.notify();
+    }
+
+    /// Settle the member changes that were sent: a note when the request
+    /// is answered (the member page is fetched again by
+    /// `member_list_stale`), the error line when TDLib refused it. Called
+    /// from `poll_live`.
+    pub(in crate::ui) fn settle_member_changes(&mut self, cx: &mut Context<Self>) {
+        if self.admin.member_changes.is_empty() {
+            return;
+        }
+        let changes = std::mem::take(&mut self.admin.member_changes);
+        let Some(requests) = self.session().map(|session| &session.requests) else {
+            // No session answers for them any more.
+            return;
+        };
+        let mut waiting = Vec::new();
+        let mut settled = Vec::new();
+        for change in changes {
+            let view = quill::state::Submit::sent(vec![change.request]).view(Some(requests));
+            if view == SubmitView::Sending {
+                waiting.push(change);
+            } else {
+                settled.push((change.kind, view));
+            }
+        }
+        self.admin.member_changes = waiting;
+        for (kind, view) in settled {
+            let note = match (kind, view) {
+                (MemberChangeKind::Unban, SubmitView::Failed(_)) => {
+                    StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UNBAN_MEMBER))
+                }
+                (MemberChangeKind::Kick, SubmitView::Failed(_)) => {
+                    StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_MEMBER_STATUS))
+                }
+                (MemberChangeKind::Unban, _) => {
+                    StatusNote::silent(tr(keys::Q_PEOPLE_MEMBER_UNBANNED))
+                }
+                (MemberChangeKind::Kick, _) => {
+                    self.admin.add_special = None;
+                    StatusNote::silent(tr(keys::Q_PEOPLE_MEMBER_BANNED))
+                }
+            };
+            self.set_note(note);
+            cx.notify();
+        }
     }
 
     /// kit Phase 2 (redo): restrict/ban hosted in a kit `Dialog` via
@@ -620,8 +686,9 @@ impl QuillApp {
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {
                         let body = body
-                            .borrow_mut()
-                            .take()
+                            .try_borrow_mut()
+                            .ok()
+                            .and_then(|mut cell| cell.take())
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }

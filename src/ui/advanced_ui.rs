@@ -104,7 +104,7 @@ impl QuillApp {
     /// rows again.
     pub(super) fn rebuild_rows_in_every_window(&mut self, cx: &mut Context<Self>) {
         self.in_every_window(cx, |this, cx| {
-            this.history.rows_key = None;
+            this.history.invalidate_rows();
             cx.notify();
         });
     }

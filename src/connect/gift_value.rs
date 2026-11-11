@@ -20,6 +20,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         lookup: GiftValueLookup,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            // Nothing can go out: the box says so under the row, with a way
+            // out, instead of the click doing nothing.
+            self.session.payments.hub.gift_value = Some(GiftValueLookup {
+                stage: GiftValueStage::Failed(
+                    crate::lang::tr(crate::lang::keys::Q_GIFT_VALUE_NOT_SENT).to_string(),
+                ),
+                ..lookup
+            });
             return Err(ConnectSendError::InvalidRequest);
         }
         if let Some(current) = self.session.payments.hub.gift_value.as_mut()

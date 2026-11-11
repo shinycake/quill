@@ -514,7 +514,13 @@ impl QuillApp {
                     Button::new("add-bot-back")
                         .label(tr(keys::Q_MEDIA_BACK))
                         .ghost()
+                        // Back would drop the send's follow-up (the start
+                        // payload goes after the promotion is answered).
+                        .disabled(sending)
                         .on_click(cx.listener(move |this, _, window, cx| {
+                            if this.box_sending() {
+                                return;
+                            }
                             // box-host: a step of the open box; it stays where it shows
                             this.dialogs.profile_dialog = Some(ProfileDialog::AddBot {
                                 bot_id,

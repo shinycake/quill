@@ -146,9 +146,6 @@ impl Session {
         extra: Option<RequestId>,
         seq: u64,
     ) {
-        if let Some(pending) = pending {
-            self.settings.quick_replies.settled(pending.id);
-        }
         let Some(asked_in) = pending
             .filter(|pending| lands_in_view(pending.purpose))
             .map(|pending| pending.asked_in)
@@ -201,8 +198,10 @@ impl Session {
             .threads
             .thread
             .as_ref()
-            .is_some_and(|thread| thread.chat_id == prev)
+            .is_some_and(|thread| thread.chat_id == prev || thread.origin_chat_id == prev)
         {
+            // The thread of a channel post lives in its discussion chat but
+            // was opened from the channel: leaving either closes it.
             self.threads.thread = None;
         }
         self.view_generation.bump();
@@ -311,9 +310,6 @@ pub struct SessionView {
     /// The Instant View reader opened in this window
     /// (`MessagesState::instant_view`).
     pub instant_view: Option<InstantViewPage>,
-    /// A date jump this window started, waiting for its page
-    /// (`SearchDomainState::date_jump_pending`).
-    pub(crate) date_jump_pending: Option<(ChatId, MessageId, DateJumpMode)>,
 }
 
 impl SessionView {
@@ -340,9 +336,5 @@ impl Session {
         std::mem::swap(&mut self.search.chat_search, &mut view.chat_search);
         std::mem::swap(&mut self.media.shared_media, &mut view.shared_media);
         std::mem::swap(&mut self.messages.instant_view, &mut view.instant_view);
-        std::mem::swap(
-            &mut self.search.date_jump_pending,
-            &mut view.date_jump_pending,
-        );
     }
 }

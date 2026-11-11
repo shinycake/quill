@@ -120,6 +120,7 @@ pub fn forget_after_helper(
         crate::agent::activity::forget_account(key);
         crate::agent::prompts::deny_account(key);
         crate::agent::pacing::forget_account(key);
+        crate::telegram::name_accent::forget_account(key);
         crate::web_app::trust::forget_account(account);
         crate::notify_volume::forget_account(account);
         crate::settings::forget_chat_windows_of(account);
@@ -226,15 +227,6 @@ pub struct Claimed {
     pub owner_error: Option<std::io::Error>,
 }
 
-/// Write `user_id` as the folder's owner. [`claim`] has already settled what
-/// the folder held; a save that failed there is tried again with this alone,
-/// so a retry never drops what the new owner has made since.
-pub fn save_owner(app_root: &Path, key: &AccountKey, user_id: i64) -> std::io::Result<()> {
-    let paths = AccountPaths::for_root(app_root, key);
-    std::fs::create_dir_all(&paths.root)?;
-    crate::settings::write_json_atomic(&paths.root.join(OWNER_FILE), &Owner { user_id })
-}
-
 /// A client of `key` learned it is signed in as `user_id`. When the folder
 /// was last signed in as someone else, what they left is dropped first. An
 /// owner that cannot be read (no file, a corrupt one) with leftovers in the
@@ -259,11 +251,20 @@ pub fn claim(app_root: &Path, key: &AccountKey, user_id: i64, origin: SignInOrig
     if someone_else {
         forget(app_root, key);
     }
-    let owner_error = save_owner(app_root, key, user_id).err();
     Claimed {
         dropped: someone_else,
-        owner_error,
+        owner_error: write_owner(app_root, key, user_id).err(),
     }
+}
+
+/// Save `user_id` as the folder's owner. Only the write: a retry after a
+/// failed save must not run [`claim`] again, which would take the new
+/// owner's own files for leftovers of someone else.
+pub fn write_owner(app_root: &Path, key: &AccountKey, user_id: i64) -> std::io::Result<()> {
+    let paths = AccountPaths::for_root(app_root, key);
+    std::fs::create_dir_all(&paths.root).and_then(|()| {
+        crate::settings::write_json_atomic(&paths.root.join(OWNER_FILE), &Owner { user_id })
+    })
 }
 
 #[cfg(test)]

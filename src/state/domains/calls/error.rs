@@ -148,10 +148,8 @@ impl Session {
                 }
             }
             Some(RequestPurpose::Calls(CallsPurpose::CreateVideoChatJoinAs { .. })) => {
-                if let Some(join_as) = self.calls.create_join_as.as_mut()
-                    && Some(join_as.request) == extra
-                {
-                    join_as.answer = Some(Err(()));
+                if let Some(join_as) = self.calls.create_join_as.as_mut() {
+                    join_as.fail(extra);
                 }
             }
             // A conference join or create: nothing is tracked yet. A failed
@@ -291,14 +289,18 @@ impl Session {
             // asked for again.
             Some(RequestPurpose::Calls(CallsPurpose::GetVideoChatInviteLink {
                 group_call_id,
-                can_self_unmute,
+                ..
             })) => {
-                if let Some(tracked) = self.calls.active_group_call.as_mut()
-                    && tracked.id == group_call_id
-                {
-                    tracked.share_links.failed(can_self_unmute);
-                }
-                if !can_self_unmute {
+                // Only the request the call still waits for: the error of
+                // one whose links were reset meanwhile says nothing.
+                let listener_failed = pending.is_some_and(|pending| {
+                    self.calls
+                        .active_group_call
+                        .as_mut()
+                        .filter(|tracked| tracked.id == group_call_id)
+                        .is_some_and(|tracked| tracked.share_links.failed(pending.id))
+                });
+                if listener_failed {
                     self.calls.group_call_error =
                         Some(call_request_error_line(err, "Couldn't get the invite link"));
                 }
@@ -318,6 +320,7 @@ impl Session {
                 {
                     self.calls.call_link = None;
                 }
+                self.calls.note_group_call_fetch_failed(group_call_id);
                 self.calls.group_call_error =
                     Some(call_request_error_line(err, "Voice chat request failed"));
             }

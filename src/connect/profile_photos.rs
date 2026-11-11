@@ -88,6 +88,32 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
+    /// A step in the viewer lets a failed next page be asked for again.
+    pub fn retry_photo_page(&mut self, owner: PhotoOwner) {
+        match owner {
+            PhotoOwner::User(user_id) => {
+                if let Some(ProfilePhotosFetch::Loaded { next_page, .. }) = self
+                    .session
+                    .users_state
+                    .user_profile_photos
+                    .get_mut(&user_id)
+                {
+                    next_page.retry();
+                }
+            }
+            PhotoOwner::Chat(chat_id) => {
+                if let Some(ChatPhotosFetch::Loaded { next_page, .. }) = self
+                    .session
+                    .users_state
+                    .chat_photo_history
+                    .get_mut(&chat_id.0)
+                {
+                    next_page.retry();
+                }
+            }
+        }
+    }
+
     /// The next page of the photos `owner` has, when the viewer nears the
     /// end of what is loaded. Nothing is sent while a page is in flight or
     /// the list is complete.
@@ -109,7 +135,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     return Ok(None);
                 };
                 let offset = i32::try_from(photos.len()).unwrap_or(i32::MAX);
-                if next_page.asking() || offset >= *total_count {
+                if !next_page.askable() || offset >= *total_count {
                     return Ok(None);
                 }
                 let extra = self
@@ -137,7 +163,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         .user_profile_photos
                         .get_mut(&user_id)
                 {
-                    *next_page = PhotoPage::Idle;
+                    *next_page = PhotoPage::Failed("send failed".to_owned());
                 }
                 sent.map(Some)
             }
@@ -150,7 +176,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 else {
                     return Ok(None);
                 };
-                if next_page.asking() || next_from_message_id.0 == 0 {
+                if !next_page.askable() || next_from_message_id.0 == 0 {
                     return Ok(None);
                 }
                 let from = *next_from_message_id;
@@ -176,7 +202,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         .chat_photo_history
                         .get_mut(&chat_id.0)
                 {
-                    *next_page = PhotoPage::Idle;
+                    *next_page = PhotoPage::Failed("send failed".to_owned());
                 }
                 sent.map(Some)
             }
