@@ -319,7 +319,7 @@ impl QuillApp {
                 .chat_look(self.open_chat_id().map(|c| c.0), cx)
                 .outgoing,
             wide: self.chat_wide(),
-            history: self.history.width.get(),
+            history: self.history.measure.get().width(),
         }
     }
 

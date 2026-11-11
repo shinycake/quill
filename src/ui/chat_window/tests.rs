@@ -983,7 +983,7 @@ fn a_pending_chrome_notify_clears_when_the_window_lost_its_view(cx: &mut TestApp
         .app
         .read_with(cx, |app, _| app.windows.slot_for(OTHER))
         .expect("slot");
-    slot.borrow().history.chrome_notify_pending.set(true);
+    slot.borrow().history.chrome_due.borrow_mut().note(3);
     // The window is live, but its session view is gone.
     h.app.update(cx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
@@ -995,7 +995,7 @@ fn a_pending_chrome_notify_clears_when_the_window_lost_its_view(cx: &mut TestApp
         app.finish_chrome_notify(Some(OTHER), cx);
     });
     assert!(
-        !slot.borrow().history.chrome_notify_pending.get(),
+        !slot.borrow().history.chrome_due.borrow().is_notifying(),
         "the flag cannot stick"
     );
 }

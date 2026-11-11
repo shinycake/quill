@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::history_anchor::HistoryMeasure;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::*;
 use quill::bubble_layout::HistoryWidth;
@@ -50,10 +51,12 @@ impl QuillApp {
     /// frame is not the wide layout shrinking a frame later. The paint
     /// probe is the source of truth from then on.
     pub(in crate::ui) fn seed_history_width(&self, pane: f32) {
-        if !self.history.width_probed.get() {
+        if !self.history.measure.get().is_measured() {
             self.history
-                .width
-                .set(HistoryWidth::new(history_pane_width(pane)));
+                .measure
+                .set(HistoryMeasure::Seeded(HistoryWidth::new(history_pane_width(
+                    pane,
+                ))));
         }
     }
 
@@ -61,7 +64,7 @@ impl QuillApp {
     pub(super) fn chat_wide(&self) -> bool {
         is_chat_wide(
             self.appearance.adaptive_for_wide,
-            self.history.chat_layout.get(),
+            self.history.measure.get().layout(),
         )
     }
 
@@ -70,22 +73,22 @@ impl QuillApp {
     /// it changes how wide the bubbles may be (`HistoryWidth`, which reads
     /// the same for every wide history).
     pub(super) fn history_width_probe(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let layout = self.history.chat_layout.clone();
-        let history_width = self.history.width.clone();
-        let probed = self.history.width_probed.clone();
-        let pane_width = self.history.pane_width.clone();
+        let measure = self.history.measure.clone();
         let app = cx.weak_entity();
         let screen = self.screen_epoch();
         canvas(
             |_, _, _| {},
             move |bounds, _, window, cx| {
-                pane_width.set(bounds.size.width);
                 let width = f32::from(bounds.size.width);
                 let now = ChatLayout::for_width(width);
-                let layout_changed = layout.replace(now) != now;
                 let measured = HistoryWidth::new(history_pane_width(width));
-                probed.set(true);
-                let width_changed = history_width.replace(measured) != measured;
+                let before = measure.replace(HistoryMeasure::Measured {
+                    width: measured,
+                    layout: now,
+                    pane: bounds.size.width,
+                });
+                let layout_changed = before.layout() != now;
+                let width_changed = before.width() != measured;
                 if layout_changed || width_changed {
                     let app = app.clone();
                     window.defer(cx, move |window, cx| {
@@ -120,7 +123,7 @@ impl QuillApp {
     /// screens" checkbox, under "Tile background". Like tdesktop it shows
     /// only while the chat is wide enough for it to matter.
     pub(super) fn adaptive_wide_checkbox(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        (self.history.chat_layout.get() == ChatLayout::Wide).then(|| {
+        (self.history.measure.get().layout() == ChatLayout::Wide).then(|| {
             Checkbox::new("appearance-adaptive-wide")
                 .checked(self.appearance.adaptive_for_wide)
                 .label(tr(keys::SETTINGS_ADAPTIVE_WIDE))

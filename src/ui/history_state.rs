@@ -53,9 +53,11 @@ pub(crate) struct HistoryUi {
     /// kit Phase 3: per-render shared inputs for history rows (files,
     /// downloads, media roots) so visible-row rendering doesn't re-clone.
     pub(super) shared: HistoryShared,
-    /// kit Phase 3: `(open_chat_id, open_topic)` the scroller state was
-    /// last synced for — a change means reset + scroll to bottom.
-    pub(super) key: Option<(i64, Option<i32>, i64)>,
+    /// kit Phase 3: the `(open_chat_id, open_topic, thread)` and window the
+    /// scroller state was last synced for — a change means reset + anchor:
+    /// the saved position, else the jump highlight, else the "Unread
+    /// messages" divider, else the bottom.
+    pub(super) anchor: super::history_anchor::WindowAnchor,
     /// Where the reader asked the history to go. The history list owns it:
     /// it reaches the goal once the rows allow, and a goal due this render
     /// wins over the view hold (`ScrollGoal`).
@@ -63,13 +65,6 @@ pub(crate) struct HistoryUi {
     /// kit Phase 3: first/last message ids of the last-synced history, to
     /// tell appends apart from prepends without re-scanning.
     pub(super) ends: Option<(MessageId, MessageId)>,
-    /// `HistoryState::window_epoch` the scroller last anchored for: a
-    /// change (window replaced) re-anchors like opening the chat.
-    pub(super) window_epoch: u64,
-    /// The scroller must anchor once rows exist: the saved position, else
-    /// the jump highlight, else the "Unread messages" divider, else the
-    /// bottom.
-    pub(super) anchor_pending: bool,
     /// Where each chat, topic or thread was left away from the tail.
     pub(super) scroll_memory: quill::state::ScrollMemory,
     /// The window stopped short of the latest message at the last render:
@@ -82,11 +77,9 @@ pub(crate) struct HistoryUi {
     pub(super) chrome_epoch: u64,
     /// `Session::revision_without_file_progress` `chrome_epoch` stands for.
     pub(super) chrome_seen: Option<u64>,
-    /// Rows drawn with stale chrome since the last render.
-    pub(super) chrome_due: std::cell::RefCell<Vec<usize>>,
-    /// A deferred notify for `chrome_due` is on its way (renders that skip
-    /// the kept-rows branch leave the list undrained).
-    pub(super) chrome_notify_pending: std::cell::Cell<bool>,
+    /// Rows drawn with stale chrome since the last render, and whether the
+    /// notify that renders them again is on its way.
+    pub(super) chrome_due: std::cell::RefCell<super::history_anchor::ChromeDue>,
     pub(super) row_stats: RowCacheStats,
     /// Tests: trust `Session::revision` the way a live session does.
     #[cfg(test)]
@@ -96,10 +89,6 @@ pub(crate) struct HistoryUi {
     pub(super) media_signature: (u64, usize),
     /// The channel's ads drawn in the main history (`sponsored_spots`).
     pub(super) sponsored: super::sponsored_spots::SponsoredInHistory,
-    /// The last jump the scroller landed on, as `(jump serial, message)`:
-    /// it lands once per jump, so a second jump to the same message lands
-    /// again, and a highlight that stays set is not scrolled to each frame.
-    pub(super) last_highlight: Option<(u64, MessageId)>,
     /// `(jump serial, start)` of the running jump-highlight fade.
     pub(super) highlight_fade: Option<(u64, std::time::Instant)>,
     /// B11: the reaction that just flew from the message (message, glyph, start).
@@ -159,19 +148,9 @@ pub(crate) struct HistoryUi {
     /// The open chat whose live-location countdowns are being refreshed
     /// (`Some` exactly while that task runs; see `live_location_tick`).
     pub(super) live_location_tick_chat: Option<ChatId>,
-    /// The history's width class at the last paint (tdesktop
-    /// `Adaptive::ChatLayout`, `chat_wide_ui`).
-    pub(super) chat_layout: std::rc::Rc<std::cell::Cell<quill::chat_wide::ChatLayout>>,
-    /// The history's width at the last paint, as bubble layout reads it:
-    /// a narrow history narrows the bubbles (`bubble_width::BubbleRoom`).
-    pub(super) width: std::rc::Rc<std::cell::Cell<quill::bubble_layout::HistoryWidth>>,
-    /// Whether the history has painted and measured `width` itself; until
-    /// it has, `width` is seeded from the pane the history is laid out in
-    /// (`seed_history_width`).
-    pub(super) width_probed: std::rc::Rc<std::cell::Cell<bool>>,
-    /// The history's width at paint, before `HistoryWidth` tops it off: rows
-    /// still move in a wide window that resizes (`InlineVideos::begin_render`).
-    pub(super) pane_width: std::rc::Rc<std::cell::Cell<Pixels>>,
+    /// The history's width, class and pane: seeded from the pane it is laid
+    /// out in until the paint probe measures it (`chat_wide_ui`).
+    pub(super) measure: std::rc::Rc<std::cell::Cell<super::history_anchor::HistoryMeasure>>,
     /// The pull to the next unread channel (`pull_next_ui`).
     pub(super) pull: super::pull_next_ui::PullUi,
     /// The subsection tab strip over this window's conversation (forum
@@ -202,6 +181,14 @@ impl super::on_screen::Farewell for HistoryUi {
 }
 
 impl HistoryUi {
+    /// The deferred chrome notify landed (or its window is gone): none is on
+    /// its way any more. A borrowed list is left to the next render.
+    pub(super) fn chrome_notify_done(&self) {
+        if let Ok(mut due) = self.chrome_due.try_borrow_mut() {
+            due.notified();
+        }
+    }
+
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
     pub(super) fn painted_row_center(&self, id: MessageId) -> Point<Pixels> {
@@ -223,24 +210,20 @@ impl HistoryUi {
             reported_visible: None,
             window_active: false,
             shared: HistoryShared::default(),
-            key: None,
+            anchor: Default::default(),
             scroll_goal: None,
             ends: None,
-            window_epoch: 0,
-            anchor_pending: false,
             scroll_memory: Default::default(),
             had_newer: false,
             rows_key: None,
             chrome_epoch: 0,
             chrome_seen: None,
             chrome_due: Default::default(),
-            chrome_notify_pending: Default::default(),
             row_stats: RowCacheStats::default(),
             #[cfg(test)]
             follow_revision_in_tests: false,
             media_signature: (0, 0),
             sponsored: Default::default(),
-            last_highlight: None,
             highlight_fade: None,
             reaction_fly: None,
             scroll_date: Default::default(),
@@ -264,10 +247,7 @@ impl HistoryUi {
             vanish_conflicts: Default::default(),
             vanish_clock: Default::default(),
             live_location_tick_chat: None,
-            chat_layout: Default::default(),
-            width: Default::default(),
-            width_probed: Default::default(),
-            pane_width: Default::default(),
+            measure: Default::default(),
             pull: Default::default(),
             subsection_tabs: Default::default(),
         }

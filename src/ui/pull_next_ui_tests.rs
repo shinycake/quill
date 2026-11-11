@@ -224,7 +224,7 @@ fn the_wide_layout_puts_every_message_on_the_left_with_photos(cx: &mut TestAppCo
     frames(vcx);
     // Wide enough, but off by default: the look is unchanged.
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.history.chat_layout.get(), ChatLayout::Wide);
+        assert_eq!(app.history.measure.get().layout(), ChatLayout::Wide);
         assert!(!app.chat_wide());
     });
     let outgoing_photo = |app: &QuillApp| {
@@ -261,7 +261,7 @@ fn a_narrow_chat_keeps_the_normal_layout(cx: &mut TestAppContext) {
     });
     frames(vcx);
     app.update(vcx, |app, cx| {
-        assert_eq!(app.history.chat_layout.get(), ChatLayout::Normal);
+        assert_eq!(app.history.measure.get().layout(), ChatLayout::Normal);
         assert!(!app.chat_wide());
         // tdesktop hides the checkbox while the chat is narrow.
         assert!(app.adaptive_wide_checkbox(cx).is_none());

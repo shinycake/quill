@@ -79,7 +79,6 @@ HeaderFacts::is_saved_messages
 HistoryState::load_failed
 HistoryState::loaded_complete
 HistoryState::newer_failed
-HistoryUi::anchor_pending
 InlineMembersUi::admins_asked
 InstallResult::failed
 InviteLinkMembersState::loading
