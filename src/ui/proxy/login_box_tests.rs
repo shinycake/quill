@@ -40,7 +40,7 @@ fn the_strip_link_opens_the_proxy_list_over_sign_in(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     vcx.update(|window, cx| window.render_frame(cx));
     app.read_with(&vcx, |app, _| {
-        assert!(app.settings.proxy.list_box);
+        assert!(app.auth_ui.proxy_list_open);
         assert!(!app.settings.open, "no Settings window while signed out");
     });
     assert!(vcx.update(|window, cx| window.has_active_dialog(cx)));
@@ -69,12 +69,15 @@ fn the_proxy_list_box_ends_with_the_sign_in_screen(cx: &mut TestAppContext) {
         if let Some(session) = app.session_mut() {
             session.auth = quill::telegram::envelope::AuthorizationState::Ready;
         }
+        // What the poll does when the authorization moves on.
+        app.auth_ui
+            .follow_auth(&quill::telegram::envelope::AuthorizationState::Ready);
         cx.notify();
     });
     vcx.run_until_parked();
     vcx.update(|window, cx| window.render_frame(cx));
     assert!(!app.read_with(&vcx, |app, _| app.proxy_list_box_shown()));
-    assert!(!app.read_with(&vcx, |app, _| app.settings.proxy.list_box));
+    assert!(!app.read_with(&vcx, |app, _| app.auth_ui.proxy_list_open));
     assert!(!vcx.update(|window, cx| window.has_active_dialog(cx)));
 
     app.update(&mut vcx, |app, cx| {
@@ -86,4 +89,30 @@ fn the_proxy_list_box_ends_with_the_sign_in_screen(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     vcx.update(|window, cx| window.render_frame(cx));
     assert!(!app.read_with(&vcx, |app, _| app.proxy_list_box_shown()));
+}
+
+/// The line under the list hides itself, and a newer line is not hidden by
+/// the older line's timer.
+#[gpui_kit::test]
+fn the_list_notice_hides_itself_after_its_own_timer(cx: &mut TestAppContext) {
+    let (app, mut vcx) = sign_in_via_proxy(cx);
+    vcx.run_until_parked();
+    let text = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.settings.proxy.notice.text().map(str::to_string)
+        })
+    };
+    app.update(&mut vcx, |app, cx| app.proxy_notice("first", cx));
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(3_000));
+    vcx.run_until_parked();
+    app.update(&mut vcx, |app, cx| app.proxy_notice("second", cx));
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(2_000));
+    vcx.run_until_parked();
+    assert_eq!(text(&app, &mut vcx).as_deref(), Some("second"));
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(3_000));
+    vcx.run_until_parked();
+    assert_eq!(text(&app, &mut vcx), None);
 }

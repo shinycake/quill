@@ -779,6 +779,31 @@ pub struct ProxyState {
 }
 
 impl ProxyState {
+    /// A link box opens, closes or connects: its check starts over, and a
+    /// check still in flight no longer matches (only its own request
+    /// settles it).
+    pub fn review_link(&mut self) {
+        self.link_check = LinkCheck::Review;
+    }
+
+    /// Check Status asks for the one-time "this exposes your IP" warning
+    /// first.
+    pub fn warn_link(&mut self) {
+        self.link_check = LinkCheck::Warn;
+    }
+
+    /// The auto-switch settings changed: the rotation restarts with them.
+    /// The one place that resets it on a prefs change.
+    pub fn set_auto_switch(&mut self, on: Option<bool>, secs: Option<u32>) {
+        if let Some(on) = on {
+            self.prefs.auto_switch = on;
+        }
+        if let Some(secs) = secs {
+            self.prefs.auto_switch_secs = secs;
+        }
+        self.rotation = Rotation::Watching;
+    }
+
     pub fn entries(&self) -> &[ProxyEntry] {
         self.list.as_deref().unwrap_or(&[])
     }
@@ -1045,6 +1070,33 @@ mod tests {
         let two = "tg://socks?server=a.b&port=1 tg://socks?server=c.d&port=2";
         assert!(proxy_link_from_text(two).is_none());
         assert!(proxy_link_from_text("hello").is_none());
+    }
+
+    #[test]
+    fn changing_the_auto_switch_settings_restarts_the_rotation_itself() {
+        let mut state = ProxyState::default();
+        state.rotation = Rotation::Disconnected { since_ms: 5 };
+        state.set_auto_switch(Some(true), Some(30));
+        assert!(state.prefs.auto_switch);
+        assert_eq!(state.prefs.auto_switch_secs, 30);
+        assert_eq!(state.rotation, Rotation::Watching);
+        state.rotation = Rotation::Probing { since_ms: 1, id: 2 };
+        state.set_auto_switch(None, None);
+        assert_eq!(state.rotation, Rotation::Watching, "any change restarts it");
+    }
+
+    #[test]
+    fn the_link_box_stage_moves_only_through_its_transitions() {
+        let mut state = ProxyState::default();
+        state.warn_link();
+        assert_eq!(state.link_check, LinkCheck::Warn);
+        state.link_check = LinkCheck::Checking(RequestId(4));
+        state.review_link();
+        assert_eq!(
+            state.link_check,
+            LinkCheck::Review,
+            "a late answer no longer matches"
+        );
     }
 
     #[test]
