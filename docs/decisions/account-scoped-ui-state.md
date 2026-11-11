@@ -8043,3 +8043,34 @@ whose variants carry the data, with a way out of every stage.
 - **A refused refetch of a stale proxy list** lands in
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
+
+### Sweep fixes (r2-33)
+
+Round 2, files: the media viewer's state (`viewer_state.rs`, `viewer_parts.rs`),
+the wallpaper box, cache and source, What's New, the widget bubble, state and
+driver, the window title and window control, the AI compose box (box, styles,
+style preview) and three files of the main frame (`frame_upkeep`, `render`,
+`status_toast`). Every `RefCell` borrow in these files is gone (`try_borrow`,
+`Cell` take and put back, or `get_mut` where `&mut self` is held).
+
+| id | result |
+| --- | --- |
+| 14-059 | `reset_viewer_item_state` drops a timestamp start for any item but the current one (the open or quality change that armed it keeps it) |
+| 14-060 | `ViewerUi::pointer: Pointer { Away, OverControls, Panning(anchor) }` replaces `drag` and `over_controls`; a step ends a pan, a close ends both, a move over a control never ends a pan |
+| 14-061 | `Reorient` owns the shown orientation in every stage (`Idle(o)`, `Decoding { orientation, target, token, shown }`, `Ready { orientation, rotated }`); `ViewerUi::orientation` and the code in `Rotated` are gone, so nothing compares them by hand |
+| 14-020, 14-066, 14-013, 14-014, 14-085, 14-032 | no panicking borrows; the dialog body slot is `Rc<Cell<Option<_>>>` |
+| 14-036, 14-037 | `Lookup::stage: LookStage { Settled, Rendering, JustMade, FadeStarted }` replaces `pending` and `fade_started` (baseline lines dropped) |
+| 14-040 | a crossfade holds one old picture per window, each painted in its own window |
+| 14-030 | `BackgroundSearch::{Found, Failed}` carry the request; the preview takes its answer by the `Looking` stage's request, and a search that is another request fails the preview |
+| 14-031 | Share is disabled while `Sharing`, `share_wallpaper_preview` refuses a second send, and Blur drops `Sharing` back to `Editing` |
+| 14-049 | `Rendered::{Whole, FillOnly}(Picture)` replaces `complete: bool` |
+| 14-087 | opening What's New refreshes the notes; `Notes::Loading { stale, _fetch }` shows the old ones meanwhile, a failed refresh keeps them, and the fetch task is held (baseline line `WhatsNewUi::opening` was stale and is dropped) |
+| 14-007, 14-062 | `Pointer { hold, contact: Contact { Away, Over, Pressed(button) } }`: `hovered` and `pressed` were one stage; `hold` is the widget's own claim (`Gesture`), kept apart |
+| 14-063 | `Lander::{NotStarted, Running(Task)}`; a finished loop (`Task::is_ready`) is started again by the next runtime |
+| 14-075 | a `Request` from a runtime that is gone sends nothing to TDLib |
+| 07-040 | the language search clears when the box opens |
+| 07-041, 07-042, 07-043 | with no connection and no demo session a request fails its box, an `addstyle` link opens no preview and Delete Style keeps the editor, each with the failure toast; a demo still answers through its session |
+| 07-049 | `cover_request` and `privacy_request` hold the story they were sent for; the answer closes the panel only when it is that story's (`cover_settled`, `privacy_settled`), and a failure names that story. Touched outside the bundle: `stories_state.rs`, `story_albums/{mod,cover_strip}.rs` |
+| 07-050 | a Premium preview fetches nothing while locked. The other steps are teardown or pauses and already lock-aware; `sync_video_avatar` no longer opens a clip while locked (`video_avatar.rs`) |
+| 07-051 | `ToastQueue::wake` is `Wake::{Idle, Armed { deadline, timer }}`; the timer is an app task held in the queue, so it survives an account switch and is dropped with its deadline. Touched outside the bundle: `toast_queue.rs`. Baseline line `detached:status_toast_visible` dropped |
+| 07-059 | the toast surface uses `try_borrow_mut` |
