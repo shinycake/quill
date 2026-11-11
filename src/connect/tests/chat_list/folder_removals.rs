@@ -222,7 +222,7 @@ fn main_list_paging_resumes_after_a_failed_page_and_the_archive_starts() {
     assert_eq!(main(&rig), 1);
     // Before the wait is over nothing goes out; after it, the page again.
     let now = std::time::Instant::now();
-    let (at, _) = rig.driver.session.chat_list.chats_retry.expect("waiting");
+    let (at, _) = rig.driver.session.chat_list.main_paging.retry().expect("waiting");
     assert!(!rig.driver.chat_list_tick(now.min(at)));
     assert_eq!(main(&rig), 1);
     assert!(rig.driver.chat_list_tick(at));
@@ -237,7 +237,7 @@ fn main_list_paging_resumes_after_a_failed_page_and_the_archive_starts() {
             .unwrap(),
     );
     rig.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, page.0));
-    assert!(rig.driver.session.chat_list.chats_retry.is_none());
+    assert!(rig.driver.session.chat_list.main_paging.retry().is_none());
 }
 
 #[test]

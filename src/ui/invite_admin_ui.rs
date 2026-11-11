@@ -286,7 +286,7 @@ impl QuillApp {
             );
         };
         block = block.child(self.invite_block_title(
-            &if state.total_count == 0 && !state.loading {
+            &if state.total_count == 0 && !state.loading() {
                 tr(keys::GROUP_INVITE_NO_JOINED).to_string()
             } else if state.total_count == 1 {
                 tr(keys::Q_OPS_1_JOINED).to_string()
@@ -312,10 +312,10 @@ impl QuillApp {
                     ))),
             );
         }
-        if let Some(error) = state.error.clone() {
+        if let Some(error) = state.error().map(str::to_string) {
             block = block.child(div().text_xs().text_color(muted).child(error));
         }
-        if state.loading {
+        if state.loading() {
             block = block.child(
                 div()
                     .text_xs()

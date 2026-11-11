@@ -75,10 +75,7 @@ fn a_next_page_of_an_older_query_does_not_join_the_new_list() {
         filter: MemberListFilter::Recent,
     });
     let first = session.request(purpose, Some(ChatId(13)));
-    session
-        .groups
-        .supergroup_member_queries
-        .insert(key, (first, "al".into()));
+    session.groups.note_member_first(key, first, "al");
     apply_json(&mut session, &seq, &sink, &page(&[1, 2, 3], 6, first.0));
     let more = session.request(
         RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembersMore {
@@ -90,14 +87,10 @@ fn a_next_page_of_an_older_query_does_not_join_the_new_list() {
     session.groups.note_member_more(key, more);
     // A search for "bob" fills the list before the "al" page lands.
     let second = session.request(purpose, Some(ChatId(13)));
-    session
-        .groups
-        .supergroup_member_queries
-        .insert(key, (second, "bob".into()));
+    session.groups.note_member_first(key, second, "bob");
     apply_json(&mut session, &seq, &sink, &page(&[8, 9], 2, second.0));
     apply_json(&mut session, &seq, &sink, &page(&[3, 4, 5], 7, more.0));
     assert_eq!(loaded_ids(&session), (vec![8, 9], 2));
-    assert!(session.groups.member_more_bases.is_empty());
 }
 
 #[test]
@@ -141,28 +134,21 @@ fn a_failed_next_page_can_be_asked_for_again() {
         offset: 3,
     });
     let first = session.request(purpose, Some(ChatId(13)));
-    session
-        .groups
-        .supergroup_member_queries
-        .insert(key, (first, String::new()));
+    session.groups.note_member_first(key, first, "");
     apply_json(&mut session, &seq, &sink, &page(&[1, 2, 3], 6, first.0));
     let more = session.request(more_purpose, Some(ChatId(13)));
     session.groups.note_member_more(key, more);
     apply_json(&mut session, &seq, &sink, &failed(more.0));
-    assert!(session.groups.member_more_failed.contains(&key));
+    assert!(session.groups.take_member_more_failed(key.0));
     assert_eq!(loaded_ids(&session), (vec![1, 2, 3], 6), "the list stays");
 
-    session.groups.member_more_failed.clear();
     let stale = session.request(more_purpose, Some(ChatId(13)));
     session.groups.note_member_more(key, stale);
     let second = session.request(purpose, Some(ChatId(13)));
-    session
-        .groups
-        .supergroup_member_queries
-        .insert(key, (second, "bob".into()));
+    session.groups.note_member_first(key, second, "bob");
     apply_json(&mut session, &seq, &sink, &failed(stale.0));
     assert!(
-        session.groups.member_more_failed.is_empty(),
+        !session.groups.take_member_more_failed(key.0),
         "another query's page says nothing about the list shown"
     );
 }

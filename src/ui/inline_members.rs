@@ -167,12 +167,7 @@ impl QuillApp {
             return;
         };
         let failed_page = self.session_mut().is_some_and(|session| {
-            let groups = &mut session.groups;
-            let before = groups.member_more_failed.len();
-            groups
-                .member_more_failed
-                .retain(|(chat, _)| *chat != shape.chat.0);
-            groups.member_more_failed.len() != before
+            session.groups.take_member_more_failed(shape.chat.0)
         });
         if failed_page && let Some(offset) = self.inline_members.paging.blocked() {
             self.inline_members.paging = Paging::Failed { offset };

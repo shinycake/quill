@@ -77,7 +77,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let story_page_ok = answered
             .filter(|_| ok)
             .and_then(crate::state::story_list_of);
-        let main_was_exhausted = self.session.chat_list.chats_exhausted;
+        let main_was_exhausted = self.session.chat_list.main_paging.is_exhausted();
         let had_topic_icons = !self.session.threads.forum_topic_icons.is_empty();
         // Parity slice: a folder `loadChats` page completing with ok pages
         // on (until a 404 marks the folder exhausted in the reducer).
@@ -725,7 +725,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if became_ready || load_chats_ok {
             self.maybe_load_main_chats()?;
         }
-        let main_ended = !main_was_exhausted && self.session.chat_list.chats_exhausted;
+        let main_ended = !main_was_exhausted && self.session.chat_list.main_paging.is_exhausted();
         if load_archive_ok || load_chats_failed || main_ended {
             self.maybe_load_archive_chats()?;
         }

@@ -19,12 +19,15 @@ pub struct BoostsListState {
     pub next_offset: String,
     /// Where the newest page stands. Loaded rows stay under every stage, so
     /// a failed next page keeps the list and shows its error under it.
-    pub stage: BoostsStage,
+    pub stage: PageStage,
 }
 
-/// The newest `getChatBoosts` page of a list.
+/// The newest page of a paged list (`getChatBoosts`, the join requests or
+/// the members of an invite link). Leaves `Loading` on the answer
+/// (`Ready`), the error or a send that failed (`Failed`), and with the
+/// list itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BoostsStage {
+pub enum PageStage {
     /// The page is out under this request (a first page or an append);
     /// replies with another id are stale.
     Loading(RequestId),
@@ -33,21 +36,39 @@ pub enum BoostsStage {
     Failed(String),
 }
 
-impl BoostsListState {
-    pub fn loading(&self) -> bool {
-        matches!(self.stage, BoostsStage::Loading(_))
+impl PageStage {
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading(_))
     }
 
     pub fn error(&self) -> Option<&str> {
-        match &self.stage {
-            BoostsStage::Failed(error) => Some(error),
+        match self {
+            Self::Failed(error) => Some(error),
             _ => None,
         }
     }
 
     /// `request` is the page this list waits for.
     pub fn waits_for(&self, request: RequestId) -> bool {
-        self.stage == BoostsStage::Loading(request)
+        *self == Self::Loading(request)
+    }
+}
+
+impl BoostsListState {
+    pub fn loading(&self) -> bool {
+        matches!(self.stage, PageStage::Loading(_))
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        match &self.stage {
+            PageStage::Failed(error) => Some(error),
+            _ => None,
+        }
+    }
+
+    /// `request` is the page this list waits for.
+    pub fn waits_for(&self, request: RequestId) -> bool {
+        self.stage == PageStage::Loading(request)
     }
 }
 
@@ -70,15 +91,18 @@ pub struct LinkRequestsState {
     pub invite_link: String,
     pub total_count: i32,
     pub requests: Vec<ParsedChatJoinRequest>,
-    pub error: Option<String>,
-    /// The page in flight, if any; its answer is the only one that lands.
-    pub request: Option<RequestId>,
+    /// The newest page: the one in flight is the only answer that lands.
+    pub stage: PageStage,
 }
 
 impl LinkRequestsState {
     /// A page is being asked for.
     pub fn loading(&self) -> bool {
-        self.request.is_some()
+        self.stage.is_loading()
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        self.stage.error()
     }
 }
 

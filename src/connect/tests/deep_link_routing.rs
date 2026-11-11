@@ -31,11 +31,11 @@ fn a_new_launch_link_replaces_a_finished_flow_but_not_one_in_flight() {
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
     let _keep = dir;
 
-    driver.session.chats_state.deep_link = Some(DeepLinkState::ShowText("old".into()));
+    driver.session.chats_state.enter_deep_link_stage(DeepLinkState::ShowText("old".into()));
     let sent = driver.request_deep_link_info("https://t.me/durov").unwrap();
     assert!(sent.is_some(), "an unconsumed ShowText does not block");
     assert!(matches!(
-        driver.session.chats_state.deep_link,
+        driver.session.chats_state.deep_link_stage().cloned(),
         Some(DeepLinkState::ResolvingChat { .. })
     ));
     assert_eq!(
@@ -78,7 +78,7 @@ fn launch_links_resolve_locally_instead_of_get_deep_link_info() {
                 "type": {"@type": "chatTypePrivate", "user_id": 42}, "unread_count": 0}),
         );
         assert!(matches!(
-            driver.session.chats_state.deep_link,
+            driver.session.chats_state.deep_link_stage().cloned(),
             Some(DeepLinkState::ChatReady { chat_id, action: DeepLinkAction::OpenUsername { ref domain, .. } })
                 if chat_id.0 == 42 && domain == "durov"
         ));
@@ -124,7 +124,7 @@ fn failed_links_use_tdesktop_wording() {
             &sink,
             json!({"@type": "error", "@extra": extra.as_extra(), "code": code, "message": msg}),
         );
-        match driver.session.chats_state.deep_link.clone() {
+        match driver.session.chats_state.deep_link_stage().cloned() {
             Some(DeepLinkState::ShowText(text)) => text,
             other => panic!("unexpected {other:?}"),
         }
@@ -215,7 +215,7 @@ fn a_web_link_tdlib_cannot_type_opens_in_the_browser() {
         json!({"@type": "error", "@extra": extra.as_extra(), "code": 404, "message": "Not Found"}),
     );
     assert_eq!(
-        driver.session.chats_state.deep_link,
+        driver.session.chats_state.deep_link_stage().cloned(),
         Some(DeepLinkState::Ui(
             crate::deep_link_types::DeepLinkUi::Browser {
                 url: "https://t.me/addtheme/Night".into()
@@ -238,7 +238,7 @@ fn open_with(
     let mut answer = answer;
     answer["@extra"] = json!(extra.as_extra());
     feed(driver, seq, sink, answer);
-    driver.session.chats_state.deep_link.clone()
+    driver.session.chats_state.deep_link_stage().cloned()
 }
 
 fn info_action(state: Option<DeepLinkState>) -> DeepLinkAction {
@@ -285,7 +285,7 @@ fn typed_links_route_through_get_internal_link_type() {
             "is_installed":false,"stickers":[]}),
     );
     assert_eq!(
-        driver.session.chats_state.deep_link,
+        driver.session.chats_state.deep_link_stage().cloned(),
         Some(DeepLinkState::Ui(DeepLinkUi::StickerSet { set_id: 777 }))
     );
 
@@ -318,7 +318,7 @@ fn typed_links_route_through_get_internal_link_type() {
             "message":{"@type":"message","id":3145728},"media_timestamp":30,
             "topic_id":{"@type":"messageTopicThread","message_thread_id":2097152}}),
     );
-    let action = info_action(driver.session.chats_state.deep_link.clone());
+    let action = info_action(driver.session.chats_state.deep_link_stage().cloned());
     assert_eq!(
         action,
         DeepLinkAction::OpenChatById {
@@ -338,7 +338,7 @@ fn typed_links_route_through_get_internal_link_type() {
             "type":{"@type":"chatTypeSupergroup","supergroup_id":1001,"is_channel":false},"unread_count":0}),
     );
     assert!(matches!(
-        driver.session.chats_state.deep_link,
+        driver.session.chats_state.deep_link_stage().cloned(),
         Some(DeepLinkState::ChatReady { chat_id, .. }) if chat_id.0 == -1001
     ));
 
@@ -361,7 +361,7 @@ fn typed_links_route_through_get_internal_link_type() {
         json!({"@type":"messageLinkInfo","@extra":extra.as_extra(),"chat_id":0}),
     );
     assert!(matches!(
-        driver.session.chats_state.deep_link,
+        driver.session.chats_state.deep_link_stage().cloned(),
         Some(DeepLinkState::ShowText(_))
     ));
 
@@ -392,7 +392,7 @@ fn typed_links_route_through_get_internal_link_type() {
         json!({"@type":"chatBoostLinkInfo","@extra":extra.as_extra(),"is_public":false,"chat_id":-1001}),
     );
     assert_eq!(
-        info_action(driver.session.chats_state.deep_link.clone()),
+        info_action(driver.session.chats_state.deep_link_stage().cloned()),
         DeepLinkAction::OpenChannelBoost { chat_id: -1001 }
     );
     // A link that names no channel is explained, not opened.
@@ -414,7 +414,7 @@ fn typed_links_route_through_get_internal_link_type() {
         json!({"@type":"chatBoostLinkInfo","@extra":extra.as_extra(),"is_public":false,"chat_id":0}),
     );
     assert!(matches!(
-        driver.session.chats_state.deep_link,
+        driver.session.chats_state.deep_link_stage().cloned(),
         Some(DeepLinkState::ShowText(_))
     ));
 
@@ -439,7 +439,7 @@ fn typed_links_route_through_get_internal_link_type() {
         json!({"@type":"user","@extra":extra.as_extra(),"id":4242,"first_name":"Ann"}),
     );
     assert_eq!(
-        info_action(driver.session.chats_state.deep_link.clone()),
+        info_action(driver.session.chats_state.deep_link_stage().cloned()),
         DeepLinkAction::OpenUserDraft {
             user_id: 4242,
             draft: "hi".into()
@@ -595,7 +595,7 @@ fn typed_link_failures_use_clear_wording() {
         json!({"@type":"error","@extra":extra.as_extra(),"code":400,"message":"PHONE_NOT_OCCUPIED"}),
     );
     assert_eq!(
-        driver.session.chats_state.deep_link,
+        driver.session.chats_state.deep_link_stage().cloned(),
         Some(DeepLinkState::ShowText(
             "The phone number +1555000 is not on Telegram yet.".into()
         ))
@@ -622,7 +622,7 @@ fn bot_links_resolve_the_bot_with_search_public_chat() {
         "chessbot"
     );
     assert!(matches!(
-        driver.session.chats_state.deep_link,
+        driver.session.chats_state.deep_link_stage().cloned(),
         Some(DeepLinkState::ResolvingChat { ref action, .. }) if *action == game
     ));
 
@@ -659,7 +659,7 @@ fn a_flow_keeps_its_origin_when_another_link_arrives() {
         .request_deep_link_info_from("https://t.me/agentpick", true)
         .unwrap()
         .unwrap();
-    assert!(driver.session.chats_state.deep_link_from_agent);
+    assert!(driver.session.chats_state.deep_link.as_ref().is_some_and(|flow| flow.from_agent));
     // The user's link waits: the flow in progress wins and keeps its origin.
     assert_eq!(
         driver
@@ -667,7 +667,7 @@ fn a_flow_keeps_its_origin_when_another_link_arrives() {
             .unwrap(),
         None
     );
-    assert!(driver.session.chats_state.deep_link_from_agent);
+    assert!(driver.session.chats_state.deep_link.as_ref().is_some_and(|flow| flow.from_agent));
     feed(
         &mut driver,
         &seq,
@@ -676,10 +676,10 @@ fn a_flow_keeps_its_origin_when_another_link_arrives() {
             "type": {"@type": "chatTypePrivate", "user_id": 77}, "unread_count": 0}),
     );
     assert!(matches!(
-        driver.session.chats_state.deep_link,
+        driver.session.chats_state.deep_link_stage().cloned(),
         Some(DeepLinkState::ChatReady { chat_id, .. }) if chat_id.0 == 77
     ));
-    assert!(driver.session.chats_state.deep_link_from_agent);
+    assert!(driver.session.chats_state.deep_link.as_ref().is_some_and(|flow| flow.from_agent));
 
     // A fresh flow started outside an injected step is the user's.
     driver.session.chats_state.deep_link = None;
@@ -691,6 +691,6 @@ fn a_flow_keeps_its_origin_when_another_link_arrives() {
             story_id: None,
         })
         .unwrap();
-    assert!(!driver.session.chats_state.deep_link_from_agent);
+    assert!(!driver.session.chats_state.deep_link.as_ref().is_some_and(|flow| flow.from_agent));
     std::fs::remove_dir_all(dir).unwrap();
 }

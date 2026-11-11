@@ -24,8 +24,9 @@ impl GroupsState {
     /// The query the member list `key` was asked with ("" for one asked
     /// before queries were kept, or filled elsewhere).
     pub fn member_query(&self, key: (i64, MemberListFilter)) -> &str {
-        self.supergroup_member_queries
+        self.member_paging
             .get(&key)
+            .and_then(|paging| paging.first.as_ref())
             .map_or("", |(_, query)| query.as_str())
     }
 
@@ -36,16 +37,34 @@ impl GroupsState {
         key: (i64, MemberListFilter),
         pending: &PendingRequest,
     ) -> bool {
-        self.supergroup_member_queries
+        self.member_paging
             .get(&key)
-            .is_none_or(|(id, _)| *id == pending.id)
+            .and_then(MemberPaging::first_id)
+            .is_none_or(|id| id == pending.id)
+    }
+
+    /// A first-page request for `key` was sent with `query`.
+    pub(crate) fn note_member_first(
+        &mut self,
+        key: (i64, MemberListFilter),
+        request: RequestId,
+        query: &str,
+    ) {
+        self.member_paging
+            .entry(key)
+            .or_default()
+            .first_sent(request, query);
+    }
+
+    /// The first-page request for `key` did not leave.
+    pub(crate) fn forget_member_first(&mut self, key: (i64, MemberListFilter)) {
+        self.member_paging.remove(&key);
     }
 
     /// A next-page request for `key` was sent: it extends the list the
     /// latest first page filled.
     pub(crate) fn note_member_more(&mut self, key: (i64, MemberListFilter), more: RequestId) {
-        let base = self.supergroup_member_queries.get(&key).map(|(id, _)| *id);
-        self.member_more_bases.insert(more, base);
+        self.member_paging.entry(key).or_default().more_sent(more);
     }
 
     /// Settle the next page `pending`: whether it extends the list `key`
@@ -56,10 +75,34 @@ impl GroupsState {
         key: (i64, MemberListFilter),
         pending: &PendingRequest,
     ) -> bool {
-        let Some(base) = self.member_more_bases.remove(&pending.id) else {
-            return false;
-        };
-        base == self.supergroup_member_queries.get(&key).map(|(id, _)| *id)
+        self.member_paging
+            .get_mut(&key)
+            .is_some_and(|paging| paging.take_more(pending.id))
+    }
+
+    /// The next page of `key` failed (and was the one the list waited
+    /// for): the panel asks for it again at its next scroll.
+    pub(crate) fn member_more_failed(&mut self, key: (i64, MemberListFilter)) {
+        if let Some(paging) = self.member_paging.get_mut(&key) {
+            paging.more_failed();
+        }
+    }
+
+    /// Takes the failed next-page marks of `chat`'s lists: whether there
+    /// were any.
+    pub fn take_member_more_failed(&mut self, chat: i64) -> bool {
+        let mut any = false;
+        for ((id, _), paging) in &mut self.member_paging {
+            if *id == chat {
+                any |= paging.take_failed();
+            }
+        }
+        any
+    }
+
+    /// `chat`'s lists were dropped: how they were asked goes too.
+    pub(crate) fn drop_member_paging(&mut self, chat: i64) {
+        self.member_paging.retain(|(id, _), _| *id != chat);
     }
 }
 
@@ -208,13 +251,11 @@ pub struct GroupsState {
     /// App config `stars_usd_withdraw_rate_x1000` / 1000: US cents per
     /// Star, for the dollar hint next to a link's monthly fee.
     pub stars_usd_rate: Option<f64>,
-    /// Slice G2: available boost slot ids from `getAvailableChatBoostSlots`
-    /// (schema 1.8.67, line 13914), keyed by chat id. The driver consumes
-    /// them to chain `boostChat` once per boost intent.
-    pub boost_slots_by_chat: HashMap<i64, Vec<crate::telegram::envelope::ParsedBoostSlot>>,
-    /// Slice G2: the chat id of a pending user boost intent — set by
-    /// `request_chat_boost`, consumed by the driver's `boostChat` chain.
-    pub boost_intent: Option<i64>,
+    /// Slice G2: the pending user boost — set by `request_chat_boost`,
+    /// holds the `getAvailableChatBoostSlots` answer (schema 1.8.67, line
+    /// 13914) until the driver's `boostChat` chain consumes it
+    /// ([`BoostChain`]).
+    pub boost_chain: BoostChain,
     /// The open boost box (`crate::boost_box`).
     pub boost_box: Option<crate::boost_box::BoostBoxState>,
     /// `boosts_per_sent_gift` of the app config: boosts a gifted Premium
@@ -257,17 +298,9 @@ pub struct GroupsState {
     /// promote member picker and the member-management dialog, keyed by
     /// (chat id, filter). One page per filter.
     pub supergroup_members: HashMap<(i64, MemberListFilter), SupergroupMembersFetch>,
-    /// The first-page `getSupergroupMembers` each entry of
-    /// `supergroup_members` comes from, and the query it asked with. A
-    /// search for another query sends a new request; only the latest one's
-    /// answer or error fills the entry.
-    pub supergroup_member_queries: HashMap<(i64, MemberListFilter), (RequestId, String)>,
-    /// Each next-page request in flight and the first-page request whose
-    /// list it extends (`None`: a list filled without one).
-    pub(crate) member_more_bases: HashMap<RequestId, Option<RequestId>>,
-    /// Lists whose last next-page request failed. The members panel takes
-    /// the mark and asks for that page again at its next scroll.
-    pub member_more_failed: HashSet<(i64, MemberListFilter)>,
+    /// How each list of `supergroup_members` was asked for: its first
+    /// page and query, and its next page ([`MemberPaging`]).
+    pub member_paging: HashMap<(i64, MemberListFilter), MemberPaging>,
     /// Slice G1: `getBasicGroupFullInfo` fetch state (the member list for
     /// basic groups), keyed by chat id. Reuses `SupergroupMembersFetch`
     /// (Loading / Loaded / Failed).
@@ -397,8 +430,7 @@ impl GroupsState {
             supergroup_size_max: 0,
             subscription_star_max: None,
             stars_usd_rate: None,
-            boost_slots_by_chat: HashMap::new(),
-            boost_intent: None,
+            boost_chain: BoostChain::Idle,
             boost_box: None,
             boosts_per_gift: None,
             supergroup_usernames: HashMap::new(),
@@ -411,9 +443,7 @@ impl GroupsState {
             supergroup_invite_right: HashMap::new(),
             admin_lists: HashMap::new(),
             supergroup_members: HashMap::new(),
-            supergroup_member_queries: HashMap::new(),
-            member_more_bases: HashMap::new(),
-            member_more_failed: HashSet::new(),
+            member_paging: HashMap::new(),
             basic_group_members: HashMap::new(),
             basic_group_descriptions: HashMap::new(),
             info_edit_errors: HashMap::new(),

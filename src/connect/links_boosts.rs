@@ -4,7 +4,7 @@ use super::*;
 use crate::ids::{ChatId, RequestId};
 use crate::state::GroupsPurpose;
 use crate::state::{
-    AdminLinksState, BOOSTS_PAGE_SIZE, BoostsListState, BoostsStage, INVITE_ADMIN_PAGE_SIZE,
+    AdminLinksState, BOOSTS_PAGE_SIZE, BoostsListState, PageStage, INVITE_ADMIN_PAGE_SIZE,
     InviteLinkFetch, LinkRequestsState, RequestPurpose,
 };
 use crate::telegram::requests::{
@@ -196,8 +196,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .join_requests_mut(chat_id.0)
         {
             Some(state) if append => {
-                state.error = None;
-                state.request = Some(extra);
+                state.stage = PageStage::Loading(extra);
             }
             _ => {
                 self.session.groups.invite_pages.set_join_requests(
@@ -206,8 +205,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         invite_link: invite_link.to_owned(),
                         total_count: 0,
                         requests: Vec::new(),
-                        error: None,
-                        request: Some(extra),
+                        stage: PageStage::Loading(extra),
                     },
                 );
             }
@@ -231,8 +229,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .join_requests_mut(chat_id.0)
             {
                 Some(state) if append && !state.requests.is_empty() => {
-                    state.request = None;
-                    state.error = Some(
+                    state.stage = PageStage::Failed(
                         crate::lang::tr(
                             crate::lang::keys::Q_INVITE_LINK_COULD_NOT_LOAD_MORE_REQUESTS,
                         )
@@ -337,7 +334,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::GetChatBoosts { append }, Some(chat_id));
         match self.session.groups.chat_boost_lists.get_mut(&chat_id.0) {
-            Some(state) if append => state.stage = BoostsStage::Loading(extra),
+            Some(state) if append => state.stage = PageStage::Loading(extra),
             _ => {
                 self.session.groups.chat_boost_lists.insert(
                     chat_id.0,
@@ -346,7 +343,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         total_count: 0,
                         boosts: Vec::new(),
                         next_offset: String::new(),
-                        stage: BoostsStage::Loading(extra),
+                        stage: PageStage::Loading(extra),
                     },
                 );
             }
@@ -359,7 +356,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // The rows already loaded stay; the page that never left shows
             // its error (a first page has no rows, so it shows the error
             // instead of "Loading").
-            state.stage = BoostsStage::Failed("Could not load boosts".into());
+            state.stage = PageStage::Failed("Could not load boosts".into());
         }
         sent
     }

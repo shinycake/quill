@@ -583,8 +583,8 @@ impl Session {
         // A short OK is not exhaustion; 404 is. A page that went through
         // ends the wait after an earlier failure.
         match pending.map(|p| p.purpose) {
-            Some(RequestPurpose::LoadChats) => self.chat_list.chats_retry = None,
-            Some(RequestPurpose::LoadArchiveChats) => self.chat_list.archive_retry = None,
+            Some(RequestPurpose::LoadChats) => self.chat_list.main_paging.page_ok(),
+            Some(RequestPurpose::LoadArchiveChats) => self.chat_list.archive_paging.page_ok(),
             _ => {}
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::DeleteChatFolder)
@@ -725,8 +725,9 @@ impl Session {
                 if let Some(state) = self.groups.invite_pages.join_requests_mut(chat_id.0)
                     && link == Some(state.invite_link.as_str())
                 {
-                    if let Some(page) = state.request.take() {
+                    if let PageStage::Loading(page) = state.stage {
                         self.requests.take(page);
+                        state.stage = PageStage::Ready;
                     }
                     state.requests.clear();
                     state.total_count = 0;

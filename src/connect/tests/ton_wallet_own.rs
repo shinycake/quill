@@ -294,7 +294,7 @@ fn resolve_link(rig: &mut Rig, url: &str, link_type: &str) -> Option<DeepLinkSta
     rig.driver.request_deep_link_info(url).unwrap();
     assert_eq!(rig.last("getInternalLinkType")["link"], url);
     rig.answer("getInternalLinkType", json!({"@type": link_type}));
-    rig.driver.session.chats_state.deep_link.take()
+    rig.driver.session.chats_state.deep_link.take().map(|flow| flow.stage)
 }
 
 #[test]

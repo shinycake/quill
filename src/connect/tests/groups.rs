@@ -443,7 +443,10 @@ fn driver_boost_chain_sends_slots_then_boost() {
     let value: Value = serde_json::from_str(&boost).unwrap();
     assert_eq!(value["chat_id"], 13);
     assert_eq!(value["slot_ids"], serde_json::json!([3]));
-    assert_eq!(driver.session.groups.boost_intent, None);
+    assert_eq!(
+        driver.session.groups.boost_chain,
+        crate::state::BoostChain::Idle
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

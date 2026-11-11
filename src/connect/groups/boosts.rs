@@ -70,7 +70,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         ) {
             return Ok(None);
         }
-        if self.session.groups.boost_intent == Some(chat_id.0) {
+        if self.session.groups.boost_chain.is_for(chat_id.0) {
             return Ok(None);
         }
         // A slots read from a press whose box closed is still out: this
@@ -81,7 +81,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .requests
             .has_purpose_for_chat(RequestPurpose::GetBoostSlotsForBoost, chat_id)
         {
-            self.session.groups.boost_intent = Some(chat_id.0);
+            self.session.groups.boost_chain.wait_for(chat_id.0);
             if let Some(state) = self.boost_box_for(chat_id) {
                 state.phase = BoostPhase::Working;
                 state.note = None;
@@ -98,7 +98,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.groups.boost_intent = Some(chat_id.0);
+        self.session.groups.boost_chain.wait_for(chat_id.0);
         if let Some(state) = self.boost_box_for(chat_id) {
             state.phase = BoostPhase::Working;
             state.note = None;
@@ -112,13 +112,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// what tdesktop shows (reassign list, "already boosted", Premium
     /// needed). `boostChat` errors are reported by the reducer.
     pub(crate) fn maybe_continue_boost(&mut self) -> Result<(), ConnectSendError> {
-        let Some(chat_id) = self.session.groups.boost_intent else {
+        let Some((chat_id, slots)) = self.session.groups.boost_chain.take_ready() else {
             return Ok(());
         };
-        let Some(slots) = self.session.groups.boost_slots_by_chat.remove(&chat_id) else {
-            return Ok(());
-        };
-        self.session.groups.boost_intent = None;
         let now = crate::local_time::now_unix();
         let choice = classify(chat_id, &slots, now);
         let session = &self.session;

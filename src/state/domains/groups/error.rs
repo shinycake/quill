@@ -356,11 +356,10 @@ impl Session {
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
                     && let Some(state) = self.groups.invite_pages.members_mut(chat_id.0)
-                    && state.request == Some(pending.id)
+                    && state.stage.waits_for(pending.id)
                 {
-                    state.loading = false;
-                    state.request = None;
-                    state.error = Some(call_request_error_line(err, "Could not load members"));
+                    state.stage =
+                        PageStage::Failed(call_request_error_line(err, "Could not load members"));
                 }
             }
             Some(RequestPurpose::GetAdminChatInviteLinks { revoked }) => {
@@ -385,11 +384,12 @@ impl Session {
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
                     && let Some(state) = self.groups.invite_pages.join_requests_mut(chat_id.0)
-                    && state.request == Some(pending.id)
+                    && state.stage.waits_for(pending.id)
                 {
-                    state.request = None;
-                    state.error =
-                        Some(call_request_error_line(err, "Could not load join requests"));
+                    state.stage = PageStage::Failed(call_request_error_line(
+                        err,
+                        "Could not load join requests",
+                    ));
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::ProcessLinkJoinRequests { .. })) => {
@@ -405,7 +405,7 @@ impl Session {
                     && state.waits_for(pending.id)
                 {
                     state.stage =
-                        BoostsStage::Failed(call_request_error_line(err, "Could not load boosts"));
+                        PageStage::Failed(call_request_error_line(err, "Could not load boosts"));
                 }
             }
             Some(RequestPurpose::GetChatBoostLink) => {
@@ -507,7 +507,7 @@ impl Session {
                     && let Some(chat_id) = pending.chat_id
                     && self.groups.take_member_more((chat_id.0, filter), pending)
                 {
-                    self.groups.member_more_failed.insert((chat_id.0, filter));
+                    self.groups.member_more_failed((chat_id.0, filter));
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers { filter })) => {
@@ -585,8 +585,10 @@ impl Session {
         }
         // Slice G2: the slots half of a boost failed — the chain
         // cannot continue; drop the intent.
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBoostSlotsForBoost) {
-            self.groups.boost_intent = None;
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBoostSlotsForBoost)
+            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+        {
+            self.groups.boost_chain.slots_failed(chat_id.0);
         }
         // A failed slots read or `boostChat` returns the boost box to its
         // counters with the reason (tdesktop shows the error as a toast).

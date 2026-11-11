@@ -349,7 +349,10 @@ fn a_press_after_closing_mid_request_takes_over_the_slots_read() {
     let boost = rig.sent_all("boostChat");
     assert_eq!(boost.len(), 1, "the press boosts with the answer");
     assert_eq!(boost[0]["slot_ids"], serde_json::json!([5]));
-    assert!(rig.driver.session.groups.boost_slots_by_chat.is_empty());
+    assert_eq!(
+        rig.driver.session.groups.boost_chain,
+        crate::state::BoostChain::Idle
+    );
 }
 
 #[test]
@@ -359,8 +362,9 @@ fn slots_answered_after_the_box_closed_are_not_kept_for_the_next_press() {
     rig.driver.request_chat_boost(ChatId(13)).unwrap();
     rig.driver.close_boost_box();
     rig.answer_slots(&format!("[{}]", slot(5, 0, 0)));
-    assert!(
-        rig.driver.session.groups.boost_slots_by_chat.is_empty(),
+    assert_eq!(
+        rig.driver.session.groups.boost_chain,
+        crate::state::BoostChain::Idle,
         "no stash runs a press behind"
     );
     // The next press reads the slots afresh.

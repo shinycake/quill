@@ -124,17 +124,12 @@ pub struct ChatsState {
     pub chat_upgrades: Vec<(i64, i64)>,
     /// `parity:platform-deep-links`: the single active deep-link flow
     /// (launch link → `getDeepLinkInfo` → follow-up → open chat).
-    pub deep_link: Option<DeepLinkState>,
+    /// The stage and the origin are one value ([`DeepLinkFlow`]); the UI
+    /// takes it at every terminal state and puts it back while the flow
+    /// goes on.
+    pub deep_link: Option<DeepLinkFlow>,
     /// Generation counter for deep-link request correlation.
     pub deep_link_seq: u64,
-    /// The link text being resolved by `getInternalLinkType` (the proxy
-    /// hand-off needs it back).
-    pub deep_link_original: String,
-    /// The flow in `deep_link` was started by a step the agent UI driver
-    /// injected. Set at every start of a flow, kept while it continues,
-    /// taken by the UI at every terminal state; the UI re-checks what an
-    /// agent's flow opens (`guard::with_injecting`).
-    pub deep_link_from_agent: bool,
 }
 
 impl ChatsState {
@@ -169,8 +164,6 @@ impl ChatsState {
             chat_upgrades: Vec::new(),
             deep_link: None,
             deep_link_seq: 0,
-            deep_link_original: String::new(),
-            deep_link_from_agent: false,
         }
     }
 
@@ -180,7 +173,32 @@ impl ChatsState {
     /// by itself (tdesktop ties the flow to the session's window).
     pub fn end_deep_link_flow(&mut self) {
         self.deep_link = None;
-        self.deep_link_from_agent = false;
-        self.deep_link_original.clear();
+    }
+
+    /// The stage of the flow in progress.
+    pub fn deep_link_stage(&self) -> Option<&DeepLinkState> {
+        self.deep_link.as_ref().map(|flow| &flow.stage)
+    }
+
+    /// The link text the flow's `getInternalLinkType` lookup resolves, while
+    /// it is in flight; empty otherwise.
+    pub fn deep_link_original(&self) -> &str {
+        match self.deep_link_stage() {
+            Some(DeepLinkState::ResolvingInfo { original, .. }) => original,
+            _ => "",
+        }
+    }
+
+    /// The flow moves to `stage`, keeping who started it. With no flow in
+    /// progress it starts one from the user.
+    pub fn enter_deep_link_stage(&mut self, stage: DeepLinkState) {
+        let from_agent = self.deep_link.as_ref().is_some_and(|flow| flow.from_agent);
+        self.deep_link = Some(DeepLinkFlow { stage, from_agent });
+    }
+
+    /// A flow `from_agent` starts at `stage` (a new flow, whoever started
+    /// the last one).
+    pub fn start_deep_link(&mut self, stage: DeepLinkState, from_agent: bool) {
+        self.deep_link = Some(DeepLinkFlow { stage, from_agent });
     }
 }

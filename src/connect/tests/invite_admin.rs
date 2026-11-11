@@ -346,7 +346,7 @@ fn link_members_page_and_ignore_replies_for_a_previous_link() {
     rig.ingest(&members_json(first, 5, &[1, 2]));
     let state = &rig.driver.session.groups.invite_pages.members(13).unwrap();
     assert!(state.members.is_empty());
-    assert!(state.loading);
+    assert!(state.loading());
     rig.ingest(&members_json(second, 3, &[7, 8]));
     let state = &rig.driver.session.groups.invite_pages.members(13).unwrap();
     assert_eq!(state.invite_link, "https://t.me/+b");

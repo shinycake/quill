@@ -742,7 +742,7 @@ fn g2_boost_slots_stashed_for_chain() {
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetBoostSlotsForBoost, Some(ChatId(13)));
     // Stashed only while a boost waits for the slots.
-    session.groups.boost_intent = Some(13);
+    session.groups.boost_chain.wait_for(13);
     apply_json(
         &mut session,
         &seq,
@@ -752,10 +752,9 @@ fn g2_boost_slots_stashed_for_chain() {
             extra.0
         ),
     );
-    let ids: Vec<i32> = session.groups.boost_slots_by_chat[&13]
-        .iter()
-        .map(|slot| slot.slot_id)
-        .collect();
+    let (chat, slots) = session.groups.boost_chain.take_ready().expect("stashed");
+    assert_eq!(chat, 13);
+    let ids: Vec<i32> = slots.iter().map(|slot| slot.slot_id).collect();
     assert_eq!(ids, vec![3, 7]);
 }
 

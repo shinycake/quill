@@ -273,9 +273,8 @@ impl Session {
             GroupsPayload::ChatBoostSlots { slots } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBoostSlotsForBoost)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && self.groups.boost_intent == Some(chat_id.0)
                 {
-                    self.groups.boost_slots_by_chat.insert(chat_id.0, slots);
+                    self.groups.boost_chain.slots_arrived(chat_id.0, slots);
                 }
                 // Slice G2: `boostChat` answers `chatBoostSlots` as well
                 // (schema 1.8.67, line 13922) — drop the cached status so
@@ -412,7 +411,7 @@ impl Session {
                     state.boosts.extend(boosts);
                     state.total_count = total_count;
                     state.next_offset = next_offset;
-                    state.stage = BoostsStage::Ready;
+                    state.stage = PageStage::Ready;
                 }
             }
             // `getChatBoostLink` answer.
@@ -447,16 +446,14 @@ impl Session {
                     }) = pending.purpose
                     && let Some(chat_id) = pending.chat_id
                     && let Some(state) = self.groups.invite_pages.members_mut(chat_id.0)
-                    && state.request == Some(pending.id)
+                    && state.stage.waits_for(pending.id)
                 {
                     if !append {
                         state.members.clear();
                     }
                     state.members.extend(members);
                     state.total_count = total_count;
-                    state.loading = false;
-                    state.error = None;
-                    state.request = None;
+                    state.stage = PageStage::Ready;
                 }
             }
             // Phase D3a: `getChatJoinRequests` answer.
@@ -468,15 +465,14 @@ impl Session {
                     && let RequestPurpose::GetLinkJoinRequests { append } = pending.purpose
                     && let Some(chat_id) = pending.chat_id
                     && let Some(state) = self.groups.invite_pages.join_requests_mut(chat_id.0)
-                    && state.request == Some(pending.id)
+                    && state.stage.waits_for(pending.id)
                 {
                     if !append {
                         state.requests.clear();
                     }
                     state.requests.extend(requests);
                     state.total_count = total_count;
-                    state.error = None;
-                    state.request = None;
+                    state.stage = PageStage::Ready;
                 } else if let Some(pending) = pending
                     && matches!(
                         pending.purpose,
@@ -925,10 +921,10 @@ impl Session {
                     && let Some(DeepLinkState::ResolvingChat {
                         action,
                         generation: slot,
-                    }) = self.chats_state.deep_link.clone()
+                    }) = self.chats_state.deep_link_stage().cloned()
                     && slot == generation
                 {
-                    self.chats_state.deep_link = Some(match result {
+                    self.chats_state.enter_deep_link_stage(match result {
                         ChatJoinResult::Success { chat_id } => {
                             DeepLinkState::ChatReady { chat_id, action }
                         }
@@ -961,10 +957,10 @@ impl Session {
                     && let Some(DeepLinkState::ResolvingChat {
                         action: DeepLinkAction::JoinInvite { hash },
                         generation: slot,
-                    }) = self.chats_state.deep_link.clone()
+                    }) = self.chats_state.deep_link_stage().cloned()
                     && slot == generation
                 {
-                    self.chats_state.deep_link = Some(DeepLinkState::InvitePreview {
+                    self.chats_state.enter_deep_link_stage(DeepLinkState::InvitePreview {
                         hash,
                         title,
                         member_count,

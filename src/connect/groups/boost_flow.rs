@@ -29,8 +29,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(false);
         };
         // The old chat's pending intent and stashed slots go with its box.
-        self.session.groups.boost_intent = None;
-        self.session.groups.boost_slots_by_chat.clear();
+        self.session.groups.boost_chain.cancel();
         self.session.groups.boost_box = Some(BoostBoxState::new(chat_id.0, !is_channel));
         self.session.groups.chat_boost_status.remove(&chat_id.0);
         self.session.groups.chat_boost_details.remove(&chat_id.0);
@@ -45,8 +44,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// ignores its box.
     pub fn close_boost_box(&mut self) {
         self.session.groups.boost_box = None;
-        self.session.groups.boost_intent = None;
-        self.session.groups.boost_slots_by_chat.clear();
+        self.session.groups.boost_chain.cancel();
     }
 
     /// Back from the reassign list to the counters.

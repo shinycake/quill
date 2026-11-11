@@ -340,15 +340,15 @@ fn cl2_archive_chat_list_settings_fetch_and_set() {
         driver
             .session
             .chat_list
-            .archive_chat_list_settings
+            .archive_chat_list_settings()
             .is_some()
     );
-    assert!(!driver.session.chat_list.archive_settings_loading);
+    assert!(!driver.session.chat_list.archive_settings_loading());
 
     let mut next = driver
         .session
         .chat_list
-        .archive_chat_list_settings
+        .archive_chat_list_settings()
         .expect("fetched");
     next.keep_unmuted_chats_archived = true;
     let sent = driver.set_archive_chat_list_settings(next).expect("send");
@@ -364,7 +364,7 @@ fn cl2_archive_chat_list_settings_fetch_and_set() {
         driver
             .session
             .chat_list
-            .archive_chat_list_settings
+            .archive_chat_list_settings()
             .expect("cached")
             .keep_unmuted_chats_archived,
         "optimistic flip applied"
@@ -386,7 +386,7 @@ fn cl2_archive_chat_list_settings_fetch_and_set() {
         !driver
             .session
             .chat_list
-            .archive_chat_list_settings
+            .archive_chat_list_settings()
             .expect("cached")
             .keep_unmuted_chats_archived,
         "refusal restored the old settings"

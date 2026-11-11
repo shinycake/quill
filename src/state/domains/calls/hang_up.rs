@@ -19,9 +19,17 @@ pub struct HangUp {
     /// TDLib answered `ok`: the call cannot come back, and the engine
     /// has not been told yet (`ConnectDriver::pump_call_engine` tells it).
     pub engine_hang_up_due: bool,
-    /// The call had been answered here (`CallProgress::Answered`) when the
-    /// hang-up went out; a failed hang-up goes back to that.
-    answered_before: bool,
+    /// What the call was before the hang-up went out; a failed hang-up
+    /// goes back to that.
+    from: HangUpFrom,
+}
+
+/// The `CallProgress` a hang-up replaced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HangUpFrom {
+    Unanswered,
+    /// `CallProgress::Answered`.
+    Answered,
 }
 
 /// How far the active 1:1 call got on this side, one value: ringing (or
@@ -80,7 +88,11 @@ impl CallProgress {
 
     /// The `discardCall` for `hang_up.call_id` went out.
     pub fn hang_up_sent(&mut self, mut hang_up: HangUp) {
-        hang_up.answered_before = self.answered_call() == Some(hang_up.call_id);
+        hang_up.from = if self.answered_call() == Some(hang_up.call_id) {
+            HangUpFrom::Answered
+        } else {
+            HangUpFrom::Unanswered
+        };
         *self = Self::HangingUp(hang_up);
     }
 
@@ -94,12 +106,11 @@ impl CallProgress {
             return None;
         }
         let hang_up = hang_up.clone();
-        *self = if hang_up.answered_before {
-            Self::Answered {
+        *self = match hang_up.from {
+            HangUpFrom::Answered => Self::Answered {
                 call_id: hang_up.call_id,
-            }
-        } else {
-            Self::Idle
+            },
+            HangUpFrom::Unanswered => Self::Idle,
         };
         Some(hang_up)
     }
@@ -124,7 +135,7 @@ impl HangUp {
             call_id,
             resume,
             engine_hang_up_due: false,
-            answered_before: false,
+            from: HangUpFrom::Unanswered,
         }
     }
 }

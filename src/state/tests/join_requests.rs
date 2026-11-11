@@ -66,8 +66,7 @@ fn approve_all_for_a_link_drops_its_page_in_flight() {
             invite_link: "https://t.me/+abc".into(),
             total_count: 4,
             requests: Vec::new(),
-            error: None,
-            request: Some(page),
+            stage: crate::state::PageStage::Loading(page),
         },
     );
     let all = session.request_for_invite_link(
@@ -106,8 +105,7 @@ fn approve_all_for_one_link_keeps_another_links_list() {
             invite_link: "https://t.me/+second".into(),
             total_count: 0,
             requests: Vec::new(),
-            error: None,
-            request: Some(page),
+            stage: crate::state::PageStage::Loading(page),
         },
     );
     apply_json(&mut session, &seq, &sink, &ok_json(all));

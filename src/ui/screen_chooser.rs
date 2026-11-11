@@ -521,7 +521,11 @@ impl QuillApp {
         match for_call {
             ScreenFor::Group => {
                 if let Some(call) = session.calls.active_group_call.as_mut() {
-                    call.screen_sharing = on;
+                    call.screen_share = if on {
+                        quill::state::ScreenShare::Sharing
+                    } else {
+                        quill::state::ScreenShare::Off
+                    };
                     call.screen_share_paused = false;
                 }
             }
