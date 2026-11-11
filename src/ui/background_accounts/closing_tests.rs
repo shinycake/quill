@@ -285,3 +285,40 @@ fn the_quit_observer_closes_clients_within_the_quit_deadline(cx: &mut TestAppCon
     assert!(fakes.iter().all(Fake::finished));
     assert!(took < QUIT_CLOSE_DEADLINE * 3, "took {took:?}");
 }
+
+#[gpui_kit::test]
+fn work_waiting_on_a_wait_that_never_ends_gives_up_as_never(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let ran = Rc::new(Cell::new(None));
+    let ran_in = ran.clone();
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.after_closing(
+            cx,
+            |_| CloseWait::Wait,
+            move |_, go, _| ran_in.set(Some(go)),
+        );
+        assert_eq!(app.background.close_waiters.len(), 1);
+    });
+    run_for(&mut vcx, 30_000);
+    assert_eq!(ran.get(), None, "still within the wait");
+    run_for(&mut vcx, 60_000);
+    assert_eq!(ran.get(), Some(false), "given up: never go ahead");
+    app.read_with(&vcx, |app, _| {
+        assert_eq!(app.background.close_waiters.len(), 0, "the waiter is gone");
+    });
+}
+
+#[gpui_kit::test]
+fn a_waiter_ends_with_the_app_state_that_owns_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let ran = Rc::new(Cell::new(None));
+    let ran_in = ran.clone();
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.after_closing(cx, |_| CloseWait::Go, move |_, go, _| ran_in.set(Some(go)));
+    });
+    run_for(&mut vcx, 40);
+    assert_eq!(ran.get(), Some(true));
+    app.read_with(&vcx, |app, _| {
+        assert_eq!(app.background.close_waiters.len(), 0);
+    });
+}

@@ -1,7 +1,7 @@
 //! Background accounts in the window: the account list badge, and what a
 //! click on another account's notification does once it reaches the
 //! render (needs the `demo-capture` feature for gpui-kit's test support).
-use super::calls::BackgroundRing;
+use super::calls::{BackgroundRing, RingNotice, RingPrompt};
 use super::{AccountUnread, BackgroundClient, BackgroundStatus, PendingOpen};
 use crate::ui::app::QuillApp;
 use crate::ui::call_sounds::CallSound;
@@ -50,9 +50,9 @@ fn ring() -> BackgroundRing {
         caller: "Alice".into(),
         is_video: false,
         account_name: "Work".into(),
-        dismissed: false,
+        prompt: RingPrompt::Shown,
         // No OS notification in tests.
-        notified: true,
+        notice: RingNotice::Sent,
     }
 }
 
@@ -86,7 +86,7 @@ fn a_dismissed_prompt_stops_ringing_in_the_app(cx: &mut TestAppContext) {
     let (app, shell, mut vcx) = new_app_shell(cx);
     app.update_in(&mut vcx, |app, _, cx| {
         let mut dismissed = ring();
-        dismissed.dismissed = true;
+        dismissed.prompt = RingPrompt::Dismissed;
         app.background.ringing = Some(dismissed);
         cx.notify();
     });

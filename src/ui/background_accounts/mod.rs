@@ -134,6 +134,8 @@ pub(crate) struct BackgroundAccounts {
     /// Clients sent `close` and drained a little per poll (`closing`):
     /// switching, signing out or logging out never waits on TDLib.
     pub(super) closing: ClosingSet,
+    /// The work waiting on those closes (`closing::after_closing`).
+    close_waiters: closing::CloseWaiters,
     /// The quit observer that closes every client together.
     quit_close: Option<Subscription>,
     /// Accounts whose folder is being deleted (`deleting`): nothing opens
@@ -161,6 +163,7 @@ impl BackgroundAccounts {
             attention: false,
             ringing: None,
             closing: ClosingSet::new(),
+            close_waiters: Default::default(),
             quit_close: None,
             deleting: HashSet::new(),
             local: LocalData::Fresh,

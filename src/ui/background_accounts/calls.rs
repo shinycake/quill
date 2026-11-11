@@ -25,11 +25,26 @@ pub(super) struct BackgroundRing {
     pub(super) is_video: bool,
     /// The account's own name, for the prompt.
     pub(super) account_name: String,
+    pub(super) prompt: RingPrompt,
+    pub(super) notice: RingNotice,
+}
+
+/// The in-app prompt and ringtone of a ring.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum RingPrompt {
+    Shown,
     /// Closed with Esc: no prompt and no ringtone (the OS notification and
-    /// the caller's side keep ringing until the call ends).
-    pub(super) dismissed: bool,
-    /// The OS notification went out for this call.
-    pub(super) notified: bool,
+    /// the caller's side keep ringing until the call ends). The
+    /// notification's "Open" shows it again.
+    Dismissed,
+}
+
+/// The OS "Incoming call" notification of a ring: sent once, and only
+/// counted once the system took it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum RingNotice {
+    Unsent,
+    Sent,
 }
 
 impl QuillApp {
@@ -62,7 +77,7 @@ impl QuillApp {
         self.background
             .ringing
             .as_ref()
-            .is_some_and(|ring| !ring.dismissed)
+            .is_some_and(|ring| ring.prompt == RingPrompt::Shown)
     }
 
     /// After a background poll: start ringing for a new incoming call,
@@ -126,8 +141,8 @@ impl QuillApp {
                         caller,
                         is_video,
                         account_name,
-                        dismissed: false,
-                        notified: false,
+                        prompt: RingPrompt::Shown,
+                        notice: RingNotice::Unsent,
                     });
                 }
             }
@@ -152,7 +167,7 @@ impl QuillApp {
         let Some(ring) = self.background.ringing.as_mut() else {
             return;
         };
-        if ring.notified {
+        if ring.notice == RingNotice::Sent {
             return;
         }
         let Some(notification) = decide_call_notify(&CallNotifyInput {
@@ -165,9 +180,22 @@ impl QuillApp {
         }) else {
             return;
         };
-        ring.notified = true;
         let account = ring.account.clone();
-        self.spawn_call_notification_as(&account, notification, cx);
+        // Counted only when it went out: a refused one is tried again at the
+        // next poll.
+        if self.spawn_call_notification_as(&account, notification, cx)
+            && let Some(ring) = self.background.ringing.as_mut()
+        {
+            ring.notice = RingNotice::Sent;
+        }
+    }
+
+    /// The prompt was closed: it and the ringtone stop for this ring.
+    fn dismiss_background_prompt(&mut self, cx: &mut Context<Self>) {
+        if let Some(ring) = self.background.ringing.as_mut() {
+            ring.prompt = RingPrompt::Dismissed;
+        }
+        cx.notify();
     }
 
     /// The call stopped ringing: no prompt, no ringtone, no toast.
@@ -175,7 +203,8 @@ impl QuillApp {
         let Some(ring) = self.background.ringing.take() else {
             return;
         };
-        if ring.notified && quill::notify::current_backend() == quill::notify::NotifyBackend::Native
+        if ring.notice == RingNotice::Sent
+            && quill::notify::current_backend() == quill::notify::NotifyBackend::Native
         {
             cx.dismiss_system_notification(&quill::notify_call::call_notification_tag(
                 &ring.account.0,
@@ -257,7 +286,7 @@ impl QuillApp {
                 CallNotificationAction::Decline => self.decline_background_call(cx),
                 CallNotificationAction::Open => {
                     if let Some(ring) = self.background.ringing.as_mut() {
-                        ring.dismissed = false;
+                        ring.prompt = RingPrompt::Shown;
                     }
                     cx.activate(true);
                     window.activate_window();
@@ -332,10 +361,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::BackgroundCall, |this, _, cx| {
-                if let Some(ring) = this.background.ringing.as_mut() {
-                    ring.dismissed = true;
-                }
-                cx.notify();
+                this.dismiss_background_prompt(cx);
             });
         app.update(cx, |this, cx| {
             let (title, body) = this.background_ring_text().unwrap_or_default();
@@ -381,5 +407,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.background_ring_audible() && !app.account.passcode.is_locked(),
         QuillApp::build_background_call_dialog,
     )
-    .close(|app, _, cx| { if let Some(ring) = app.background.ringing.as_mut() { ring.dismissed = true; } cx.notify(); }),
+    .close(|app, _, cx| app.dismiss_background_prompt(cx)),
 }

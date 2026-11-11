@@ -17,6 +17,40 @@ use quill::connect::{EXPORT_STOP_HOLD, QUIT_CLOSE_DEADLINE, deadline_after};
 /// How often a waiter checks the closing set again.
 const CLOSE_POLL: Duration = Duration::from_millis(16);
 
+/// How many checks a waiter makes before it gives up (about a minute): a
+/// close or a preparation that never ends reads as `Never` then, so the
+/// work it holds up is deferred to the next start instead of waiting for
+/// good.
+const CLOSE_POLLS: u32 = 3750;
+
+/// The waiters of `after_closing`. Each holds its task here: they end by
+/// themselves, and the app going away drops the rest.
+#[derive(Default)]
+pub(super) struct CloseWaiters {
+    next: u64,
+    held: Vec<(u64, Task<()>)>,
+}
+
+impl CloseWaiters {
+    fn next_id(&mut self) -> u64 {
+        self.next += 1;
+        self.next
+    }
+
+    fn hold(&mut self, id: u64, task: Task<()>) {
+        self.held.push((id, task));
+    }
+
+    fn release(&mut self, id: u64) {
+        self.held.retain(|(held, _)| *held != id);
+    }
+
+    #[cfg(test)]
+    pub(super) fn len(&self) -> usize {
+        self.held.len()
+    }
+}
+
 /// What work waiting on closing clients should do now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::ui) enum CloseWait {
@@ -126,28 +160,35 @@ impl QuillApp {
         then: impl FnOnce(&mut QuillApp, bool, &mut Context<QuillApp>) + 'static,
     ) {
         let mut then = Some(then);
+        let id = self.background.close_waiters.next_id();
         // screen-scope: the wait covers the closing clients of every account, and its follow-up acts on whatever is on screen then.
-        Self::spawn_app(cx, async move |this, cx| {
+        let task = Self::spawn_app(cx, async move |this, cx| {
+            let mut polls = 0;
             loop {
+                let last = polls >= CLOSE_POLLS;
                 let finished = this.update(cx, |this, cx| {
                     this.reap_closing(cx);
                     let go = match wait(this) {
-                        CloseWait::Wait => return false,
+                        CloseWait::Wait if !last => return false,
+                        CloseWait::Wait | CloseWait::Never => false,
                         CloseWait::Go => true,
-                        CloseWait::Never => false,
                     };
+                    this.background.close_waiters.release(id);
                     if let Some(then) = then.take() {
                         then(this, go, cx);
                     }
                     true
                 });
                 match finished {
-                    Ok(false) => cx.background_executor().timer(CLOSE_POLL).await,
+                    Ok(false) => {
+                        polls += 1;
+                        cx.background_executor().timer(CLOSE_POLL).await
+                    }
                     Ok(true) | Err(_) => break,
                 }
             }
-        })
-        .detach();
+        });
+        self.background.close_waiters.hold(id, task);
     }
 
     /// Whether `key`'s database can be opened now: not while its old
@@ -197,7 +238,7 @@ impl QuillApp {
 /// closing, so a new client never opens a database that is still closing.
 /// False: that can't be confirmed in this run, so never open it.
 pub(in crate::ui) async fn closed(this: &ScopedApp, key: &AccountKey, cx: &mut AsyncApp) -> bool {
-    loop {
+    for _ in 0..CLOSE_POLLS {
         let wait = this
             .update(cx, |this, cx| {
                 this.reap_closing(cx);
@@ -210,4 +251,5 @@ pub(in crate::ui) async fn closed(this: &ScopedApp, key: &AccountKey, cx: &mut A
             CloseWait::Wait => cx.background_executor().timer(CLOSE_POLL).await,
         }
     }
+    false
 }
