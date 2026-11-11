@@ -829,7 +829,7 @@ fn an_ai_answer_applies_only_to_the_draft_it_was_asked_about(cx: &mut TestAppCon
     let answer = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, text: &str| {
         app.update(vcx, |app, _| {
             if let Some(session) = app.demo_session.as_mut() {
-                session.messages.ai_composer_text = Some((GROUP, text.to_string()));
+                session.messages.ai_composer_text = Some((None, GROUP, text.to_string()));
             }
         });
         vcx.update(|window, cx| app.update(cx, |app, cx| app.apply_ai_composer_answer(window, cx)));

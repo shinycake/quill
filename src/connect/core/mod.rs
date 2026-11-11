@@ -259,7 +259,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // chat id rides `PendingRequest::chat_id` (the purposes are unit
         // variants); the UI drains `Session::ai_composer_text` into the
         // composer draft.
-        let ai_text_answer: Option<(ChatId, String)> = match &owned.envelope.payload {
+        let ai_text_answer: Option<(Option<ChatId>, ChatId, String)> = match &owned.envelope.payload {
             EnvelopePayload::Messages(MessagesPayload::AiCompose(
                 AiComposePayload::FixedText { text, .. },
             ))
@@ -273,7 +273,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                         RequestPurpose::FixTextWithAi | RequestPurpose::ComposeTextWithAi
                     )
                 })
-                .and_then(|pending| pending.chat_id.map(|chat_id| (chat_id, text.clone()))),
+                .and_then(|pending| {
+                    pending
+                        .chat_id
+                        .map(|chat_id| (pending.window, chat_id, text.clone()))
+                }),
             _ => None,
         };
         // Slice msg-richtext-ai-tools: capture AI rich-message answers
@@ -282,7 +286,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // the pending request. Same drain contract as the text answers.
         // The UI serializes the blocks back to editor markup; the note
         // records which method answered.
-        let ai_rich_answer: Option<(ChatId, RichMessageContent, &'static str)> =
+        let ai_rich_answer: Option<(Option<ChatId>, ChatId, RichMessageContent, &'static str)> =
             match &owned.envelope.payload {
                 EnvelopePayload::Messages(MessagesPayload::RichMessage { rich }) => owned
                     .envelope
@@ -298,7 +302,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                     })
                     .and_then(|pending| {
                         let note = ai_rich_draft_note(pending.purpose);
-                        pending.chat_id.map(|chat_id| (chat_id, rich.clone(), note))
+                        pending
+                            .chat_id
+                            .map(|chat_id| (pending.window, chat_id, rich.clone(), note))
                     }),
                 _ => None,
             };
@@ -779,11 +785,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Slice msg-richtext-ai-tools: stash AI answers for the composer
         // drain. A late answer for a chat the user has since left is
         // dropped by the UI (chat-id check), never applied blindly.
-        if let Some((chat_id, text)) = ai_text_answer {
-            self.session.messages.ai_composer_text = Some((chat_id, text));
+        if let Some((window, chat_id, text)) = ai_text_answer {
+            self.session.messages.ai_composer_text = Some((window, chat_id, text));
         }
-        if let Some((chat_id, rich, note)) = ai_rich_answer {
-            self.session.messages.ai_composer_blocks = Some((chat_id, rich, note));
+        if let Some((window, chat_id, rich, note)) = ai_rich_answer {
+            self.session.messages.ai_composer_blocks = Some((window, chat_id, rich, note));
         }
         // A5: stash the `checkChatUsername` verdict for the
         // edit-profile dialog.
