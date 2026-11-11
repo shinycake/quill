@@ -76,6 +76,7 @@ mod forwards;
 mod group_call_stage;
 mod history_calendar;
 mod history_prune;
+mod history_retention;
 mod history_trim;
 mod history_types;
 mod info_types;

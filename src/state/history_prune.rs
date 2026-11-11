@@ -36,8 +36,9 @@
 //! held stays queued until the hold lifts. Every history entry, however it
 //! is created ([`Session::history_entry`]), joins the LRU unless a view,
 //! the queue or a hold covers it, so the bound covers all of them.
+use super::history_retention::Retained;
 use super::*;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Newest messages a chat or topic keeps once it is no longer shown.
 pub const CLOSED_TAIL_KEEP: usize = 60;
@@ -107,13 +108,15 @@ impl DroppedMemos {
 /// Which closed histories are kept, most recently used first.
 #[derive(Debug, Default)]
 pub struct HistoryPruning {
-    closed_chats: VecDeque<i64>,
-    closed_topics: VecDeque<(i64, i32)>,
+    /// Each closed chat: waiting for the UI's claims before it is
+    /// trimmed (in the order the views closed), or a kept tail ranked by
+    /// use.
+    chats: Retained<i64>,
+    /// The same for a chat's forum topics.
+    topics: Retained<(i64, i32)>,
+    /// The UI's claim on chats, replaced whole at every update: an input,
+    /// not a stage of a history.
     holds: BTreeSet<ChatId>,
-    /// Chats and topics that stopped being shown, in the order they closed,
-    /// waiting for the UI's claims before they are trimmed.
-    release_chats: VecDeque<i64>,
-    release_topics: VecDeque<(i64, i32)>,
     /// Topic pages still in flight when their entry was dropped.
     pub(super) gone_topic_pages: BTreeSet<u64>,
     dropped: DroppedMemos,
@@ -129,15 +132,16 @@ impl HistoryPruning {
     }
 
     /// Closed chats with a kept tail, most recently used first.
-    pub fn closed_chats(&self) -> impl Iterator<Item = ChatId> + '_ {
-        self.closed_chats.iter().copied().map(ChatId)
+    pub fn closed_chats(&self) -> impl Iterator<Item = ChatId> {
+        self.chats.closed_newest_first().into_iter().map(ChatId)
     }
 
     /// Closed topics with a kept tail, most recently used first.
-    pub fn closed_topics(&self) -> impl Iterator<Item = (ChatId, i32)> + '_ {
-        self.closed_topics
-            .iter()
-            .map(|&(chat, topic)| (ChatId(chat), topic))
+    pub fn closed_topics(&self) -> impl Iterator<Item = (ChatId, i32)> {
+        self.topics
+            .closed_newest_first()
+            .into_iter()
+            .map(|(chat, topic)| (ChatId(chat), topic))
     }
 
     /// Chats the UI holds.
@@ -148,7 +152,7 @@ impl HistoryPruning {
     /// Whether `chat_id` closed and its trim is still waiting for the UI's
     /// claims.
     pub fn release_pending(&self, chat_id: ChatId) -> bool {
-        self.release_chats.contains(&chat_id.0)
+        self.chats.is_releasing(&chat_id.0)
     }
 
     /// Whether `message_id` was deleted in `chat_id` before its history
@@ -168,26 +172,6 @@ impl HistoryPruning {
 
     fn take_dropped(&mut self, chat_id: i64) -> Option<DroppedHistory> {
         self.dropped.take(chat_id)
-    }
-
-    fn queue_chat(&mut self, chat_id: i64) {
-        self.release_chats.retain(|id| *id != chat_id);
-        self.release_chats.push_back(chat_id);
-    }
-
-    fn queue_topic(&mut self, key: (i64, i32)) {
-        self.release_topics.retain(|k| *k != key);
-        self.release_topics.push_back(key);
-    }
-
-    fn touch_chat(&mut self, chat_id: i64) {
-        self.closed_chats.retain(|id| *id != chat_id);
-        self.closed_chats.push_front(chat_id);
-    }
-
-    fn touch_topic(&mut self, key: (i64, i32)) {
-        self.closed_topics.retain(|k| *k != key);
-        self.closed_topics.push_front(key);
     }
 }
 
@@ -261,10 +245,8 @@ impl Session {
     /// a chat nobody shows keep the page cap, as before pruning.
     pub fn keep_all_histories(&mut self) {
         self.history_pruning.keep_all = true;
-        self.history_pruning.release_chats.clear();
-        self.history_pruning.release_topics.clear();
-        self.history_pruning.closed_chats.clear();
-        self.history_pruning.closed_topics.clear();
+        self.history_pruning.chats.clear();
+        self.history_pruning.topics.clear();
     }
 
     /// The UI's claim on histories that are read while their chat is not
@@ -325,16 +307,12 @@ impl Session {
 
     /// A chat is shown again: it is no longer a closed tail.
     pub(crate) fn reclaim_chat_history(&mut self, chat_id: ChatId) {
-        self.history_pruning
-            .closed_chats
-            .retain(|id| *id != chat_id.0);
+        self.history_pruning.chats.reclaim(&chat_id.0);
     }
 
     /// A topic is shown again: it is no longer a closed tail.
     pub(crate) fn reclaim_topic_history(&mut self, chat_id: ChatId, topic: i32) {
-        self.history_pruning
-            .closed_topics
-            .retain(|key| *key != (chat_id.0, topic));
+        self.history_pruning.topics.reclaim(&(chat_id.0, topic));
     }
 
     /// `chat_id` stopped being shown by one view (the main window moved on
@@ -346,7 +324,7 @@ impl Session {
         if self.history_pruning.keep_all || self.chat_shown_by_view(chat_id) {
             return;
         }
-        self.history_pruning.queue_chat(chat_id.0);
+        self.history_pruning.chats.queue(chat_id.0);
     }
 
     /// `topic` of `chat_id` stopped being shown; settled like
@@ -355,32 +333,32 @@ impl Session {
         if self.history_pruning.keep_all || self.topic_shown_by_view(chat_id, topic) {
             return;
         }
-        self.history_pruning.queue_topic((chat_id.0, topic));
+        self.history_pruning.topics.queue((chat_id.0, topic));
     }
 
     /// Trim what the release queue holds, in the order the views closed.
     /// An entry the UI still holds stays queued until its hold lifts.
     pub(crate) fn settle_history_releases(&mut self) {
-        let chats = std::mem::take(&mut self.history_pruning.release_chats);
+        let chats = self.history_pruning.chats.take_releasing();
         for id in chats {
             let chat_id = ChatId(id);
             if self.chat_shown_by_view(chat_id) {
                 continue;
             }
             if self.history_pruning.holds.contains(&chat_id) {
-                self.history_pruning.release_chats.push_back(id);
+                self.history_pruning.chats.queue(id);
                 continue;
             }
             self.release_chat_history_now(chat_id);
         }
-        let topics = std::mem::take(&mut self.history_pruning.release_topics);
+        let topics = self.history_pruning.topics.take_releasing();
         for (chat, topic) in topics {
             let chat_id = ChatId(chat);
             if self.topic_shown_by_view(chat_id, topic) {
                 continue;
             }
             if self.history_pruning.holds.contains(&chat_id) {
-                self.history_pruning.release_topics.push_back((chat, topic));
+                self.history_pruning.topics.queue((chat, topic));
                 continue;
             }
             self.release_topic_history_now(chat_id, topic);
@@ -398,7 +376,7 @@ impl Session {
         if let Some(history) = self.histories.get_mut(&chat_id.0) {
             history.trim_to_tail(CLOSED_TAIL_KEEP);
             self.prune_reply_targets(chat_id);
-            self.history_pruning.touch_chat(chat_id.0);
+            self.history_pruning.chats.touch(chat_id.0);
         }
         // Sorted, so the LRU order (and with it the eviction victim) does
         // not depend on the hash map's iteration order.
@@ -422,7 +400,7 @@ impl Session {
         }
         if let Some(history) = self.threads.topic_histories.get_mut(&(chat_id.0, topic)) {
             let moved = history.has_newer() | (history.trim_to_tail(CLOSED_TAIL_KEEP) > 0);
-            self.history_pruning.touch_topic((chat_id.0, topic));
+            self.history_pruning.topics.touch((chat_id.0, topic));
             // Pages asked for from the window that went would land across
             // a gap.
             if moved {
@@ -448,7 +426,7 @@ impl Session {
                 && !self.chat_history_in_use(chat_id)
                 && !self.history_pruning.release_pending(chat_id)
             {
-                self.history_pruning.touch_chat(chat_id.0);
+                self.history_pruning.chats.touch(chat_id.0);
                 self.enforce_closed_bounds(Some(chat_id.0));
             }
         }
@@ -465,9 +443,9 @@ impl Session {
             self.threads.topic_histories.entry(key).or_default();
             if !self.history_pruning.keep_all
                 && !self.topic_history_in_use(chat_id, topic)
-                && !self.history_pruning.release_topics.contains(&key)
+                && !self.history_pruning.topics.is_releasing(&key)
             {
-                self.history_pruning.touch_topic(key);
+                self.history_pruning.topics.touch(key);
                 self.enforce_closed_bounds(None);
             }
         }
@@ -480,9 +458,7 @@ impl Session {
         if let Some(history) = self.histories.remove(&chat_id) {
             self.history_pruning.remember_dropped(chat_id, &history);
         }
-        self.history_pruning
-            .closed_chats
-            .retain(|id| *id != chat_id);
+        self.history_pruning.chats.forget(&chat_id);
         self.forget_side_tables_once_unloaded(ChatId(chat_id));
     }
 
@@ -572,7 +548,7 @@ impl Session {
             self.threads.topic_histories.remove(&key);
         }
         self.history_pruning
-            .closed_topics
+            .topics
             .retain(|(chat, _)| *chat != chat_id.0);
         self.forget_side_tables_once_unloaded(chat_id);
     }
@@ -590,35 +566,33 @@ impl Session {
             if dropped > 0 {
                 self.prune_reply_targets(chat_id);
             }
-            self.history_pruning.touch_chat(chat_id.0);
+            self.history_pruning.chats.touch(chat_id.0);
             self.enforce_closed_bounds(None);
         }
     }
 
     /// Drop the least recently used closed histories beyond the bounds.
     fn enforce_closed_bounds(&mut self, keep: Option<i64>) {
-        while self.history_pruning.closed_chats.len() > CLOSED_CHATS_MAX {
+        while self.history_pruning.chats.closed_len() > CLOSED_CHATS_MAX {
             let victim = self
                 .history_pruning
-                .closed_chats
-                .iter()
-                .rposition(|id| Some(*id) != keep && self.chat_history_evictable(ChatId(*id)));
-            let Some(id) = victim.and_then(|at| self.history_pruning.closed_chats.remove(at))
-            else {
+                .chats
+                .oldest_closed(|id| Some(*id) != keep && self.chat_history_evictable(ChatId(*id)));
+            let Some(id) = victim else {
                 break;
             };
+            self.history_pruning.chats.forget(&id);
             self.drop_history_entry(id);
         }
-        while self.history_pruning.closed_topics.len() > CLOSED_TOPICS_MAX {
+        while self.history_pruning.topics.closed_len() > CLOSED_TOPICS_MAX {
             let victim = self
                 .history_pruning
-                .closed_topics
-                .iter()
-                .rposition(|&(chat, topic)| !self.topic_history_in_use(ChatId(chat), topic));
-            let Some(key) = victim.and_then(|at| self.history_pruning.closed_topics.remove(at))
-            else {
+                .topics
+                .oldest_closed(|&(chat, topic)| !self.topic_history_in_use(ChatId(chat), topic));
+            let Some(key) = victim else {
                 break;
             };
+            self.history_pruning.topics.forget(&key);
             self.drop_topic_pages_in_flight(key);
             self.threads.topic_histories.remove(&key);
             self.forget_side_tables_once_unloaded(ChatId(key.0));
