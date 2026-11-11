@@ -26,10 +26,24 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     (app, VisualTestContext::from_window(handle.into(), cx))
 }
 
-fn slot(app: &QuillApp, index: usize) -> OptionMediaSlot {
-    app.chat_ui.poll_dialog.as_ref().unwrap().attach[index]
+/// What the slot holds, comparable: a read in progress shows as `None`
+/// here (`preparing` tells it apart).
+fn slot(app: &QuillApp, index: usize) -> Option<PollOptionInput> {
+    app.chat_ui.poll_dialog.as_ref().unwrap().options[index]
+        .attach
         .media
-        .clone()
+        .ready()
+        .cloned()
+}
+
+fn preparing(app: &QuillApp, index: usize) -> Option<String> {
+    match &app.chat_ui.poll_dialog.as_ref().unwrap().options[index]
+        .attach
+        .media
+    {
+        OptionMediaSlot::Preparing(read) => Some(read.path.clone()),
+        _ => None,
+    }
 }
 
 #[gpui_kit::test]
@@ -39,10 +53,10 @@ fn a_link_is_attached_with_done_and_an_empty_one_is_refused(cx: &mut TestAppCont
         app.open_poll_dialog(window, cx);
         app.start_poll_option_link(AttachTarget::Row(1), window, cx);
         app.finish_poll_option_link(AttachTarget::Row(1), cx);
-        assert_eq!(slot(app, 1), OptionMediaSlot::None);
+        assert_eq!(slot(app, 1), None);
         assert!(app.connection.status_note().contains("link"));
 
-        let input = app.chat_ui.poll_dialog.as_ref().unwrap().attach[1]
+        let input = app.chat_ui.poll_dialog.as_ref().unwrap().options[1].attach
             .link_input()
             .cloned()
             .unwrap();
@@ -52,12 +66,12 @@ fn a_link_is_attached_with_done_and_an_empty_one_is_refused(cx: &mut TestAppCont
         app.finish_poll_option_link(AttachTarget::Row(1), cx);
         assert_eq!(
             slot(app, 1),
-            OptionMediaSlot::Ready(PollOptionInput::Link {
+            Some(PollOptionInput::Link {
                 url: "https://example.com/tacos".into()
             })
         );
         let dialog = app.chat_ui.poll_dialog.as_ref().unwrap();
-        assert!(dialog.attach[1].link_input().is_none());
+        assert!(dialog.options[1].attach.link_input().is_none());
         // The draft carries it for the second option once it has text.
         let draft = dialog.draft(cx);
         assert_eq!(
@@ -82,7 +96,7 @@ fn a_sticker_chosen_in_the_panel_goes_to_the_option_not_the_chat(cx: &mut TestAp
         assert!(app.route_poll_option_sticker(FileId(9), "\u{1F600}", (512, 512), cx));
         assert_eq!(
             slot(app, 0),
-            OptionMediaSlot::Ready(PollOptionInput::Sticker {
+            Some(PollOptionInput::Sticker {
                 file_id: 9,
                 width: 512,
                 height: 512,
@@ -103,19 +117,17 @@ fn a_picked_photo_is_read_then_ready_and_a_text_file_is_refused(cx: &mut TestApp
     app.update_in(&mut vcx, |app, window, cx| {
         app.open_poll_dialog(window, cx);
         app.take_poll_option_file(AttachTarget::Row(0), PathBuf::from("/tmp/notes.txt"), cx);
-        assert_eq!(slot(app, 0), OptionMediaSlot::None);
+        assert_eq!(slot(app, 0), None);
+        assert_eq!(preparing(app, 0), None);
         assert!(app.connection.status_note().contains("photo or a video"));
 
         app.take_poll_option_file(AttachTarget::Row(0), photo, cx);
-        assert_eq!(slot(app, 0), OptionMediaSlot::Preparing(shown.clone()));
+        assert_eq!(preparing(app, 0), Some(shown.clone()));
         assert!(app.chat_ui.poll_dialog.as_ref().unwrap().media_preparing());
     });
     vcx.run_until_parked();
     app.update_in(&mut vcx, |app, _, _| {
-        assert_eq!(
-            slot(app, 0),
-            OptionMediaSlot::Ready(PollOptionInput::Photo { path: shown })
-        );
+        assert_eq!(slot(app, 0), Some(PollOptionInput::Photo { path: shown }));
         assert!(!app.chat_ui.poll_dialog.as_ref().unwrap().media_preparing());
     });
 }
@@ -126,23 +138,28 @@ fn removing_a_row_keeps_the_media_with_its_option(cx: &mut TestAppContext) {
     app.update_in(&mut vcx, |app, window, cx| {
         app.open_poll_dialog(window, cx);
         app.add_poll_option_row(window, cx);
-        let link = |url: &str| OptionMediaSlot::Ready(PollOptionInput::Link { url: url.into() });
+        let link_input = |url: &str| PollOptionInput::Link { url: url.into() };
+        let link = |url: &str| OptionMediaSlot::Ready(link_input(url));
         {
             let dialog = app.chat_ui.poll_dialog.as_mut().unwrap();
-            dialog.attach[0].media = link("a");
-            dialog.attach[2].media = link("c");
-            dialog.attach[2].mode = crate::ui::dialogs::AttachMode::Menu;
+            dialog.options[0].attach.media = link("a");
+            dialog.options[2].attach.media = link("c");
+            dialog.options[2].attach.mode = crate::ui::dialogs::AttachMode::Menu;
         }
         app.remove_poll_option_row(1, cx);
         let dialog = app.chat_ui.poll_dialog.as_ref().unwrap();
-        let media: Vec<_> = dialog.attach.iter().map(|a| a.media.clone()).collect();
-        assert_eq!(media, vec![link("a"), link("c")]);
+        let media: Vec<_> = dialog
+            .options
+            .iter()
+            .map(|row| row.attach.media.ready().cloned())
+            .collect();
+        assert_eq!(media, vec![Some(link_input("a")), Some(link_input("c"))]);
         assert!(
-            matches!(dialog.attach[1].mode, crate::ui::dialogs::AttachMode::Menu),
+            matches!(dialog.options[1].attach.mode, crate::ui::dialogs::AttachMode::Menu),
             "the open menu follows its row"
         );
         app.clear_poll_option_media(AttachTarget::Row(0), cx);
-        assert_eq!(slot(app, 0), OptionMediaSlot::None);
+        assert_eq!(slot(app, 0), None);
     });
 }
 
@@ -201,7 +218,7 @@ fn emoji_picked_in_the_panel_go_to_the_option_field_with_a_token(cx: &mut TestAp
         assert!(app.route_poll_option_emoji("\u{1F600}", window, cx));
         assert!(app.route_poll_option_custom_emoji("\u{2B50}", 5368324170671202286, window, cx));
         let dialog = app.chat_ui.poll_dialog.as_ref().unwrap();
-        let field = dialog.option_inputs[1].read(cx);
+        let field = dialog.options[1].input.read(cx);
         assert_eq!(field.value().as_ref(), "\u{1F600}\u{2B50}");
         assert_eq!(field.tokens().len(), 1);
         // The option reaches the draft as composer markup with the emoji.
@@ -221,7 +238,7 @@ fn a_slot_is_found_by_its_id_after_an_earlier_row_is_removed(cx: &mut TestAppCon
         app.open_poll_dialog(window, cx);
         app.add_poll_option_row(window, cx);
         app.add_poll_option_row(window, cx);
-        let asked = app.chat_ui.poll_dialog.as_ref().unwrap().attach[2].id;
+        let asked = app.chat_ui.poll_dialog.as_ref().unwrap().options[2].attach.id;
         assert_eq!(app.target_of_attach(asked), Some(AttachTarget::Row(2)));
         app.remove_poll_option_row(0, cx);
         assert_eq!(
@@ -231,5 +248,55 @@ fn a_slot_is_found_by_its_id_after_an_earlier_row_is_removed(cx: &mut TestAppCon
         );
         app.remove_poll_option_row(1, cx);
         assert_eq!(app.target_of_attach(asked), None, "its row is gone");
+    });
+}
+
+#[gpui_kit::test]
+fn a_pick_for_a_removed_option_is_dropped_and_the_panel_has_one_recipient(
+    cx: &mut TestAppContext,
+) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.open_poll_dialog(window, cx);
+        app.add_poll_option_row(window, cx);
+        // The second option takes the panel from the first.
+        app.choose_poll_option_sticker(AttachTarget::Row(0), cx);
+        app.choose_poll_option_sticker(AttachTarget::Row(1), cx);
+        assert!(app.route_poll_option_sticker(FileId(1), "x", (1, 1), cx));
+        assert_eq!(slot(app, 0), None, "the first option no longer waits");
+        assert!(matches!(
+            slot(app, 1),
+            Some(PollOptionInput::Sticker { file_id: 1, .. })
+        ));
+        // Its row goes while the panel waits for it: the pick is dropped.
+        app.choose_poll_option_sticker(AttachTarget::Row(2), cx);
+        app.remove_poll_option_row(2, cx);
+        assert!(!app.route_poll_option_sticker(FileId(2), "x", (1, 1), cx));
+        assert_eq!(
+            app.pickers.poll_pick,
+            crate::ui::dialogs::PollPick::None,
+            "nobody waits for the next sticker"
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn removing_a_row_cancels_the_read_of_its_picked_file(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let photo =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs/screenshots/fixtures/demo-thumb.png");
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.open_poll_dialog(window, cx);
+        app.add_poll_option_row(window, cx);
+        app.take_poll_option_file(AttachTarget::Row(2), photo, cx);
+        assert!(preparing(app, 2).is_some());
+        app.remove_poll_option_row(2, cx);
+    });
+    vcx.run_until_parked();
+    app.update_in(&mut vcx, |app, _, _| {
+        let dialog = app.chat_ui.poll_dialog.as_ref().unwrap();
+        assert!(!dialog.media_preparing(), "the read went with its row");
+        assert_eq!(slot(app, 0), None);
+        assert_eq!(slot(app, 1), None, "no answer landed on another row");
     });
 }

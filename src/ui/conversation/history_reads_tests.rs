@@ -117,7 +117,7 @@ fn overdraw_rows_below_the_view_are_not_read(cx: &mut TestAppContext) {
     assert!(off.iter().all(|id| !seen.contains(id)));
     // The report reads what was seen, nothing more.
     let reported = app.update(vcx, |app, _| {
-        app.history.reported_visible.clone().map(|(_, ids)| ids)
+        app.history.reported_visible.clone().map(|reported| reported.ids)
     });
     assert_eq!(reported, Some(seen));
 }

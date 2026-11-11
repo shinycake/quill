@@ -81,9 +81,11 @@ impl QuillApp {
             )))
             .content(move |content, window, cx| {
                 let body = body_app.update(cx, |this, cx| {
-                    let focus = this.message_ui.poll_add_option.as_mut().and_then(|panel| {
-                        std::mem::take(&mut panel.focus_on_mount).then(|| panel.input.clone())
-                    });
+                    let focus = this
+                        .message_ui
+                        .poll_add_option
+                        .as_mut()
+                        .and_then(|panel| panel.take_focus().then(|| panel.input.clone()));
                     focus_after_mount(focus, window, cx);
                     this.poll_add_option_panel(cx)
                 });

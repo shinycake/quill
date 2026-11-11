@@ -4,6 +4,7 @@
 use super::app::{PaneMode, QuillApp, pane_placeholder};
 use super::group_panels::SupergroupHeaderExtras;
 use super::history::HistoryShared;
+use super::history_state::ReportedVisible;
 use super::history::{album_history_row, history_skeleton, session_history_row};
 use super::synthetic::BubbleLook;
 use super::*;
@@ -465,10 +466,10 @@ impl QuillApp {
             // Nothing is on screen behind another app: a reaction that
             // comes now stays unread until the window is back, which then
             // reports its rows afresh.
-            if let Some((chat_id, _)) = self.history.reported_visible.take()
+            if let Some(reported) = self.history.reported_visible.take()
                 && let Some(live) = self.live.as_mut()
             {
-                live.driver.session.leave_screen(chat_id);
+                live.driver.session.leave_screen(reported.chat);
             }
             return;
         }
@@ -479,12 +480,13 @@ impl QuillApp {
             Ok(Some((chat, ids))) if *chat == chat_id && !ids.is_empty() => ids.clone(),
             _ => return,
         };
-        if self
-            .history
-            .reported_visible
-            .as_ref()
-            .is_some_and(|(chat, last)| *chat == chat_id && *last == ids)
-        {
+        let open = self
+            .session()
+            .and_then(|session| session.histories.get(&chat_id.0))
+            .map_or(0, |history| history.views.epoch());
+        if self.history.reported_visible.as_ref().is_some_and(|last| {
+            last.chat == chat_id && last.open == open && last.ids == ids
+        }) {
             return;
         }
         // Before `viewMessages`, while the rows still count as unread: an
@@ -499,13 +501,21 @@ impl QuillApp {
             // queued for the next attempt, and re-reporting every frame
             // would only spin the render loop.
             let queued = matches!(live.driver.view_messages(chat_id, &ids), Ok(Some(_)));
-            self.history.reported_visible = Some((chat_id, ids));
+            self.history.reported_visible = Some(ReportedVisible {
+                chat: chat_id,
+                open,
+                ids,
+            });
             if queued {
                 self.notify_tick(crate::ui::app_slice::SliceKind::Conversation, cx);
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.autoplay_emoji_effects(chat_id, &ids, paused, rand::random());
-            self.history.reported_visible = Some((chat_id, ids));
+            self.history.reported_visible = Some(ReportedVisible {
+                chat: chat_id,
+                open,
+                ids,
+            });
         }
     }
 }

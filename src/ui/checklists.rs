@@ -6,7 +6,7 @@
 
 use super::ai_compose::marked_link;
 use super::app::QuillApp;
-use super::dialogs::OptionMediaSlot;
+use super::dialogs::{AddOptionStage, OptionMediaSlot};
 use super::polls::AttachTarget;
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -478,8 +478,7 @@ impl QuillApp {
             message_id,
             input,
             attach: Default::default(),
-            error: None,
-            focus_on_mount: true,
+            stage: AddOptionStage::Opening,
         });
         cx.notify();
     }
@@ -513,7 +512,7 @@ impl QuillApp {
             Ok(_) => text.trim().to_string(),
             Err(reason) => {
                 if let Some(panel) = self.message_ui.poll_add_option.as_mut() {
-                    panel.error = Some(reason);
+                    panel.refuse(reason);
                 }
                 cx.notify();
                 return;
@@ -602,7 +601,7 @@ impl QuillApp {
                     .child(self.poll_option_attach_button(AttachTarget::Added, cx)),
             )
             .children(self.poll_option_attach_area(AttachTarget::Added, cx));
-        if let Some(error) = panel.error {
+        if let Some(error) = panel.error() {
             body = body.child(
                 div()
                     .id("poll-add-option-error")

@@ -5,7 +5,7 @@ use super::app::QuillApp;
 use super::country_box::CountryHost;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
-use crate::ui::dialogs::poll::{PollPage, QuizLock};
+use crate::ui::dialogs::poll::{PollOptionRow, PollPage, QuizLock};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -579,11 +579,11 @@ impl QuillApp {
         let Some(dialog) = self.chat_ui.poll_dialog.as_mut() else {
             return;
         };
-        if dialog.option_inputs.len() >= POLL_OPTIONS_MAX {
+        if dialog.options.len() >= POLL_OPTIONS_MAX {
             return;
         }
-        let index = dialog.option_inputs.len();
-        dialog.option_inputs.push(cx.new(|cx| {
+        let index = dialog.options.len();
+        let input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder(tr_with(
                     keys::Q_MEDIA_OPTION,
@@ -591,8 +591,12 @@ impl QuillApp {
                 ))
                 .auto_grow(1, 2)
                 .submit_on_enter(false)
-        }));
-        dialog.attach.push(Default::default());
+        });
+        dialog.options.push(PollOptionRow {
+            input,
+            attach: Default::default(),
+            correct: false,
+        });
         cx.notify();
     }
 
@@ -600,16 +604,12 @@ impl QuillApp {
         let Some(dialog) = self.chat_ui.poll_dialog.as_mut() else {
             return;
         };
-        if dialog.option_inputs.len() <= POLL_OPTIONS_MIN || index >= dialog.option_inputs.len() {
+        if dialog.options.len() <= POLL_OPTIONS_MIN || index >= dialog.options.len() {
             return;
         }
-        dialog.option_inputs.remove(index);
-        // The media, its menu, link field and sticker choice go with the row.
-        if index < dialog.attach.len() {
-            dialog.attach.remove(index);
-        }
-        // Keep the marked correct-answer rows pointing at the same options.
-        dialog.forget_correct_row(index);
+        // The field, media (with its menu, link field and read), and the
+        // correct-answer mark go with the row.
+        dialog.options.remove(index);
         cx.notify();
     }
 
@@ -744,15 +744,15 @@ impl QuillApp {
                     .h(px(40.)),
             );
         let is_quiz = dialog.is_quiz;
-        let quiz_correct_rows = dialog.quiz_correct_rows.clone();
-        for (index, input) in dialog.option_inputs.iter().enumerate() {
+        for (index, option) in dialog.options.iter().enumerate() {
+            let input = &option.input;
             let mut row = div()
                 .id(("poll-dialog-option", index as u64))
                 .flex()
                 .items_center()
                 .gap_2();
             if is_quiz {
-                let marked = quiz_correct_rows.contains(&index);
+                let marked = option.correct;
                 row = row.child(
                     // Phase 6: kit Checkbox, not Radio — a correct answer
                     // is toggleable (clicking the marked option clears it),
@@ -782,7 +782,7 @@ impl QuillApp {
             );
             row = row.child(self.poll_option_emoji_button(AttachTarget::Row(index), cx));
             row = row.child(self.poll_option_attach_button(AttachTarget::Row(index), cx));
-            if dialog.option_inputs.len() > POLL_OPTIONS_MIN {
+            if dialog.options.len() > POLL_OPTIONS_MIN {
                 row = row.child(
                     Button::new(format!("poll-remove-option-{index}"))
                         .icon(gpui_kit::assets::IconName::X)
@@ -799,7 +799,7 @@ impl QuillApp {
                 panel = panel.child(extra);
             }
         }
-        if dialog.option_inputs.len() < POLL_OPTIONS_MAX {
+        if dialog.options.len() < POLL_OPTIONS_MAX {
             panel = panel.child(
                 Button::new("poll-add-option")
                     .icon(gpui_kit::assets::IconName::Plus)

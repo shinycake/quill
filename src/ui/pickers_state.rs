@@ -9,6 +9,9 @@ use quill::lang::{keys, tr};
 pub(crate) struct PickerUi {
     /// The composer's emoji / sticker / GIF popover.
     pub(super) media_panel: super::media_panel::MediaPanel,
+    /// Where the panel's next sticker or emoji goes when a poll option
+    /// asked for it (`polls/option_attach.rs`).
+    pub(super) poll_pick: super::dialogs::PollPick,
     /// The emoji status selector's search (cleared on each open).
     pub(super) status_search_input: Entity<TextareaState>,
     /// The emoji packs box's search: typing searches once it pauses
@@ -86,6 +89,7 @@ impl PickerUi {
         });
         Self {
             media_panel: super::media_panel::MediaPanel::default(),
+            poll_pick: Default::default(),
             status_search_input,
             emoji_set_search_input,
             emoji_set_keystroke: 0,

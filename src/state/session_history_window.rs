@@ -97,6 +97,13 @@ impl Session {
             .is_some_and(|h| h.load_failed() && h.messages.is_empty())
     }
 
+    /// The page request for `chat_id` could not be sent: the history ends in
+    /// its failed stage (the Retry row) rather than being asked again from
+    /// every render.
+    pub fn fail_history_load(&mut self, chat_id: ChatId) {
+        self.history_entry(chat_id).fail_load();
+    }
+
     /// The open history waits for its first page (no entry yet, or a page
     /// that starts the window in flight): the UI shows a skeleton rather
     /// than "No messages". Live messages that arrived meanwhile don't show
