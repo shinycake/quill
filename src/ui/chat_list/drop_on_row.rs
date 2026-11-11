@@ -329,7 +329,11 @@ impl QuillApp {
             return;
         };
         let (was_on_row, moved) = match over {
-            Over::Row { chat, position: seen, .. } => (*chat == chat_id, *seen != position),
+            Over::Row {
+                chat,
+                position: seen,
+                ..
+            } => (*chat == chat_id, *seen != position),
             Over::Off => (false, true),
         };
         if was_on_row && !moved {
@@ -746,12 +750,11 @@ impl QuillApp {
             super::super::forward_drag_source::drag_for(session, chat, id, &[])
         });
         if let Some(drag) = drag {
-            self.chat_list.drop_on_row.seen =
-                Dragged::Staged(Box::new(Dragged::Forward {
-                    drag,
-                    in_list: true,
-                    hover: Some(ChatId(12)),
-                }));
+            self.chat_list.drop_on_row.seen = Dragged::Staged(Box::new(Dragged::Forward {
+                drag,
+                in_list: true,
+                hover: Some(ChatId(12)),
+            }));
         }
     }
 
@@ -775,12 +778,11 @@ impl QuillApp {
             self.share.forward = crate::ui::forward_stage::ForwardStage::Selecting(draft);
         }
         if let Some(drag) = drag {
-            self.chat_list.drop_on_row.seen =
-                Dragged::Staged(Box::new(Dragged::Forward {
-                    drag,
-                    in_list: true,
-                    hover: Some(ChatId(12)),
-                }));
+            self.chat_list.drop_on_row.seen = Dragged::Staged(Box::new(Dragged::Forward {
+                drag,
+                in_list: true,
+                hover: Some(ChatId(12)),
+            }));
         }
     }
 }
@@ -788,8 +790,8 @@ impl QuillApp {
 #[cfg(test)]
 mod tests {
     use super::{Dragged, DropOnRow, FileDrag, Freeze, Over, sort_frozen};
-    use gpui_kit::gpui::{point, px};
     use gpui_kit::Task;
+    use gpui_kit::gpui::{point, px};
     use quill::drop_modes::DragState;
     use quill::ids::ChatId;
     use std::collections::HashMap;

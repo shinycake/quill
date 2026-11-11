@@ -261,7 +261,8 @@ impl QuillApp {
     /// Ask for the open shared folder's new chats (the driver keeps to the
     /// update period). Called when a folder opens and from the poll loop.
     pub(super) fn poll_folder_new_chats(&mut self) {
-        let (Some(folder_id), Some(live)) = (self.chat_list.view.folder(), self.live.as_mut()) else {
+        let (Some(folder_id), Some(live)) = (self.chat_list.view.folder(), self.live.as_mut())
+        else {
             return;
         };
         let _ = live.driver.fetch_folder_new_chats(folder_id);

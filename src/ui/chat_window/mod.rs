@@ -379,7 +379,10 @@ impl ChatWindows {
             Some(in_place.clone())
         } else {
             // A slot in use is not read: the window still comes forward.
-            open.slot.try_borrow().ok().map(|slot| slot.composer.clone())
+            open.slot
+                .try_borrow()
+                .ok()
+                .map(|slot| slot.composer.clone())
         };
         let _ = open.handle.update(cx, |_, window, cx| {
             window.activate_window();

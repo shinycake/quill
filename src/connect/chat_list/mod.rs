@@ -490,11 +490,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // the chat it creates: another user's creation in flight does not
         // swallow this one, and only the same user's does.
         let chat = ChatId(user_id);
-        if self
-            .session
-            .requests
-            .has_purpose_for_chat(purpose, chat)
-        {
+        if self.session.requests.has_purpose_for_chat(purpose, chat) {
             return Ok(None);
         }
         let extra = self.session.request(purpose, Some(chat));

@@ -400,7 +400,9 @@ fn a_ban_warning_waits_while_another_box_is_open_then_opens(cx: &mut TestAppCont
         // The confirmed ban is kept, not dropped, and nothing opens over Pick.
         assert!(!app.drain_pending_ban(cx));
     });
-    assert!(app.read_with(&vcx, |app, _| !app.admin.community.flow.ban_waits.is_empty()));
+    assert!(app.read_with(&vcx, |app, _| {
+        !app.admin.community.flow.ban_waits.is_empty()
+    }));
     assert_eq!(open_box(&app, &mut vcx), "pick");
     app.update(&mut vcx, |app, cx| {
         app.admin.community.flow.open = None;

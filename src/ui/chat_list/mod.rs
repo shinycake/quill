@@ -657,17 +657,18 @@ impl QuillApp {
                 })
                 .collect();
             let press = self.chat_list.pin.take_press(drag.chat_id.0).unwrap_or(y);
-            let stage = quill::pin_reorder::PinReorder::begin(ids, heights, drag.chat_id.0, press, now)
-                .map_or(crate::ui::chat_list_state::PinStage::Idle, |mut reorder| {
-                    reorder.drag_to(y, now);
-                    crate::ui::chat_list_state::PinStage::Dragging(
-                        crate::ui::chat_list_state::PinDrag {
-                            archived: drag.archived,
-                            reorder,
-                            next_press: None,
-                        },
-                    )
-                });
+            let stage =
+                quill::pin_reorder::PinReorder::begin(ids, heights, drag.chat_id.0, press, now)
+                    .map_or(crate::ui::chat_list_state::PinStage::Idle, |mut reorder| {
+                        reorder.drag_to(y, now);
+                        crate::ui::chat_list_state::PinStage::Dragging(
+                            crate::ui::chat_list_state::PinDrag {
+                                archived: drag.archived,
+                                reorder,
+                                next_press: None,
+                            },
+                        )
+                    });
             self.chat_list.begin_pin_drag(stage);
         }
         self.notify_sidebar(cx);

@@ -159,9 +159,11 @@ impl QuillApp {
                     (true, _) => {
                         self.cancel_inline_opening();
                         self.links.deep_link_dialog = Some(text);
-                        self.screen
-                            .windows
-                            .open_box_in(DialogKind::DeepLinkInfo, from_window, since);
+                        self.screen.windows.open_box_in(
+                            DialogKind::DeepLinkInfo,
+                            from_window,
+                            since,
+                        );
                     }
                     (false, Some(action)) => {
                         self.screen.links.flow.resume(origin);
@@ -172,9 +174,11 @@ impl QuillApp {
                     (false, None) => {
                         self.cancel_inline_opening();
                         self.links.deep_link_dialog = Some(text);
-                        self.screen
-                            .windows
-                            .open_box_in(DialogKind::DeepLinkInfo, from_window, since);
+                        self.screen.windows.open_box_in(
+                            DialogKind::DeepLinkInfo,
+                            from_window,
+                            since,
+                        );
                     }
                 }
             }

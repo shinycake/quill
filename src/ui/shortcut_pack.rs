@@ -533,7 +533,8 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return false;
         };
-        let pinned = session.pinned_chat_ids(self.chat_list.view.filter() == ChatListFilter::Archived);
+        let pinned =
+            session.pinned_chat_ids(self.chat_list.view.filter() == ChatListFilter::Archived);
         let chats = visible_pinned(&self.listed_chat_ids(), &pinned);
         let Some(&chat_id) = chats.get(index) else {
             return false;

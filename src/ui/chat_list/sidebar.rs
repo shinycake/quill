@@ -329,7 +329,11 @@ impl QuillApp {
         // drag ends itself when its window lost focus, and settles when the
         // slide is done.
         let active = self.frame.window_active.get();
-        if self.chat_list.pin.advance(std::time::Instant::now(), active) {
+        if self
+            .chat_list
+            .pin
+            .advance(std::time::Instant::now(), active)
+        {
             self.request_animation_tick(60, cx);
         }
         // kit Phase 3: hand the flat item list to the kit `VirtualList`.

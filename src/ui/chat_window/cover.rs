@@ -162,8 +162,7 @@ impl ChatWindows {
             .iter()
             .filter(|open| {
                 open.slot.try_borrow().is_ok_and(|slot| {
-                    !slot.stand.active
-                        && slot.stand.place.is_some_and(|place| front.covers(&place))
+                    !slot.stand.active && slot.stand.place.is_some_and(|place| front.covers(&place))
                 })
             })
             .map(|open| open.handle.window_id())

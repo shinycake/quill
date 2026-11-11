@@ -103,9 +103,7 @@ pub(super) fn windows_to_save(
     let not_back = match restore {
         Restore::Pending => return None,
         Restore::Offered(saved) | Restore::Done(saved) => saved.clone(),
-        Restore::Opening { waiting, refused } => {
-            waiting.iter().chain(refused).cloned().collect()
-        }
+        Restore::Opening { waiting, refused } => waiting.iter().chain(refused).cloned().collect(),
     };
     let mut all = open;
     for window in not_back {
@@ -260,7 +258,10 @@ impl QuillApp {
                 }
                 self.windows.restore = Restore::Offered(saved);
             }
-            Restore::Opening { waiting, mut refused } => {
+            Restore::Opening {
+                waiting,
+                mut refused,
+            } => {
                 let (ready, waiting) = split_ready(waiting, |chat| {
                     self.session()
                         .is_some_and(|s| s.chats.contains_key(&chat.0))
@@ -273,8 +274,7 @@ impl QuillApp {
                         .session()
                         .and_then(|s| s.chats.get(&chat_id.0))
                         .is_some_and(|chat| self.can_open_chat_window(chat));
-                    if openable
-                        && !self.try_open_chat_window_at(chat_id, Some(bounds), window, cx)
+                    if openable && !self.try_open_chat_window_at(chat_id, Some(bounds), window, cx)
                     {
                         refused.push(saved);
                     }
@@ -440,7 +440,10 @@ mod tests {
         );
         // Done with a refused or dismissed window: it stays in the file.
         assert_eq!(
-            chats(windows_to_save(vec![saved(1)], &Restore::Done(vec![saved(2)]))),
+            chats(windows_to_save(
+                vec![saved(1)],
+                &Restore::Done(vec![saved(2)])
+            )),
             Some(vec![1, 2])
         );
     }

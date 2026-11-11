@@ -100,7 +100,8 @@ impl QuillApp {
     /// archive (tdesktop shows the archive's hidden stories there; Quill
     /// shows none).
     pub(super) fn story_strip_available(&self) -> bool {
-        !self.stories.strip.tiles.is_empty() && self.chat_list.view.filter() != ChatListFilter::Archived
+        !self.stories.strip.tiles.is_empty()
+            && self.chat_list.view.filter() != ChatListFilter::Archived
     }
 
     /// The compact stack's opacity: full while the strip is collapsed (fading
