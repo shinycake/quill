@@ -26,7 +26,7 @@ fn due(f: &Fixture) -> bool {
     let chat_list = &f.1.session.chat_list;
     chat_list.archive_mute.suggestion_due(
         &chat_list.suggestions.actions,
-        chat_list.archive_chat_list_settings.as_ref(),
+        chat_list.archive_settings.data(),
     )
 }
 
@@ -79,7 +79,13 @@ fn no_suggestion_when_the_setting_is_on_and_the_switch_stays() {
     suggest(&mut f);
     answer_settings(&mut f, true);
     assert!(!due(&f));
-    let settings = f.1.session.chat_list.archive_chat_list_settings.unwrap();
+    let settings =
+        f.1.session
+            .chat_list
+            .archive_settings
+            .data()
+            .copied()
+            .unwrap();
     let off = crate::telegram::requests::ArchiveChatListSettings {
         archive_and_mute_new_chats_from_unknown_users: false,
         ..settings

@@ -267,15 +267,25 @@ impl Session {
             // Slice G2: `chatBoostSlots` (schema 1.8.67, line 6968) — the
             // `getAvailableChatBoostSlots` answer. Stashed per chat so the
             // driver's `boostChat` chain can consume it (see
-            // `maybe_continue_boost` in connect.rs). Only while a boost
-            // waits for them: a stash left from a closed box would be
-            // used, out of date, by the next press.
+            // `maybe_continue_boost` in connect.rs). Only while the box of
+            // that chat waits for them: a box that closed has nothing to
+            // hand them to.
             GroupsPayload::ChatBoostSlots { slots } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBoostSlotsForBoost)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && self.groups.boost_intent == Some(chat_id.0)
+                    && let Some(state) = self
+                        .groups
+                        .boost_box
+                        .as_mut()
+                        .filter(|state| state.chat_id == chat_id.0)
+                    && matches!(
+                        state.phase,
+                        crate::boost_box::BoostPhase::Working(crate::boost_box::BoostWork::Slots)
+                    )
                 {
-                    self.groups.boost_slots_by_chat.insert(chat_id.0, slots);
+                    state.phase = crate::boost_box::BoostPhase::Working(
+                        crate::boost_box::BoostWork::SlotsReady(slots),
+                    );
                 }
                 // Slice G2: `boostChat` answers `chatBoostSlots` as well
                 // (schema 1.8.67, line 13922) — drop the cached status so
@@ -293,8 +303,16 @@ impl Session {
                         .as_mut()
                         .filter(|state| state.chat_id == chat_id.0)
                     {
-                        state.phase = crate::boost_box::BoostPhase::Main;
-                        state.note = state.reassigning.take().map(|moved| {
+                        let moved = match std::mem::replace(
+                            &mut state.phase,
+                            crate::boost_box::BoostPhase::Main,
+                        ) {
+                            crate::boost_box::BoostPhase::Working(
+                                crate::boost_box::BoostWork::Boosting { reassign },
+                            ) => reassign,
+                            _ => None,
+                        };
+                        state.note = moved.map(|moved| {
                             crate::boost_box::reassign_done_text(
                                 moved.count,
                                 moved.groups,

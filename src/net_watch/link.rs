@@ -11,10 +11,35 @@ const DISCARD_PORT: u16 = 9;
 pub(super) struct Link {
     /// The OS interface index; 0 when unknown.
     pub(super) interface: u32,
-    pub(super) gateway: Option<IpAddr>,
-    /// The gateway's link-layer address; `None` until the system has
-    /// resolved it, which is no change of network ([`super::Path::settled`]).
-    pub(super) gateway_hardware: Option<[u8; 6]>,
+    pub(super) gateway: Gateway,
+}
+
+/// How far the gateway is known. `Unresolved` until the system has
+/// resolved its link-layer address, which is no change of network
+/// ([`super::Path::settled`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum Gateway {
+    #[default]
+    None,
+    Unresolved(IpAddr),
+    Resolved(IpAddr, [u8; 6]),
+}
+
+impl Gateway {
+    pub(super) fn new(ip: Option<IpAddr>, hardware: Option<[u8; 6]>) -> Self {
+        match (ip, hardware) {
+            (Some(ip), Some(hardware)) => Self::Resolved(ip, hardware),
+            (Some(ip), None) => Self::Unresolved(ip),
+            (None, _) => Self::None,
+        }
+    }
+
+    pub(super) fn ip(self) -> Option<IpAddr> {
+        match self {
+            Self::None => None,
+            Self::Unresolved(ip) | Self::Resolved(ip, _) => Some(ip),
+        }
+    }
 }
 
 /// The link `local` sends to `to` from.
@@ -152,7 +177,7 @@ mod unix {
 /// real packet does.
 #[cfg(target_os = "linux")]
 mod backend {
-    use super::Link;
+    use super::{Gateway, Link};
     use crate::net_watch::netlink;
     use std::net::IpAddr;
 
@@ -165,16 +190,17 @@ mod backend {
         };
         Link {
             interface,
-            gateway,
-            gateway_hardware: gateway
-                .and_then(|gateway| netlink::neighbour(&socket, interface, gateway)),
+            gateway: Gateway::new(
+                gateway,
+                gateway.and_then(|gateway| netlink::neighbour(&socket, interface, gateway)),
+            ),
         }
     }
 }
 
 #[cfg(target_os = "macos")]
 mod backend {
-    use super::Link;
+    use super::{Gateway, Link};
     use core_foundation::base::{CFType, TCFType};
     use core_foundation::dictionary::{CFDictionary, CFDictionaryRef};
     use core_foundation::string::{CFString, CFStringRef};
@@ -226,8 +252,7 @@ mod backend {
         };
         Link {
             interface,
-            gateway,
-            gateway_hardware,
+            gateway: Gateway::new(gateway, gateway_hardware),
         }
     }
 
@@ -306,7 +331,7 @@ impl Drop for Resolve {
 
 #[cfg(windows)]
 mod backend {
-    use super::Link;
+    use super::{Gateway, Link};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     use windows_sys::Win32::Foundation::NO_ERROR;
     use windows_sys::Win32::NetworkManagement::IpHelper::{
@@ -337,8 +362,10 @@ mod backend {
         let gateway = ip_of(&route.NextHop).filter(|hop| !hop.is_unspecified());
         Link {
             interface: route.InterfaceIndex,
-            gateway,
-            gateway_hardware: gateway.and_then(|gateway| hardware(route.InterfaceIndex, gateway)),
+            gateway: Gateway::new(
+                gateway,
+                gateway.and_then(|gateway| hardware(route.InterfaceIndex, gateway)),
+            ),
         }
     }
 
@@ -416,7 +443,7 @@ mod backend {
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 mod backend {
-    use super::Link;
+    use super::{Gateway, Link};
     use std::net::IpAddr;
 
     pub(super) fn of(_local: IpAddr, _to: IpAddr) -> Link {

@@ -56,10 +56,6 @@ impl QuillApp {
         self.ai_compose
             .style_prompt
             .update(cx, |state, cx| state.set_value(prompt, window, cx));
-        // A save from an editor left earlier never closes this one.
-        if let Some(session) = super::session_mut(self) {
-            session.messages.ai_compose.forget_style_save();
-        }
         let Some(open) = self.ai_compose.open.as_mut() else {
             return;
         };
@@ -227,7 +223,7 @@ impl QuillApp {
                     .w_full()
                     .rounded(pill_radius())
                     .label(label)
-                    .disabled(editor.save == StyleSave::Sent)
+                    .disabled(matches!(editor.save, StyleSave::Sent { .. }))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.submit_ai_style_editor(window, cx);
                     })),
@@ -256,7 +252,7 @@ impl QuillApp {
         let Some(editor) = self.ai_style_editor_mut() else {
             return;
         };
-        if editor.save == StyleSave::Sent {
+        if matches!(editor.save, StyleSave::Sent { .. }) {
             return;
         }
         editor.warning = if editor.emoji_id == 0 {
@@ -272,7 +268,6 @@ impl QuillApp {
         if editor.warning.is_some() {
             return;
         }
-        editor.save = StyleSave::Sent;
         let editor = editor.clone();
         let Some(live) = self.live.as_mut() else {
             return;
@@ -292,16 +287,21 @@ impl QuillApp {
                 editor.show_creator,
             ),
         };
-        if sent.is_err() {
-            if let Some(editor) = self.ai_style_editor_mut() {
-                editor.save = StyleSave::Editing;
+        match sent {
+            Ok(request) => {
+                if let Some(editor) = self.ai_style_editor_mut() {
+                    editor.save = StyleSave::Sent { request };
+                }
             }
-            self.ai_compose_error_toast(
-                &quill::ai_compose::AiBoxError::Other(String::new()),
-                window,
-                cx,
-            );
+            Err(_) => {
+                self.ai_compose_error_toast(
+                    &quill::ai_compose::AiBoxError::Other(String::new()),
+                    window,
+                    cx,
+                );
+            }
         }
+        cx.notify();
     }
 }
 
