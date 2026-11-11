@@ -240,7 +240,7 @@ impl QuillApp {
                 )],
             )
         };
-        let note = self.session().and_then(|s| s.search.date_jump_note.clone());
+        let note = self.session().and_then(|s| s.search.date_jump_note());
         div()
             .id("jump-date")
             .mx_auto()

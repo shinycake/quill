@@ -92,14 +92,9 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return;
         };
-        let stored = session.groups.event_log_filters.get(&chat_id.0).copied();
-        let stored_admins = session
-            .groups
-            .event_log_users
-            .get(&chat_id.0)
-            .cloned()
-            .unwrap_or_default();
-        let fetch = session.groups.event_logs.get(&chat_id.0).cloned();
+        let stored = session.groups.event_log_filter(chat_id.0);
+        let stored_admins = session.groups.event_log_users(chat_id.0).to_vec();
+        let fetch = session.groups.event_log_fetch(chat_id.0).cloned();
         let is_channel = session
             .chats
             .get(&chat_id.0)

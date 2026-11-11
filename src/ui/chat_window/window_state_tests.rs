@@ -88,10 +88,10 @@ fn underlined(app: &Entity<QuillApp>, scope: Option<ChatId>, cx: &mut TestAppCon
     app.update(cx, |app, cx| {
         app.in_window_scope(scope, cx, |app, _| {
             let spelling = &app.composer_ui.spelling;
-            if spelling.misspellings.is_empty() {
+            if spelling.underlines.found.is_empty() {
                 String::new()
             } else {
-                spelling.checked_text.clone()
+                spelling.underlines.text.clone()
             }
         })
     })
@@ -266,17 +266,18 @@ fn a_set_video_pick_goes_with_its_window(cx: &mut TestAppContext) {
     use crate::ui::sticker_set_box::state::{PendingVideo, PickExisting, PickedFile};
     let (app, main, chat_window) = new_app(cx);
     app.update(cx, |app, _| {
-        app.sticker_box.pending_video = Some(PendingVideo {
-            pick: PickExisting {
-                set_id: 78,
-                kind: quill::sticker_set_box::SetKind::Stickers,
-                adapt: false,
-            },
-            file_id: quill::ids::FileId(9_001),
-            file: PickedFile::Video,
-            emoji: None,
-            window: Some(OTHER),
-        });
+        app.sticker_box.pending =
+            crate::ui::sticker_set_box::state::PickWait::Downloading(PendingVideo {
+                pick: PickExisting {
+                    set_id: 78,
+                    kind: quill::sticker_set_box::SetKind::Stickers,
+                    adapt: false,
+                },
+                file_id: quill::ids::FileId(9_001),
+                file: PickedFile::Video,
+                emoji: None,
+                window: Some(OTHER),
+            });
     });
     cx.update_window(chat_window, |_, window, _| window.remove_window())
         .expect("the chat window");
@@ -285,7 +286,7 @@ fn a_set_video_pick_goes_with_its_window(cx: &mut TestAppContext) {
         .expect("the main window");
     cx.run_until_parked();
     app.read_with(cx, |app, _| {
-        assert!(app.sticker_box.pending_video.is_none());
+        assert!(app.sticker_box.pending.downloading().is_none());
         assert!(app.composer_ui.send_box.video_editor.is_none());
     });
 }
@@ -374,10 +375,14 @@ fn a_clip_error_stays_in_its_windows_viewer(cx: &mut TestAppContext) {
     app.update(cx, |app, cx| {
         app.set_window_scope(None);
         app.in_window_scope(Some(OTHER), cx, |app, _| {
-            app.viewer.clip_error = Some("This video can't be played".into());
+            app.viewer.clip.fail("This video can't be played".into());
         });
-        assert!(app.viewer.clip_error.is_none(), "the main viewer has none");
-        let theirs = app.in_window_scope(Some(OTHER), cx, |app, _| app.viewer.clip_error.clone());
+        assert!(
+            app.viewer.clip.error().is_none(),
+            "the main viewer has none"
+        );
+        let theirs =
+            app.in_window_scope(Some(OTHER), cx, |app, _| app.viewer.clip.error().cloned());
         assert_eq!(
             theirs.flatten().as_deref(),
             Some("This video can't be played")

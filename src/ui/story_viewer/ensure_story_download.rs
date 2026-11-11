@@ -1,6 +1,7 @@
 //! Methods moved out of `story_viewer.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::stories_state::PanelKind;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -277,24 +278,24 @@ impl QuillApp {
     /// cover and privacy editors and the management status line.
     pub(in crate::ui) fn story_action_row(&self, cx: &mut Context<Self>) -> AnyElement {
         let mut column = div().flex().flex_col().gap_2().items_center();
-        if self.stories.viewer_ui().reaction_picker_open {
+        if self.stories.viewer_ui().is_open(PanelKind::ReactionPicker) {
             column = column.child(self.story_reaction_picker(cx));
         }
-        if self.stories.viewer_ui().viewers_open {
+        if self.stories.viewer_ui().is_open(PanelKind::Viewers) {
             column = column.child(self.story_viewers_panel(cx));
         }
-        if self.stories.viewer_ui().stats_open {
+        if self.stories.viewer_ui().is_open(PanelKind::Stats) {
             column = column.child(self.story_stats_panel(cx));
         }
-        if self.stories.viewer_ui().report_open {
+        if self.stories.viewer_ui().is_open(PanelKind::Report) {
             column = column.child(self.story_report_ui(cx));
         }
         // Phase 9.5: cover-frame editor row (video stories) + privacy
         // editor panel + the management status line (pending / error).
-        if self.stories.viewer_ui().cover.is_some() {
+        if self.stories.viewer_ui().cover().is_some() {
             column = column.child(self.story_cover_editor(cx));
         }
-        if self.stories.viewer_ui().privacy_edit.is_some() {
+        if self.stories.viewer_ui().privacy_edit().is_some() {
             column = column.child(self.story_privacy_panel(cx));
         }
         if let Some(status) = self.story_manage_status() {

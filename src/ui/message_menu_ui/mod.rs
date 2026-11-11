@@ -257,7 +257,7 @@ impl QuillApp {
                 .iter()
                 .any(|set| set.id == target.set_id),
             favorite: (target.kind == MediaKind::Sticker
-                && (session.stickers.stickers.installed_loaded
+                && (session.stickers.stickers.installed_loaded()
                     || !session.stickers.stickers.favorites.is_empty()))
             .then(|| {
                 session

@@ -108,12 +108,17 @@ pub fn frame(
 
 /// One message being put back together from reports.
 #[derive(Default)]
-pub(crate) struct Assembly {
-    cmd: u8,
-    total: usize,
-    data: Vec<u8>,
-    next_seq: u8,
-    started: bool,
+pub(crate) enum Assembly {
+    /// Waiting for an initialization packet.
+    #[default]
+    Idle,
+    /// An initialization packet came; continuation packets fill `data`.
+    Reading {
+        cmd: u8,
+        total: usize,
+        data: Vec<u8>,
+        next_seq: u8,
+    },
 }
 
 impl Assembly {
@@ -135,25 +140,41 @@ impl Assembly {
             let Some((len, data)) = body.split_first_chunk::<2>() else {
                 return Err(HidError::Protocol("short init packet"));
             };
-            self.cmd = kind & 0x7F;
-            self.total = usize::from(u16::from_be_bytes(*len));
-            self.data.clear();
-            self.data
-                .extend_from_slice(data.get(..self.total.min(data.len())).unwrap_or_default());
-            self.next_seq = 0;
-            self.started = true;
+            let total = usize::from(u16::from_be_bytes(*len));
+            *self = Self::Reading {
+                cmd: kind & 0x7F,
+                total,
+                data: data
+                    .get(..total.min(data.len()))
+                    .unwrap_or_default()
+                    .to_vec(),
+                next_seq: 0,
+            };
         } else {
-            if !self.started || kind != self.next_seq {
+            let Self::Reading {
+                total,
+                data,
+                next_seq,
+                ..
+            } = self
+            else {
+                return Err(HidError::Protocol("unexpected continuation packet"));
+            };
+            if kind != *next_seq {
                 return Err(HidError::Protocol("unexpected continuation packet"));
             }
-            self.next_seq = self.next_seq.saturating_add(1);
-            let want = self.total.saturating_sub(self.data.len());
-            self.data
-                .extend_from_slice(body.get(..want.min(body.len())).unwrap_or_default());
+            *next_seq = next_seq.saturating_add(1);
+            let want = total.saturating_sub(data.len());
+            data.extend_from_slice(body.get(..want.min(body.len())).unwrap_or_default());
         }
-        if self.data.len() >= self.total {
-            self.started = false;
-            return Ok(Some((self.cmd, std::mem::take(&mut self.data))));
+        if let Self::Reading {
+            cmd, total, data, ..
+        } = self
+            && data.len() >= *total
+        {
+            let done = (*cmd, std::mem::take(data));
+            *self = Self::Idle;
+            return Ok(Some(done));
         }
         Ok(None)
     }

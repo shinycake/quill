@@ -35,7 +35,7 @@ fn stickers_animate_with_transparent_backgrounds() {
 fn video_stickers_animate_with_transparent_backgrounds() {
     let cancelled = AtomicBool::new(false);
     let cache = std::env::temp_dir().join(format!("quill-webm-sticker-{}", std::process::id()));
-    let child = std::sync::Arc::new(Mutex::new(None));
+    let child = std::sync::Arc::new(crate::video::Extraction::default());
     let webm = decode_webm_sized(
         &fixtures().join("demo-sticker.webm"),
         &cache,
@@ -48,7 +48,7 @@ fn video_stickers_animate_with_transparent_backgrounds() {
     assert!(webm.frames.len() > 1 && webm.frames.len() <= MAX_STICKER_FRAMES);
     assert_ne!(webm.frames[0], webm.frames[10]);
     assert_eq!(webm.frames[0][3], 0);
-    assert!(child.lock().unwrap().is_none());
+    assert!(!child.is_cancelled());
     assert!(!cache.exists());
     let mut legacy = serde_json::to_value(crate::settings::MediaPrefs::default()).unwrap();
     legacy

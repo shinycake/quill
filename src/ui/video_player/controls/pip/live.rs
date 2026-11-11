@@ -4,7 +4,7 @@
 //! enlarge and mute fade in with the pointer like the file PiP's buttons.
 //! The whole picture moves the window: there is no line to press.
 
-use super::super::super::{PlayState, VideoPlayer};
+use super::super::super::{PlayState, VideoPlayer, WeakVideoPlayer};
 use super::super::live::live_badge;
 use super::super::volume_icon;
 use super::{LivePip, VideoPip};
@@ -48,7 +48,13 @@ impl VideoPip {
                 if !left {
                     return EndCheck::Close;
                 }
-                if !std::mem::replace(&mut self.feed_left_told, true) {
+                let told = self
+                    .told_for
+                    .as_ref()
+                    .and_then(WeakVideoPlayer::upgrade)
+                    .is_some_and(|told| told.same_as(player));
+                if !told {
+                    self.told_for = Some(player.downgrade());
                     let feed_left = live.feed_left.clone();
                     cx.defer(move |cx| feed_left(cx));
                 }

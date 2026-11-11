@@ -24,6 +24,7 @@ use gpui_kit::*;
 use plots::PlotInput;
 use quill::lang::{keys, tr};
 use quill::stat_chart::{ChartKind, StatChart};
+use quill::state::fetch::Fetch;
 use series::{points, zoomable_point};
 use state::ChartState;
 use std::rc::Rc;
@@ -40,10 +41,8 @@ type UnzoomFn = Rc<dyn Fn(&mut Window, &mut App)>;
 pub(super) struct ZoomedDay {
     /// The point zoomed into, milliseconds.
     pub x: i64,
-    /// That day's chart once it loaded.
-    pub chart: Option<Rc<StatChart>>,
-    /// Why it did not load.
-    pub error: Option<SharedString>,
+    /// That day's chart: loading, loaded, or why it did not load.
+    pub fetch: Fetch<Rc<StatChart>>,
 }
 
 /// A chart section of the statistics panel.
@@ -168,7 +167,7 @@ impl RenderOnce for StatChartView {
                 .map(|i| self.chart.range_title(i, i))
                 .unwrap_or_default()
                 .into();
-            if let Some(chart) = day.chart {
+            if let Fetch::Ready(chart) = day.fetch {
                 return StatChartView {
                     id: format!("{}-day-{}", self.id, day.x).into(),
                     title: self.title.clone(),
@@ -184,9 +183,10 @@ impl RenderOnce for StatChartView {
                 .into_any_element();
             }
             // Still loading, or failed: the overview stays with a note.
-            let note: SharedString = day
-                .error
-                .unwrap_or_else(|| tr(keys::Q_MISC_LOADING_THE_DAY).into());
+            let note: SharedString = match day.fetch.error() {
+                Some(error) => error.to_string().into(),
+                None => tr(keys::Q_MISC_LOADING_THE_DAY).into(),
+            };
             let id = self.id.clone();
             return self
                 .render_chart(window, cx)
@@ -253,7 +253,7 @@ impl StatChartView {
                 s.key_point,
                 s.hovered.clone(),
                 s.focus.clone(),
-                s.range.clone(),
+                s.range.as_ref().map(|r| r.slider.clone()),
                 s.pie.as_ref().map(|p| p.slider.clone()),
                 s.zooms_locally(),
             )

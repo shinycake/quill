@@ -338,12 +338,14 @@ impl QuillApp {
         let report = session
             .messages
             .sponsored_report
-            .clone()
+            .flight()
+            .cloned()
             .filter(|flight| spot.report && flight.chat_id == chat_id);
         let outcome = session
             .messages
-            .last_sponsored_report
-            .clone()
+            .sponsored_report
+            .outcome()
+            .cloned()
             .filter(|outcome| spot.outcome && outcome.chat_id == chat_id);
         if ad.is_none() && report.is_none() && outcome.is_none() {
             return None;
@@ -581,7 +583,7 @@ impl QuillApp {
     pub(super) fn pick_sponsored_report_option(&mut self, option_id: &str, cx: &mut Context<Self>) {
         let Some(flight) = self
             .session()
-            .and_then(|s| s.messages.sponsored_report.clone())
+            .and_then(|s| s.messages.sponsored_report.flight().cloned())
         else {
             return;
         };

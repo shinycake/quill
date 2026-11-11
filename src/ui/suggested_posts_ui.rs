@@ -19,8 +19,8 @@ use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr};
 use quill::state::Session;
 use quill::suggested_posts::{
-    BAR_PRICED_TAIL, BAR_PROMPT, BarLine, BarSend, DirectMessagesRole, SuggestBar, SuggestMode,
-    SuggestTerms, SuggestedPostPurpose, SuggestedPrice, bar_both_tail, bar_dated, time_value,
+    BAR_PRICED_TAIL, BAR_PROMPT, BarLine, DirectMessagesRole, SuggestBar, SuggestTerms,
+    SuggestedPostPurpose, SuggestedPrice, bar_both_tail, bar_dated, time_value,
 };
 use quill::telegram::envelope::MessageSender;
 
@@ -100,7 +100,7 @@ impl QuillApp {
         options.suggested_post = self
             .open_chat_id()
             .and_then(|chat| self.session()?.suggest_bar(chat))
-            .filter(|bar| bar.edit_of.is_none())
+            .filter(|bar| bar.edit_of().is_none())
             .map(|bar| bar.terms);
         options
     }
@@ -125,7 +125,7 @@ impl QuillApp {
                 bars.remove(&chat_id.0);
             }
         }
-        if self.open_chat_id() == Some(chat_id) && bar.is_none_or(|bar| bar.edit_of.is_none()) {
+        if self.open_chat_id() == Some(chat_id) && bar.is_none_or(|bar| bar.edit_of().is_none()) {
             self.note_open_draft(false, cx);
         }
         cx.notify();
@@ -203,7 +203,7 @@ impl QuillApp {
                 .child(price_amount(price, 13., cx))
                 .child(bar_both_tail(&date(send_date))),
         };
-        let mode = bar.mode;
+        let mode = bar.mode();
         let terms = bar.terms;
         Some(
             div()
@@ -272,7 +272,7 @@ impl QuillApp {
         let editing = self
             .session()
             .and_then(|session| session.suggest_bar(chat_id))
-            .is_some_and(|bar| bar.edit_of.is_some());
+            .is_some_and(|bar| bar.edit_of().is_some());
         if editing {
             self.composer
                 .update(cx, |input, cx| input.set_value("", window, cx));
@@ -305,16 +305,7 @@ impl QuillApp {
         self.chat_ui.set_reply(None);
         self.composer
             .update(cx, |input, cx| input.set_value(text, window, cx));
-        self.set_suggest_bar(
-            chat_id,
-            Some(SuggestBar {
-                terms,
-                mode: SuggestMode::Change,
-                edit_of: Some(message_id),
-                send: BarSend::Idle,
-            }),
-            cx,
-        );
+        self.set_suggest_bar(chat_id, Some(SuggestBar::editing(terms, message_id)), cx);
     }
 
     /// The send of an "Edit Message": a new message replying to the
@@ -332,13 +323,13 @@ impl QuillApp {
         if self
             .session()
             .and_then(|session| session.suggest_bar(chat_id))
-            .is_some_and(|bar| bar.edit_of.is_some() && bar.send.is_sending())
+            .is_some_and(|bar| bar.edit_of().is_some() && bar.send().is_sending())
         {
             return true;
         }
         let Some((message_id, terms, is_media)) = self.session().and_then(|session| {
             let bar = session.suggest_bar(chat_id)?;
-            let message_id = bar.edit_of?;
+            let message_id = bar.edit_of()?;
 
             let is_media = session
                 .histories

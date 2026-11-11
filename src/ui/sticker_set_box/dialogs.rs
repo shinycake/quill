@@ -33,7 +33,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::StickerSetRename, |this, _, cx| {
-                this.sticker_box.rename_open = false;
+                this.sticker_box.confirm.close_rename();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
@@ -77,7 +77,7 @@ impl QuillApp {
                                 .label(tr(keys::CANCEL))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
-                                    this.sticker_box.rename_open = false;
+                                    this.sticker_box.confirm.close_rename();
                                     this.close_kit_dialog_if_done(
                                         DialogKind::StickerSetRename,
                                         window,
@@ -115,7 +115,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::StickerDelete, |this, _, cx| {
-                this.sticker_box.delete_sticker = None;
+                this.sticker_box.confirm.close_delete_sticker();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
@@ -125,8 +125,8 @@ impl QuillApp {
                 .unwrap_or((0, SetKind::Stickers));
             let still = this
                 .sticker_box
-                .delete_sticker
-                .as_ref()
+                .confirm
+                .delete_sticker()
                 .and_then(|item| this.panel_still(item));
             let title = match kind {
                 SetKind::Stickers => tr(keys::Q_MEDIA_DELETE_STICKER),
@@ -162,7 +162,7 @@ impl QuillApp {
                                 .label(tr(keys::CLOSE))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
-                                    this.sticker_box.delete_sticker = None;
+                                    this.sticker_box.confirm.close_delete_sticker();
                                     this.close_kit_dialog_if_done(
                                         DialogKind::StickerDelete,
                                         window,
@@ -198,7 +198,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::StickerSetDelete, |this, _, cx| {
-                this.sticker_box.delete_set_open = false;
+                this.sticker_box.confirm.close_delete_set();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
@@ -214,7 +214,7 @@ impl QuillApp {
                     this.close_kit_dialog_if_done(DialogKind::StickerSetDelete, window, cx);
                 },
                 |this, window, cx| {
-                    this.sticker_box.delete_set_open = false;
+                    this.sticker_box.confirm.close_delete_set();
                     this.close_kit_dialog_if_done(DialogKind::StickerSetDelete, window, cx);
                     cx.notify();
                 },
@@ -232,7 +232,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::StickerSetRemove, |this, _, cx| {
-                this.sticker_box.remove_set_open = false;
+                this.sticker_box.confirm.close_remove_set();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
@@ -249,7 +249,7 @@ impl QuillApp {
                     this.close_kit_dialog_if_done(DialogKind::StickerSetRemove, window, cx);
                 },
                 |this, window, cx| {
-                    this.sticker_box.remove_set_open = false;
+                    this.sticker_box.confirm.close_remove_set();
                     this.close_kit_dialog_if_done(DialogKind::StickerSetRemove, window, cx);
                     cx.notify();
                 },
@@ -587,45 +587,45 @@ crate::ui::shell::register_dialogs! {
     /// "Edit name" in the set box's menu.
     StickerSetRename => DialogSpec::new(
         5610,
-        |app| super::sticker_box_shown(app) && app.sticker_box.rename_open,
+        |app| super::sticker_box_shown(app) && app.sticker_box.confirm.is_rename(),
         QuillApp::build_rename_set_dialog,
     )
     .per_window()
     .close(|app, _, cx| {
-            app.sticker_box.rename_open = false;
+            app.sticker_box.confirm.close_rename();
             cx.notify();
         }),
     /// A cell's "Delete sticker" / "Delete emoji".
     StickerDelete => DialogSpec::new(
         5620,
-        |app| super::sticker_box_shown(app) && app.sticker_box.delete_sticker.is_some(),
+        |app| super::sticker_box_shown(app) && app.sticker_box.confirm.delete_sticker().is_some(),
         QuillApp::build_delete_sticker_dialog,
     )
     .per_window()
     .close(|app, _, cx| {
-            app.sticker_box.delete_sticker = None;
+            app.sticker_box.confirm.close_delete_sticker();
             cx.notify();
         }),
     /// "Delete Pack" → "Delete for Everyone".
     StickerSetDelete => DialogSpec::new(
         5630,
-        |app| super::sticker_box_shown(app) && app.sticker_box.delete_set_open,
+        |app| super::sticker_box_shown(app) && app.sticker_box.confirm.is_delete_set(),
         QuillApp::build_delete_set_dialog,
     )
     .per_window()
     .close(|app, _, cx| {
-            app.sticker_box.delete_set_open = false;
+            app.sticker_box.confirm.close_delete_set();
             cx.notify();
         }),
     /// "Delete Pack" → "Delete for Myself".
     StickerSetRemove => DialogSpec::new(
         5640,
-        |app| super::sticker_box_shown(app) && app.sticker_box.remove_set_open,
+        |app| super::sticker_box_shown(app) && app.sticker_box.confirm.is_remove_set(),
         QuillApp::build_remove_set_dialog,
     )
     .per_window()
     .close(|app, _, cx| {
-            app.sticker_box.remove_set_open = false;
+            app.sticker_box.confirm.close_remove_set();
             cx.notify();
         }),
     /// The "New Sticker" / "New Emoji" emoji step.

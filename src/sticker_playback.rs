@@ -5,10 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 use std::io::Read;
 use std::path::Path;
-use std::sync::{
-    Mutex,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 mod fitz;
 mod lottie_check;
@@ -147,20 +144,20 @@ pub fn decode_tgs_sized(
 /// `max_frames` frames, one frame at a time into `each`; its frames a
 /// second. Decoded in process by the bundled decoder when it is installed;
 /// otherwise by the `ffmpeg` binary, with PNG frames under `cache` (removed
-/// again) and the running process in `child` so the UI can stop it.
+/// again) and the running process in `extraction` so the UI can stop it.
 pub fn stream_webm_sized(
     path: &Path,
     cache: &Path,
     edge: usize,
     max_frames: usize,
-    child: &std::sync::Arc<Mutex<Option<std::process::Child>>>,
+    extraction: &std::sync::Arc<crate::video::Extraction>,
     cancelled: &AtomicBool,
     each: &mut WebmSteps<'_>,
 ) -> Result<f64, String> {
     if let Some(fps) = webm::decode_in_process(path, edge, max_frames, cancelled, each)? {
         return Ok(fps);
     }
-    webm::decode_with_ffmpeg(path, cache, edge, max_frames, child, cancelled, each)
+    webm::decode_with_ffmpeg(path, cache, edge, max_frames, extraction, cancelled, each)
 }
 
 /// [`stream_webm_sized`] gathered in memory.
@@ -169,7 +166,7 @@ pub fn decode_webm_sized(
     cache: &Path,
     edge: usize,
     max_frames: usize,
-    child: &std::sync::Arc<Mutex<Option<std::process::Child>>>,
+    extraction: &std::sync::Arc<crate::video::Extraction>,
     cancelled: &AtomicBool,
 ) -> Result<WebmFrames, String> {
     let mut frames = WebmFrames::default();
@@ -178,7 +175,7 @@ pub fn decode_webm_sized(
         cache,
         edge,
         max_frames,
-        child,
+        extraction,
         cancelled,
         &mut |step| {
             frames.keep(step);

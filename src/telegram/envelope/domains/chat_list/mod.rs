@@ -69,7 +69,7 @@ pub enum ChatListPayload {
     },
     /// Slice CL2: `archiveChatListSettings` — `getArchiveChatListSettings`
     /// response (schema 1.8.67, line 3512); stored in
-    /// `Session::archive_chat_list_settings` when the pending purpose is
+    /// `ChatListState::archive_settings` when the pending purpose is
     /// `GetArchiveChatListSettings`.
     ArchiveChatListSettings {
         settings: ArchiveChatListSettings,

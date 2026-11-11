@@ -158,6 +158,16 @@ impl QuillApp {
         if remember {
             if let Some(live) = self.live.as_mut() {
                 live.driver.remember_paid_trust(chat, confirm.per_message);
+                if let Some(error) = live
+                    .driver
+                    .session
+                    .payments
+                    .paid_messages
+                    .trust_save_error()
+                    .map(str::to_string)
+                {
+                    self.set_note(StatusNote::error(error));
+                }
             } else if let Some(session) = self.paid_session_mut() {
                 session
                     .payments

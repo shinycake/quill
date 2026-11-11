@@ -108,10 +108,10 @@ pub(crate) const SLOW_MODE_FIELDS: &str = r#""slow_mode_delay":30,"slow_mode_del
 pub(crate) const MEMBER_STATUS: &str = r#"{"@type":"chatMemberStatusMember"}"#;
 
 /// Register an event-log page or poll as the driver does: the chat's log
-/// then waits for it (`GroupsState::event_log_waits`).
+/// then waits for it (`EventLog::wait`).
 pub(crate) fn event_log_request(session: &mut Session, purpose: GroupsPurpose) -> RequestId {
     let extra = session.request(RequestPurpose::Groups(purpose), Some(ChatId(13)));
-    let wait = session.groups.event_log_waits.entry(13).or_default();
+    let wait = &mut session.groups.event_logs.entry(13).or_default().wait;
     if purpose == GroupsPurpose::PollChatEventLog {
         wait.poll = Some(extra);
     } else {

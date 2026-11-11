@@ -100,8 +100,11 @@ impl Session {
         thread.unread_anchor = (thread.unread_count > 0).then_some(MessageId(
             thread.last_read_inbox_message_id.max(thread.thread_id),
         ));
-        thread.status = ThreadStatus::LoadingHistory;
-        thread.needs_chat_switch = open_chat != Some(info.chat_id);
+        thread.status = if open_chat != Some(info.chat_id) {
+            ThreadStatus::SwitchingChat
+        } else {
+            ThreadStatus::Starting
+        };
         let rows: Vec<HistoryMessage> = info
             .messages
             .into_iter()
@@ -166,14 +169,14 @@ impl Session {
             // The newer side: an empty page says the window reached the
             // newest reply whatever the server reported before.
             if added == 0 {
-                thread.history.has_newer = false;
+                thread.history.newer_exists(false);
             } else {
                 thread.refresh_has_newer();
             }
         } else {
-            thread.history.older = OlderEnd::Open;
+            thread.history.reopen_older();
             if empty || added == 0 || reached_root || oldest_reply.is_none() {
-                thread.history.loaded_complete = true;
+                thread.history.mark_complete();
             }
             if let Some(oldest) = oldest_reply {
                 thread.history.next_from_message_id = MessageId(oldest);
@@ -189,7 +192,7 @@ impl Session {
         };
         let trimmed = thread.trim_after_page(far_end) > 0;
         thread.history.total_count = thread.history.messages.len() as i32;
-        if thread.status == ThreadStatus::LoadingHistory {
+        if thread.status.is_opening() {
             thread.status = ThreadStatus::Ready;
         }
         if trimmed {
@@ -223,11 +226,11 @@ impl Session {
             return;
         }
         if newer {
-            thread.history.newer_failed = true;
-        } else if thread.status != ThreadStatus::Ready {
+            thread.history.fail_newer();
+        } else if !thread.status.is_loaded() {
             thread.status = ThreadStatus::Failed(line);
         } else {
-            thread.history.older = OlderEnd::Failed;
+            thread.history.fail_older();
         }
     }
 

@@ -151,22 +151,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let packs = &mut self.session.payments.star_packs;
-        if packs.loaded || packs.loading {
+        if !self.session.payments.star_packs.options.can_ask() {
             return Ok(None);
         }
-        packs.loading = true;
-        packs.error = None;
         let extra = self
             .session
             .request(RequestPurpose::GetStarPackOptions, None);
         let json = get_star_payment_options(extra);
         match self.send_json_request(extra, &json) {
-            Ok(id) => Ok(Some(id)),
-            Err(err) => {
-                self.session.payments.star_packs.loading = false;
-                Err(err)
+            Ok(id) => {
+                self.session.payments.star_packs.options.begin();
+                Ok(Some(id))
             }
+            Err(err) => Err(err),
         }
     }
 }

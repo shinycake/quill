@@ -85,15 +85,89 @@ impl EmojiLists {
     }
 }
 
+/// The install or removal of one emoji set (`changeStickerSet`): at most
+/// one at a time. Only the answer of `Running`'s own request settles it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SetMutation {
+    #[default]
+    Idle,
+    Running {
+        request: crate::ids::RequestId,
+        set_id: i64,
+        installed: bool,
+    },
+    /// The change failed; the box says so until the next change, the next
+    /// answer or the box opens again.
+    Failed,
+}
+
+impl SetMutation {
+    /// The set being changed and whether it is being installed.
+    pub fn running(self) -> Option<(i64, bool)> {
+        match self {
+            Self::Running {
+                set_id, installed, ..
+            } => Some((set_id, installed)),
+            _ => None,
+        }
+    }
+
+    pub fn is_failed(self) -> bool {
+        self == Self::Failed
+    }
+
+    pub fn is_running(self) -> bool {
+        matches!(self, Self::Running { .. })
+    }
+
+    /// `request` is the change this stage waits for.
+    pub fn waits_for(self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(self, Self::Running { request: waiting, .. } if Some(waiting) == request)
+    }
+
+    /// A failure line from an earlier change goes; a change in flight
+    /// stays.
+    pub fn forget_failure(&mut self) {
+        if self.is_failed() {
+            *self = Self::Idle;
+        }
+    }
+}
+
+/// Which screen reads the emoji status choices, so their custom emoji are
+/// looked up. One at a time: a status picker and the chat appearance box
+/// are not open together.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum StatusPicker {
+    #[default]
+    Closed,
+    /// The profile's status selector.
+    Profile,
+    /// The Appearance box of a chat (its status choices).
+    ChatAppearance,
+}
+
+/// The `setEmojiStatus` call in flight, and the emoji a success adds to the
+/// recents.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum StatusChange {
+    #[default]
+    Idle,
+    Setting {
+        request: crate::ids::RequestId,
+        /// `None` removes the status, or sets a gift's.
+        emoji: Option<i64>,
+    },
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct EmojiPanel {
-    pub mutating_set: Option<(i64, bool)>,
+    pub mutation: SetMutation,
     /// Sets whose cover previews were asked for, so a repaint never asks twice.
     pub covers_requested: HashSet<i64>,
-    pub pending_status_emoji: Option<i64>,
+    pub status_change: StatusChange,
     pub outdated_packs: std::collections::HashSet<i64>,
-    pub status_open: bool,
-    pub status_note: Option<String>,
+    pub status_picker: StatusPicker,
     /// Where each custom emoji id's `getCustomEmojiStickers` stands: asked,
     /// answered, failed or given up ([`custom_lookup`]).
     pub custom_lookups: CustomEmojiLookups,
@@ -101,14 +175,11 @@ pub struct EmojiPanel {
     /// Each set list's own fetch: a failure shows on its tab only, and no
     /// other request clears it.
     pub lists: EmojiLists,
-    pub mutation_failed: bool,
     pub tab: EmojiSetTab,
     pub search_query: String,
     pub trending_offset: i32,
     pub trending_next_offset: i32,
     pub trending_total: i32,
-    /// `updateTrendingStickerSets` for custom emoji arrived.
-    pub trending_stale: bool,
     pub trending_has_more: bool,
     /// Slice S10: installed emoji sets (`getInstalledStickerSets` with
     /// `stickerTypeCustomEmoji`) — the "Emoji Sets" settings list.
@@ -133,8 +204,6 @@ pub struct EmojiPanel {
     pub default_status_ids: Vec<i64>,
     /// `getDefaultChatEmojiStatuses`: the statuses of channels and groups.
     pub chat_default_status_ids: Vec<i64>,
-    /// The Appearance box of a chat is open and shows those statuses.
-    pub chat_status_open: bool,
     /// Slice S10: upgraded-gift statuses (`getUpgradedGiftEmojiStatuses`).
     pub upgraded_gift_statuses: Vec<EmojiStatusItem>,
     /// Slice S10: last `getAnimatedEmoji` answer for the composer's
@@ -662,32 +731,37 @@ impl Session {
 
     /// Slice S10: an emoji-status or emoji-set mutation succeeded — drop the
     /// affected cache so the next fetch shows the server-confirmed state.
-    pub fn invalidate_emoji_caches(&mut self, purpose: Option<RequestPurpose>) {
+    pub fn invalidate_emoji_caches(
+        &mut self,
+        purpose: Option<RequestPurpose>,
+        request: Option<crate::ids::RequestId>,
+    ) {
         if purpose == Some(RequestPurpose::ChangeEmojiSet) {
-            self.stickers.emoji.mutation_failed = false;
-            self.stickers.emoji.mutating_set = None;
+            let mutation = &mut self.stickers.emoji.mutation;
+            if mutation.waits_for(request) || mutation.is_failed() {
+                *mutation = SetMutation::Idle;
+            }
         }
         if matches!(
             purpose,
             Some(RequestPurpose::SetEmojiStatus | RequestPurpose::ClearRecentEmojiStatuses)
         ) {
             if purpose == Some(RequestPurpose::SetEmojiStatus)
-                && let Some(id) = self.stickers.emoji.pending_status_emoji.take()
+                && let StatusChange::Setting {
+                    request: waiting,
+                    emoji,
+                } = self.stickers.emoji.status_change
+                && Some(waiting) == request
             {
-                self.remember_emoji_pack_usage(&[id]);
+                self.stickers.emoji.status_change = StatusChange::Idle;
+                if let Some(id) = emoji {
+                    self.remember_emoji_pack_usage(&[id]);
+                }
             }
             self.stickers.emoji.recent_statuses.clear();
             drop(
                 self.requests
                     .take_purpose(RequestPurpose::GetRecentEmojiStatuses),
-            );
-            self.stickers.emoji.status_note = Some(
-                if purpose == Some(RequestPurpose::SetEmojiStatus) {
-                    "Emoji status updated."
-                } else {
-                    "Recent emoji statuses cleared."
-                }
-                .into(),
             );
         }
         if matches!(

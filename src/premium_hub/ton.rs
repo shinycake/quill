@@ -464,11 +464,10 @@ pub struct GramsHub {
     pub filter: TxFilter,
     pub entries: Vec<TonTx>,
     pub next_offset: String,
-    pub loaded: bool,
-    pub loading: bool,
-    pub error: Option<String>,
-    /// `@extra` of the newest page request; older answers are dropped.
-    pub request: u64,
+    /// The newest page request (older answers are dropped), its answer or
+    /// its failure ([`crate::gift_market::PageLoad`]); the rows stay under
+    /// every stage.
+    pub load: crate::gift_market::PageLoad,
     /// The first All page had incoming / outgoing rows (tdesktop shows the
     /// tabs only when both directions exist).
     pub has_in: bool,
@@ -505,16 +504,12 @@ impl GramsHub {
         self.filter = filter;
         self.entries.clear();
         self.next_offset.clear();
-        self.loaded = false;
-        self.loading = false;
-        self.error = None;
+        self.load = crate::gift_market::PageLoad::Idle;
         self.selected = None;
     }
 
     pub fn apply_page(&mut self, page: TonTxPage, append: bool) {
-        self.loading = false;
-        self.error = None;
-        self.loaded = true;
+        self.load = crate::gift_market::PageLoad::Ready;
         self.balance_nano = Some(page.balance_nano);
         self.next_offset = page.next_offset;
         if !append && self.filter == TxFilter::All {

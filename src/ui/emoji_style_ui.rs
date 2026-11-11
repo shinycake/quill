@@ -85,12 +85,57 @@ impl SetStage {
     }
 }
 
+/// Reading the saved choice at startup, once.
+#[derive(Default)]
+enum Startup {
+    #[default]
+    NotStarted,
+    /// Off the UI thread; the task applies it and ends the stage.
+    Reading(Task<()>),
+    /// The saved choice was applied, or there is no data folder to read.
+    Done,
+}
+
+/// "Install from file…". A new pick replaces a running one (dropping its
+/// task); the task ends its own stage with the result.
+#[derive(Default)]
+enum FileInstall {
+    #[default]
+    Idle,
+    /// The file picker is up, or the file is being installed.
+    Running(Task<()>),
+    /// Why the last file was refused; the box shows it until the next try.
+    Refused(String),
+}
+
+impl FileInstall {
+    /// The task finished (or the user left the picker): it ends its own
+    /// stage without cancelling itself.
+    fn finish(&mut self, next: FileInstall) {
+        if let Self::Running(task) = std::mem::replace(self, next) {
+            task.detach();
+        }
+    }
+
+    fn forget_refusal(&mut self) {
+        if matches!(self, Self::Refused(_)) {
+            *self = Self::Idle;
+        }
+    }
+
+    fn refusal(&self) -> Option<&str> {
+        match self {
+            Self::Refused(why) => Some(why),
+            _ => None,
+        }
+    }
+}
+
 /// The box and the set choice, on `SettingsUi`.
 #[derive(Default)]
 pub(super) struct EmojiStyleUi {
     pub(super) open: bool,
-    /// The saved choice has been read and applied.
-    started: bool,
+    startup: Startup,
     /// The set in use.
     current: EmojiSetId,
     /// Sets whose pack is installed.
@@ -98,11 +143,7 @@ pub(super) struct EmojiStyleUi {
     stage: SetStage,
     /// The latest write of the choice; the next one waits for it.
     save_task: Option<Task<()>>,
-    /// Reading the saved choice at startup.
-    startup_task: Option<Task<()>>,
-    /// "Install from file…": the task, and why the last file was refused.
-    file_task: Option<Task<()>>,
-    file_error: Option<String>,
+    file: FileInstall,
 }
 
 /// `<app data>`, where `emoji-sets/` lives.
@@ -172,10 +213,10 @@ impl QuillApp {
     /// Apply the saved set once, at the first frame.
     pub(super) fn sync_emoji_style(&mut self, cx: &mut Context<Self>) {
         let state = &mut self.preferences.emoji_style;
-        if state.started {
+        if !matches!(state.startup, Startup::NotStarted) {
             return;
         }
-        state.started = true;
+        state.startup = Startup::Done;
         let Some(root) = app_root() else {
             return;
         };
@@ -194,9 +235,16 @@ impl QuillApp {
             }
             loaded
         });
-        self.preferences.emoji_style.startup_task = Some(cx.spawn(async move |this, cx| {
+        self.preferences.emoji_style.startup = Startup::Reading(cx.spawn(async move |this, cx| {
             let loaded = load.await;
-            let _ = this.update(cx, |this, cx| this.apply_emoji_state(loaded, cx));
+            let _ = this.update(cx, |this, cx| {
+                if let Startup::Reading(task) =
+                    std::mem::replace(&mut this.preferences.emoji_style.startup, Startup::Done)
+                {
+                    task.detach();
+                }
+                this.apply_emoji_state(loaded, cx)
+            });
         }));
     }
 
@@ -225,7 +273,7 @@ impl QuillApp {
     pub(super) fn open_emoji_set_style(&mut self, cx: &mut Context<Self>) {
         self.preferences.emoji_style.open = true;
         self.open_box(DialogKind::EmojiSetStyle);
-        self.preferences.emoji_style.file_error = None;
+        self.preferences.emoji_style.file.forget_refusal();
         cx.notify();
     }
 
@@ -331,7 +379,7 @@ impl QuillApp {
             return;
         };
         let state = &mut self.preferences.emoji_style;
-        state.file_error = None;
+        state.file.forget_refusal();
         let progress = Arc::new(Progress::default());
         let worker_progress = progress.clone();
         let worker = cx.background_spawn(async move {
@@ -386,44 +434,54 @@ impl QuillApp {
     /// file's hash picks the set, then it is switched to like a download.
     fn install_emoji_set_file(&mut self, cx: &mut Context<Self>) {
         let Some(root) = app_root() else {
-            self.preferences.emoji_style.file_error =
-                Some(tr(keys::Q_MEDIA_COULDNT_OPEN_QUILLS_DATA_FOLDER).into());
+            self.preferences.emoji_style.file =
+                FileInstall::Refused(tr(keys::Q_MEDIA_COULDNT_OPEN_QUILLS_DATA_FOLDER).into());
             cx.notify();
             return;
         };
-        self.preferences.emoji_style.file_error = None;
         let picker = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
             multiple: false,
             prompt: Some(tr(keys::Q_MEDIA_INSTALL).into()),
         });
-        self.preferences.emoji_style.file_task = Some(cx.spawn(async move |this, cx| {
-            let Ok(Ok(Some(paths))) = picker.await else {
-                return;
+        let task = cx.spawn(async move |this, cx| {
+            let result = match picker.await {
+                Ok(Ok(Some(paths))) => match paths.into_iter().next() {
+                    Some(path) => Some(
+                        cx.background_executor()
+                            .spawn(async move {
+                                quill::emoji_sets_style::download::install_file(&root, &path)
+                            })
+                            .await,
+                    ),
+                    None => None,
+                },
+                _ => None,
             };
-            let Some(path) = paths.into_iter().next() else {
-                return;
-            };
-            let result = cx
-                .background_executor()
-                .spawn(async move { quill::emoji_sets_style::download::install_file(&root, &path) })
-                .await;
             let _ = this.update(cx, |this, cx| {
                 match result {
-                    Ok(id) => {
+                    Some(Ok(id)) => {
                         let state = &mut this.preferences.emoji_style;
+                        state.file.finish(FileInstall::Idle);
                         // The file wins over a download in flight, which
                         // would switch sets again when it lands.
                         state.stage.replace(SetStage::Idle);
                         state.ready.insert(id);
                         this.switch_emoji_set(id, true, cx);
                     }
-                    Err(message) => this.preferences.emoji_style.file_error = Some(message),
+                    Some(Err(message)) => this
+                        .preferences
+                        .emoji_style
+                        .file
+                        .finish(FileInstall::Refused(message)),
+                    // The picker closed without a file.
+                    None => this.preferences.emoji_style.file.finish(FileInstall::Idle),
                 }
                 cx.notify();
             });
-        }));
+        });
+        self.preferences.emoji_style.file = FileInstall::Running(task);
     }
 
     /// The Settings row that opens the box (tdesktop: Chat settings,
@@ -543,7 +601,11 @@ impl QuillApp {
                         .child(format!("{}.", credits.join(". "))),
                 )
                 .when_some(
-                    this.preferences.emoji_style.file_error.clone(),
+                    this.preferences
+                        .emoji_style
+                        .file
+                        .refusal()
+                        .map(str::to_string),
                     |body, error| {
                         body.child(div().text_xs().text_color(cx.theme().danger).child(error))
                     },

@@ -210,10 +210,9 @@ impl QuillApp {
         self.viewer_leave_video_fullscreen();
         // MED1: orientation and playback error are per-item state.
         self.viewer.orientation = Default::default();
-        self.viewer.rotated = None;
-        self.viewer.cancel_reorient();
+        self.viewer.reorient.reset();
         self.viewer.hdr.reset();
-        self.viewer.clip_error = None;
+        self.viewer.clip.clear_error();
         self.viewer.extra.share_at = None;
         if let Some(item) = self.viewer.state.current()
             && let Some(turns) = self
@@ -267,11 +266,10 @@ impl QuillApp {
         // Reopening the same item starts with its caption collapsed.
         self.viewer.extra.caption = Default::default();
         self.viewer.state.close();
-        self.viewer.cancel_reorient();
         // A turned photo is a full-size picture of its own (up to about
         // 20 MB, and as much again on the GPU); opening the next item
         // replaced it, but nothing did until then.
-        self.viewer.rotated = None;
+        self.viewer.reorient.reset();
         self.viewer.hdr.reset();
         self.viewer.over_controls = false;
         // A pan held when the viewer closed ends with it.

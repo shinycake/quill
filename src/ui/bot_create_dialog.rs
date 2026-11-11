@@ -15,7 +15,7 @@ use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::owned_bots::{self, NAME_MAX, UsernameProblem};
-use quill::state::DeepLinkAction;
+use quill::state::{DeepLinkAction, ManagedBotShare};
 use quill::telegram::envelope::{RequestManagedBotSpec, UsernameCheckResult};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -23,15 +23,6 @@ use std::time::Duration;
 
 /// Wait after the last keystroke before asking the server.
 const CHECK_DELAY: Duration = Duration::from_millis(350);
-
-/// The keyboard button a dialog answers: after `createBot` the new bot is
-/// handed to the requesting bot with `shareUsersWithBot`.
-#[derive(Clone, Copy)]
-pub(in crate::ui) struct ManagedBotShare {
-    chat_id: ChatId,
-    message_id: MessageId,
-    button_id: i32,
-}
 
 pub(super) struct BotCreateDialog {
     manager_id: i64,
@@ -43,8 +34,6 @@ pub(super) struct BotCreateDialog {
     username: Entity<InputState>,
     /// Counts keystrokes, so only the last one starts a check.
     version: u64,
-    /// The person pressed Create and the answer is awaited.
-    submitted: bool,
     _subscription: Subscription,
 }
 
@@ -170,7 +159,6 @@ impl QuillApp {
             name,
             username: username.clone(),
             version: 0,
-            submitted: false,
             _subscription: subscription,
         });
         self.open_box(DialogKind::BotCreate);
@@ -225,13 +213,11 @@ impl QuillApp {
 
     fn close_bot_create(&mut self, cx: &mut Context<Self>) {
         // While "Creating..." the box may close: the bot is created on the
-        // server all the same, and `poll_bot_create` reports the answer
+        // server all the same, and `drain_bot_create` reports the answer
         // (toast, chat, share) whether or not the box is still there.
         let creating = self
-            .dialogs
-            .bot_create_dialog
-            .as_ref()
-            .is_some_and(|dialog| dialog.submitted);
+            .session()
+            .is_some_and(|session| session.bots.owned.create.creating());
         if self.dialogs.bot_create_dialog.take().is_some()
             && !creating
             && let Some(live) = self.live.as_mut()
@@ -245,9 +231,6 @@ impl QuillApp {
         let Some(dialog) = self.screen.dialogs.bot_create_dialog.as_mut() else {
             return;
         };
-        if dialog.submitted {
-            return;
-        }
         let name = dialog.name.read(cx).value().trim().to_string();
         let typed = dialog.username.read(cx).value().to_string();
         let manager_id = dialog.manager_id;
@@ -267,7 +250,7 @@ impl QuillApp {
         };
         if live
             .driver
-            .create_managed_bot(manager_id, &name, &full, via_link)
+            .create_managed_bot(manager_id, &name, &full, via_link, share)
             .is_err()
         {
             self.set_note(StatusNote::error(tr(
@@ -276,65 +259,29 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        dialog.submitted = true;
-        let starts = live.driver.session.bots.owned.create.starts;
-        // Watched until TDLib answers or the box closes: a cap would leave
-        // Create off with nothing in flight, and drop a late success. Not
-        // tied to the window it was pressed in: when that window closes the
-        // box goes on in the main window, and its answer still lands.
-        self.spawn_screen(cx, async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(150))
-                    .await;
-                let Ok(done) = this.update(cx, |this, cx| {
-                    this.poll_bot_create(&name, &full, manager_id, share, starts, cx)
-                }) else {
-                    break;
-                };
-                if done {
-                    break;
-                }
-            }
-        })
-        .detach();
         cx.notify();
     }
 
-    /// Watch the `createBot` answer; `true` when it is settled. The box
-    /// may have been closed meanwhile: the answer is reported all the same.
-    pub(super) fn poll_bot_create(
-        &mut self,
-        name: &str,
-        full: &str,
-        manager_id: i64,
-        share: Option<ManagedBotShare>,
-        starts: u64,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let Some(create) = self.session().map(|s| s.bots.owned.create.clone()) else {
-            return true;
+    /// Report the `createBot` answer the poll loop finds in the session:
+    /// the bot exists, or the create failed with no box left to show why.
+    /// The box may have been closed meanwhile: the answer is reported all
+    /// the same, with the name and manager fixed at the press.
+    pub(super) fn drain_bot_create(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(live) = self.live.as_mut() else {
+            return false;
         };
-        // A later create started (the box was closed and reopened, and
-        // Create pressed again): its own watcher reports its answer, with
-        // its own name and username.
-        if create.starts != starts {
-            return true;
-        }
-        if let Some(new_bot_id) = create.created {
+        let created = live.driver.take_created_bot();
+        if let Some((submission, new_bot_id)) = created {
             let manager = self
                 .session()
-                .and_then(|s| s.user(manager_id))
+                .and_then(|s| s.user(submission.manager_id))
                 .map(|u| u.first_name.clone())
                 .unwrap_or_default();
             // The shell closes the kit dialog with its flag, in whichever
             // window hosts it. The answer is in: the dialog may go.
-            if let Some(dialog) = self.dialogs.bot_create_dialog.as_mut() {
-                dialog.submitted = false;
-            }
             self.close_bot_create(cx);
             // tdesktop reports the new bot to the requesting bot.
-            if let (Some(share), Some(live)) = (share, self.live.as_mut()) {
+            if let (Some(share), Some(live)) = (submission.share, self.live.as_mut()) {
                 let _ = live.driver.share_users_with_bot(
                     share.chat_id,
                     share.message_id,
@@ -344,27 +291,33 @@ impl QuillApp {
             }
             // tdesktop opens the new bot's chat and toasts.
             let _ = self.resolve_deep_link_here(DeepLinkAction::OpenUsername {
-                domain: full.to_string(),
+                domain: submission.username.clone(),
                 start_param: None,
                 post: None,
                 story_id: None,
             });
             self.set_note(StatusNote::silent(tr_with(
                 keys::Q_MEDIA_CREATED_WILL_MANAGE_THIS_BOT,
-                &[("name", name), ("manager", &manager.to_string())],
+                &[("name", &submission.name), ("manager", &manager)],
             )));
             cx.notify();
             return true;
         }
-        if create.creating.is_none() {
-            // Failed: the dialog shows the reason and takes another try; a
-            // closed box has nowhere to show it, so it is a toast. No error
-            // means the state was reset for another box: nothing to report.
-            if let Some(dialog) = self.dialogs.bot_create_dialog.as_mut() {
-                dialog.submitted = false;
-            } else if let Some(error) = create.error {
-                self.set_note(StatusNote::error(error));
-            }
+        // Failed: an open dialog shows the reason and takes another try; a
+        // closed box has nowhere to show it, so it is a toast.
+        if self.dialogs.bot_create_dialog.is_none()
+            && let Some(live) = self.live.as_mut()
+            && let Some(error) = live
+                .driver
+                .session
+                .bots
+                .owned
+                .create
+                .error()
+                .map(str::to_string)
+        {
+            live.driver.reset_create_bot();
+            self.set_note(StatusNote::error(error));
             cx.notify();
             return true;
         }
@@ -387,7 +340,6 @@ impl QuillApp {
             };
             let (manager_id, name, username) =
                 (state.manager_id, state.name.clone(), state.username.clone());
-            let submitted = state.submitted;
             let muted = cx.theme().muted_foreground;
             let danger = cx.theme().danger;
             let success = cx.theme().success;
@@ -404,11 +356,8 @@ impl QuillApp {
             let name_text = name.read(cx).value().trim().to_string();
             let full = owned_bots::full_username(&typed);
             let problem = owned_bots::username_problem(&typed);
-            let verdict = create
-                .check
-                .as_ref()
-                .filter(|(checked, _)| *checked == full)
-                .map(|(_, result)| *result);
+            let verdict = create.verdict(&full);
+            let submitted = create.creating();
             let (line, line_color) = match (problem, verdict) {
                 (Some(UsernameProblem::Empty), _) => (String::new(), muted),
                 (Some(problem), _) => (problem.line().to_string(), danger),
@@ -420,7 +369,7 @@ impl QuillApp {
                     success,
                 ),
                 (None, Some(_)) => (tr(keys::CREATE_BOT_USERNAME_TAKEN).to_string(), danger),
-                (None, None) if create.check_pending.is_some() => {
+                (None, None) if create.checking() => {
                     (tr(keys::Q_MEDIA_CHECKING).to_string(), muted)
                 }
                 (None, None) => (
@@ -491,7 +440,7 @@ impl QuillApp {
                         .text_color(muted)
                         .child(tr(keys::Q_MEDIA_CREATING)),
                 );
-            } else if let Some(error) = create.error.clone() {
+            } else if let Some(error) = create.error().map(str::to_string) {
                 body = body.child(div().text_xs().text_color(danger).child(error));
             }
             let footer = div()

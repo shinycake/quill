@@ -82,7 +82,8 @@ fn open_checkout(
     let mut vcx = VisualTestContext::from_window(handle.into(), cx);
     app.update_in(&mut vcx, |app, window, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.form = Some(stripe_checkout(can_save, need_password));
+            session.payments.checkout =
+                quill::state::CheckoutForm::Ready(stripe_checkout(can_save, need_password));
         }
         app.payments.card_transport = Some(transport);
         app.open_payment_dialog(window, cx);
@@ -414,7 +415,7 @@ fn saving_without_a_password_asks_to_turn_it_on(cx: &mut TestAppContext) {
         let app = app.read(cx);
         let dialog = app.payments.dialog.as_ref();
         (
-            app.twofa.open,
+            app.twofa.is_open(),
             dialog.is_some_and(|dialog| {
                 dialog.new_card.is_some()
                     && dialog.credential_choice == PaymentCredentialChoice::NewCard
@@ -440,7 +441,7 @@ fn saving_without_a_password_asks_to_turn_it_on(cx: &mut TestAppContext) {
                 pending_reset_date: 0,
             });
         }
-        app.twofa.open = false;
+        app.twofa.close();
         cx.notify();
     });
     draw(&mut vcx);

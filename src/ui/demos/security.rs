@@ -55,12 +55,11 @@ impl QuillApp {
                 recipient: quill::telegram::envelope::MessageSender::User { user_id: 11 },
                 recipient_name: "Demo chat A".into(),
                 requested_name: quote.name.clone(),
-                price: quote.stars,
-                quote: Some(quote),
-                loading: false,
-                sending: false,
-                completed: false,
-                note: Some("Injected quote — no purchase is sent in this demo.".into()),
+                stage: quill::marketplace::GiftPurchaseStage::Quoted {
+                    price: quote.stars,
+                    quote,
+                    note: Some("Injected quote — no purchase is sent in this demo.".into()),
+                },
             });
         }
         self.payments
@@ -101,8 +100,8 @@ impl QuillApp {
         // Telegram).
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
-            session.settings.storage_stats = Some(demo_storage_stats());
-            session.settings.storage_stats_loading = false;
+            session.settings.storage_stats =
+                quill::state::fetch::Fetch::Ready(demo_storage_stats());
             session.settings.data_storage = demo_data_storage_prefs();
             session.settings.storage_freed = Some(54_525_952);
         }

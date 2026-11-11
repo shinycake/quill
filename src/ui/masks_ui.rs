@@ -42,7 +42,7 @@ impl QuillApp {
                 self.set_note(StatusNote::error(tr(keys::Q_MISC_COULD_NOT_LOAD_MASKS)));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.stickers.masks.open = true;
+            session.stickers.masks.set_dialog_open(true);
             session.stickers.manager.open = true;
         }
         self.open_box(crate::ui::shell::DialogKind::MaskSets);
@@ -82,9 +82,9 @@ impl QuillApp {
             .unwrap_or_default();
         let thumbs: Vec<_> = panel
             .installed
+            .items()
             .iter()
-            .filter_map(|set| panel.set_stickers.get(&set.id))
-            .flatten()
+            .flat_map(|set| panel.set_stickers(set.id))
             .filter_map(|item| {
                 let session = session?;
                 let path = item
@@ -97,9 +97,10 @@ impl QuillApp {
             })
             .take(STRIP_LIMIT)
             .collect();
-        let empty_note = if panel.failed {
+        let empty_note = if panel.installed.error().is_some() {
             Some(tr(keys::Q_MISC_COULD_NOT_LOAD_MASKS))
-        } else if panel.installed_loaded && panel.installed.is_empty() {
+        } else if matches!(&panel.installed, quill::state::fetch::Fetch::Ready(sets) if sets.is_empty())
+        {
             Some(tr(keys::Q_MISC_NO_MASKS_INSTALLED))
         } else {
             None

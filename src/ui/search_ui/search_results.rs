@@ -17,7 +17,7 @@ impl QuillApp {
         let status = session
             .map(|s| s.search.search.status())
             .unwrap_or(SearchStatus::Closed);
-        let recents = session.is_some_and(|s| s.search.search.recents);
+        let recents = session.is_some_and(|s| s.search.search.is_recents());
         let query = session
             .map(|s| s.search.search.query.clone())
             .unwrap_or_default();

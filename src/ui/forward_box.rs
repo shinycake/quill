@@ -488,7 +488,7 @@ impl QuillApp {
             .content(move |content, window, cx| {
                 let viewport = window.viewport_size().height;
                 let body = body_app.update(cx, |this, cx| {
-                    if std::mem::take(&mut this.share.focus_search) {
+                    if this.share.forward.take_first_draw() {
                         let search = this.share.search_input.clone();
                         window.defer(cx, move |window, cx| {
                             search.update(cx, |input, cx| input.focus(window, cx));

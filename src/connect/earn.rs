@@ -52,7 +52,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `getApplicationConfig` once, for the affiliate switches.
     pub fn ensure_earn_app_config(&mut self) -> Result<(), ConnectSendError> {
         self.earn_ready()?;
-        if self.session.payments.earn.limits.app_config_loaded
+        if !self.session.payments.earn.limits.app_config.can_ask()
             || self.earn_in_flight(EarnPurpose::AppConfig)
             || self
                 .session
@@ -64,8 +64,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_earn(
             EarnPurpose::AppConfig,
             crate::telegram::requests::get_application_config,
-        )
-        .map(|_| ())
+        )?;
+        self.session.payments.earn.limits.app_config.begin();
+        Ok(())
     }
 
     /// Load what an info-panel page shows.
@@ -372,7 +373,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             step: WithdrawStep::Checking,
             request: None,
         });
-        let result = self.send_withdrawal(target, "");
+        let result = self.send_withdrawal(target, "").map(|_| ());
         if result.is_err() {
             self.session.payments.earn.withdraw = None;
         }
@@ -386,26 +387,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(withdraw) = self.session.payments.earn.withdraw.as_mut() else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if password.is_empty()
-            || matches!(withdraw.step, WithdrawStep::Password { sending: true, .. })
-        {
+        if password.is_empty() || matches!(withdraw.step, WithdrawStep::PasswordSending(_)) {
             return Ok(());
         }
-        withdraw.step = WithdrawStep::Password {
-            sending: true,
-            error: None,
-        };
         let target = withdraw.target;
-        let result = self.send_withdrawal(target, password);
-        if result.is_err()
-            && let Some(withdraw) = self.session.payments.earn.withdraw.as_mut()
-        {
-            withdraw.step = WithdrawStep::Password {
-                sending: false,
-                error: None,
-            };
+        // The step carries the request, so it is entered once the send
+        // went out; a failed send leaves the box as it was.
+        let request = self.send_withdrawal(target, password)?;
+        if let Some(withdraw) = self.session.payments.earn.withdraw.as_mut() {
+            withdraw.step = WithdrawStep::PasswordSending(request);
         }
-        result
+        Ok(())
     }
 
     /// Send the URL request and record it on the withdrawal, so only its
@@ -414,12 +406,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         target: WithdrawTarget,
         password: &str,
-    ) -> Result<(), ConnectSendError> {
+    ) -> Result<RequestId, ConnectSendError> {
         let request = self.send_withdrawal_request(target, password)?;
         if let Some(withdraw) = self.session.payments.earn.withdraw.as_mut() {
             withdraw.request = Some(request);
         }
-        Ok(())
+        Ok(request)
     }
 
     fn send_withdrawal_request(
@@ -457,7 +449,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .and_then(|info| info.as_ref()?.affiliate_program);
         let earn = &mut self.session.payments.earn;
         earn.setup = Some(SetupPage::new(bot_user_id, program));
-        earn.setup_closed = false;
+        earn.effects
+            .retain(|effect| *effect != EarnEffect::SetupDone);
         let _ = self.ensure_earn_app_config();
         Ok(())
     }
@@ -766,10 +759,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             stage: JoinStage::Open,
         };
         let earn = &mut self.session.payments.earn;
-        if earn.recipients.is_loading() {
-            earn.pending_join = Some(join);
-        } else {
-            earn.join_box = Some(join);
+        if let Some(open) = earn.recipients.park(join) {
+            earn.join_box = Some(open);
         }
         Ok(())
     }
@@ -789,6 +780,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.payments.earn.recipients = Recipients::Loading {
             waiting: Vec::new(),
             found: Vec::new(),
+            join: None,
         };
         let chats = self.send_earn_tracked(
             EarnPurpose::RecipientChats,
@@ -807,7 +799,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if bots.is_err() {
             let earn = &mut self.session.payments.earn;
             earn.recipients = Recipients::Failed;
-            earn.pending_join = None;
             return Err(ConnectSendError::InvalidRequest);
         }
         Ok(())

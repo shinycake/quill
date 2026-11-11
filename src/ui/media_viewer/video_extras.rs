@@ -29,7 +29,7 @@ impl QuillApp {
         self.viewer
             .state
             .current()
-            .is_some_and(|item| item.kind.is_playable() && self.viewer.player.is_some())
+            .is_some_and(|item| item.kind.is_playable() && self.viewer.clip.player().is_some())
     }
 
     /// "Rotate": a quarter turn of the playing video (tdesktop turns by
@@ -55,7 +55,7 @@ impl QuillApp {
     /// when it is a decoded image or CPU surface pixels (Windows NV12); a
     /// GPU surface (macOS) can't be read back.
     pub(in crate::ui) fn viewer_oriented_frame(&self) -> Option<Arc<RenderImage>> {
-        self.viewer.player.as_ref()?.current_picture()?.snapshot()
+        self.viewer.clip.player()?.current_picture()?.snapshot()
     }
 
     /// The playback position of the playing video, in whole seconds.

@@ -177,7 +177,7 @@ impl QuillApp {
             // An opened thread lands at its first unread reply or its
             // latest, never where it was left last time.
             if let Some(thread) = live.driver.session.threads.thread.as_ref() {
-                let topic = match thread.needs_chat_switch {
+                let topic = match thread.status.needs_chat_switch() {
                     true => None,
                     false => live.driver.session.open_topic,
                 };
@@ -193,7 +193,7 @@ impl QuillApp {
                 .threads
                 .thread
                 .as_ref()
-                .filter(|thread| thread.needs_chat_switch)
+                .filter(|thread| thread.status.needs_chat_switch())
                 .map(|thread| thread.chat_id);
             match switch_to {
                 // A chat window keeps its own chat: the thread moves to the
@@ -231,7 +231,7 @@ impl QuillApp {
                 .threads
                 .thread
                 .as_ref()
-                .is_none_or(|thread| thread.history.loaded_complete);
+                .is_none_or(|thread| thread.history.loaded_complete());
             if !complete && matches!(live.driver.fetch_thread_history(), Ok(Some(_))) {
                 cx.notify();
             }

@@ -233,7 +233,7 @@ impl QuillApp {
                 ),
         );
         block = match &state.active {
-            InviteLinkFetch::Loading => block.child(super::invite_admin_ui::loading_row(muted)),
+            InviteLinkFetch::Loading(_) => block.child(super::invite_admin_ui::loading_row(muted)),
             InviteLinkFetch::Failed(message) => {
                 block.child(div().text_xs().text_color(muted).child(message.clone()))
             }
@@ -371,8 +371,8 @@ impl QuillApp {
                     .child(
                         div().text_xs().text_color(muted).child(
                             state
-                                .error
-                                .clone()
+                                .error()
+                                .map(str::to_string)
                                 .unwrap_or_else(|| tr(keys::Q_OPS_NO_PENDING_REQUESTS).into()),
                         ),
                     )
@@ -460,7 +460,7 @@ impl QuillApp {
                     ),
             );
         }
-        if let Some(error) = state.error.clone() {
+        if let Some(error) = state.error().map(str::to_string) {
             block = block.child(div().text_xs().text_color(muted).child(error));
         }
         if state.loading() {

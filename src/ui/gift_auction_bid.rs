@@ -560,7 +560,11 @@ impl QuillApp {
                 &[("stars", &(stars_text(balance.stars)).to_string())],
             )));
         }
-        let bidding = session.payments.gift_market.bid.is_placing_for(gift_id);
+        let bidding = session
+            .payments
+            .gift_market
+            .bidding
+            .is_some_and(|(gift, _)| gift == gift_id);
         let action = state.bid_action(chosen);
         let button = Button::new("auction-bid-submit")
             .label(action.label(state.my_stars()))

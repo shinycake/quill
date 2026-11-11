@@ -4,7 +4,7 @@
 use super::app::QuillApp;
 use super::*;
 use crate::ui::status_note::StatusNote;
-use crate::ui::stories_state::ViewerPanel;
+use crate::ui::stories_state::{PanelKind, ViewerPanel};
 use crate::ui::story_page::{AlbumDelete, AlbumView, PageWait};
 use crate::ui::user_error::{user_error_doing, user_error_for};
 use gpui_kit::component::button::*;
@@ -584,9 +584,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.stories.viewer_ui().privacy_edit.is_some() {
+        if self.stories.viewer_ui().privacy_edit().is_some() {
             if let Some(open) = self.stories.viewer_ui_mut() {
-                open.privacy_edit = None;
+                open.close(PanelKind::Privacy);
             }
             return;
         }
@@ -599,15 +599,14 @@ impl QuillApp {
             .and_then(|story| story.privacy_settings.as_ref())
             .and_then(StoryPrivacy::from_settings_json)
             .unwrap_or((StoryPrivacy::Everyone, Vec::new()));
-        let value = Some(StoryPrivacyEdit {
+        let value = StoryPrivacyEdit {
             chat_id: item.chat_id.0,
             story_id: item.story_id,
             privacy,
             selected_user_ids,
-        });
+        };
         if let Some(open) = self.stories.viewer_ui_mut() {
-            open.close_other_panels(ViewerPanel::Privacy);
-            open.privacy_edit = value;
+            open.show(ViewerPanel::Privacy(value));
             open.privacy_request = None;
         }
         self.stories
@@ -622,7 +621,7 @@ impl QuillApp {
         if let Some(edit) = self
             .stories
             .viewer_ui_mut()
-            .and_then(|open| open.privacy_edit.as_mut())
+            .and_then(|open| open.privacy_edit_mut())
         {
             if edit.selected_user_ids.contains(&user_id) {
                 edit.selected_user_ids.retain(|id| *id != user_id);
@@ -636,7 +635,7 @@ impl QuillApp {
     /// Phase 9.5: the privacy editor panel — the 4-way selector plus
     /// the contact picker for "Selected users".
     pub(super) fn story_privacy_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let edit = match self.stories.viewer_ui().privacy_edit.as_ref() {
+        let edit = match self.stories.viewer_ui().privacy_edit() {
             Some(edit) => edit,
             None => return div().into_any_element(),
         };
@@ -662,7 +661,7 @@ impl QuillApp {
                     if let Some(edit) = this
                         .stories
                         .viewer_ui_mut()
-                        .and_then(|open| open.privacy_edit.as_mut())
+                        .and_then(|open| open.privacy_edit_mut())
                         && let Some(&privacy) = StoryPrivacy::ALL.get(ix)
                     {
                         edit.privacy = privacy;
@@ -728,7 +727,7 @@ impl QuillApp {
         let manage_busy = self
             .stories
             .viewer_ui()
-            .privacy_edit
+            .privacy_edit()
             .as_ref()
             .is_some_and(|edit| {
                 self.session()
@@ -757,7 +756,7 @@ impl QuillApp {
                         .text_color(text_bright())
                         .on_click(cx.listener(|this, _, _, cx| {
                             if let Some(open) = this.stories.viewer_ui_mut() {
-                                open.privacy_edit = None;
+                                open.close(PanelKind::Privacy);
                             }
                             cx.notify();
                         })),
@@ -774,7 +773,7 @@ impl QuillApp {
         if self.stories.viewer_ui().privacy_request.is_some() {
             return;
         }
-        let Some(edit) = self.stories.viewer_ui().privacy_edit.clone() else {
+        let Some(edit) = self.stories.viewer_ui().privacy_edit().cloned() else {
             return;
         };
         // Demo mode: surface the same notice as `story_composer_save_edit`

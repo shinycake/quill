@@ -3,12 +3,8 @@
 use super::super::*;
 use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
-use crate::gift_market::{
-    AttributeId, BidStage, CraftGift, CraftResult, CraftStage, ForgeAnswer, ResaleFilter,
-    ResaleSort,
-};
+use crate::gift_market::{AttributeId, CraftGift, CraftResult, ResaleFilter, ResaleSort};
 use crate::ids::ChatId;
-use crate::ids::RequestId;
 use crate::marketplace::GiftPrice;
 use crate::platform::MemorySecretStore;
 use crate::telegram::client::copy_and_parse;
@@ -327,14 +323,16 @@ fn auction_link_follow_and_bids() {
         .as_str()
         .and_then(|extra| extra.parse::<u64>().ok());
     assert_eq!(
-        f.driver.session.payments.gift_market.bid,
-        BidStage::Placing {
-            gift_id: 800,
-            request: RequestId(asked.unwrap_or_default())
-        }
+        f.driver
+            .session
+            .payments
+            .gift_market
+            .bidding
+            .map(|(gift, request)| (gift, Some(request.0))),
+        Some((800, asked))
     );
     f.answer("placeGiftAuctionBid", json!({"@type": "ok"}));
-    assert_eq!(f.driver.session.payments.gift_market.bid, BidStage::Idle);
+    assert!(f.driver.session.payments.gift_market.bidding.is_none());
     assert_eq!(
         f.driver.session.take_gift_market_toasts()[0].0,
         "Your bid has been placed"
@@ -370,7 +368,7 @@ fn auction_link_follow_and_bids() {
             "@extra": f.last("increaseGiftAuctionBid")["@extra"]})
         .to_string(),
     );
-    assert_eq!(f.driver.session.payments.gift_market.bid, BidStage::Idle);
+    assert!(f.driver.session.payments.gift_market.bidding.is_none());
     // A bid for someone else is a new bid, not a raise of the friend's.
     f.driver
         .bid_gift_auction(
@@ -484,11 +482,11 @@ fn craft_loads_both_lists_and_crafts() {
     );
     f.answer("searchGiftsForResale", resale_page(&[8]));
     let craft = f.driver.session.payments.gift_market.craft.clone().unwrap();
-    assert_eq!(craft.candidates.gifts.len(), 2);
+    assert_eq!(craft.candidates.len(), 2);
     assert_eq!(craft.market.listings.len(), 1);
     assert_eq!(craft.probabilities, vec![vec![1000]]);
     if let Some(craft) = f.driver.session.payments.gift_market.craft.as_mut() {
-        let second = craft.candidates.gifts[0].clone();
+        let second = craft.candidates[0].clone();
         assert!(craft.add(second));
     }
     f.driver.craft_gift().unwrap();
@@ -500,14 +498,8 @@ fn craft_loads_both_lists_and_crafts() {
     assert!(f.driver.craft_gift().is_err());
     f.answer("craftGift", json!({"@type": "craftGiftResultFail"}));
     let craft = f.driver.session.payments.gift_market.craft.clone().unwrap();
-    assert!(!craft.stage.is_crafting());
-    assert!(matches!(
-        craft.stage,
-        CraftStage::Forging {
-            answer: ForgeAnswer::Replied(Some(CraftResult::Fail)),
-            ..
-        }
-    ));
+    assert!(!craft.crafting());
+    assert_eq!(craft.result(), Some(&CraftResult::Fail));
 }
 
 /// A craft in flight is not orphaned: a new craft box is refused until its
@@ -524,7 +516,7 @@ fn a_new_craft_session_does_not_orphan_a_craft_in_flight() {
             "next_offset": ""}),
     );
     if let Some(craft) = f.driver.session.payments.gift_market.craft.as_mut() {
-        let second = craft.candidates.gifts[0].clone();
+        let second = craft.candidates[0].clone();
         assert!(craft.add(second));
     }
     f.driver.craft_gift().unwrap();
@@ -535,18 +527,13 @@ fn a_new_craft_session_does_not_orphan_a_craft_in_flight() {
         "the forge is still out"
     );
     let craft = f.driver.session.payments.gift_market.craft.clone().unwrap();
-    assert!(craft.stage.is_crafting());
+    assert!(craft.crafting());
     assert_eq!(craft.slots[0].received_gift_id, "r1");
     f.answer("craftGift", json!({"@type": "craftGiftResultFail"}));
     let craft = f.driver.session.payments.gift_market.craft.clone().unwrap();
-    assert!(
-        matches!(
-            craft.stage,
-            CraftStage::Forging {
-                answer: ForgeAnswer::Replied(Some(CraftResult::Fail)),
-                ..
-            }
-        ),
+    assert_eq!(
+        craft.result(),
+        Some(&CraftResult::Fail),
         "its outcome landed"
     );
 }

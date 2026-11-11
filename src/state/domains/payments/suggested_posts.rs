@@ -51,7 +51,7 @@ impl Session {
         let bars = &mut self.payments.suggested_posts.bars;
         if bars
             .get(&chat_id)
-            .is_some_and(|bar| bar.send.waits_for(pending.map(|p| p.id)))
+            .is_some_and(|bar| bar.send().waits_for(pending.map(|p| p.id)))
         {
             bars.remove(&chat_id);
         }
@@ -67,9 +67,9 @@ impl Session {
         posts.settle_busy(purpose);
         if let SuggestedPostPurpose::SendChange { chat_id, .. } = purpose
             && let Some(bar) = posts.bars.get_mut(&chat_id)
-            && bar.send.waits_for(request)
+            && bar.send().waits_for(request)
         {
-            bar.send = BarSend::Idle;
+            bar.set_send(BarSend::Idle);
         }
         if err.earn_hint == Some(crate::earn::EarnErrorHint::BalanceTooLow) {
             posts.balance_low.push(purpose);

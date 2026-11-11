@@ -65,7 +65,14 @@ fn time_zones_are_loaded_once() {
             r#"{{"@type":"timeZones","@extra":"{extra}","time_zones":[{{"@type":"timeZone","id":"Europe/Paris","name":"Paris","utc_time_offset":7200}},{{"@type":"timeZone","id":"UTC","name":"UTC","utc_time_offset":0}}]}}"#
         ),
     );
-    let zones = driver.session.settings.business.time_zones.clone().unwrap();
+    let zones = driver
+        .session
+        .settings
+        .business
+        .time_zones
+        .data()
+        .cloned()
+        .unwrap();
     assert_eq!(zones[0].id, "UTC");
     assert_eq!(zones[1].full_name(), "(UTC+2:00) Paris");
     driver.ensure_time_zones().unwrap();

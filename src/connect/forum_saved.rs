@@ -301,7 +301,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A failed page waits for Retry; a page out for this view is not
         // asked again. (A page out for a view that was left is no reason
         // to hold this one back: its answer is dropped on arrival.)
-        if view.history.loaded_complete
+        if view.history.loaded_complete()
             || view.history.older == OlderEnd::Failed
             || view.page != SavedPage::Idle
         {
@@ -321,11 +321,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// "Retry" over a Saved Messages view whose last older page failed.
     pub fn retry_saved_older(&mut self) -> Sent {
         if let Some(search) = self.session.threads.saved.tag_search.as_mut() {
-            search.history.older = OlderEnd::Open;
+            search.history.reopen_older();
             return self.fetch_saved_tag_page();
         }
         if let Some(view) = self.session.threads.saved.sublist.as_mut() {
-            view.history.older = OlderEnd::Open;
+            view.history.reopen_older();
         }
         self.fetch_saved_sublist_history()
     }
@@ -410,7 +410,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(search) = self.session.threads.saved.tag_search.as_ref() else {
             return Ok(None);
         };
-        if search.history.loaded_complete || search.history.older == OlderEnd::Failed {
+        if search.history.loaded_complete() || search.history.older == OlderEnd::Failed {
             return Ok(None);
         }
         // A page for this filter is out. One asked for another tag does not

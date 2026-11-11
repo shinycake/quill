@@ -101,7 +101,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// A proxy on the local network works with no route, and the proxy list
     /// arrives after the first poll, so it counts as a change.
     fn network_tick(&mut self, network: NetworkState) -> bool {
-        if !self.parameters_sent || !matches!(self.session.shutdown, ShutdownPhase::Running) {
+        if !self.parameters_sent() || !matches!(self.session.shutdown, ShutdownPhase::Running) {
             return false;
         }
         let proxy = &self.session.settings.proxy;

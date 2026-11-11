@@ -14,7 +14,7 @@ use gpui_kit::component::input::Textarea;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::gift_market::{BuyPay, BuyStep, ResaleBuy, listing_price};
+use quill::gift_market::{BuyStep, ResaleBuy, listing_price};
 use quill::lang::{keys, tr, tr_with};
 use quill::marketplace::GiftPrice;
 use quill::premium_hub::upgraded::Rarity;
@@ -75,9 +75,7 @@ impl QuillApp {
         if let Some(buy) = self.resale_buy_mut() {
             let gram_only = buy.listing.gift.resale.is_some_and(|r| r.gram_only);
             buy.pay_in_grams = grams || gram_only;
-            if matches!(buy.pay, BuyPay::Repriced(_)) {
-                buy.pay = BuyPay::Idle;
-            }
+            buy.price_changed = None;
         }
         cx.notify();
     }
@@ -200,7 +198,7 @@ impl QuillApp {
                     );
                 }
                 let shown = price.map(price_text).unwrap_or_default();
-                if let Some(changed) = buy.price_changed() {
+                if let Some(changed) = buy.price_changed {
                     body = body
                         .child(
                             div()

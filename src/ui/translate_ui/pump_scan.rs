@@ -12,20 +12,24 @@
 
 /// The settings a pass's answer depends on.
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub(super) struct PumpKey {
+pub(in crate::ui) struct PumpKey {
     pub(super) chat: i64,
     pub(super) to: &'static str,
     pub(super) automatic: bool,
     pub(super) skip: Vec<&'static str>,
 }
 
+/// What the last pass saw: nothing yet, or its settings, the messages'
+/// `revision` and the messages that wanted a translation (newest first).
 #[derive(Default)]
-pub(in crate::ui) struct PumpScan {
-    key: Option<PumpKey>,
-    /// The messages' `revision` at the last pass.
-    revision: u64,
-    /// The messages that wanted a translation at the last pass.
-    wanted: Vec<i64>,
+pub(in crate::ui) enum PumpScan {
+    #[default]
+    Fresh,
+    Scanned {
+        key: PumpKey,
+        revision: u64,
+        wanted: Vec<i64>,
+    },
 }
 
 impl PumpScan {
@@ -38,11 +42,19 @@ impl PumpScan {
         all: impl FnOnce() -> Vec<i64>,
         changed_since: impl FnOnce(u64) -> Vec<i64>,
     ) -> Vec<i64> {
-        if self.key.as_ref() != Some(key) {
+        let Self::Scanned {
+            key: scanned,
+            revision,
+            wanted,
+        } = self
+        else {
+            return all();
+        };
+        if scanned != key {
             return all();
         }
-        let mut ids = changed_since(self.revision);
-        ids.extend_from_slice(&self.wanted);
+        let mut ids = changed_since(*revision);
+        ids.extend_from_slice(wanted);
         ids.sort_unstable_by(|a, b| b.cmp(a));
         ids.dedup();
         ids
@@ -51,9 +63,11 @@ impl PumpScan {
     /// Remember a pass over `key`'s messages at `revision`, with the ids
     /// that still want a translation (newest first).
     pub(super) fn record(&mut self, key: PumpKey, revision: u64, wanted: Vec<i64>) {
-        self.key = Some(key);
-        self.revision = revision;
-        self.wanted = wanted;
+        *self = Self::Scanned {
+            key,
+            revision,
+            wanted,
+        };
     }
 }
 

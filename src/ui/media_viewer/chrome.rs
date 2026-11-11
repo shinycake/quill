@@ -61,8 +61,8 @@ impl QuillApp {
         self.tick_viewer_ttl(ttl, cx);
         let ttl_badge = ttl.and_then(|ttl| self.viewer_ttl_badge(ttl));
         let has_local_clip = self.viewer_clip_path(item).is_some();
-        let hidden = self.viewer.controls_hidden;
-        let fade_gen = self.viewer.controls_gen;
+        let hidden = self.viewer.visibility.is_hidden();
+        let fade_gen = self.viewer.visibility.flips();
         let (position, total) = self.viewer.state.position().unwrap_or((0, 0));
         let sender_line = (!profile_view)
             .then(|| self.viewer_sender_line(item))
@@ -459,8 +459,9 @@ impl QuillApp {
         }
         let error = self
             .viewer
-            .clip_error
-            .clone()
+            .clip
+            .error()
+            .cloned()
             .filter(|_| !is_video)
             .map(|err| {
                 let can_open = item.kind.is_playable() && has_local_clip;

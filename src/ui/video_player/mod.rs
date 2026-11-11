@@ -26,6 +26,7 @@ mod backend_still;
 pub(crate) mod controls;
 mod decoder_load;
 mod element;
+mod life;
 mod live_follow;
 mod live_picture;
 #[cfg(any(not(target_os = "macos"), test))]
@@ -247,12 +248,7 @@ struct Inner {
     orphan: Option<Arc<RenderImage>>,
     turns: u8,
     mirrored: bool,
-    error: Option<PlayerError>,
-    /// The backend was dropped by [`VideoPlayer::hibernate`].
-    asleep: bool,
-    /// A new picture is wanted since then (opened, seeked, stepped): the
-    /// element keeps drawing until it comes, even while paused.
-    awaiting: Option<Instant>,
+    life: life::Life,
     /// Views redrawn when the transport changes (controls), at most
     /// [`WATCH_INTERVAL`] apart while playing.
     watchers: Vec<EntityId>,
@@ -328,9 +324,7 @@ impl VideoPlayer {
                 orphan: None,
                 turns: 0,
                 mirrored: false,
-                error: None,
-                asleep: false,
-                awaiting,
+                life: life::Life::awake(awaiting),
                 watchers: Vec::new(),
                 watched: None,
                 _poll: None,
@@ -450,8 +444,7 @@ impl VideoPlayer {
         let now = Instant::now();
         let dropped = self.with_inner(|inner| {
             inner.machine.sleep(now);
-            inner.awaiting = None;
-            inner.asleep = true;
+            inner.life.sleep();
             if keep_picture {
                 inner.orphan = inner.raw.as_ref().and_then(Picture::image);
                 return Vec::new();
@@ -495,7 +488,7 @@ impl VideoPlayer {
     pub(crate) fn seek(&self, secs: f64) {
         let now = Instant::now();
         let Some(target) = self.with_inner(|inner| {
-            inner.awaiting = Some(now);
+            inner.life.await_picture(now);
             inner.machine.seek(secs, now)
         }) else {
             return;
@@ -513,7 +506,7 @@ impl VideoPlayer {
         {
             return;
         }
-        self.with_inner(|inner| inner.awaiting = Some(Instant::now()));
+        self.with_inner(|inner| inner.life.await_picture(Instant::now()));
         self.with_backend(|backend| backend.step_frame(forward));
     }
 
@@ -621,7 +614,7 @@ impl VideoPlayer {
 
     /// Why the clip can't play, once (the transport stays `Failed`).
     pub(crate) fn take_error(&self) -> Option<PlayerError> {
-        self.with_inner(|inner| inner.error.take()).flatten()
+        self.with_inner(|inner| inner.life.take_error()).flatten()
     }
 
     /// Poll the backend, fold its status into the transport, loop at the
@@ -637,7 +630,7 @@ impl VideoPlayer {
         let command = self.with_inner(|inner| {
             if let Some(error) = error.filter(|_| inner.machine.state() != PlayState::Failed) {
                 inner.machine.fail(now);
-                inner.error = Some(error);
+                inner.life.fail(error);
                 return None;
             }
             let status = match status {
@@ -732,7 +725,7 @@ impl VideoPlayer {
             // Turning copies the picture: no borrow held meanwhile.
             let turned = turn(&picture, turns, mirrored);
             self.with_inner(|inner| {
-                inner.awaiting = None;
+                inner.life.picture_came();
                 inner.show(picture, turned);
             });
         }
@@ -787,7 +780,7 @@ impl VideoPlayer {
             });
         self.read_inner(|inner| {
             let transport = inner.machine.snapshot(now);
-            let awaiting = inner.awaiting.is_some_and(|since| {
+            let awaiting = inner.life.awaiting().is_some_and(|since| {
                 transport
                     .state
                     .awaits_picture(now.saturating_duration_since(since))
@@ -799,7 +792,7 @@ impl VideoPlayer {
             FrameDemand {
                 animates: (transport.state.animates() || awaiting || settling)
                     && transport.state != PlayState::Failed
-                    && !inner.asleep,
+                    && !inner.life.is_asleep(),
                 plays_sound: transport.has_sound && transport.volume > 0.0,
                 next_due,
                 interval: inner.estimator.interval(),

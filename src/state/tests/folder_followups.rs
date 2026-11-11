@@ -87,7 +87,7 @@ fn a_limit_error_opens_the_limit_box_instead_of_an_error_line() {
     );
     // The limit box is for the box that sent this request.
     assert_eq!(
-        session.chat_list.folder_limit_hit.take(),
+        session.chat_list.take_folder_limit_hit(),
         Some((FolderLimitKind::SharedFolders, Some(extra)))
     );
     // Too many folders when creating one.
@@ -102,7 +102,7 @@ fn a_limit_error_opens_the_limit_box_instead_of_an_error_line() {
         ),
     );
     assert_eq!(
-        session.chat_list.folder_limit_hit.take(),
+        session.chat_list.take_folder_limit_hit(),
         Some((FolderLimitKind::Folders, Some(extra)))
     );
     // Too many included chats when saving.
@@ -117,7 +117,7 @@ fn a_limit_error_opens_the_limit_box_instead_of_an_error_line() {
         ),
     );
     assert_eq!(
-        session.chat_list.folder_limit_hit.take(),
+        session.chat_list.take_folder_limit_hit(),
         Some((FolderLimitKind::ChatsIncluded, Some(extra)))
     );
     // Any other failure is still an ordinary error.
@@ -131,7 +131,7 @@ fn a_limit_error_opens_the_limit_box_instead_of_an_error_line() {
             extra.0
         ),
     );
-    assert!(session.chat_list.folder_limit_hit.is_none());
+    assert!(session.chat_list.folder_limit_hits.is_empty());
     assert!(matches!(
         session.chat_list.dialog_answers.take(extra),
         Some(crate::state::DialogAnswer::Failed(_))
@@ -180,7 +180,7 @@ fn a_request_that_hit_a_limit_answers_its_box_with_the_limit_not_a_line() {
     ] {
         let extra = session.request_for_folder(purpose, 3);
         refuse(&mut session, &seq, &sink, extra, message);
-        assert!(session.chat_list.folder_limit_hit.take().is_some());
+        assert!(session.chat_list.take_folder_limit_hit().is_some());
         assert_eq!(
             session.chat_list.dialog_answers.take(extra),
             Some(DialogAnswer::LimitHit),
@@ -232,4 +232,28 @@ fn a_refused_folder_reorder_or_tags_switch_says_why() {
             "{purpose:?}: the toast is not silent"
         );
     }
+}
+
+#[test]
+fn two_limit_hits_between_polls_both_reach_the_ui_in_order() {
+    let (mut session, _sink) = session();
+    let first = session.request(RequestPurpose::CreateChatFolder, None);
+    let second = session.request(RequestPurpose::EditChatFolder, None);
+    session
+        .chat_list
+        .folder_limit_hits
+        .push_back((crate::folder_limits::FolderLimitKind::Folders, Some(first)));
+    session
+        .chat_list
+        .folder_limit_hits
+        .push_back((crate::folder_limits::FolderLimitKind::Folders, Some(second)));
+    assert_eq!(
+        session.chat_list.take_folder_limit_hit().map(|(_, r)| r),
+        Some(Some(first))
+    );
+    assert_eq!(
+        session.chat_list.take_folder_limit_hit().map(|(_, r)| r),
+        Some(Some(second))
+    );
+    assert!(session.chat_list.take_folder_limit_hit().is_none());
 }

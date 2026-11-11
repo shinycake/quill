@@ -319,12 +319,12 @@ impl Session {
             // dismissed, or an earlier step, has nothing left to dismiss.
             let waits = pending.is_some_and(|p| {
                 self.messages
-                    .sponsored_report_target
+                    .sponsored_report
+                    .target()
                     .is_some_and(|target| target.request == Some(p.id))
             });
             if waits {
-                self.messages.sponsored_report = None;
-                self.messages.sponsored_report_target = None;
+                self.messages.sponsored_report = SponsoredReportFlow::Idle;
             }
         }
     }

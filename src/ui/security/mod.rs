@@ -47,7 +47,7 @@ impl QuillApp {
                 .and_then(|s| s.auth_state.password_op_error.clone());
             let notice = this.twofa_notice_line();
             let mut body = div().flex().flex_col().gap_2();
-            if let Some(line) = notice.filter(|_| this.twofa.view == TwofaView::Status) {
+            if let Some(line) = notice.filter(|_| this.twofa.view() == TwofaView::Status) {
                 body = body.child(
                     div()
                         .id("twofa-notice")
@@ -65,7 +65,7 @@ impl QuillApp {
                         .child(tr_with(keys::Q_PREFS_ERROR, &[("line", &line.to_string())])),
                 );
             }
-            body = match (this.twofa.view, state) {
+            body = match (this.twofa.view(), state) {
                 (TwofaView::Status, None) => body.child(
                     div()
                         .text_xs()
@@ -481,13 +481,13 @@ impl QuillApp {
 
     /// Phase S2: refetch the storage stats. Live: drop the cache so the
     /// guarded fetch fires again. Demo: re-inject the fixture stats.
-    pub(super) fn refresh_storage_usage(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn refresh_storage_usage(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.driver.refresh_storage_statistics();
             let _ = live.driver.maybe_fetch_storage_statistics();
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.settings.storage_stats = Some(demo_storage_stats());
-            session.settings.storage_stats_loading = false;
+            session.settings.storage_stats =
+                quill::state::fetch::Fetch::Ready(demo_storage_stats());
         }
         cx.notify();
     }
@@ -501,8 +501,8 @@ impl QuillApp {
         ) {
             return;
         }
-        self.twofa.open = true;
         self.open_box(DialogKind::TwoFa);
+        self.twofa.open_at(TwofaView::Status);
         self.goto_twofa_view(TwofaView::Status);
         // The last change's error belongs to the box it was shown in; a
         // cached state skips the fetch that would clear it. One still in
@@ -555,7 +555,7 @@ impl QuillApp {
     /// Slice A2: close the overlay and clear every 2FA input — passwords
     /// must not linger in the form after the dialog is gone.
     pub(super) fn close_twofa(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.twofa.open = false;
+        self.twofa.close();
         self.goto_twofa_view(TwofaView::Status);
         self.twofa
             .current_password
@@ -619,9 +619,7 @@ impl QuillApp {
     /// Slice A2: switch the 2FA view; a fresh form starts with no local
     /// notice line.
     pub(super) fn goto_twofa_view(&mut self, view: TwofaView) {
-        self.twofa.view = view;
-        self.twofa.notice = None;
-        self.twofa.confirm = None;
+        self.twofa.goto(view);
         if view == TwofaView::Status {
             self.clear_twofa_flow();
         } else if let Some(session) = self.live.as_mut().map(|l| &mut l.driver.session) {
@@ -660,7 +658,7 @@ impl QuillApp {
             None
         };
         if let Some(note) = missing {
-            self.twofa.notice = Some(note.to_string());
+            self.twofa.set_notice(Some(note.to_string()));
             current.zeroize();
             new.zeroize();
             cx.notify();
@@ -684,11 +682,12 @@ impl QuillApp {
         current.zeroize();
         new.zeroize();
         if !sent {
-            self.twofa.notice = Some(tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string());
+            self.twofa
+                .set_notice(Some(tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string()));
             cx.notify();
             return;
         }
-        self.twofa.notice = None;
+        self.twofa.set_notice(None);
         self.clear_twofa_inputs(window, cx);
         self.goto_twofa_view(TwofaView::Status);
         cx.notify();
@@ -726,7 +725,7 @@ impl QuillApp {
             None
         };
         if let Some(note) = missing {
-            self.twofa.notice = Some(note.to_string());
+            self.twofa.set_notice(Some(note.to_string()));
             current.zeroize();
             cx.notify();
             return;
@@ -737,11 +736,12 @@ impl QuillApp {
         };
         current.zeroize();
         if !sent {
-            self.twofa.notice = Some(tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string());
+            self.twofa
+                .set_notice(Some(tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string()));
             cx.notify();
             return;
         }
-        self.twofa.notice = None;
+        self.twofa.set_notice(None);
         self.clear_twofa_inputs(window, cx);
         self.goto_twofa_view(TwofaView::Status);
         cx.notify();
@@ -831,7 +831,7 @@ crate::ui::shell::register_dialogs! {
 
     TwoFa => DialogSpec::new(
         800,
-        |app| app.twofa.open,
+        |app| app.twofa.is_open(),
         QuillApp::build_twofa_dialog,
     )
 

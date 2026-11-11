@@ -37,6 +37,26 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+
+/// Where the carrier is. The event loop owns it; the web view's callbacks
+/// read a copy of `Loading` (`armed`) from their own threads.
+#[derive(Clone, Copy)]
+enum Phase {
+    /// The view is being locked down; nothing it does counts yet.
+    LockingDown,
+    /// Quill's page was asked for; the relay judges the view.
+    Loading,
+    /// A `close` came: only the end of the grace (`at`) matters now.
+    /// `wait_for_browser` is set by a `close` that says no other carrier
+    /// shares the data folder (read on Windows only).
+    Closing {
+        at: Instant,
+        #[cfg_attr(not(windows), allow(dead_code))]
+        wait_for_browser: bool,
+    },
+    /// The event loop is destroyed and the view is gone.
+    Gone,
+}
 use tao::event::Event;
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tao::window::WindowBuilder;
@@ -313,9 +333,7 @@ fn host(
         });
         return;
     }
-    // Set by a `close` that says no other carrier shares the data folder.
-    #[cfg(windows)]
-    let mut wait_for_browser = false;
+    let mut phase = Phase::LockingDown;
     let close_timer = event_loop.create_proxy();
     let status_proxy = event_loop.create_proxy();
     let mut relay = Relay::new(Instant::now());
@@ -327,30 +345,39 @@ fn host(
             // for the last carrier) the helper waits for the browser
             // process to let go of the data folder.
             drop(view.take());
+            let closing = std::mem::replace(&mut phase, Phase::Gone);
             #[cfg(windows)]
             {
                 drop(context.take());
                 if let Some(browser) = browser.take()
-                    && wait_for_browser
+                    && matches!(
+                        closing,
+                        Phase::Closing {
+                            wait_for_browser: true,
+                            ..
+                        }
+                    )
                 {
                     browser.wait();
                 }
             }
+            #[cfg(not(windows))]
+            let _ = closing;
             return;
         }
-        let Some(webview) = view.as_ref() else {
+        let (Some(webview), false) = (view.as_ref(), matches!(phase, Phase::Gone)) else {
             return;
         };
         let now = Instant::now();
         *control_flow = ControlFlow::Wait;
-        if let Some(at) = relay.closing_at {
+        if let Phase::Closing { at, .. } = phase {
             // Only the end of the close grace matters now.
             if now >= at {
                 *control_flow = ControlFlow::Exit;
             }
             return;
         }
-        let loading = armed.load(Ordering::Acquire);
+        let loading = matches!(phase, Phase::Loading);
         match event {
             // Ticks may bunch up behind a busy loop; about one per `TICK`
             // counts (the thread's clock and this one differ a little).
@@ -377,6 +404,7 @@ fn host(
                     *control_flow = ControlFlow::Exit;
                     return;
                 };
+                phase = Phase::Loading;
                 armed.store(true, Ordering::Release);
                 relay.load_started(now);
                 if webview.load_url(page.url.expose()).is_err() {
@@ -395,12 +423,10 @@ fn host(
                 }
             }
             Event::UserEvent(Wake::Command(CarrierCommand::Close { notify_page, last })) => {
-                #[cfg(windows)]
-                {
-                    wait_for_browser = last;
-                }
-                #[cfg(not(windows))]
-                let _ = last;
+                phase = Phase::Closing {
+                    at: now,
+                    wait_for_browser: last,
+                };
                 match &page {
                     Some(page) if notify_page && relay.posted => {
                         let close = js_string(r#"{"t":"close"}"#);
@@ -409,7 +435,10 @@ fn host(
                             "deliver",
                             &format!("0, 't', {close}"),
                         ));
-                        relay.closing_at = Some(now + CLOSE_GRACE);
+                        phase = Phase::Closing {
+                            at: now + CLOSE_GRACE,
+                            wait_for_browser: last,
+                        };
                         let timer = close_timer.clone();
                         if !watchdog::wake_after(CLOSE_GRACE, move || {
                             let _ = timer.send_event(Wake::Tick);

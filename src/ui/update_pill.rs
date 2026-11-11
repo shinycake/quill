@@ -26,19 +26,38 @@ const HEIGHT: Pixels = px(20.);
 /// pill's less this, so the two are concentric.
 const INSET: Pixels = px(2.);
 
+/// The fill's share of the pill: settled, or easing to a new target.
+enum Fill {
+    Settled(f32),
+    Easing { from: f32, to: f32, since: Instant },
+}
+
+impl Default for Fill {
+    fn default() -> Self {
+        Self::Settled(0.0)
+    }
+}
+
+/// What the last control was, and for a ready update how its percentage
+/// fades into the restart label.
+#[derive(Default, Clone, Copy)]
+enum Phase {
+    #[default]
+    Other,
+    Downloading,
+    /// The update is ready. `Some(since)` when the swap began; `None` for
+    /// an update that was ready without a download to watch (shown at once).
+    Ready(Option<Instant>),
+}
+
 /// The pill's motion: where the fill eases from and to, and when the
 /// finished download started fading into the restart label. The control
 /// itself stays the source of truth; this only remembers the last target
 /// so a change can ease instead of jump.
 #[derive(Default)]
 pub(super) struct UpdatePill {
-    from: f32,
-    to: f32,
-    since: Option<Instant>,
-    downloading: bool,
-    /// `Some` once the update is ready: when the swap began, `None` inside
-    /// for one that was ready without a download to watch (shown at once).
-    ready: Option<Option<Instant>>,
+    fill: Fill,
+    phase: Phase,
 }
 
 impl UpdatePill {
@@ -49,48 +68,53 @@ impl UpdatePill {
         let target = control.fraction().unwrap_or(1.0);
         let downloading = matches!(control, UpdateControl::Downloading { .. });
         let ready = matches!(control, UpdateControl::Restart | UpdateControl::Restarting);
-        let eases = self.downloading && (downloading || ready);
-        if !eases {
-            self.from = target;
-            self.to = target;
-            self.since = None;
-        } else if target != self.to {
-            self.from = self.fill(now);
-            self.to = target;
-            self.since = Some(now);
-        }
-        self.ready = match (ready, self.ready) {
-            (false, _) => None,
-            (true, Some(started)) => Some(started),
-            (true, None) => Some(self.downloading.then_some(now)),
+        let was_downloading = matches!(self.phase, Phase::Downloading);
+        let eases = was_downloading && (downloading || ready);
+        let to = match self.fill {
+            Fill::Settled(to) | Fill::Easing { to, .. } => to,
         };
-        self.downloading = downloading;
+        if !eases {
+            self.fill = Fill::Settled(target);
+        } else if target != to {
+            self.fill = Fill::Easing {
+                from: self.fill(now),
+                to: target,
+                since: now,
+            };
+        }
+        self.phase = match (ready, self.phase) {
+            (true, Phase::Ready(started)) => Phase::Ready(started),
+            (true, _) => Phase::Ready(was_downloading.then_some(now)),
+            (false, _) if downloading => Phase::Downloading,
+            (false, _) => Phase::Other,
+        };
     }
 
     /// The share of the pill filled at `now`, 0 to 1.
     pub(super) fn fill(&self, now: Instant) -> f32 {
-        let Some(since) = self.since else {
-            return self.to;
-        };
-        let t = progress(now.saturating_duration_since(since), FILL);
-        self.from + (self.to - self.from) * super::sidebar_reveal::ease_out_cubic(t)
+        match self.fill {
+            Fill::Settled(to) => to,
+            Fill::Easing { from, to, since } => {
+                let t = progress(now.saturating_duration_since(since), FILL);
+                from + (to - from) * super::sidebar_reveal::ease_out_cubic(t)
+            }
+        }
     }
 
     /// How far the percentage has faded into the restart label, 0 to 1.
     pub(super) fn ready_mix(&self, now: Instant) -> f32 {
-        match self.ready {
-            None => 0.0,
-            Some(None) => 1.0,
-            Some(Some(since)) => progress(now.saturating_duration_since(since), SWAP),
+        match self.phase {
+            Phase::Other | Phase::Downloading => 0.0,
+            Phase::Ready(None) => 1.0,
+            Phase::Ready(Some(since)) => progress(now.saturating_duration_since(since), SWAP),
         }
     }
 
     pub(super) fn animating(&self, now: Instant) -> bool {
-        let filling = self
-            .since
-            .is_some_and(|since| now.saturating_duration_since(since) < FILL);
-        let swapping =
-            matches!(self.ready, Some(Some(since)) if now.saturating_duration_since(since) < SWAP);
+        let filling = matches!(self.fill, Fill::Easing { since, .. }
+            if now.saturating_duration_since(since) < FILL);
+        let swapping = matches!(self.phase, Phase::Ready(Some(since))
+            if now.saturating_duration_since(since) < SWAP);
         filling || swapping
     }
 }

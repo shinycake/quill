@@ -213,7 +213,7 @@ impl QuillApp {
                 .child(resale_count_label(search.total_count)),
         );
         body = body.child(self.resale_pills(session, &filter, &roots, cx));
-        if let Some(error) = search.stage.error() {
+        if let Some(error) = search.load.error() {
             body = body.child(
                 div()
                     .text_sm()
@@ -221,7 +221,7 @@ impl QuillApp {
                     .child(error.to_string()),
             );
         }
-        if search.stage.is_loaded() && search.listings.is_empty() {
+        if search.load.answered() && search.listings.is_empty() && !search.load.is_loading() {
             body = body.child(
                 div()
                     .py_6()
@@ -269,7 +269,7 @@ impl QuillApp {
             );
         }
         body = body.child(grid);
-        if search.is_loading() {
+        if search.load.is_loading() {
             body = body.child(
                 div()
                     .text_sm()

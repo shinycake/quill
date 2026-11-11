@@ -350,11 +350,11 @@ impl QuillApp {
             EmojiSetTab::Search => panel.found_sets.iter().collect(),
         };
         let rows = sets.iter().fold(v_flex().w_full(), |rows, set| {
-            rows.child(self.emoji_pack_row(set, panel.tab, panel.mutating_set, cx))
+            rows.child(self.emoji_pack_row(set, panel.tab, panel.mutation.running(), cx))
         });
         let status = if loading && sets.is_empty() {
             Some(tr(keys::Q_MEDIA_LOADING_EMOJI_PACKS))
-        } else if panel.lists.of(panel.tab).error().is_some() || panel.mutation_failed {
+        } else if panel.lists.of(panel.tab).error().is_some() || panel.mutation.is_failed() {
             Some(tr(keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS))
         } else if sets.is_empty() && !loading {
             Some(tr(keys::Q_MEDIA_NO_EMOJI_PACKS_FOUND))

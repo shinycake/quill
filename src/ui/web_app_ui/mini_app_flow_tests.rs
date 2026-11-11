@@ -58,7 +58,7 @@ fn open_window(app: &mut QuillApp, cx: &mut gpui_kit::App) -> mpsc::Receiver<Hos
     app.mini_apps.window = Some(MiniAppWindow {
         child: Some(child),
         writer: HelperWriter::spawn(stdin),
-        wedged: false,
+        helper: crate::ui::web_app_ui::launch_flow::HelperState::Ready,
         events: mpsc::channel().1,
         launch: WebAppLaunch {
             bot_user_id: BOT,
@@ -69,13 +69,11 @@ fn open_window(app: &mut QuillApp, cx: &mut gpui_kit::App) -> mpsc::Receiver<Hos
             url: "https://example.com/app".into(),
         },
         theme: theme_params(cx),
-        ready: true,
         closing_confirmation: false,
         settings_button: false,
         popups: Default::default(),
         popup_seq: 0,
-        waiting_write_access: false,
-        data_sent: false,
+        write_access: crate::ui::web_app_ui::launch_flow::WriteAccess::Idle,
         privacy_policy_url: None,
         in_attachment_menu: false,
         emoji: Default::default(),
@@ -251,7 +249,14 @@ fn a_paid_checkout_reports_paid_and_closes(cx: &mut TestAppContext) {
         payments.request = Some(quill::state::PaymentRequest {
             invoice: quill::payment_invoice::InputInvoice::Name("abc".into()),
         });
-        payments.form_paid = true;
+        payments.checkout =
+            quill::state::CheckoutForm::Paid(quill::telegram::envelope::PaymentFormData {
+                id: 1,
+                form_type: quill::telegram::envelope::PaymentFormTypeData::Stars { star_count: 50 },
+                seller_bot_user_id: 900,
+                product_title: "Pack".into(),
+                product_description: String::new(),
+            });
         app.poll_invoice(cx);
         let (event, data) = reply(&received);
         assert_eq!(event, "invoice_closed");
@@ -276,18 +281,14 @@ fn an_account_switch_closes_the_mini_app_and_what_waits(cx: &mut TestAppContext)
             then: waiting,
             window: None,
         };
-        app.mini_apps.awaiting_attach_bot = Some(awaited.clone());
-        app.mini_apps.awaiting_search = Some(awaited.clone());
-        app.mini_apps.awaiting_toggle = Some(awaited);
+        app.mini_apps.flow.add(awaited);
         app.ensure_mini_app_poll(cx);
 
         app.switch_account(&quill::ids::AccountKey("other".into()), "", window, cx);
 
         assert!(app.mini_apps.window.is_none(), "the window closed");
         assert!(matches!(next(&received), HostCommand::Close));
-        assert!(app.mini_apps.awaiting_attach_bot.is_none());
-        assert!(app.mini_apps.awaiting_search.is_none());
-        assert!(app.mini_apps.awaiting_toggle.is_none());
+        assert!(!app.mini_apps.flow.is_waiting(), "the launch's wait went");
         assert!(app.mini_apps.poll.is_none(), "the poll stopped");
         assert!(!app.poll_mini_apps(cx), "nothing is left to wait for");
     });
@@ -349,5 +350,46 @@ fn the_mini_app_poll_keeps_the_window_its_flow_started_in(cx: &mut TestAppContex
             app.mini_apps.from_window, None,
             "a flow the main window started"
         );
+    });
+}
+
+/// A write-access answer moves the window only when it is the answer to the
+/// request the window waits on; the consent popup then leads to a second
+/// request with its own answer.
+#[gpui_kit::test]
+fn a_write_access_answer_must_be_for_the_request_the_window_waits_on(cx: &mut TestAppContext) {
+    use crate::ui::web_app_ui::launch_flow::WriteAccess;
+    use quill::ids::RequestId;
+    use quill::state::{WriteAccessResult, WriteAnswer};
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let received = open_window(app, cx);
+        let state = |app: &QuillApp| app.mini_apps.window.as_ref().map(|w| w.write_access);
+        app.with_window(|w| w.write_access = WriteAccess::Checking(RequestId(5)));
+        // Another request's answer, and another bot's: dropped.
+        let other = WriteAnswer::new(RequestId(6), BOT, WriteAccessResult::Denied);
+        app.finish_write_access(other, cx);
+        let bot = WriteAnswer::new(RequestId(5), BOT + 1, WriteAccessResult::Denied);
+        app.finish_write_access(bot, cx);
+        assert_eq!(state(app), Some(WriteAccess::Checking(RequestId(5))));
+        // Its own answer asks the person.
+        let consent = WriteAnswer::new(RequestId(5), BOT, WriteAccessResult::NeedsConsent);
+        app.finish_write_access(consent, cx);
+        assert_eq!(state(app), Some(WriteAccess::Asking));
+        prompt(&received);
+        // A late answer does nothing while the person decides.
+        app.finish_write_access(consent, cx);
+        assert_eq!(state(app), Some(WriteAccess::Asking));
+        // The grant being asked for answers only to its own request.
+        app.with_window(|w| w.write_access = WriteAccess::Allowing(RequestId(7)));
+        let late = WriteAnswer::new(RequestId(5), BOT, WriteAccessResult::Granted);
+        app.finish_write_access(late, cx);
+        assert_eq!(state(app), Some(WriteAccess::Allowing(RequestId(7))));
+        let granted = WriteAnswer::new(RequestId(7), BOT, WriteAccessResult::Granted);
+        app.finish_write_access(granted, cx);
+        assert_eq!(state(app), Some(WriteAccess::Idle));
+        let (event, data) = reply(&received);
+        assert_eq!(event, "write_access_requested");
+        assert_eq!(data["status"], "allowed");
     });
 }

@@ -11,7 +11,7 @@ use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
-use quill::gift_market::{CraftResult, CraftStage};
+use quill::gift_market::CraftResult;
 use std::time::{Duration, Instant};
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
@@ -126,17 +126,18 @@ fn the_forge_ends_in_the_result(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     app.update_in(vcx, |app, _, cx| {
         app.craft_now(cx);
-        assert!(app.craft_session().is_some_and(|c| c.stage.is_forging()));
+        assert!(app.gift_market.forge_started.is_some());
         assert_eq!(app.craft_box(cx).title.as_ref(), "Crafting");
         // Not before the forge ran its time.
         app.craft_frame_upkeep(cx);
         assert_eq!(app.gift_market.top(), Some(&MarketBox::Craft));
-        age_forge(app);
+        app.gift_market.forge_started =
+            Instant::now().checked_sub(Duration::from_secs_f32(FORGE_SECONDS + 0.1));
         app.craft_frame_upkeep(cx);
-        assert!(app.craft_session().is_some_and(|c| !c.stage.is_forging()));
+        assert!(app.gift_market.forge_started.is_none());
         assert_eq!(app.gift_market.top(), Some(&MarketBox::CraftResult));
         assert_eq!(
-            app.craft_session().and_then(|c| c.stage.result().cloned()),
+            app.craft_session().and_then(|c| c.result().cloned()),
             Some(CraftResult::Fail)
         );
         assert_eq!(app.craft_result_box(cx).title.as_ref(), "Crafting Failed");
@@ -160,20 +161,10 @@ fn the_forge_ends_in_the_result(cx: &mut TestAppContext) {
 /// Ends the running forge with `result` as if `craftGift` had answered.
 fn answer_forge(app: &mut QuillApp, result: CraftResult) {
     if let Some(craft) = app.craft_mut() {
-        craft.stage.answer(Some(result));
+        craft.run = quill::gift_market::CraftRun::Done(result);
     }
-    age_forge(app);
-}
-
-/// The forge started long enough ago to end.
-fn age_forge(app: &mut QuillApp) {
-    if let Some(craft) = app.craft_mut()
-        && let CraftStage::Forging { since, .. } = &mut craft.stage
-        && let Some(older) =
-            Instant::now().checked_sub(Duration::from_secs_f32(FORGE_SECONDS + 0.1))
-    {
-        *since = older;
-    }
+    app.gift_market.forge_started =
+        Instant::now().checked_sub(Duration::from_secs_f32(FORGE_SECONDS + 0.1));
 }
 
 #[gpui_kit::test]
@@ -187,7 +178,7 @@ fn a_refused_craft_keeps_the_craft_box(cx: &mut TestAppContext) {
         app.craft_now(cx);
         answer_forge(app, CraftResult::TooEarly(3_600));
         app.craft_frame_upkeep(cx);
-        assert!(app.craft_session().is_some_and(|c| !c.stage.is_forging()));
+        assert!(app.gift_market.forge_started.is_none());
         match app.gift_market.top() {
             Some(MarketBox::Notice { title, text }) => {
                 assert_eq!(title, "Crafting unavailable");
@@ -198,10 +189,7 @@ fn a_refused_craft_keeps_the_craft_box(cx: &mut TestAppContext) {
             }
             other => panic!("expected the notice, got {other:?}"),
         }
-        assert_eq!(
-            app.craft_session().map(|c| c.stage.clone()),
-            Some(CraftStage::Choosing)
-        );
+        assert_eq!(app.craft_session().and_then(|c| c.result().cloned()), None);
         assert_eq!(slot_ids(app), ["own-1204", "own-77", "own-19"]);
         app.market_back(cx);
         assert_eq!(app.gift_market.top(), Some(&MarketBox::Craft));
@@ -210,16 +198,13 @@ fn a_refused_craft_keeps_the_craft_box(cx: &mut TestAppContext) {
         app.craft_now(cx);
         answer_forge(app, CraftResult::InvalidGift);
         app.craft_frame_upkeep(cx);
-        assert!(app.craft_session().is_some_and(|c| !c.stage.is_forging()));
+        assert!(app.gift_market.forge_started.is_none());
         assert_eq!(app.gift_market.top(), Some(&MarketBox::Craft));
         assert_eq!(
             app.connection.status_note(),
             "This gift can't be used for crafting."
         );
-        assert_eq!(
-            app.craft_session().map(|c| c.stage.clone()),
-            Some(CraftStage::Choosing)
-        );
+        assert_eq!(app.craft_session().and_then(|c| c.result().cloned()), None);
         assert_eq!(slot_ids(app), ["own-1204", "own-77", "own-19"]);
     });
 }

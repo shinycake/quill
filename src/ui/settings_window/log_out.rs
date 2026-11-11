@@ -19,7 +19,8 @@ impl QuillApp {
         cx: &mut App,
     ) -> Dialog {
         let on_close = QuillShell::on_close_kind(app, shell, DialogKind::LogOut, |this, _, cx| {
-            this.settings.log_out_confirm = false;
+            this.settings
+                .set_box(crate::ui::settings_state::SettingsBox::LogOut, false);
             cx.notify();
         });
         app.update(cx, |this, cx| {
@@ -37,7 +38,8 @@ impl QuillApp {
                         .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.settings.log_out_confirm = false;
+                            this.settings
+                                .set_box(crate::ui::settings_state::SettingsBox::LogOut, false);
                             this.close_kit_dialog_if_done(DialogKind::LogOut, window, cx);
                             cx.notify();
                         })),
@@ -49,7 +51,8 @@ impl QuillApp {
                         .on_click(cx.listener(|this, _, window, cx| {
                             // The box closes only when the request went out.
                             if this.submit_logout(cx) {
-                                this.settings.log_out_confirm = false;
+                                this.settings
+                                    .set_box(crate::ui::settings_state::SettingsBox::LogOut, false);
                             }
                             this.close_kit_dialog_if_done(DialogKind::LogOut, window, cx);
                         })),
@@ -85,8 +88,8 @@ crate::ui::shell::register_dialogs! {
     /// Log out confirmation from the settings window.
     LogOut => DialogSpec::new(
         7310,
-        |app| app.settings.open && app.settings.log_out_confirm,
+        |app| app.settings.open && app.settings.box_open(crate::ui::settings_state::SettingsBox::LogOut),
         QuillApp::build_log_out_dialog,
     )
-    .close(|app, _, cx| { app.settings.log_out_confirm = false; cx.notify(); }),
+    .close(|app, _, cx| { app.settings.set_box(crate::ui::settings_state::SettingsBox::LogOut, false); cx.notify(); }),
 }

@@ -132,7 +132,7 @@ impl QuillApp {
                     } else {
                         StarsBoxMode::Reaction
                     };
-                    this.open_live_stars_box(mode, 0, false, cx);
+                    this.open_live_stars_box(mode, 0, super::live_state::AfterStars::Nothing, cx);
                 }),
             )
             .into_any_element()
@@ -205,7 +205,12 @@ impl QuillApp {
                     PopupMenuItem::new(tr(keys::VIDEO_STREAM_EDIT_STARS)).on_click(
                         move |_, _, cx| {
                             let _ = edit.update(cx, |this, cx| {
-                                this.open_live_stars_box(StarsBoxMode::Comment, 0, false, cx);
+                                this.open_live_stars_box(
+                                    StarsBoxMode::Comment,
+                                    0,
+                                    super::live_state::AfterStars::Nothing,
+                                    cx,
+                                );
                             });
                         },
                     ),
@@ -300,7 +305,12 @@ impl QuillApp {
                             )
                             .tooltip(tr(keys::VIDEO_STREAM_EDIT_STARS))
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_live_stars_box(StarsBoxMode::Comment, 0, false, cx);
+                                this.open_live_stars_box(
+                                    StarsBoxMode::Comment,
+                                    0,
+                                    super::live_state::AfterStars::Nothing,
+                                    cx,
+                                );
                             })),
                         ),
                 )

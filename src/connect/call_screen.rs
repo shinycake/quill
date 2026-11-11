@@ -364,7 +364,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return (call.screen_sharing && up).then_some(CaptureTarget::Private(call.id));
         }
         let call = self.session.calls.active_group_call.as_ref()?;
-        (call.is_joined && call.screen_sharing).then_some(CaptureTarget::Group(call.id))
+        (call.is_joined && call.screen_share.is_sharing()).then_some(CaptureTarget::Group(call.id))
     }
 
     /// Start, follow and stop the shared screen. Called from the driver
@@ -586,7 +586,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .calls
             .active_group_call
             .as_ref()
-            .is_some_and(|call| call.screen_sharing || call.screen_share_pending);
+            .is_some_and(|call| call.screen_share.is_on());
         if sharing {
             let _ = self.toggle_group_call_screen_share();
         }

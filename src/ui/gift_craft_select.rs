@@ -45,7 +45,6 @@ impl QuillApp {
         };
         let Some(gift) = craft
             .candidates
-            .gifts
             .iter()
             .find(|gift| gift.received_gift_id == received_gift_id)
             .cloned()
@@ -178,7 +177,7 @@ impl QuillApp {
                     .child(tile),
             );
         }
-        if craft.candidates.is_loading() && own_count == 0 {
+        if craft.candidates_load.is_loading() && own_count == 0 {
             body = body.child(
                 div()
                     .text_sm()
@@ -195,7 +194,7 @@ impl QuillApp {
         } else {
             body = body.child(own);
         }
-        if !craft.candidates.is_loading() && !craft.candidates.offset.is_empty() {
+        if !craft.candidates_load.is_loading() && !craft.candidates_offset.is_empty() {
             body = body.child(
                 Button::new("craft-own-more")
                     .label(tr(keys::Q_MONEY_SHOW_MORE))
@@ -239,7 +238,7 @@ impl QuillApp {
                     .child(tile),
             );
         }
-        if market.is_loading() && market.listings.is_empty() {
+        if market.load.is_loading() && market.listings.is_empty() {
             body = body.child(
                 div()
                     .text_sm()
@@ -247,7 +246,7 @@ impl QuillApp {
                     .child(tr(keys::Q_MONEY_LOADING)),
             );
         } else if market.listings.is_empty()
-            && let Some(error) = market.stage.error()
+            && let Some(error) = market.load.error()
         {
             // A failed search is not "none on sale": say why, and retry.
             body = body.child(

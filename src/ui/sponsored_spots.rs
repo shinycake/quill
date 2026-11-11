@@ -62,15 +62,15 @@ impl QuillApp {
         let report = session
             .messages
             .sponsored_report
-            .as_ref()
+            .flight()
             .filter(|flight| flight.chat_id == chat_id)
             .map(|flight| flight.message_id);
         // "Hide ads" answers for no ad in particular (id 0): under the
         // last ad placed.
         let outcome = session
             .messages
-            .last_sponsored_report
-            .as_ref()
+            .sponsored_report
+            .outcome()
             .filter(|outcome| outcome.chat_id == chat_id)
             .map(|outcome| match outcome.message_id {
                 0 => entry.placed.last().map_or(0, |spot| spot.ad_id),
