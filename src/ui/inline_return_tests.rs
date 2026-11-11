@@ -152,12 +152,11 @@ fn an_old_bot_message_loaded_after_the_start_does_not_bring_the_user_back(cx: &m
             .expect("a private chat to stand for the bot");
         (origin, chat, user)
     });
+    // The start goes out as the bot's chat opens, so that chat is the open
+    // one by then (a frame in between would end the trip otherwise).
     app.update(&mut vcx, |app, cx| {
-        app.demo_session
-            .as_mut()
-            .expect("a demo session")
-            .histories
-            .remove(&bot_chat);
+        let session = app.demo_session.as_mut().expect("a demo session");
+        session.histories.remove(&bot_chat);
         app.begin_inline_return(bot_id, "somebot", "param");
         // The user lands in the bot's chat with the start: a frame between
         // the steps must not find the trip outside the bot's chat.
@@ -166,9 +165,6 @@ fn an_old_bot_message_loaded_after_the_start_does_not_bring_the_user_back(cx: &m
             app.take_inline_start(ChatId(bot_chat), cx),
             "the start goes"
         );
-        // The user lands in the bot's chat with the start: a frame between
-        // the two would see the origin chat and end the trip.
-        app.demo_session.as_mut().expect("a demo session").open_chat = Some(ChatId(bot_chat));
     });
     // Its history loads: an old answer of the bot, then the user's own
     // start.

@@ -136,18 +136,27 @@ impl QuillApp {
             return None;
         }
         if !open.thread_switch && self.routed_to_chat_window(chat_id, cx) {
-            self.in_window_scope(Some(chat_id), cx, |app, cx| app.land_chat_open(open, cx));
+            let landed = self.in_window_scope(Some(chat_id), cx, |app, cx| {
+                app.land_chat_open(open, cx);
+            });
+            if landed.is_none() {
+                // The window lost its view: what the open carried is gone.
+                self.note_open_dropped(cx);
+            }
             return None;
         }
         if here.is_none() {
             return Some(open);
         }
-        let main = self.main_window.handle?;
+        let Some(main) = self.main_window.handle else {
+            self.note_open_dropped(cx);
+            return None;
+        };
         let owner = cx.entity();
         let screen = self.screen_epoch();
         // window-scope: `in_screen_scope` puts the main window's state in place.
         cx.defer(move |cx| {
-            let _ = main.update(cx, |_, window, cx| {
+            let sent = main.update(cx, |_, window, cx| {
                 owner.update(cx, |app, cx| {
                     app.in_screen_scope(screen, cx, |app, cx| {
                         app.select_chat_request(open, window, cx);
@@ -156,8 +165,25 @@ impl QuillApp {
                 cx.activate(true);
                 window.activate_window();
             });
+            // The main window went away before the open could reach it. (An
+            // account switch meanwhile took the screen the open was for.)
+            if sent.is_err() {
+                owner.update(cx, |app, cx| {
+                    app.in_screen_scope(screen, cx, |app, cx| app.note_open_dropped(cx));
+                });
+            }
         });
         None
+    }
+
+    /// An open that carried something (messages to forward, files, text)
+    /// could not reach its window: the user is told, not left with a
+    /// selection that vanished.
+    fn note_open_dropped(&mut self, cx: &mut Context<Self>) {
+        self.set_note(StatusNote::error(tr(
+            keys::Q_MISC_COULDNT_OPEN_THE_CHAT_WINDOW,
+        )));
+        cx.notify();
     }
 
     /// The window in place shows `open`'s chat: go to its message, take

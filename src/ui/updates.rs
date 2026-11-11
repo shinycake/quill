@@ -45,6 +45,16 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The timer's check. "Updated to Quill X" stays until the user has seen
+    /// the changelog (`acknowledge_changelog`): a check would replace it
+    /// without that, and the banner would come back at the next launch.
+    fn recheck_for_updates(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.preferences.update_state, UpdateState::Installed(_)) {
+            return;
+        }
+        self.check_for_updates(cx);
+    }
+
     /// Checks at launch, then every few hours while Quill runs (tdesktop's
     /// updater rechecks on a timer too). There is no launch check when the
     /// session opens on "Updated to Quill X"; a check only starts when
@@ -57,7 +67,7 @@ impl QuillApp {
             loop {
                 cx.background_executor().timer(RECHECK_EVERY).await;
                 if this
-                    .update(cx, |this, cx| this.check_for_updates(cx))
+                    .update(cx, |this, cx| this.recheck_for_updates(cx))
                     .is_err()
                 {
                     break;
@@ -90,8 +100,9 @@ impl QuillApp {
     }
 
     /// The update download ended. One the disk held goes back to
-    /// available, so the disk's return to healthy starts it again from the
-    /// bytes it kept (`auto_download_update`).
+    /// available, and starts again at once when the disk is healthy by now,
+    /// else at the disk's return to healthy, from the bytes it kept
+    /// (`auto_download_update`).
     pub(super) fn finish_update_download(
         &mut self,
         release: quill::updater::ReleaseInfo,
@@ -99,11 +110,18 @@ impl QuillApp {
         result: Result<std::path::PathBuf, &'static str>,
         cx: &mut Context<Self>,
     ) {
+        let held = result.is_err() && progress.is_held();
         self.preferences.update_state = match result {
             Ok(plan) => UpdateState::Staged(release, plan),
-            Err(_) if progress.is_held() => UpdateState::Available(release),
+            Err(_) if held => UpdateState::Available(release),
             Err(message) => UpdateState::DownloadFailed(release, message),
         };
+        // The disk may have recovered while the download was still noticing
+        // the hold: its return to healthy found the download running and
+        // started nothing, so this is where it starts again.
+        if held {
+            self.auto_download_update(cx);
+        }
         cx.notify();
     }
 
@@ -601,3 +619,8 @@ pub(super) fn published_notices_unless_opened(
         this.open_link(quill::about::NOTICES_URL, cx);
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "updates_tests.rs"]
+mod tests;

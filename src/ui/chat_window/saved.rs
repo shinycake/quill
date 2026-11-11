@@ -4,6 +4,7 @@
 //! whether to restore them, and from then on the answer decides.
 
 use super::super::app::QuillApp;
+use super::super::on_screen::ScreenEpoch;
 use gpui_kit::component::WindowExt;
 use gpui_kit::*;
 use quill::ids::ChatId;
@@ -22,6 +23,23 @@ pub(super) enum Restore {
     /// chat list is complete.
     Opening(Vec<SavedChatWindow>),
     Done,
+}
+
+/// The write of the window places: nothing due, or a quiet-period timer
+/// running for the screen it was started on. The timer is the stage, so
+/// it goes with its owner; one started on an earlier screen epoch never
+/// fires (its updates are dropped) and no longer counts as due.
+#[derive(Debug, Default)]
+pub(super) enum SaveTimer {
+    #[default]
+    Idle,
+    Due(ScreenEpoch, Task<()>),
+}
+
+impl SaveTimer {
+    pub(super) fn due_on(&self, screen: ScreenEpoch) -> bool {
+        matches!(self, SaveTimer::Due(epoch, _) if *epoch == screen)
+    }
 }
 
 /// The saved windows of `account` to bring back, when the answer was to
@@ -101,14 +119,20 @@ impl QuillApp {
         // A change still waiting for its timer is saved now too: the timer
         // is the screen's and goes with it, so a window closed just before
         // the switch would otherwise come back next time.
-        if !windows.is_empty() || self.windows.save_pending {
+        if !windows.is_empty() || self.windows.save.due_on(self.screen_epoch()) {
             self.save_chat_windows_now(cx);
         }
+        self.windows.save = SaveTimer::Idle;
         for (chat_id, handle, view) in windows {
             self.in_window_scope(Some(chat_id), cx, |app, cx| app.flush_leaving_draft(cx));
             self.forget_chat_window(chat_id, cx);
             let _ = view.update(cx, |view, _| view.mark_closed());
-            let _ = handle.update(cx, |_, window, _| window.remove_window());
+            // The switch may run inside this window's own update, which
+            // holds it: the removal waits until it is let go.
+            // screen-scope: the window is already forgotten; this only closes the OS window.
+            cx.defer(move |cx| {
+                let _ = handle.update(cx, |_, window, _| window.remove_window());
+            });
         }
         self.windows.restore = Restore::Pending;
     }
@@ -116,35 +140,36 @@ impl QuillApp {
     /// Write the open chat windows after a short quiet period (a window
     /// opened, closed, moved or resized).
     pub(super) fn schedule_chat_windows_save(&mut self, cx: &mut Context<Self>) {
-        if self.saved_windows_account().is_none() || self.windows.save_pending {
+        if self.saved_windows_account().is_none() || self.windows.save.due_on(self.screen_epoch()) {
             return;
         }
-        self.windows.save_pending = true;
         // The screen's own timer: after a switch it does not run, so it
         // cannot file the next account's (still empty) windows under that
         // account before they are restored. The switch saves the old
         // account's windows itself (`close_chat_windows_for_switch`).
-        self.spawn_screen(cx, async move |this, cx| {
+        let timer = self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(std::time::Duration::from_millis(600))
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.windows.save_pending = false;
+                // The task ends with this update: let it finish alone.
+                if let SaveTimer::Due(_, task) = std::mem::take(&mut this.windows.save) {
+                    task.detach();
+                }
                 this.save_chat_windows_now(cx);
             });
-        })
-        .detach();
+        });
+        self.windows.save = SaveTimer::Due(self.screen_epoch(), timer);
     }
 
-    fn save_chat_windows_now(&mut self, cx: &mut App) {
+    fn save_chat_windows_now(&mut self, _cx: &mut App) {
         let Some(account) = self.saved_windows_account() else {
             return;
         };
         let windows: Vec<SavedChatWindow> = self
             .windows
-            .open_windows()
-            .filter_map(|(chat_id, handle)| {
-                let bounds = handle.update(cx, |_, window, _| window.bounds()).ok()?;
+            .open_places()
+            .filter_map(|(chat_id, bounds)| {
                 SavedChatWindow {
                     account: account.clone(),
                     chat_id: chat_id.0,
@@ -195,7 +220,15 @@ impl QuillApp {
                     }
                 };
             }
-            Restore::Offered(saved) => self.windows.restore = Restore::Offered(saved),
+            Restore::Offered(saved) => {
+                // The question is still open while its box is. A box lost
+                // without an answer (another dialog replaced it, all
+                // dialogs closed) asks again.
+                if !window.has_active_dialog(cx) {
+                    self.offer_restore(window, cx);
+                }
+                self.windows.restore = Restore::Offered(saved);
+            }
             Restore::Opening(saved) => {
                 let (ready, waiting) = split_ready(saved, |chat| {
                     self.session()

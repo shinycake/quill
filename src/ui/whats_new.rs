@@ -164,6 +164,7 @@ impl Render for WhatsNewView {
         let owner = self.owner.clone();
         super::window_frame::sync(
             window,
+            cx,
             owner
                 .upgrade()
                 .is_some_and(|app| app.read(cx).appearance.native_window_frame),

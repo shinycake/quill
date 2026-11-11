@@ -69,6 +69,17 @@ pub(super) fn kind_of(path: &Path) -> Option<Kind> {
     }
 }
 
+/// What [`Claim::poll_launch`] found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Launch {
+    /// The launch is still running.
+    Holds,
+    /// Its lock is gone: the launch exited.
+    Gone,
+    /// The file system has no locks: the process id is all there is.
+    Unlockable,
+}
+
 /// A claim this process has open (and, where the file system allows,
 /// locked).
 pub(super) struct Claim {
@@ -86,6 +97,26 @@ impl Claim {
     pub(super) fn read(&mut self) -> io::Result<InstallPlan> {
         self.file.rewind()?;
         super::read_plan_from(&mut self.file)
+    }
+
+    /// Whether the launch that handed the claim over still holds its lock,
+    /// which it does until its process exits. The lock is the helper's
+    /// proof the app is gone: a process id can be reused, and how long the
+    /// app takes to quit is not the helper's to guess.
+    pub(super) fn poll_launch(&mut self) -> Launch {
+        // This handle's own lock would block the probe.
+        let _ = self.file.unlock();
+        let state = match self.file.try_lock() {
+            Ok(()) => {
+                let _ = self.file.unlock();
+                Launch::Gone
+            }
+            Err(TryLockError::WouldBlock) => Launch::Holds,
+            Err(TryLockError::Error(_)) => Launch::Unlockable,
+        };
+        // Back to sharing, so the claim stays live while this helper works.
+        let _ = self.file.lock_shared();
+        state
     }
 
     /// Deletes the claim, and a ready plan of the same stamp, while the lock
@@ -333,6 +364,26 @@ mod tests {
         assert!(matches!(take_over(&claim_path), Err(Refused::Taken(_))));
         assert!(matches!(take_over(taken.path()), Err(Refused::Taken(_))));
         drop(held);
+        taken.release();
+    }
+
+    #[test]
+    fn the_helper_waits_for_the_launch_by_its_lock_not_by_a_deadline() {
+        let ready = ready("launch");
+        let held = claim(&ready, &plan()).unwrap();
+        let claim_path = held.path().to_path_buf();
+        let (mut taken, _) = take_over(&claim_path).ok().unwrap();
+        // The app is still quitting: its lock is on the claim, however long
+        // that takes, and the helper's own lock does not hide it.
+        assert_eq!(taken.poll_launch(), Launch::Holds);
+        assert_eq!(taken.poll_launch(), Launch::Holds);
+        drop(held);
+        assert_eq!(taken.poll_launch(), Launch::Gone);
+        // The helper's lock is back: the claim still reads as live.
+        assert!(matches!(
+            liveness(taken.path(), Kind::Applying, SystemTime::now()),
+            Liveness::Live
+        ));
         taken.release();
     }
 
