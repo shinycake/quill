@@ -385,7 +385,7 @@ fn the_copied_check_mark_goes_back_to_the_copy_icon(cx: &mut TestAppContext) {
     app.update_in(&mut vcx, |app, window, cx| {
         app.folders.share = Some(FolderShareDialog::new(window, cx, 5));
         app.copy_folder_link("https://t.me/addlist/a", cx);
-        let copied = app.folders.share.as_ref().map(|d| d.copied.clone());
+        let copied = app.folders.share.as_ref().map(|d| d.copy_mark().clone());
         assert!(matches!(copied, Some(CopyMark::Copied { .. })));
     });
     vcx.executor()
@@ -393,7 +393,7 @@ fn the_copied_check_mark_goes_back_to_the_copy_icon(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
         assert_eq!(
-            app.folders.share.as_ref().map(|d| d.copied.clone()),
+            app.folders.share.as_ref().map(|d| d.copy_mark().clone()),
             Some(CopyMark::Idle)
         );
     });

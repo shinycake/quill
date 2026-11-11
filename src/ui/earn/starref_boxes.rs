@@ -618,21 +618,7 @@ impl QuillApp {
         if let Some(earn) = self.earn_mut() {
             earn.link_box = None;
         }
-        self.earn.link_shown = None;
         cx.notify();
-    }
-
-    /// The box for `link` is being drawn: its icon plays from the first
-    /// draw of this link, and again for another link.
-    fn note_link_shown(&mut self, link: &LinkBox) {
-        if self
-            .earn
-            .link_shown
-            .as_ref()
-            .is_none_or(|(shown, _)| shown != link)
-        {
-            self.earn.link_shown = Some((link.clone(), Instant::now()));
-        }
     }
 
     fn copy_affiliate_link(&mut self, url: &str, cx: &mut Context<Self>) {
@@ -645,13 +631,16 @@ impl QuillApp {
     /// a quarter turn and settles with a small overshoot (tdesktop plays
     /// the `starref_link` animation once in `CreateLinkIcon`).
     fn link_icon_motion(&self, cx: &mut Context<Self>) -> Transformation {
-        let elapsed = self
-            .earn
-            .link_shown
-            .as_ref()
-            .map_or(LINK_PLAY, |(_, since)| {
-                crate::ui::motion::elapsed_since(*since, Instant::now())
-            });
+        let elapsed = match self
+            .earn_state()
+            .and_then(|e| e.link_box.as_ref())
+            .map(|l| l.icon)
+        {
+            Some(LinkIcon::Playing { since }) => {
+                crate::ui::motion::elapsed_since(since, Instant::now())
+            }
+            Some(LinkIcon::Unseen) | None => LINK_PLAY,
+        };
         let t = if crate::ui::motion::interface_animations_off() {
             1.
         } else {
@@ -683,7 +672,9 @@ impl QuillApp {
             else {
                 return dialog.on_close(on_close);
             };
-            this.note_link_shown(&link);
+            if let Some(open) = this.earn_mut().and_then(|e| e.link_box.as_mut()) {
+                open.note_drawn(Instant::now());
+            }
             let Some(session) = this.session() else {
                 return dialog.on_close(on_close);
             };

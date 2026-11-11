@@ -165,14 +165,14 @@ impl Session {
                 }
             }
         }
-        if matches!(
-            pending.map(|p| p.purpose),
-            Some(
-                RequestPurpose::ResolveGifSearchBot
-                    | RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { .. })
-            )
-        ) {
-            self.stickers.gifs.search_failed_now();
+        match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::ResolveGifSearchBot) => self.stickers.gifs.search_failed_now(),
+            Some(RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { .. })) => {
+                self.stickers
+                    .gifs
+                    .search_request_failed(pending.map(|p| p.id));
+            }
+            _ => {}
         }
         if matches!(
             pending.map(|p| p.purpose),

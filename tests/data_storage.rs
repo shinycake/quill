@@ -133,7 +133,8 @@ fn optimize_storage_answer_drops_stats_and_reports_freed_bytes() {
         ),
     );
     assert!(session.settings.storage_stats.is_some());
-    session.settings.data_storage_error = Some("stale".into());
+    session.settings.storage_clear =
+        quill::state::StorageClear::Failed("an earlier clear failed".into());
     let extra = session.request(RequestPurpose::OptimizeStorage, None);
     session.settings.storage_clear = quill::state::StorageClear::Clearing;
     apply_json(
@@ -149,7 +150,7 @@ fn optimize_storage_answer_drops_stats_and_reports_freed_bytes() {
     assert!(!session.settings.storage_stats_loading);
     assert!(!session.settings.storage_clear.is_clearing());
     assert_eq!(session.settings.storage_clear.freed(), Some(5_242_880));
-    assert!(session.settings.data_storage_error.is_none());
+    assert!(session.settings.storage_clear.failed().is_none());
 }
 
 /// Batch 6: an `optimizeStorage` error surfaces without dropping the
@@ -180,7 +181,11 @@ fn optimize_storage_error_keeps_stats() {
             extra.0,
         ),
     );
-    let err = session.settings.data_storage_error.expect("error surfaced");
+    let err = session
+        .settings
+        .storage_clear
+        .failed()
+        .expect("error surfaced");
     assert!(err.starts_with("Couldn't clear the cache:"), "{err}");
     assert!(session.settings.storage_stats.is_some());
     assert!(!session.settings.storage_clear.is_clearing());

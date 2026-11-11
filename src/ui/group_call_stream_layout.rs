@@ -265,10 +265,7 @@ impl QuillApp {
             .session()
             .and_then(|s| s.calls.active_group_call.as_ref())
             .map(|call| call.id);
-        self.group_call_screen.stream_watch = StreamWatch::Wanted {
-            intent,
-            tracked_then: tracked,
-        };
+        self.group_call_screen.want_stream(intent, tracked);
         // A new ask starts clean: only an error after it ends the wish.
         if let Some(live) = self.live.as_mut() {
             live.driver.session.calls.group_call_error = None;

@@ -94,9 +94,6 @@ pub(crate) struct EarnUi {
     pub(super) scroll: ScrollHandle,
     /// The programs box's list.
     pub(super) box_scroll: ScrollHandle,
-    /// The referral link box being shown and when it first was: its icon plays once
-    /// (tdesktop's `starref_link` animation).
-    pub(super) link_shown: Option<(quill::earn::LinkBox, std::time::Instant)>,
 }
 
 /// The earn boxes (setup confirm, programs, join, link, revoke, the
@@ -143,7 +140,6 @@ impl EarnUi {
             sliders: None,
             scroll: ScrollHandle::new(),
             box_scroll: ScrollHandle::new(),
-            link_shown: None,
         }
     }
 }

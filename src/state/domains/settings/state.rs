@@ -37,9 +37,10 @@ pub enum AutoDownloadAnswer {
 }
 
 /// The local storage clear (`optimizeStorage`): one at a time. `Clearing`
-/// leaves on its answer (`Freed`) or its error (`Idle`, the line on
-/// `data_storage_error`); `Freed` stays until the screen is reopened.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// leaves on its answer (`Freed`) or its error (`Failed`, the line the page
+/// shows); `Freed` and `Failed` stay until the screen is reopened or the
+/// next clear starts.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum StorageClear {
     #[default]
     Idle,
@@ -47,17 +48,26 @@ pub enum StorageClear {
     /// Bytes the last confirmed clear freed: the screen shows "{size}
     /// freed on your device!".
     Freed(i64),
+    /// The clear did not go: why, for the page.
+    Failed(String),
 }
 
 impl StorageClear {
-    pub fn is_clearing(self) -> bool {
-        self == StorageClear::Clearing
+    pub fn is_clearing(&self) -> bool {
+        matches!(self, StorageClear::Clearing)
     }
 
-    pub fn freed(self) -> Option<i64> {
+    pub fn freed(&self) -> Option<i64> {
         match self {
-            StorageClear::Freed(bytes) => Some(bytes),
-            StorageClear::Idle | StorageClear::Clearing => None,
+            StorageClear::Freed(bytes) => Some(*bytes),
+            StorageClear::Idle | StorageClear::Clearing | StorageClear::Failed(_) => None,
+        }
+    }
+
+    pub fn failed(&self) -> Option<&str> {
+        match self {
+            StorageClear::Failed(why) => Some(why),
+            StorageClear::Idle | StorageClear::Clearing | StorageClear::Freed(_) => None,
         }
     }
 }

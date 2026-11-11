@@ -126,7 +126,12 @@ impl QuillApp {
             None => self.demo_session.is_some(),
         };
         if asked {
+            let call = self
+                .session()
+                .and_then(|s| s.calls.active_group_call.as_ref())
+                .map(|call| call.id);
             self.group_call_boxes.call_box = CallBox::Share {
+                call,
                 speaker: true,
                 copied: false,
             };

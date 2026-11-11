@@ -85,7 +85,7 @@ fn open_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<Chat
 }
 
 fn clock_running(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
-    app.update(vcx, |app, _| app.frame.frame_clock.borrow().is_running())
+    app.update(vcx, |app, _| app.frame.clock_running())
 }
 
 #[gpui_kit::test]

@@ -249,6 +249,9 @@ impl QuillApp {
         self.forget_storage_sliders();
         if let Some(session) = self.session_mut() {
             session.settings.data_storage_error = None;
+            if session.settings.storage_clear.failed().is_some() {
+                session.settings.storage_clear = quill::state::StorageClear::Idle;
+            }
         }
     }
 
@@ -269,10 +272,12 @@ impl QuillApp {
         let session = self.session();
         let mut body = div().flex().flex_col().gap_4();
         // Failures surface here, never as toasts (the S3 pattern).
-        if let Some(err) = session
-            .as_ref()
-            .and_then(|s| s.settings.data_storage_error.clone())
-        {
+        if let Some(err) = session.as_ref().and_then(|s| {
+            s.settings
+                .data_storage_error
+                .clone()
+                .or_else(|| s.settings.storage_clear.failed().map(str::to_string))
+        }) {
             body = body.child(
                 div()
                     .text_xs()

@@ -120,10 +120,10 @@ pub(crate) struct GroupCallScreen {
     pub(super) pin: quill::calls::tile_pin::TilePin,
     /// The stream you asked to watch and where that stands.
     pub(super) stream_watch: StreamWatch,
-    /// The call the boxes above and [`GroupCallBoxes`]' invite and share
-    /// boxes were opened for (`sync_group_call_boxes`): another call, or
-    /// none, closes them, so a rename typed for one call cannot rename the
-    /// next.
+    /// The call the boxes above were opened for (`sync_group_call_boxes`):
+    /// another call, or none, closes them, so a rename typed for one call
+    /// cannot rename the next. The invite and share boxes
+    /// ([`GroupCallBoxes`]) carry their own call in [`CallBox`].
     pub(super) boxes_call: Option<i32>,
     /// The call the composer's unsent text was typed for: another call
     /// clears it where a window is at hand (`sync_group_call_composer`).
@@ -159,6 +159,9 @@ pub(super) enum StreamWatch {
     Wanted {
         intent: super::group_call_stream_layout::StreamJoinIntent,
         tracked_then: Option<i32>,
+        /// A join already sent, still waiting for its answer: a new wish
+        /// does not drop it, so its timeout and failure still land.
+        joining: Option<StreamJoining>,
     },
     Joining(StreamJoining),
 }
@@ -167,8 +170,12 @@ impl GroupCallScreen {
     /// The call whose join is on its way, if any.
     pub(super) fn joining_call(&self) -> Option<i32> {
         match &self.stream_watch {
-            StreamWatch::Joining(joining) => Some(joining.call),
-            StreamWatch::Idle | StreamWatch::Wanted { .. } => None,
+            StreamWatch::Joining(joining)
+            | StreamWatch::Wanted {
+                joining: Some(joining),
+                ..
+            } => Some(joining.call),
+            StreamWatch::Idle | StreamWatch::Wanted { joining: None, .. } => None,
         }
     }
 
@@ -184,6 +191,7 @@ impl GroupCallScreen {
             StreamWatch::Wanted {
                 intent,
                 tracked_then,
+                ..
             } => Some((*intent, *tracked_then)),
             StreamWatch::Idle | StreamWatch::Joining(_) => None,
         }
@@ -191,16 +199,53 @@ impl GroupCallScreen {
 
     /// Drop the wish; a join already sent keeps waiting for its answer.
     pub(super) fn clear_stream_wish(&mut self) {
-        if matches!(self.stream_watch, StreamWatch::Wanted { .. }) {
-            self.stream_watch = StreamWatch::Idle;
-        }
+        self.stream_watch = match std::mem::replace(&mut self.stream_watch, StreamWatch::Idle) {
+            StreamWatch::Wanted {
+                joining: Some(joining),
+                ..
+            } => StreamWatch::Joining(joining),
+            StreamWatch::Wanted { joining: None, .. } => StreamWatch::Idle,
+            other => other,
+        };
     }
 
     /// Stop waiting on a sent join; a wish not yet consumed stays.
     pub(super) fn clear_stream_joining(&mut self) {
-        if matches!(self.stream_watch, StreamWatch::Joining(_)) {
-            self.stream_watch = StreamWatch::Idle;
-        }
+        self.stream_watch = match std::mem::replace(&mut self.stream_watch, StreamWatch::Idle) {
+            StreamWatch::Joining(_) => StreamWatch::Idle,
+            StreamWatch::Wanted {
+                intent,
+                tracked_then,
+                ..
+            } => StreamWatch::Wanted {
+                intent,
+                tracked_then,
+                joining: None,
+            },
+            StreamWatch::Idle => StreamWatch::Idle,
+        };
+    }
+
+    /// Ask for a stream. A join already on its way stays alive under the
+    /// new wish.
+    pub(super) fn want_stream(
+        &mut self,
+        intent: super::group_call_stream_layout::StreamJoinIntent,
+        tracked_then: Option<i32>,
+    ) {
+        let joining = match std::mem::replace(&mut self.stream_watch, StreamWatch::Idle) {
+            StreamWatch::Joining(joining)
+            | StreamWatch::Wanted {
+                joining: Some(joining),
+                ..
+            } => Some(joining),
+            StreamWatch::Idle | StreamWatch::Wanted { joining: None, .. } => None,
+        };
+        self.stream_watch = StreamWatch::Wanted {
+            intent,
+            tracked_then,
+            joining,
+        };
     }
 
     pub(super) fn new(
@@ -275,24 +320,29 @@ pub(crate) enum VideoChatCreate {
     Sent(quill::ids::RequestId),
 }
 
-/// The overlay open over the call window. Opening one replaces the other,
-/// closing, a call change and the call having no links to share all leave
-/// to `None`.
+/// The overlay open over the call window, with the call (tracked when it
+/// opened) it acts on. Opening one replaces the other, closing, a call
+/// change (`keep_for`) and the call having no links to share all leave to
+/// `None`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum CallBox {
     #[default]
     None,
     /// Phase C2f: voice-chat invite picker overlay (contacts list).
-    Invite,
+    Invite { call: Option<i32> },
     /// "Share Invite Link" box: asked for (it shows once both links are
     /// in), its "Users with this link can speak" checkbox, and whether
     /// the link was just copied.
-    Share { speaker: bool, copied: bool },
+    Share {
+        call: Option<i32>,
+        speaker: bool,
+        copied: bool,
+    },
 }
 
 impl GroupCallBoxes {
     pub(super) fn invite_open(&self) -> bool {
-        self.call_box == CallBox::Invite
+        matches!(self.call_box, CallBox::Invite { .. })
     }
 
     pub(super) fn share_open(&self) -> bool {
@@ -309,7 +359,10 @@ impl GroupCallBoxes {
     }
 
     pub(super) fn set_share_speaker(&mut self, on: bool) {
-        if let CallBox::Share { speaker, copied } = &mut self.call_box {
+        if let CallBox::Share {
+            speaker, copied, ..
+        } = &mut self.call_box
+        {
             *speaker = on;
             *copied = false;
         }
@@ -323,6 +376,18 @@ impl GroupCallBoxes {
 
     pub(super) fn close_call_box(&mut self) {
         self.call_box = CallBox::None;
+    }
+
+    /// A box opened for another call than `tracked` closes: it must not
+    /// act on the next call.
+    pub(super) fn keep_for(&mut self, tracked: Option<i32>) {
+        let opened_for = match self.call_box {
+            CallBox::None => return,
+            CallBox::Invite { call } | CallBox::Share { call, .. } => call,
+        };
+        if opened_for != tracked {
+            self.call_box = CallBox::None;
+        }
     }
 }
 
@@ -353,11 +418,11 @@ impl QuillApp {
             self.group_call_screen.settings_open = false;
             self.group_call_screen.pin = Default::default();
             self.group_call.stream.close_boxes();
-            self.group_call_boxes.close_call_box();
             // The in-call chat and the member levels are the last call's.
             self.group_call.chat_shown = false;
             self.group_call.row_levels.clear();
         }
+        self.group_call_boxes.keep_for(id);
         // The rename, Settings and screen privacy boxes are drawn in the
         // call window: with that window closed they would show nowhere.
         if id.is_some() && self.group_call_screen.window_closed_by_user == id {

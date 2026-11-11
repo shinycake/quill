@@ -389,7 +389,7 @@ fn clear_storage_failure_reports_and_frees_the_gate() {
         &format!(r#"{{"@type":"error","code":500,"message":"x","@extra":"{extra}"}}"#),
     );
     assert!(!f.1.session.settings.storage_clear.is_clearing());
-    assert!(f.1.session.settings.data_storage_error.is_some());
+    assert!(f.1.session.settings.storage_clear.failed().is_some());
     assert!(f.1.session.settings.storage_clear.freed().is_none());
     cleanup(f);
 }

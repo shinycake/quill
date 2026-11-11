@@ -507,6 +507,40 @@ fn a_join_that_never_lands_stops_waiting(cx: &mut TestAppContext) {
     assert!(error(&app, &mut call).is_some());
 }
 
+/// Asking for another stream while a join is on its way keeps that join:
+/// the Join button stays hidden and its failure still shows.
+#[gpui_kit::test]
+fn a_new_wish_keeps_the_join_on_its_way(cx: &mut TestAppContext) {
+    let (app, mut main, _call) = open_stream(cx, StreamState::Live);
+    app.update(&mut main, |app, cx| {
+        app.leave_active_group_call(cx);
+        app.sync_group_call_window(cx);
+    });
+    track_unjoined(&app, &mut main);
+    app.update(&mut main, |app, _| {
+        app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
+            crate::ui::group_call_state::StreamJoining::new(CALL, Task::ready(())),
+        );
+        app.note_stream_join_intent(StreamJoinIntent::Call(999));
+    });
+    app.read_with(&main, |app, _| {
+        assert_eq!(app.group_call_screen.joining_call(), Some(CALL));
+        assert!(app.group_call_screen.stream_wish().is_some());
+    });
+    app.update(&mut main, |app, cx| app.stream_join_ended(CALL, cx));
+    app.read_with(&main, |app, _| {
+        assert_eq!(app.group_call_screen.joining_call(), None);
+        assert!(
+            app.group_call_screen.stream_wish().is_some(),
+            "the wish stays"
+        );
+        assert!(
+            app.session()
+                .is_some_and(|s| s.calls.group_call_error.is_some())
+        );
+    });
+}
+
 /// A screen share that failed earlier is not a failed join: the join on
 /// its way keeps waiting.
 #[gpui_kit::test]

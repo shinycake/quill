@@ -122,7 +122,7 @@ impl GifWanted {
     /// What the session's list holds now.
     fn shown(panel: &GifPanel) -> Self {
         if panel.search_mode() {
-            Self::Search(panel.search_query.clone())
+            Self::Search(panel.search_query().to_string())
         } else {
             Self::Saved
         }
@@ -180,9 +180,14 @@ impl QuillApp {
                 GifWanted::Saved => session.stickers.gifs.search_left(),
                 GifWanted::Search(query) => {
                     // No search bot offline: the demo finds nothing.
-                    session.stickers.gifs.search_begun();
-                    session.stickers.gifs.search_query = query.clone();
-                    session.accept_gif_search_results(Vec::new(), String::new(), true);
+                    session.stickers.gifs.search_begun(query.clone());
+                    session.stickers.gifs.search_sent(quill::ids::RequestId(0));
+                    session.accept_gif_search_results(
+                        Some(quill::ids::RequestId(0)),
+                        Vec::new(),
+                        String::new(),
+                        true,
+                    );
                 }
             }
             true

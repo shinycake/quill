@@ -369,7 +369,11 @@ impl QuillApp {
     /// the cache is empty.
     pub(super) fn open_group_call_invite(&mut self, cx: &mut Context<Self>) {
         self.group_call_needs_unlock(cx);
-        self.group_call_boxes.call_box = CallBox::Invite;
+        let call = self
+            .session()
+            .and_then(|s| s.calls.active_group_call.as_ref())
+            .map(|call| call.id);
+        self.group_call_boxes.call_box = CallBox::Invite { call };
         if let Some(live) = self.live.as_mut()
             && live.driver.session.users_state.contacts.is_none()
         {

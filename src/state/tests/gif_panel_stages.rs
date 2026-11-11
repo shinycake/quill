@@ -1,12 +1,13 @@
 //! The GIF panel's two requests each move through one stage: the saved list
 //! and the search never read as loading and failed at once, and a search
 //! that was left takes its failure with it.
+use crate::ids::RequestId;
 use crate::state::{GifList, GifPanel};
 
 #[test]
 fn a_new_search_starts_clean_after_a_failed_one() {
     let mut panel = GifPanel::default();
-    panel.search_begun();
+    panel.search_begun("cats".into());
     panel.search_failed_now();
     assert!(panel.search_failed() && !panel.search_loading());
     // Back to the saved GIFs: the failure goes with the search.
@@ -14,16 +15,43 @@ fn a_new_search_starts_clean_after_a_failed_one() {
     assert_eq!(panel.list, GifList::Saved);
     assert!(!panel.search_failed());
     // The next search is loading, not still failed.
-    panel.search_begun();
+    panel.search_begun("cats".into());
     assert!(panel.search_loading() && !panel.search_failed());
+    panel.search_sent(RequestId(1));
     panel.search_answered();
     assert!(!panel.search_loading() && !panel.search_failed());
 }
 
 #[test]
+fn a_late_page_of_an_earlier_search_does_not_answer_the_new_one() {
+    let mut panel = GifPanel::default();
+    panel.search_begun("cats".into());
+    panel.search_sent(RequestId(1));
+    // The user searches again before the first page lands.
+    panel.search_begun("dogs".into());
+    panel.search_sent(RequestId(2));
+    assert!(!panel.search_waits_for(Some(RequestId(1))));
+    assert!(panel.search_waits_for(Some(RequestId(2))));
+    // The old request failing does not fail the new search either.
+    panel.search_request_failed(Some(RequestId(1)));
+    assert!(panel.search_loading() && !panel.search_failed());
+    panel.search_request_failed(Some(RequestId(2)));
+    assert!(panel.search_failed());
+    assert_eq!(panel.search_query(), "dogs");
+}
+
+#[test]
+fn a_failed_save_while_the_list_loads_keeps_the_fetch() {
+    let mut panel = GifPanel::default();
+    panel.saved_asked();
+    panel.saved_mutation_failed();
+    assert!(panel.loading() && !panel.failed());
+}
+
+#[test]
 fn a_failed_search_asks_again_loading_not_failed() {
     let mut panel = GifPanel::default();
-    panel.search_begun();
+    panel.search_begun("cats".into());
     panel.search_failed_now();
     panel.search_asked();
     assert!(panel.search_loading() && !panel.search_failed());

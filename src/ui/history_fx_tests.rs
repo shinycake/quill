@@ -90,7 +90,7 @@ fn the_date_draws_nothing_while_it_rests(cx: &mut TestAppContext) {
 
     assert!(renders_over(vcx, 1200) > 1, "it fades out");
     assert!(!date_up(&app, vcx, &day));
-    let clock = app.read_with(vcx, |app, _| app.frame.frame_clock.borrow().is_running());
+    let clock = app.read_with(vcx, |app, _| app.frame.clock_running());
     assert!(!clock, "nothing asks for ticks");
 }
 

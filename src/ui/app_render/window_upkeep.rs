@@ -197,7 +197,7 @@ impl QuillApp {
             .payments
             .dialog
             .as_ref()
-            .is_some_and(|d| d.prefill == crate::ui::dialogs::Prefill::AwaitingForm)
+            .is_some_and(|d| d.awaiting_form())
             || !self
                 .windows
                 .dialog_may_show_in(crate::ui::shell::DialogKind::PaymentForm, here)

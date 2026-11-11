@@ -21,87 +21,122 @@ pub struct PaymentDialog {
     /// The shipping country's ISO code, picked in the country box.
     pub(crate) country_iso: String,
     pub(crate) postal_input: Entity<TextareaState>,
-    pub(crate) credential_choice: PaymentCredentialChoice,
-    /// The card the provider tokenized, and whether to save it (tdesktop's
-    /// `NewCredentials`). Kept only while the checkout is open.
-    pub(crate) new_card: NewCardStage,
-    /// What fills the dialog: the checkout, or the country box or "New
-    /// Card" form open over it.
+    /// How the order is paid: a saved credential or the card the provider
+    /// tokenized (tdesktop's `NewCredentials`). Kept only while the
+    /// checkout is open.
+    pub(crate) method: PaymentMethod,
+    /// What fills the dialog: waiting for the form, the checkout, or the
+    /// country box or "New Card" form open over it.
     pub(crate) page: PaymentPage,
     pub(crate) terms_accepted: bool,
     pub(crate) allow_save_order: bool,
-    /// Slice P1 fix-up: the dialog opens on Buy press before the form
-    /// arrives — the saved order info prefills once, when the form lands.
-    pub(crate) prefill: Prefill,
 }
 
-/// Whether the form's saved order info went into the inputs yet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Prefill {
-    AwaitingForm,
-    Filled,
-}
-
-/// The checkout's page: the form itself, or one picker over it. A page
-/// leaves to the checkout: the pick, Cancel, or the dialog closing.
+/// The checkout's page. The dialog opens on Buy press before the form
+/// arrives (`AwaitingForm`); the form's saved order info prefills the
+/// inputs once, when it lands, and the page becomes the checkout itself.
+/// A picker over the checkout leaves to the checkout: the pick, Cancel,
+/// or the dialog closing.
 pub(crate) enum PaymentPage {
+    AwaitingForm,
     Checkout,
     Country(crate::ui::country_box::CountryBox),
     CardForm(Box<crate::ui::payments::card_form::CardForm>),
 }
 
-/// The card entered in the "New Card" form. `NeedsPassword` is the same
-/// card after asking to save it when the account cannot save yet: "Turn on
+/// How the order is paid, as one value. `NeedsPassword` is the new card
+/// after asking to save it when the account cannot save yet: "Turn on
 /// Two-Step Verification" (tdesktop's `askSetPassword`) waits on it and Pay
 /// stays off; choosing another method, dismissing the ask or setting the
-/// password leaves it for `Ready`.
+/// password leaves it for `NewCard`. A new card stays listed while a saved
+/// credential is chosen, so it is carried by `Saved` too.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum NewCardStage {
-    None,
-    Ready(NewCard),
+pub(crate) enum PaymentMethod {
+    /// "New Card" is chosen and none was entered yet.
+    NoCard,
+    Saved {
+        id: String,
+        card: Option<NewCard>,
+    },
+    NewCard(NewCard),
     NeedsPassword(NewCard),
 }
 
-impl NewCardStage {
+impl PaymentMethod {
     pub(crate) fn card(&self) -> Option<&NewCard> {
         match self {
-            NewCardStage::Ready(card) | NewCardStage::NeedsPassword(card) => Some(card),
-            NewCardStage::None => None,
+            Self::NewCard(card) | Self::NeedsPassword(card) => Some(card),
+            Self::Saved { card, .. } => card.as_ref(),
+            Self::NoCard => None,
         }
     }
 
-    pub(crate) fn is_none(&self) -> bool {
-        matches!(self, NewCardStage::None)
+    /// The choice shown selected in the method list.
+    pub(crate) fn choice(&self) -> PaymentCredentialChoice {
+        match self {
+            Self::Saved { id, .. } => PaymentCredentialChoice::Saved(id.clone()),
+            Self::NoCard | Self::NewCard(_) | Self::NeedsPassword(_) => {
+                PaymentCredentialChoice::NewCard
+            }
+        }
+    }
+
+    /// "New Card" is the chosen method but no card was entered.
+    pub(crate) fn lacks_card(&self) -> bool {
+        matches!(self, Self::NoCard)
     }
 
     pub(crate) fn needs_password(&self) -> bool {
-        matches!(self, NewCardStage::NeedsPassword(_))
+        matches!(self, Self::NeedsPassword(_))
     }
 
     /// Let go of the password ask; the card stays.
     pub(crate) fn drop_password_prompt(&mut self) {
-        *self = match std::mem::replace(self, NewCardStage::None) {
-            NewCardStage::NeedsPassword(card) => NewCardStage::Ready(card),
+        *self = match std::mem::replace(self, Self::NoCard) {
+            Self::NeedsPassword(card) => Self::NewCard(card),
             other => other,
         };
     }
 
-    /// Ask for a password (when `ask`) before the card can be saved.
-    pub(crate) fn ask_password(&mut self, ask: bool) {
-        *self = match std::mem::replace(self, NewCardStage::None) {
-            NewCardStage::Ready(card) | NewCardStage::NeedsPassword(card) if ask => {
-                NewCardStage::NeedsPassword(card)
-            }
-            NewCardStage::NeedsPassword(card) => NewCardStage::Ready(card),
-            other => other,
+    /// Pick `choice` from the list. The entered card stays listed; picking
+    /// it again asks for a password (when `ask_password`) if it is to be
+    /// saved and cannot be yet.
+    pub(crate) fn choose(&mut self, choice: PaymentCredentialChoice, ask_password: bool) {
+        let card = self.take_card();
+        *self = match (choice, card) {
+            (PaymentCredentialChoice::Saved(id), card) => Self::Saved { id, card },
+            (PaymentCredentialChoice::NewCard, None) => Self::NoCard,
+            (PaymentCredentialChoice::NewCard, Some(card)) => Self::using(card, ask_password),
         };
+    }
+
+    /// The card just entered becomes the method.
+    pub(crate) fn use_card(&mut self, card: NewCard, ask_password: bool) {
+        *self = Self::using(card, ask_password);
+    }
+
+    fn using(card: NewCard, ask_password: bool) -> Self {
+        if card.save && ask_password {
+            Self::NeedsPassword(card)
+        } else {
+            Self::NewCard(card)
+        }
+    }
+
+    fn take_card(&mut self) -> Option<NewCard> {
+        match std::mem::replace(self, Self::NoCard) {
+            Self::NewCard(card) | Self::NeedsPassword(card) => Some(card),
+            Self::Saved { card, .. } => card,
+            Self::NoCard => None,
+        }
     }
 }
 
+/// A method picked from the list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PaymentCredentialChoice {
     Saved(String),
-    /// The tokenized [`NewCard`], or nothing chosen yet when there is none.
+    /// The tokenized [`NewCard`].
     NewCard,
 }
 
@@ -132,12 +167,10 @@ impl PaymentDialog {
             state_input: input(cx, tr(keys::Q_MONEY_STATE)),
             country_iso: String::new(),
             postal_input: input(cx, tr(keys::Q_MONEY_POSTAL_CODE)),
-            credential_choice: PaymentCredentialChoice::NewCard,
-            new_card: NewCardStage::None,
-            page: PaymentPage::Checkout,
+            method: PaymentMethod::NoCard,
+            page: PaymentPage::AwaitingForm,
             terms_accepted: false,
             allow_save_order: true,
-            prefill: Prefill::AwaitingForm,
             // ponytail: no `validated` flag — the session's
             // `payment_validated: Option<ValidatedOrderInfoData>` is the
             // single source of truth for whether validation ran.
@@ -155,16 +188,25 @@ impl PaymentDialog {
         window: &mut Window,
         cx: &mut Context<QuillApp>,
     ) {
-        if self.prefill == Prefill::Filled {
+        if !self.awaiting_form() {
             return;
         }
         if let PaymentFormTypeData::Regular(regular) = &form.form_type {
             self.prefill(&regular.saved_order_info, window, cx);
             if let Some(first) = regular.saved_credentials.first() {
-                self.credential_choice = PaymentCredentialChoice::Saved(first.id.clone());
+                let card = self.method.take_card();
+                self.method = PaymentMethod::Saved {
+                    id: first.id.clone(),
+                    card,
+                };
             }
         }
-        self.prefill = Prefill::Filled;
+        self.page = PaymentPage::Checkout;
+    }
+
+    /// The form has not landed yet.
+    pub(crate) fn awaiting_form(&self) -> bool {
+        matches!(self.page, PaymentPage::AwaitingForm)
     }
 
     /// Prefill the order fields from the form's `saved_order_info`
@@ -190,7 +232,7 @@ impl PaymentDialog {
     pub(crate) fn card_form(&self) -> Option<&crate::ui::payments::card_form::CardForm> {
         match &self.page {
             PaymentPage::CardForm(form) => Some(form.as_ref()),
-            PaymentPage::Checkout | PaymentPage::Country(_) => None,
+            PaymentPage::AwaitingForm | PaymentPage::Checkout | PaymentPage::Country(_) => None,
         }
     }
 
@@ -199,21 +241,21 @@ impl PaymentDialog {
     ) -> Option<&mut crate::ui::payments::card_form::CardForm> {
         match &mut self.page {
             PaymentPage::CardForm(form) => Some(form.as_mut()),
-            PaymentPage::Checkout | PaymentPage::Country(_) => None,
+            PaymentPage::AwaitingForm | PaymentPage::Checkout | PaymentPage::Country(_) => None,
         }
     }
 
     pub(crate) fn country_box(&self) -> Option<&crate::ui::country_box::CountryBox> {
         match &self.page {
             PaymentPage::Country(country_box) => Some(country_box),
-            PaymentPage::Checkout | PaymentPage::CardForm(_) => None,
+            PaymentPage::AwaitingForm | PaymentPage::Checkout | PaymentPage::CardForm(_) => None,
         }
     }
 
     pub(crate) fn country_box_mut(&mut self) -> Option<&mut crate::ui::country_box::CountryBox> {
         match &mut self.page {
             PaymentPage::Country(country_box) => Some(country_box),
-            PaymentPage::Checkout | PaymentPage::CardForm(_) => None,
+            PaymentPage::AwaitingForm | PaymentPage::Checkout | PaymentPage::CardForm(_) => None,
         }
     }
 
@@ -239,7 +281,7 @@ impl PaymentDialog {
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod tests {
-    use super::{NewCard, NewCardStage};
+    use super::{NewCard, PaymentCredentialChoice, PaymentMethod};
     use quill::payment_card::NewCredentials;
 
     fn card() -> NewCard {
@@ -251,21 +293,27 @@ mod tests {
 
     #[test]
     fn asking_for_a_password_keeps_the_card_and_every_exit_gives_it_back() {
-        let mut stage = NewCardStage::Ready(card());
-        stage.ask_password(true);
-        assert!(stage.needs_password() && stage.card().is_some());
+        let mut method = PaymentMethod::NoCard;
+        method.use_card(card(), true);
+        assert!(method.needs_password() && method.card().is_some());
         // Dismissed, or another method chosen: the card stays, the ask goes.
-        stage.drop_password_prompt();
-        assert!(!stage.needs_password() && stage.card().is_some());
-        stage.ask_password(true);
-        stage.ask_password(false);
-        assert!(!stage.needs_password() && stage.card().is_some());
+        method.drop_password_prompt();
+        assert!(!method.needs_password() && method.card().is_some());
+        method.use_card(card(), true);
+        method.choose(PaymentCredentialChoice::Saved("s".into()), true);
+        assert!(!method.needs_password() && method.card().is_some());
+        assert_eq!(method.choice(), PaymentCredentialChoice::Saved("s".into()));
+        // The card chosen again asks again while it cannot be saved.
+        method.choose(PaymentCredentialChoice::NewCard, true);
+        assert!(method.needs_password());
+        method.choose(PaymentCredentialChoice::NewCard, false);
+        assert!(!method.needs_password() && method.card().is_some());
     }
 
     #[test]
     fn there_is_nothing_to_ask_a_password_for_without_a_card() {
-        let mut stage = NewCardStage::None;
-        stage.ask_password(true);
-        assert!(stage.is_none() && !stage.needs_password());
+        let mut method = PaymentMethod::NoCard;
+        method.choose(PaymentCredentialChoice::NewCard, true);
+        assert!(method.lacks_card() && !method.needs_password());
     }
 }

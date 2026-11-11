@@ -22,7 +22,7 @@ fn frames_not_from_the_fade(drawn: &BTreeMap<&'static str, u32>) -> u32 {
 }
 
 fn clock_runs(app: &Entity<QuillApp>, vcx: &VisualTestContext) -> bool {
-    app.read_with(vcx, |app, _| app.frame.frame_clock.borrow().is_running())
+    app.read_with(vcx, |app, _| app.frame.clock_running())
 }
 
 #[gpui_kit::test]

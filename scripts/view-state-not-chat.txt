@@ -15,7 +15,7 @@
 #
 #   <Struct>.<field> [*] | <why it may outlive the chat it names>
 
-ComposerUi.shown_draft | carries its own chat and topic: a draft for another slot never matches
+ComposerUi.draft_load | carries its own chat and topic: a draft for another slot never matches
 ComposerUi.slow_mode_tick_chat | marks the running 1 s tick task, which exits by itself when the chat changes; resetting it would start a second task
 MessageUi.swipe_reply_start | one press gesture, carries its chat; the release checks it
 HistoryUi.painted_ids | rebuilt by every paint of the history list

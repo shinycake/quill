@@ -97,7 +97,12 @@ impl Session {
             // replaces; later pages append (deduped); `next_offset`
             // pages the bot's result list.
             self.remember_files(&page.files);
-            self.accept_gif_search_results(page.animations, page.next_offset, first_page);
+            self.accept_gif_search_results(
+                pending.map(|p| p.id),
+                page.animations,
+                page.next_offset,
+                first_page,
+            );
         }
     }
     #[allow(clippy::too_many_arguments)]

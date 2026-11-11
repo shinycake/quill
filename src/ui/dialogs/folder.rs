@@ -111,8 +111,13 @@ impl FolderEditorDialog {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FolderShareView {
     /// The folder's invite links; `confirm_delete` is the link whose delete
-    /// is waiting for confirmation.
-    List { confirm_delete: Option<String> },
+    /// is waiting for confirmation, `copied` the link last copied to the
+    /// clipboard until its check mark times out. Leaving the list takes
+    /// both along.
+    List {
+        confirm_delete: Option<String>,
+        copied: CopyMark,
+    },
     /// Naming a link and choosing its chats; `None` creates a new link.
     Edit { link: Option<String> },
 }
@@ -122,6 +127,7 @@ impl FolderShareView {
     pub(crate) fn list() -> Self {
         FolderShareView::List {
             confirm_delete: None,
+            copied: CopyMark::Idle,
         }
     }
 }
@@ -157,9 +163,6 @@ pub struct FolderShareDialog {
     pub(crate) selected: HashSet<i64>,
     /// The create / edit / delete request the box waits on.
     pub(crate) op: LinkOp,
-    /// The link last copied to the clipboard, until the check mark times
-    /// out.
-    pub(crate) copied: CopyMark,
 }
 
 impl FolderShareDialog {
@@ -176,7 +179,21 @@ impl FolderShareDialog {
             name_input,
             selected: HashSet::new(),
             op: LinkOp::Idle,
-            copied: CopyMark::Idle,
+        }
+    }
+
+    /// The link list's check mark (none off the list).
+    pub(crate) fn copy_mark(&self) -> &CopyMark {
+        match &self.view {
+            FolderShareView::List { copied, .. } => copied,
+            FolderShareView::Edit { .. } => &CopyMark::Idle,
+        }
+    }
+
+    /// Mark a link copied; the form has no copy buttons, so it keeps none.
+    pub(crate) fn mark_copied(&mut self, mark: CopyMark) {
+        if let FolderShareView::List { copied, .. } = &mut self.view {
+            *copied = mark;
         }
     }
 }

@@ -6792,35 +6792,45 @@ Implicit-state conversions: each stage is one value, with a way out.
 - **Folder boxes.** The share box's request and its failure line are one
   value (`LinkOp::{Idle, Saving, Failed}`), and the link awaiting delete
   confirmation is part of the list view (`FolderShareView::List {
-  confirm_delete }`); opening the form drops only a failure, never a request
-  still in flight (09-038, 09-115). 09-114: already `FolderLoad`
+  confirm_delete, copied }`, so the copy check mark leaves with the list
+  (09-038); opening the form drops only a failure, never a request still in
+  flight (09-115). 09-114: already `FolderLoad`
   (Loading, Failed, Ready, Merging, Saving); the form line and the picker are
   messages and a sub-page of `Ready`, not stages. 09-116, 09-037, 09-X018:
   already `InviteStage`, the `seeded`/`adding` flags and the session-side
   invite fields are gone.
 - **Video chat.** The window is `CallWindow::{Closed, Opening, Open {
   handle, visible }}` (10-031, 10-048). The stream you asked to watch is
-  `StreamWatch::{Idle, Wanted, Joining}` (10-032, 10-049). The invite and
-  share boxes are `CallBox::{None, Invite, Share {..}}`, opening one replaces
-  the other (10-038). The global push-to-talk hook keeps its listener and its
+  `StreamWatch::{Idle, Wanted { .., joining }, Joining}` (10-032, 10-049): a
+  new wish keeps a join already on its way (its timeout task, `joining_call`
+  and its failure line), tested. The invite and share boxes are
+  `CallBox::{None, Invite { call }, Share { call, .. }}`, opening one
+  replaces the other and `keep_for` closes one opened for another call
+  (10-038). `boxes_call` stays: it is the owner key of the rename, Settings
+  and pin state that live in `GroupCallScreen`, not a stage of the box. The global push-to-talk hook keeps its listener and its
   permission re-check as tasks in `GlobalPtt`: dropping the task is the way
   out, so no stop flag or polling bool (10-036, 10-067); `ptt_capture` is
   one independent Settings mode. The stage volume slider is
   `SliderStage::{Made, Dragging}` (10-041). `createVideoChat` waits as
   `VideoChatCreate::{Idle, Sent}` and now also leaves on its own success,
   through `answered_creates` beside `failed_creates` (09-X024).
-- **Storage.** The clear is `StorageClear::{Idle, Clearing, Freed}`; a
-  reopened screen drops only the "freed" line (09-X028). The scroll to the
+- **Storage.** The clear is `StorageClear::{Idle, Clearing, Freed, Failed}`:
+  its failure line is in the stage, so a new clear or a reopened screen
+  replaces it without resetting `data_storage_error` by hand (09-X028);
+  `data_storage_error` is left for the page's other requests. The scroll to the
   usage rows is `ScrollStage` (StorageScroll::pending).
-- **Boxes.** The checkout keeps the tokenized card as `NewCardStage::{None,
-  Ready, NeedsPassword}` and its page as `PaymentPage::{Checkout, Country,
-  CardForm}` (09-049, 11-p7-010); `Prefill` says whether the form's saved
-  info went in. The poll box is `PollPage::{Opening, Form, Country, Deadline,
+- **Boxes.** The checkout's payment method is one value,
+  `PaymentMethod::{NoCard, Saved { id, card }, NewCard, NeedsPassword}`, and
+  its page `PaymentPage::{AwaitingForm, Checkout, Country, CardForm}`
+  (09-049, 11-p7-010); the form landing prefills the inputs and moves
+  `AwaitingForm` to `Checkout`, so no `Prefill` flag exists. The poll box is `PollPage::{Opening, Form, Country, Deadline,
   ConfirmDiscard}`, and the first-focus request is the `Opening` stage
   (09-048, 09-X029, 12-009). An option's attach area is `AttachMode::{Idle,
   Menu, Link, AwaitSticker, AwaitEmoji}` (09-047, 12-008). The two earn
   history boxes are `TxBox` (09-062); the referral link's icon plays from the
-  first draw of its link instead of a per-frame mirror (09-061); a join box
+  first draw of its link: `LinkBox::icon` (`LinkIcon::{Unseen, Playing}`)
+  lives inside the box the session holds, so a box that goes away takes it
+  along and the same link reopened plays again (09-061); a join box
   parked for the recipients lives in `Recipients::Loading`, so a failure or
   closing the profile drops it with the stage (09-X033). The layer fade is
   `LayerFade::{Open, Closing}` with the close count in the variant (09-072).
@@ -6830,17 +6840,25 @@ Implicit-state conversions: each stage is one value, with a way out.
   clock is `ClockLoop::{Stopped, Running(task)}`, so a stopped clock cannot
   read as running (09-X068, 09-118); layer focus is `LayerFocus::{Closed,
   Open}` (09-103); the lifted-drag marker is the presence of its global
-  (09-X060); the emoji word bar is `WordBar::{Closed, Hover, Pinned}`
-  (09-083); a first-run clip is `Clip::{Writing, Ready, Absent}` (09-099);
+  (09-X060); the emoji word bar is `WordBar::{Closed, Asking, Hover, Pinned}`,
+  where `Asking` is "Suggest Emoji" waiting for its keyword answer and the
+  open bars own the pointer-away wait, so closing the bar drops it (09-083);
+  a hover opened while `Asking` takes the bar's place and ends the ask; a first-run clip is `Clip::{Writing, Ready, Absent}` (09-099);
   an emoji effect is `EffectKind` plus `Playback` (09-086); the emoji set
   box's startup read and file install are `Startup` and `FileInstall`
-  (03-045, 09-089), with a dismissed file picker now leaving its stage.
+  (03-045, 09-089), with a dismissed file picker now leaving its stage, and a
+  cancelled download is `DownloadError::Cancelled` instead of a string
+  compare. The composer's draft is `DraftLoad::{Unshown, Shown, Restoring}`:
+  the next-frame restore request carries what was shown (09-X061). The frame
+  clock sits in a `Cell`, read by taking and putting back.
 - **GIF panel.** The saved list is a `Fetch<()>` and the panel holds
-  `GifList::{Saved, Search(Fetch<()>)}`: a new search no longer starts with
-  the last one's failure, and an answer to a search that was left changes
-  nothing (09-119). Bid amount (09-120): the amount stays the one stored
-  value; only `from_slider` and `choose` write it, and `choose` moves the
-  track with it.
+  `GifList::{Saved, Search(GifSearch { query, fetch, request })}`: a new
+  search no longer starts with the last one's failure, and a page or error
+  is matched to the request the search waits for, so a late page of an
+  earlier query cannot mark the new search ready (09-119, tested). A failed
+  save or remove while the list loads keeps the fetch stage. Bid amount
+  (09-120): `chosen` is the one stored value; the track is only a coarser
+  view of it, written by `choose` alone and never read back.
 - **Already fixed upstream, skipped.** 09-091 (`TooltipStage`), 11-p4-015
   (`StateSaveTimer`), 09-125 (`AuctionOpen`).
 - **Left in the baseline.** `ActiveGroupCall`, `SettingsState` and

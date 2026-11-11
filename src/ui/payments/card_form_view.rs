@@ -55,7 +55,7 @@ impl QuillApp {
     /// Pay with no card chosen yet: enter one first, as tdesktop's Pay
     /// opens the payment method when it is missing.
     pub(super) fn needs_card_entry(&self, dialog: &PaymentDialog) -> bool {
-        dialog.credential_choice == PaymentCredentialChoice::NewCard && dialog.new_card.is_none()
+        dialog.method.lacks_card()
     }
 
     pub(super) fn can_enter_new_card(&self) -> bool {
@@ -68,7 +68,7 @@ impl QuillApp {
     /// be saved (see `checkout_can_save_credentials`).
     fn set_password_for_card(&mut self, cx: &mut Context<Self>) {
         if let Some(dialog) = self.payments.dialog.as_mut() {
-            dialog.new_card.drop_password_prompt();
+            dialog.method.drop_password_prompt();
         }
         self.open_twofa(cx);
     }
@@ -79,19 +79,14 @@ impl QuillApp {
     fn choose_payment_method(&mut self, choice: PaymentCredentialChoice, cx: &mut Context<Self>) {
         let ask_password = self.needs_password_to_save();
         if let Some(dialog) = self.payments.dialog.as_mut() {
-            let saving_new_card = choice == PaymentCredentialChoice::NewCard
-                && dialog.new_card.card().is_some_and(|card| card.save);
-            dialog
-                .new_card
-                .ask_password(saving_new_card && ask_password);
-            dialog.credential_choice = choice;
+            dialog.method.choose(choice, ask_password);
         }
         cx.notify();
     }
 
     fn dismiss_card_password_prompt(&mut self, cx: &mut Context<Self>) {
         if let Some(dialog) = self.payments.dialog.as_mut() {
-            dialog.new_card.drop_password_prompt();
+            dialog.method.drop_password_prompt();
         }
         cx.notify();
     }
@@ -110,13 +105,13 @@ impl QuillApp {
             choices.push(Some(PaymentCredentialChoice::Saved(credential.id.clone())));
             titles.push(credential.title.clone());
         }
-        if let Some(card) = dialog.new_card.card() {
+        if let Some(card) = dialog.method.card() {
             choices.push(Some(PaymentCredentialChoice::NewCard));
             titles.push(card.credentials.title().to_string());
         }
         let selected = choices
             .iter()
-            .position(|choice| choice.as_ref() == Some(&dialog.credential_choice));
+            .position(|choice| choice.as_ref() == Some(&dialog.method.choice()));
         let can_enter = self.can_enter_new_card();
         let radios = titles.into_iter().enumerate().map(|(index, title)| {
             Radio::new(SharedString::from(format!("payment-method-{index}")))
@@ -145,7 +140,7 @@ impl QuillApp {
                         }
                     })),
             );
-        if dialog.new_card.needs_password() {
+        if dialog.method.needs_password() {
             section = section.child(self.card_password_prompt(cx));
         }
         section

@@ -236,7 +236,12 @@ fn the_call_boxes_close_with_their_call(cx: &mut TestAppContext) {
     });
 
     app.update_in(vcx, |app, _, _| {
+        let call = app
+            .session()
+            .and_then(|s| s.calls.active_group_call.as_ref())
+            .map(|call| call.id);
         app.group_call_boxes.call_box = crate::ui::group_call_state::CallBox::Share {
+            call,
             speaker: true,
             copied: false,
         };

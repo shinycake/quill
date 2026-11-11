@@ -61,12 +61,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.cancel_gif_search_requests();
-        self.session.stickers.gifs.search_query = query.trim().to_string();
         self.session.stickers.gifs.search_chat = chat;
         self.session.stickers.gifs.search_results.clear();
         self.session.stickers.gifs.search_next_offset.clear();
         self.session.stickers.gifs.search_offset.clear();
-        self.session.stickers.gifs.search_begun();
+        self.session
+            .stickers
+            .gifs
+            .search_begun(query.trim().to_string());
         self.maybe_search_gifs(false)
     }
 
@@ -115,7 +117,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if more && offset.is_empty() {
             return Ok(None);
         }
-        let query = self.session.stickers.gifs.search_query.clone();
+        let query = self.session.stickers.gifs.search_query().to_string();
         let chat_id = self
             .session
             .stickers
@@ -125,10 +127,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .unwrap_or(ChatId(0));
         self.session.stickers.gifs.search_asked();
         self.session.stickers.gifs.search_offset = offset.clone();
-        self.gif_request(
+        let sent = self.gif_request(
             RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { first_page: !more }),
             |id| get_inline_query_results(id, bot_id, chat_id, &query, &offset),
-        )
+        )?;
+        if let Some(request) = sent {
+            self.session.stickers.gifs.search_sent(request);
+        }
+        Ok(sent)
     }
 
     pub fn more_gif_search_results(&mut self) -> Result<Option<RequestId>, ConnectSendError> {

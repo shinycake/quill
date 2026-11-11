@@ -336,7 +336,7 @@ impl QuillApp {
             }
         };
         if let Some(dialog) = self.folders.share.as_mut() {
-            if let FolderShareView::List { confirm_delete } = &mut dialog.view {
+            if let FolderShareView::List { confirm_delete, .. } = &mut dialog.view {
                 *confirm_delete = None;
             }
             match result {
@@ -357,10 +357,10 @@ impl QuillApp {
         cx.write_to_clipboard(ClipboardItem::new_string(link.to_string()));
         if let Some(dialog) = self.folders.share.as_mut() {
             let at = std::time::Instant::now();
-            dialog.copied = CopyMark::Copied {
+            dialog.mark_copied(CopyMark::Copied {
                 link: link.to_string(),
                 at,
-            };
+            });
             // The check mark goes back to the copy icon on its own. The
             // box is the screen's: a timer from an account switched away
             // does not touch the next account's box.
@@ -368,9 +368,9 @@ impl QuillApp {
                 cx.background_executor().timer(COPIED_MARK).await;
                 let _ = this.update(cx, |this, cx| {
                     if let Some(dialog) = this.folders.share.as_mut()
-                        && matches!(&dialog.copied, CopyMark::Copied { at: now, .. } if *now == at)
+                        && matches!(dialog.copy_mark(), CopyMark::Copied { at: now, .. } if *now == at)
                     {
-                        dialog.copied = CopyMark::Idle;
+                        dialog.mark_copied(CopyMark::Idle);
                         cx.notify();
                     }
                 });
@@ -602,9 +602,9 @@ impl QuillApp {
             );
             let confirming = matches!(
                 &state.view,
-                FolderShareView::List { confirm_delete: Some(ask) } if *ask == url
+                FolderShareView::List { confirm_delete: Some(ask), .. } if *ask == url
             );
-            let copied = state.copied.is_copied(&url);
+            let copied = state.copy_mark().is_copied(&url);
             let copy_url = url.clone();
             let edit_link = link.clone();
             let ask_url = url.clone();
@@ -673,7 +673,7 @@ impl QuillApp {
                                 .accessibility_label(tr(keys::Q_CHATLIST_DELETE_INVITE_LINK))
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     if let Some(dialog) = this.folders.share.as_mut()
-                                        && let FolderShareView::List { confirm_delete } =
+                                        && let FolderShareView::List { confirm_delete, .. } =
                                             &mut dialog.view
                                     {
                                         *confirm_delete = Some(ask_url.clone());
@@ -701,8 +701,9 @@ impl QuillApp {
                                         .small()
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             if let Some(dialog) = this.folders.share.as_mut()
-                                                && let FolderShareView::List { confirm_delete } =
-                                                    &mut dialog.view
+                                                && let FolderShareView::List {
+                                                    confirm_delete, ..
+                                                } = &mut dialog.view
                                             {
                                                 *confirm_delete = None;
                                             }

@@ -166,12 +166,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             ..OptimizeStorage::everything(50)
         };
         self.session.settings.storage_clear = StorageClear::Clearing;
-        self.session.settings.data_storage_error = None;
         if let Err(err) = self.sender.send_json(&optimize_storage(extra, &params)) {
             self.session.requests.take(extra);
-            self.session.settings.storage_clear = StorageClear::Idle;
-            self.session.settings.data_storage_error =
-                Some("Couldn't clear the cache.".to_string());
+            self.session.settings.storage_clear =
+                StorageClear::Failed("Couldn't clear the cache.".to_string());
             return Err(err);
         }
         Ok(extra)

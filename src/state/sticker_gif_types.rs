@@ -228,7 +228,6 @@ pub struct GifPanel {
     /// Which list the panel holds: the saved GIFs, or a search and how it
     /// stands. Leaving the search leaves its stage with it.
     pub list: GifList,
-    pub search_query: String,
     /// The chat of the window that asked (the inline query's chat); paging
     /// keeps it.
     pub search_chat: Option<crate::ids::ChatId>,
@@ -289,14 +288,24 @@ impl GifSearches {
     }
 }
 
-/// Which list a GIF panel holds. A search is a `Fetch` of its own: asked
-/// (`Loading`), answered (`Ready`, the results are in `search_results`), or
-/// refused (`Failed`).
+/// Which list a GIF panel holds. A search is a stage of its own: for one
+/// query, asked (`Loading`), answered (`Ready`, the results are in
+/// `search_results`), or refused (`Failed`). Its pages are matched to the
+/// request that asked, so a late page of an earlier search changes nothing.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum GifList {
     #[default]
     Saved,
-    Search(Fetch<()>),
+    Search(GifSearch),
+}
+
+/// A GIF search: its query, where it stands, and the page request it waits
+/// for (none before the first one goes out).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GifSearch {
+    pub query: String,
+    pub fetch: Fetch<()>,
+    pub request: Option<crate::ids::RequestId>,
 }
 
 const GIF_FAILED: &str = "gif request failed";
@@ -325,11 +334,20 @@ impl GifPanel {
     }
 
     pub fn search_loading(&self) -> bool {
-        matches!(&self.list, GifList::Search(search) if search.is_loading())
+        matches!(&self.list, GifList::Search(search) if search.fetch.is_loading())
     }
 
     pub fn search_failed(&self) -> bool {
-        matches!(&self.list, GifList::Search(search) if search.error().is_some())
+        matches!(&self.list, GifList::Search(search) if search.fetch.error().is_some())
+    }
+
+    /// The query of the search the panel holds ("" when it shows the saved
+    /// GIFs).
+    pub fn search_query(&self) -> &str {
+        match &self.list {
+            GifList::Search(search) => &search.query,
+            GifList::Saved => "",
+        }
     }
 
     /// `getSavedAnimations` went out.
@@ -355,9 +373,12 @@ impl GifPanel {
     }
 
     /// A save or remove failed, or a request could not be sent: the list
-    /// stays as it was.
+    /// stays as it was, and a fetch in flight goes on (its answer is the
+    /// list's).
     pub fn saved_mutation_failed(&mut self) {
-        self.saved.fail(GIF_FAILED);
+        if !self.saved.is_loading() {
+            self.saved.fail(GIF_FAILED);
+        }
     }
 
     /// A new request starts clean: a failure no longer shows.
@@ -384,9 +405,14 @@ impl GifPanel {
         };
     }
 
-    /// A search starts: the panel holds its (not yet answered) results.
-    pub fn search_begun(&mut self) {
-        self.list = GifList::Search(Fetch::Loading { stale: None });
+    /// A search for `query` starts: the panel holds its (not yet answered)
+    /// results.
+    pub fn search_begun(&mut self, query: String) {
+        self.list = GifList::Search(GifSearch {
+            query,
+            fetch: Fetch::Loading { stale: None },
+            request: None,
+        });
     }
 
     /// The panel goes back to the saved GIFs.
@@ -394,34 +420,59 @@ impl GifPanel {
         self.list = GifList::Saved;
     }
 
-    /// A search request goes out (a page, or the first after the bot is
-    /// known).
+    /// The search waits for a request again (a retry, or the first after
+    /// the bot is known); the request that answers it is named by
+    /// [`Self::search_sent`].
     pub fn search_asked(&mut self) {
         if let GifList::Search(search) = &mut self.list {
-            search.begin();
+            search.fetch.begin();
+            search.request = None;
         }
     }
 
-    /// A search page answered.
+    /// The page request `request` went out for the search.
+    pub fn search_sent(&mut self, request: crate::ids::RequestId) {
+        if let GifList::Search(search) = &mut self.list {
+            search.request = Some(request);
+        }
+    }
+
+    /// Whether `request` is the page the search waits for.
+    pub fn search_waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(&self.list, GifList::Search(search)
+            if request.is_some() && search.request == request)
+    }
+
+    /// A search page answered (the caller checked [`Self::search_waits_for`]).
     pub fn search_answered(&mut self) {
         if let GifList::Search(search) = &mut self.list {
-            search.succeed(());
+            search.fetch.succeed(());
+            search.request = None;
         }
     }
 
     /// The search failed, or could not be sent.
     pub fn search_failed_now(&mut self) {
         if let GifList::Search(search) = &mut self.list {
-            search.fail(GIF_FAILED);
+            search.fetch.fail(GIF_FAILED);
+            search.request = None;
+        }
+    }
+
+    /// A page request of the search failed: only the one the search waits
+    /// for fails it.
+    pub fn search_request_failed(&mut self, request: Option<crate::ids::RequestId>) {
+        if self.search_waits_for(request) {
+            self.search_failed_now();
         }
     }
 
     /// A new search request starts clean: a failure no longer shows.
     pub fn search_failure_cleared(&mut self) {
         if let GifList::Search(search) = &mut self.list
-            && search.error().is_some()
+            && search.fetch.error().is_some()
         {
-            *search = Fetch::Idle;
+            search.fetch = Fetch::Idle;
         }
     }
 

@@ -307,7 +307,7 @@ impl QuillApp {
         if own_window_active {
             self.frame.own_window_tick.set(true);
         }
-        if self.frame.frame_clock.borrow().is_running() {
+        if self.frame.clock_running() {
             return;
         }
         let fps = self.frame.animation_demand.get();
@@ -397,10 +397,12 @@ impl QuillApp {
             // Nothing awaits below: dropping this task's own handle only
             // ends the future once the clock reads as stopped.
             let _ = this.update(cx, |this, _| {
-                *this.frame.frame_clock.borrow_mut() = ClockLoop::Stopped;
+                this.frame.frame_clock.set(ClockLoop::Stopped);
             });
         });
-        *self.frame.frame_clock.borrow_mut() = ClockLoop::Running { _task: clock };
+        self.frame
+            .frame_clock
+            .set(ClockLoop::Running { _task: clock });
     }
 
     fn tick_hidden(&self, view: EntityId, cx: &App) -> bool {

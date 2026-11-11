@@ -506,6 +506,35 @@ impl Resolve {
 pub struct LinkBox {
     pub program: ConnectedProgram,
     pub recipient: EarnPeer,
+    /// Whether the box's icon animation has started. It lives with the
+    /// box, so a box that goes away (a layer drop, another account) takes
+    /// it along and the next one plays from the start.
+    pub icon: LinkIcon,
+}
+
+/// The link icon's one-time play: waiting for the first draw, then
+/// running from the instant that draw happened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkIcon {
+    Unseen,
+    Playing { since: std::time::Instant },
+}
+
+impl LinkBox {
+    pub fn new(program: ConnectedProgram, recipient: EarnPeer) -> Self {
+        Self {
+            program,
+            recipient,
+            icon: LinkIcon::Unseen,
+        }
+    }
+
+    /// The first draw starts the play; later draws keep its start.
+    pub fn note_drawn(&mut self, now: std::time::Instant) {
+        if self.icon == LinkIcon::Unseen {
+            self.icon = LinkIcon::Playing { since: now };
+        }
+    }
 }
 
 /// The "Revoke Link" confirmation of a joined program.

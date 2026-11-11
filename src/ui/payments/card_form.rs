@@ -7,7 +7,7 @@
 
 use crate::ui::app::QuillApp;
 use crate::ui::country_box::{CountryBox, CountryHost};
-use crate::ui::dialogs::{NewCard, NewCardStage, PaymentCredentialChoice, PaymentPage};
+use crate::ui::dialogs::{NewCard, PaymentPage};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::*;
 use quill::country_select::CountryMode;
@@ -598,10 +598,10 @@ impl QuillApp {
             .card_form()
             .and_then(|form| form.save)
             .unwrap_or(false);
-        dialog.new_card = NewCardStage::Ready(NewCard { credentials, save });
-        dialog.credential_choice = PaymentCredentialChoice::NewCard;
+        dialog
+            .method
+            .use_card(NewCard { credentials, save }, ask_password);
         dialog.page = PaymentPage::Checkout;
-        dialog.new_card.ask_password(save && ask_password);
         cx.notify();
     }
 

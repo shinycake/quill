@@ -418,7 +418,7 @@ fn turning_suggestions_off_from_the_menu_says_where_to_turn_them_on(cx: &mut Tes
 /// lookup has given up.
 #[gpui_kit::test]
 fn suggest_emoji_says_so_when_the_lookup_fails(cx: &mut TestAppContext) {
-    use crate::ui::emoji_words_ui::AskedWord;
+    use crate::ui::emoji_words_ui::WordBar;
     use quill::ids::RequestId;
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
@@ -431,12 +431,12 @@ fn suggest_emoji_says_so_when_the_lookup_fails(cx: &mut TestAppContext) {
             lookups.sent(RequestId(id), "zzzz".to_string());
             lookups.failed(RequestId(id));
         }
-        app.composer_ui.emoji_words.asked = AskedWord::Waiting {
+        app.composer_ui.emoji_words.bar = WordBar::Asking {
             range: 0..4,
             word: "zzzz".to_string(),
         };
         app.answer_asked_word(cx);
-        assert_eq!(app.composer_ui.emoji_words.asked, AskedWord::Idle);
+        assert!(matches!(app.composer_ui.emoji_words.bar, WordBar::Closed));
         assert_eq!(
             app.connection.status_note().to_string(),
             tr(keys::Q_CHAT_EMOJI_WORD_LOOKUP_FAILED)

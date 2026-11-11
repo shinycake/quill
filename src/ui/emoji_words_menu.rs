@@ -10,7 +10,7 @@ use std::ops::Range;
 
 use super::actions::{EmojiWordBlock, EmojiWordSuggest, EmojiWordsOff};
 use super::app::QuillApp;
-use super::emoji_words_ui::{AskedWord, WordBar};
+use super::emoji_words_ui::{OpenBar, WordBar};
 use super::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -116,7 +116,9 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.composer_ui.emoji_words.asked = AskedWord::Waiting {
+        let ui = &mut self.screen.composer_ui.emoji_words;
+        ui.unhover(&mut self.screen.composer_ui.suggest);
+        ui.bar = WordBar::Asking {
             range: action.start..action.end,
             word: normalized,
         };
@@ -126,13 +128,14 @@ impl QuillApp {
     /// Open the bar for the word "Suggest Emoji" asked about once its
     /// keyword answer is in; a note when it has no emoji.
     pub(super) fn answer_asked_word(&mut self, cx: &mut Context<Self>) {
-        let AskedWord::Waiting {
+        let WordBar::Asking {
             range,
             word: normalized,
-        } = self.composer_ui.emoji_words.asked.clone()
+        } = &self.composer_ui.emoji_words.bar
         else {
             return;
         };
+        let (range, normalized) = (range.clone(), normalized.clone());
         let lookups = self.session().map(|s| &s.stickers.emoji.keyword_lookups);
         let answered = lookups.is_none_or(|l| l.answer(&normalized).is_some());
         if !answered {
@@ -140,13 +143,13 @@ impl QuillApp {
             // instead of opening the bar unprompted if a later lookup of the
             // word lands.
             if lookups.is_some_and(|l| l.gave_up(&normalized)) {
-                self.composer_ui.emoji_words.asked = AskedWord::Idle;
+                self.composer_ui.emoji_words.bar = WordBar::Closed;
                 self.set_note(StatusNote::info(tr(keys::Q_CHAT_EMOJI_WORD_LOOKUP_FAILED)));
                 cx.notify();
             }
             return;
         }
-        self.composer_ui.emoji_words.asked = AskedWord::Idle;
+        self.composer_ui.emoji_words.bar = WordBar::Closed;
         let word = Highlight {
             range,
             normalized,
@@ -158,7 +161,7 @@ impl QuillApp {
         } else {
             let ui = &mut self.screen.composer_ui.emoji_words;
             ui.unhover(&mut self.screen.composer_ui.suggest);
-            ui.bar = WordBar::Pinned((word, items));
+            ui.bar = WordBar::Pinned(OpenBar::new((word, items)));
         }
         cx.notify();
     }

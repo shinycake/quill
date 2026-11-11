@@ -191,7 +191,6 @@ impl Session {
                     self.settings.storage_clear = StorageClear::Freed(total_size);
                     self.settings.storage_stats = None;
                     self.settings.storage_stats_loading = false;
-                    self.settings.data_storage_error = None;
                 }
             }
             SettingsPayload::AutoDownloadSettingsPresets { low, medium, high } => {

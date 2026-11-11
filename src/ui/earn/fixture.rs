@@ -296,8 +296,5 @@ pub(in crate::ui) fn open_join_box(session: &mut Session) {
 
 /// The link box of the joined program.
 pub(in crate::ui) fn open_link_box(session: &mut Session, recipient: EarnPeer) {
-    session.payments.earn.link_box = Some(LinkBox {
-        program: joined_program(),
-        recipient,
-    });
+    session.payments.earn.link_box = Some(LinkBox::new(joined_program(), recipient));
 }
