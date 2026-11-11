@@ -375,8 +375,10 @@ fn the_withdrawal_request_has_the_schema_shape() {
 #[test]
 fn a_finished_withdrawal_is_taken_once() {
     use super::{GramWithdraw, WithdrawOutcome};
-    let mut hub = GramsHub::default();
-    hub.withdraw = Some(GramWithdraw::Sending(RequestId(3)));
+    let mut hub = GramsHub {
+        withdraw: Some(GramWithdraw::Sending(RequestId(3))),
+        ..GramsHub::default()
+    };
     assert_eq!(hub.take_withdraw_outcome(), None);
     assert_eq!(hub.withdraw, Some(GramWithdraw::Sending(RequestId(3))));
     hub.withdraw = Some(GramWithdraw::Finished(WithdrawOutcome::TooSmall));
