@@ -188,6 +188,33 @@ fn a_low_balance_asks_for_a_top_up_instead_of_a_toast() {
     );
 }
 
+/// Sweep s4-payments-2, 13-108: two refused payments between two frames
+/// are both kept for the UI, not only the last.
+#[test]
+fn two_low_balance_refusals_between_frames_are_both_kept() {
+    let mut f = Fixture::new();
+    f.open_direct_messages(false);
+    for message in [3_i64, 4] {
+        f.driver
+            .add_offer(CHAT, MessageId(message << 20), stars(900, 0))
+            .unwrap();
+        let extra = f.last("addOffer")["@extra"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        f.ingest(&format!(
+            r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"BALANCE_TOO_LOW"}}"#
+        ));
+    }
+    assert_eq!(f.driver.session.take_suggested_post_balance_low().len(), 2);
+    assert!(
+        f.driver
+            .session
+            .take_suggested_post_balance_low()
+            .is_empty()
+    );
+}
+
 #[test]
 fn add_offer_carries_the_complete_terms() {
     let mut f = Fixture::new();

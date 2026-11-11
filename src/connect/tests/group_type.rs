@@ -324,6 +324,32 @@ fn a_half_sent_revoke_is_recorded_and_settles() {
     assert_eq!(state.public_chats, crate::state::PublicChatsFetch::None);
 }
 
+/// Sweep s4-payments-2, 12-017: a revoke that settles, however late, leaves
+/// one "freed" signal for the Type box to check its link again; it is taken
+/// once.
+#[test]
+fn a_settled_revoke_signals_the_type_box_once() {
+    let mut rig = Rig::new();
+    rig.driver.session.groups.group_type.public_limit_reached = Some(true);
+    rig.driver.revoke_public_link(ChatId(13)).unwrap().unwrap();
+    assert!(!rig.driver.session.take_public_link_freed(), "still out");
+    let requests = rig
+        .driver
+        .session
+        .groups
+        .group_type
+        .revoke
+        .revoking()
+        .cloned()
+        .unwrap()
+        .requests;
+    for id in requests {
+        rig.answer(id, "ok");
+    }
+    assert!(rig.driver.session.take_public_link_freed());
+    assert!(!rig.driver.session.take_public_link_freed(), "taken once");
+}
+
 /// Round 2, 120: a check that could not be sent is not "Checking...".
 #[test]
 fn a_check_that_could_not_be_sent_is_not_in_flight() {

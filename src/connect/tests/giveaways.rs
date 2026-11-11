@@ -148,6 +148,58 @@ fn the_info_box_takes_only_its_own_answer() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// Sweep s4-payments-2, 10-010: asking the prices for another channel drops
+/// the first channel's at once, and the first's late answer does not fill
+/// the second's form.
+#[test]
+fn the_prices_of_another_channel_are_not_shown_for_this_one() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    driver.request_giveaway_options(-100).unwrap();
+    let first = sent_request(&recorder, "getPremiumGiveawayPaymentOptions")["@extra"].clone();
+    let answer = |extra: &Value| {
+        json!({"@type":"premiumGiveawayPaymentOptions","@extra":extra,
+            "options":[{"currency":"USD","amount":1500,"winner_count":5,"month_count":3}]})
+    };
+    feed(&mut driver, &seq, &sink, answer(&first));
+    assert_eq!(
+        driver
+            .session
+            .payments
+            .giveaway
+            .options
+            .premium_options()
+            .len(),
+        1
+    );
+    driver.request_giveaway_options(-200).unwrap();
+    assert!(
+        driver
+            .session
+            .payments
+            .giveaway
+            .options
+            .premium_options()
+            .is_empty(),
+        "the first channel's prices are gone while the second's load"
+    );
+    // The first channel's answer comes late: not the second's.
+    feed(&mut driver, &seq, &sink, answer(&first));
+    assert!(
+        driver
+            .session
+            .payments
+            .giveaway
+            .options
+            .premium_options()
+            .is_empty()
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn price_options_only_inform() {
     let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());

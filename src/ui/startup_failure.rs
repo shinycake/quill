@@ -90,6 +90,12 @@ pub(crate) fn note_quit_asked() {
     QUIT_ASKED.with(|asked| asked.set(true));
 }
 
+/// The quit that was asked for was refused (the app declined it): a window
+/// closing from now on is a window lost again.
+pub(crate) fn note_quit_refused() {
+    QUIT_ASKED.with(|asked| asked.set(false));
+}
+
 #[cfg(any(test, target_os = "windows", target_os = "linux"))]
 pub(super) fn quit_asked() -> bool {
     QUIT_ASKED.with(std::cell::Cell::get)

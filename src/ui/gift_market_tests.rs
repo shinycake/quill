@@ -279,3 +279,48 @@ fn the_chat_list_bar_shows_while_a_bid_runs(cx: &mut TestAppContext) {
         assert!(app.gift_auction_bar(cx).is_none());
     });
 }
+
+/// Sweep s4-payments-2, 10-013: two failures in one frame both toast (the
+/// second waits in the queue behind the first).
+#[gpui_kit::test]
+fn two_failed_answers_in_one_frame_both_toast(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-gift-resale");
+    let vcx = &mut vcx;
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, window, cx| {
+        if let Some(market) = app.gift_market_mut() {
+            market.notes = vec!["Purchase failed".into(), "Craft failed".into()];
+        }
+        app.gift_market_frame_upkeep(window, cx);
+        let toasts = &app.connection.toasts;
+        assert_eq!(toasts.visible().map(|n| n.text()), Some("Purchase failed"));
+        assert_eq!(toasts.waiting(), 1, "the second one is queued, not lost");
+    });
+}
+
+/// Sweep s4-payments-2, 10-006: the bid slider, the custom field and "Hide
+/// My Name" belong to the boxes that show them: replacing, popping or
+/// clearing the last of those boxes drops them, so the next auction starts
+/// clean.
+#[gpui_kit::test]
+fn a_replaced_or_closed_bid_box_takes_its_choices_with_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-gift-auction");
+    let vcx = &mut vcx;
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, _| {
+        let market = &mut app.gift_market;
+        market.stack.clear();
+        market.hide_name = true;
+        market.push(MarketBox::AuctionBid { gift_id: 1 });
+        market.push(MarketBox::AuctionSend { gift_id: 1 });
+        assert_eq!(market.pop(), Some(MarketBox::AuctionSend { gift_id: 1 }));
+        assert!(market.hide_name, "the bid box below still uses it");
+        // Replace the bid box by another box: nothing of it stays.
+        assert_eq!(market.pop(), Some(MarketBox::AuctionBid { gift_id: 1 }));
+        assert!(!market.hide_name, "no box is left to own the choice");
+        market.hide_name = true;
+        market.push(MarketBox::AuctionSend { gift_id: 2 });
+        market.clear();
+        assert!(!market.hide_name);
+    });
+}

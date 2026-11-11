@@ -60,6 +60,9 @@ jobs:
       # A request a box waits on has a box that takes its answer by request id.
       - name: dialog answers
         run: python3 scripts/check-dialog-answers.py
+      # A drain of one-shot notes shows every note, not the last.
+      - name: drained notes
+        run: python3 scripts/check-drained-notes.py
       - name: hotspots
         if: github.event_name == 'pull_request'
         run: bash scripts/check-hotspots.sh ${{ github.event.pull_request.base.sha }}

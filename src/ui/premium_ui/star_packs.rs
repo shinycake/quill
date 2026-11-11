@@ -11,7 +11,7 @@ use quill::star_packs::StarPacksState;
 use quill::telegram::envelope::format_payment_price;
 
 impl QuillApp {
-    fn packs_mut(&mut self) -> Option<&mut StarPacksState> {
+    pub(super) fn packs_mut(&mut self) -> Option<&mut StarPacksState> {
         if let Some(live) = self.live.as_mut() {
             Some(&mut live.driver.session.payments.star_packs)
         } else {

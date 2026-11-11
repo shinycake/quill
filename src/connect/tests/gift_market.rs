@@ -313,7 +313,21 @@ fn auction_link_follow_and_bids() {
             )
             .is_err()
     );
+    // The bid in flight is the request that answers it (09-X067).
+    let asked = f.last("placeGiftAuctionBid")["@extra"]
+        .as_str()
+        .and_then(|extra| extra.parse::<u64>().ok());
+    assert_eq!(
+        f.driver
+            .session
+            .payments
+            .gift_market
+            .bidding
+            .map(|(gift, request)| (gift, Some(request.0))),
+        Some((800, asked))
+    );
     f.answer("placeGiftAuctionBid", json!({"@type": "ok"}));
+    assert!(f.driver.session.payments.gift_market.bidding.is_none());
     assert_eq!(
         f.driver.session.take_gift_market_toasts()[0].0,
         "Your bid has been placed"

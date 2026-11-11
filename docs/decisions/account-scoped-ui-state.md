@@ -5464,3 +5464,61 @@ land and the typed form was gone.
 - **Skipped.** 13-069: `AgentUi::pick_account` already resets the activity
   filter wherever `picked` changes, with a test
   (`picking_another_account_resets_the_activity_filter`).
+
+### Sweep fixes (s4-payments-2)
+
+- **Earn boxes.** A join or revoke box waits on a `BoxSend` (`Idle` or
+  `Sending(RequestId)`), set when the send succeeded, and only the answer
+  or error of that request closes the box, opens the link box or toasts;
+  the lists still learn a joined or left program (09-X034, replaces
+  `JoinBox::joining` and `RevokeBox::sending`). A program click carries the
+  list it came from (`ProgramSurface`), and its answer opens a box only
+  while that programs box or that peer's join page is open (09-X035). The
+  bot photos of a program list are asked every upkeep and the file layer
+  dedups, so a refused send is tried again (09-X042, 09-067; no
+  `photos_asked` set). The setup sliders are one `SetupSliders` keyed by bot
+  and the program the page opened with, rebuilt when either differs
+  (09-X036). A reopened Stars Balance page refills the amount (09-068).
+  Every earn note toasts (09-069).
+- **Gift market.** The bid in flight is `(gift_id, RequestId)` and only its
+  answer clears it (09-X067; `bid_gift_auction` already refused a second
+  bid, so this guards a late or foreign answer). Stack changes go through
+  `GiftMarketUi::pop/clear/close_where`, which drop the slider, custom field
+  and Hide My Name when the last box owning them leaves, however it left
+  (10-006). A sticker file counts as requested only when its send went out
+  (10-012; the auction follow was already `AuctionFollow::Failed`). Every
+  market note toasts (10-013). The send-gift choices are one
+  `SendGiftInputs` replaced whole by `reset_gift_inputs` when a send or buy
+  step begins, so the message, Hide My Name, upgrade and pay-with-Stars
+  choices of one recipient or listing never reach another (10-007, 10-008).
+  Delete Gift acts for the account and window that asked and only for a gift
+  still in the list (10-015).
+- **Giveaway form.** `GiveawayOptions` holds `Fetch` lists and the chat the
+  Premium prices were asked for; asking for another chat drops the old
+  prices at once and the earlier chat's late answer is ignored (10-010).
+- **Paid messages.** `PaidSave` is one entry per target, so a Remove Fee
+  never disables a channel's Save, and an answer settles only its own
+  target (11-p6-006).
+- **Premium and groups.** The preview clip slot is `ClipSlot` (`Idle`,
+  `Playing`, `Failed(file_id)`), so a clip that cannot be opened is tried
+  once per preview (12-018). Closing the Stars box folds "Buy more Stars"
+  (12-019). A revoke from the limit box ends as `PublicLinkStage::Freed`;
+  the poll drain takes it once and the Type box checks its link again, so
+  the 10 s timer is gone and a slow TDLib no longer leaves "link taken"
+  (12-017).
+- **Suggested posts.** Publish on a busy suggestion keeps its box open with
+  the button waiting, and a suggestion that is no longer pending sends
+  nothing (13-112). The decline reason's Enter runs in the window of the
+  field (13-111). Every failure toasts and every refused payment asks for
+  its top-up (13-108).
+- **Smaller.** The Fragment line of the collectible box is found in the
+  translated sentence and dropped when absent, and its prefix is a lang
+  key (08-119). Show My Last Seen / Read Time keeps its box in a `Saving`
+  stage and toasts on the answer, or the refusal (12-048; tdesktop's
+  source was not reachable, this is the smallest safe choice). A refused
+  quit request clears the noted quit, so a lost main window is reopened
+  (13-040).
+- **Guard.** `scripts/check-drained-notes.py` fails on
+  `notes.into_iter().last()` in `src/ui`.
+- **Skipped.** 10-011: both openers already call
+  `open_box(DialogKind::SendGift)`.

@@ -614,3 +614,72 @@ fn nothing_is_sent_before_sign_in() {
     );
     assert_eq!(recorder.snapshot().len(), 0);
 }
+
+/// Sweep s4-payments-2, 09-X034: a join box closed before its answer, and
+/// another program's box opened since, are not touched by the answer or
+/// the error of the first request.
+#[test]
+fn a_closed_join_boxs_answer_leaves_the_box_open_now_alone() {
+    for fails in [false, true] {
+        let mut p = parts();
+        let page = EarnPeer::Chat(CHANNEL);
+        p.0.open_starref_join(page).unwrap();
+        answer(&mut p, "searchAffiliatePrograms", found(&[BOT, BOT + 1]));
+        p.0.open_affiliate_program(BOT, false).unwrap();
+        error(&mut p, "getConnectedAffiliateProgram", "NOT_FOUND");
+        p.0.join_affiliate_program().unwrap();
+        let first = sent_request(&p.1, "connectAffiliateProgram");
+        // The box closes, and the box of the next program opens.
+        p.0.session.payments.earn.join_box = None;
+        p.0.open_affiliate_program(BOT + 1, false).unwrap();
+        error(&mut p, "getConnectedAffiliateProgram", "NOT_FOUND");
+        assert_eq!(
+            p.0.session
+                .payments
+                .earn
+                .join_box
+                .as_ref()
+                .map(|j| j.bot_user_id),
+            Some(BOT + 1)
+        );
+        let mut body = if fails {
+            json!({"@type": "error", "code": 400, "message": "STARREF_HASH_REVOKED"})
+        } else {
+            connected(BOT, "https://t.me/bot?start=_tgr_x")
+        };
+        body["@extra"] = first["@extra"].clone();
+        feed(&mut p, body);
+        let earn = &p.0.session.payments.earn;
+        assert_eq!(
+            earn.join_box.as_ref().map(|j| (j.bot_user_id, j.send)),
+            Some((BOT + 1, BoxSend::Idle)),
+            "the open box is still the second program's, idle"
+        );
+        assert!(earn.link_box.is_none());
+        assert!(earn.notes.is_empty(), "a closed box does not toast");
+    }
+}
+
+/// Sweep s4-payments-2, 09-X035: a program click answered after the list it
+/// came from closed opens nothing.
+#[test]
+fn a_program_click_answered_after_its_list_closed_opens_nothing() {
+    let mut p = parts();
+    let page = EarnPeer::Chat(CHANNEL);
+    p.0.open_starref_join(page).unwrap();
+    answer(&mut p, "searchAffiliatePrograms", found(&[BOT]));
+    p.0.open_affiliate_program(BOT, false).unwrap();
+    p.0.session.payments.earn.join = None;
+    error(&mut p, "getConnectedAffiliateProgram", "NOT_FOUND");
+    assert!(p.0.session.payments.earn.join_box.is_none());
+    p.0.open_starref_join(page).unwrap();
+    answer(&mut p, "searchAffiliatePrograms", found(&[BOT]));
+    p.0.open_affiliate_program(BOT, false).unwrap();
+    p.0.session.payments.earn.join = None;
+    answer(
+        &mut p,
+        "getConnectedAffiliateProgram",
+        connected(BOT, "https://t.me/bot?start=_tgr_z"),
+    );
+    assert!(p.0.session.payments.earn.link_box.is_none());
+}

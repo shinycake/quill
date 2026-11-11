@@ -289,6 +289,34 @@ fn an_app_wide_dialogs_flag_survives_a_switch(cx: &mut TestAppContext) {
     });
 }
 
+/// Files handed to Quill from outside wait in the app's own `start_files`,
+/// so a switch leaves them: the chooser is up for the next account too
+/// (sweep s4-payments-2, 13-037).
+#[gpui_kit::test]
+fn files_waiting_for_a_chat_survive_a_switch(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    frames(&mut vcx);
+    let file = quill::scratch::process_dir("quill-start-switch").join("file.txt");
+    let _ = std::fs::write(&file, b"hello");
+    app.update(&mut vcx, |app, cx| {
+        app.begin_start_files(vec![file.clone()], cx);
+    });
+    frames(&mut vcx);
+    app.read_with(&vcx, |app, _| {
+        assert!(QuillShell::open_dialog_names(app).contains(&"StartFiles"));
+    });
+    switch(&app, &mut vcx);
+    frames(&mut vcx);
+    app.read_with(&vcx, |app, _| {
+        assert_eq!(
+            app.start_files.choosing,
+            vec![file.clone()],
+            "the files wait"
+        );
+        assert!(QuillShell::open_dialog_names(app).contains(&"StartFiles"));
+    });
+}
+
 /// "Reply in another chat" shows only while the composer has a reply, and
 /// the chat leave clears it: the box still closes, so the new account's
 /// next Reply does not open the chooser.

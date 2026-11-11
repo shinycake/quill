@@ -252,6 +252,20 @@ fn noting_quit(mut quit: Box<dyn FnMut() -> bool>) -> Box<dyn FnMut() -> bool> {
     })
 }
 
+/// A quit request the app refuses never happens, so the quit that was noted
+/// when it was asked for is not one any more.
+fn noting_refusal(
+    mut request: Box<dyn FnMut() -> gpui_kit::QuitAnswer>,
+) -> Box<dyn FnMut() -> gpui_kit::QuitAnswer> {
+    Box::new(move || {
+        let answer = request();
+        if matches!(answer, gpui_kit::QuitAnswer::Refuse) {
+            super::startup_failure::note_quit_refused();
+        }
+        answer
+    })
+}
+
 impl Platform for ZoomPlatform {
     fn platform_info(&self) -> PlatformInfo {
         self.inner.platform_info()
@@ -406,7 +420,7 @@ impl Platform for ZoomPlatform {
         self.inner.on_quit(noting_quit(callback))
     }
     fn on_quit_request(&self, callback: Box<dyn FnMut() -> gpui_kit::QuitAnswer>) {
-        self.inner.on_quit_request(callback)
+        self.inner.on_quit_request(noting_refusal(callback))
     }
     fn on_reopen(&self, callback: Box<dyn FnMut()>) {
         self.inner.on_reopen(callback)
@@ -947,6 +961,19 @@ mod tests {
         let mut quit = noting_quit(Box::new(|| true));
         assert!(quit());
         assert!(crate::ui::startup_failure::quit_asked());
+    }
+
+    #[test]
+    fn a_refused_quit_is_not_a_quit() {
+        crate::ui::startup_failure::note_quit_asked();
+        let mut request = noting_refusal(Box::new(|| gpui_kit::QuitAnswer::Refuse));
+        assert!(matches!(request(), gpui_kit::QuitAnswer::Refuse));
+        assert!(!crate::ui::startup_failure::quit_asked());
+        crate::ui::startup_failure::note_quit_asked();
+        let mut allowed = noting_refusal(Box::new(|| gpui_kit::QuitAnswer::Allow));
+        assert!(matches!(allowed(), gpui_kit::QuitAnswer::Allow));
+        assert!(crate::ui::startup_failure::quit_asked());
+        crate::ui::startup_failure::note_quit_refused();
     }
 
     #[test]

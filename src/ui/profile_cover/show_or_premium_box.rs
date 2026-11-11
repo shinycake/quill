@@ -12,8 +12,10 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::ids::RequestId;
 use quill::lang::{Key, keys, tr, tr_with};
-use quill::privacy::PrivacyRuleDetail;
+use quill::privacy::{PrivacyKeyState, PrivacyRuleDetail};
+use quill::state::ReadDateStage;
 use quill::telegram::requests::PrivacyWho;
 use quill::telegram::requests_privacy::PrivacySettingKey;
 use std::cell::RefCell;
@@ -26,11 +28,21 @@ pub(in crate::ui) enum ShowOrPremium {
     ReadTime,
 }
 
+/// Where the box stands: choosing, or the privacy change is out and the
+/// box waits for its answer (a refusal toasts and closes it, an answer
+/// toasts "shown"; closing the box drops the wait).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::ui) enum ShowStage {
+    Choosing,
+    Saving(RequestId),
+}
+
 /// The open box and the person it names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::ui) struct ShowOrPremiumBox {
     pub(in crate::ui) kind: ShowOrPremium,
     pub(in crate::ui) user_id: i64,
+    pub(in crate::ui) stage: ShowStage,
 }
 
 /// The words, icon and Premium ref of one kind (tdesktop's `Skin`).
@@ -83,7 +95,11 @@ impl QuillApp {
         user_id: i64,
         cx: &mut Context<Self>,
     ) {
-        self.profile_cover.show_or_premium = Some(ShowOrPremiumBox { kind, user_id });
+        self.profile_cover.show_or_premium = Some(ShowOrPremiumBox {
+            kind,
+            user_id,
+            stage: ShowStage::Choosing,
+        });
         self.open_box(DialogKind::ShowOrPremium);
         cx.notify();
     }
@@ -103,22 +119,43 @@ impl QuillApp {
                     who: Some(PrivacyWho::Everybody),
                     ..Default::default()
                 };
-                live.driver
-                    .set_privacy_rules(PrivacySettingKey::ShowStatus, everybody)
-                    .is_ok()
+                Some(
+                    live.driver
+                        .set_privacy_rules(PrivacySettingKey::ShowStatus, everybody),
+                )
             }
-            (ShowOrPremium::ReadTime, Some(live)) => {
-                live.driver.set_read_date_privacy(true).is_ok()
-            }
+            (ShowOrPremium::ReadTime, Some(live)) => Some(live.driver.set_read_date_privacy(true)),
             (ShowOrPremium::ReadTime, None) => {
                 if let Some(demo) = self.demo_session.as_mut() {
                     demo.settings.read_date_show = Some(true);
                 }
-                true
+                None
             }
-            (ShowOrPremium::LastSeen, None) => true,
+            (ShowOrPremium::LastSeen, None) => None,
         };
-        self.set_note(match (sent, kind) {
+        match sent {
+            // Out: the box waits for the answer (`drain_show_or_premium`).
+            Some(Ok(request)) => {
+                if let Some(open) = self.profile_cover.show_or_premium.as_mut() {
+                    open.stage = ShowStage::Saving(request);
+                }
+                cx.notify();
+            }
+            // Not sent: said at once, and the box closes.
+            Some(Err(_)) => {
+                self.set_note(Self::show_mine_note(kind, false));
+                self.close_show_or_premium(cx);
+            }
+            // The demo has no connection: it is shown at once.
+            None => {
+                self.set_note(Self::show_mine_note(kind, true));
+                self.close_show_or_premium(cx);
+            }
+        }
+    }
+
+    fn show_mine_note(kind: ShowOrPremium, shown: bool) -> StatusNote {
+        match (shown, kind) {
             (true, ShowOrPremium::LastSeen) => StatusNote::info(tr(keys::LASTSEEN_SHOWN_TOAST)),
             (true, ShowOrPremium::ReadTime) => StatusNote::info(tr(keys::READTIME_SHOWN_TOAST)),
             (false, ShowOrPremium::LastSeen) => {
@@ -127,8 +164,46 @@ impl QuillApp {
             (false, ShowOrPremium::ReadTime) => {
                 StatusNote::error(tr(keys::Q_NOTES_FAILED_READ_DATE))
             }
+        }
+    }
+
+    /// The privacy change of "Show My Last Seen" / "Show My Read Time" was
+    /// answered: toast what happened and close the box. True when it did.
+    pub(in crate::ui) fn drain_show_or_premium(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(ShowOrPremiumBox {
+            kind,
+            stage: ShowStage::Saving(request),
+            ..
+        }) = self.profile_cover.show_or_premium
+        else {
+            return false;
+        };
+        let settled = self.session().map(|session| match kind {
+            ShowOrPremium::LastSeen => {
+                match session.settings.privacy.get(&PrivacySettingKey::ShowStatus) {
+                    Some(PrivacyKeyState::Saving {
+                        request: live,
+                        earlier,
+                        ..
+                    }) if *live == request || earlier.iter().any(|(id, _)| *id == request) => None,
+                    Some(PrivacyKeyState::SaveFailed { .. }) => Some(false),
+                    _ => Some(true),
+                }
+            }
+            ShowOrPremium::ReadTime => match session.settings.read_date_stage {
+                ReadDateStage::Setting(id) if id == request => None,
+                ReadDateStage::Failed => Some(false),
+                _ => Some(true),
+            },
         });
+        match settled {
+            Some(None) => return false,
+            Some(Some(shown)) => self.set_note(Self::show_mine_note(kind, shown)),
+            // The account went away: nothing to say.
+            None => {}
+        }
         self.close_show_or_premium(cx);
+        true
     }
 
     pub(in crate::ui) fn build_show_or_premium_box(
@@ -151,6 +226,7 @@ impl QuillApp {
             (open, name)
         };
         let kind = open.map_or(ShowOrPremium::LastSeen, |open| open.kind);
+        let saving = open.is_some_and(|open| matches!(open.stage, ShowStage::Saving(_)));
         let skin = kind.skin();
         app.update(cx, |_, cx| {
             let theme = cx.theme();
@@ -195,6 +271,8 @@ impl QuillApp {
                                 .label(tr(skin.show_button))
                                 .primary()
                                 .w_full()
+                                .loading(saving)
+                                .disabled(saving)
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.show_mine(kind, cx);
                                     this.close_kit_dialog_if_done(

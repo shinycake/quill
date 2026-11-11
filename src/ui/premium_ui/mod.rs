@@ -131,6 +131,10 @@ impl QuillApp {
             hub.stars_open = false;
             hub.tx_selected = None;
         }
+        // "Buy more Stars" starts folded the next time.
+        if let Some(packs) = self.packs_mut() {
+            packs.open = false;
+        }
         cx.notify();
     }
 
