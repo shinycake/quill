@@ -37,6 +37,11 @@ impl PageStage {
         }
     }
 
+    /// The last page arrived and nothing is out or failed.
+    pub fn is_ready(&self) -> bool {
+        matches!(self, Self::Ready)
+    }
+
     pub fn error(&self) -> Option<&str> {
         match self {
             Self::Failed(reason) => Some(reason),

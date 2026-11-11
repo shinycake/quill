@@ -415,7 +415,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .ok_or(ConnectSendError::InvalidRequest)?;
         let (own, market) = (
-            !craft.candidates_stage.loaded() && !craft.candidates_stage.is_loading(),
+            !craft.candidates_stage.is_loading() && !craft.candidates_stage.is_ready(),
             !craft.market.loaded() && !craft.market.is_loading(),
         );
         if own {
@@ -425,6 +425,23 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.search_resale_page(true, false)?;
         }
         Ok(())
+    }
+
+    /// "Retry" of a failed "your gifts" list: the page that failed again (the
+    /// first one when nothing arrived).
+    pub fn retry_craft_candidates(&mut self) -> Result<RequestId, ConnectSendError> {
+        let craft = self
+            .session
+            .payments
+            .gift_market
+            .craft
+            .as_ref()
+            .ok_or(ConnectSendError::InvalidRequest)?;
+        if craft.candidates_stage.error().is_none() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let more = !craft.candidates.is_empty() && !craft.candidates_offset.is_empty();
+        self.craft_candidates_page(more)
     }
 
     /// "Retry" of a failed "on sale" list in Select Gifts: the first page

@@ -218,7 +218,7 @@ impl Session {
                 // Slice CL2: `getArchiveChatListSettings` answer — only
                 // our own in-flight request writes the cache.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetArchiveChatListSettings) {
-                    self.chat_list.archive_chat_list_settings.succeed(settings);
+                    self.chat_list.archive_settings.succeed(settings);
                     self.chat_list.archive_mute.note_settings(&settings);
                 }
             }

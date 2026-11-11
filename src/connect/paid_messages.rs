@@ -4,7 +4,7 @@
 //! Stars: the Stars leave only with a `sendMessage` the user confirmed.
 use super::*;
 use crate::ids::{ChatId, RequestId};
-use crate::paid_messages::{PaidTarget, PaidTrust};
+use crate::paid_messages::{PaidTarget, PaidTrust, TrustFile};
 use crate::paid_messages_guard::HeldSend;
 use crate::state::{RequestPurpose, unix_ms_now};
 use crate::telegram::envelope::CommonPayload;
@@ -49,28 +49,34 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(guard) = self.sender.paid_guard() {
             guard.set_state(prices, trusted);
         }
-        if self.session.payments.paid_messages.trust_dirty {
-            self.session.payments.paid_messages.trust_dirty = false;
+        if self.session.payments.paid_messages.trust_file == TrustFile::Dirty {
             self.save_paid_trust();
         }
     }
 
     /// Reads the account's trusted prices once.
     fn load_paid_trust(&mut self) {
-        if self.session.payments.paid_messages.trust_loaded {
+        if self.session.payments.paid_messages.trust_file != TrustFile::NotLoaded {
             return;
         }
-        self.session.payments.paid_messages.trust_loaded = true;
+        self.session.payments.paid_messages.trust_file = TrustFile::Clean;
         if let Ok(text) = std::fs::read_to_string(self.paths.root.join(TRUST_FILE)) {
             self.session.payments.paid_messages.trust = PaidTrust::from_json(&text);
         }
         self.sync_paid_guard();
     }
 
-    fn save_paid_trust(&self) {
+    /// Writes the trusted prices; the file is `Clean` after, or the write
+    /// failed and `SaveFailed` says why.
+    fn save_paid_trust(&mut self) {
         let path = self.paths.root.join(TRUST_FILE);
-        let _ = std::fs::create_dir_all(&self.paths.root);
-        let _ = std::fs::write(path, self.session.payments.paid_messages.trust.to_json());
+        let written = std::fs::create_dir_all(&self.paths.root).and_then(|()| {
+            std::fs::write(path, self.session.payments.paid_messages.trust.to_json())
+        });
+        self.session.payments.paid_messages.trust_file = match written {
+            Ok(()) => TrustFile::Clean,
+            Err(err) => TrustFile::SaveFailed(format!("Couldn't remember this price: {err}")),
+        };
     }
 
     /// "Don't ask me again": trusts `stars` per message in a chat and
@@ -82,6 +88,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .paid_messages
             .trust
             .trust(chat_id.0, stars);
+        self.session.payments.paid_messages.trust_changed();
         self.save_paid_trust();
         self.sync_paid_guard();
     }

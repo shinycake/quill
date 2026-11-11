@@ -539,6 +539,11 @@ impl GramsHub {
         self.stage.loaded()
     }
 
+    /// The current tab's list is complete: nothing out, nothing failed.
+    pub fn is_ready(&self) -> bool {
+        self.stage.is_ready()
+    }
+
     pub fn error(&self) -> Option<&str> {
         self.stage.error()
     }

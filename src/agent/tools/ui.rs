@@ -464,8 +464,8 @@ fn done_output(
             map.insert(key.clone(), value.clone());
         }
     }
-    ui_shot::add_to_answer(shot, asked.skipped, tree.frame, &mut text, &mut data);
-    Ok(ToolOutput { text, data })
+    let images = ui_shot::add_to_answer(shot, asked.skipped, tree.frame, &mut text, &mut data);
+    Ok(ToolOutput { text, data, images })
 }
 
 fn target_json(target: &Target, tree: &UiTree) -> Value {
@@ -502,7 +502,11 @@ pub fn read_ui_tree(args: &Value) -> Result<ToolOutput, ToolError> {
     }
     text.push_str(&tree.text_lines(&nodes, limit));
     let data = tree.to_json(&nodes, limit);
-    Ok(ToolOutput { text, data })
+    Ok(ToolOutput {
+        text,
+        data,
+        images: Vec::new(),
+    })
 }
 
 pub fn click_element(args: &Value) -> Result<ToolOutput, ToolError> {

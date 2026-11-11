@@ -96,3 +96,16 @@ fn preview_slot_publishes_at_most_four_times_a_second() {
         "the seen preview is not copied again"
     );
 }
+
+#[test]
+fn a_shared_window_pauses_and_resumes_once_per_change() {
+    use super::ShareVisibility;
+    use crate::calls::capture::CaptureEvent;
+    let mut visibility = ShareVisibility::default();
+    assert_eq!(visibility.seen(true), None, "still showing");
+    assert_eq!(visibility.seen(false), Some(CaptureEvent::Paused));
+    assert!(visibility.hidden());
+    assert_eq!(visibility.seen(false), None, "still hidden");
+    assert_eq!(visibility.seen(true), Some(CaptureEvent::Resumed));
+    assert!(!visibility.hidden());
+}

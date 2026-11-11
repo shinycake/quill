@@ -11,7 +11,6 @@ use crate::agent::ui_driver::policy;
 use crate::agent::ui_driver::shot::{self, Shot, ShotOptions, ShotScope};
 use base64::Engine as _;
 use serde_json::{Value, json};
-use std::cell::RefCell;
 
 pub(super) const TOOLS: &[Tool] = &[Tool {
     name: "take_screenshot",
@@ -116,23 +115,10 @@ fn options(args: &Value) -> ShotOptions {
     }
 }
 
-thread_local! {
-    /// Images the tool running on this thread attaches to its answer.
-    static ATTACHED: RefCell<Vec<Value>> = const { RefCell::new(Vec::new()) };
-}
-
-/// Attach `shot` to the answer of the tool running on this thread.
-fn attach(shot: &Shot) {
+/// `shot` as the image block that goes in the MCP answer.
+fn image_block(shot: &Shot) -> Value {
     let data = base64::engine::general_purpose::STANDARD.encode(&shot.png);
-    let block = json!({"type": "image", "data": data, "mimeType": "image/png"});
-    let _ = ATTACHED.try_with(|attached| attached.borrow_mut().push(block));
-}
-
-/// The image blocks attached since the last call, for the MCP answer.
-pub(super) fn take_attached() -> Vec<Value> {
-    ATTACHED
-        .try_with(|attached| std::mem::take(&mut *attached.borrow_mut()))
-        .unwrap_or_default()
+    json!({"type": "image", "data": data, "mimeType": "image/png"})
 }
 
 /// The screenshot's facts for `structuredContent` (the PNG goes as an
@@ -164,33 +150,34 @@ fn shot_line(shot: &Shot) -> String {
     )
 }
 
-/// Attach the screenshot an input step returned and describe it in `text`
-/// and `data`; `skipped` says why none was taken.
+/// Describe the screenshot an input step returned in `text` and `data` and
+/// return it as the image blocks for the answer; `skipped` says why none
+/// was taken.
 pub(super) fn add_to_answer(
     result: Option<Result<Shot, String>>,
     skipped: Option<String>,
     frame: u64,
     text: &mut String,
     data: &mut Value,
-) {
+) -> Vec<Value> {
     let note = match (result, skipped) {
         (Some(Ok(shot)), _) => {
-            attach(&shot);
             text.push('\n');
             text.push_str(&shot_line(&shot));
             if let Some(map) = data.as_object_mut() {
                 map.insert("screenshot".into(), shot_json(&shot, frame));
             }
-            return;
+            return vec![image_block(&shot)];
         }
         (Some(Err(note)), _) | (None, Some(note)) => note,
-        (None, None) => return,
+        (None, None) => return Vec::new(),
     };
     text.push_str("\nNo screenshot: ");
     text.push_str(&note);
     if let Some(map) = data.as_object_mut() {
         map.insert("screenshot".into(), json!({"error": note}));
     }
+    Vec::new()
 }
 
 pub fn take_screenshot(args: &Value) -> Result<ToolOutput, ToolError> {
@@ -222,7 +209,7 @@ pub fn take_screenshot(args: &Value) -> Result<ToolOutput, ToolError> {
             return Err(error);
         }
     };
-    attach(&shot);
+    let images = vec![image_block(&shot)];
     let text = format!(
         "Quill window {}x{} px (scale {}). {}",
         tree.width,
@@ -237,12 +224,12 @@ pub fn take_screenshot(args: &Value) -> Result<ToolOutput, ToolError> {
             json!({"width": tree.width, "height": tree.height, "scale": tree.scale}),
         );
     }
-    Ok(ToolOutput { text, data })
+    Ok(ToolOutput { text, data, images })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{add_to_answer, take_attached, take_screenshot, with_options};
+    use super::{add_to_answer, take_screenshot, with_options};
     use crate::agent::ui_driver::shot::{Shot, ShotScope};
     use serde_json::json;
 
@@ -256,7 +243,6 @@ mod tests {
 
     #[test]
     fn a_screenshot_reaches_the_answer_as_an_image_block() {
-        let _ = take_attached();
         let shot = Shot {
             png: vec![0x89, b'P', b'N', b'G'],
             width: 640,
@@ -266,23 +252,22 @@ mod tests {
         };
         let mut text = String::new();
         let mut data = json!({});
-        add_to_answer(Some(Ok(shot)), None, 7, &mut text, &mut data);
+        let blocks = add_to_answer(Some(Ok(shot)), None, 7, &mut text, &mut data);
         assert!(text.contains("640x480"), "{text}");
         assert_eq!(data["screenshot"]["scope"], "granted");
         assert_eq!(data["screenshot"]["frame"], 7);
-        let blocks = serde_json::Value::Array(take_attached());
+        let blocks = serde_json::Value::Array(blocks);
         assert_eq!(blocks.as_array().map(Vec::len), Some(1));
         assert_eq!(blocks[0]["type"], "image");
         assert_eq!(blocks[0]["mimeType"], "image/png");
         assert_eq!(blocks[0]["data"], "iVBORw==");
-        assert!(take_attached().is_empty(), "taken once");
 
         let mut text = String::new();
         let mut data = json!({});
-        add_to_answer(None, Some("limited".into()), 1, &mut text, &mut data);
+        let none = add_to_answer(None, Some("limited".into()), 1, &mut text, &mut data);
         assert!(text.contains("No screenshot: limited"), "{text}");
         assert_eq!(data["screenshot"]["error"], "limited");
-        assert!(take_attached().is_empty());
+        assert!(none.is_empty());
     }
 
     #[test]

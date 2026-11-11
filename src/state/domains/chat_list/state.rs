@@ -108,10 +108,12 @@ pub struct ChatListState {
     /// The same for `loadChats(chatListArchive)`.
     pub(crate) archive_retry: Option<(std::time::Instant, std::time::Duration)>,
     /// Slice CL2: archive auto-settings from `getArchiveChatListSettings`
-    /// (schema 1.8.67, line 13421). `None` until the first fetch; the
+    /// (schema 1.8.67, line 13421). Idle until the first fetch; the
     /// archive-settings panel fetches on open (TGX
-    /// `SettingsArchiveChatListController` does the same).
-    pub archive_chat_list_settings: crate::state::fetch::Fetch<ArchiveChatListSettings>,
+    /// `SettingsArchiveChatListController` does the same). A cached copy
+    /// stays readable (`Fetch::data`) while it reloads or after a reload
+    /// fails.
+    pub archive_settings: crate::state::fetch::Fetch<ArchiveChatListSettings>,
     /// Slice CL2: the archive-settings panel is open.
     pub archive_settings_open: bool,
     /// Whether "Archive and mute" is offered (server option, seen on).
@@ -133,36 +135,6 @@ pub struct ChatListState {
 }
 
 impl ChatListState {
-    /// The archive auto-settings held: the answer, or the copy a reload or a
-    /// failure left in place.
-    pub fn archive_settings(&self) -> Option<ArchiveChatListSettings> {
-        self.archive_chat_list_settings.data().copied()
-    }
-
-    /// The settings panel has nothing to draw yet and a request is out.
-    pub fn archive_settings_loading(&self) -> bool {
-        matches!(
-            self.archive_chat_list_settings,
-            crate::state::fetch::Fetch::Loading { stale: None }
-        )
-    }
-
-    /// A refused change puts back the settings held before it.
-    pub fn restore_archive_settings(&mut self, previous: Option<ArchiveChatListSettings>) {
-        if let Some(previous) = previous {
-            self.set_archive_settings_value(previous);
-        }
-    }
-
-    /// An optimistic edit (or its rollback) of the held settings. A request
-    /// in flight stays in flight.
-    pub fn set_archive_settings_value(&mut self, value: ArchiveChatListSettings) {
-        match self.archive_chat_list_settings.data_mut() {
-            Some(held) => *held = value,
-            None => self.archive_chat_list_settings.succeed(value),
-        }
-    }
-
     /// The folder tab order: the folders with "All chats" at its position.
     pub fn folder_order(&self) -> crate::folder_order::FolderOrder {
         crate::folder_order::FolderOrder {
@@ -260,7 +232,7 @@ impl ChatListState {
             archive_chats_exhausted: false,
             chats_retry: None,
             archive_retry: None,
-            archive_chat_list_settings: crate::state::fetch::Fetch::Idle,
+            archive_settings: crate::state::fetch::Fetch::Idle,
             archive_settings_open: false,
             archive_mute: Default::default(),
             chat_preview_fetch: HashMap::new(),

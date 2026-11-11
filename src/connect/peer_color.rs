@@ -65,10 +65,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.has_purpose(purpose) {
             return Ok(None);
         }
-        self.session.users_state.wearable_gifts_loaded = false;
         let extra = self.session.request(purpose, None);
         let json = get_wearable_gifts(extra, MessageSender::User { user_id: me }, 50);
-        self.send_json_request(extra, &json).map(Some)
+        let sent = self.send_json_request(extra, &json).map(Some);
+        if sent.is_ok() {
+            self.session.users_state.wearable_gifts.begin();
+        }
+        sent
     }
 
     /// `setProfileAccentColor`: profile color (-1 = none) and profile icon
@@ -102,21 +105,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if (!self.session.users_state.background_emoji_icons.is_empty()
-            && !self.session.users_state.background_emoji_icons_failed)
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetBackgroundEmojiIcons)
-        {
+        if !self.session.users_state.background_emoji_icons.can_ask() {
             return Ok(None);
         }
-        self.session.users_state.background_emoji_icons_failed = false;
         let extra = self
             .session
             .request(RequestPurpose::GetBackgroundEmojiIcons, None);
         let json = get_default_background_custom_emoji_stickers(extra);
-        self.send_json_request(extra, &json).map(Some)
+        let sent = self.send_json_request(extra, &json).map(Some);
+        if sent.is_ok() {
+            self.session.users_state.background_emoji_icons.begin();
+        }
+        sent
     }
 
     /// Download the stickers of the wearable gifts that are not local yet.
@@ -125,6 +125,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .users_state
             .wearable_gifts
+            .items()
             .iter()
             .filter_map(|gift| gift.gift.sticker.as_ref())
             .flat_map(|sticker| std::iter::once(sticker.file_id).chain(sticker.thumb_file_id))
@@ -141,6 +142,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .users_state
             .background_emoji_icons
+            .items()
             .iter()
             .filter_map(|sticker| sticker.display_file_id())
             .collect();

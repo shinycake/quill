@@ -145,7 +145,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         filter: TxFilter,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         let grams = &mut self.session.payments.hub.grams;
-        if grams.filter == filter && grams.loaded() {
+        if grams.filter == filter && grams.is_ready() {
             return Ok(None);
         }
         grams.restart(filter);

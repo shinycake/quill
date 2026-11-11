@@ -22,7 +22,13 @@ impl QuillApp {
         self.open_box(DialogKind::ArchiveHint);
         // The wording depends on the account's archive settings.
         if let Some(live) = self.live.as_mut()
-            && live.driver.session.chat_list.archive_settings().is_none()
+            && live
+                .driver
+                .session
+                .chat_list
+                .archive_settings
+                .data()
+                .is_none()
         {
             let _ = live.driver.fetch_archive_chat_list_settings();
         }
@@ -44,7 +50,7 @@ impl QuillApp {
             let muted = cx.theme().muted_foreground;
             let keep = this
                 .session()
-                .and_then(|s| s.chat_list.archive_settings())
+                .and_then(|s| s.chat_list.archive_settings.data().copied())
                 .map(|settings| settings.keep_unmuted_chats_archived);
             let about = archive_hint_about(unarchive_on_new_message(keep));
             let icons = [IconName::Archive, IconName::EyeOff, IconName::CircleUser];

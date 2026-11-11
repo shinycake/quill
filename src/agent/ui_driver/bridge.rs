@@ -390,33 +390,31 @@ pub fn refuse_all(reason: &str) {
     }
 }
 
-fn epoch() -> Instant {
-    static EPOCH: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
-    *EPOCH.get_or_init(Instant::now)
+/// When an agent last read or drove the window, and when the user last gave
+/// it real input; `None` is "never".
+struct DriverClock {
+    drive: Option<Instant>,
+    real_input: Option<Instant>,
 }
 
-fn now_ms() -> u64 {
-    // Starts at 1 so "never" (0) stays distinct.
-    epoch().elapsed().as_millis() as u64 + 1
-}
-
-/// When an agent last read or drove the window (ms on the bridge clock).
-static LAST_DRIVE_MS: AtomicU64 = AtomicU64::new(0);
-/// When the user last gave the window real input.
-static LAST_REAL_INPUT_MS: AtomicU64 = AtomicU64::new(0);
+static CLOCK: Mutex<DriverClock> = Mutex::new(DriverClock {
+    drive: None,
+    real_input: None,
+});
 
 /// How long after the last command the tree keeps being built.
 pub const DRIVE_WINDOW: Duration = Duration::from_secs(30);
 
 /// Record that an agent used the driver now.
 pub fn note_drive() {
-    LAST_DRIVE_MS.store(now_ms(), Ordering::Relaxed);
+    crate::locks::lock_or_recover(&CLOCK).drive = Some(Instant::now());
 }
 
 /// Whether an agent used the driver within [`DRIVE_WINDOW`].
 pub fn drove_recently() -> bool {
-    let last = LAST_DRIVE_MS.load(Ordering::Relaxed);
-    last != 0 && now_ms().saturating_sub(last) < DRIVE_WINDOW.as_millis() as u64
+    crate::locks::lock_or_recover(&CLOCK)
+        .drive
+        .is_some_and(|at| at.elapsed() < DRIVE_WINDOW)
 }
 
 /// Whether the window should build its element tree every frame: the
@@ -430,13 +428,13 @@ pub fn wants_forced() -> bool {
 
 /// Record input that came from the user, not from the driver.
 pub fn note_real_input() {
-    LAST_REAL_INPUT_MS.store(now_ms(), Ordering::Relaxed);
+    crate::locks::lock_or_recover(&CLOCK).real_input = Some(Instant::now());
 }
 
 /// Milliseconds since the user's last real input, `None` if never seen.
 pub fn real_input_age_ms() -> Option<u64> {
-    let last = LAST_REAL_INPUT_MS.load(Ordering::Relaxed);
-    (last != 0).then(|| now_ms().saturating_sub(last))
+    let at = crate::locks::lock_or_recover(&CLOCK).real_input?;
+    Some(u64::try_from(at.elapsed().as_millis()).unwrap_or(u64::MAX))
 }
 
 /// Pause or resume the driver. Paused, every driver tool refuses. The
@@ -546,10 +544,6 @@ mod tests {
     #[test]
     fn the_drive_clock_and_pause_flag() {
         let _guard = lock();
-        assert!(
-            !super::drove_recently()
-                || super::LAST_DRIVE_MS.load(std::sync::atomic::Ordering::Relaxed) != 0
-        );
         super::note_drive();
         assert!(super::drove_recently());
         assert!(super::real_input_age_ms().is_none_or(|age| age < u64::MAX));

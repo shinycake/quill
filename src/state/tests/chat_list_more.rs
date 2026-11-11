@@ -132,8 +132,7 @@ fn cl2_archive_settings_fetch_stores_and_set_rolls_back() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetArchiveChatListSettings, None);
-    session.chat_list.archive_chat_list_settings.begin();
-    assert!(session.chat_list.archive_settings_loading());
+    session.chat_list.archive_settings.begin();
     apply_json(
         &mut session,
         &seq,
@@ -144,25 +143,24 @@ fn cl2_archive_settings_fetch_stores_and_set_rolls_back() {
         ),
     );
     assert_eq!(
-        session.chat_list.archive_settings(),
+        session.chat_list.archive_settings.data().copied(),
         Some(ArchiveChatListSettings {
             archive_and_mute_new_chats_from_unknown_users: true,
             keep_unmuted_chats_archived: false,
             keep_chats_from_folders_archived: true,
         })
     );
-    assert!(!session.chat_list.archive_settings_loading());
+    assert!(!session.chat_list.archive_settings.is_loading());
 
-    let old = session.chat_list.archive_settings();
+    let old = session.chat_list.archive_settings.data().copied();
     let extra = session.request(RequestPurpose::SetArchiveChatListSettings, None);
     session
         .requests
         .pending_mut(extra)
         .expect("pending")
         .rollback = Some(RequestRollback::ArchiveChatListSettings { previous: old });
-    session
-        .chat_list
-        .set_archive_settings_value(ArchiveChatListSettings {
+    session.chat_list.archive_settings =
+        crate::state::fetch::Fetch::Ready(ArchiveChatListSettings {
             keep_unmuted_chats_archived: true,
             ..old.unwrap_or_default()
         });
@@ -175,7 +173,7 @@ fn cl2_archive_settings_fetch_stores_and_set_rolls_back() {
             extra.0
         ),
     );
-    assert_eq!(session.chat_list.archive_settings(), old);
+    assert_eq!(session.chat_list.archive_settings.data().copied(), old);
     assert_eq!(
         session.chats_state.chat_action_error.last(),
         Some("could not save archive settings (error 400)")

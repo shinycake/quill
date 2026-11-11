@@ -4,8 +4,8 @@ use super::*;
 use crate::ids::{ChatId, RequestId};
 use crate::state::GroupsPurpose;
 use crate::state::{
-    AdminLinksState, BOOSTS_PAGE_SIZE, BoostsListState, BoostsStage, INVITE_ADMIN_PAGE_SIZE,
-    InviteLinkFetch, LinkRequestsState, RequestPurpose,
+    AdminLinksState, BOOSTS_PAGE_SIZE, BoostsListState, INVITE_ADMIN_PAGE_SIZE, InviteLinkFetch,
+    LinkRequestsState, ListPageStage, RequestPurpose,
 };
 use crate::telegram::requests::{
     delete_all_revoked_chat_invite_links, get_chat_boost_link, get_chat_boosts,
@@ -54,10 +54,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             chat_id.0,
             AdminLinksState {
                 creator_user_id,
-                active: InviteLinkFetch::Loading,
-                revoked: InviteLinkFetch::Loading,
-                active_request: Some(active),
-                revoked_request: Some(revoked),
+                active: InviteLinkFetch::Loading(active),
+                revoked: InviteLinkFetch::Loading(revoked),
             },
         );
         let first = get_chat_invite_links(
@@ -195,10 +193,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .invite_pages
             .join_requests_mut(chat_id.0)
         {
-            Some(state) if append => {
-                state.error = None;
-                state.request = Some(extra);
-            }
+            Some(state) if append => state.stage = ListPageStage::Loading(extra),
             _ => {
                 self.session.groups.invite_pages.set_join_requests(
                     chat_id.0,
@@ -206,8 +201,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         invite_link: invite_link.to_owned(),
                         total_count: 0,
                         requests: Vec::new(),
-                        error: None,
-                        request: Some(extra),
+                        stage: ListPageStage::Loading(extra),
                     },
                 );
             }
@@ -231,8 +225,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .join_requests_mut(chat_id.0)
             {
                 Some(state) if append && !state.requests.is_empty() => {
-                    state.request = None;
-                    state.error = Some(
+                    state.stage = ListPageStage::Failed(
                         crate::lang::tr(
                             crate::lang::keys::Q_INVITE_LINK_COULD_NOT_LOAD_MORE_REQUESTS,
                         )
@@ -337,7 +330,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::GetChatBoosts { append }, Some(chat_id));
         match self.session.groups.chat_boost_lists.get_mut(&chat_id.0) {
-            Some(state) if append => state.stage = BoostsStage::Loading(extra),
+            Some(state) if append => state.stage = ListPageStage::Loading(extra),
             _ => {
                 self.session.groups.chat_boost_lists.insert(
                     chat_id.0,
@@ -346,7 +339,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         total_count: 0,
                         boosts: Vec::new(),
                         next_offset: String::new(),
-                        stage: BoostsStage::Loading(extra),
+                        stage: ListPageStage::Loading(extra),
                     },
                 );
             }
@@ -359,7 +352,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // The rows already loaded stay; the page that never left shows
             // its error (a first page has no rows, so it shows the error
             // instead of "Loading").
-            state.stage = BoostsStage::Failed("Could not load boosts".into());
+            state.stage = ListPageStage::Failed("Could not load boosts".into());
         }
         sent
     }

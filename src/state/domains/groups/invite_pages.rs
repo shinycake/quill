@@ -120,15 +120,13 @@ impl InvitePages {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::InviteLinkFetch;
+    use crate::state::{InviteLinkFetch, RequestId};
 
     fn links(creator: i64) -> AdminLinksState {
         AdminLinksState {
             creator_user_id: creator,
-            active: InviteLinkFetch::Loading,
-            revoked: InviteLinkFetch::Loading,
-            active_request: None,
-            revoked_request: None,
+            active: InviteLinkFetch::Loading(RequestId(1)),
+            revoked: InviteLinkFetch::Loading(RequestId(2)),
         }
     }
 

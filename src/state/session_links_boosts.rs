@@ -19,12 +19,13 @@ pub struct BoostsListState {
     pub next_offset: String,
     /// Where the newest page stands. Loaded rows stay under every stage, so
     /// a failed next page keeps the list and shows its error under it.
-    pub stage: BoostsStage,
+    pub stage: ListPageStage,
 }
 
-/// The newest `getChatBoosts` page of a list.
+/// The newest page of a paged list (`getChatBoosts`, a link's join requests
+/// or members), one value for "asked", "answered" and "failed".
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BoostsStage {
+pub enum ListPageStage {
     /// The page is out under this request (a first page or an append);
     /// replies with another id are stale.
     Loading(RequestId),
@@ -33,21 +34,28 @@ pub enum BoostsStage {
     Failed(String),
 }
 
+impl ListPageStage {
+    /// `request` is the page this stage waits for.
+    pub fn waits_for(&self, request: RequestId) -> bool {
+        *self == ListPageStage::Loading(request)
+    }
+}
+
 impl BoostsListState {
     pub fn loading(&self) -> bool {
-        matches!(self.stage, BoostsStage::Loading(_))
+        matches!(self.stage, ListPageStage::Loading(_))
     }
 
     pub fn error(&self) -> Option<&str> {
         match &self.stage {
-            BoostsStage::Failed(error) => Some(error),
+            ListPageStage::Failed(error) => Some(error),
             _ => None,
         }
     }
 
     /// `request` is the page this list waits for.
     pub fn waits_for(&self, request: RequestId) -> bool {
-        self.stage == BoostsStage::Loading(request)
+        self.stage.waits_for(request)
     }
 }
 
@@ -58,9 +66,6 @@ pub struct AdminLinksState {
     pub creator_user_id: i64,
     pub active: InviteLinkFetch,
     pub revoked: InviteLinkFetch,
-    /// Request ids of the two lists; replies for another admin are stale.
-    pub active_request: Option<RequestId>,
-    pub revoked_request: Option<RequestId>,
 }
 
 /// The pending join requests of one invite link
@@ -70,15 +75,22 @@ pub struct LinkRequestsState {
     pub invite_link: String,
     pub total_count: i32,
     pub requests: Vec<ParsedChatJoinRequest>,
-    pub error: Option<String>,
-    /// The page in flight, if any; its answer is the only one that lands.
-    pub request: Option<RequestId>,
+    /// The newest page: the one in flight is the only answer that lands,
+    /// and a failed next page keeps the rows with its error under them.
+    pub stage: ListPageStage,
 }
 
 impl LinkRequestsState {
     /// A page is being asked for.
     pub fn loading(&self) -> bool {
-        self.request.is_some()
+        matches!(self.stage, ListPageStage::Loading(_))
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        match &self.stage {
+            ListPageStage::Failed(error) => Some(error),
+            _ => None,
+        }
     }
 }
 

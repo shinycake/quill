@@ -400,7 +400,7 @@ fn failed_color_requests_surface_the_error_and_icons_flag() {
             extra.0
         ),
     );
-    assert!(session.users_state.background_emoji_icons_failed);
+    assert!(session.users_state.background_emoji_icons.error().is_some());
 }
 
 #[test]

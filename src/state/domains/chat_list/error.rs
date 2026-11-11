@@ -209,7 +209,7 @@ impl Session {
             }
             Some(RequestPurpose::GetArchiveChatListSettings) => {
                 self.chat_list
-                    .archive_chat_list_settings
+                    .archive_settings
                     .fail(format!("error {}", err.code));
                 self.chat_list.archive_mute.note_reload_failed();
                 self.chats_state.chat_action_error.push(format!(

@@ -502,6 +502,47 @@ fn craft_loads_both_lists_and_crafts() {
     assert_eq!(craft.result, Some(CraftResult::Fail));
 }
 
+/// A failed "your gifts" list is an error the box draws, and asking again
+/// (the next open, or Retry) sends the first page once more.
+#[test]
+fn a_failed_craft_candidates_list_is_asked_again() {
+    let mut f = Fixture::new();
+    f.driver
+        .open_gift_craft(CraftGift::parse_received(&received(1)).unwrap())
+        .unwrap();
+    f.answer(
+        "getGiftsForCrafting",
+        json!({"@type": "error", "code": 500, "message": "INTERNAL"}),
+    );
+    let stage = |f: &Fixture| {
+        f.driver
+            .session
+            .payments
+            .gift_market
+            .craft
+            .as_ref()
+            .map(|c| c.candidates_stage.clone())
+    };
+    assert!(stage(&f).is_some_and(|s| s.error().is_some()));
+    let before = f.sent("getGiftsForCrafting").len();
+    f.driver.preload_craft_lists().unwrap();
+    assert_eq!(f.sent("getGiftsForCrafting").len(), before + 1);
+    assert!(stage(&f).is_some_and(|s| s.is_loading()));
+    f.answer(
+        "getGiftsForCrafting",
+        json!({"@type": "error", "code": 500, "message": "INTERNAL"}),
+    );
+    f.driver.retry_craft_candidates().unwrap();
+    assert_eq!(f.sent("getGiftsForCrafting").len(), before + 2);
+    f.answer(
+        "getGiftsForCrafting",
+        json!({"@type": "giftsForCrafting", "total_count": 1, "gifts": [received(2)],
+            "next_offset": ""}),
+    );
+    assert!(stage(&f).is_some_and(|s| s.is_ready()));
+    assert!(f.driver.retry_craft_candidates().is_err());
+}
+
 /// A craft in flight is not orphaned: a new craft box is refused until its
 /// answer lands, and the answer belongs to the session that sent it.
 #[test]

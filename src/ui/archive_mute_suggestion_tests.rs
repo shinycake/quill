@@ -100,7 +100,7 @@ fn no_box_while_the_setting_is_on(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut()
-            && let Some(settings) = session.chat_list.archive_chat_list_settings.data_mut()
+            && let Some(settings) = session.chat_list.archive_settings.data_mut()
         {
             settings.archive_and_mute_new_chats_from_unknown_users = true;
         }
