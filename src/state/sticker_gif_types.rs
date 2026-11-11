@@ -256,7 +256,7 @@ pub enum SavedGifs {
     /// Not asked for yet, or dropped to be asked again.
     Unloaded(Vec<AnimationItem>),
     /// The request is in flight. `stale`: `updateSavedAnimations` arrived
-    /// meanwhile, so its answer is shown but the list is fetched again.
+    /// meanwhile: the list is fetched again.
     Loading {
         items: Vec<AnimationItem>,
         stale: bool,
@@ -308,7 +308,10 @@ impl SavedGifs {
 
     /// Whether `getSavedAnimations` should go out now.
     pub fn needs_load(&self) -> bool {
-        matches!(self, Self::Unloaded(_) | Self::Ready { stale: true, .. })
+        matches!(
+            self,
+            Self::Unloaded(_) | Self::Ready { stale: true, .. } | Self::Loading { stale: true, .. }
+        )
     }
 
     /// The request goes out.
@@ -351,8 +354,10 @@ impl SavedGifs {
                 }
             }
             // The request in flight answers for a list the server has since
-            // changed: it stays loading (the spinner holds), and its answer
-            // is kept but marked stale, so the list is asked for again.
+            // changed. The stage stays loading (the spinner holds) but is
+            // marked stale: the connect layer drops the pending request, so
+            // `needs_load` sends a new one, and an answer that still lands
+            // is kept as stale, so the list is asked for again.
             Self::Loading { stale, .. } => *stale = true,
             Self::Unloaded(_) => {}
         }

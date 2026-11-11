@@ -6824,7 +6824,7 @@ hand. The shape is gone (one enum or `Fetch<T>` per stage), not commented.
 | 09-018 | `CustomEmojiCard { Hidden, Asked{emoji,tap}, Shown{preview,tap} }` per window; the session's preview is only the answer. |
 | 09-011, 09-X009, 10-163 | `LinkFlow { Idle, Running{origin: FlowOrigin{window, by_agent}}, Asking{invite} }` and `ResolvedLink { window, step }`: the agent origin lives in the running flow, taken with its state and put back only while it goes on. `ChatsState::deep_link_from_agent` and `request_deep_link_info_from` are gone. |
 | 09-022 | `DemoUi::next_seq(last)` numbers the stream's updates through the demo's one counter, never behind the session's. |
-| 09-032 | `GifPanel::saved: SavedGifs { Unloaded, Loading{items,stale}, Ready{stale}, Failed }` replaces the list, `loaded`, `loading`, `failed` and `stale`; an `updateSavedAnimations` during a request keeps it `Loading` (spinner) and its answer lands `Ready{stale: true}`, so the list is asked again. The search flags are a second flow and stay on the baseline. |
+| 09-032 | `GifPanel::saved: SavedGifs { Unloaded, Loading{items,stale}, Ready{stale}, Failed }` replaces the list, `loaded`, `loading`, `failed` and `stale`; an `updateSavedAnimations` during a request keeps it `Loading` (spinner) with a stale mark, so `needs_load` sends a new request at once. The search flags are a second flow and stay on the baseline. |
 | 09-X016, 09-027 | `DeviceLink { Idle{notice}, Scanning, Confirm, Linking }`; the answer is applied only in `Linking`, and `is_busy` (any stage but `Idle`) guards both entry points and hides the page's buttons, so a pasted link cannot replace a pending answer. |
 | 09-039, 11-p5-006 | `NewContactStage { Form, Sending{request,name}, NotJoined{name} }`. |
 
