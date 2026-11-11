@@ -47,12 +47,10 @@ pub(crate) struct AdminUi {
     pub(super) event_log_ids: std::cell::RefCell<Vec<i64>>,
     /// Counts search edits so only the last one searches.
     pub(super) event_log_keystroke: u64,
-    /// The list reports its scrolling to the app (set up once).
-    pub(super) event_log_hooked: bool,
     /// The list length an automatic "load earlier" was last asked for.
     pub(super) event_log_autoload: std::cell::Cell<Option<(ChatId, usize)>>,
-    /// The chat whose recent-actions poll is running (one timer task).
-    pub(super) event_log_poll: Option<ChatId>,
+    /// The recent-actions poll (one timer task).
+    pub(super) event_log_poll: EventLogPoll,
     /// B7: group / channel settings dialog (topics, history, reactions,
     /// discussion group, ...).
     pub(super) group_settings_dialog: Option<GroupSettingsDialog>,
@@ -62,6 +60,14 @@ pub(crate) struct AdminUi {
     pub(super) welcome_dialog: Option<WelcomeDialog>,
     /// The group or channel Edit box (`group_edit_box/`).
     pub(super) group_edit_box: Option<super::group_edit_box::GroupEditBox>,
+}
+
+/// The recent-actions poll: no timer task, or one running for a chat. The
+/// task sets `Idle` when its page closes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum EventLogPoll {
+    Idle,
+    Running(ChatId),
 }
 
 /// The boost box keeps its state in the session (`groups.boost_box`),
@@ -108,9 +114,8 @@ impl AdminUi {
             event_log_list: super::event_log::new_event_log_list(),
             event_log_ids: std::cell::RefCell::new(Vec::new()),
             event_log_keystroke: 0,
-            event_log_hooked: false,
             event_log_autoload: std::cell::Cell::new(None),
-            event_log_poll: None,
+            event_log_poll: EventLogPoll::Idle,
             group_settings_dialog: None,
             join_requests_dialog: None,
             welcome_dialog: None,

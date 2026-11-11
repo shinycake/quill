@@ -16,7 +16,6 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::emoji::EmojiSetTab;
-use quill::ids::ChatId;
 use quill::lang::{keys, tr, trn};
 use quill::local_path::sandboxed_display_path;
 use quill::state::RequestPurpose;
@@ -241,11 +240,7 @@ impl QuillApp {
                 .tooltip(tr(keys::BOX_REMOVE))
                 .accessibility_label(format!("{} {title}", tr(keys::BOX_REMOVE)))
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.open_group_confirm(
-                        ChatId(0),
-                        GroupConfirmAction::RemoveEmojiSet { set_id: id },
-                        cx,
-                    );
+                    this.open_group_confirm(GroupConfirmAction::RemoveEmojiSet { set_id: id }, cx);
                 }))
                 .into_any_element()
         } else if set.is_installed {

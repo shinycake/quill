@@ -539,11 +539,11 @@ impl QuillApp {
     /// Slice CL3: bulk delete — confirms first, like the single-chat
     /// row-menu path.
     pub(super) fn delete_selected_chats(&mut self, cx: &mut Context<Self>) {
-        // The dialog needs a chat id; the chats to delete are the ones
-        // selected now, carried by the action.
+        // The chats to delete are the ones selected now, carried by the
+        // action.
         let ids = self.selected_chat_ids();
-        if let Some(first) = ids.first().copied() {
-            self.open_group_confirm(first, GroupConfirmAction::RemoveSelectedChats { ids }, cx);
+        if !ids.is_empty() {
+            self.open_group_confirm(GroupConfirmAction::RemoveSelectedChats { ids }, cx);
         }
     }
 

@@ -4,7 +4,7 @@
 //! Earlier events load when the list is scrolled to its top.
 #![deny(clippy::indexing_slicing)]
 
-use super::admin_state::EventLogSearch;
+use super::admin_state::{EventLogPoll, EventLogSearch};
 use super::app::QuillApp;
 use super::dialogs::group_admin_settings::GroupSettingsView;
 use super::event_log_rows::{LogEntry, render_entry};
@@ -169,12 +169,9 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Ask the list to tell the app when it is scrolled to its top.
+    /// Ask the list to tell the app when it is scrolled to its top. Setting
+    /// the handler again replaces it, so each open of the page sets it.
     pub(super) fn hook_event_log_scroll(&mut self, cx: &mut Context<Self>) {
-        if self.admin.event_log_hooked {
-            return;
-        }
-        self.admin.event_log_hooked = true;
         let app = cx.weak_entity();
         let screen = self.screen_epoch();
         // Runs while the list holds its own state: it must not touch the
@@ -202,10 +199,10 @@ impl QuillApp {
     /// events are fetched and join the bottom of the list (the list keeps a
     /// reader who has scrolled up where they are).
     pub(super) fn start_event_log_poll(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        if self.live.is_none() || self.admin.event_log_poll == Some(chat_id) {
+        if self.live.is_none() || self.admin.event_log_poll == EventLogPoll::Running(chat_id) {
             return;
         }
-        self.admin.event_log_poll = Some(chat_id);
+        self.admin.event_log_poll = EventLogPoll::Running(chat_id);
         self.spawn_scoped(cx, async move |this, cx| {
             loop {
                 cx.background_executor()
@@ -223,8 +220,8 @@ impl QuillApp {
             // otherwise keep the page from ever polling again. A screen
             // that is gone took the flag with it.
             let _ = this.main().update(cx, |this, _| {
-                if this.admin.event_log_poll == Some(chat_id) {
-                    this.admin.event_log_poll = None;
+                if this.admin.event_log_poll == EventLogPoll::Running(chat_id) {
+                    this.admin.event_log_poll = EventLogPoll::Idle;
                 }
             });
         })

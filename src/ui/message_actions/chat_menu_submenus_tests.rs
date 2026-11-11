@@ -177,7 +177,7 @@ fn a_basic_group_offers_delete_and_leave(cx: &mut TestAppContext) {
         app.admin
             .group_confirm_dialog
             .as_ref()
-            .map(|dialog| matches!(dialog.action, GroupConfirmAction::RemoveFromList))
+            .map(|dialog| matches!(dialog.action, GroupConfirmAction::RemoveFromList { .. }))
     });
     assert_eq!(action, Some(true));
 }
@@ -254,7 +254,7 @@ fn exit_entry_follows_the_chat_kind(cx: &mut TestAppContext) {
         app.admin
             .group_confirm_dialog
             .as_ref()
-            .map(|dialog| matches!(dialog.action, GroupConfirmAction::LeaveChat))
+            .map(|dialog| matches!(dialog.action, GroupConfirmAction::LeaveChat { .. }))
     });
     assert_eq!(action, Some(true));
 }

@@ -239,9 +239,10 @@ impl Session {
                 RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { .. })
                 | RequestPurpose::DeleteAccount,
             ) => {
-                self.settings
-                    .account_op
-                    .fail(pending.map(|p| p.id), sessions_error_line("update the account", err));
+                self.settings.account_op.fail(
+                    pending.map(|p| p.id),
+                    sessions_error_line("update the account", err),
+                );
             }
             // Slice A4: a failed websites fetch or disconnect
             // clears the in-flight flags and parks the honest,

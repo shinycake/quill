@@ -39,7 +39,10 @@ pub(super) enum DateField {
 pub(super) enum ExportPage {
     Options,
     /// The calendar is open for this end of the range, on this month.
-    Calendar { field: DateField, month: YearMonth },
+    Calendar {
+        field: DateField,
+        month: YearMonth,
+    },
 }
 
 /// The box's choices while it is open.
@@ -300,7 +303,11 @@ impl QuillApp {
                                 };
                                 draft.page = ExportPage::Calendar {
                                     field,
-                                    month: YearMonth::of(if shown > 0 { shown } else { now_unix() }),
+                                    month: YearMonth::of(if shown > 0 {
+                                        shown
+                                    } else {
+                                        now_unix()
+                                    }),
                                 };
                             }
                             cx.notify();

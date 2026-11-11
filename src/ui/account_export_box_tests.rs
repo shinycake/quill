@@ -45,11 +45,7 @@ fn the_box_opens_with_tdesktops_defaults_and_edits_its_draft(cx: &mut TestAppCon
         assert_eq!(shell.open_dialog, Some(DialogKind::AccountExport));
     });
     app.read_with(vcx, |app, _| {
-        let draft = app
-            .dialogs
-            .account_export
-            .draft()
-            .expect("box open");
+        let draft = app.dialogs.account_export.draft().expect("box open");
         assert_eq!(draft.settings.format, ExportFormat::Html);
         assert!(draft.settings.is_on(Section::PersonalInfo));
         assert!(draft.settings.only_my(Section::PrivateGroups));

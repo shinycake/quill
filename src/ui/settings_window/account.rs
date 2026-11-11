@@ -275,7 +275,6 @@ impl QuillApp {
                             tr(keys::Q_PREFS_DELETE_SYNCED_CONTACTS),
                             cx.listener(|this, _, _, cx| {
                                 this.open_group_confirm(
-                                    quill::ids::ChatId(0),
                                     crate::ui::GroupConfirmAction::DeleteSyncedContacts,
                                     cx,
                                 );

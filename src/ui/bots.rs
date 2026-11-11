@@ -620,7 +620,7 @@ impl QuillApp {
             "bot-restart",
             tr(keys::Q_MEDIA_RESTART_BOT),
             cx.listener(move |this, _, _, cx| {
-                this.open_group_confirm(open, GroupConfirmAction::RestartBot, cx);
+                this.open_group_confirm(GroupConfirmAction::RestartBot { chat_id: open }, cx);
             }),
         ));
         if !username.is_empty() {
@@ -643,8 +643,10 @@ impl QuillApp {
             },
             cx.listener(move |this, _, _, cx| {
                 this.open_group_confirm(
-                    open,
-                    GroupConfirmAction::BlockUser { block: !blocked },
+                    GroupConfirmAction::BlockUser {
+                        chat_id: open,
+                        block: !blocked,
+                    },
                     cx,
                 );
             }),

@@ -2,6 +2,7 @@
 //! the Experimental settings page and the update channel switch (needs the
 //! `demo-capture` feature for gpui-kit's test support). Nothing leaves the
 //! app: no connection, and the app data root is a temp directory.
+use crate::ui::advanced_state::DebugConfirm;
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -79,7 +80,9 @@ fn debugmode_typed_in_settings_asks_before_turning_the_logs_on(cx: &mut TestAppC
     app.read_with(vcx, |app, _| {
         assert_eq!(
             app.preferences.advanced.debug_confirm,
-            Some(quill::advanced::debug_mode::enabled())
+            DebugConfirm::Asking {
+                logs_on: quill::advanced::debug_mode::enabled()
+            }
         );
     });
     shell.read_with(vcx, |shell, _| {
@@ -88,7 +91,7 @@ fn debugmode_typed_in_settings_asks_before_turning_the_logs_on(cx: &mut TestAppC
     // Cancel keeps the mode as it was and clears the question.
     let was = quill::advanced::debug_mode::enabled();
     app.update_in(vcx, |app, _, cx| {
-        app.preferences.advanced.debug_confirm = None;
+        app.preferences.advanced.debug_confirm = DebugConfirm::Closed;
         cx.notify();
     });
     vcx.run_until_parked();
@@ -107,7 +110,7 @@ fn codes_do_nothing_where_no_screen_takes_them(cx: &mut TestAppContext) {
     });
     type_into(&app, vcx, "debugmode");
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.preferences.advanced.debug_confirm, None);
+        assert_eq!(app.preferences.advanced.debug_confirm, DebugConfirm::Closed);
     });
     // A Settings subpage does not read them either (tdesktop reads them on
     // the settings pages, not on boxes and subpages opened from them).
@@ -118,7 +121,7 @@ fn codes_do_nothing_where_no_screen_takes_them(cx: &mut TestAppContext) {
     });
     type_into(&app, vcx, "debugmode");
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.preferences.advanced.debug_confirm, None);
+        assert_eq!(app.preferences.advanced.debug_confirm, DebugConfirm::Closed);
     });
     // Ctrl-chords are not typed text.
     app.update_in(vcx, |app, _, _| app.settings.sub = None);
@@ -137,7 +140,7 @@ fn codes_do_nothing_where_no_screen_takes_them(cx: &mut TestAppContext) {
     }
     type_into(&app, vcx, "ebugmod");
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.preferences.advanced.debug_confirm, None);
+        assert_eq!(app.preferences.advanced.debug_confirm, DebugConfirm::Closed);
     });
 }
 

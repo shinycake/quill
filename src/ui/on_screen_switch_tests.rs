@@ -205,7 +205,7 @@ fn a_switch_closes_boxes_holding_the_old_accounts_ids(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     frames(&mut vcx);
     app.update_in(&mut vcx, |app, _, cx| {
-        app.open_group_confirm(CHAT, GroupConfirmAction::DeleteChat, cx);
+        app.open_group_confirm(GroupConfirmAction::DeleteChat { chat_id: CHAT }, cx);
         app.folders.delete_confirm = Some(FolderDeleteConfirm {
             folder_id: 2,
             name: "Work".into(),

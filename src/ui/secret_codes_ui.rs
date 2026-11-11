@@ -5,6 +5,7 @@
 //! and on the sign-in screen itself.
 #![deny(clippy::indexing_slicing)]
 
+use super::advanced_state::DebugConfirm;
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
@@ -86,7 +87,9 @@ impl QuillApp {
     ) {
         match code {
             Code::DebugMode => {
-                self.preferences.advanced.debug_confirm = Some(debug_mode::enabled());
+                self.preferences.advanced.debug_confirm = DebugConfirm::Asking {
+                    logs_on: debug_mode::enabled(),
+                };
                 self.open_box(DialogKind::DebugModeConfirm);
                 cx.notify();
             }
@@ -239,12 +242,13 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::DebugModeConfirm, |this, _, cx| {
-                this.preferences.advanced.debug_confirm = None;
+                this.preferences.advanced.debug_confirm = DebugConfirm::Closed;
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            let text =
-                debug_mode::confirm_text(this.preferences.advanced.debug_confirm == Some(true));
+            let text = debug_mode::confirm_text(
+                this.preferences.advanced.debug_confirm == DebugConfirm::Asking { logs_on: true },
+            );
             let footer = div()
                 .flex()
                 .justify_end()
@@ -254,7 +258,7 @@ impl QuillApp {
                         .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.preferences.advanced.debug_confirm = None;
+                            this.preferences.advanced.debug_confirm = DebugConfirm::Closed;
                             this.close_kit_dialog_if_done(DialogKind::DebugModeConfirm, window, cx);
                             cx.notify();
                         })),
@@ -264,7 +268,7 @@ impl QuillApp {
                         .label(tr(keys::BOX_OK))
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.preferences.advanced.debug_confirm = None;
+                            this.preferences.advanced.debug_confirm = DebugConfirm::Closed;
                             this.switch_debug_mode(cx);
                             this.close_kit_dialog_if_done(DialogKind::DebugModeConfirm, window, cx);
                         })),
@@ -293,8 +297,8 @@ crate::ui::shell::register_dialogs! {
     /// The `debugmode` code's question: turn the debug logs on or off.
     DebugModeConfirm => DialogSpec::new(
         1050,
-        |app| app.preferences.advanced.debug_confirm.is_some(),
+        |app| app.preferences.advanced.debug_confirm != DebugConfirm::Closed,
         QuillApp::build_debug_mode_dialog,
     )
-    .close(|app, _, cx| { app.preferences.advanced.debug_confirm = None; cx.notify(); }),
+    .close(|app, _, cx| { app.preferences.advanced.debug_confirm = DebugConfirm::Closed; cx.notify(); }),
 }

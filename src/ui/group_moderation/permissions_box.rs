@@ -352,7 +352,10 @@ impl QuillApp {
                     )
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.close_permissions_dialog(cx);
-                        this.open_group_confirm(chat_id, GroupConfirmAction::BroadcastIntro, cx);
+                        this.open_group_confirm(
+                            GroupConfirmAction::BroadcastIntro { chat_id: chat_id },
+                            cx,
+                        );
                         this.close_kit_dialog_if_done(DialogKind::Permissions, window, cx);
                     })),
                 )
