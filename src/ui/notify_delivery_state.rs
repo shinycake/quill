@@ -45,6 +45,14 @@ pub(crate) struct NotifyDelivery {
 }
 
 impl NotifyDelivery {
+    /// `account` logged out or was removed: what its notifications kept
+    /// goes with it.
+    pub(super) fn forget_account(&mut self, account: &quill::ids::AccountKey) {
+        self.reply_targets.retain(|(owner, _), _| owner != account);
+        self.unsent_replies.retain(|(owner, _), _| owner != account);
+        self.preview_waits.retain(|(owner, _), _| owner != account);
+    }
+
     pub(super) fn new(audio_output: &super::audio::SharedOutput) -> Self {
         Self {
             notify_clicks: Arc::new(Mutex::new(Vec::new())),

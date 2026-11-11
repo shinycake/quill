@@ -140,3 +140,27 @@ fn an_unsent_reply_waits_out_the_lock(cx: &mut TestAppContext) {
         assert!(app.delivery.unsent_replies.is_empty());
     });
 }
+
+/// An account that logs out or is removed takes its parked reply texts,
+/// reply targets and photo waits with it; another account's stay.
+#[gpui_kit::test]
+fn a_removed_accounts_notification_state_goes_with_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = demo_app(cx);
+    app.update(&mut vcx, |app, _| {
+        let account = app.current_account().expect("the demo account");
+        let other = quill::ids::AccountKey("someone-else".into());
+        for owner in [&account, &other] {
+            app.delivery
+                .unsent_replies
+                .insert((owner.clone(), CHAT), "typed".into());
+            app.delivery
+                .reply_targets
+                .insert((owner.clone(), CHAT), quill::ids::MessageId(5));
+        }
+        app.delivery.forget_account(&account);
+        assert!(!app.delivery.unsent_replies.contains_key(&(account.clone(), CHAT)));
+        assert!(!app.delivery.reply_targets.contains_key(&(account, CHAT)));
+        assert!(app.delivery.unsent_replies.contains_key(&(other.clone(), CHAT)));
+        assert!(app.delivery.reply_targets.contains_key(&(other, CHAT)));
+    });
+}

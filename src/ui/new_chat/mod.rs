@@ -271,10 +271,16 @@ impl QuillApp {
     /// the person does next, and an answered one is forgotten.
     fn drop_new_chat_dialog(&mut self) {
         if let Some(dialog) = self.admin.create_chat_dialog.take()
-            && let NewChatStage::Creating { request, .. } = dialog.stage
             && let Some(live) = self.live.as_mut()
         {
-            live.driver.abandon_new_chat(request);
+            match dialog.stage {
+                NewChatStage::Creating { request, .. } => live.driver.abandon_new_chat(request),
+                NewChatStage::Type {
+                    save: TypeSaveStage::Saving(sent),
+                    ..
+                } => live.driver.forget_new_chat_type_save(&sent),
+                _ => {}
+            }
         }
     }
 
@@ -290,19 +296,22 @@ impl QuillApp {
     }
 
     fn set_new_chat_stage(&mut self, stage: NewChatStage, cx: &mut Context<Self>) {
-        let left = self.new_chat_dialog_mut().and_then(|dialog| {
+        let left = self.new_chat_dialog_mut().map(|dialog| {
             let left = std::mem::replace(&mut dialog.stage, stage);
             dialog.search_input.update(cx, |_, cx| cx.notify());
-            match left {
-                NewChatStage::Creating { request, .. } => Some(request),
-                _ => None,
-            }
+            left
         });
-        // The answer of the create the stage waited for is in the next step.
-        if let Some(request) = left
-            && let Some(live) = self.live.as_mut()
-        {
-            live.driver.abandon_new_chat(request);
+        // The answer of the create or Save the stage waited for is in the
+        // next step.
+        if let Some(live) = self.live.as_mut() {
+            match left {
+                Some(NewChatStage::Creating { request, .. }) => live.driver.abandon_new_chat(request),
+                Some(NewChatStage::Type {
+                    save: TypeSaveStage::Saving(sent),
+                    ..
+                }) => live.driver.forget_new_chat_type_save(&sent),
+                _ => {}
+            }
         }
         cx.notify();
     }
