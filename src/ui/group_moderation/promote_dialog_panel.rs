@@ -73,7 +73,7 @@ impl QuillApp {
                     ),
             );
         match members {
-            None | Some(SupergroupMembersFetch::Loading(_)) => {
+            None | Some(SupergroupMembersFetch::Loading) => {
                 panel = panel.child(
                     div()
                         .text_sm()

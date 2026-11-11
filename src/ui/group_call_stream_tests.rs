@@ -193,7 +193,10 @@ fn track_unjoined(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
         let session = app.demo_session.as_mut().expect("demo");
         session.calls.active_group_call = Some(ActiveGroupCall {
             is_rtmp_stream: true,
-            stream: StreamState::Connecting,
+            media: quill::state::GroupMedia::Stream {
+                mode: quill::calls::engine::GroupCallMode::Rtmp,
+                state: StreamState::Connecting,
+            },
             ..ActiveGroupCall::fresh(CALL)
         });
         // Outside a draw, as the poll loop runs it.
@@ -904,7 +907,10 @@ fn a_switch_to_another_stream_closes_the_boxes(cx: &mut TestAppContext) {
         let session = app.demo_session.as_mut().expect("demo");
         session.calls.active_group_call = Some(ActiveGroupCall {
             is_rtmp_stream: true,
-            stream: StreamState::Live,
+            media: quill::state::GroupMedia::Stream {
+                mode: quill::calls::engine::GroupCallMode::Rtmp,
+                state: StreamState::Live,
+            },
             ..ActiveGroupCall::fresh(CALL + 1)
         });
         app.sync_group_call_window(cx);

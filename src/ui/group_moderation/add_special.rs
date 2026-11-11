@@ -249,7 +249,7 @@ impl QuillApp {
         let message =
             |text: &'static str| div().px_2().py_2().text_sm().text_color(muted).child(text);
         match fetch {
-            None | Some(SupergroupMembersFetch::Loading(_)) => {
+            None | Some(SupergroupMembersFetch::Loading) => {
                 list = list.child(message(tr(keys::CONTACTS_LOADING)));
             }
             Some(
