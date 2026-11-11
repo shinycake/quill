@@ -134,6 +134,10 @@ impl SlowModeTick {
 pub(crate) struct ComposerUi {
     /// Highlighted row of the composer's `@` suggestions.
     pub(super) mention_selected: usize,
+    /// When this window's AI button last appeared (its sparkle blinks from
+    /// there); `None` while it is not drawn. Set and cleared as the button
+    /// draws, so each window follows its own composer.
+    pub(super) ai_button_since: std::cell::Cell<Option<std::time::Instant>>,
     /// Composer `#hashtag` / `:emoji` autocomplete popup.
     pub(super) suggest: super::composer_suggest::SuggestUi,
     pub(super) emoji_words: super::emoji_words_ui::EmojiWordsUi,
@@ -190,6 +194,7 @@ impl ComposerUi {
     pub(super) fn new() -> Self {
         Self {
             mention_selected: 0,
+            ai_button_since: std::cell::Cell::new(None),
             suggest: super::composer_suggest::SuggestUi::default(),
             emoji_words: Default::default(),
             inline_scroll: gpui_kit::ScrollHandle::new(),

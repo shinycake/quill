@@ -349,7 +349,7 @@ impl QuillApp {
                     .positions
                     .insert(ChatMessage::new(chat_id, target_id), secs);
                 if self.playback.active.voice() == Some(target_id)
-                    && self.playback.player.chat.is_none_or(|c| c == chat_id)
+                    && self.playback.active.chat().is_none_or(|c| c == chat_id)
                 {
                     self.seek_active_to(secs, cx);
                 } else {
@@ -370,7 +370,7 @@ impl QuillApp {
                     .positions
                     .insert(ChatMessage::new(chat_id, target_id), secs);
                 if self.playback.active.audio() == Some(target_id)
-                    && self.playback.player.chat.is_none_or(|c| c == chat_id)
+                    && self.playback.active.chat().is_none_or(|c| c == chat_id)
                 {
                     self.seek_active_to(secs, cx);
                 } else {

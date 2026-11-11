@@ -8586,3 +8586,45 @@ editor follows the session list), `story_page` (supersede and cap),
 `connect/tests/suggested_posts` (failure cap), `system_accent` (retry),
 `connect/tests/tone_upload` (another request's answer), `tray_sni`
 (panicking update), `video_edit` (mirror outside the frame).
+
+### Sweep fixes (r2-22)
+
+| Ids | Fix |
+|---|---|
+| 07-021 | `Tray::last_shown` is written only after `set_icon` returned `Ok`; a failed set (or an icon that did not build) is tried again on the next tick. |
+| 07-022 | The tray cell is borrowed with `try_borrow_mut` (a re-entrant call skips the tick) and read with `try_borrow` (`false` when busy). |
+| 07-010 | `AppearancePrefs::work_mode: WorkMode` replaces `show_tray_icon` and `show_taskbar_icon`. `WorkMode` (de)serializes as the two old keys (`#[serde(flatten)]`), so existing prefs files load unchanged and a file with both off reads as window only. `toggle_tray`, `toggle_taskbar` and `skip_taskbar` take and return the mode. |
+| 07-019 | The folder picker's answer carries the key of the draft that asked (the draft's slider entity) and `apply_account_export_folder` applies it only to that draft. |
+| 07-024 | The check lives with the request it answers, in the session (`AgeVerification { params, check }`, `SyncState::set_age_verification`): a repeat of the same request keeps a start, a different request or lifting it starts over, so nothing is cleared by hand and the screen holds no copy. |
+| 07-027, 07-035 | `AccountsDialog::{Closed, Open { row_edit, error }}` replaces `open`, `row_edit` and `error`; open and close replace it whole, `ask` moves to the next row question and drops the last one's error. A removal that fails after the dialog closed goes to the status line (`fail_accounts_dialog`). The one-shot body is a `Cell`, not a `RefCell`. |
+| 07-032 | The older page is `OlderEvents::{Available, Asking, Failed(line), ..}` on the page (r2-01, 09-096): a send that was refused and a page that failed both land in `Failed`, which draws the line and a Retry instead of the spinner, and the automatic ask does not repeat for the same list length. |
+| 07-033 | `event_log_ids` is a `Cell<Vec<i64>>` taken out while the list is touched. (09-098 is the same fix in r2-01.) |
+| 07-030, 07-036 | Turning Agent access off, from the master switch or the connected strip's Revoke (`turn_agent_access_off`, the one place), closes the consent and the reset question (`close_agent_boxes_for_access_off`), so they do not come back when it is turned on again; the one-shot body is a `Cell`. |
+| 07-029 | `Driver::Running { id, _task, waiting }` holds the command's task. A command whose window is gone calls `agent_command_abandoned`, which answers the waiting commands with the "window not open" refusal and leaves the stage. |
+| 07-037 | The blocked-dialog queue is a `Cell<Vec<Blocked>>` of `(ScreenEpoch, window, Opened)`: only that window's shell closes an entry, and entries of an earlier screen are dropped. |
+| 07-028, 07-048 | `takeover.wake` is `Wake::{None, At { at, _task }}`: a nearer wake replaces (drops) the pending timer, and the app owns it. |
+| 07-038 | The style editor lives in the view: `AiComposeView::StyleEditor(editor)` and `StyleIcon(editor)`; leaving the view drops it. |
+| 07-039 | The AI button's blink start is `ComposerUi::ai_button_since`, per window, set and cleared as the button draws; the main-window upkeep that mirrored it is gone. |
+| 07-044 | `AiStylePreview::begin_adding`, `begin_removing` and `show_again` move the stage in place; no placeholder `LookingUp { token: 0 }` is written. |
+| 07-045, 07-046 | The animation layer's frame is `Frame::{Prepainting(items), Painted(items)}` and an item is `Slot::{Registered, Painted { inline, seq, opacity }}`. Frame and occluders are read through `try_borrow`; `prepaint` and `paint` copy the items out first, so nothing is held while GPUI is called. |
+| 07-047 | `media_roots_frame` is a `Cell<Option<Rc<..>>>`, taken and put back. |
+| 08-015 | The attach-icon cache is keyed by path and modification time: a file replaced at the same path reads again, a missing or unreadable file is not remembered. |
+| 08-007 | `ActiveTrack::{None, Voice(Track), Audio(Track)}`: the track owns its chat, bar text, length, seek slider, scrub and hover. Stopping the voice note does nothing while a music file is active. |
+| 08-011 | `Session::cancel_password_recovery` beside the other recovery transitions; the reducer paths use it too. |
+| 08-009 | `OpenNotice::LoginPrevented(places)` is the one slot of "which account notice is open"; `AuthUi::login_prevented` is gone. A prevented login replaces an open freeze notice (the banner opens it again). |
+
+Skipped, with the reason:
+
+- **07-018** (`ExportView` on `AccountExport`). It is not a second copy of the
+  work stage: `AccountProgress` says how far the export is, `view` says whether
+  its box is on screen, and all four pairs are real (a settled export that is
+  hidden is cleared with a note, a settled one that is shown waits for Done).
+  Its owner is the export in the session on purpose (07-015): the screen is
+  replaced on an account switch and a hidden export would reopen over the
+  account when the user came back. The box's own stage is `ExportBox`.
+- **07-031** (`EventLogSearch::shows`). The one search `Textarea` is filled by
+  two surfaces, the info panel (`show_event_log_query` for the panel's chat)
+  and the Group Settings page, so which chat's query its text holds is a fact
+  about the widget that neither `EventLogPage::chat` nor the dialog's chat id
+  says. The refill runs from the window's own upkeep because setting the text
+  needs the `Window`.

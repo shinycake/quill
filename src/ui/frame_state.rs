@@ -56,7 +56,7 @@ pub(crate) struct FrameUi {
     pub(super) title_badge: std::cell::RefCell<quill::tray::badge_cache::BadgeCache>,
     /// `media_display_roots`, computed once per frame (rows ask for it
     /// one by one, and it touches the file system).
-    pub(super) media_roots_frame: std::cell::RefCell<Option<std::rc::Rc<[PathBuf]>>>,
+    pub(super) media_roots_frame: std::cell::Cell<Option<std::rc::Rc<[PathBuf]>>>,
     /// The main window's last frame `QuillApp::main_frame_starts` ran for.
     pub(super) frame_started: std::cell::Cell<u64>,
     /// The chat or call window's view being drawn: animated content asks

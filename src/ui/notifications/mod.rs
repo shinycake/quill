@@ -289,7 +289,10 @@ impl QuillApp {
     fn polled_chrome(&self) -> (StatusNote, bool, Option<i32>, bool) {
         (
             self.connection.note().clone(),
-            self.auth_ui.login_prevented.is_some(),
+            matches!(
+                self.account_boxes.notice,
+                super::account_state::OpenNotice::LoginPrevented(_)
+            ),
             self.folders.tab,
             self.connection_lost(),
         )

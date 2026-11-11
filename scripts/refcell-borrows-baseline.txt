@@ -33,22 +33,10 @@ Ivars::answer::answer.borrow_mut 1
 Ivars::waiting::answer.borrow 1
 LatestFrames::now::slices.borrow 1
 LatestFrames::now::whole.borrow 1
-Layer::begin_frame::items.borrow_mut 1
-Layer::begin_frame::occluders.borrow_mut 1
-Layer::changes_in::items.borrow 1
-Layer::demand::items.borrow 1
-Layer::occluded::occluders.borrow 1
-Layer::paint::items.borrow 1
-Layer::paint_now::items.borrow 1
-Layer::plan::items.borrow 1
-Layer::prepaint::items.borrow 1
-Layer::register::items.borrow_mut 1
-Layered::paint::items.borrow 1
 MotionState::cancel_reveal::reveal.borrow_mut 1
 MotionState::reveal_now::reveal.borrow_mut 1
 MotionState::reveal_probe::reveal.borrow 1
 MotionState::start_reveal::reveal.borrow_mut 1
-Occluder::prepaint::occluders.borrow_mut 1
 QuillApp::advance_effects::active.borrow 2
 QuillApp::advance_effects::active.borrow_mut 1
 QuillApp::arm_send_fly::cells.borrow 1
@@ -56,10 +44,8 @@ QuillApp::arm_send_fly::fly.borrow_mut 1
 QuillApp::arm_send_fly::source.borrow_mut 1
 QuillApp::begin_widget_pass::passes.borrow_mut 2
 QuillApp::build_account_notice_dialog::body.borrow_mut 1
-QuillApp::build_accounts_dialog::body.borrow_mut 1
 QuillApp::build_add_contact_dialog::body.borrow_mut 1
 QuillApp::build_add_special_dialog::body.borrow_mut 1
-QuillApp::build_ai_compose_dialog::body.borrow_mut 1
 QuillApp::build_ai_style_preview_dialog::body.borrow_mut 1
 QuillApp::build_archive_settings_dialog::body.borrow_mut 1
 QuillApp::build_block_bar_dialog::body.borrow_mut 1
@@ -170,8 +156,6 @@ QuillApp::inline_members_view::snapshot.borrow 1
 QuillApp::jump_corner_buttons::corner_lift.borrow_mut 1
 QuillApp::jump_corner_buttons::corners.borrow_mut 1
 QuillApp::layer_wants_tick::animation_targets.borrow_mut 1
-QuillApp::media_display_roots::media_roots_frame.borrow 1
-QuillApp::media_display_roots::media_roots_frame.borrow_mut 1
 QuillApp::media_panel_reveal::media_panel.borrow_mut 1
 QuillApp::message_effects_pass::waiting.borrow 1
 QuillApp::message_effects_pass::waiting.borrow_mut 2
@@ -183,7 +167,6 @@ QuillApp::premium_autoplay::played.borrow_mut 2
 QuillApp::premium_autoplay::seen.borrow 1
 QuillApp::premium_autoplay::seen.borrow_mut 1
 QuillApp::reconcile_widgets::passes.borrow_mut 1
-QuillApp::render::media_roots_frame.borrow_mut 1
 QuillApp::report_visible_sponsored::rendered_sponsored.borrow_mut 1
 QuillApp::request_app_tick_unless::animation_targets.borrow 1
 QuillApp::request_app_tick_unless::still_ticks.borrow_mut 1
@@ -249,7 +232,6 @@ badge::replays.borrow_mut 1
 begin::first.borrow_mut 1
 begin_pass::anchors.borrow_mut 1
 begin_pass::badges.borrow_mut 1
-block_opened_by_agent::blocked.borrow_mut 1
 build_community_hub_dialog::body.borrow_mut 1
 build_create_community_dialog::body.borrow_mut 1
 build_tile_in_background::tile.borrow_mut 1
@@ -266,9 +248,8 @@ connection::slot.borrow 1
 connection::slot.borrow_mut 1
 context_menu_item::keys.borrow 1
 corner_mask::masks.borrow_mut 2
-current::current.borrow 2
+current::current.borrow 1
 current_agent::agent.borrow 1
-dialog_with::body.borrow_mut 1
 display_grid::grids.borrow_mut 1
 display_of::displays.borrow 1
 drawn::cache.borrow_mut 2
@@ -348,9 +329,7 @@ slice_rendered::slices.borrow_mut 1
 slice_shown::slices.borrow_mut 1
 start_sweeper::seen.borrow_mut 1
 sync::applied.borrow_mut 2
-sync_tray::cell.borrow_mut 2
 take::first.borrow_mut 1
-take_blocked_closing_layers::blocked.borrow_mut 1
 take_replays::replays.borrow_mut 1
 take_text_painted::painted.borrow_mut 1
 take_unshowable::retired.borrow_mut 1
@@ -359,8 +338,6 @@ trace_count_by::counts.borrow_mut 1
 trace_slice_render::counts.borrow_mut 1
 tracker::played.borrow 1
 tracker::seen.borrow_mut 1
-tray_available::cell.borrow 2
-tray_registering::cell.borrow 1
 video_output_ready::slot.borrow 1
 video_redraws::asks.borrow 1
 video_request::asks.borrow_mut 1
@@ -370,6 +347,5 @@ wake::retired.borrow 1
 wake::slot.borrow_mut 1
 watch_gpu_loss::slot.borrow_mut 1
 whole_of::whole.borrow 1
-with_layer::current.borrow_mut 1
 with_selected::selected.borrow_mut 1
 wrap::fly.borrow 1

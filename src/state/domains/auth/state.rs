@@ -15,6 +15,14 @@ pub enum PasswordRecovery {
     CodeSent,
 }
 
+impl AuthState {
+    /// The user left recovery-code entry (Back), or the request was refused
+    /// or the auth step ended: back to password entry.
+    pub fn cancel_password_recovery(&mut self) {
+        self.password_recovery = PasswordRecovery::Idle;
+    }
+}
+
 pub struct AuthState {
     /// See [`PasswordRecovery`].
     pub password_recovery: PasswordRecovery,

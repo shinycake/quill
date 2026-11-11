@@ -196,7 +196,7 @@ impl Session {
                     self.auth_state.password_recovery == PasswordRecovery::Requested(extra)
                 })
             {
-                self.auth_state.password_recovery = PasswordRecovery::Idle;
+                self.cancel_password_recovery();
             }
         }
     }

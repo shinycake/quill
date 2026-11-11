@@ -147,3 +147,23 @@ fn a_freeze_notice_closed_by_the_lifted_freeze_does_not_reopen(cx: &mut TestAppC
         assert_eq!(app.account_notice(), None);
     });
 }
+
+/// "New Login Prevented" is one of the account notices, held in the one
+/// slot: it takes the place of an open freeze notice, and closing it leaves
+/// nothing open.
+#[gpui_kit::test]
+fn a_prevented_login_takes_the_one_notice_slot(cx: &mut TestAppContext) {
+    use crate::ui::account_state::OpenNotice;
+    let (app, mut vcx) = open(cx);
+    app.update(&mut vcx, |app, cx| {
+        app.account_boxes.notice = OpenNotice::Frozen;
+        app.account_boxes.notice = OpenNotice::LoginPrevented(vec!["Berlin".into()]);
+        assert_eq!(
+            app.account_notice(),
+            Some(super::AccountNotice::LoginPrevented)
+        );
+        app.dismiss_account_notice(cx);
+        assert_eq!(app.account_boxes.notice, OpenNotice::None);
+        assert_eq!(app.account_notice(), None);
+    });
+}

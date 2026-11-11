@@ -11,18 +11,51 @@ use quill::ai_compose::{AiComposeBox, StyleExample, StyleExamples, TextCompositi
 use quill::ids::{AccountKey, ChatId, ConversationKey, RequestId};
 use quill::lang::{keys, tr};
 use std::ops::Range;
-use std::time::Instant;
 
 /// What the box shows. tdesktop opens the language picker, the Cocoon
 /// box, the style editor and its icon picker as boxes of their own;
 /// Quill's dialogs never stack, so they are views inside the one dialog.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AiComposeView {
     Card,
     Languages,
     About,
-    StyleEditor,
-    StyleIcon,
+    /// The New Style / Edit Style view with its editor. Leaving the view
+    /// drops the editor.
+    StyleEditor(StyleEditor),
+    /// The editor's icon picker, over the same editor.
+    StyleIcon(StyleEditor),
+}
+
+impl AiComposeView {
+    /// The editor of the style editor and its icon picker.
+    pub(super) fn editor(&self) -> Option<&StyleEditor> {
+        match self {
+            Self::StyleEditor(editor) | Self::StyleIcon(editor) => Some(editor),
+            Self::Card | Self::Languages | Self::About => None,
+        }
+    }
+
+    pub(super) fn editor_mut(&mut self) -> Option<&mut StyleEditor> {
+        match self {
+            Self::StyleEditor(editor) | Self::StyleIcon(editor) => Some(editor),
+            Self::Card | Self::Languages | Self::About => None,
+        }
+    }
+
+    /// The editor's icon picker opens over the editor.
+    pub(super) fn show_icon_picker(&mut self) {
+        if let Self::StyleEditor(editor) = self {
+            *self = Self::StyleIcon(editor.clone());
+        }
+    }
+
+    /// The icon picker goes back to the editor it was over.
+    pub(super) fn show_editor(&mut self) {
+        if let Self::StyleIcon(editor) = self {
+            *self = Self::StyleEditor(editor.clone());
+        }
+    }
 }
 
 /// The editor field a failed check points at (tdesktop's
@@ -143,15 +176,33 @@ impl AiStylePreview {
         matches!(&self.stage, PreviewStage::Removing { request: asked, .. } if *asked == request)
     }
 
+    /// Add Style was sent as `request`: the button waits for its answer.
+    pub(super) fn begin_adding(&mut self, request: RequestId) {
+        if let PreviewStage::Shown(style) = &self.stage {
+            self.stage = PreviewStage::Adding {
+                style: style.clone(),
+                request,
+            };
+        }
+    }
+
+    /// Remove or Delete was sent as `request` from this preview.
+    pub(super) fn begin_removing(&mut self, request: RequestId) {
+        if let PreviewStage::Shown(style) = &self.stage {
+            self.stage = PreviewStage::Removing {
+                style: style.clone(),
+                request,
+            };
+        }
+    }
+
     /// The Add, Remove or Delete failed or never left: show the style again.
     pub(super) fn show_again(&mut self) {
-        let stage = std::mem::replace(&mut self.stage, PreviewStage::LookingUp { token: 0 });
-        self.stage = match stage {
-            PreviewStage::Adding { style, .. } | PreviewStage::Removing { style, .. } => {
-                PreviewStage::Shown(style)
-            }
-            other => other,
-        };
+        if let PreviewStage::Adding { style, .. } | PreviewStage::Removing { style, .. } =
+            &self.stage
+        {
+            self.stage = PreviewStage::Shown(style.clone());
+        }
     }
 }
 
@@ -193,7 +244,6 @@ pub(crate) struct AiComposeOpen {
     pub(super) view: AiComposeView,
     /// The style names the box last refreshed against.
     pub(super) style_names: Vec<String>,
-    pub(super) editor: Option<StyleEditor>,
     /// A style just created or edited, selected once the box's style list
     /// has it (tdesktop `selectToneById`).
     pub(super) select_saved: Option<String>,
@@ -206,9 +256,6 @@ pub(crate) struct AiComposeUi {
     pub(super) style_prompt: Entity<TextareaState>,
     pub(super) preview: Option<AiStylePreview>,
     pub(super) apply_in_place: Option<ApplyInPlace>,
-    /// When the composer's AI button appeared (its sparkle blinks from
-    /// here); `None` while it is hidden.
-    pub(super) button_shown_at: Option<Instant>,
 }
 
 impl crate::ui::on_screen::Farewell for AiComposeUi {}
@@ -260,7 +307,6 @@ impl AiComposeUi {
             style_prompt,
             preview: None,
             apply_in_place: None,
-            button_shown_at: None,
         }
     }
 }

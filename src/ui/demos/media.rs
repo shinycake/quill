@@ -188,7 +188,7 @@ impl QuillApp {
     /// `QUILL_DEMO_SEEK_HOVER=<0..1>`: the pointer over the active row's
     /// scrubber, at that fraction.
     fn demo_seek_hover(&mut self) {
-        self.playback.seek_hover = std::env::var("QUILL_DEMO_SEEK_HOVER")
+        let hover = std::env::var("QUILL_DEMO_SEEK_HOVER")
             .ok()
             .and_then(|value| value.trim().parse::<f32>().ok())
             .filter(|at| at.is_finite())
@@ -196,6 +196,9 @@ impl QuillApp {
                 site: SeekSite::Row,
                 at: at.clamp(0.0, 1.0),
             });
+        if let Some(track) = self.playback.active.track_mut() {
+            track.hover = hover;
+        }
     }
 
     fn demo_ready_downloads(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
