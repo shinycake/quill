@@ -26,6 +26,9 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use unicode_segmentation::UnicodeSegmentation;
 
+mod user_words;
+use user_words::UserWords;
+
 /// Embedded English wordlist, one word per line, most frequent first.
 const WORDLIST: &str = include_str!("../../assets/spellcheck/en.txt");
 
@@ -254,52 +257,6 @@ pub struct SpellChecker {
     /// change to the words drops the verdicts in the same step, so a
     /// stale underline cannot outlive an Add to Dictionary.
     words: Mutex<UserWords>,
-}
-
-/// What the user told the checker, and the backend answers that depend on
-/// it.
-#[derive(Default)]
-struct UserWords {
-    /// Words the user added and the backend can't store (lowercased).
-    app_words: HashSet<String>,
-    /// Session ignores ("Ignore"), lowercased. Like tdesktop's
-    /// `ignoreWord:inSpellDocumentWithTag:0` they last until quit.
-    ignored: HashSet<String>,
-    /// Backend answers per exact word (case matters: "Paris" ≠ "paris").
-    cache: VerdictCache,
-}
-
-impl UserWords {
-    /// Drop every verdict; one asked for before this is not stored after it.
-    fn clear_cache(&mut self) {
-        self.cache.generation = self.cache.generation.wrapping_add(1);
-        self.cache.words.clear();
-    }
-
-    fn replace_app_words(&mut self, words: HashSet<String>) {
-        self.app_words = words;
-        self.clear_cache();
-    }
-
-    fn add_app_word(&mut self, word: String) {
-        self.app_words.insert(word);
-        self.clear_cache();
-    }
-
-    fn remove_app_word(&mut self, word: &str) -> bool {
-        let removed = self.app_words.remove(word);
-        self.clear_cache();
-        removed
-    }
-}
-
-/// The verdicts, stamped with how many times they were cleared: a verdict
-/// asked for before a clear (an Add to Dictionary, a language change) is
-/// not stored after it.
-#[derive(Default)]
-struct VerdictCache {
-    generation: u64,
-    words: HashMap<String, bool>,
 }
 
 impl SpellChecker {
