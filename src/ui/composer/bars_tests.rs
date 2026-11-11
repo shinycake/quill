@@ -297,7 +297,10 @@ fn the_quote_picker_and_the_reply_chooser_are_never_open_together(cx: &mut TestA
     app.update_in(vcx, |app, window, cx| {
         app.apply_reply_option(ReplyOption::ReplyInAnotherChat, window, cx);
     });
-    assert_eq!(panel(&app, vcx), ReplyPanel::chooser());
+    assert!(
+        matches!(panel(&app, vcx), ReplyPanel::Chooser(_)),
+        "the chooser is open"
+    );
     assert!(app.read_with(vcx, |app, _| !app.reply_quote_open()));
     app.update_in(vcx, |app, window, cx| {
         app.apply_reply_option(ReplyOption::UpdateQuote, window, cx);
