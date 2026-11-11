@@ -136,7 +136,7 @@ on_screen_fields! {
     /// Stories UI state: the strip, viewer, composer, story page and their boxes.
     stories: super::stories_state::StoryUi,
     /// Chat list: rows, filter, menus, pinning, preview and side tabs (`ui/chat_list_state.rs`).
-    chat_list: super::chat_list_state::ChatListUi,
+    chat_list: Box<super::chat_list_state::ChatListUi>,
     /// The main window's compose field.
     composer: Entity<TextareaState>,
     /// Composer state: menus, attachments, send options, reply and edit drafts (`ui/composer_state.rs`).
@@ -322,7 +322,7 @@ impl OnScreen {
             playback: super::playback_state::PlaybackUi::new(),
             viewer: super::viewer_state::ViewerUi::new(),
             stories: super::stories_state::StoryUi::new(window, cx),
-            chat_list: super::chat_list_state::ChatListUi::new(window, cx),
+            chat_list: Box::new(super::chat_list_state::ChatListUi::new(window, cx)),
             composer,
             composer_ui: Box::new(super::composer_state::ComposerUi::new()),
             _effect_notes: Default::default(),
