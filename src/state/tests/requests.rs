@@ -274,7 +274,7 @@ fn load_chats_404_marks_exhaustion() {
             extra.0
         ),
     );
-    assert!(session.chat_list.chats_exhausted);
+    assert!(session.chat_list.main_paging.is_exhausted());
     assert!(!sink.rendered().contains("Not Found"));
 }
 
@@ -305,10 +305,16 @@ fn chat_list_paging_restarts_after_logout_and_login() {
             );
         }
         session.chat_list.folder_chats_exhausted.insert(2);
-        assert!(session.chat_list.chats_exhausted && session.chat_list.archive_chats_exhausted);
+        assert!(
+            session.chat_list.main_paging.is_exhausted()
+                && session.chat_list.archive_paging.is_exhausted()
+        );
         apply_json(&mut session, &seq, &sink, &auth(leaving));
-        assert!(!session.chat_list.chats_exhausted, "{leaving}");
-        assert!(!session.chat_list.archive_chats_exhausted, "{leaving}");
+        assert!(!session.chat_list.main_paging.is_exhausted(), "{leaving}");
+        assert!(
+            !session.chat_list.archive_paging.is_exhausted(),
+            "{leaving}"
+        );
         assert!(
             session.chat_list.folder_chats_exhausted.is_empty(),
             "{leaving}"
@@ -345,15 +351,15 @@ fn take_purpose_drops_only_matching_request() {
 fn an_unanswered_device_login_and_tone_upload_settle_with_their_account() {
     use crate::tone_upload::{ToneTarget, ToneUpload};
     let (mut session, _) = session();
-    session.request(RequestPurpose::ConfirmDeviceLogin, None);
+    let login = session.request(RequestPurpose::ConfirmDeviceLogin, None);
     session.request(RequestPurpose::UploadSavedNotificationSound, None);
-    session.settings.sessions_mutating = true;
+    session.settings.sessions_op.begin(login);
     session.settings.tone_upload = ToneUpload::Uploading {
         name: "Chime".into(),
         target: ToneTarget::Reaction,
     };
     session.settle_account_requests();
-    assert!(!session.settings.sessions_mutating);
+    assert!(!session.settings.sessions_op.is_mutating());
     assert!(matches!(
         session.settings.tone_upload,
         ToneUpload::Failed(_)
@@ -366,7 +372,7 @@ fn storage_statistics_answer_cached_by_purpose() {
     let (mut without_purpose, sink2) = session();
     let seq = AtomicU64::new(0);
     let extra = with_purpose.request(RequestPurpose::GetStorageStatistics, None);
-    with_purpose.settings.storage_stats_loading = true;
+    with_purpose.settings.storage_stats.begin();
     apply_json(
         &mut with_purpose,
         &seq,
@@ -376,7 +382,11 @@ fn storage_statistics_answer_cached_by_purpose() {
             extra.0
         ),
     );
-    let stats = with_purpose.settings.storage_stats.expect("stats cached");
+    let stats = with_purpose
+        .settings
+        .storage_stats
+        .data()
+        .expect("stats cached");
     assert_eq!(stats.total_size, 6000);
     assert!(
         stats
@@ -385,7 +395,7 @@ fn storage_statistics_answer_cached_by_purpose() {
             .any(|t| t.file_type == "fileTypeSecret" && t.size == 4000 && t.count == 1),
         "secret category present"
     );
-    assert!(!with_purpose.settings.storage_stats_loading);
+    assert!(!with_purpose.settings.storage_stats.is_loading());
 
     // A stray `storageStatistics` (no matching purpose) is ignored.
     let seq2 = AtomicU64::new(0);
@@ -395,7 +405,7 @@ fn storage_statistics_answer_cached_by_purpose() {
         &sink2,
         r#"{"@type":"storageStatistics","size":1,"count":1,"by_chat":[]}"#,
     );
-    assert!(without_purpose.settings.storage_stats.is_none());
+    assert!(without_purpose.settings.storage_stats.data().is_none());
 }
 
 #[test]
@@ -403,7 +413,7 @@ fn storage_statistics_error_clears_loading() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetStorageStatistics, None);
-    session.settings.storage_stats_loading = true;
+    session.settings.storage_stats.begin();
     apply_json(
         &mut session,
         &seq,
@@ -413,8 +423,12 @@ fn storage_statistics_error_clears_loading() {
             extra.0
         ),
     );
-    assert!(session.settings.storage_stats.is_none());
-    assert!(!session.settings.storage_stats_loading);
+    assert!(session.settings.storage_stats.data().is_none());
+    assert!(!session.settings.storage_stats.is_loading());
+    assert!(
+        session.settings.storage_stats.error().is_some(),
+        "the overlay draws the failure"
+    );
 }
 
 #[test]
@@ -465,9 +479,17 @@ fn opening_a_chat_clears_viewed_ids_for_that_generation() {
     let seq = AtomicU64::new(0);
     session.open_chat(ChatId(1));
     session.mark_viewed(ChatId(1), &[MessageId(5)]);
-    assert!(session.histories.get(&1).unwrap().viewed.contains(&5));
+    assert!(session.histories.get(&1).unwrap().views.is_viewed(5));
     session.open_chat(ChatId(1));
-    assert!(session.histories.get(&1).unwrap().viewed.is_empty());
+    assert!(
+        session
+            .histories
+            .get(&1)
+            .unwrap()
+            .views
+            .done_ids()
+            .is_empty()
+    );
     apply_json(
         &mut session,
         &seq,
@@ -529,14 +551,14 @@ fn update_chat_photo_swaps_and_clears() {
 fn topic_selection_state() {
     let (mut session, _sink) = session();
     session.open_chat(ChatId(16));
-    assert_eq!(session.open_topic, None);
+    assert_eq!(session.open_forum_topic(), None);
     session.select_topic(ChatId(16), 2);
-    assert_eq!(session.open_topic, Some(2));
+    assert_eq!(session.open_forum_topic(), Some(2));
     session.deselect_topic();
-    assert_eq!(session.open_topic, None);
+    assert_eq!(session.open_forum_topic(), None);
     session.select_topic(ChatId(16), 2);
     session.open_chat(ChatId(17));
-    assert_eq!(session.open_topic, None);
+    assert_eq!(session.open_forum_topic(), None);
 }
 
 #[test]

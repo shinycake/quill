@@ -10,7 +10,25 @@ impl Session {
     pub(crate) fn mark_saved_sounds_stale(&mut self) {
         self.requests
             .take_purpose(RequestPurpose::GetSavedNotificationSounds);
-        self.settings.saved_sounds_stale = true;
+        self.settings.saved_sounds.outdate();
+    }
+
+    /// A `setAccountTtl` or `deleteAccount` is out: one write at a time. A
+    /// `getAccountTtl` in flight does not block a write.
+    pub fn account_ttl_write_pending(&self) -> bool {
+        self.requests.pending.values().any(|pending| {
+            matches!(
+                pending.purpose,
+                RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { .. })
+                    | RequestPurpose::DeleteAccount
+            )
+        })
+    }
+
+    /// The saved-sound list is owed a fetch: it changed, and no request
+    /// for it is out (`Fetch::Outdated`).
+    pub fn saved_sounds_owed(&self) -> bool {
+        self.settings.saved_sounds.is_outdated()
     }
 
     /// `notificationSound`: the new sound joins the front of the list
@@ -22,10 +40,11 @@ impl Session {
         };
         self.remember_files(std::slice::from_ref(&sound.sound));
         let sound_id = sound.id;
-        self.settings
-            .saved_notification_sounds
-            .retain(|saved| saved.id != sound_id);
-        self.settings.saved_notification_sounds.insert(0, sound);
+        self.settings.saved_sounds.insert_data_if_missing(Vec::new);
+        if let Some(saved) = self.settings.saved_sounds.data_mut() {
+            saved.retain(|saved| saved.id != sound_id);
+            saved.insert(0, sound);
+        }
         self.mark_saved_sounds_stale();
         let target = match &self.settings.tone_upload {
             ToneUpload::Uploading { target, .. } => Some(*target),

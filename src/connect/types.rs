@@ -284,6 +284,16 @@ pub enum InstantViewOutcome {
 }
 
 /// Session + outbound sender that auto-replies to `WaitTdlibParameters`.
+/// The call devices' list: never asked for (a call that is coming asks
+/// once), on its way, or in.
+#[derive(Default)]
+pub(crate) enum DeviceListing {
+    #[default]
+    Cold,
+    Listing(std::sync::mpsc::Receiver<Vec<MediaDevice>>),
+    Listed,
+}
+
 pub struct ConnectDriver<S: JsonSender> {
     pub session: Session,
     pub(crate) sender: S,
@@ -310,7 +320,6 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) call_capture: super::call_capture::CallCapture,
     /// The shared screen Quill captures (`connect::call_screen`).
     pub(crate) call_screen: super::call_screen::CallScreen,
-    pub(crate) call_devices_warmed: bool,
     /// Every picture (group-call tracks, streams, 1:1 calls): one live
     /// feed each, newest frame only (`group_calls/live_feeds.rs`).
     pub(crate) live_feeds: super::group_calls::live_feeds::LiveFeeds,
@@ -342,8 +351,9 @@ pub struct ConnectDriver<S: JsonSender> {
     /// (microphone, speaker) ids. `None` means the engine default; no
     /// devices are fabricated, so this can legitimately be empty.
     pub(crate) call_devices_cache: Vec<MediaDevice>,
-    /// The device list on its way (`refresh_call_devices`).
-    pub(crate) call_devices_listing: Option<std::sync::mpsc::Receiver<Vec<MediaDevice>>>,
+    /// Whether the device list was asked for, and is on its way
+    /// (`refresh_call_devices`).
+    pub(crate) call_devices_listing: DeviceListing,
     pub(crate) selected_devices: (Option<String>, Option<String>),
     /// The group calls whose sound you muted for yourself (the live
     /// stream's settings box, the live story's sound toggle).
@@ -356,19 +366,13 @@ pub struct ConnectDriver<S: JsonSender> {
     /// folder's owner (`account_data::claim`).
     pub(crate) claimed_owner: Option<i64>,
     pub(crate) database_key: DatabaseKey,
-    pub(crate) parameters_sent: bool,
-    pub(crate) search_debounce_token: u64,
-    pub(crate) pending_typed_search: Option<(u64, String)>,
-    pub(crate) chat_search_debounce_token: u64,
-    pub(crate) pending_typed_chat_search: Option<(u64, String)>,
     /// Last `chatActionTyping` we sent (Unigram `_lastTypingTime`).
     pub(crate) outgoing_typing: Option<OutgoingTyping>,
     /// Last `chatActionRecordingVoiceNote` (Unigram record button).
     pub(crate) outgoing_voice: Option<OutgoingTyping>,
-    /// tdesktop `saveDraft` clock for the open composer.
-    pub(crate) draft_clock: DraftSaveClock,
-    pub(crate) draft_save_token: u64,
-    pub(crate) pending_draft: Option<PendingDraft>,
+    /// The composer draft save waiting for its quiet window (tdesktop
+    /// `saveDraft`), or kept after a failed send.
+    pub(crate) pending_draft: crate::state::debounce::Debounce<HeldDraft>,
     /// Q1: idempotent reads waiting out a 429 before being re-sent.
     pub(crate) flood_retries: Vec<super::flood_retry::FloodRetry>,
     /// Q1: re-send count per request id that hit a rate limit.
@@ -393,8 +397,43 @@ pub(crate) struct OutgoingTyping {
     pub(crate) last_sent_ms: u64,
 }
 
+/// A draft save that has not gone out.
+pub(crate) enum HeldDraft {
+    /// Waiting out the quiet window that began at `started_ms`.
+    Quiet {
+        started_ms: u64,
+        draft: PendingDraft,
+    },
+    /// The send failed: the save waits for the next flush, typing or chat
+    /// leave.
+    Kept(PendingDraft),
+}
+
+impl HeldDraft {
+    pub(crate) fn draft(&self) -> &PendingDraft {
+        match self {
+            Self::Quiet { draft, .. } | Self::Kept(draft) => draft,
+        }
+    }
+
+    pub(crate) fn into_draft(self) -> PendingDraft {
+        match self {
+            Self::Quiet { draft, .. } | Self::Kept(draft) => draft,
+        }
+    }
+
+    /// tdesktop's `saveDraft` clock: running only in a quiet window.
+    pub(crate) fn clock(&self) -> DraftSaveClock {
+        match self {
+            Self::Quiet { started_ms, .. } => DraftSaveClock::Armed {
+                first_edit_ms: *started_ms,
+            },
+            Self::Kept(_) => DraftSaveClock::Idle,
+        }
+    }
+}
+
 pub(crate) struct PendingDraft {
-    pub(crate) token: u64,
     pub(crate) chat_id: ChatId,
     /// The slot the edit belongs to, fixed when the timer was armed: a
     /// topic or thread switch before it fires still saves to the right one.

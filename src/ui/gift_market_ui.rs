@@ -146,13 +146,13 @@ impl QuillApp {
         match popped {
             Some(MarketBox::Buy) if !still(&MarketBox::Buy) => {
                 if let Some(market) = self.gift_market_mut() {
-                    market.buy.take_if(|buy| !buy.sending);
+                    market.buy.take_if(|buy| !buy.sending());
                 }
             }
             Some(MarketBox::Resale) if !still(&MarketBox::Resale) => {
                 if let Some(market) = self.gift_market_mut() {
                     market.resale = None;
-                    market.buy.take_if(|buy| !buy.sending);
+                    market.buy.take_if(|buy| !buy.sending());
                 }
             }
             _ => {}
@@ -237,7 +237,7 @@ impl QuillApp {
             return;
         };
         let next = match state.choose_box(&recipient, auction_about_shown(), now_unix()) {
-            AuctionBoxChoice::Bid => MarketBox::AuctionBid { gift_id },
+            AuctionBoxChoice::Bid => MarketBox::bid(gift_id),
             AuctionBoxChoice::ChangeRecipient => MarketBox::ChangeRecipient { gift_id },
             AuctionBoxChoice::Info => MarketBox::AuctionInfo { gift_id },
             AuctionBoxChoice::About => MarketBox::AuctionAbout { gift_id },
@@ -433,7 +433,7 @@ impl QuillApp {
                 MarketBox::AuctionAbout { gift_id } => this.auction_about_box(gift_id, cx),
                 MarketBox::AuctionInfo { gift_id } => this.auction_info_box(gift_id, cx),
                 MarketBox::AuctionSend { gift_id } => this.auction_send_box(gift_id, cx),
-                MarketBox::AuctionBid { gift_id } => this.auction_bid_box(gift_id, cx),
+                MarketBox::AuctionBid { gift_id, .. } => this.auction_bid_box(gift_id, cx),
                 MarketBox::AuctionBought { gift_id } => this.auction_bought_box(gift_id, cx),
                 MarketBox::ChangeRecipient { gift_id } => this.change_recipient_box(gift_id, cx),
                 MarketBox::ActiveAuctions => this.active_auctions_box(cx),
@@ -612,7 +612,7 @@ crate::ui::shell::register_dialogs! {
         3860,
         |app| {
             !app.gift_market.stack.is_empty()
-                && !app.session().is_some_and(|s| s.payments.hub.premium_open)
+                && !app.session().is_some_and(|s| s.payments.hub.premium_open())
         },
         QuillApp::build_gift_market_dialog,
     )

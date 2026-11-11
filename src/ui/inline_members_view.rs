@@ -31,12 +31,19 @@ struct MemberRow {
     is_bot: bool,
 }
 
+/// Where the member list stands. `Loading` holds the last page while a
+/// membership change refetches it; `Failed` holds no rows.
+enum MembersStage {
+    Loading,
+    Ready,
+    Failed(String),
+}
+
 /// The rows of the list and where they stand.
 struct MembersView {
     rows: Vec<MemberRow>,
     total: i32,
-    loading: bool,
-    failed: Option<String>,
+    stage: MembersStage,
     /// The members are hidden from the viewer: this is the admin list.
     admins_only: bool,
 }
@@ -52,7 +59,8 @@ impl QuillApp {
         let session = self.session()?;
         let chat_id = shape.chat;
         let view = self.inline_members_view(shape);
-        if view.failed.is_some() && shape.is_channel && view.rows.is_empty() {
+        if matches!(view.stage, MembersStage::Failed(_)) && shape.is_channel && view.rows.is_empty()
+        {
             return None;
         }
         let group_total = if shape.is_basic {
@@ -131,7 +139,8 @@ impl QuillApp {
                 .child(text)
                 .into_any_element()
         };
-        if let Some(message) = view.failed.clone().filter(|_| view.rows.is_empty()) {
+        if let (MembersStage::Failed(message), true) = (&view.stage, view.rows.is_empty()) {
+            let message = message.clone();
             list = list.child(hint(message)).child(ghost_text_button(
                 "inline-members-retry",
                 tr(keys::Q_MEDIA_RETRY),
@@ -140,7 +149,7 @@ impl QuillApp {
                 }),
             ));
         } else if view.rows.is_empty() {
-            list = list.child(hint(if view.loading {
+            list = list.child(hint(if matches!(view.stage, MembersStage::Loading) {
                 tr(keys::Q_MEDIA_LOADING_MEMBERS).to_string()
             } else {
                 tr(keys::Q_MEDIA_NO_MEMBERS).to_string()
@@ -149,7 +158,7 @@ impl QuillApp {
         for row in view.rows.iter().take(shown) {
             list = list.child(self.inline_member_row(chat_id, row, &roots, cx));
         }
-        if view.loading && !view.rows.is_empty() {
+        if matches!(view.stage, MembersStage::Loading) && !view.rows.is_empty() {
             list = list.child(hint(tr(keys::Q_MEDIA_LOADING).to_string()));
         }
         block = block.child(list);
@@ -168,8 +177,7 @@ impl QuillApp {
         let empty = MembersView {
             rows: Vec::new(),
             total: 0,
-            loading: true,
-            failed: None,
+            stage: MembersStage::Loading,
             admins_only: false,
         };
         let Some(session) = self.session() else {
@@ -185,7 +193,7 @@ impl QuillApp {
                 .supergroup_members
                 .get(&(shape.chat.0, filter))
         };
-        let (members, total, loading, failed) = match fetch {
+        let (members, total, stage) = match fetch {
             Some(SupergroupMembersFetch::Loaded {
                 members,
                 total_count,
@@ -197,10 +205,10 @@ impl QuillApp {
                         total: *total_count,
                     }));
                 }
-                (members.clone(), *total_count, false, None)
+                (members.clone(), *total_count, MembersStage::Ready)
             }
             Some(SupergroupMembersFetch::Failed(message)) => {
-                (Vec::new(), 0, false, Some(message.clone()))
+                (Vec::new(), 0, MembersStage::Failed(message.clone()))
             }
             Some(SupergroupMembersFetch::Loading) | None => {
                 let snapshot = self.inline_members.snapshot.borrow();
@@ -208,8 +216,8 @@ impl QuillApp {
                     .as_ref()
                     .filter(|s| s.chat == shape.chat && !admins_only)
                 {
-                    Some(last) => (last.members.clone(), last.total, true, None),
-                    None => (Vec::new(), 0, true, None),
+                    Some(last) => (last.members.clone(), last.total, MembersStage::Loading),
+                    None => (Vec::new(), 0, MembersStage::Loading),
                 }
             }
         };
@@ -253,8 +261,7 @@ impl QuillApp {
         MembersView {
             rows,
             total,
-            loading,
-            failed,
+            stage,
             admins_only,
         }
     }
@@ -280,7 +287,7 @@ impl QuillApp {
         } else {
             (row.status.display(), row.status.is_online())
         };
-        let badge = member_badge(row.member.status, &row.member.tag);
+        let badge = member_badge(row.member.status(), &row.member.tag);
         let id = row.user_id.unwrap_or_default();
         let mut line = div()
             .id(format!("inline-member-{id}"))

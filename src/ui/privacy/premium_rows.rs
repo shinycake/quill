@@ -121,7 +121,7 @@ impl QuillApp {
         if key == PrivacySettingKey::ShowStatus
             && last_seen_warning_due(&detail, self.privacy_premium(), last_seen_warning_seen())
         {
-            self.privacy.last_seen_warning = Some(detail);
+            self.privacy.layer.warn_last_seen(detail);
             self.open_box(DialogKind::LastSeenWarning);
             cx.notify();
             return;
@@ -154,14 +154,14 @@ impl QuillApp {
 
     fn confirm_last_seen_warning(&mut self, cx: &mut Context<Self>) {
         set_last_seen_warning_seen(true);
-        if let Some(detail) = self.privacy.last_seen_warning.take() {
+        if let Some(detail) = self.privacy.layer.take_last_seen_warning() {
             self.send_privacy_rule(PrivacySettingKey::ShowStatus, detail, cx);
         }
         cx.notify();
     }
 
     fn dismiss_last_seen_warning(&mut self, cx: &mut Context<Self>) {
-        self.privacy.last_seen_warning = None;
+        self.privacy.layer.take_last_seen_warning();
         cx.notify();
     }
 
@@ -220,7 +220,7 @@ crate::ui::shell::register_dialogs! {
     /// Before a free account first hides its last seen.
     LastSeenWarning => DialogSpec::new(
         3796,
-        |app| app.privacy.last_seen_warning.is_some(),
+        |app| app.privacy.layer.last_seen_warning().is_some(),
         QuillApp::build_last_seen_warning,
     )
     .close(|app, _, cx| app.dismiss_last_seen_warning(cx)),

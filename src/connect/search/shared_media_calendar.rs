@@ -49,8 +49,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(SharedMediaJump::Stale);
         }
         let Some((target, day)) = nearest_media_day(&calendar.days, day_number) else {
-            self.session.search.date_jump_note =
-                Some(crate::lang::tr(crate::lang::keys::Q_MISC_NO_MEDIA_TO_JUMP_TO).to_string());
+            self.session.search.date_jump =
+                crate::state::DateJumpAnswer::NotFound(crate::state::DateJumpNote::NoMedia);
             return Ok(SharedMediaJump::NoMedia);
         };
         let (from, offset) = (

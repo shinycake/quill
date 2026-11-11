@@ -55,8 +55,7 @@ fn sticker(id: i64) -> StickerItem {
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,
-        requires_premium: false,
-        premium_animation: None,
+        premium: None,
     }
 }
 
@@ -76,7 +75,7 @@ register_demos![
     DemoSpec::chat_list("ready-sticker-suggest").setup(|app, window, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             let stickers = &mut session.stickers.stickers;
-            stickers.suggest_for = Some(PUMPKIN.into());
+            stickers.suggest_for = quill::state::SuggestFor::Asked(PUMPKIN.into());
             stickers.suggestions = (1..=6).map(sticker).collect();
         }
         draft(app, PUMPKIN, window, cx);

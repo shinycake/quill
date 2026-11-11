@@ -407,7 +407,7 @@ impl QuillApp {
                     this.market_back(cx);
                     this.close_kit_dialog_if_done(DialogKind::GiftMarket, window, cx);
                 } else {
-                    this.market_push(MarketBox::AuctionBid { gift_id }, cx);
+                    this.market_push(MarketBox::bid(gift_id), cx);
                 }
             },
         ));
@@ -492,7 +492,8 @@ impl QuillApp {
                     cx,
                 ));
             }
-            None | Some(Fetch::Idle | Fetch::Loading { stale: None }) => {
+            None
+            | Some(Fetch::Idle | Fetch::Outdated(None) | Fetch::Loading { stale: None, .. }) => {
                 body = body.child(
                     div()
                         .text_sm()
@@ -500,7 +501,13 @@ impl QuillApp {
                         .child(tr(keys::Q_MONEY_LOADING)),
                 );
             }
-            Some(Fetch::Ready(list) | Fetch::Loading { stale: Some(list) }) => {
+            Some(
+                Fetch::Ready(list)
+                | Fetch::Outdated(Some(list))
+                | Fetch::Loading {
+                    stale: Some(list), ..
+                },
+            ) => {
                 for gift in list {
                     let heading = if gift.number > 0 {
                         format!("{title} #{}", group_digits(i64::from(gift.number)))
@@ -655,7 +662,7 @@ impl QuillApp {
             }
         });
         self.gift_market.recipient = recipient;
-        self.market_push(MarketBox::AuctionBid { gift_id }, cx);
+        self.market_push(MarketBox::bid(gift_id), cx);
     }
 
     pub(super) fn active_auctions_box(&mut self, cx: &mut Context<Self>) -> BoxView {

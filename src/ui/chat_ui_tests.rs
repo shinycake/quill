@@ -62,7 +62,7 @@ fn open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, chat: ChatId) {
 /// Open the three surfaces the old hand list missed, and a reply.
 fn open_chat_surfaces(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     app.update(vcx, |app, cx| {
-        app.chat_ui.rich_editor_open = true;
+        app.chat_ui.rich.set_editor(true);
         app.chat_ui.send_as_open = true;
         app.chat_ui.link_popup = Some(LinkPopup {
             position: point(px(10.), px(10.)),
@@ -83,7 +83,7 @@ struct Shown {
 
 fn shown(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Shown {
     app.read_with(vcx, |app, _| Shown {
-        rich_editor: app.chat_ui.rich_editor_open,
+        rich_editor: app.chat_ui.rich.editor_open(),
         send_as: app.chat_ui.send_as_open,
         link_popup: app.chat_ui.link_popup.is_some(),
         reply: app.chat_ui.has_reply(),
@@ -166,7 +166,7 @@ fn a_reply_aimed_at_the_next_chat_comes_along(cx: &mut TestAppContext) {
     app.update(&mut vcx, |app, _| {
         let reply = ComposerReplyTo::new(CHAT, MessageId(1)).into_chat(other);
         app.chat_ui.set_reply(Some(reply));
-        app.chat_ui.rich_editor_open = true;
+        app.chat_ui.rich.set_editor(true);
     });
     open(&app, &mut vcx, other);
     let after = shown(&app, &mut vcx);
@@ -214,7 +214,7 @@ fn a_chat_the_reducer_closed_does_not_keep_its_bars(cx: &mut TestAppContext) {
     open_chat_surfaces(&app, &mut vcx);
     app.update(&mut vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.open_chat = None;
+            session.open = quill::state::OpenView::of(None);
         }
         cx.notify();
     });
@@ -310,7 +310,7 @@ fn another_chat_drops_the_reschedule_picker_and_the_scheduled_list(cx: &mut Test
     });
     frames(&mut vcx);
     app.read_with(&vcx, |app, _| {
-        assert!(app.chat_ui.schedule_picker.is_some() && app.chat_ui.schedule_popup_open);
+        assert!(app.chat_ui.schedule_popup_shown());
     });
     open(&app, &mut vcx, other);
     app.read_with(&vcx, |app, _| {
@@ -318,7 +318,7 @@ fn another_chat_drops_the_reschedule_picker_and_the_scheduled_list(cx: &mut Test
             app.chat_ui.schedule_picker.is_none(),
             "the picker was the last chat's"
         );
-        assert!(!app.chat_ui.schedule_popup_open);
+        assert!(!app.chat_ui.schedule_popup_shown());
         assert!(
             !app.chat_ui.scheduled_dialog_open,
             "the list was the last chat's"
@@ -333,14 +333,34 @@ fn another_chat_closes_the_info_cards(cx: &mut TestAppContext) {
     let other = other_chat(&app, &mut vcx);
     open(&app, &mut vcx, CHAT);
     app.update(&mut vcx, |app, cx| {
-        app.chat_ui.topic_info_open = true;
-        app.chat_ui.thread_info_open = true;
+        app.chat_ui.info_card = crate::ui::chat_ui_state::InfoCard::Topic;
         cx.notify();
     });
     open(&app, &mut vcx, other);
     app.read_with(&vcx, |app, _| {
-        assert!(!app.chat_ui.topic_info_open && !app.chat_ui.thread_info_open);
+        assert_eq!(
+            app.chat_ui.info_card,
+            crate::ui::chat_ui_state::InfoCard::Closed
+        );
     });
+}
+
+/// A thread's card opens over a topic's; closing the thread brings the
+/// topic's back.
+#[test]
+fn a_thread_card_keeps_the_topic_card_under_it() {
+    use crate::ui::chat_ui_state::InfoCard;
+    let mut card = InfoCard::Closed;
+    card.toggle_topic();
+    card.toggle_thread();
+    assert!(card.topic() && card.thread());
+    card.close_thread();
+    assert_eq!(card, InfoCard::Topic);
+    card.toggle_thread();
+    card.toggle_thread();
+    assert_eq!(card, InfoCard::Topic);
+    card.toggle_topic();
+    assert_eq!(card, InfoCard::Closed);
 }
 
 /// Round 8, 2a: a new poll or checklist goes to the chat shown at Create,
@@ -554,14 +574,11 @@ fn another_chat_drops_the_secret_inline_bot_alert(cx: &mut TestAppContext) {
     let other = other_chat(&app, &mut vcx);
     open(&app, &mut vcx, CHAT);
     app.update(&mut vcx, |app, _| {
-        app.chat_ui.pending_inline_bot_alert = Some("@bot query".into());
+        app.chat_ui.bot_alert = crate::ui::inline_mode::BotAlert::Switch("@bot query".into());
     });
     open(&app, &mut vcx, other);
     assert!(
-        app.read_with(&vcx, |app, _| app
-            .chat_ui
-            .pending_inline_bot_alert
-            .is_none()),
+        app.read_with(&vcx, |app, _| !app.chat_ui.bot_alert.is_pending()),
         "the alert stayed with the chat it was raised in"
     );
 }

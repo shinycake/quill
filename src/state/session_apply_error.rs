@@ -20,7 +20,21 @@ impl Session {
             self.users_state.saves.failed(id, error_reason(&err));
         }
         if let Some(slot) = extra.and_then(|id| self.groups.new_chats.type_saves.get_mut(&id)) {
-            *slot = TypeSave::Failed(super::request_errors::error_reason(&err));
+            // A link problem is worded as the Edit box words it.
+            let problem = (pending.map(|p| p.purpose)
+                == Some(RequestPurpose::SetSupergroupUsername))
+            .then(|| crate::group_type::username_save_problem(err.server_type.as_deref()))
+            .flatten();
+            *slot = TypeSave::Failed(match problem {
+                Some(problem) => crate::lang::tr(problem.text()).to_string(),
+                None => super::request_errors::error_reason(&err),
+            });
+        }
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::GetPaidReactionSenders
+            && let Some(chat) = pending.chat_id
+        {
+            self.payments.paid.senders_failed(chat.0);
         }
         if matches!(
             pending.map(|p| p.purpose),
@@ -83,7 +97,7 @@ impl Session {
             // Slice CL2: drop the refused archive-settings flip;
             // the panel re-fetches the truth on next open.
             Some(RequestRollback::ArchiveChatListSettings { previous }) => {
-                self.chat_list.archive_chat_list_settings = previous;
+                self.chat_list.edit_archive_settings(previous);
             }
             Some(
                 rollback @ (RequestRollback::JoinByRequest { .. }

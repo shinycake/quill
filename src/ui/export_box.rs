@@ -5,6 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::export_state::ExportBox;
 use super::folder_share::finish_dialog;
 use super::shell::{DialogKind, QuillShell};
 use gpui_kit::component::button::*;
@@ -33,14 +34,23 @@ pub(super) enum DateField {
     Till,
 }
 
+/// Which page of the options box is showing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ExportPage {
+    Options,
+    /// The calendar is open for this end of the range, on this month.
+    Calendar {
+        field: DateField,
+        month: YearMonth,
+    },
+}
+
 /// The box's choices while it is open.
 #[derive(Clone)]
 pub(super) struct ChatExportDraft {
     pub settings: ExportSettings,
     size_slider: Entity<SliderState>,
-    /// The calendar is open for this end of the range.
-    pub(super) picking: Option<DateField>,
-    month: YearMonth,
+    pub(super) page: ExportPage,
     error: Option<String>,
 }
 
@@ -69,7 +79,7 @@ impl QuillApp {
             .session()
             .is_some_and(|s| s.settings.chat_export.is_some())
         {
-            self.dialogs.chat_export_progress_hidden = false;
+            self.set_chat_export_view(quill::export::ExportView::Shown);
             self.open_box(DialogKind::ChatExport);
             cx.notify();
             return;
@@ -89,21 +99,32 @@ impl QuillApp {
         });
         cx.subscribe(&slider, |this, _, event: &SliderEvent, cx| {
             let (SliderEvent::Change(value) | SliderEvent::Release(value)) = event;
-            if let Some(draft) = this.dialogs.chat_export_dialog.as_mut() {
+            if let Some(draft) = this.dialogs.chat_export.draft_mut() {
                 draft.settings.size_limit = size_limit_by_index(value.end().round() as usize);
             }
             cx.notify();
         })
         .detach();
         self.open_box(DialogKind::ChatExport);
-        self.dialogs.chat_export_dialog = Some(ChatExportDraft {
+        self.dialogs.chat_export = ExportBox::Options(ChatExportDraft {
             settings,
             size_slider: slider,
-            picking: None,
-            month: YearMonth::of(now_unix()),
+            page: ExportPage::Options,
             error: None,
         });
         cx.notify();
+    }
+
+    /// Show or hide the running export's progress box. The choice lives
+    /// with the export in the account's session, so it survives a switch
+    /// to another account and back.
+    pub(super) fn set_chat_export_view(&mut self, view: quill::export::ExportView) {
+        if let Some(export) = self
+            .session_mut()
+            .and_then(|s| s.settings.chat_export.as_mut())
+        {
+            export.view = view;
+        }
     }
 
     /// Start the export with the box's choices. The worker thread pages
@@ -112,7 +133,7 @@ impl QuillApp {
         if quill::agent::ui_driver::guard::refuse_if_injecting("export a chat") {
             return;
         }
-        let Some(draft) = self.screen.dialogs.chat_export_dialog.as_mut() else {
+        let Some(draft) = self.screen.dialogs.chat_export.draft_mut() else {
             return;
         };
         let settings = draft.settings.clone();
@@ -123,10 +144,7 @@ impl QuillApp {
             ))),
         };
         match started {
-            Ok(()) => {
-                self.dialogs.chat_export_dialog = None;
-                self.dialogs.chat_export_progress_hidden = false;
-            }
+            Ok(()) => self.dialogs.chat_export.reset(),
             Err(error) => draft.error = Some(error.to_string()),
         }
         cx.notify();
@@ -144,7 +162,7 @@ impl QuillApp {
             let _ = this.update(cx, |this, cx| {
                 if let Ok(Ok(Some(paths))) = result
                     && let Some(folder) = paths.first()
-                    && let Some(draft) = this.dialogs.chat_export_dialog.as_mut()
+                    && let Some(draft) = this.dialogs.chat_export.draft_mut()
                 {
                     draft.settings.dir = folder.clone();
                 }
@@ -162,13 +180,13 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::ChatExport, |this, _, cx| {
-                this.dialogs.chat_export_dialog = None;
+                this.dialogs.chat_export.reset();
                 // A running export keeps going; its result shows as a note.
-                this.dialogs.chat_export_progress_hidden = true;
+                this.set_chat_export_view(quill::export::ExportView::Hidden);
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            let Some(draft) = this.dialogs.chat_export_dialog.clone() else {
+            let Some(draft) = this.dialogs.chat_export.draft().cloned() else {
                 let (body, footer) = this.chat_export_progress(cx);
                 return finish_dialog(
                     dialog,
@@ -178,9 +196,11 @@ impl QuillApp {
                     on_close,
                 );
             };
-            let (title, body, footer) = match draft.picking {
-                Some(field) => this.chat_export_calendar(&draft, field, cx),
-                None => this.chat_export_options(&draft, cx),
+            let (title, body, footer) = match draft.page {
+                ExportPage::Calendar { field, month } => {
+                    this.chat_export_calendar(&draft, field, month, cx)
+                }
+                ExportPage::Options => this.chat_export_options(&draft, cx),
             };
             finish_dialog(dialog, title, body, Some(footer), on_close)
         })
@@ -209,7 +229,7 @@ impl QuillApp {
                     .label(kind.label())
                     .checked(settings.media.contains(kind))
                     .on_click(cx.listener(move |this, &on, _, cx| {
-                        if let Some(draft) = this.dialogs.chat_export_dialog.as_mut() {
+                        if let Some(draft) = this.dialogs.chat_export.draft_mut() {
                             draft.settings.media = draft.settings.media.with(kind, on);
                         }
                         cx.notify();
@@ -244,7 +264,7 @@ impl QuillApp {
                     .map(|(i, f)| Radio::new(("chat-export-format-item", i)).label(f.label())),
             )
             .on_click(cx.listener(|this, &ix, _, cx| {
-                if let Some(draft) = this.dialogs.chat_export_dialog.as_mut()
+                if let Some(draft) = this.dialogs.chat_export.draft_mut()
                     && let Some(&format) = ExportFormat::ALL.get(ix)
                 {
                     draft.settings.format = format;
@@ -276,14 +296,19 @@ impl QuillApp {
                             &[("to_lowercase", &(label.to_lowercase()).to_string())],
                         ))
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            if let Some(draft) = this.dialogs.chat_export_dialog.as_mut() {
+                            if let Some(draft) = this.dialogs.chat_export.draft_mut() {
                                 let shown = match field {
                                     DateField::From => draft.settings.from,
                                     DateField::Till => draft.settings.till - 1,
                                 };
-                                draft.month =
-                                    YearMonth::of(if shown > 0 { shown } else { now_unix() });
-                                draft.picking = Some(field);
+                                draft.page = ExportPage::Calendar {
+                                    field,
+                                    month: YearMonth::of(if shown > 0 {
+                                        shown
+                                    } else {
+                                        now_unix()
+                                    }),
+                                };
                             }
                             cx.notify();
                         })),
@@ -295,7 +320,7 @@ impl QuillApp {
                             .ghost()
                             .small()
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                if let Some(draft) = this.dialogs.chat_export_dialog.as_mut() {
+                                if let Some(draft) = this.dialogs.chat_export.draft_mut() {
                                     match field {
                                         DateField::From => draft.settings.from = 0,
                                         DateField::Till => draft.settings.till = 0,
@@ -315,7 +340,7 @@ impl QuillApp {
                     .checked(settings.only_mine)
                     .accessibility_label(tr(keys::EXPORT_OPTION_ONLY_MY))
                     .on_click(cx.listener(|this, &on, _, cx| {
-                        if let Some(draft) = this.dialogs.chat_export_dialog.as_mut() {
+                        if let Some(draft) = this.dialogs.chat_export.draft_mut() {
                             draft.settings.only_mine = on;
                         }
                         cx.notify();
@@ -391,7 +416,7 @@ impl QuillApp {
                     .label(tr(keys::CANCEL))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.dialogs.chat_export_dialog = None;
+                        this.dialogs.chat_export.reset();
                         cx.notify();
                         this.close_kit_dialog_if_done(DialogKind::ChatExport, window, cx);
                     })),
@@ -413,11 +438,11 @@ impl QuillApp {
         &self,
         draft: &ChatExportDraft,
         field: DateField,
+        month: YearMonth,
         cx: &mut Context<Self>,
     ) -> (String, AnyElement, AnyElement) {
         let theme = cx.theme().clone();
         let today = local_day_number(now_unix());
-        let month = draft.month;
         let current = YearMonth::of(now_unix());
         let selected = match field {
             DateField::From => draft.settings.from,
@@ -436,8 +461,11 @@ impl QuillApp {
                     .tooltip(tr(keys::Q_OPS_PREVIOUS_MONTH))
                     .accessibility_label(tr(keys::Q_OPS_PREVIOUS_MONTH))
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(draft) = this.dialogs.chat_export_dialog.as_mut() {
-                            draft.month = month.prev();
+                        if let Some(draft) = this.dialogs.chat_export.draft_mut() {
+                            draft.page = ExportPage::Calendar {
+                                field,
+                                month: month.prev(),
+                            };
                         }
                         cx.notify();
                     })),
@@ -458,8 +486,11 @@ impl QuillApp {
                     .tooltip(tr(keys::Q_OPS_NEXT_MONTH))
                     .accessibility_label(tr(keys::Q_OPS_NEXT_MONTH))
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(draft) = this.dialogs.chat_export_dialog.as_mut() {
-                            draft.month = month.next();
+                        if let Some(draft) = this.dialogs.chat_export.draft_mut() {
+                            draft.page = ExportPage::Calendar {
+                                field,
+                                month: month.next(),
+                            };
                         }
                         cx.notify();
                     })),
@@ -512,12 +543,12 @@ impl QuillApp {
                         .tab_index(0)
                         .hover(|s| s.bg(theme.secondary_hover))
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            if let Some(draft) = this.dialogs.chat_export_dialog.as_mut() {
+                            if let Some(draft) = this.dialogs.chat_export.draft_mut() {
                                 match field {
                                     DateField::From => draft.settings.set_from_day(dn),
                                     DateField::Till => draft.settings.set_till_day(dn),
                                 }
-                                draft.picking = None;
+                                draft.page = ExportPage::Options;
                             }
                             cx.notify();
                         }));
@@ -547,8 +578,8 @@ impl QuillApp {
                 .label(tr(keys::Q_OPS_BACK))
                 .ghost()
                 .on_click(cx.listener(|this, _, _, cx| {
-                    if let Some(draft) = this.dialogs.chat_export_dialog.as_mut() {
-                        draft.picking = None;
+                    if let Some(draft) = this.dialogs.chat_export.draft_mut() {
+                        draft.page = ExportPage::Options;
                     }
                     cx.notify();
                 })),
@@ -571,13 +602,17 @@ crate::ui::shell::register_dialogs! {
     ChatExport => DialogSpec::new(
         1500,
         |app| {
-            app.dialogs.chat_export_dialog.is_some()
-                || (!app.dialogs.chat_export_progress_hidden
-                    && app.session().is_some_and(|s| s.settings.chat_export.is_some()))
+            app.dialogs.chat_export.is_options()
+                || app.session().is_some_and(|s| {
+                    s.settings
+                        .chat_export
+                        .as_ref()
+                        .is_some_and(|export| export.view == quill::export::ExportView::Shown)
+                })
         },
         QuillApp::build_chat_export_dialog,
     )
-    .close(|app, _, cx| { app.dialogs.chat_export_dialog = None; app.dialogs.chat_export_progress_hidden = true; cx.notify(); }),
+    .close(|app, _, cx| { app.dialogs.chat_export.reset(); app.set_chat_export_view(quill::export::ExportView::Hidden); cx.notify(); }),
 }
 
 #[cfg(test)]

@@ -105,7 +105,7 @@ impl Harness {
     pub(super) fn open_chat(&self, cx: &mut TestAppContext) -> Option<ChatId> {
         self.settle(cx);
         self.app
-            .read_with(cx, |app, _| app.session().and_then(|s| s.open_chat))
+            .read_with(cx, |app, _| app.session().and_then(|s| s.open_chat_id()))
     }
 
     fn window_chats(&self, cx: &mut TestAppContext) -> Vec<ChatId> {
@@ -128,7 +128,7 @@ impl Harness {
                 MessageContent::Text(text) => text.text.clone(),
                 _ => String::new(),
             };
-            Some((text, last.reply_to.as_ref().map(|reply| reply.message_id)))
+            Some((text, last.reply_to.as_ref().map(|reply| reply.message_id())))
         })
     }
 
@@ -228,8 +228,8 @@ fn a_reply_started_in_a_chat_window_stays_in_that_window(cx: &mut TestAppContext
     h.settle(cx);
     let (window_menu, main_menu) = h.app.read_with(cx, |app, _| {
         let slot = app.windows.slot_for(OTHER).expect("slot");
-        let window_menu = slot.borrow().message_ui.menu;
-        (window_menu, app.message_ui.menu)
+        let window_menu = slot.borrow().message_ui.menu.at();
+        (window_menu, app.message_ui.menu.at())
     });
     assert_eq!(
         window_menu.map(|menu| (menu.chat_id, menu.message_id)),
@@ -388,7 +388,7 @@ fn a_chat_picked_inside_a_chat_window_opens_in_the_main_window(cx: &mut TestAppC
     assert_eq!(h.window_chats(cx), vec![OTHER], "the window kept its chat");
     let window_view = h.app.update(cx, |app, cx| {
         app.in_window_scope(Some(OTHER), cx, |app, _| {
-            app.session().and_then(|session| session.open_chat)
+            app.session().and_then(|session| session.open_chat_id())
         })
     });
     assert_eq!(window_view, Some(Some(OTHER)));
@@ -516,12 +516,14 @@ fn a_chat_window_searches_and_forwards_with_fields_of_its_own(cx: &mut TestAppCo
         (
             slot.chat_search_input.read(cx).value().to_string(),
             app.search_ui.chat_input.read(cx).value().to_string(),
-            app.session().is_some_and(|s| s.search.chat_search.open),
+            app.session()
+                .is_some_and(|s| s.search.chat_search.is_open()),
         )
     });
     let window_open = h.app.update(cx, |app, cx| {
         app.in_window_scope(Some(OTHER), cx, |app, _| {
-            app.session().is_some_and(|s| s.search.chat_search.open)
+            app.session()
+                .is_some_and(|s| s.search.chat_search.is_open())
         })
     });
     assert_eq!(window_text, "later");
@@ -590,12 +592,20 @@ fn a_window_a_switch_closed_reports_nothing_afterwards(cx: &mut TestAppContext) 
                 .and_then(|open| open.view.upgrade())
         })
         .expect("the window's view");
-    let closed_by_switch = h.app.update(cx, |app, cx| {
+    let kept = h.app.update(cx, |app, cx| {
         app.close_chat_windows_for_switch(cx);
-        // Before the deferred close report runs.
-        view.read(cx).is_closed()
+        assert!(!app.windows.lists_view(view.entity_id()), "unlisted");
+        app.windows.closed.len()
     });
-    assert!(closed_by_switch, "the late report has nothing left to do");
+    // The late report, before the platform's own removal runs.
+    view.update(cx, |view, cx| view.closing(true, None, cx));
+    h.app.read_with(cx, |app, _| {
+        assert_eq!(
+            app.windows.closed.len(),
+            kept,
+            "the late report has nothing left to do"
+        );
+    });
 }
 
 #[gpui_kit::test]
@@ -983,7 +993,7 @@ fn a_pending_chrome_notify_clears_when_the_window_lost_its_view(cx: &mut TestApp
         .app
         .read_with(cx, |app, _| app.windows.slot_for(OTHER))
         .expect("slot");
-    slot.borrow().history.chrome_notify_pending.set(true);
+    slot.borrow().history.chrome_due.borrow_mut().note(3);
     // The window is live, but its session view is gone.
     h.app.update(cx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
@@ -995,7 +1005,7 @@ fn a_pending_chrome_notify_clears_when_the_window_lost_its_view(cx: &mut TestApp
         app.finish_chrome_notify(Some(OTHER), cx);
     });
     assert!(
-        !slot.borrow().history.chrome_notify_pending.get(),
+        !slot.borrow().history.chrome_due.borrow().is_notifying(),
         "the flag cannot stick"
     );
 }
@@ -1098,8 +1108,9 @@ fn a_photo_edit_whose_chat_window_closed_still_lands_in_its_tray(cx: &mut TestAp
                 .unwrap();
                 let item = app.tray_item(0).unwrap();
                 let pixels = image::open(&path).unwrap().to_rgba8();
-                app.viewer.photo_editor =
-                    Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
+                app.viewer
+                    .photo_editor
+                    .open(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
                 app.photo_editor_mut(PhotoEditor::rotate, cx);
                 app.save_photo_editor(window, cx);
             });
@@ -1140,7 +1151,7 @@ fn a_message_photo_edit_whose_chat_window_closed_leaves_no_png(cx: &mut TestAppC
         app.update(cx, |app, cx| {
             app.in_window_of(window, cx, |app, window, cx| {
                 let pixels = image::RgbaImage::from_pixel(59, 11, image::Rgba([4, 5, 6, 255]));
-                app.viewer.photo_editor = Some(PhotoEditor::new(
+                app.viewer.photo_editor.open(PhotoEditor::new(
                     EditorPurpose::MessageEdit {
                         chat: ChatId(1),
                         message: MessageId(2),
@@ -1200,11 +1211,12 @@ fn a_held_send_whose_chat_window_closed_says_it_did_not_go(cx: &mut TestAppConte
                 .unwrap();
                 let item = app.tray_item(0).unwrap();
                 let pixels = image::open(&path).unwrap().to_rgba8();
-                app.viewer.photo_editor =
-                    Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
+                app.viewer
+                    .photo_editor
+                    .open(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
                 app.photo_editor_mut(PhotoEditor::rotate, cx);
                 app.save_photo_editor(window, cx);
-                app.submit_composer(String::new(), window, cx);
+                app.submit_composer(String::new(), Default::default(), window, cx);
                 app.open_photo_editor(0, cx);
             });
         });
@@ -1220,7 +1232,10 @@ fn a_held_send_whose_chat_window_closed_says_it_did_not_go(cx: &mut TestAppConte
             quill::lang::tr(quill::lang::keys::Q_MISC_NOT_SENT_THE_CHAT_CLOSED_BEFORE_THE_PHOTO)
         );
         assert!(app.viewer.photo_editor.is_none(), "no editor opened");
-        assert!(app.viewer.photo_editor_after.is_none(), "the tap is gone");
+        assert!(
+            app.viewer.photo_editor.deferred().is_none(),
+            "the tap is gone"
+        );
         assert!(!app.composer_sends.holds(&original), "the edit landed");
     });
     let edits = quill::scratch::temp_work_dir("quill-edits");

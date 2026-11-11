@@ -162,7 +162,7 @@ impl QuillApp {
         self.session().is_some_and(|session| {
             let stickers = &session.stickers.stickers;
             !stickers.suggestions.is_empty()
-                && self.composer_suggests(stickers.suggest_for.as_deref(), cx)
+                && self.composer_suggests(stickers.suggest_for.emoji(), cx)
         })
     }
 
@@ -285,7 +285,7 @@ impl QuillApp {
         };
         let premium_mark = self
             .session()
-            .filter(|s| sticker.requires_premium && s.premium_badges_shown())
+            .filter(|s| sticker.requires_premium() && s.premium_badges_shown())
             .map(|s| crate::ui::premium_mark::premium_mark(s.my_is_premium()));
         let cell = div()
             .id(SharedString::from(format!(
@@ -366,7 +366,7 @@ impl QuillApp {
             return Some(intro);
         }
         let session = self.session()?;
-        if !session.stickers.stickers.greeting_loaded {
+        if session.stickers.stickers.greeting.is_idle() {
             self.defer_screen(cx, move |this, cx| {
                 if let Some(live) = this.live.as_mut() {
                     let _ = live.driver.fetch_greeting_stickers();
@@ -374,7 +374,7 @@ impl QuillApp {
                 }
             });
         }
-        let sticker = greeting_pick(&session.stickers.stickers.greeting, chat.id.0)?.clone();
+        let sticker = greeting_pick(session.stickers.stickers.greeting.data()?, chat.id.0)?.clone();
         if let Some(file) = sticker.display_file_id()
             && let Some(live) = self.live.as_mut()
         {

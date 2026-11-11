@@ -35,16 +35,21 @@ impl Session {
             if call.state.is_terminal() {
                 self.end_active_call(call);
             } else {
-                if matches!(call.state, CallState::Ready) && active.ready_at.is_none() {
-                    active.ready_at = Some(Instant::now());
-                }
                 if matches!(call.state, CallState::Ready) {
-                    active.ready = call.ready.clone();
+                    match active.ready.as_mut() {
+                        Some(ready) => ready.params = call.ready.clone(),
+                        None => {
+                            active.ready = Some(CallReady {
+                                params: call.ready.clone(),
+                                since: Instant::now(),
+                            })
+                        }
+                    }
                 }
                 active.is_video = call.is_video;
                 // A hang-up in flight keeps showing: the update is where
                 // the call goes back to if the discardCall fails.
-                match self.calls.hang_up.as_mut() {
+                match self.calls.progress.hang_up_mut() {
                     Some(hang_up) if hang_up.call_id == call.id => {
                         hang_up.resume = call.state.clone();
                     }
@@ -89,9 +94,11 @@ impl Session {
         if call.state.is_terminal() {
             // Another call's card still waiting for its rating stays: a
             // call that ended untracked (a missed one) does not replace it.
-            let holds_rating = self.calls.summary.as_ref().is_some_and(|summary| {
-                summary.call_id != call.id && summary.need_rating && summary.rating.is_open()
-            });
+            let holds_rating = self
+                .calls
+                .summary
+                .as_ref()
+                .is_some_and(|summary| summary.call_id != call.id && summary.rating.is_open());
             if !holds_rating {
                 self.calls.summary = Some(CallSummary::from_terminal(call, 0, false));
             }
@@ -171,10 +178,7 @@ impl Session {
         };
         // "Add People" closes with its call: its search goes too.
         self.calls.add_people_search = ShareSearch::default();
-        let duration_secs = active
-            .ready_at
-            .map(|t| t.elapsed().as_secs() as i64)
-            .unwrap_or(0);
+        let duration_secs = active.connected_secs();
         let mut summary =
             CallSummary::from_terminal(call, duration_secs, active.transport.is_connected());
         summary.final_transport = active.transport.state();
@@ -185,17 +189,7 @@ impl Session {
         if !self.note_call_migration(call, &summary) {
             self.calls.summary = Some(summary);
         }
-        if self
-            .calls
-            .hang_up
-            .as_ref()
-            .is_some_and(|hang_up| hang_up.call_id == call.id)
-        {
-            self.calls.hang_up = None;
-        }
-        if self.calls.answered_call == Some(call.id) {
-            self.calls.answered_call = None;
-        }
+        self.calls.progress.call_ended(call.id);
         self.calls
             .busy_decline_queue
             .retain(|(id, _, _)| *id != call.id);
@@ -240,8 +234,10 @@ impl Session {
     /// (`story_stream`); any other live story is not tracked.
     pub(crate) fn accept_group_call_update(&mut self, group_call: &ParsedGroupCall) {
         // TDLib confirms the leave: later joined updates are real again.
-        if !group_call.is_joined && self.calls.left_group_call == Some(group_call.id) {
-            self.calls.left_group_call = None;
+        if !group_call.is_joined
+            && let Some(call) = self.calls.group_call_mut(group_call.id)
+        {
+            call.rejoin.leave_over();
         }
         let watched = self.stories.live.as_ref().map(|live| live.group_call_id);
         if watched == Some(group_call.id) {
@@ -495,7 +491,17 @@ impl Session {
             && tracked.id == group_call_id
         {
             tracked.join_as = pick_join_as(&senders, tracked.join_as, default);
-            tracked.join_as_options = senders;
+            tracked.join_as_options.succeed(senders);
+        }
+    }
+
+    /// `getVideoChatAvailableParticipants` failed: the picker is optional,
+    /// so the call keeps no list and the join goes ahead as yourself.
+    pub(crate) fn fail_group_call_join_as_options(&mut self, group_call_id: i32, error: &str) {
+        if let Some(tracked) = self.calls.active_group_call.as_mut()
+            && tracked.id == group_call_id
+        {
+            tracked.join_as_options.fail(error);
         }
     }
 
@@ -514,7 +520,7 @@ impl Session {
     /// tracked either.
     fn group_call_update_may_take_slot(&self, group_call: &ParsedGroupCall) -> bool {
         if group_call.is_joined {
-            return self.calls.left_group_call != Some(group_call.id);
+            return !self.calls.group_call_left(group_call.id);
         }
         match self.calls.active_group_call.as_ref() {
             Some(tracked) => tracked.id == group_call.id || !tracked.is_joined,
@@ -561,7 +567,7 @@ impl Session {
             if let Some(request) = request {
                 tracked.rejoin.attempt_joined(request);
             }
-            tracked.join_payload = payload;
+            tracked.transport.store_answer(payload);
         }
     }
 
@@ -572,7 +578,7 @@ impl Session {
         if let Some(tracked) = self.calls.active_group_call.as_mut()
             && tracked.id == group_call_id
         {
-            tracked.screen_share_answer = payload;
+            tracked.screen_share.store_answer(payload);
         }
     }
 
@@ -597,7 +603,6 @@ fn apply_group_call_fields(tracked: &mut ActiveGroupCall, group_call: &ParsedGro
     tracked.scheduled_start_date = 0;
     let was_joined = tracked.is_joined;
     tracked.is_joined = group_call.is_joined;
-    tracked.need_rejoin = group_call.need_rejoin;
     tracked.can_be_managed = group_call.can_be_managed;
     tracked.is_owned = group_call.is_owned;
     tracked.participant_count = group_call.participant_count;

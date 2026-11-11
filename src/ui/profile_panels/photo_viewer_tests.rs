@@ -41,7 +41,7 @@ fn the_group_avatar_opens_its_photos_newest_first(cx: &mut TestAppContext) {
 
     let opened = app.read_with(&vcx, |app, _| {
         (
-            app.viewer.extra.profile_owner,
+            app.viewer.state.source().profile_owner(),
             app.viewer.state.current().map(|item| item.message_id.0),
             app.profile_photo_facts()
                 .map(|facts| (facts.header, facts.actions)),

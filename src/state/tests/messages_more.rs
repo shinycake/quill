@@ -62,7 +62,7 @@ fn forward_messages_result_upserts_dest_and_labels_origin() {
             .all(|c| c.supported())
     );
     let extra = session.request(RequestPurpose::ForwardMessages, Some(ChatId(12)));
-    session.messages.in_flight_forward = Some(ForwardFlight {
+    session.messages.forwards.begin(ForwardFlight {
         extra,
         dest_chat_id: ChatId(12),
         from_chat_id: ChatId(11),
@@ -80,8 +80,8 @@ fn forward_messages_result_upserts_dest_and_labels_origin() {
     );
     let result = session
         .messages
-        .last_forward
-        .as_ref()
+        .forwards
+        .latest_result()
         .expect("forward result");
     assert_eq!(result.dest_chat_id, ChatId(12));
     assert_eq!(result.dest_title, "Bob");
@@ -209,7 +209,7 @@ fn message_is_pinned_update_and_newest_pinned() {
         &sink,
         r#"{"@type":"updateNewMessage","message":{"id":101,"chat_id":11,"is_outgoing":false,"is_pinned":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}}}}"#,
     );
-    session.open_chat = Some(ChatId(11));
+    session.open = crate::state::OpenView::of(Some(ChatId(11)));
     let pinned = session
         .histories
         .get(&11)
@@ -473,8 +473,8 @@ fn b1_force_reply_arms_pending_target() {
 fn delete_account_ok_clears_mutating_without_local_teardown() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.account_mutating = true;
-    session.settings.account_error = Some("stale".into());
+    session.settings.account_delete.fail("stale");
+    session.settings.account_delete.begin();
     let extra = session.request(RequestPurpose::DeleteAccount, None);
     apply_json(
         &mut session,
@@ -482,15 +482,15 @@ fn delete_account_ok_clears_mutating_without_local_teardown() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!session.settings.account_mutating);
-    assert!(session.settings.account_error.is_none());
+    assert!(!session.settings.account_busy());
+    assert!(session.settings.account_error().is_none());
 }
 
 #[test]
 fn delete_account_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.account_mutating = true;
+    session.settings.account_delete.begin();
     let extra = session.request(RequestPurpose::DeleteAccount, None);
     apply_json(
         &mut session,
@@ -501,9 +501,9 @@ fn delete_account_error_surfaces_honestly() {
             extra.0
         ),
     );
-    assert!(!session.settings.account_mutating);
+    assert!(!session.settings.account_busy());
     assert_eq!(
-        session.settings.account_error.as_deref(),
+        session.settings.account_error(),
         Some("Could not update the account: Telegram refused the request")
     );
 }
@@ -512,10 +512,14 @@ fn delete_account_error_surfaces_honestly() {
 fn code_send_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.auth_state.change_number_phone = Some("+15550199".into());
-    session.auth_state.change_number_timeout = Some(60);
-    session.auth_state.change_number_loading = true;
     let extra = session.request(RequestPurpose::SendPhoneNumberCode, None);
+    session.auth_state.change_number = crate::state::ChangeNumber::Resending {
+        request: extra,
+        code: crate::state::CodeSent {
+            phone: "+15550199".into(),
+            timeout: 60,
+        },
+    };
     apply_json(
         &mut session,
         &seq,
@@ -525,14 +529,11 @@ fn code_send_error_surfaces_honestly() {
             extra.0
         ),
     );
-    assert!(!session.auth_state.change_number_loading);
+    assert!(!session.auth_state.change_number.is_sending());
+    assert_eq!(session.auth_state.change_number.phone(), Some("+15550199"));
+    assert_eq!(session.auth_state.change_number.timeout(), Some(60));
     assert_eq!(
-        session.auth_state.change_number_phone.as_deref(),
-        Some("+15550199")
-    );
-    assert_eq!(session.auth_state.change_number_timeout, Some(60));
-    assert_eq!(
-        session.auth_state.change_number_error.as_deref(),
+        session.auth_state.change_number.error(),
         Some("Could not send the verification code: Telegram refused the request")
     );
 }
@@ -626,8 +627,6 @@ fn scheduled_entry(id: i64, send_date: i32) -> ParsedMessage {
         date: 0,
         is_outgoing: true,
         is_pinned: false,
-        topic_id: None,
-        thread_id: None,
         ephemeral: None,
         media_album_id: 0,
         author_signature: None,
@@ -635,7 +634,6 @@ fn scheduled_entry(id: i64, send_date: i32) -> ParsedMessage {
             send_date,
             repeat_period: 0,
         }),
-        can_retry: false,
         send_state: Default::default(),
         content: MessageContent::Text("later".into()),
         files: Vec::new(),
@@ -666,7 +664,7 @@ fn reschedule_ok_rewrites_the_scheduled_entry() {
     let extra = session.request(
         RequestPurpose::Messages(MessagesPurpose::EditMessageSchedulingState {
             message_id: MessageId(70),
-            scheduling: ComposerScheduling::SendAtDate(5000),
+            scheduling: ComposerScheduling::at(5000),
         }),
         Some(ChatId(7)),
     );
@@ -801,7 +799,7 @@ fn waiting_force_reply_in_unshown_chat_is_not_ready() {
     assert!(!session.bots.pending_force_replies.is_empty());
     assert!(!session.force_reply_ready());
     // Shown and loaded: a render has something to hand out.
-    session.open_chat = Some(ChatId(21));
+    session.open = crate::state::OpenView::of(Some(ChatId(21)));
     assert!(session.force_reply_ready());
 }
 
@@ -885,4 +883,75 @@ fn force_replies_of_two_chats_in_one_batch_both_wait_for_their_windows() {
             message_id: MessageId(402),
         })
     );
+}
+
+/// Two forwards that finish before the UI polls each keep their outcome.
+#[test]
+fn forward_outcomes_queue_until_the_ui_takes_them() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let mut asked = Vec::new();
+    for dest in [12, 13] {
+        let extra = session.request(RequestPurpose::ForwardMessages, Some(ChatId(dest)));
+        session.messages.forwards.begin(ForwardFlight {
+            extra,
+            dest_chat_id: ChatId(dest),
+            from_chat_id: ChatId(11),
+            from_topic: Default::default(),
+            requested: 1,
+        });
+        asked.push(extra);
+    }
+    for extra in &asked {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"x"}}"#,
+                extra.0
+            ),
+        );
+    }
+    assert!(!session.messages.forwards.in_flight());
+    let dests: Vec<_> = std::iter::from_fn(|| session.messages.forwards.take_result())
+        .map(|result| result.dest_chat_id)
+        .collect();
+    assert_eq!(dests, [ChatId(12), ChatId(13)]);
+}
+
+/// The next page of a reactions tab is part of the tab's stage: it pages,
+/// appends when it answers, and a failed page leaves the list as it was.
+#[test]
+fn a_reactions_tab_pages_and_keeps_its_list_when_the_next_page_fails() {
+    use crate::telegram::envelope::AddedReactionsPage;
+    let (mut session, _sink) = session();
+    let (chat, message) = (ChatId(5), MessageId(9));
+    session.begin_message_audience(chat, message);
+    let page = |offset: &str| AddedReactionsPage {
+        total_count: 3,
+        reactions: Vec::new(),
+        next_offset: offset.to_string(),
+    };
+    session.accept_added_reactions(chat, message, 0, false, page("2"));
+    session.audience_tab_loading_more(chat, message, 0);
+    let audience = session.messages.message_audience.as_ref().unwrap();
+    assert!(audience.reactions.is_paging());
+    assert_eq!(audience.reactions.ready().unwrap().next_offset, "2");
+    session.fail_audience(RequestPurpose::Messages(
+        MessagesPurpose::GetMessageAddedReactions {
+            chat_id: chat,
+            message_id: message,
+            filter: 0,
+            append: true,
+        },
+    ));
+    let audience = session.messages.message_audience.as_ref().unwrap();
+    assert!(!audience.reactions.is_paging(), "the failure ends the page");
+    assert_eq!(audience.reactions.ready().unwrap().next_offset, "2");
+    session.audience_tab_loading_more(chat, message, 0);
+    session.accept_added_reactions(chat, message, 0, true, page(""));
+    let audience = session.messages.message_audience.as_ref().unwrap();
+    assert!(!audience.reactions.is_paging());
+    assert!(audience.reactions.ready().unwrap().next_offset.is_empty());
 }

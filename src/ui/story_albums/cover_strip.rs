@@ -7,6 +7,7 @@
 
 use super::*;
 use crate::ui::owned_image::OwnedImage;
+use crate::ui::stories_state::{PanelKind, ViewerPanel};
 use crate::ui::story_viewer::chrome;
 use quill::story_cover::{
     STRIP_FRAMES, fraction_of, frame_times, time_at, time_label, timestamp_secs,
@@ -84,9 +85,9 @@ impl QuillApp {
         story_id: i32,
         cx: &mut Context<Self>,
     ) {
-        if self.stories.viewer_ui().cover.is_some() {
+        if self.stories.viewer_ui().cover().is_some() {
             if let Some(open) = self.stories.viewer_ui_mut() {
-                open.cover = None;
+                open.close(PanelKind::Cover);
             }
             cx.notify();
             return;
@@ -99,10 +100,10 @@ impl QuillApp {
             .stories
             .viewer
             .current()
-            .and_then(|item| item.duration_secs)
+            .and_then(|item| item.duration_secs())
             .map(|secs| i64::from(secs) * 1000);
         let serial = NEXT_SERIAL.fetch_add(1, Ordering::Relaxed);
-        let value = Some(CoverPicker {
+        let value = CoverPicker {
             chat_id,
             story_id,
             stage: match &source {
@@ -120,10 +121,9 @@ impl QuillApp {
             bounds: Rc::new(Cell::new(None)),
             focus: cx.focus_handle(),
             serial,
-        });
+        };
         if let Some(open) = self.stories.viewer_ui_mut() {
-            open.close_other_panels(ViewerPanel::Cover);
-            open.cover = value;
+            open.show(ViewerPanel::Cover(Box::new(value)));
         }
         cx.notify();
         let Some(source) = source else { return };
@@ -135,8 +135,7 @@ impl QuillApp {
     pub(in crate::ui) fn cover_waits_for_clip(&self) -> bool {
         self.stories
             .viewer_ui()
-            .cover
-            .as_ref()
+            .cover()
             .is_some_and(|cover| cover.stage == CoverStage::WaitingForClip)
     }
 
@@ -145,8 +144,7 @@ impl QuillApp {
     pub(in crate::ui) fn cover_clip_unreadable(&self) -> bool {
         self.stories
             .viewer_ui()
-            .cover
-            .as_ref()
+            .cover()
             .is_some_and(|cover| cover.stage == CoverStage::Unreadable)
     }
 
@@ -156,8 +154,7 @@ impl QuillApp {
         let Some((serial, CoverStage::WaitingForClip)) = self
             .stories
             .viewer_ui()
-            .cover
-            .as_ref()
+            .cover()
             .map(|cover| (cover.serial, cover.stage.clone()))
         else {
             return;
@@ -168,7 +165,7 @@ impl QuillApp {
         if let Some(cover) = self
             .stories
             .viewer_ui_mut()
-            .and_then(|open| open.cover.as_mut())
+            .and_then(|open| open.cover_mut())
         {
             cover.stage = CoverStage::Probing {
                 source: source.clone(),
@@ -183,8 +180,7 @@ impl QuillApp {
         let fallback_ms = self
             .stories
             .viewer_ui()
-            .cover
-            .as_ref()
+            .cover()
             .and_then(|cover| cover.fallback_ms);
         self.spawn_scoped(cx, async move |this, cx| {
             let probe_source = source.clone();
@@ -199,7 +195,7 @@ impl QuillApp {
                     if let Some(cover) = this
                         .stories
                         .viewer_ui_mut()
-                        .and_then(|open| open.cover.as_mut())
+                        .and_then(|open| open.cover_mut())
                         .filter(|c| c.serial == serial)
                     {
                         cover.stage = CoverStage::Unreadable;
@@ -212,7 +208,7 @@ impl QuillApp {
                 let Some(cover) = this
                     .stories
                     .viewer_ui_mut()
-                    .and_then(|open| open.cover.as_mut())
+                    .and_then(|open| open.cover_mut())
                     .filter(|c| c.serial == serial)
                 else {
                     return false;
@@ -247,7 +243,7 @@ impl QuillApp {
                     let Some(cover) = this
                         .stories
                         .viewer_ui_mut()
-                        .and_then(|open| open.cover.as_mut())
+                        .and_then(|open| open.cover_mut())
                         .filter(|c| c.serial == serial)
                     else {
                         return false;
@@ -272,7 +268,7 @@ impl QuillApp {
         let Some(cover) = self
             .stories
             .viewer_ui_mut()
-            .and_then(|open| open.cover.as_mut())
+            .and_then(|open| open.cover_mut())
         else {
             return;
         };
@@ -298,7 +294,7 @@ impl QuillApp {
                 let Some(cover) = this
                     .stories
                     .viewer_ui_mut()
-                    .and_then(|open| open.cover.as_mut())
+                    .and_then(|open| open.cover_mut())
                     .filter(|c| c.serial == serial)
                 else {
                     return;
@@ -322,7 +318,7 @@ impl QuillApp {
         let Some(cover) = self
             .stories
             .viewer_ui_mut()
-            .and_then(|open| open.cover.as_mut())
+            .and_then(|open| open.cover_mut())
         else {
             return;
         };
@@ -341,7 +337,7 @@ impl QuillApp {
         let Some(cover) = self
             .stories
             .viewer_ui_mut()
-            .and_then(|open| open.cover.as_mut())
+            .and_then(|open| open.cover_mut())
         else {
             return;
         };
@@ -355,13 +351,7 @@ impl QuillApp {
     }
 
     fn cover_drag(&mut self, x: f32, cx: &mut Context<Self>) {
-        let Some(cover) = self
-            .stories
-            .viewer_ui()
-            .cover
-            .as_ref()
-            .filter(|c| c.dragging)
-        else {
+        let Some(cover) = self.stories.viewer_ui().cover().filter(|c| c.dragging) else {
             return;
         };
         let Some(bounds) = cover.bounds.get() else {
@@ -375,14 +365,14 @@ impl QuillApp {
         if let Some(cover) = self
             .stories
             .viewer_ui_mut()
-            .and_then(|open| open.cover.as_mut())
+            .and_then(|open| open.cover_mut())
         {
             cover.dragging = false;
         }
     }
 
     fn cover_key(&mut self, key: &str, shift: bool, cx: &mut Context<Self>) {
-        let Some(cover) = self.stories.viewer_ui().cover.as_ref() else {
+        let Some(cover) = self.stories.viewer_ui().cover() else {
             return;
         };
         let Some(duration) = cover.stage.duration_ms() else {
@@ -403,7 +393,7 @@ impl QuillApp {
     /// Phase 9.5: the cover picker panel — preview, frame strip, time and
     /// the Set / Cancel buttons.
     pub(in crate::ui) fn story_cover_editor(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(cover) = self.stories.viewer_ui().cover.as_ref() else {
+        let Some(cover) = self.stories.viewer_ui().cover() else {
             return div().into_any_element();
         };
         // No second call for this story while one is in flight.
@@ -567,7 +557,7 @@ impl QuillApp {
                             .custom(chrome::ghost(cx))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 if let Some(open) = this.stories.viewer_ui_mut() {
-                                    open.cover = None;
+                                    open.close(PanelKind::Cover);
                                 }
                                 cx.notify();
                             })),
@@ -590,7 +580,7 @@ impl QuillApp {
 
     /// The story the open cover picker is for.
     pub(in crate::ui) fn open_cover_story(&self) -> Option<(i64, i32)> {
-        let cover = self.stories.viewer_ui().cover.as_ref()?;
+        let cover = self.stories.viewer_ui().cover()?;
         Some((cover.chat_id, cover.story_id))
     }
 
@@ -604,8 +594,7 @@ impl QuillApp {
         let Some((chat_id, story_id, at_ms)) = self
             .stories
             .viewer_ui()
-            .cover
-            .as_ref()
+            .cover()
             .map(|cover| (cover.chat_id, cover.story_id, cover.at_ms))
         else {
             return;

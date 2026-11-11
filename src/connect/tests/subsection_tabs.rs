@@ -196,7 +196,7 @@ fn bot_private_chat_topic_select_sends_exact_request() {
     );
 
     driver.select_topic(12).unwrap();
-    assert_eq!(driver.session.open_topic, Some(12));
+    assert_eq!(driver.session.open_forum_topic(), Some(12));
     let search = sent(&recorder, "searchChatMessages");
     let search = search.last().unwrap();
     assert_eq!(search["chat_id"], 41);
@@ -214,7 +214,7 @@ fn bot_private_chat_topic_select_sends_exact_request() {
             r#"{{"@type":"foundChatMessages","@extra":"{extra}","total_count":1,"next_from_message_id":0,"messages":[{{"id":700,"chat_id":41,"is_outgoing":false,"topic_id":{{"@type":"messageTopicForum","forum_topic_id":12}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"hi","entities":[]}}}}}}]}}"#
         ),
     );
-    assert_eq!(driver.session.open_topic, Some(12));
+    assert_eq!(driver.session.open_forum_topic(), Some(12));
     assert!(
         driver.session.threads.topic_histories[&(41, 12)]
             .messages
@@ -302,8 +302,8 @@ fn opening_topic_reads_it_and_never_resurrects_a_stale_count() {
         .histories
         .entry(41)
         .or_default()
-        .viewed
-        .insert(800);
+        .views
+        .mark_done([800]);
 
     driver.select_topic(5).unwrap();
     driver.view_messages(ChatId(41), &[MessageId(800)]).unwrap();
@@ -378,7 +378,7 @@ fn forums_in_a_list_load_their_topics_when_they_appear() {
     let fetches = sent(&recorder, "getForumTopics");
     assert_eq!(fetches.len(), 1);
     assert_eq!(fetches[0]["chat_id"], id(61));
-    assert!(driver.session.threads.forum_row_asked.contains(&id(61)));
+    assert!(driver.session.threads.forum_row_asked(id(61)));
     // A repeated update does not ask again.
     ingest(&mut driver, &forum(61));
     assert_eq!(sent(&recorder, "getForumTopics").len(), 1);
@@ -390,7 +390,7 @@ fn forums_in_a_list_load_their_topics_when_they_appear() {
             fetches[0]["@extra"].as_str().unwrap()
         ),
     );
-    assert!(driver.session.threads.forum_topics_failed.contains(&id(61)));
+    assert!(driver.session.threads.forum_topics_failed(id(61)));
     ingest(&mut driver, &forum(61));
     assert_eq!(sent(&recorder, "getForumTopics").len(), 1);
     // A forum that is in no chat list is not preloaded; once it enters one it is.
@@ -410,7 +410,7 @@ fn forums_in_a_list_load_their_topics_when_they_appear() {
     ingest(&mut driver, &chat(62, true));
     ingest(&mut driver, &forum(62));
     assert_eq!(sent(&recorder, "getForumTopics").len(), 2);
-    assert!(!driver.session.threads.forum_row_asked.contains(&id(62)));
+    assert!(!driver.session.threads.forum_row_asked(id(62)));
     driver.session.auth = AuthorizationState::Ready;
     driver.preload_known_forums();
     assert_eq!(sent(&recorder, "getForumTopics").len(), 3);

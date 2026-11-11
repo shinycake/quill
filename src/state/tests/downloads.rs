@@ -13,14 +13,7 @@ fn sound_download_error_drops_pending_playback() {
             id: FileId(91),
             size: 0,
             expected_size: 100,
-            uploading: false,
-            local: LocalFileState {
-                path: String::new(),
-                can_be_downloaded: true,
-                is_downloading_active: false,
-                is_downloading_completed: false,
-                downloaded_size: 0,
-            },
+            local: LocalFileState::from_parts(String::new(), true, false, false, 0),
         },
         true,
     );
@@ -269,9 +262,9 @@ fn a_low_disk_holds_every_automatic_download() {
     let (mut session, _sink) = session();
     session.chats.insert(13, placeholder_chat(ChatId(13)));
     assert!(session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_PHOTO));
-    session.media.disk_holds_auto_downloads = true;
+    session.media.disk = crate::state::DiskPressure::Full;
     assert!(!session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_PHOTO));
-    session.media.disk_holds_auto_downloads = false;
+    session.media.disk = crate::state::DiskPressure::Healthy;
     assert!(session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_PHOTO));
 }
 
@@ -374,14 +367,7 @@ fn completed_user_downloads_land_in_recent_list() {
         id: FileId(id),
         size: 100,
         expected_size: 100,
-        uploading: false,
-        local: LocalFileState {
-            path: format!("/tmp/{id}.bin"),
-            can_be_downloaded: true,
-            is_downloading_active: false,
-            is_downloading_completed: true,
-            downloaded_size: 100,
-        },
+        local: LocalFileState::from_parts(format!("/tmp/{id}.bin"), true, false, true, 100),
     };
     // User-initiated download completing → recorded.
     session.begin_download(FileId(7));
@@ -599,14 +585,7 @@ fn paused_download_survives_idle_file_updates_in_either_order() {
                 id: FileId(31),
                 size: 100,
                 expected_size: 100,
-                uploading: false,
-                local: LocalFileState {
-                    path: String::new(),
-                    can_be_downloaded: true,
-                    is_downloading_active: false,
-                    is_downloading_completed: false,
-                    downloaded_size: 25,
-                },
+                local: LocalFileState::from_parts(String::new(), true, false, false, 25),
             },
             true,
         );

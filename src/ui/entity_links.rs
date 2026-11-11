@@ -216,7 +216,9 @@ impl QuillApp {
                     ChatKind::Supergroup { .. } | ChatKind::BasicGroup { .. }
                 )
             })
-            && self.session().is_some_and(|s| s.open_chat == Some(chat_id));
+            && self
+                .session()
+                .is_some_and(|s| s.open_chat_id() == Some(chat_id));
         if in_chat {
             self.open_chat_search_ui(window, cx);
             let query = tag.to_string();
@@ -243,7 +245,7 @@ impl QuillApp {
         let Some(session) = session else {
             return;
         };
-        if session.open_chat != Some(chat_id) {
+        if session.open_chat_id() != Some(chat_id) {
             return;
         }
         let in_group = session.chats.get(&chat_id.0).is_some_and(|chat| {
@@ -328,7 +330,7 @@ impl QuillApp {
         let replied = own
             .and_then(|message| message.reply_to.as_ref())
             .filter(|reply| reply.is_same_chat(chat_id))
-            .and_then(|reply| message(reply.message_id.0));
+            .and_then(|reply| message(reply.message_id().0));
         let target = [own, replied]
             .into_iter()
             .flatten()
@@ -346,7 +348,7 @@ impl QuillApp {
                 self.playback
                     .positions
                     .insert(ChatMessage::new(chat_id, target_id), secs);
-                if self.playback.playing_voice == Some(target_id)
+                if self.playback.active.voice() == Some(target_id)
                     && self.playback.player.chat.is_none_or(|c| c == chat_id)
                 {
                     self.seek_active_to(secs, cx);
@@ -367,7 +369,7 @@ impl QuillApp {
                 self.playback
                     .positions
                     .insert(ChatMessage::new(chat_id, target_id), secs);
-                if self.playback.playing_audio == Some(target_id)
+                if self.playback.active.audio() == Some(target_id)
                     && self.playback.player.chat.is_none_or(|c| c == chat_id)
                 {
                     self.seek_active_to(secs, cx);

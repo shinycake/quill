@@ -90,7 +90,7 @@ fn lit(vcx: &mut VisualTestContext, chat: u64) -> bool {
 }
 
 fn open_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<ChatId> {
-    app.update(vcx, |app, _| app.session().and_then(|s| s.open_chat))
+    app.update(vcx, |app, _| app.session().and_then(|s| s.open_chat_id()))
 }
 
 fn attached(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> usize {

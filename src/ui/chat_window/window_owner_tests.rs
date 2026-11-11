@@ -173,7 +173,7 @@ fn a_gif_plays_in_its_window_and_stops_when_the_window_closes(cx: &mut TestAppCo
     open_chat_window(&app, main, cx);
     let message = MessageId(40);
     let (here, in_main) = app.update(cx, |app, cx| {
-        app.playback.playing_animation = Some(PlayingGif {
+        app.playback.animation = crate::ui::playback_state::GifPlayback::Waiting(PlayingGif {
             window: Some(OTHER),
             message: ChatMessage::new(OTHER, message),
         });
@@ -183,6 +183,6 @@ fn a_gif_plays_in_its_window_and_stops_when_the_window_closes(cx: &mut TestAppCo
     assert_eq!(here, Some(true), "the chat window's row plays it");
     assert!(!in_main, "the main window's row does not");
     app.update(cx, |app, cx| app.forget_chat_window(OTHER, cx));
-    let playing = app.read_with(cx, |app, _| app.playback.playing_animation.is_some());
+    let playing = app.read_with(cx, |app, _| app.playback.animation.playing().is_some());
     assert!(!playing, "the window's GIF stopped with it");
 }

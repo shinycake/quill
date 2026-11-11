@@ -377,7 +377,12 @@ impl QuillApp {
                     }
                     (tr(keys::Q_MONEY_SECURITY_CHECK), body, footer)
                 }
-                WithdrawStep::Password { sending, error } => {
+                step @ (WithdrawStep::Password { .. } | WithdrawStep::PasswordSending(_)) => {
+                    let sending = matches!(step, WithdrawStep::PasswordSending(_));
+                    let error = match step {
+                        WithdrawStep::Password { error } => error,
+                        _ => None,
+                    };
                     let description = match withdraw.target {
                         WithdrawTarget::Ton { .. } | WithdrawTarget::Stars { .. } => {
                             tr(keys::BOT_EARN_BALANCE_PASSWORD_DESCRIPTION)

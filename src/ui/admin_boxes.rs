@@ -273,9 +273,7 @@ impl QuillApp {
     fn demo_admin_box(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use quill::ids::ChatId;
         use quill::state::{MemberListFilter, SupergroupMembersFetch};
-        use quill::telegram::envelope::{
-            ChannelMemberStatus, ChatAdminRights, MessageSender, ParsedChatMember,
-        };
+        use quill::telegram::envelope::{ChatAdminRights, MessageSender, ParsedChatMember};
         let chat = ChatId(12);
         if let Some(session) = self.demo_session.as_mut() {
             session.open_chat(chat);
@@ -284,13 +282,8 @@ impl QuillApp {
                 .into_iter()
                 .map(|user_id| ParsedChatMember {
                     member_id: MessageSender::User { user_id },
-                    status: ChannelMemberStatus::Member,
-                    admin_can_post_messages: None,
-                    admin_can_invite_users: None,
-                    admin_rights: None,
+                    standing: quill::telegram::envelope::MemberStatus::Member,
                     tag: String::new(),
-                    can_be_edited: true,
-                    restriction: None,
                     inviter_user_id: 0,
                     joined_chat_date: 0,
                 })

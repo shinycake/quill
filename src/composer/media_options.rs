@@ -61,14 +61,28 @@ pub struct MediaSendOptions {
     pub paid_stars: i64,
 }
 
+/// Whether a file is sent as a GIF animation (`inputMessageAnimation`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GifMode {
+    /// A plain photo, video or file.
+    #[default]
+    Off,
+    /// A `.gif` file, or a video that never had sound (tdesktop
+    /// `modifications.gif = !hasAudio`). In an album it goes as a plain
+    /// video.
+    Gif,
+    /// The sound was taken out of a video that had it (tdesktop
+    /// `sendsVideoAsGif`): such a video leaves an album and goes out
+    /// alone.
+    SoundRemoved,
+}
+
 /// What the user set on one attachment besides the file itself.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AttachmentExtras {
-    /// Send the file as a GIF (`inputMessageAnimation`) when it is sent on
-    /// its own: a `.gif` file, a video without sound (tdesktop
-    /// `modifications.gif = !hasAudio`) or a video turned into one in the
-    /// video editor. In an album it goes as a plain video.
-    pub gif: bool,
+    /// Send the file as a GIF when it is sent on its own: a `.gif` file, a
+    /// video without sound or a video turned into one in the video editor.
+    pub gif: GifMode,
     /// The cover picked with "Edit Cover" (`inputVideo.cover`).
     pub cover: Option<PathBuf>,
     /// `inputVideo.start_timestamp` in seconds: the cover frame chosen in
@@ -79,22 +93,105 @@ pub struct AttachmentExtras {
     pub source: Option<PathBuf>,
     /// The edits `path` was made with.
     pub edits: Option<VideoEdits>,
-    /// `gif` came from taking the sound out of a video that had it
-    /// (tdesktop `sendsVideoAsGif`): such a video leaves an album and goes
-    /// out alone. A video that never had sound stays in the album.
-    pub sound_removed: bool,
     /// The thumbnail Quill made for a picture sent as a file
     /// (`inputDocument.thumbnail`; tdesktop `FinalizeFileThumbnail`).
     pub file_thumbnail: Option<FileThumbnail>,
+    /// What was done to the picture so that it can go out.
+    pub photo: PhotoPrep,
+}
+
+/// How a picture is prepared for sending.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum PhotoPrep {
+    /// The file goes as it is, or nothing was read about it yet.
+    #[default]
+    AsIs,
     /// The JPEG made for a picture Telegram can't take as a photo
     /// ([`photo_needs_jpeg`](super::photo_needs_jpeg)).
-    pub photo_jpeg: Option<PathBuf>,
+    Jpeg(PathBuf),
     /// The file can't go as a photo or video (tdesktop `PrepareDetails`:
     /// unreadable, animated, or too narrow), so "Compress" is not offered.
-    pub file_only: bool,
+    FileOnly,
     /// A photo edit is rendering into a new file for this one: the latest
-    /// Done's number. Until it lands the file must not be sent.
-    pub photo_render: Option<u64>,
+    /// Done's number. Until it lands the file must not be sent. If the
+    /// render fails, `before` is what the picture was.
+    Rendering { render: u64, before: Box<PhotoPrep> },
+}
+
+impl PhotoPrep {
+    /// What the picture is apart from a render in flight.
+    fn settled(&self) -> &PhotoPrep {
+        match self {
+            PhotoPrep::Rendering { before, .. } => before.settled(),
+            other => other,
+        }
+    }
+}
+
+impl AttachmentExtras {
+    pub fn is_gif(&self) -> bool {
+        self.gif != GifMode::Off
+    }
+
+    /// Turn the GIF on (keeping a taken-out sound) or off.
+    pub fn set_gif(&mut self, on: bool) {
+        self.gif = match (on, self.gif) {
+            (false, _) => GifMode::Off,
+            (true, GifMode::Off) => GifMode::Gif,
+            (true, kept) => kept,
+        };
+    }
+
+    /// A GIF made by taking the sound out of a video that had it.
+    pub fn sound_removed(&self) -> bool {
+        self.gif == GifMode::SoundRemoved
+    }
+
+    /// The JPEG made for the picture, if it needed one.
+    pub fn photo_jpeg(&self) -> Option<&Path> {
+        match self.photo.settled() {
+            PhotoPrep::Jpeg(jpeg) => Some(jpeg),
+            _ => None,
+        }
+    }
+
+    /// The file can't go as a photo or video.
+    pub fn file_only(&self) -> bool {
+        *self.photo.settled() == PhotoPrep::FileOnly
+    }
+
+    /// The render of a photo edit in flight for this file.
+    pub fn photo_render(&self) -> Option<u64> {
+        match self.photo {
+            PhotoPrep::Rendering { render, .. } => Some(render),
+            _ => None,
+        }
+    }
+
+    /// Prepare the picture with `prep` once nothing renders; a render in
+    /// flight keeps going and this is what it falls back to.
+    pub fn set_photo(&mut self, prep: PhotoPrep) {
+        match &mut self.photo {
+            PhotoPrep::Rendering { before, .. } => **before = prep,
+            slot => *slot = prep,
+        }
+    }
+
+    /// A render of an edit starts (the latest Done replaces an earlier one).
+    pub fn begin_render(&mut self, render: u64) {
+        let before = Box::new(self.photo.settled().clone());
+        self.photo = PhotoPrep::Rendering { render, before };
+    }
+
+    /// The render ended without a file: the picture is as it was.
+    pub fn abandon_render(&mut self) {
+        self.photo = self.photo.settled().clone();
+    }
+
+    /// The render landed as the new file: nothing else was done to it.
+    pub fn land_render(&mut self) {
+        self.photo = PhotoPrep::AsIs;
+    }
 }
 
 /// A JPEG thumbnail written next to the media cache for upload with a file.
@@ -359,7 +456,7 @@ mod tests {
         assert!(!paid_media_fits(&[gif], true));
         // A soundless video is a "GIF" for the animation rule only.
         let mut silent = video;
-        silent.extras.gif = true;
+        silent.extras.set_gif(true);
         assert!(paid_media_fits(&[silent], true));
         assert!(!paid_media_fits(
             &[attachment(AttachmentKind::VideoNote)],

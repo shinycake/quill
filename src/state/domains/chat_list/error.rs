@@ -34,7 +34,9 @@ impl Session {
         if let Some(kind) = limit_kind {
             // The box that sent the request gets the limit box in its own
             // window; its own answer (`DialogAnswers`) ends its wait.
-            self.chat_list.folder_limit_hit = Some((kind, pending.map(|p| p.id)));
+            self.chat_list
+                .folder_limit_hits
+                .push_back((kind, pending.map(|p| p.id)));
         }
         // Share Folder: a failed fetch ends its stage in the error the box
         // draws with a Retry, and recommended folders say so in the toast.
@@ -135,7 +137,7 @@ impl Session {
             // on every ingest would loop at round-trip speed.
             Some(RequestPurpose::GetChatFolder) => {
                 if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
-                    self.chat_list.folder_spec_errors.insert(
+                    self.chat_list.folder_specs.fail(
                         folder_id,
                         call_request_error_line(
                             err,
@@ -208,7 +210,11 @@ impl Session {
                 ));
             }
             Some(RequestPurpose::GetArchiveChatListSettings) => {
-                self.chat_list.archive_settings_loading = false;
+                self.chat_list.archive_settings.failed(
+                    pending.map(|p| p.id),
+                    format!("error {}", err.code),
+                    false,
+                );
                 self.chat_list.archive_mute.note_reload_failed();
                 self.chats_state.chat_action_error.push(format!(
                     "could not load archive settings (error {})",
@@ -228,19 +234,9 @@ impl Session {
         let now = std::time::Instant::now();
         let list = &mut self.chat_list;
         match pending.map(|p| p.purpose) {
-            Some(RequestPurpose::LoadChats) if err.code == 404 => {
-                list.chats_exhausted = true;
-                list.chats_retry = None;
-            }
-            Some(RequestPurpose::LoadChats) => {
-                list.chats_retry = Some(ChatListState::next_page_retry(list.chats_retry, now));
-            }
-            Some(RequestPurpose::LoadArchiveChats) if err.code == 404 => {
-                list.archive_chats_exhausted = true;
-                list.archive_retry = None;
-            }
+            Some(RequestPurpose::LoadChats) => list.main_paging.page_failed(err.code, now),
             Some(RequestPurpose::LoadArchiveChats) => {
-                list.archive_retry = Some(ChatListState::next_page_retry(list.archive_retry, now));
+                list.archive_paging.page_failed(err.code, now)
             }
             _ => {}
         }

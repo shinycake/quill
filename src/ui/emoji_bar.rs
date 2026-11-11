@@ -173,7 +173,7 @@ impl QuillApp {
         if items.is_empty() || !session.my_is_premium() {
             return items;
         }
-        let library = &session.media.media_library.set_stickers;
+        let library = &session.media.media_library;
         let sets: Vec<&[StickerItem]> = session
             .stickers
             .emoji
@@ -195,7 +195,7 @@ impl QuillApp {
     /// rebuilt when this moves.
     pub(super) fn custom_sets_loaded(&self) -> usize {
         self.session().map_or(0, |session| {
-            let library = &session.media.media_library.set_stickers;
+            let library = &session.media.media_library;
             session
                 .stickers
                 .emoji
@@ -461,7 +461,7 @@ impl QuillApp {
             },
             Some(_) => return None,
             None => {
-                let (_, items) = self.composer_ui.emoji_words.hovered.as_ref()?;
+                let (_, items) = self.composer_ui.emoji_words.hovered()?;
                 BarSpec {
                     id: "word-emoji",
                     items,
@@ -540,8 +540,7 @@ mod tests {
             thumb_file_id: None,
             thumb_width: 0,
             thumb_height: 0,
-            requires_premium: true,
-            premium_animation: None,
+            premium: Some(quill::telegram::envelope::PremiumSticker { animation: None }),
         }
     }
 

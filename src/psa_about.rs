@@ -58,16 +58,33 @@ enum Load {
     Done,
 }
 
+/// The box: not up, held back until the saved flags are in, or on screen.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+enum Toast {
+    #[default]
+    Hidden,
+    /// A chat opened before the saved flags were in; it gets its box when
+    /// they arrive (if it is still the open one).
+    Waiting(ChatId),
+    Showing(AboutToast),
+}
+
+/// Whether `seen` differs from the file.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum SaveState {
+    #[default]
+    InSync,
+    /// A flag was added that no save has carried yet.
+    Unsaved,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PsaAbout {
     seen: BTreeSet<i64>,
     load: Load,
-    /// `seen` changed since it was last saved.
-    dirty: bool,
-    toast: Option<AboutToast>,
+    save: SaveState,
+    toast: Toast,
     serial: u32,
-    /// A chat opened before the saved flags were in.
-    waiting: Option<ChatId>,
     /// Overrides the app data folder (tests).
     file: Option<PathBuf>,
 }
@@ -88,15 +105,25 @@ impl PsaAbout {
 
     /// The box to draw: its chat is the open one and its time is not up.
     pub fn visible(&self, open_chat: Option<ChatId>, now: Instant) -> Option<&AboutToast> {
-        self.toast
-            .as_ref()
-            .filter(|toast| open_chat == Some(toast.chat_id) && now < toast.expires_at)
+        match &self.toast {
+            Toast::Showing(toast) if open_chat == Some(toast.chat_id) && now < toast.expires_at => {
+                Some(toast)
+            }
+            _ => None,
+        }
     }
 
     /// Drop the box and anything waiting for the saved flags.
     pub fn hide(&mut self) {
-        self.toast = None;
-        self.waiting = None;
+        self.toast = Toast::Hidden;
+    }
+
+    /// A chat opened before the saved flags were in: it waits for them. A
+    /// box already on screen stays.
+    pub fn wait_for_load(&mut self, chat_id: ChatId) {
+        if !matches!(self.toast, Toast::Showing(_)) {
+            self.toast = Toast::Waiting(chat_id);
+        }
     }
 
     /// Without a driver (demos, tests) there is nothing to read.
@@ -153,21 +180,24 @@ impl PsaAbout {
     /// Save the flags that changed, merged with the file, on a background
     /// thread.
     pub fn save_unsaved(&mut self) {
-        if !std::mem::take(&mut self.dirty) {
+        if self.save == SaveState::InSync {
             return;
         }
+        // Without a file there is nothing to save to: the flags stay
+        // unsaved rather than counted as written.
         let Some(path) = self.file_path() else {
             return;
         };
+        self.save = SaveState::InSync;
         let seen = self.seen.clone();
         std::thread::spawn(move || merge_save(&path, &seen));
     }
 
     fn show(&mut self, chat_id: ChatId, now: Instant, lifetime: Duration) {
         self.seen.insert(chat_id.0);
-        self.dirty = true;
+        self.save = SaveState::Unsaved;
         self.serial = self.serial.wrapping_add(1);
-        self.toast = Some(AboutToast {
+        self.toast = Toast::Showing(AboutToast {
             chat_id,
             serial: self.serial,
             expires_at: now + lifetime,
@@ -182,7 +212,7 @@ impl Session {
     pub(crate) fn show_promotion_about(&mut self, chat_id: ChatId, now: Instant) {
         self.chat_list.psa_about.hide();
         if !self.chat_list.psa_about.is_loaded() {
-            self.chat_list.psa_about.waiting = Some(chat_id);
+            self.chat_list.psa_about.wait_for_load(chat_id);
             return;
         }
         self.show_about_if_due(chat_id, now);
@@ -193,9 +223,11 @@ impl Session {
         if !self.chat_list.psa_about.poll_load() {
             return;
         }
-        if let Some(chat_id) = self.chat_list.psa_about.waiting.take()
-            && self.open_chat == Some(chat_id)
-        {
+        let Toast::Waiting(chat_id) = self.chat_list.psa_about.toast else {
+            return;
+        };
+        self.chat_list.psa_about.toast = Toast::Hidden;
+        if self.open_chat_id() == Some(chat_id) {
             self.show_about_if_due(chat_id, now);
         }
     }
@@ -282,7 +314,7 @@ mod tests {
             supergroup_id: id,
             is_channel: true,
         };
-        chat.my_member_status = Some(ChannelMemberStatus::Left);
+        chat.assume_member_status(Some(ChannelMemberStatus::Left));
         s.chats.insert(id, chat);
         s.chat_list.promoted_chats.insert(
             id,
@@ -298,7 +330,7 @@ mod tests {
     fn visible(s: &Session) -> bool {
         s.chat_list
             .psa_about
-            .visible(s.open_chat, Instant::now())
+            .visible(s.open_chat_id(), Instant::now())
             .is_some()
     }
 
@@ -334,7 +366,7 @@ mod tests {
         s.open_chat(ChatId(9));
         assert!(!visible(&s));
         if let Some(chat) = s.chats.get_mut(&5) {
-            chat.my_member_status = Some(ChannelMemberStatus::Member);
+            chat.assume_member_status(Some(ChannelMemberStatus::Member));
         }
         s.open_chat(ChatId(5));
         assert!(!visible(&s), "useTopPromotion");
@@ -376,7 +408,7 @@ mod tests {
         let mut s = session_with_promoted(5);
         s.open_chat(ChatId(5));
         let about = &s.chat_list.psa_about;
-        let open = s.open_chat;
+        let open = s.open_chat_id();
         assert!(about.visible(open, Instant::now()).is_some());
         let later = Instant::now() + Duration::from_secs(9);
         assert!(about.visible(open, later).is_none());

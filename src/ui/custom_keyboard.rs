@@ -28,7 +28,7 @@ impl QuillApp {
     /// demo session).
     pub(super) fn open_chat_custom_keyboard(&self) -> Option<(ChatId, MessageId, ReplyKeyboard)> {
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         session.custom_keyboard_for_chat(chat_id, &self.message_ui.dismissed_keyboards)
     }
 
@@ -76,7 +76,7 @@ impl QuillApp {
             return Some(toggle);
         }
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         let has_commands = session
             .command_menu_items(chat_id)
             .iter()
@@ -229,7 +229,7 @@ impl QuillApp {
     ) {
         let ready = self
             .session()
-            .filter(|session| session.open_chat == Some(target.chat_id))
+            .filter(|session| session.open_chat_id() == Some(target.chat_id))
             .is_some_and(|session| {
                 session
                     .reply_target(target.chat_id, target.message_id)

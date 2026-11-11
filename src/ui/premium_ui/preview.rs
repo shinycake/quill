@@ -56,10 +56,11 @@ impl QuillApp {
         let Some(hub) = self.session().map(|s| &s.payments.hub) else {
             return vec![feature];
         };
-        let premium = hub.premium.as_ref().map_or(&[][..], |i| &i.features[..]);
+        let premium = hub.premium.data().map_or(&[][..], |i| &i.features[..]);
         let business = hub
             .business_features
-            .as_deref()
+            .data()
+            .map(Vec::as_slice)
             .unwrap_or(&BusinessFeature::FALLBACK_ORDER);
         preview_order(premium, business, feature)
     }
@@ -368,8 +369,9 @@ impl QuillApp {
                     .primary()
                     .w_full()
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(hub) = this.hub_mut() {
-                            hub.premium_ref = feature.start_ref().unwrap_or_default().into();
+                        if let Some(open) = this.hub_mut().and_then(|hub| hub.premium_box.as_mut())
+                        {
+                            open.start_ref = feature.start_ref().unwrap_or_default().into();
                         }
                         this.set_promo_page(PromoPage::Overview, cx);
                     })),

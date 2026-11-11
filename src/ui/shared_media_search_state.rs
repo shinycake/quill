@@ -1,6 +1,6 @@
 //! What the gallery's search field keeps on the UI side: the text field,
-//! the `(chat, tab)` its text belongs to, and the count of the keystroke
-//! the debounce is waiting on. The query a tab answers lives in
+//! the `(chat, tab)` its text belongs to, and the debounce of its last
+//! keystroke. The query a tab answers lives in
 //! `SharedMediaTabState::query`.
 #![deny(clippy::indexing_slicing)]
 
@@ -14,25 +14,68 @@ use quill::state::SharedMediaTab;
 /// What the field's text belongs to, like the grid's `PageKey`.
 pub(crate) type SearchKey = (ChatId, SharedMediaTab);
 
-pub(crate) struct SharedMediaSearchUi {
-    pub(super) input: Entity<InputState>,
-    /// The key `input` was made for: a different key means a fresh, empty
-    /// field, so text never carries over to another chat or tab.
-    pub(super) key: Option<SearchKey>,
-    /// Bumped by every keystroke; a debounce timer only fires for the
-    /// keystroke it was started by.
-    pub(super) keystroke: u64,
+/// The gallery's search: nothing while no searchable tab is open, else the
+/// field of one `(chat, tab)` with the debounce of its last keystroke. The
+/// whole value is replaced when the key changes, so text never carries over
+/// to another chat or tab and no search of the old one is still waiting.
+pub(crate) enum GallerySearch {
+    Closed,
+    Open(SearchField),
 }
 
-impl crate::ui::on_screen::Farewell for SharedMediaSearchUi {}
+pub(crate) struct SearchField {
+    /// What the field's text belongs to.
+    pub(super) key: SearchKey,
+    pub(super) input: Entity<InputState>,
+    /// The search waiting for a quiet moment; the next keystroke or the
+    /// field going replaces (and so cancels) it.
+    pub(super) debounce: Option<Task<()>>,
+}
 
-impl SharedMediaSearchUi {
-    pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
-        Self {
-            input: Self::fresh_input(window, cx),
-            key: None,
-            keystroke: 0,
+impl crate::ui::on_screen::Farewell for GallerySearch {}
+
+impl GallerySearch {
+    pub(super) fn new() -> Self {
+        Self::Closed
+    }
+
+    /// The `(chat, tab)` the field was made for.
+    pub(super) fn key(&self) -> Option<SearchKey> {
+        match self {
+            Self::Closed => None,
+            Self::Open(field) => Some(field.key),
         }
+    }
+
+    pub(super) fn input(&self) -> Option<&Entity<InputState>> {
+        match self {
+            Self::Closed => None,
+            Self::Open(field) => Some(&field.input),
+        }
+    }
+
+    pub(super) fn field_mut(&mut self) -> Option<&mut SearchField> {
+        match self {
+            Self::Closed => None,
+            Self::Open(field) => Some(field),
+        }
+    }
+
+    /// A fresh, empty field for `key` (or none), replacing the old one.
+    pub(super) fn reopen(
+        &mut self,
+        key: Option<SearchKey>,
+        window: &mut Window,
+        cx: &mut Context<QuillApp>,
+    ) {
+        *self = match key {
+            None => Self::Closed,
+            Some(key) => Self::Open(SearchField {
+                key,
+                input: Self::fresh_input(window, cx),
+                debounce: None,
+            }),
+        };
     }
 
     /// An empty field whose edits go to the gallery search.
@@ -49,7 +92,7 @@ impl SharedMediaSearchUi {
                 // last edit may still be on its way: only the current one
                 // speaks for the gallery.
                 if matches!(event, InputEvent::Change)
-                    && state.entity_id() == this.media_search.input.entity_id()
+                    && this.media_search.input().map(Entity::entity_id) == Some(state.entity_id())
                 {
                     let text = state.read(cx).value().to_string();
                     // The gallery is drawn in the main window only.

@@ -23,8 +23,7 @@ fn resolved_emoji(custom_emoji_id: Option<i64>, file_id: i32) -> StickerItem {
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,
-        requires_premium: false,
-        premium_animation: None,
+        premium: None,
     }
 }
 
@@ -104,6 +103,7 @@ fn visible_custom_emoji_survives_overflow() {
             popular: Vec::new(),
             allow_custom_emoji: true,
             premium_locked: Vec::new(),
+            paid_offered: false,
         });
     let total = CUSTOM_EMOJI_CACHE_CAP as i64 + 5;
     session.accept_custom_emoji_stickers(

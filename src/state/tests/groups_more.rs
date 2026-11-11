@@ -1,6 +1,7 @@
 //! State reducer tests: groups (continued from groups.rs).
 use super::common::*;
 use super::*;
+use crate::state::fetch::Fetch;
 
 #[test]
 fn event_log_gate() {
@@ -95,7 +96,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         GroupsPurpose::GetChatEventLog { from_event_id: 0 },
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &[300, 299]));
-    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
     else {
         panic!("expected loaded event log");
     };
@@ -113,7 +114,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         GroupsPurpose::GetChatEventLog { from_event_id: 299 },
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &full));
-    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
     else {
         panic!("expected loaded event log");
     };
@@ -129,7 +130,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         GroupsPurpose::GetChatEventLog { from_event_id: 200 },
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &[199]));
-    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
     else {
         panic!("expected loaded event log");
     };
@@ -142,7 +143,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         GroupsPurpose::GetChatEventLog { from_event_id: 0 },
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &[500]));
-    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
     else {
         panic!("expected loaded event log");
     };
@@ -173,7 +174,7 @@ fn event_log_failure_states() {
         ),
     );
     let ChatEventLogFetch::Failed(message) =
-        session.groups.event_logs.get(&13).expect("log failed")
+        session.groups.event_log_fetch(13).expect("log failed")
     else {
         panic!("expected failed event log");
     };
@@ -206,7 +207,7 @@ fn event_log_failure_states() {
             extra.0
         ),
     );
-    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
     else {
         panic!("expected loaded event log");
     };
@@ -389,10 +390,12 @@ fn update_chat_member_invalidates_admin_list_and_own_rights() {
     );
     let chat = session.chats.get(&13).unwrap();
     assert_eq!(
-        chat.my_member_status,
+        chat.member_status(),
         Some(ChannelMemberStatus::Administrator)
     );
-    assert_eq!(chat.my_admin_can_promote_members, Some(true));
+    assert!(
+        matches!(chat.my_member, crate::state::OwnMember::Administrator(rights) if rights.promote_members == Some(true))
+    );
     assert!(chat.can_manage_admins());
 }
 
@@ -493,8 +496,8 @@ fn supergroup_members_fetch_caches() {
     };
     assert_eq!(*total_count, 2);
     assert_eq!(members.len(), 2);
-    assert_eq!(members[0].status, ChannelMemberStatus::Member);
-    assert_eq!(members[1].status, ChannelMemberStatus::Administrator);
+    assert_eq!(members[0].status(), ChannelMemberStatus::Member);
+    assert_eq!(members[1].status(), ChannelMemberStatus::Administrator);
 }
 
 #[test]
@@ -522,11 +525,11 @@ fn basic_group_full_info_caches_members() {
     };
     assert_eq!(*total_count, 2);
     assert_eq!(members.len(), 2);
-    assert_eq!(members[0].status, ChannelMemberStatus::Creator);
+    assert_eq!(members[0].status(), ChannelMemberStatus::Creator);
     // Slice G1: `chatMember.tag` (schema 1.8.67, line 2526) is the
     // admin custom title.
     assert_eq!(members[0].tag, "boss");
-    assert_eq!(members[1].status, ChannelMemberStatus::Member);
+    assert_eq!(members[1].status(), ChannelMemberStatus::Member);
     assert_eq!(members[1].tag, "");
 }
 
@@ -664,13 +667,14 @@ fn g2_welcome_pack_and_flag_cached() {
         .groups
         .welcome_messages
         .get(&13)
+        .and_then(|pack| pack.data())
         .expect("welcome pack");
     assert_eq!(pack.len(), 1);
     assert_eq!(pack[0].id, 7);
-    assert_eq!(
-        session.groups.welcome_message_fetches.get(&13),
-        Some(&WelcomeMessagesFetch::Loaded)
-    );
+    assert!(matches!(
+        session.groups.welcome_messages.get(&13),
+        Some(Fetch::Ready(_))
+    ));
     apply_json(
         &mut session,
         &seq,
@@ -741,8 +745,10 @@ fn g2_boost_slots_stashed_for_chain() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetBoostSlotsForBoost, Some(ChatId(13)));
-    // Stashed only while a boost waits for the slots.
-    session.groups.boost_intent = Some(13);
+    // Kept only while the box of that chat waits for the slots.
+    let mut open = crate::boost_box::BoostBoxState::new(13, false);
+    open.phase = crate::boost_box::BoostPhase::Working(crate::boost_box::BoostWork::Slots);
+    session.groups.boost_box = Some(open);
     apply_json(
         &mut session,
         &seq,
@@ -752,10 +758,16 @@ fn g2_boost_slots_stashed_for_chain() {
             extra.0
         ),
     );
-    let ids: Vec<i32> = session.groups.boost_slots_by_chat[&13]
-        .iter()
-        .map(|slot| slot.slot_id)
-        .collect();
+    let Some(crate::boost_box::BoostPhase::Working(crate::boost_box::BoostWork::SlotsReady(slots))) =
+        session
+            .groups
+            .boost_box
+            .as_ref()
+            .map(|state| state.phase.clone())
+    else {
+        panic!("the box holds the slots");
+    };
+    let ids: Vec<i32> = slots.iter().map(|slot| slot.slot_id).collect();
     assert_eq!(ids, vec![3, 7]);
 }
 
@@ -865,8 +877,8 @@ fn g2_welcome_fetch_error_marks_failed() {
         ),
     );
     assert!(matches!(
-        session.groups.welcome_message_fetches.get(&13),
-        Some(WelcomeMessagesFetch::Failed(_))
+        session.groups.welcome_messages.get(&13),
+        Some(Fetch::Failed { .. })
     ));
 }
 
@@ -916,11 +928,10 @@ fn g2_welcome_delete_ok_drops_pack() {
     // the cached pack so the dialog refetches it.
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.groups.welcome_messages.insert(13, Vec::new());
     session
         .groups
-        .welcome_message_fetches
-        .insert(13, WelcomeMessagesFetch::Loaded);
+        .welcome_messages
+        .insert(13, Fetch::Ready(Vec::new()));
     let extra = session.request(
         RequestPurpose::Groups(GroupsPurpose::DeleteChatWelcomeMessage {
             welcome_message_id: 7,
@@ -934,7 +945,6 @@ fn g2_welcome_delete_ok_drops_pack() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
     assert!(!session.groups.welcome_messages.contains_key(&13));
-    assert!(!session.groups.welcome_message_fetches.contains_key(&13));
 }
 
 #[test]
@@ -1117,4 +1127,38 @@ fn a_refused_toggle_keeps_a_value_an_update_changed_meanwhile() {
         ),
     );
     assert_eq!(session.groups.supergroup_anti_spam_enabled.get(&25), None);
+}
+
+#[test]
+fn a_new_status_drops_the_rights_of_the_old_one() {
+    let mut chat = placeholder_chat(ChatId(31));
+    chat.set_member_status(ChannelMemberStatus::Administrator, Some(true));
+    chat.set_admin_can_invite_users(Some(true));
+    assert!(chat.can_invite_users());
+    // Demoted: no administrator right is left to read.
+    chat.set_member_status(ChannelMemberStatus::Member, None);
+    assert!(!chat.can_invite_users());
+    assert_eq!(chat.member_status(), Some(ChannelMemberStatus::Member));
+    // Promoted again without a rights block: the old rights do not return.
+    chat.set_member_status(ChannelMemberStatus::Administrator, None);
+    assert!(!chat.can_invite_users());
+    assert!(chat.channel_admin_can_post(), "a bare administrator posts");
+    // Rights can only be set on an administrator.
+    chat.set_member_status(ChannelMemberStatus::Left, None);
+    chat.set_admin_can_invite_users(Some(true));
+    assert!(!chat.can_invite_users());
+}
+
+#[test]
+fn the_own_restriction_is_unknown_then_one_of_two_answers() {
+    use crate::state::OwnRestriction;
+    let mut chat = placeholder_chat(ChatId(32));
+    assert!(!chat.rights_fetched());
+    assert_eq!(chat.my_restriction, OwnRestriction::Unknown);
+    // The probe found no member record: not restricted, and not asked again.
+    chat.note_no_member_record();
+    assert!(chat.rights_fetched());
+    assert_eq!(chat.restriction(), None);
+    chat.set_my_restriction(None);
+    assert_eq!(chat.my_restriction, OwnRestriction::NotRestricted);
 }

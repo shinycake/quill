@@ -13,7 +13,7 @@ use crate::locks::LockExt;
 use std::fs;
 use std::path::{Path, PathBuf};
 #[cfg(feature = "ui")]
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU8;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -192,13 +192,114 @@ impl RunClock {
 #[cfg(feature = "ui")]
 #[derive(Default)]
 struct Control {
-    /// The recording is paused: the thread drops audio, and flushes what it
-    /// has so the file can be played.
-    paused: AtomicBool,
-    /// The thread has flushed the file since the pause.
-    flushed: AtomicBool,
+    /// The pause handshake, one of [`Handshake`] (see there).
+    handshake: AtomicU8,
     /// Why the encoder thread ended before the microphone closed.
     ended: Mutex<Option<String>>,
+}
+
+/// Where the pause handshake between the capture and its encoder thread
+/// stands. One atomic, moved by compare-exchange from the side that owns
+/// each step, so the two sides never disagree and a dead encoder is a
+/// stage too.
+#[cfg(feature = "ui")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum Handshake {
+    /// Recording: the thread encodes what it hears.
+    Recording = 0,
+    /// Paused: the thread drops audio and flushes what it has so the file
+    /// can be played.
+    PauseAsked = 1,
+    /// The thread has flushed the file since the pause.
+    Flushed = 2,
+    /// The encoder thread failed: no pause will ever be answered.
+    Failed = 3,
+}
+
+/// What the encoder thread does to follow the capture's pause.
+#[cfg(feature = "ui")]
+enum PauseStep {
+    /// Flush the file so it can be played.
+    Flush,
+    /// Carry on encoding.
+    Resume,
+}
+
+#[cfg(feature = "ui")]
+impl Handshake {
+    fn from_u8(value: u8) -> Self {
+        match value {
+            1 => Self::PauseAsked,
+            2 => Self::Flushed,
+            3 => Self::Failed,
+            _ => Self::Recording,
+        }
+    }
+}
+
+#[cfg(feature = "ui")]
+impl Control {
+    fn stage(&self) -> Handshake {
+        Handshake::from_u8(self.handshake.load(std::sync::atomic::Ordering::Acquire))
+    }
+
+    /// Move from `from` to `to`; `false` when the other side moved first.
+    fn advance(&self, from: Handshake, to: Handshake) -> bool {
+        self.handshake
+            .compare_exchange(
+                from as u8,
+                to as u8,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .is_ok()
+    }
+
+    /// The capture asks for a pause (a failed encoder stays failed).
+    fn ask_pause(&self) {
+        self.advance(Handshake::Recording, Handshake::PauseAsked);
+    }
+
+    /// The capture carries on recording.
+    fn ask_resume(&self) {
+        if !self.advance(Handshake::PauseAsked, Handshake::Recording) {
+            self.advance(Handshake::Flushed, Handshake::Recording);
+        }
+    }
+
+    /// The encoder thread's side of the handshake, once per loop: follow
+    /// the capture into or out of a pause (`paused` is what the thread has
+    /// done so far), and answer a pause with `Flushed`. A resume and a new
+    /// pause inside one receive timeout leave the thread already paused
+    /// with the stage back at `PauseAsked`; it still has to answer.
+    fn follow_pause<E>(
+        &self,
+        paused: &mut bool,
+        mut act: impl FnMut(PauseStep) -> Result<(), E>,
+    ) -> Result<(), E> {
+        let want = matches!(self.stage(), Handshake::PauseAsked | Handshake::Flushed);
+        if want != *paused {
+            *paused = want;
+            act(if want {
+                PauseStep::Flush
+            } else {
+                PauseStep::Resume
+            })?;
+        }
+        if *paused {
+            self.advance(Handshake::PauseAsked, Handshake::Flushed);
+        }
+        Ok(())
+    }
+
+    /// The encoder ended with a failure.
+    fn fail(&self) {
+        self.handshake.store(
+            Handshake::Failed as u8,
+            std::sync::atomic::Ordering::Release,
+        );
+    }
 }
 
 /// A running microphone capture: the cpal stream, the encoder thread it
@@ -226,13 +327,22 @@ const NO_AUDIO_SECS: u64 = 3;
 pub struct VoiceCapture {
     pub path: PathBuf,
     clock: RunClock,
-    live: Option<Live>,
+    source: Source,
     /// Bars shown while recording (the waveform so far).
     pub bars: Vec<u8>,
     levels: Arc<Mutex<Vec<u8>>>,
-    fixed_seconds: Option<i32>,
-    /// Screenshot fixtures must not be deleted on Cancel.
-    keep_file: bool,
+}
+
+/// Where a capture's audio comes from.
+enum Source {
+    /// The microphone, until it is closed.
+    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
+    Live(Live),
+    /// A screenshot fixture of this length: no microphone, and its file is
+    /// not deleted on Cancel.
+    Fixture { seconds: i32 },
+    /// The microphone was closed.
+    Closed,
 }
 
 impl VoiceCapture {
@@ -269,17 +379,13 @@ impl VoiceCapture {
                             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
                             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                         };
-                        let want = control.paused.load(Ordering::Acquire);
-                        if want != paused {
-                            paused = want;
-                            if paused {
-                                encoder.pause()?;
-                                control.flushed.store(true, Ordering::Release);
-                            } else {
+                        control.follow_pause(&mut paused, |step| match step {
+                            PauseStep::Flush => encoder.pause(),
+                            PauseStep::Resume => {
                                 encoder.resume();
-                                control.flushed.store(false, Ordering::Release);
+                                Ok(())
                             }
-                        }
+                        })?;
                         let Some(chunk) = chunk.filter(|_| !paused) else {
                             continue;
                         };
@@ -298,6 +404,7 @@ impl VoiceCapture {
                     Ok(total)
                 })();
                 if let Err(reason) = &result {
+                    control.fail();
                     *control.ended.lock_or_recover() = Some(reason.clone());
                 }
                 result
@@ -314,7 +421,7 @@ impl VoiceCapture {
         Ok(Self {
             path,
             clock: RunClock::started_at(Instant::now()),
-            live: Some(Live {
+            source: Source::Live(Live {
                 mic,
                 worker,
                 samples,
@@ -322,8 +429,6 @@ impl VoiceCapture {
             }),
             bars: Vec::new(),
             levels,
-            fixed_seconds: None,
-            keep_file: false,
         })
     }
 
@@ -337,16 +442,16 @@ impl VoiceCapture {
         Self {
             path,
             clock: RunClock::started_at(Instant::now()),
-            live: None,
+            source: Source::Fixture {
+                seconds: seconds.max(0),
+            },
             bars,
             levels: Arc::default(),
-            fixed_seconds: Some(seconds.max(0)),
-            keep_file: true,
         }
     }
 
     pub fn elapsed_secs(&self) -> i32 {
-        if let Some(seconds) = self.fixed_seconds {
+        if let Source::Fixture { seconds } = self.source {
             return seconds;
         }
         self.clock
@@ -364,9 +469,8 @@ impl VoiceCapture {
         }
         self.clock.pause_at(Instant::now());
         #[cfg(feature = "ui")]
-        if let Some(live) = &self.live {
-            use std::sync::atomic::Ordering;
-            live.control.paused.store(true, Ordering::Release);
+        if let Source::Live(live) = &self.source {
+            live.control.ask_pause();
             live.mic.pause();
         }
     }
@@ -378,9 +482,8 @@ impl VoiceCapture {
         }
         self.clock.resume_at(Instant::now());
         #[cfg(feature = "ui")]
-        if let Some(live) = &self.live {
-            use std::sync::atomic::Ordering;
-            live.control.paused.store(false, Ordering::Release);
+        if let Source::Live(live) = &self.source {
+            live.control.ask_resume();
             live.mic.play();
         }
     }
@@ -395,21 +498,16 @@ impl VoiceCapture {
             return None;
         }
         #[cfg(feature = "ui")]
-        if let Some(live) = &self.live {
-            use std::sync::atomic::Ordering;
-            return live
-                .control
-                .flushed
-                .load(Ordering::Acquire)
-                .then_some(self.path.as_path());
+        if let Source::Live(live) = &self.source {
+            return (live.control.stage() == Handshake::Flushed).then_some(self.path.as_path());
         }
         // A fixture has no encoder to wait for.
-        self.live.is_none().then_some(self.path.as_path())
+        Some(self.path.as_path())
     }
 
     /// Refresh the live bars from the levels heard so far.
     pub fn sample_bar(&mut self) {
-        if self.fixed_seconds.is_some() {
+        if matches!(self.source, Source::Fixture { .. }) {
             return;
         }
         if let Ok(levels) = self.levels.lock() {
@@ -422,7 +520,9 @@ impl VoiceCapture {
     #[cfg(feature = "ui")]
     pub fn failure(&self) -> Option<String> {
         use std::sync::atomic::Ordering;
-        let live = self.live.as_ref()?;
+        let Source::Live(live) = &self.source else {
+            return None;
+        };
         let error = live.mic.error.lock_or_recover().take();
         let error = error.or_else(|| live.control.ended.lock_or_recover().take());
         // The encoder only returns once the microphone is closed, so a
@@ -448,9 +548,13 @@ impl VoiceCapture {
     /// UI runs this off the UI thread.
     pub fn discard(mut self) {
         self.stop_live();
-        if !self.keep_file {
+        if !self.is_fixture() {
             let _ = fs::remove_file(&self.path);
         }
+    }
+
+    fn is_fixture(&self) -> bool {
+        matches!(self.source, Source::Fixture { .. })
     }
 
     /// Stop the encoder and keep the file when it holds audio. Joins the
@@ -468,8 +572,10 @@ impl VoiceCapture {
         let worker = self.stop_mic();
         VoiceFinish {
             path: std::mem::take(&mut self.path),
-            keep_file: self.keep_file,
-            fixed_seconds: self.fixed_seconds,
+            fixture: match self.source {
+                Source::Fixture { seconds } => Some(seconds),
+                Source::Live(_) | Source::Closed => None,
+            },
             levels: self.levels.clone(),
             bars: std::mem::take(&mut self.bars),
             wall,
@@ -481,14 +587,24 @@ impl VoiceCapture {
     /// drops.
     #[cfg(feature = "ui")]
     fn stop_mic(&mut self) -> Option<Worker> {
-        let live = self.live.take()?;
-        drop(live.mic);
-        Some(live.worker)
+        match std::mem::replace(&mut self.source, Source::Closed) {
+            Source::Live(live) => {
+                drop(live.mic);
+                Some(live.worker)
+            }
+            fixture @ Source::Fixture { .. } => {
+                self.source = fixture;
+                None
+            }
+            Source::Closed => None,
+        }
     }
 
     #[cfg(not(feature = "ui"))]
     fn stop_mic(&mut self) -> Option<Worker> {
-        self.live = None;
+        if matches!(self.source, Source::Live(_)) {
+            self.source = Source::Closed;
+        }
         None
     }
 
@@ -527,8 +643,9 @@ fn join_worker(_worker: Option<Worker>) -> Option<Result<u64, String>> {
 /// thread.
 pub struct VoiceFinish {
     path: PathBuf,
-    keep_file: bool,
-    fixed_seconds: Option<i32>,
+    /// A screenshot fixture's length: its file is kept whatever the encoder
+    /// says.
+    fixture: Option<i32>,
     levels: Arc<Mutex<Vec<u8>>>,
     bars: Vec<u8>,
     wall: Duration,
@@ -543,21 +660,21 @@ impl VoiceFinish {
         let encoded = match samples {
             Some(Err(ref reason)) => Err(reason.clone()),
             Some(Ok(0)) => Err(crate::media_tools::no_audio_message(false)),
-            _ if self.keep_file => Ok(()),
+            _ if self.fixture.is_some() => Ok(()),
             _ if len == 0 || !self.path.is_file() => {
                 Err(crate::media_tools::no_audio_message(false))
             }
             _ => Ok(()),
         };
         if let Err(reason) = encoded {
-            if !self.keep_file {
+            if self.fixture.is_none() {
                 let _ = fs::remove_file(&self.path);
             }
             return Err(reason);
         }
         // The encoded sample count is exact; the wall clock only stands in
         // for fixtures.
-        let duration_secs = match (self.fixed_seconds, samples) {
+        let duration_secs = match (self.fixture, samples) {
             (Some(fixed), _) => fixed,
             (None, Some(Ok(total))) => (total as f64 / 48_000.0).round() as i32,
             _ => self.wall.as_secs_f64().round() as i32,
@@ -662,6 +779,38 @@ pub fn voice_file_ready(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "ui")]
+    #[test]
+    fn a_pause_inside_one_timeout_after_a_resume_is_still_flushed() {
+        let control = Control::default();
+        let (mut paused, mut flushes, mut resumes) = (false, 0, 0);
+        let mut step = |control: &Control, paused: &mut bool| {
+            control
+                .follow_pause(paused, |s| {
+                    match s {
+                        PauseStep::Flush => flushes += 1,
+                        PauseStep::Resume => resumes += 1,
+                    }
+                    Ok::<(), String>(())
+                })
+                .unwrap_or_default();
+        };
+        control.ask_pause();
+        step(&control, &mut paused);
+        assert_eq!(control.stage(), Handshake::Flushed);
+        // Resume and pause again before the thread looks.
+        control.ask_resume();
+        control.ask_pause();
+        assert_eq!(control.stage(), Handshake::PauseAsked);
+        step(&control, &mut paused);
+        assert_eq!(control.stage(), Handshake::Flushed);
+        // A real resume still resumes.
+        control.ask_resume();
+        step(&control, &mut paused);
+        assert_eq!(control.stage(), Handshake::Recording);
+        assert_eq!((flushes, resumes), (1, 1));
+    }
 
     #[test]
     fn waveform_5bit_roundtrip_matches_tdesktop_packing() {

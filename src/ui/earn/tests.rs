@@ -287,13 +287,17 @@ fn park_a_join_box(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
         let Some(session) = app.demo_session.as_mut() else {
             return;
         };
-        session.payments.earn.pending_join = Some(quill::earn::JoinBox {
-            bot_user_id: 5,
-            info: Default::default(),
-            recipient: quill::earn::EarnPeer::User(1),
-            choose_recipient: true,
-            stage: quill::earn::JoinStage::Open,
-        });
+        session.payments.earn.recipients = quill::earn::Recipients::Loading {
+            waiting: Vec::new(),
+            found: Vec::new(),
+            join: Some(quill::earn::JoinBox {
+                bot_user_id: 5,
+                info: Default::default(),
+                recipient: quill::earn::EarnPeer::User(1),
+                choose_recipient: true,
+                stage: quill::earn::JoinStage::Open,
+            }),
+        };
     });
 }
 
@@ -301,7 +305,7 @@ fn parked_join_box(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool 
     app.read_with(vcx, |app, _| {
         app.demo_session
             .as_ref()
-            .is_some_and(|s| s.payments.earn.pending_join.is_some())
+            .is_some_and(|s| s.payments.earn.recipients.parked().is_some())
     })
 }
 
@@ -348,4 +352,22 @@ fn a_withdrawal_larger_than_the_balance_is_brought_down_to_it(cx: &mut TestAppCo
         (app.earn.amount.read(cx).value().to_string(), available)
     });
     assert_eq!(Some(typed.parse::<i64>().unwrap_or(-1)), available);
+}
+
+#[gpui_kit::test]
+fn a_reopened_link_box_plays_its_icon_from_the_start(cx: &mut TestAppContext) {
+    use quill::earn::LinkIcon;
+    let mut link = LinkBox::new(
+        super::fixture::joined_program(),
+        quill::earn::EarnPeer::User(1),
+    );
+    assert_eq!(link.icon, LinkIcon::Unseen);
+    let first = std::time::Instant::now();
+    link.note_drawn(first);
+    link.note_drawn(first + std::time::Duration::from_secs(1));
+    assert_eq!(link.icon, LinkIcon::Playing { since: first });
+    // The same link opened again is a new box: it has not played.
+    let again = LinkBox::new(link.program.clone(), link.recipient);
+    assert_eq!(again.icon, LinkIcon::Unseen);
+    let _ = cx;
 }

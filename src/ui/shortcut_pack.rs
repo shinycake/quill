@@ -175,12 +175,12 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return false;
         };
-        let Some(chat_id) = session.open_chat else {
+        let Some(chat_id) = session.open_chat_id() else {
             return false;
         };
         // tdesktop skips forums; a topic or comment thread is the same
         // kind of sub-view here.
-        if session.open_topic.is_some() || self.thread_active() {
+        if session.open_forum_topic().is_some() || self.thread_active() {
             return false;
         }
         let Some(chat) = session.chats.get(&chat_id.0) else {
@@ -232,7 +232,7 @@ impl QuillApp {
         }
         let can_attach = self.session().is_some_and(|session| {
             session
-                .open_chat
+                .open_chat_id()
                 .and_then(|chat| session.chats.get(&chat.0))
                 .is_some_and(|chat| chat.can_post() && chat.can_send_basic_messages)
         });
@@ -253,7 +253,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.shortcut_blocked(window, cx) || self.session().and_then(|s| s.open_chat).is_none() {
+        if self.shortcut_blocked(window, cx)
+            || self.session().and_then(|s| s.open_chat_id()).is_none()
+        {
             return false;
         }
         self.end_landing();
@@ -331,7 +333,7 @@ impl QuillApp {
         if self.shortcut_blocked(window, cx) {
             return false;
         }
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|s| s.open_chat_id()) else {
             return false;
         };
         if !self.selecting_in(chat_id) {
@@ -356,7 +358,7 @@ impl QuillApp {
         if self.shortcut_blocked(window, cx) {
             return false;
         }
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|s| s.open_chat_id()) else {
             return false;
         };
         let ids = self.loaded_selectable_ids(chat_id);
@@ -399,7 +401,7 @@ impl QuillApp {
         if keystroke.key == "space" && !modifiers.shift {
             let selecting = self
                 .session()
-                .and_then(|s| s.open_chat)
+                .and_then(|s| s.open_chat_id())
                 .is_some_and(|chat| self.selecting_in(chat));
             // Space toggles the selection when there is one, else plays the
             // focused media for a screen reader (`playPauseFocusedMedia`).
@@ -472,7 +474,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|s| s.open_chat_id()) else {
             return false;
         };
         if !self.selecting_in(chat_id) {
@@ -637,7 +639,7 @@ impl QuillApp {
         if self.shortcut_blocked(window, cx) {
             return false;
         }
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|s| s.open_chat_id()) else {
             return false;
         };
         let unread = self
@@ -656,11 +658,11 @@ impl QuillApp {
         if self.shortcut_blocked(window, cx) {
             return false;
         }
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|s| s.open_chat_id()) else {
             return false;
         };
         let size = window.viewport_size();
-        self.chat_list.preview = None;
+        self.chat_list.peek = crate::ui::chat_list_state::PeekPreview::Idle;
         self.chat_list.menu = Some(ChatMenuState::at(
             chat_id,
             point(size.width - px(220.), px(64.)),
@@ -678,7 +680,7 @@ impl QuillApp {
         if self.shortcut_blocked(window, cx) {
             return false;
         }
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|s| s.open_chat_id()) else {
             return false;
         };
         let size = window.viewport_size();

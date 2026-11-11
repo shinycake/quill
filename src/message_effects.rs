@@ -66,7 +66,7 @@ impl MessageEffect {
                 }),
             EffectKind::Sticker { sticker } => sticker
                 .as_ref()
-                .and_then(|sticker| sticker.premium_animation)
+                .and_then(|sticker| sticker.premium_animation())
                 .filter(|file| file.0 != 0)
                 .map(|file| EffectAnimation {
                     file,
@@ -186,10 +186,12 @@ pub fn parse_available_effect_ids(value: &Value) -> (Vec<i64>, Vec<i64>) {
 pub const LOOKUP_RETRY_FIRST: Duration = Duration::from_secs(5);
 pub const LOOKUP_RETRY_MAX: Duration = Duration::from_secs(5 * 60);
 
-/// One effect's `getMessageEffect`, before its answer arrives. An effect
-/// with no entry has not been asked for (or its ask was dropped).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// One effect's `getMessageEffect` and its answer. An effect with no entry
+/// has not been asked for (or its ask was dropped).
+#[derive(Debug, Clone, PartialEq)]
 enum EffectLookup {
+    /// Described; nothing more to ask.
+    Ready(Box<MessageEffect>),
     /// Sent; `failures` is how many earlier asks failed.
     Loading { failures: u32 },
     /// The server says the effect does not exist: nothing to wait for.
@@ -208,11 +210,10 @@ fn lookup_wait(failures: u32) -> Duration {
 /// The effects the session knows.
 #[derive(Debug, Default)]
 pub struct MessageEffects {
-    by_id: HashMap<i64, MessageEffect>,
     /// `updateAvailableMessageEffects`, in the server's order.
     reaction_ids: Vec<i64>,
     sticker_ids: Vec<i64>,
-    /// Where each effect not yet described stands.
+    /// Where each effect stands: asked, failed, or described.
     lookups: HashMap<i64, EffectLookup>,
     /// Bumped when an effect arrives, so a view can tell it changed.
     revision: u64,
@@ -228,8 +229,8 @@ impl MessageEffects {
     }
 
     pub fn accept(&mut self, effect: MessageEffect) {
-        self.lookups.remove(&effect.id);
-        self.by_id.insert(effect.id, effect);
+        self.lookups
+            .insert(effect.id, EffectLookup::Ready(Box::new(effect)));
         self.revision += 1;
     }
 
@@ -238,6 +239,8 @@ impl MessageEffects {
     /// for again after a wait that doubles per failure.
     pub fn fail(&mut self, id: i64, code: i32, now: Instant) {
         let failures = match self.lookups.get(&id) {
+            // An effect already described stays so.
+            Some(EffectLookup::Ready(_)) => return,
             Some(EffectLookup::Loading { failures } | EffectLookup::Waiting { failures, .. }) => {
                 *failures
             }
@@ -270,7 +273,10 @@ impl MessageEffects {
     }
 
     pub fn get(&self, id: i64) -> Option<&MessageEffect> {
-        self.by_id.get(&id)
+        match self.lookups.get(&id) {
+            Some(EffectLookup::Ready(effect)) => Some(effect),
+            _ => None,
+        }
     }
 
     /// `getMessageEffect` failed for `id`: there is nothing to wait for.
@@ -302,13 +308,14 @@ impl MessageEffects {
         ids.into_iter()
             .filter(|id| *id != 0)
             .filter(|id| {
-                !self.by_id.contains_key(id)
-                    && match self.lookups.get(id) {
-                        None => true,
-                        Some(EffectLookup::Waiting { until, .. }) => now >= *until,
-                        Some(EffectLookup::Loading { .. } | EffectLookup::Gone) => false,
-                    }
-                    && seen.insert(*id)
+                let askable = match self.lookups.get(id) {
+                    None => true,
+                    Some(EffectLookup::Waiting { until, .. }) => now >= *until,
+                    Some(
+                        EffectLookup::Ready(_) | EffectLookup::Loading { .. } | EffectLookup::Gone,
+                    ) => false,
+                };
+                askable && seen.insert(*id)
             })
             .collect()
     }
@@ -316,6 +323,7 @@ impl MessageEffects {
     /// The ask for `id` went out.
     pub fn mark_requested(&mut self, id: i64) {
         let failures = match self.lookups.get(&id) {
+            Some(EffectLookup::Ready(_)) => return,
             Some(EffectLookup::Waiting { failures, .. }) => *failures,
             _ => 0,
         };
@@ -330,7 +338,7 @@ impl MessageEffects {
         let mut reactions = Vec::new();
         let mut stickers = Vec::new();
         for id in self.available_ids() {
-            let Some(effect) = self.by_id.get(&id) else {
+            let Some(effect) = self.get(id) else {
                 continue;
             };
             if (!premium_possible && effect.is_premium) || !added.insert(id) {

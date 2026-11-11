@@ -40,9 +40,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
     ) -> Result<Option<SearchFlight>, ConnectSendError> {
         let search = &self.session.search.search;
-        if search.open
+        if search.is_open()
             && search.query.is_empty()
-            && !search.recents
+            && !search.is_recents()
             && matches!(
                 search.status(),
                 SearchStatus::Searching
@@ -136,17 +136,25 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// price TDLib reported, once the free searches are gone. Only the
     /// user's explicit confirmation reaches it, and it refuses unless the
     /// open query is a plain one whose free search was refused.
-    pub fn search_public_posts_paid(&mut self) -> Result<Option<SearchFlight>, ConnectSendError> {
+    pub fn search_public_posts_paid(
+        &mut self,
+        query: &str,
+        price: i64,
+    ) -> Result<Option<SearchFlight>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let search = &self.session.search.search;
-        let query = search.query.trim().to_string();
-        let price = search.tabs.limits.map_or(0, |limits| limits.star_count);
+        let query = query.trim().to_string();
+        // What the user confirmed: this query at this price. A query typed
+        // or a price TDLib reported since is another purchase.
+        let reported = search.tabs.limits.map_or(0, |limits| limits.star_count);
         if search.filters.scope != SearchScope::PublicPosts
-            || !search.public_limits_exceeded
+            || !search.public_limits_exceeded()
             || price <= 0
+            || price != reported
             || query.is_empty()
+            || query != search.query.trim()
             || crate::search_filters::tag_query(&query).is_some()
         {
             return Ok(None);
@@ -156,6 +164,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request_search(RequestPurpose::SearchPublicPosts, search_gen);
+        self.session.search.search.begin_paid_posts(extra, price);
         match self.sender.send_json(&search_public_posts_paid(
             extra,
             &query,
@@ -178,18 +187,23 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let tabs = &mut self.session.search.search.tabs;
-        if tabs.recommended_loading || tabs.recommended_loaded {
+        if !tabs.recommended.can_ask() {
             return Ok(None);
         }
-        tabs.recommended_loading = true;
         let extra = self
             .session
             .request(RequestPurpose::GetRecommendedChats, None);
         if let Err(err) = self.sender.send_json(&get_recommended_chats(extra)) {
             self.session.requests.take(extra);
-            self.session.search.search.tabs.recommended_loading = false;
+            self.session
+                .search
+                .search
+                .tabs
+                .recommended
+                .fail("could not send");
             return Err(err);
         }
+        self.session.search.search.tabs.recommended.begin();
         Ok(Some(extra))
     }
 

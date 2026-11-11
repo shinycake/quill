@@ -281,7 +281,11 @@ fn driver_mutation_confirmed_refetches_dropped_cache() {
     );
     // Seed the caches the way the dialogs load them before mutating.
     driver.session.threads.forum_topics.insert(13, vec![]);
-    driver.session.groups.welcome_messages.insert(13, vec![]);
+    driver
+        .session
+        .groups
+        .welcome_messages
+        .insert(13, crate::state::fetch::Fetch::Ready(vec![]));
     driver.session.groups.chat_boost_status.insert(13, (0, 0));
     let sent_types = || {
         recorder
@@ -350,7 +354,14 @@ fn driver_mutation_confirmed_refetches_dropped_cache() {
         &mut driver,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!driver.session.groups.welcome_messages.contains_key(&13));
+    // The dropped pack is being asked for again, not kept as the answer.
+    assert!(matches!(
+        driver.session.groups.welcome_messages.get(&13),
+        Some(crate::state::fetch::Fetch::Loading {
+            stale: None,
+            request: None
+        })
+    ));
     assert!(
         sent_types().iter().any(|t| t == "loadChatWelcomeMessages"),
         "welcome pack reloaded after confirmed add"
@@ -443,7 +454,14 @@ fn driver_boost_chain_sends_slots_then_boost() {
     let value: Value = serde_json::from_str(&boost).unwrap();
     assert_eq!(value["chat_id"], 13);
     assert_eq!(value["slot_ids"], serde_json::json!([3]));
-    assert_eq!(driver.session.groups.boost_intent, None);
+    assert!(
+        !driver
+            .session
+            .groups
+            .boost_box
+            .as_ref()
+            .is_some_and(|state| state.awaiting_slots())
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -656,7 +674,7 @@ fn driver_send_recorded_video_note_sends_input_message_video_note() {
         ),
         Err(ConnectSendError::InvalidRequest)
     );
-    driver.session.open_chat = Some(ChatId(11));
+    driver.session.open = crate::state::OpenView::of(Some(ChatId(11)));
     // A real file so `pick_send_path` accepts it; the thumbnail probe
     // may fail on garbage bytes (thumbnail is optional).
     let clip = dir.join("clip.mp4");
@@ -714,7 +732,7 @@ fn driver_send_recorded_video_note_to_ignores_the_open_chat() {
         thumbnail: None,
     };
     // Recorded in chat 11, finished after chat 12 was opened.
-    driver.session.open_chat = Some(ChatId(12));
+    driver.session.open = crate::state::OpenView::of(Some(ChatId(12)));
     let extra = driver
         .send_recorded_video_note_to(ChatId(11), &Default::default(), &draft, None)
         .expect("sends");
@@ -723,6 +741,6 @@ fn driver_send_recorded_video_note_to_ignores_the_open_chat() {
     assert_eq!(value["@type"], "sendMessage");
     assert_eq!(value["chat_id"], 11);
     assert_eq!(value["@extra"], extra.0.to_string());
-    assert_eq!(driver.session.open_chat, Some(ChatId(12)));
+    assert_eq!(driver.session.open_chat_id(), Some(ChatId(12)));
     let _ = std::fs::remove_dir_all(&dir);
 }

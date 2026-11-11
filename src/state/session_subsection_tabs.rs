@@ -181,7 +181,7 @@ impl Session {
         };
         let member = self.bot_topics(chat_id).is_some()
             || matches!(
-                chat.my_member_status,
+                chat.member_status(),
                 Some(
                     crate::telegram::envelope::ChannelMemberStatus::Creator
                         | crate::telegram::envelope::ChannelMemberStatus::Administrator
@@ -275,7 +275,7 @@ impl Session {
         let jump = topics.first().filter(|t| t.unread).map(|t| t.id);
         Some(RowForum {
             loaded: self.threads.forum_topics.contains_key(&chat_id.0)
-                || self.threads.forum_topics_failed.contains(&chat_id.0),
+                || self.threads.forum_topics_failed(chat_id.0),
             unread_topics: i32::try_from(shown).unwrap_or(i32::MAX),
             badge_muted,
             jump,
@@ -460,7 +460,7 @@ impl Session {
     /// pending sends and messages read elsewhere would skew them): the
     /// driver refetches the topic from TDLib.
     pub(crate) fn note_forum_topic_message(&mut self, message: &ParsedMessage) {
-        let Some(topic_id) = message.topic_id else {
+        let Some(topic_id) = message.topic_id() else {
             return;
         };
         self.threads

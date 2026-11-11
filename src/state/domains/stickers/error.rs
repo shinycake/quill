@@ -24,6 +24,17 @@ impl Session {
                         ),
                     ));
             }
+            Some(RequestPurpose::GetGreetingStickers) => {
+                self.stickers
+                    .stickers
+                    .greeting
+                    .fail(call_request_error_line(
+                        err,
+                        crate::lang::tr(
+                            crate::lang::keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN,
+                        ),
+                    ));
+            }
             Some(RequestPurpose::SearchEmojis) => {
                 if let Some(pending) = pending {
                     self.stickers.emoji.keyword_lookups.failed(pending.id);
@@ -43,8 +54,7 @@ impl Session {
                     self.fail_sticker_set_view(0);
                 }
             }
-            // The lookup's ids are asked for again; the note shows only
-            // where it is read, in the status picker. A rate limit is no
+            // The lookup's ids are asked for again. A rate limit is no
             // failure: the connect layer holds lookups until it is over.
             Some(RequestPurpose::GetCustomEmojiStickers) => {
                 let emoji = &mut self.stickers.emoji;
@@ -55,25 +65,6 @@ impl Session {
                         emoji.custom_emoji_lookup_failed(pending.id);
                     }
                 }
-                if emoji.status_open || emoji.chat_status_open {
-                    emoji.status_note = Some(call_request_error_line(
-                        err,
-                        "Could not update emoji statuses. Retry the action",
-                    ));
-                }
-            }
-            Some(
-                RequestPurpose::SetEmojiStatus
-                | RequestPurpose::ClearRecentEmojiStatuses
-                | RequestPurpose::GetRecentEmojiStatuses
-                | RequestPurpose::GetThemedEmojiStatuses
-                | RequestPurpose::GetDefaultEmojiStatuses
-                | RequestPurpose::GetDefaultChatEmojiStatuses,
-            ) => {
-                self.stickers.emoji.status_note = Some(call_request_error_line(
-                    err,
-                    "Could not update emoji statuses. Retry the action",
-                ));
             }
             _ => {}
         }
@@ -110,23 +101,35 @@ impl Session {
         self.fail_mask_request(pending);
         self.fail_sticker_creator(err, pending);
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ChangeEmojiSet) {
-            self.stickers.emoji.mutation_failed = true;
-            self.stickers.emoji.mutating_set = None;
+            // Only the change the box waits for fails it.
+            if self
+                .stickers
+                .emoji
+                .mutation
+                .waits_for(pending.map(|p| p.id))
+            {
+                self.stickers.emoji.mutation = crate::emoji::SetMutation::Failed;
+            }
         }
         // Suggestions that waited for the installed sets stop waiting: the
         // next emoji typed asks again.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetInstalledStickerSets)
-            && self.stickers.stickers.suggest_waiting_for_sets
+            && self.stickers.stickers.suggest_for.waiting_for_sets()
         {
-            self.stickers.stickers.suggest_waiting_for_sets = false;
-            self.stickers.stickers.suggest_for = None;
+            self.stickers.stickers.suggest_for = SuggestFor::Nothing;
         }
         let emoji_purpose = pending.map(|p| p.purpose);
         if emoji_purpose == Some(RequestPurpose::GetInstalledEmojiSets) {
-            self.stickers.emoji.installed.fail(error_reason(err));
+            self.stickers.emoji.lists.installed.fail(error_reason(err));
         }
-        if emoji_purpose == Some(RequestPurpose::SetEmojiStatus) {
-            self.stickers.emoji.pending_status_emoji = None;
+        if emoji_purpose == Some(RequestPurpose::SetEmojiStatus)
+            && matches!(
+                self.stickers.emoji.status_change,
+                crate::emoji::StatusChange::Setting { request, .. }
+                    if Some(request) == pending.map(|p| p.id)
+            )
+        {
+            self.stickers.emoji.status_change = crate::emoji::StatusChange::Idle;
         }
         if let Some(list) = emoji_purpose.and_then(|p| self.stickers.emoji.lists.for_purpose(p)) {
             list.fail(crate::lang::tr(
@@ -165,27 +168,23 @@ impl Session {
                 }
             }
         }
-        if matches!(
-            pending.map(|p| p.purpose),
-            Some(
-                RequestPurpose::ResolveGifSearchBot
-                    | RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { .. })
-            )
-        ) {
-            self.stickers.gifs.search_failed = true;
-            self.stickers.gifs.search_loading = false;
+        match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::ResolveGifSearchBot) => self.stickers.gifs.search_failed_now(),
+            Some(RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { .. })) => {
+                self.stickers
+                    .gifs
+                    .search_request_failed(pending.map(|p| p.id));
+            }
+            _ => {}
         }
         if matches!(
             pending.map(|p| p.purpose),
             Some(RequestPurpose::AddSavedAnimation | RequestPurpose::RemoveSavedAnimation)
         ) {
-            self.stickers.gifs.failed = true;
+            self.stickers.gifs.saved_mutation_failed();
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedAnimations) {
-            self.stickers.gifs.loading = false;
-            self.stickers.gifs.loaded = true;
-            self.stickers.gifs.failed = true;
-            self.stickers.gifs.stale = false;
+            self.stickers.gifs.saved_failed();
         }
     }
 }

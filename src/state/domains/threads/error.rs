@@ -37,19 +37,22 @@ impl Session {
             // sublists were loaded; it is not a failure.
             Some(RequestPurpose::LoadSavedMessagesTopics) => {
                 if err.code == 404 {
-                    self.threads.saved.topics_exhausted = true;
+                    self.threads.saved.topics_load = SavedTopicsLoad::Exhausted;
                 } else {
                     // Not sent as far as the pump goes: it asks again when
                     // the connection is back or Saved Messages opens again.
-                    self.threads.saved.topics_requested = false;
-                    self.threads.saved.retry_when_online = true;
+                    self.threads.saved.topics_load = SavedTopicsLoad::Retry;
                     self.chats_state
                         .chat_action_error
                         .push(call_request_error_line(err, "Could not load saved chats"));
                 }
             }
             Some(RequestPurpose::GetSavedMessagesTags { topic_id: 0 }) => {
-                self.threads.saved.retry_when_online = true;
+                self.threads.saved.tags.failed(
+                    pending.map(|p| p.id),
+                    format!("error {}", err.code),
+                    false,
+                );
                 self.chats_state
                     .chat_action_error
                     .push(call_request_error_line(
@@ -59,8 +62,8 @@ impl Session {
             }
             Some(RequestPurpose::LoadDirectMessagesChatTopics) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.threads.direct.page_failed(chat_id.0, err.code);
                     if err.code == 404 {
-                        self.threads.direct.exhausted.insert(chat_id.0);
                         self.view_generation.bump();
                     } else {
                         self.chats_state
@@ -85,7 +88,7 @@ impl Session {
             // The rows show "No chats" and do not ask again.
             Some(RequestPurpose::GetForumTopics) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.threads.forum_topics_failed.insert(chat_id.0);
+                    self.threads.forum_topics.fail(chat_id.0, error_reason(err));
                 }
             }
             Some(RequestPurpose::GetForumTopicLink) => {

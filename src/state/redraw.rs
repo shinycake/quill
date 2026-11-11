@@ -57,7 +57,9 @@ impl Session {
     /// screen.
     pub fn note_rows_on_screen(&mut self, messages: Option<&[MessageId]>) {
         // view-in-place: the main window's frame reports its own rows.
-        let history = self.open_chat.and_then(|chat| self.histories.get(&chat.0));
+        let history = self
+            .open_chat_id()
+            .and_then(|chat| self.histories.get(&chat.0));
         self.messages.rows_on_screen = messages.map(|messages| RowsOnScreen {
             messages: messages.iter().copied().collect(),
             auto_download_files: messages
@@ -273,13 +275,13 @@ fn interaction_need(session: &Session, chat_id: ChatId, message_id: MessageId) -
 /// downloading at all (an upload, a generated file) redraws at once.
 fn file_need(session: &Session, file: &ParsedFile) -> RedrawNeed {
     let id = file.id.0;
-    let completes = file.local.is_downloading_completed
+    let completes = file.local.is_downloading_completed()
         && !session
             .media
             .files
             .get(&id)
-            .is_some_and(|known| known.local.is_downloading_completed);
-    let asked_by = session.media.open_chat_media_downloads.get(&id).copied();
+            .is_some_and(|known| known.local.is_downloading_completed());
+    let asked_by = session.media.downloads.asked_by_chat(id);
     let open_chat = asked_by.is_some();
     // Only the main window reports its rows; a chat window that draws
     // the chat shows the row's progress live.
@@ -296,7 +298,7 @@ fn file_need(session: &Session, file: &ParsedFile) -> RedrawNeed {
         RedrawNeed::Conversation
     } else if open_chat
         || session.media.downloads.is_requested(id)
-        || file.local.is_downloading_completed
+        || file.local.is_downloading_completed()
     {
         RedrawNeed::Later
     } else {

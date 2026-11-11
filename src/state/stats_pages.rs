@@ -3,6 +3,7 @@
 //! forwards, previews of recent posts, and which page the statistics
 //! panel shows (tdesktop `info/statistics/`).
 use super::*;
+use crate::state::paged::{Page, Paged};
 use crate::state::session_reply::{story_thumb_candidates, thumb_candidates};
 use crate::telegram::envelope::{
     MessageStatisticsView, ParsedMessage, PublicForwardsView, StatisticalGraph,
@@ -46,35 +47,74 @@ pub enum MessageStatsFetch {
     Failed(String),
 }
 
-/// Pages of public forwards received so far.
+/// The public forwards received so far.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PublicForwardsList {
+pub struct PublicForwardsPage {
     pub forwards: Vec<crate::telegram::envelope::PublicForwardView>,
     pub total: i32,
     pub next_offset: String,
-    /// The page on its way: only its answer lands here, so a page asked
-    /// for a post shown before cannot join this post's list.
-    asking: Option<RequestId>,
-    pub error: Option<String>,
+}
+
+impl Page for PublicForwardsPage {
+    fn next_offset(&self) -> &str {
+        &self.next_offset
+    }
+
+    fn append(&mut self, later: Self) {
+        self.forwards.extend(later.forwards);
+        self.total = later.total;
+        self.next_offset = later.next_offset;
+    }
+}
+
+/// Pages of public forwards of one post. The page on its way names its
+/// request: only its answer lands here, so a page asked for a post shown
+/// before cannot join this post's list, and an empty answer is an answer
+/// (not "never asked").
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PublicForwardsList {
+    pub list: Paged<PublicForwardsPage>,
 }
 
 impl PublicForwardsList {
+    pub fn items(&self) -> &[crate::telegram::envelope::PublicForwardView] {
+        self.list.data().map_or(&[], |p| p.forwards.as_slice())
+    }
+
+    pub fn total(&self) -> i32 {
+        self.list.data().map_or(0, |p| p.total)
+    }
+
+    pub fn next_offset(&self) -> &str {
+        self.list.next_offset()
+    }
+
     /// A page is on its way.
     pub fn loading(&self) -> bool {
-        self.asking.is_some()
+        self.list.loading()
+    }
+
+    /// The list answered at least once (also with no forwards).
+    pub fn loaded(&self) -> bool {
+        self.list.data().is_some()
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        self.list.error()
     }
 
     /// Whether `request` is the page this list is waiting for.
     pub(crate) fn asked(&self, request: RequestId) -> bool {
-        self.asking == Some(request)
+        self.list.waits_for(Some(request))
     }
 
-    fn accept(&mut self, view: PublicForwardsView) {
-        self.asking = None;
-        self.error = None;
-        self.total = view.total_count;
-        self.next_offset = view.next_offset;
-        self.forwards.extend(view.forwards);
+    /// Show `forwards` as the answered list (a fixture, or a test).
+    pub fn set(&mut self, forwards: Vec<crate::telegram::envelope::PublicForwardView>, total: i32) {
+        self.list = Paged::Ready(PublicForwardsPage {
+            forwards,
+            total,
+            next_offset: String::new(),
+        });
     }
 }
 
@@ -235,10 +275,15 @@ impl StatsState {
             .filter(|m| m.chat_id == chat_id && m.message_id == message_id)
     }
 
-    pub(crate) fn forwards_requested(&mut self, chat_id: i64, message_id: i64, request: RequestId) {
+    pub(crate) fn forwards_requested(
+        &mut self,
+        chat_id: i64,
+        message_id: i64,
+        request: RequestId,
+        append: bool,
+    ) {
         if let Some(state) = self.message_mut(chat_id, message_id) {
-            state.forwards.asking = Some(request);
-            state.forwards.error = None;
+            state.forwards.list.begin(request, append);
         }
     }
 
@@ -263,7 +308,14 @@ impl StatsState {
         if let Some(state) = self.message_mut(chat_id, message_id)
             && state.forwards.asked(request)
         {
-            state.forwards.accept(view);
+            state.forwards.list.answer(
+                request,
+                PublicForwardsPage {
+                    forwards: view.forwards,
+                    total: view.total_count,
+                    next_offset: view.next_offset,
+                },
+            );
         }
     }
 
@@ -283,8 +335,7 @@ impl StatsState {
         if let Some(state) = self.message_mut(chat_id, message_id)
             && state.forwards.asked(request)
         {
-            state.forwards.asking = None;
-            state.forwards.error = Some(error);
+            state.forwards.list.fail(Some(request), error);
         }
     }
 
@@ -351,11 +402,11 @@ impl Session {
             earn.resolve = crate::earn::Resolve::Idle;
         }
         if earn
-            .pending_join
-            .as_ref()
+            .recipients
+            .parked()
             .is_some_and(|join| target != Some(InfoPanelTarget::User(join.bot_user_id)))
         {
-            earn.pending_join = None;
+            earn.recipients.drop_parked();
         }
         self.users_state.open_info_panel = target;
     }

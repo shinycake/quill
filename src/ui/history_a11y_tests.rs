@@ -131,7 +131,7 @@ fn focus_entering_the_history_picks_a_message_and_arrows_move_it(cx: &mut TestAp
     vcx.dispatch_action(SelectionFocusOlder);
     vcx.run_until_parked();
     assert_eq!(focused(&app, vcx), kids.get(at - 1).copied());
-    let chat = app.read_with(vcx, |app, _| app.session().and_then(|s| s.open_chat));
+    let chat = app.read_with(vcx, |app, _| app.session().and_then(|s| s.open_chat_id()));
     let chat = chat.expect("the demo opens a chat");
     assert!(!app.read_with(vcx, |app, _| app.selecting_in(chat)));
     vcx.dispatch_action(SelectionFocusNewer);
@@ -184,7 +184,7 @@ fn the_first_messages_of_a_focused_empty_chat_take_focus(cx: &mut TestAppContext
     vcx.update(|window, cx| {
         app.update(cx, |app, cx| app.history_a11y_focus_in(window, cx));
     });
-    let armed = app.read_with(vcx, |app, _| app.message_ui.a11y.announce_first);
+    let armed = app.read_with(vcx, |app, _| app.message_ui.a11y.focus.armed());
     assert!(armed.is_some());
     assert_eq!(focused(&app, vcx), None);
     // The first slice arrives: the newest message (or the one after the
@@ -199,7 +199,7 @@ fn the_first_messages_of_a_focused_empty_chat_take_focus(cx: &mut TestAppContext
         focused(&app, vcx),
         expected.and_then(|at| kids.get(at).copied())
     );
-    assert!(app.read_with(vcx, |app, _| app.message_ui.a11y.announce_first.is_none()));
+    assert!(app.read_with(vcx, |app, _| app.message_ui.a11y.focus.armed().is_none()));
 }
 
 #[gpui_kit::test]
@@ -226,7 +226,7 @@ fn the_bar_focus_does_not_follow_into_another_chat(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
         app.chat_ui.focus = A11yFocus::Bar;
-        let current = app.session().and_then(|s| s.open_chat);
+        let current = app.session().and_then(|s| s.open_chat_id());
         let other = app.session().and_then(|s| {
             s.chats
                 .keys()
@@ -234,7 +234,7 @@ fn the_bar_focus_does_not_follow_into_another_chat(cx: &mut TestAppContext) {
                 .find(|id| Some(ChatId(*id)) != current)
         });
         if let (Some(other), Some(session)) = (other, app.demo_session.as_mut()) {
-            session.open_chat = Some(ChatId(other));
+            session.open = quill::state::OpenView::of(Some(ChatId(other)));
         }
         app.sync_chat_ui(cx);
         assert_eq!(app.chat_ui.focus, A11yFocus::None, "the new chat's own");

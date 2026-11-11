@@ -9,7 +9,9 @@ use gpui_kit::component::WindowExt;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
-use quill::settings::{ChatWindowsState, SavedChatWindow, load_chat_windows, save_chat_windows};
+use quill::settings::{
+    ChatWindowsState, RestoreAnswer, SavedChatWindow, load_chat_windows, save_chat_windows,
+};
 
 /// Where the windows from last time stand.
 #[derive(Debug, Default)]
@@ -45,7 +47,7 @@ impl SaveTimer {
 /// The saved windows of `account` to bring back, when the answer was to
 /// restore (`None` otherwise, or when the question is still open).
 pub(super) fn to_restore(state: &ChatWindowsState, account: &str) -> Option<Vec<SavedChatWindow>> {
-    (state.asked && state.restore).then(|| state.windows_of(account))
+    (state.answer == RestoreAnswer::Yes).then(|| state.windows_of(account))
 }
 
 /// Split saved windows into those whose chat has loaded (as chat and
@@ -114,7 +116,7 @@ impl QuillApp {
             .windows
             .open
             .iter()
-            .map(|open| (open.chat_id, open.handle, open.view.clone()))
+            .map(|open| (open.chat_id, open.handle))
             .collect();
         // A change still waiting for its timer is saved now too: the timer
         // is the screen's and goes with it, so a window closed just before
@@ -123,10 +125,9 @@ impl QuillApp {
             self.save_chat_windows_now(cx);
         }
         self.windows.save = SaveTimer::Idle;
-        for (chat_id, handle, view) in windows {
+        for (chat_id, handle) in windows {
             self.in_window_scope(Some(chat_id), cx, |app, cx| app.flush_leaving_draft(cx));
             self.forget_chat_window(chat_id, cx);
-            let _ = view.update(cx, |view, _| view.mark_closed());
             // The switch may run inside this window's own update, which
             // holds it: the removal waits until it is let go.
             // screen-scope: the window is already forgotten; this only closes the OS window.
@@ -210,7 +211,7 @@ impl QuillApp {
                 let saved = state.windows_of(&account);
                 self.windows.restore = if saved.is_empty() {
                     Restore::Done
-                } else if !state.asked {
+                } else if state.answer == RestoreAnswer::Unasked {
                     self.offer_restore(window, cx);
                     Restore::Offered(saved)
                 } else {
@@ -239,7 +240,9 @@ impl QuillApp {
                 }
                 // Chats still loading get their windows when they arrive;
                 // once the list is complete the rest is gone for good.
-                let exhausted = self.session().is_some_and(|s| s.chat_list.chats_exhausted);
+                let exhausted = self
+                    .session()
+                    .is_some_and(|s| s.chat_list.main_paging.is_exhausted());
                 self.windows.restore = if waiting.is_empty() || exhausted {
                     Restore::Done
                 } else {
@@ -292,7 +295,7 @@ mod tests {
     use super::{Restore, split_ready, to_restore, windows_to_save};
     use gpui_kit::{point, px, size};
     use quill::ids::ChatId;
-    use quill::settings::{ChatWindowsState, SavedChatWindow};
+    use quill::settings::{ChatWindowsState, RestoreAnswer, SavedChatWindow};
 
     fn saved(chat_id: i64) -> SavedChatWindow {
         SavedChatWindow {
@@ -308,8 +311,7 @@ mod tests {
     #[test]
     fn the_windows_come_back_only_after_a_yes_and_as_their_chats_load() {
         let mut state = ChatWindowsState {
-            asked: false,
-            restore: false,
+            answer: RestoreAnswer::Unasked,
             windows: vec![saved(1), saved(2)],
         };
         // Not asked yet, or declined: nothing comes back.

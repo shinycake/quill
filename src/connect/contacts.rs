@@ -18,7 +18,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.users_state.contacts.is_some()
+        if !self.session.users_state.contacts.can_ask()
             || self
                 .session
                 .requests
@@ -26,15 +26,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.session.users_state.contacts_error = false;
+        self.session.users_state.contacts.begin();
         let extra = self.session.request(RequestPurpose::GetContacts, None);
         if let Err(err) = self.sender.send_json(&get_contacts(extra)) {
             self.session.requests.take(extra);
             // Nothing is in flight: the tab shows the error and its Retry,
             // not "Loading contacts...".
-            self.session.users_state.contacts_error = true;
+            self.session
+                .users_state
+                .contacts
+                .fail_dropping_data("could not send the request");
             return Err(err);
         }
+        self.session.users_state.contacts.sent(extra);
         Ok(Some(extra))
     }
 
@@ -43,12 +47,17 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// failed waits for Retry; a send that fails ends the loading with
     /// Retry instead of leaving "Loading contacts..." up.
     pub fn refetch_invalidated_contacts(&mut self) {
-        let users = &self.session.users_state;
-        if users.contacts.is_some() || users.contacts_error {
+        if !self.session.users_state.contacts.is_idle() {
             return;
         }
-        if self.fetch_contacts().is_err() {
-            self.session.users_state.contacts_error = true;
+        // A fetch refused before it began (the chats path is not active)
+        // leaves the list idle: it ends in the error line and its Retry
+        // too, not in a tab that stays on "Loading contacts...".
+        if self.fetch_contacts().is_err() && self.session.users_state.contacts.is_idle() {
+            self.session
+                .users_state
+                .contacts
+                .fail_dropping_data("could not send the request");
         }
     }
 
@@ -115,7 +124,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let Some(user_id) = self
             .session
-            .open_chat
+            .open_chat_id()
             .and_then(|chat_id| self.session.private_chat_user_id(chat_id))
         else {
             return Ok(());
@@ -324,7 +333,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// The New Contact box (tdesktop `AddContactBox::save` with no user):
     /// `importContacts` with the one phone contact. The answer lands in
-    /// `UsersState::new_contact_outcome`, and a phone on Telegram opens the
+    /// `UsersState::new_contact`, and a phone on Telegram opens the
     /// chat. `Ok(None)` while one is in flight.
     pub fn add_contact_by_phone(
         &mut self,
@@ -336,10 +345,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::AddContactByPhone;
-        if self.session.users_state.new_contact_request.is_some() {
+        if self.session.users_state.new_contact.sending().is_some() {
             return Ok(None);
         }
-        self.session.users_state.new_contact_outcome = None;
+        self.session.users_state.new_contact = crate::state::NewContact::Closed;
         let contact = ImportedContact {
             phone_number: phone_number.to_string(),
             first_name: first_name.to_string(),
@@ -354,15 +363,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.users_state.new_contact_request = Some(extra);
+        self.session.users_state.new_contact = crate::state::NewContact::Sending(extra);
         Ok(Some(extra))
     }
 
     /// The New Contact box closed: the import it sent opens no chat when
     /// it lands, and the next box may send its own.
     pub fn forget_new_contact(&mut self) {
-        self.session.users_state.new_contact_request = None;
-        self.session.users_state.new_contact_outcome = None;
+        self.session.users_state.new_contact = crate::state::NewContact::Closed;
     }
 
     /// Slice A6: "Delete synced contacts" (TGX
@@ -389,7 +397,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         sent += 1;
-        if let Some(ids) = self.session.users_state.contacts.clone()
+        if let Some(ids) = self.session.users_state.contacts.data().cloned()
             && !ids.is_empty()
         {
             let extra = self.session.request(RequestPurpose::RemoveContact, None);

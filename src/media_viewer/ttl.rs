@@ -9,7 +9,7 @@
 //! `message.self_destruct_in` is that timer.
 
 use super::MediaViewerKind;
-use crate::telegram::envelope::{MessageSelfDestruct, SelfDestructKind};
+use crate::telegram::envelope::{MessageSelfDestruct, SelfDestructClock, SelfDestructKind};
 
 /// A running timer of a timed photo or video.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,11 +26,16 @@ pub fn viewer_ttl(self_destruct: &MessageSelfDestruct, now_ms: u64) -> Option<Vi
     let SelfDestructKind::Timer { secs } = self_destruct.kind else {
         return None;
     };
-    let left_ms = (self_destruct.expires_in_ms > 0).then(|| {
-        let elapsed =
-            i64::try_from(now_ms.saturating_sub(self_destruct.fetched_at_ms)).unwrap_or(i64::MAX);
-        self_destruct.expires_in_ms.saturating_sub(elapsed).max(0)
-    });
+    let left_ms = match self_destruct.clock {
+        SelfDestructClock::NotOpened => None,
+        SelfDestructClock::Counting {
+            expires_in_ms,
+            fetched_at_ms,
+        } => {
+            let elapsed = i64::try_from(now_ms.saturating_sub(fetched_at_ms)).unwrap_or(i64::MAX);
+            Some(expires_in_ms.saturating_sub(elapsed).max(0))
+        }
+    };
     Some(ViewerTtl {
         total_secs: secs,
         left_ms,
@@ -85,8 +90,7 @@ mod tests {
     fn timer(secs: i32, expires_in_ms: i64, fetched_at_ms: u64) -> MessageSelfDestruct {
         MessageSelfDestruct {
             kind: SelfDestructKind::Timer { secs },
-            expires_in_ms,
-            fetched_at_ms,
+            clock: SelfDestructClock::from_ms(expires_in_ms, fetched_at_ms),
         }
     }
 
@@ -124,8 +128,7 @@ mod tests {
     fn view_once_media_has_no_countdown() {
         let once = MessageSelfDestruct {
             kind: SelfDestructKind::Immediately,
-            expires_in_ms: 0,
-            fetched_at_ms: 0,
+            clock: SelfDestructClock::from_ms(0, 0),
         };
         assert_eq!(viewer_ttl(&once, 0), None);
     }

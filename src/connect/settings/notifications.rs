@@ -249,7 +249,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.settings.saved_sounds_loaded
+        // Asked when never asked, or owed again; a failed fetch waits for
+        // the next change of the list.
+        let saved = &self.session.settings.saved_sounds;
+        if !saved.wants_fetch()
             || self
                 .session
                 .requests
@@ -260,10 +263,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetSavedNotificationSounds, None);
+        self.session.settings.saved_sounds.begin();
         match self.sender.send_json(&get_saved_notification_sounds(extra)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
+                self.session
+                    .settings
+                    .saved_sounds
+                    .fail("The saved sounds request was not sent.");
                 Err(err)
             }
         }
@@ -274,10 +282,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn refresh_notification_sounds_if_stale(
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.session.settings.saved_sounds_stale {
+        // Owed again: stale, with no request out.
+        if !self.session.saved_sounds_owed() {
             return Ok(None);
         }
-        self.session.settings.saved_sounds_loaded = false;
         self.maybe_fetch_notification_sounds()
     }
 
@@ -415,7 +423,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(entry) = self
             .session
             .settings
-            .saved_notification_sounds
+            .saved_notification_sounds()
             .iter()
             .find(|s| s.id == sound_id)
         else {

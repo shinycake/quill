@@ -34,6 +34,28 @@ pub enum WebAppOpenResult {
     },
 }
 
+/// A write-access answer: for which bot, to which request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WriteAnswer {
+    pub request: crate::ids::RequestId,
+    pub bot_user_id: i64,
+    pub result: WriteAccessResult,
+}
+
+impl WriteAnswer {
+    pub fn new(
+        request: crate::ids::RequestId,
+        bot_user_id: i64,
+        result: WriteAccessResult,
+    ) -> Self {
+        Self {
+            request,
+            bot_user_id,
+            result,
+        }
+    }
+}
+
 /// Where a bot stands on messaging the person (`canBotSendMessages`,
 /// `allowBotToSendMessages`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,8 +141,8 @@ pub struct WebApps {
     /// first, each with the bot it answers: the flow waiting takes only its
     /// own bot's.
     pub attachment_menu_toggled: Vec<AttachmentToggle>,
-    /// One-shot: write-access answers, `(bot_user_id, result)`.
-    pub write_access: Option<(i64, WriteAccessResult)>,
+    /// One-shot: the write-access answer, with the request it answers.
+    pub write_access: Option<WriteAnswer>,
     /// One-shot: `toggleBotCanManageEmojiStatus` outcome,
     /// `(bot_user_id, done)`.
     pub emoji_access: Option<(i64, bool)>,
@@ -132,9 +154,10 @@ pub struct WebApps {
     pub custom_requests: HashMap<u64, String>,
     /// One-shot: custom request answers.
     pub custom_replies: Vec<CustomRequestReply>,
-    /// Apps tab: `getGrossingWebAppBots` bot ids (`None` until loaded).
-    pub grossing_bots: Option<Vec<i64>>,
-    pub grossing_loading: bool,
+    /// Apps tab: `getGrossingWebAppBots` bot ids. One request at a time,
+    /// so its answer and its error need no key; a failure is drawn with
+    /// the tab's reopen as the retry.
+    pub grossing: crate::state::fetch::Fetch<Vec<i64>>,
     /// One-shot: `sendWebAppData` outcome (`Ok` or a failure message).
     pub data_sent: Option<Result<(), String>>,
     /// One-shot: the contact card sent for `web_app_request_phone` was

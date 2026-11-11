@@ -188,8 +188,8 @@ impl Session {
                     && !program.url.is_empty()
                     && !program.is_disconnected
                 {
-                    earn.link_box = Some(LinkBox { program, recipient });
-                    earn.pending_join = None;
+                    earn.link_box = Some(LinkBox::new(program, recipient));
+                    earn.recipients.drop_parked();
                 } else {
                     self.open_join_box_after_resolve(bot_user_id, recipient, choose_recipient);
                 }
@@ -214,7 +214,7 @@ impl Session {
                     }
                 }
                 if asked || earn.join_box.is_none() {
-                    earn.link_box = Some(LinkBox { program, recipient });
+                    earn.link_box = Some(LinkBox::new(program, recipient));
                 }
             }
             (EarnPayload::Connected(program), Some(EarnPurpose::Disconnect)) => {
@@ -286,10 +286,10 @@ impl Session {
             choose_recipient,
             stage: JoinStage::Open,
         };
-        if choose_recipient && earn.recipients.is_loading() {
-            earn.pending_join = Some(join);
-        } else {
+        if !choose_recipient {
             earn.join_box = Some(join);
+        } else if let Some(open) = earn.recipients.park(join) {
+            earn.join_box = Some(open);
         }
     }
 
@@ -301,7 +301,7 @@ impl Session {
                 // An answer to an attempt the user cancelled (or one
                 // before this attempt) opens nothing.
                 let id = pending.map(|p| p.id);
-                if earn.withdraw.as_ref().is_some_and(|w| w.waits_for(id)) {
+                if earn.withdraw.as_ref().is_some_and(|w| w.takes_answer(id)) {
                     earn.withdraw = None;
                     if !url.is_empty() {
                         earn.open_url = Some(url);
@@ -338,7 +338,7 @@ impl Session {
         // either way.
         if ours {
             earn.setup = None;
-            earn.setup_closed = true;
+            earn.effects.push(EarnEffect::SetupDone);
         }
         earn.note(if end {
             "Affiliate program ended. Participating affiliates have been notified. All referral links will be disabled in 24 hours."
@@ -407,7 +407,7 @@ impl Session {
     /// The signed-in user created the channel (tdesktop `amCreator`).
     pub fn earn_is_channel_creator(&self, chat_id: i64) -> bool {
         self.chats.get(&chat_id).is_some_and(|chat| {
-            chat.my_member_status == Some(crate::telegram::envelope::ChannelMemberStatus::Creator)
+            chat.member_status() == Some(crate::telegram::envelope::ChannelMemberStatus::Creator)
         })
     }
 
@@ -431,7 +431,12 @@ impl Session {
     fn add_earn_recipients(&mut self, more: Vec<EarnPeer>, request: Option<RequestId>) {
         let me = self.my_user_id;
         let earn = &mut self.payments.earn;
-        let Recipients::Loading { waiting, found } = &mut earn.recipients else {
+        let Recipients::Loading {
+            waiting,
+            found,
+            join,
+        } = &mut earn.recipients
+        else {
             return;
         };
         let Some(at) = request.and_then(|id| waiting.iter().position(|w| *w == id)) else {
@@ -451,8 +456,9 @@ impl Session {
                 list.push(peer);
             }
         }
+        let parked = join.take();
         earn.recipients = Recipients::Ready(list);
-        if let Some(join) = earn.pending_join.take() {
+        if let Some(join) = parked {
             earn.join_box = Some(join);
         }
     }
@@ -484,8 +490,7 @@ impl Session {
                     if matches!(peer, EarnPeer::Chat(_))
                         && err.earn_hint == Some(EarnErrorHint::BroadcastRequired)
                     {
-                        page.ton_unavailable = true;
-                        page.ton = Load::Idle;
+                        page.ton = Load::Unavailable;
                     } else {
                         page.ton = Load::Failed(crate::lang::tr_with(
                             crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_REVENUE_REASON,
@@ -519,14 +524,18 @@ impl Session {
                     page.history_mut(filter).load.fail_request(request);
                 }
             }
-            // Settled either way, so the gates do not ask again each frame.
-            EarnPurpose::AppConfig => earn.limits.app_config_loaded = true,
+            // Failed: the next info panel to open asks again.
+            EarnPurpose::AppConfig => earn.limits.app_config.fail(reason.clone()),
             EarnPurpose::TonBalance { peer } | EarnPurpose::StarBalance { peer } => {
                 earn.fail_balance(peer, request);
             }
             EarnPurpose::AdAccountUrl { .. } => {}
             EarnPurpose::WithdrawalUrl { with_password } => {
-                if earn.withdraw.as_ref().is_some_and(|w| w.waits_for(request)) {
+                if earn
+                    .withdraw
+                    .as_ref()
+                    .is_some_and(|w| w.takes_answer(request))
+                {
                     Self::apply_withdrawal_error(earn, err, with_password, &reason);
                 }
             }
@@ -611,23 +620,16 @@ impl Session {
             }
             Some(EarnErrorHint::PasswordInvalid) if with_password => {
                 withdraw.step = WithdrawStep::Password {
-                    sending: false,
                     error: Some("Wrong cloud password".into()),
                 };
             }
             _ if !with_password => {
                 // Any other answer to the password-less try opens the
                 // password box (tdesktop `processOut`).
-                withdraw.step = WithdrawStep::Password {
-                    sending: false,
-                    error: None,
-                };
+                withdraw.step = WithdrawStep::Password { error: None };
             }
             _ => {
-                withdraw.step = WithdrawStep::Password {
-                    sending: false,
-                    error: None,
-                };
+                withdraw.step = WithdrawStep::Password { error: None };
                 // tdesktop toasts the error as it is.
                 earn.note(reason);
             }

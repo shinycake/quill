@@ -13,14 +13,7 @@ fn file(id: i32) -> ParsedFile {
         id: FileId(id),
         size: 10,
         expected_size: 10,
-        uploading: false,
-        local: LocalFileState {
-            path: String::new(),
-            can_be_downloaded: true,
-            is_downloading_active: false,
-            is_downloading_completed: false,
-            downloaded_size: 0,
-        },
+        local: LocalFileState::from_parts(String::new(), true, false, false, 0),
     }
 }
 
@@ -32,13 +25,10 @@ fn live(chat: i64, id: i64, files: Vec<ParsedFile>) -> ParsedMessage {
         date: 0,
         is_outgoing: false,
         is_pinned: false,
-        topic_id: None,
-        thread_id: None,
         ephemeral: None,
         media_album_id: 0,
         author_signature: None,
         scheduling_state: None,
-        can_retry: false,
         send_state: Default::default(),
         content: MessageContent::Text("m".into()),
         files,
@@ -66,7 +56,7 @@ fn a_chat_nobody_has_open_stays_within_the_cap() {
     let history = &session.histories[&7];
     assert!(history.messages.len() <= HISTORY_WINDOW_CAP);
     assert_eq!(history.newest_id(), Some(MessageId(total)), "newest stay");
-    assert!(!history.loaded_complete, "older ones page back in");
+    assert!(!history.loaded_complete(), "older ones page back in");
 }
 
 fn feed_live(session: &mut Session, chat: i64, ids: std::ops::RangeInclusive<i64>) {
@@ -93,7 +83,7 @@ fn a_chat_left_open_at_the_tail_stays_within_the_cap() {
     let history = &session.histories[&7];
     assert!(history.messages.len() <= HISTORY_WINDOW_CAP);
     assert_eq!(history.newest_id(), Some(MessageId(total)));
-    assert!(!history.loaded_complete, "older rows page back in");
+    assert!(!history.loaded_complete(), "older rows page back in");
     assert!(!session.history_has_newer(ChatId(7)), "still at the latest");
 }
 
@@ -126,11 +116,15 @@ fn a_reader_near_the_top_keeps_the_oldest_rows_and_the_tail_waits() {
     session.open_chat(ChatId(7));
     let cap = HISTORY_WINDOW_CAP as i64;
     feed_live(&mut session, 7, 1..=cap);
-    session.histories.get_mut(&7).unwrap().loaded_complete = true;
+    session
+        .histories
+        .get_mut(&7)
+        .unwrap()
+        .set_loaded_complete(true);
     session.note_history_reader((7, None, 0), ReaderPosition::Away { top: MessageId(50) });
     feed_live(&mut session, 7, cap + 1..=cap + 1);
     assert_eq!(session.histories[&7].oldest_id(), Some(MessageId(1)));
-    assert!(session.histories[&7].loaded_complete);
+    assert!(session.histories[&7].loaded_complete());
     assert!(session.history_has_newer(ChatId(7)), "paged back in below");
     feed_live(&mut session, 7, cap + 2..=cap + 500);
     let history = &session.histories[&7];
@@ -265,7 +259,7 @@ fn a_forum_topic_on_screen_drops_rows_far_from_its_reader() {
     session.topic_history_entry(ChatId(7), 3);
     for id in 1..=cap + 1 {
         let mut message = live(7, id, Vec::new());
-        message.topic_id = Some(3);
+        message.extras.topic = Some(crate::telegram::envelope::MessageTopic::Forum(3));
         session.apply_update_new_message(message);
     }
     let topic = &session.threads.topic_histories[&(7, 3)];
@@ -281,7 +275,7 @@ fn a_forum_topic_on_screen_drops_rows_far_from_its_reader() {
     );
     for id in cap + 2..=cap + 400 {
         let mut message = live(7, id, Vec::new());
-        message.topic_id = Some(3);
+        message.extras.topic = Some(crate::telegram::envelope::MessageTopic::Forum(3));
         session.apply_update_new_message(message);
     }
     let topic = &session.threads.topic_histories[&(7, 3)];
@@ -291,7 +285,7 @@ fn a_forum_topic_on_screen_drops_rows_far_from_its_reader() {
         Some(&(cap + 2 - 1200)),
         "the reader keeps their rows"
     );
-    assert!(topic.has_newer, "the newest end went and pages back in");
+    assert!(topic.has_newer(), "the newest end went and pages back in");
     assert_eq!(topic.latest_seen, cap + 400);
 }
 
@@ -302,7 +296,7 @@ fn reply_strips_of_trimmed_topic_rows_go_when_only_the_topic_is_loaded() {
     let total = HISTORY_WINDOW_CAP as i64 * 2;
     for id in 1_000_000..1_000_000 + total {
         let mut message = live(7, id, Vec::new());
-        message.topic_id = Some(3);
+        message.extras.topic = Some(crate::telegram::envelope::MessageTopic::Forum(3));
         session.apply_update_new_message(message);
         session.histories.remove(&7);
         session.accept_replied_message(ChatId(7), MessageId(id - 500_000), live(7, 1, Vec::new()));

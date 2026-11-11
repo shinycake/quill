@@ -165,7 +165,7 @@ fn too_many_public_chats_opens_the_limit_box() {
     let state = &rig.driver.session.groups.group_type;
     assert_eq!(state.public_limit_reached, Some(true));
     assert_eq!(
-        rig.driver.session.payments.hub.limit_box,
+        rig.driver.session.payments.hub.limit_box(),
         Some((PremiumLimitKind::PublicLinks, 0))
     );
 }
@@ -174,7 +174,12 @@ fn too_many_public_chats_opens_the_limit_box() {
 fn revoking_a_link_frees_the_limit() {
     let mut rig = Rig::new();
     rig.driver.session.groups.group_type.public_limit_reached = Some(true);
-    rig.driver.session.payments.hub.limit_box = Some((PremiumLimitKind::PublicLinks, 0));
+    rig.driver.session.payments.hub.limit_notice =
+        Some(crate::premium_hub::limit_notice::LimitNotice::Box {
+            kind: PremiumLimitKind::PublicLinks,
+            extra: 0,
+            toast: None,
+        });
     rig.driver.revoke_public_link(ChatId(13)).unwrap().unwrap();
     let clear = rig.sent("setSupergroupUsername");
     let disable = rig.sent("disableAllSupergroupUsernames");
@@ -196,7 +201,7 @@ fn revoking_a_link_frees_the_limit() {
     let state = &rig.driver.session.groups.group_type;
     assert_eq!(state.revoke, crate::state::PublicLinkStage::Freed);
     assert_eq!(state.public_limit_reached, Some(false));
-    assert_eq!(rig.driver.session.payments.hub.limit_box, None);
+    assert_eq!(rig.driver.session.payments.hub.limit_box(), None);
 }
 
 #[test]

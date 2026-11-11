@@ -111,8 +111,10 @@ impl QuillApp {
             .sum();
         let clearing = session
             .as_ref()
-            .is_some_and(|s| s.settings.storage_clearing);
-        let freed = session.as_ref().and_then(|s| s.settings.storage_freed);
+            .is_some_and(|s| s.settings.storage_clear.is_clearing());
+        let freed = session
+            .as_ref()
+            .and_then(|s| s.settings.storage_clear.freed());
         let actions =
             self.local_storage_actions(cx, &categories_selected(self), selected_size, clearing);
         section = section.child(self.setting_spot(&["data.clear_cache"], actions, cx));
@@ -259,8 +261,8 @@ impl QuillApp {
             // dialog (the S3 pattern).
             live.driver.clear_storage(&types, &chats).is_ok()
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.settings.storage_stats = None;
-            demo.settings.storage_freed = Some(54_525_952);
+            demo.settings.storage_stats = Default::default();
+            demo.settings.storage_clear = quill::state::StorageClear::Freed(54_525_952);
             true
         } else {
             false
@@ -345,7 +347,7 @@ impl QuillApp {
     /// Start the two limit sliders on what TDLib reports. They are made
     /// once per visit (`open_data_storage` drops them).
     pub(super) fn ensure_storage_sliders(&mut self, cx: &mut Context<Self>) {
-        let sliders = &self.preferences.index_sliders;
+        let sliders = &self.index_sliders;
         if sliders.contains(StepSlider::StorageSize) && sliders.contains(StepSlider::StorageKeep) {
             return;
         }
@@ -417,7 +419,7 @@ impl QuillApp {
 
     /// Leaving the page with a drag that never released: its limits go now.
     pub(in crate::ui) fn apply_unreleased_storage_drag(&mut self) {
-        let drag = std::mem::take(&mut self.preferences.index_sliders.storage);
+        let drag = std::mem::take(&mut self.index_sliders.storage);
         if let StorageDrag::Moved {
             account,
             size,

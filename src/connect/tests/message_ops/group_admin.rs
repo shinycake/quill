@@ -87,7 +87,12 @@ fn driver_set_chat_member_tag_gates_and_shape() {
     );
     // Owner → sends `setChatMemberTag`.
     driver.session.my_user_id = Some(7);
-    driver.session.chats.get_mut(&9).unwrap().my_member_status = Some(ChannelMemberStatus::Creator);
+    driver
+        .session
+        .chats
+        .get_mut(&9)
+        .unwrap()
+        .assume_member_status(Some(ChannelMemberStatus::Creator));
     let extra = driver
         .set_chat_member_tag(ChatId(9), 42, "boss")
         .unwrap()
@@ -168,7 +173,12 @@ fn driver_group_info_edit_gates_and_shape() {
     // A basic group member needs the default `can_change_info`
     // permission (tdesktop `ChatData::canEditInformation`).
     assert!(driver.set_chat_photo(ChatId(9), None).unwrap().is_none());
-    driver.session.chats.get_mut(&9).unwrap().my_member_status = Some(ChannelMemberStatus::Member);
+    driver
+        .session
+        .chats
+        .get_mut(&9)
+        .unwrap()
+        .assume_member_status(Some(ChannelMemberStatus::Member));
     let extra = driver
         .set_chat_photo(ChatId(9), None)
         .unwrap()
@@ -189,7 +199,12 @@ fn driver_group_info_edit_gates_and_shape() {
     assert_eq!(recorder.snapshot().len(), sent_before);
     // Supergroup plain member WITH the default
     // `permissions.can_change_info` → sends.
-    driver.session.chats.get_mut(&10).unwrap().my_member_status = Some(ChannelMemberStatus::Member);
+    driver
+        .session
+        .chats
+        .get_mut(&10)
+        .unwrap()
+        .assume_member_status(Some(ChannelMemberStatus::Member));
     driver
         .session
         .chats
@@ -214,7 +229,12 @@ fn driver_group_info_edit_gates_and_shape() {
         .take_purpose(RequestPurpose::SetChatPhoto);
     // Creator → sends `setChatTitle`.
     driver.session.my_user_id = Some(7);
-    driver.session.chats.get_mut(&9).unwrap().my_member_status = Some(ChannelMemberStatus::Creator);
+    driver
+        .session
+        .chats
+        .get_mut(&9)
+        .unwrap()
+        .assume_member_status(Some(ChannelMemberStatus::Creator));
     let extra = driver
         .set_group_title(ChatId(9), "New name")
         .unwrap()

@@ -16,13 +16,10 @@ fn live(chat: i64, id: i64) -> ParsedMessage {
         date: 0,
         is_outgoing: false,
         is_pinned: false,
-        topic_id: None,
-        thread_id: None,
         ephemeral: None,
         media_album_id: 0,
         author_signature: None,
         scheduling_state: None,
-        can_retry: false,
         send_state: Default::default(),
         content: MessageContent::Text("m".into()),
         files: Vec::new(),
@@ -64,7 +61,7 @@ fn topic_with(session: &mut Session, chat: i64, topic: i32, count: i64) {
     for id in 1..=count {
         history.upsert(history_message(live(chat, id), false));
     }
-    history.loaded_complete = true;
+    history.mark_complete();
     session
         .threads
         .topic_histories
@@ -96,7 +93,7 @@ fn closing_a_chat_trims_it_to_a_tail_and_reopening_keeps_it() {
     let history = &session.histories[&7];
     assert_eq!(history.newest_id(), Some(MessageId(200)));
     assert_eq!(history.oldest_id(), Some(MessageId(141)));
-    assert!(!history.loaded_complete, "older rows page back in");
+    assert!(!history.loaded_complete(), "older rows page back in");
     assert!(is_closed_tail(&session, 7));
     switch(&mut session, 7);
     assert_eq!(len(&session, 7), CLOSED_TAIL_KEEP, "shown from the tail");
@@ -254,7 +251,10 @@ fn a_dropped_chat_forgets_its_pinned_list_and_replied_messages() {
         session.accept_replied_message(ChatId(chat), MessageId(5), live(chat, 1));
         session.accept_replied_message(ChatId(chat), MessageId(80), live(chat, 2));
         let pinned = session.histories[&chat].messages[&80].clone();
-        session.messages.pinned_messages.insert(chat, vec![pinned]);
+        session
+            .messages
+            .pinned_messages
+            .insert(chat, crate::state::fetch::Fetch::Ready(vec![pinned]));
     }
     leave(&mut session);
     assert!(!session.histories.contains_key(&1), "the oldest went");
@@ -386,7 +386,7 @@ fn leaving_a_topic_trims_it_and_the_open_topic_stays_whole() {
     settle(&mut session);
     let left = &session.threads.topic_histories[&(7, 1)];
     assert_eq!(left.messages.len(), CLOSED_TAIL_KEEP);
-    assert!(!left.loaded_complete);
+    assert!(!left.loaded_complete());
     assert_eq!(left.next_from_message_id, MessageId(141), "paging resumes");
     assert_eq!(session.threads.topic_histories[&(7, 2)].messages.len(), 200);
     session.deselect_topic();
@@ -484,7 +484,9 @@ fn releasing_several_topics_is_deterministic() {
 fn entries_made_outside_the_lru_join_it_and_stay_bounded() {
     let (mut session, _sink) = session();
     for chat in 1..=(CLOSED_CHATS_MAX as i64 + 10) {
-        session.history_entry(ChatId(chat)).loaded_complete = true;
+        session
+            .history_entry(ChatId(chat))
+            .set_loaded_complete(true);
     }
     assert_eq!(session.histories.len(), CLOSED_CHATS_MAX);
     // The shown chat's entry is not part of the LRU.
@@ -542,12 +544,12 @@ fn a_late_page_for_a_closed_topic_stays_inside_the_topic_bound() {
     for topic in 1..=(CLOSED_TOPICS_MAX as i32 + 6) {
         session
             .topic_history_entry(ChatId(7), topic)
-            .loaded_complete = true;
+            .mark_complete();
     }
     assert_eq!(session.threads.topic_histories.len(), CLOSED_TOPICS_MAX);
     // The open topic's entry is not part of the LRU.
     session.open_chat(ChatId(7));
-    session.open_topic = Some(900);
+    session.open = session.open.with_topic(900);
     session.topic_history_entry(ChatId(7), 900);
     assert_eq!(session.threads.topic_histories.len(), CLOSED_TOPICS_MAX + 1);
 }
@@ -555,7 +557,7 @@ fn a_late_page_for_a_closed_topic_stays_inside_the_topic_bound() {
 #[test]
 fn an_older_page_for_an_evicted_topic_does_not_start_it_again() {
     let (mut session, _sink) = session();
-    session.topic_history_entry(ChatId(7), 1).loaded_complete = true;
+    session.topic_history_entry(ChatId(7), 1).mark_complete();
     let extra = session.request_for_topic(RequestPurpose::GetTopicHistory, Some(ChatId(7)), 1);
     let pending = session.requests.get(extra).cloned().expect("in flight");
     for topic in 2..=(CLOSED_TOPICS_MAX as i32 + 6) {
@@ -825,7 +827,7 @@ fn the_open_chat_keeps_its_gallery_counts_while_its_topics_go() {
         session.history_entry(ChatId(chat));
     }
     assert!(!session.threads.topic_histories.contains_key(&(1, 1)));
-    assert!(session.media.shared_media.open);
+    assert!(session.media.shared_media.open());
     assert!(session.media.chat_media_counts.contains_key(&1));
 }
 
@@ -955,13 +957,23 @@ fn a_translation_job_whose_request_is_gone_fails_and_frees_its_place() {
     // The first request left without an answer (a restarted client).
     session.requests.take(lost_request);
     session.fail_orphaned_translations();
-    assert!(!session.messages.translate.jobs.contains_key(&lost));
+    assert!(
+        !session
+            .messages
+            .translate
+            .pending_jobs()
+            .any(|job| job == lost)
+    );
     assert!(matches!(
         session.message_translation(ChatId(1), MessageId(5), "en"),
         Some(Translation::Failed(_))
     ));
     assert!(
-        session.messages.translate.jobs.contains_key(&live),
+        session
+            .messages
+            .translate
+            .pending_jobs()
+            .any(|job| job == live),
         "a job still asking keeps its place"
     );
 }

@@ -184,7 +184,7 @@ fn a_call_takes_the_focus_when_quill_comes_forward(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     app.update(vcx, |app, cx| app.sync_call_window(cx));
     vcx.run_until_parked();
-    let Some(call) = app.read_with(vcx, |app, _| app.calls.window) else {
+    let Some(call) = app.read_with(vcx, |app, _| app.calls.window.handle()) else {
         panic!("the call window did not open");
     };
     close_main_window(vcx);

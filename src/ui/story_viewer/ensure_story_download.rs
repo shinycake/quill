@@ -1,6 +1,7 @@
 //! Methods moved out of `story_viewer.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::stories_state::PanelKind;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -27,7 +28,7 @@ impl QuillApp {
             self.request_media_download(item.download_file_id, None, cx);
         }
         // B14: a video story also needs its clip to play.
-        if let Some(video_id) = item.video_file_id
+        if let Some(video_id) = item.video_file_id()
             && video_id != item.download_file_id
         {
             let roots = self.media_display_roots();
@@ -65,7 +66,7 @@ impl QuillApp {
                     .iter()
                     .copied()
                     .chain([item.download_file_id])
-                    .chain(item.video_file_id)
+                    .chain(item.video_file_id())
                     .collect()
             })
             .unwrap_or_default();
@@ -80,8 +81,8 @@ impl QuillApp {
     /// when the story, the ids it needs or the stickers known changed, and
     /// that fact is recorded only after the fetch succeeded, so a failed
     /// fetch is retried on the next tick. A TDLib error answer counts as a
-    /// failure too (`StoriesState::custom_emoji_failures` is part of the
-    /// record), and the retry waits out `custom_emoji_retry`. Returns
+    /// failure too (`StoriesState::custom_emoji_fetch` is part of the
+    /// record), and the retry waits out its backoff. Returns
     /// whether a fetch ran.
     pub(in crate::ui) fn warm_story_custom_emoji(&mut self) -> bool {
         self.warm_story_custom_emoji_with(std::time::Instant::now(), |app, ids| {
@@ -104,7 +105,7 @@ impl QuillApp {
         let (known, failures, waiting) = self.session().map_or((0, 0, false), |s| {
             (
                 s.stories.custom_emoji_stickers.len(),
-                s.stories.custom_emoji_failures,
+                s.stories.custom_emoji_fetch.failures(),
                 s.stories.custom_emoji_fetch_waiting(now),
             )
         });
@@ -142,7 +143,8 @@ impl QuillApp {
                     }
                     match session.media.files.get(&file_id.0) {
                         Some(file)
-                            if file.usable_path().is_some() || file.local.is_downloading_active =>
+                            if file.usable_path().is_some()
+                                || file.local.is_downloading_active() =>
                         {
                             None
                         }
@@ -277,24 +279,24 @@ impl QuillApp {
     /// cover and privacy editors and the management status line.
     pub(in crate::ui) fn story_action_row(&self, cx: &mut Context<Self>) -> AnyElement {
         let mut column = div().flex().flex_col().gap_2().items_center();
-        if self.stories.viewer_ui().reaction_picker_open {
+        if self.stories.viewer_ui().is_open(PanelKind::ReactionPicker) {
             column = column.child(self.story_reaction_picker(cx));
         }
-        if self.stories.viewer_ui().viewers_open {
+        if self.stories.viewer_ui().is_open(PanelKind::Viewers) {
             column = column.child(self.story_viewers_panel(cx));
         }
-        if self.stories.viewer_ui().stats_open {
+        if self.stories.viewer_ui().is_open(PanelKind::Stats) {
             column = column.child(self.story_stats_panel(cx));
         }
-        if self.stories.viewer_ui().report_open {
+        if self.stories.viewer_ui().is_open(PanelKind::Report) {
             column = column.child(self.story_report_ui(cx));
         }
         // Phase 9.5: cover-frame editor row (video stories) + privacy
         // editor panel + the management status line (pending / error).
-        if self.stories.viewer_ui().cover.is_some() {
+        if self.stories.viewer_ui().cover().is_some() {
             column = column.child(self.story_cover_editor(cx));
         }
-        if self.stories.viewer_ui().privacy_edit.is_some() {
+        if self.stories.viewer_ui().privacy_edit().is_some() {
             column = column.child(self.story_privacy_panel(cx));
         }
         if let Some(status) = self.story_manage_status() {

@@ -259,7 +259,7 @@ impl QuillApp {
 
     /// Plain text into the composer, replacing what is there.
     fn set_composer_plain(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
-        self.composer_ui.markdown_revert = None;
+        self.composer_ui.echo.drop_revert();
         self.composer
             .update(cx, |input, cx| input.set_value(text, window, cx));
         cx.notify();

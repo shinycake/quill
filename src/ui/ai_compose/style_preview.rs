@@ -25,7 +25,7 @@ use quill::state::StyleError;
 use quill::telegram::envelope::MessageSender;
 use quill::text::TextEntity;
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -72,8 +72,6 @@ impl QuillApp {
             stage: PreviewStage::LookingUp { token },
             examples: StyleExamples::new(false),
             example: None,
-            example_token: 0,
-            example_asked_at: None,
         });
         self.open_box(DialogKind::AiStylePreview);
         cx.notify();
@@ -141,8 +139,12 @@ impl QuillApp {
             let slot = &mut s.messages.ai_compose.style_lookup;
             let answered = slot
                 .as_ref()
-                .is_some_and(|lookup| lookup.token == token && lookup.outcome.is_some());
-            if answered { slot.take()?.outcome } else { None }
+                .is_some_and(|lookup| lookup.token == token && lookup.outcome.is_done());
+            if answered {
+                slot.take()?.outcome.done()
+            } else {
+                None
+            }
         });
         let Some(outcome) = outcome else {
             return;
@@ -182,8 +184,7 @@ impl QuillApp {
             .ai_compose
             .preview
             .as_ref()
-            .filter(|preview| preview.examples.loading())
-            .map(|preview| preview.example_token)
+            .and_then(|preview| preview.examples.token())
         else {
             return;
         };
@@ -191,8 +192,12 @@ impl QuillApp {
             let slot = &mut s.messages.ai_compose.example;
             let answered = slot
                 .as_ref()
-                .is_some_and(|answer| answer.token == token && answer.outcome.is_some());
-            if answered { slot.take()?.outcome } else { None }
+                .is_some_and(|answer| answer.token == token && answer.outcome.is_done());
+            if answered {
+                slot.take()?.outcome.done()
+            } else {
+                None
+            }
         });
         let Some(outcome) = outcome else {
             return;
@@ -200,14 +205,16 @@ impl QuillApp {
         let Some(preview) = self.ai_compose.preview.as_mut() else {
             return;
         };
-        preview.example_asked_at = None;
         match outcome {
             Ok(example) => {
-                preview.examples.loaded();
-                preview.example = Some(example);
+                if preview.examples.loaded(token) {
+                    preview.example = Some(example);
+                }
             }
             Err(error) => {
-                preview.examples.failed();
+                if !preview.examples.failed(token) {
+                    return;
+                }
                 let kind = match error {
                     StyleError::Other(kind) => kind,
                     StyleError::Invalid | StyleError::SavedTooMany => String::new(),
@@ -222,12 +229,13 @@ impl QuillApp {
         let Some(preview) = self.ai_compose.preview.as_mut() else {
             return;
         };
-        let Some(number) = preview.examples.start_next() else {
+        if preview.examples.loading() {
+            return;
+        }
+        let token = fresh_token();
+        let Some(number) = preview.examples.start_next(token, Instant::now()) else {
             return;
         };
-        let token = fresh_token();
-        preview.example_token = token;
-        preview.example_asked_at = Some(Instant::now());
         let name = preview.name.clone();
         cx.notify();
         let number = i32::try_from(number).unwrap_or(i32::MAX);
@@ -237,8 +245,7 @@ impl QuillApp {
                 .is_ok()
         });
         if !sent && let Some(preview) = self.ai_compose.preview.as_mut() {
-            preview.examples.failed();
-            preview.example_asked_at = None;
+            preview.examples.failed(token);
             self.push_ai_toast(text_toast(""), window, cx);
         }
     }
@@ -378,7 +385,8 @@ impl QuillApp {
             .and_then(|s| s.messages.ai_compose.limits.example_count);
         let another = preview.style().is_some() && preview.examples.can_show_another(max);
         let angle = preview
-            .example_asked_at
+            .examples
+            .asked_at()
             .map_or(0., |at| spin_angle(at.elapsed()));
         let font = self.msg_font();
         let body = |text: &str, entities: &[TextEntity], key: u64, cx: &mut Context<Self>| {
@@ -390,7 +398,7 @@ impl QuillApp {
                     .child(Skeleton::new().w(relative(0.6)).h(px(12.)))
                     .into_any_element();
             }
-            let seen: HashSet<(i64, u64, u64, bool)> = HashSet::new();
+            let seen = crate::ui::message_text::revealed::Revealed::default();
             rich_text_line(
                 text,
                 entities,

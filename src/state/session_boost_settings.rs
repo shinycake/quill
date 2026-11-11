@@ -26,8 +26,8 @@ impl Session {
     /// Boosts a member needs to bypass restrictions: the value being saved,
     /// else the one from the full info (0 = off).
     pub fn chat_unrestrict_boost_count(&self, chat_id: ChatId) -> i32 {
-        if let Some(pending) = self.groups.unrestrict_boost_pending.get(&chat_id.0) {
-            return *pending;
+        if let Some(save) = self.groups.unrestrict_boost_saves.get(&chat_id.0) {
+            return save.value;
         }
         self.chat_supergroup(chat_id)
             .and_then(|id| self.groups.supergroup_full_infos.get(&id))
@@ -37,9 +37,7 @@ impl Session {
     /// A boost-count save is out for this chat: the next one waits for its
     /// answer (the driver refuses a second send).
     pub fn unrestrict_boost_saving(&self, chat_id: ChatId) -> bool {
-        self.groups
-            .unrestrict_boost_pending
-            .contains_key(&chat_id.0)
+        self.groups.unrestrict_boost_saves.contains_key(&chat_id.0)
     }
 
     /// The acknowledged value becomes the stored one.
@@ -53,7 +51,18 @@ impl Session {
         let Some(chat_id) = pending.chat_id else {
             return;
         };
-        let Some(value) = self.groups.unrestrict_boost_pending.remove(&chat_id.0) else {
+        // Only the save this `ok` answers settles it.
+        if self
+            .groups
+            .unrestrict_boost_saves
+            .get(&chat_id.0)
+            .is_none_or(|save| save.request != pending.id)
+        {
+            return;
+        }
+        let Some(UnrestrictSave { value, .. }) =
+            self.groups.unrestrict_boost_saves.remove(&chat_id.0)
+        else {
             return;
         };
         if let Some(supergroup_id) = self.chat_supergroup(chat_id)

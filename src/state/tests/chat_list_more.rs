@@ -132,7 +132,8 @@ fn cl2_archive_settings_fetch_stores_and_set_rolls_back() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetArchiveChatListSettings, None);
-    session.chat_list.archive_settings_loading = true;
+    session.chat_list.archive_settings.begin();
+    session.chat_list.archive_settings.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -143,26 +144,28 @@ fn cl2_archive_settings_fetch_stores_and_set_rolls_back() {
         ),
     );
     assert_eq!(
-        session.chat_list.archive_chat_list_settings,
+        session.chat_list.archive_chat_list_settings(),
         Some(ArchiveChatListSettings {
             archive_and_mute_new_chats_from_unknown_users: true,
             keep_unmuted_chats_archived: false,
             keep_chats_from_folders_archived: true,
         })
     );
-    assert!(!session.chat_list.archive_settings_loading);
+    assert!(!session.chat_list.archive_settings_loading());
 
-    let old = session.chat_list.archive_chat_list_settings;
+    let old = session.chat_list.archive_chat_list_settings();
     let extra = session.request(RequestPurpose::SetArchiveChatListSettings, None);
     session
         .requests
         .pending_mut(extra)
         .expect("pending")
         .rollback = Some(RequestRollback::ArchiveChatListSettings { previous: old });
-    session.chat_list.archive_chat_list_settings = Some(ArchiveChatListSettings {
-        keep_unmuted_chats_archived: true,
-        ..old.unwrap_or_default()
-    });
+    session
+        .chat_list
+        .edit_archive_settings(Some(ArchiveChatListSettings {
+            keep_unmuted_chats_archived: true,
+            ..old.unwrap_or_default()
+        }));
     apply_json(
         &mut session,
         &seq,
@@ -172,11 +175,32 @@ fn cl2_archive_settings_fetch_stores_and_set_rolls_back() {
             extra.0
         ),
     );
-    assert_eq!(session.chat_list.archive_chat_list_settings, old);
+    assert_eq!(session.chat_list.archive_chat_list_settings(), old);
     assert_eq!(
         session.chats_state.chat_action_error.last(),
         Some("could not save archive settings (error 400)")
     );
+}
+
+#[test]
+fn a_refused_archive_settings_fetch_leaves_loading() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request(RequestPurpose::GetArchiveChatListSettings, None);
+    session.chat_list.archive_settings.begin();
+    session.chat_list.archive_settings.sent(extra);
+    assert!(session.chat_list.archive_settings.is_loading());
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"INTERNAL"}}"#,
+            extra.0
+        ),
+    );
+    assert!(!session.chat_list.archive_settings.is_loading());
+    assert!(session.chat_list.archive_settings.error().is_some());
 }
 
 #[test]
@@ -458,7 +482,7 @@ fn folder_invite_links_list_create_edit_and_errors() {
         ),
     );
     assert_eq!(
-        session.chat_list.folder_limit_hit.take(),
+        session.chat_list.take_folder_limit_hit(),
         Some((
             crate::folder_limits::FolderLimitKind::InviteLinks,
             Some(extra)

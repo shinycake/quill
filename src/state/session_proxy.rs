@@ -3,11 +3,7 @@
 //! `Session::proxy`. Mutations never touch the list optimistically: the
 //! answer marks it stale and the driver refetches `getProxies`.
 use super::*;
-use crate::proxy::{PingStatus, ProxyFetch};
-
-/// Ping slot used by the "enable this proxy?" link box, whose proxy is
-/// not in the list (TDLib ids are non-negative).
-pub const LINK_PING_ID: i32 = -1;
+use crate::proxy::{LinkCheck, PingStatus, ProxyFetch, ProxyMutation};
 
 impl Session {
     /// `getProxies` answer: replaces the list; pings of proxies that no
@@ -28,20 +24,15 @@ impl Session {
         }
         proxy
             .pings
-            .retain(|id, _| *id == LINK_PING_ID || proxies.iter().any(|p| p.id == *id));
+            .retain(|id, _| proxies.iter().any(|p| p.id == *id));
         // The system proxy's entries stay out of the list (never listed,
         // shared or rotated).
         let (system, list) = proxies
             .into_iter()
             .partition(crate::system_proxy::is_system_entry);
         proxy.system = system;
-        let enabled = list.iter().find(|p| p.is_enabled).map(|p| p.id);
-        if proxy.carrier_failed != enabled {
-            proxy.carrier_failed = None;
-        }
         proxy.list = Some(list);
         proxy.fetch = ProxyFetch::Idle;
-        proxy.stale = false;
     }
 
     /// `updateWebProxyCarrierOpened`: host it, or refuse it when this
@@ -52,17 +43,9 @@ impl Session {
         &mut self,
         carrier: crate::proxy_carrier::CarrierRequest,
     ) {
-        use crate::proxy_carrier::OpenVerdict;
-        let proxy = &mut self.settings.proxy;
-        match proxy.carriers.opened(carrier) {
-            OpenVerdict::Hosting { proxy_id } => {
-                if proxy.carrier_failed == Some(proxy_id) {
-                    proxy.carrier_failed = None;
-                }
-            }
-            OpenVerdict::Refused { proxy_id } => proxy.carrier_failed = Some(proxy_id),
-            OpenVerdict::Temporary => {}
-        }
+        // A refused carrier (no host) shows through `can_enable`, a failed
+        // one through `Carriers::failed_for`: the row has no copy to keep.
+        let _ = self.settings.proxy.carriers.opened(carrier);
     }
 
     /// `updateWebProxyCarrierClosed`.
@@ -78,10 +61,7 @@ impl Session {
         carrier_id: i32,
         error: crate::proxy_carrier::CarrierError,
     ) {
-        let proxy = &mut self.settings.proxy;
-        if let Some(proxy_id) = proxy.carriers.failed(carrier_id, error) {
-            proxy.carrier_failed = Some(proxy_id);
-        }
+        let _ = self.settings.proxy.carriers.failed(carrier_id, error);
     }
 
     /// Whether this client can host carriers, as the host now says (a
@@ -105,11 +85,14 @@ impl Session {
     fn proxy_mutation_succeeded(&mut self, pending: Option<&PendingRequest>) {
         let proxy = &mut self.settings.proxy;
         let system = pending.is_some_and(|p| proxy.system_step.answered(p.id, false));
-        proxy.mutating = false;
-        proxy.stale = true;
+        // Only the change in flight unlocks the list; an answer of an older
+        // one (dropped meanwhile) leaves the lock to its own.
+        if pending.is_none_or(|p| proxy.mutation.is(p.id)) {
+            proxy.mutation = ProxyMutation::Idle;
+        }
         // A list fetch still out may predate this change: its answer is not
         // the one to wait for any more, and the refetch asks again.
-        proxy.fetch = ProxyFetch::Idle;
+        proxy.fetch = ProxyFetch::Stale;
         // The box's error line is the user's: the system step's success
         // does not wipe the error of the user's own failed change.
         if !system {
@@ -138,10 +121,25 @@ impl Session {
         .then_some(proxy_id)
     }
 
+    /// The link box's check answered: only the request its `Checking`
+    /// stage carries settles it.
+    fn settle_link_check(&mut self, pending: Option<&PendingRequest>, status: PingStatus) {
+        let Some(pending) = pending else { return };
+        if self.settings.proxy.link_check == LinkCheck::Checking(pending.id) {
+            self.settings.proxy.link_check = LinkCheck::Done(status);
+        }
+    }
+
     /// `pingProxy` answer, in seconds.
     pub(crate) fn apply_proxy_ping(&mut self, pending: Option<&PendingRequest>, seconds: f64) {
+        let ms = (seconds * 1000.0).round().clamp(0.0, f64::from(u32::MAX)) as u32;
+        if pending
+            .is_some_and(|p| p.purpose == RequestPurpose::Settings(SettingsPurpose::PingLinkProxy))
+        {
+            self.settle_link_check(pending, PingStatus::Available(ms));
+            return;
+        }
         if let Some(proxy_id) = self.take_awaited_ping(pending) {
-            let ms = (seconds * 1000.0).round().clamp(0.0, f64::from(u32::MAX)) as u32;
             self.settings
                 .proxy
                 .pings
@@ -170,14 +168,15 @@ impl Session {
         match purpose {
             RequestPurpose::GetProxies => {
                 if pending.is_some_and(|p| self.settings.proxy.fetch.answers(p.id)) {
-                    self.settings.proxy.fetch = ProxyFetch::Idle;
-                    self.settings.proxy.stale = false;
+                    self.settings.proxy.fetch = ProxyFetch::Failed;
                     self.settings.proxy.error =
                         Some(sessions_error_line("load the proxy list", err));
                 }
             }
             RequestPurpose::MutateProxy => {
-                self.settings.proxy.mutating = false;
+                if pending.is_none_or(|p| self.settings.proxy.mutation.is(p.id)) {
+                    self.settings.proxy.mutation = ProxyMutation::Idle;
+                }
                 // TDLib refusing the system step is not the user's error:
                 // the box does not show it, and the tick reads it here.
                 let system =
@@ -187,6 +186,9 @@ impl Session {
                 }
             }
             // A failed ping is the answer: the proxy is not available.
+            RequestPurpose::Settings(SettingsPurpose::PingLinkProxy) => {
+                self.settle_link_check(pending, PingStatus::Unavailable);
+            }
             RequestPurpose::Settings(SettingsPurpose::PingProxy { .. }) => {
                 if let Some(proxy_id) = self.take_awaited_ping(pending) {
                     self.settings

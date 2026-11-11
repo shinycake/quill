@@ -134,10 +134,12 @@ fn topic_link_answer_reaches_the_clipboard_slot() {
         r#"{"@type":"messageLink","@extra":"EXTRA","link":"https://t.me/forum/7","is_public":true}"#,
     );
     assert_eq!(
-        f.driver.session.messages.message_link_result.as_deref(),
-        Some("https://t.me/forum/7")
+        f.driver.session.messages.message_link,
+        Some(crate::state::MessageLinkAnswer {
+            link: "https://t.me/forum/7".into(),
+            is_public: true,
+        })
     );
-    assert!(f.driver.session.messages.message_link_public);
 }
 
 #[test]
@@ -262,7 +264,7 @@ fn saved_sublists_load_open_page_pin_and_delete() {
         "loadSavedMessagesTopics",
         r#"{"@type":"error","@extra":"EXTRA","code":404,"message":"Not Found"}"#,
     );
-    assert!(f.driver.session.threads.saved.topics_exhausted);
+    assert!(f.driver.session.threads.saved.topics_exhausted());
     assert!(f.driver.load_saved_topics().unwrap().is_none());
 
     f.driver.open_saved_sublist(77).unwrap();
@@ -323,7 +325,10 @@ fn tag_label_needs_premium_and_filter_searches_saved_messages() {
     assert_eq!(sent[0]["tag"]["@type"], "reactionTypeEmoji");
     // 12 characters at most, and the bar shows the name at once.
     assert!(sent[0]["label"].as_str().unwrap().chars().count() <= 12);
-    assert_eq!(f.driver.session.threads.saved.tags[0].label, "A very long");
+    assert_eq!(
+        f.driver.session.threads.saved.tag_list()[0].label,
+        "A very long"
+    );
 
     // Filter by tag: searchSavedMessages over all of Saved Messages.
     f.driver.filter_saved_by_tag(tag.clone()).unwrap();
@@ -338,7 +343,7 @@ fn tag_label_needs_premium_and_filter_searches_saved_messages() {
     );
     let found = f.driver.session.threads.saved.tag_search.as_ref().unwrap();
     assert_eq!(found.history.messages.len(), 1);
-    assert!(found.history.loaded_complete);
+    assert!(found.history.loaded_complete());
     // Inside a sublist the same filter is scoped to that sublist.
     f.driver.clear_saved_tag_filter();
     f.driver.open_saved_sublist(77).unwrap();
@@ -371,12 +376,11 @@ fn a_second_tag_asks_at_once_and_the_first_tags_page_is_dropped() {
     let search = f.driver.session.threads.saved.tag_search.as_ref().unwrap();
     assert_eq!(search.tag, like);
     assert!(
-        !search.loaded,
+        search.history.messages.is_empty(),
         "the first tag's page does not fill the chip"
     );
     f.ingest(&page(second, 5));
     let search = f.driver.session.threads.saved.tag_search.as_ref().unwrap();
-    assert!(search.loaded);
     assert!(search.history.messages.contains_key(&5));
     assert!(!search.history.messages.contains_key(&9));
 }
@@ -399,7 +403,7 @@ fn a_failed_tag_page_stops_paging_and_retry_asks_again() {
     let first = f.driver.filter_saved_by_tag(tag).unwrap().unwrap();
     f.ingest(&error_for(first));
     let search = f.driver.session.threads.saved.tag_search.as_ref().unwrap();
-    assert!(!search.history.loaded_complete, "not complete: it failed");
+    assert!(!search.history.loaded_complete(), "not complete: it failed");
     assert_eq!(search.history.older, OlderEnd::Failed);
     assert_eq!(f.driver.fetch_saved_tag_page().unwrap(), None, "no re-ask");
     assert_eq!(f.sent("searchSavedMessages").len(), 1);
@@ -446,5 +450,5 @@ fn a_reentered_sublist_takes_only_its_own_page() {
     f.ingest(&page(new, 30));
     let view = f.driver.session.threads.saved.sublist.as_ref().unwrap();
     assert_eq!(view.history.messages.len(), 1);
-    assert!(!view.history.loaded_complete);
+    assert!(!view.history.loaded_complete());
 }

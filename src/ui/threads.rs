@@ -9,6 +9,7 @@ use super::history_state::ScrollGoal;
 use super::message_text::kit_avatar_element;
 use super::nested_click::SwallowPress;
 use super::*;
+use crate::ui::history_state::ScrollAim;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
@@ -125,7 +126,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         // The info card belongs to the thread that showed it.
-        self.chat_ui.thread_info_open = false;
+        self.chat_ui.info_card.close_thread();
         // The composer still belongs to the chat (or topic) the thread is
         // opened from: save it there before TDLib resolves the thread.
         self.flush_leaving_draft(cx);
@@ -153,8 +154,11 @@ impl QuillApp {
 
     /// Whether the open chat shows a loaded thread.
     pub(super) fn thread_active(&self) -> bool {
-        self.session()
-            .is_some_and(|s| s.open_chat.and_then(|c| s.thread_for_chat(c)).is_some())
+        self.session().is_some_and(|s| {
+            s.open_chat_id()
+                .and_then(|c| s.thread_for_chat(c))
+                .is_some()
+        })
     }
 
     /// Per-frame thread bookkeeping, run from `render` (it needs the
@@ -177,9 +181,9 @@ impl QuillApp {
             // An opened thread lands at its first unread reply or its
             // latest, never where it was left last time.
             if let Some(thread) = live.driver.session.threads.thread.as_ref() {
-                let topic = match thread.needs_chat_switch {
+                let topic = match thread.status.needs_chat_switch() {
                     true => None,
-                    false => live.driver.session.open_topic,
+                    false => live.driver.session.open_forum_topic(),
                 };
                 self.screen.history.scroll_memory.forget((
                     thread.chat_id.0,
@@ -193,7 +197,7 @@ impl QuillApp {
                 .threads
                 .thread
                 .as_ref()
-                .filter(|thread| thread.needs_chat_switch)
+                .filter(|thread| thread.status.needs_chat_switch())
                 .map(|thread| thread.chat_id);
             match switch_to {
                 // A chat window keeps its own chat: the thread moves to the
@@ -224,14 +228,14 @@ impl QuillApp {
         }
         // "Jump to root" pages older replies until the root is in; the
         // history list scrolls there (`ScrollGoal::ThreadRoot`).
-        if self.screen.history.scroll_goal == Some(ScrollGoal::ThreadRoot) {
+        if self.screen.history.aim.goal() == Some(ScrollGoal::ThreadRoot) {
             let complete = live
                 .driver
                 .session
                 .threads
                 .thread
                 .as_ref()
-                .is_none_or(|thread| thread.history.loaded_complete);
+                .is_none_or(|thread| thread.history.loaded_complete());
             if !complete && matches!(live.driver.fetch_thread_history(), Ok(Some(_))) {
                 cx.notify();
             }
@@ -240,7 +244,7 @@ impl QuillApp {
 
     /// Back to where the thread was opened from.
     pub(super) fn leave_thread_view(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.chat_ui.thread_info_open = false;
+        self.chat_ui.info_card.close_thread();
         let Some(live) = self.live.as_mut() else {
             if let Some(session) = self.demo_session.as_mut() {
                 session.close_thread();
@@ -261,7 +265,7 @@ impl QuillApp {
             return;
         };
         let back = live.driver.close_thread();
-        self.history.scroll_goal = None;
+        self.history.aim.take_goal();
         match back {
             // Another chat: the post the thread was opened from rides with
             // the open, to the window that shows that chat.
@@ -304,7 +308,7 @@ impl QuillApp {
             .map(|thread| MessageId(thread.thread_id));
         live.driver.session.close_thread();
         self.request_draft_restore();
-        self.history.scroll_goal = None;
+        self.history.aim.take_goal();
         if let Some(root) = root {
             self.jump_to_replied_message(root, cx);
         }
@@ -314,7 +318,7 @@ impl QuillApp {
     /// Scroll to the thread's root post, loading older replies first when
     /// they are not all loaded yet.
     pub(super) fn jump_to_thread_root(&mut self, cx: &mut Context<Self>) {
-        self.history.scroll_goal = Some(ScrollGoal::ThreadRoot);
+        self.history.aim = ScrollAim::Goal(ScrollGoal::ThreadRoot);
         cx.notify();
     }
 
@@ -334,7 +338,7 @@ impl QuillApp {
     /// scrolls to it.
     pub(super) fn thread_root_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let thread = session.thread_for_chat(session.open_chat?)?;
+        let thread = session.thread_for_chat(session.open_chat_id()?)?;
         let root = thread.root_message()?;
         let title = if thread.is_comments() {
             tr(keys::Q_OPS_ORIGINAL_POST)
@@ -387,7 +391,7 @@ impl QuillApp {
                         // Keep the root bar's own click (jump to the original) out of it.
                         .swallow_press()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.chat_ui.thread_info_open = !this.chat_ui.thread_info_open;
+                            this.chat_ui.info_card.toggle_thread();
                             cx.notify();
                         })),
                 )

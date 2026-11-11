@@ -122,7 +122,7 @@ impl SendRights {
             // Broadcast channels: only admins post, the channel footer owns it.
             ChatKind::Supergroup {
                 is_channel: false, ..
-            } => (true, chat.my_member_status),
+            } => (true, chat.member_status()),
             _ => (false, None),
         };
         let voice_refused_by = match chat.kind {
@@ -136,7 +136,7 @@ impl SendRights {
             group,
             status,
             defaults: chat.permissions,
-            restriction: chat.my_restriction,
+            restriction: chat.restriction(),
             now,
             voice_refused_by,
         }

@@ -116,8 +116,13 @@ fn set_local(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, file: i32, loc
         let session = app.demo_session.as_mut().expect("the demo session");
         assert!(session.media.files.contains_key(&file), "the clip's file");
         session.media.files.update(file, |file| {
-            file.local.is_downloading_completed = local;
-            file.local.is_downloading_active = false;
+            file.local = quill::telegram::envelope::LocalFileState::from_parts(
+                file.local.path().to_string(),
+                file.local.can_be_downloaded(),
+                false,
+                local,
+                file.local.downloaded_size(),
+            );
         });
     });
 }
@@ -239,7 +244,7 @@ fn a_clicked_mp4_gif_loops_on_the_inline_player(cx: &mut TestAppContext) {
         assert_eq!(videos.demand(MP4_GIF), Some(Demand::Loop));
         assert!(!videos.is_sounding(MP4_GIF));
         // The MP4 never reaches the GIF decoder.
-        assert!(app.playback.playing_animation.is_none());
+        assert!(app.playback.animation.playing().is_none());
         assert!(app.playback.gif_decodes.is_empty());
         videos.player(MP4_GIF)
     });
@@ -280,8 +285,8 @@ fn a_video_labelled_image_gif_plays_on_the_inline_player(cx: &mut TestAppContext
     settle(&app, vcx);
     app.read_with(vcx, |app, _| {
         let videos = &app.players.inline_videos;
-        assert!(app.playback.playing_animation.is_none());
-        assert!(app.playback.gif.is_none());
+        assert!(app.playback.animation.playing().is_none());
+        assert!(app.playback.animation.clip().is_none());
         assert!(app.playback.gif_decodes.is_empty());
         assert_eq!(videos.demand(LABELLED_GIF), Some(Demand::Loop));
         assert!(videos.player(LABELLED_GIF).is_some());
@@ -353,21 +358,21 @@ fn one_press_on_a_voice_note_plays_it_once_downloaded(cx: &mut TestAppContext) {
     land(&app, vcx);
     app.read_with(vcx, |app, _| {
         assert!(app.playback.intent.is_none());
-        assert_eq!(app.playback.playing_voice, None, "cancelled");
+        assert_eq!(app.playback.active.voice(), None, "cancelled");
     });
     // Pressed once: it plays by itself once downloaded.
     set_local(&app, vcx, VOICE_FILE, false);
     press(&app, vcx);
     app.read_with(vcx, |app, _| {
         assert!(app.playback.intent.is_some(), "parked for the download");
-        assert_eq!(app.playback.playing_voice, None);
+        assert_eq!(app.playback.active.voice(), None);
     });
     set_local(&app, vcx, VOICE_FILE, true);
     land(&app, vcx);
     app.read_with(vcx, |app, _| {
         assert!(app.playback.intent.is_none());
         assert_eq!(
-            app.playback.playing_voice,
+            app.playback.active.voice(),
             Some(MessageId(VOICE)),
             "plays by itself"
         );
@@ -396,17 +401,17 @@ fn a_gif_played_again_while_it_decodes_starts_at_once(cx: &mut TestAppContext) {
                 first: Some(clip.clone()),
             },
         );
-        app.playback.playing_animation = Some(crate::ui::playback_state::PlayingGif {
+        let playing = crate::ui::playback_state::PlayingGif {
             window: None,
             message: ChatMessage::new(chat, message),
-        });
-        app.playback.gif = Some(clip.clone());
+        };
+        app.playback.animation = crate::ui::playback_state::GifPlayback::Waiting(playing);
+        app.playback
+            .animation
+            .begin_clip(clip.clone(), std::time::Instant::now());
         app.stop_animation_playback();
-        assert!(app.playback.gif.is_none());
-        app.playback.playing_animation = Some(crate::ui::playback_state::PlayingGif {
-            window: None,
-            message: ChatMessage::new(chat, message),
-        });
+        assert!(app.playback.animation.clip().is_none());
+        app.playback.animation = crate::ui::playback_state::GifPlayback::Waiting(playing);
         app.spawn_gif_decode(
             chat,
             message,
@@ -414,7 +419,7 @@ fn a_gif_played_again_while_it_decodes_starts_at_once(cx: &mut TestAppContext) {
             "/nonexistent/played-again.gif".into(),
             cx,
         );
-        let playing = app.playback.gif.as_ref();
+        let playing = app.playback.animation.clip();
         assert!(playing.is_some_and(|playing| Arc::ptr_eq(playing, &clip)));
         let decode = app
             .playback
@@ -492,6 +497,6 @@ fn the_lock_drops_a_parked_clip_and_keeps_a_parked_voice_note(cx: &mut TestAppCo
     land(&app, vcx);
     app.read_with(vcx, |app, _| {
         assert!(app.account.passcode.is_locked());
-        assert_eq!(app.playback.playing_voice, Some(MessageId(VOICE)));
+        assert_eq!(app.playback.active.voice(), Some(MessageId(VOICE)));
     });
 }

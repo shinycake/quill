@@ -187,7 +187,7 @@ pub(super) fn album_history_row(
     look: BubbleLook,
     session: Option<&Session>,
     // Revealed spoilers: tiles keep their cover until clicked.
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &crate::ui::message_text::revealed::Revealed,
     corner: CornerActions,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {

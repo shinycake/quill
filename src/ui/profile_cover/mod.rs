@@ -34,12 +34,26 @@ pub(in crate::ui) use show_or_premium_box::{ShowOrPremium, ShowOrPremiumBox};
 /// The open cover boxes (a `QuillApp` field).
 #[derive(Debug, Default)]
 pub(super) struct ProfileCoverUi {
-    /// The person whose Stars rating box is open.
-    pub(super) rating_box: Option<i64>,
+    /// The Stars rating box, while it is open.
+    pub(super) rating_box: Option<RatingBox>,
     /// The open "Show Your Last Seen" / "Show Your Read Date" box.
     pub(super) show_or_premium: Option<ShowOrPremiumBox>,
-    /// The rating box shows your pending rating ("Future Rating").
-    pub(super) rating_preview: bool,
+}
+
+/// Which rating the box shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum RatingMode {
+    #[default]
+    Current,
+    /// Your pending rating ("Future Rating").
+    Future,
+}
+
+/// The open Stars rating box: the person and the rating it shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct RatingBox {
+    pub(super) user_id: i64,
+    pub(super) mode: RatingMode,
 }
 
 impl crate::ui::on_screen::Farewell for ProfileCoverUi {}
@@ -159,7 +173,7 @@ impl QuillApp {
         let saved = self.session().map(|s| &s.threads.saved);
         let status = saved_chats_status(
             saved.map_or(0, |saved| saved.topic_count),
-            saved.is_some_and(|saved| saved.topics_exhausted),
+            saved.is_some_and(|saved| saved.topics_exhausted()),
         );
         div()
             .flex()
@@ -200,9 +214,11 @@ fn rating_pill(user_id: i64, rating: StarsRating, cx: &mut Context<QuillApp>) ->
         .rounded(px(9.))
         .accessibility_label(label)
         .on_click(cx.listener(move |this, _, _, cx| {
-            this.profile_cover.rating_box = Some(user_id);
+            this.profile_cover.rating_box = Some(RatingBox {
+                user_id,
+                mode: RatingMode::Current,
+            });
             this.open_box(crate::ui::shell::DialogKind::StarsRating);
-            this.profile_cover.rating_preview = false;
             cx.notify();
         }));
     let button = if rating.is_negative() {

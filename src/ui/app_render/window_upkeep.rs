@@ -120,6 +120,14 @@ impl QuillApp {
         {
             self.proxy_saving_upkeep(window, cx);
         }
+        // A Bot edit box opened before the bot's texts arrived is filled at
+        // the first frame after they land, in the window that hosts it.
+        if self
+            .windows
+            .dialog_may_show_in(crate::ui::shell::DialogKind::BotEdit, self.windows.scope)
+        {
+            self.fill_bot_edit(window, cx);
+        }
         self.business_closed_error_upkeep();
         if self.windows.dialog_may_show_in(
             crate::ui::shell::DialogKind::GroupSettings,
@@ -193,14 +201,20 @@ impl QuillApp {
     /// can't live in `poll_live`: the inputs need a `&mut Window`.
     fn checkout_prefill_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let here = self.windows.scope;
-        if !self.payments.dialog.as_ref().is_some_and(|d| !d.prefilled)
+        if !self
+            .payments
+            .dialog
+            .as_ref()
+            .is_some_and(|d| d.awaiting_form())
             || !self
                 .windows
                 .dialog_may_show_in(crate::ui::shell::DialogKind::PaymentForm, here)
         {
             return;
         }
-        let payment_form = self.session().and_then(|s| s.payments.form.clone());
+        let payment_form = self
+            .session()
+            .and_then(|s| s.payments.checkout.form().cloned());
         if let (Some(dialog), Some(form)) = (self.payments.dialog.as_mut(), payment_form) {
             dialog.prefill_from_form(&form, window, cx);
         }
@@ -268,7 +282,7 @@ impl QuillApp {
         let Some(session) = self.session_mut() else {
             return;
         };
-        let open_chat = session.open_chat;
+        let open_chat = session.open_chat_id();
         // The window that asked takes the answer, whichever windows show
         // the same chat; one whose window closed since has no taker.
         let here = session.view_in_place();

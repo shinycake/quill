@@ -4,7 +4,7 @@
 //! Earlier events load when the list is scrolled to its top.
 #![deny(clippy::indexing_slicing)]
 
-use super::admin_state::EventLogSearch;
+use super::admin_state::{EventLogPage, EventLogSearch};
 use super::app::QuillApp;
 use super::dialogs::group_admin_settings::GroupSettingsView;
 use super::event_log_rows::{LogEntry, render_entry};
@@ -64,7 +64,7 @@ impl QuillApp {
     ) {
         let query = self
             .session()
-            .and_then(|session| session.groups.event_log_queries.get(&chat_id.0).cloned())
+            .map(|session| session.groups.event_log_query(chat_id.0).to_string())
             .unwrap_or_default();
         if let Some(search) = self.admin.event_log_search.as_mut() {
             search.shows = Some(chat_id);
@@ -110,20 +110,30 @@ impl QuillApp {
 
     /// The search text changed: search once typing pauses.
     fn event_log_search_typed(&mut self, cx: &mut Context<Self>) {
-        self.admin.event_log_keystroke = self.admin.event_log_keystroke.wrapping_add(1);
-        let keystroke = self.admin.event_log_keystroke;
-        self.spawn_scoped(cx, async move |this, cx| {
+        let Some(chat_id) = self.event_log_open_chat() else {
+            return;
+        };
+        let typed = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor().timer(SEARCH_DELAY).await;
             this.update(cx, |this, cx| {
-                if this.admin.event_log_keystroke == keystroke
-                    && let Some(chat_id) = this.event_log_open_chat()
-                {
+                if this.event_log_open_chat() == Some(chat_id) {
                     this.apply_event_log_search(chat_id, cx);
                 }
             })
             .ok();
-        })
-        .detach();
+        });
+        // Replacing the page's timer stops the one of the earlier edit.
+        self.event_log_page_for(chat_id).typed = Some(typed);
+    }
+
+    /// The page of `chat_id`; the page of another chat is replaced (its
+    /// timers stop with it).
+    pub(super) fn event_log_page_for(&mut self, chat_id: ChatId) -> &mut EventLogPage {
+        let page = &mut self.admin.event_log_page;
+        if page.as_ref().is_none_or(|page| page.chat != chat_id) {
+            *page = Some(EventLogPage::new(chat_id));
+        }
+        page.get_or_insert_with(|| EventLogPage::new(chat_id))
     }
 
     /// Apply the search box value (the driver stores it per chat; an empty
@@ -137,7 +147,7 @@ impl QuillApp {
             .unwrap_or_default();
         let current = self
             .session()
-            .and_then(|session| session.groups.event_log_queries.get(&chat_id.0).cloned())
+            .map(|session| session.groups.event_log_query(chat_id.0).to_string())
             .unwrap_or_default();
         if query == current {
             return;
@@ -169,12 +179,9 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Ask the list to tell the app when it is scrolled to its top.
+    /// Ask the list to tell the app when it is scrolled to its top. Setting
+    /// the handler again replaces it, so each open of the page sets it.
     pub(super) fn hook_event_log_scroll(&mut self, cx: &mut Context<Self>) {
-        if self.admin.event_log_hooked {
-            return;
-        }
-        self.admin.event_log_hooked = true;
         let app = cx.weak_entity();
         let screen = self.screen_epoch();
         // Runs while the list holds its own state: it must not touch the
@@ -202,11 +209,11 @@ impl QuillApp {
     /// events are fetched and join the bottom of the list (the list keeps a
     /// reader who has scrolled up where they are).
     pub(super) fn start_event_log_poll(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        if self.live.is_none() || self.admin.event_log_poll == Some(chat_id) {
+        self.event_log_page_for(chat_id).autoload.set(None);
+        if self.live.is_none() {
             return;
         }
-        self.admin.event_log_poll = Some(chat_id);
-        self.spawn_scoped(cx, async move |this, cx| {
+        let poll = self.spawn_scoped(cx, async move |this, cx| {
             loop {
                 cx.background_executor()
                     .timer(EVENT_LOG_POLL_INTERVAL)
@@ -218,17 +225,9 @@ impl QuillApp {
                     break;
                 }
             }
-            // Through the main window: when the chat window this started
-            // in has closed, `this` is gone, and the screen-wide flag would
-            // otherwise keep the page from ever polling again. A screen
-            // that is gone took the flag with it.
-            let _ = this.main().update(cx, |this, _| {
-                if this.admin.event_log_poll == Some(chat_id) {
-                    this.admin.event_log_poll = None;
-                }
-            });
-        })
-        .detach();
+        });
+        // The page owns the timer; a poll already running for it is replaced.
+        self.event_log_page_for(chat_id).poll = Some(poll);
     }
 
     /// One poll step; `false` once the page is closed.
@@ -299,17 +298,9 @@ impl QuillApp {
             return None;
         }
         let groups = &session.groups;
-        let fetch = groups.event_logs.get(&chat_id.0).cloned();
-        let query = groups
-            .event_log_queries
-            .get(&chat_id.0)
-            .cloned()
-            .unwrap_or_default();
-        let filtered = groups.event_log_filters.contains_key(&chat_id.0)
-            || groups
-                .event_log_users
-                .get(&chat_id.0)
-                .is_some_and(|users| !users.is_empty());
+        let fetch = groups.event_log_fetch(chat_id.0).cloned();
+        let query = groups.event_log_query(chat_id.0).to_string();
+        let filtered = groups.event_log_filtered(chat_id.0);
         let is_channel = session
             .chats
             .get(&chat_id.0)
@@ -361,7 +352,7 @@ impl QuillApp {
         );
 
         let content = match fetch {
-            None | Some(ChatEventLogFetch::Loading) => {
+            None | Some(ChatEventLogFetch::Idle | ChatEventLogFetch::Loading) => {
                 self.event_log_reset_list();
                 self.event_log_centered(
                     div()
@@ -465,7 +456,9 @@ impl QuillApp {
 
     /// Forget the rows the list was built for.
     pub(super) fn event_log_reset_list(&self) {
-        self.admin.event_log_autoload.set(None);
+        if let Some(page) = self.admin.event_log_page.as_ref() {
+            page.autoload.set(None);
+        }
         let mut shown = self.admin.event_log_ids.borrow_mut();
         if !shown.is_empty() {
             shown.clear();
@@ -509,12 +502,22 @@ impl QuillApp {
         // Only once the list has been laid out: before that every offset is 0.
         let laid_out = state.viewport_bounds().size.height > px(0.);
         let at_top = laid_out && state.scroll_px_offset_for_scrollbar().y > px(-TOP_SLACK);
-        let asked = Some((chat_id, page.events.len()));
-        if page.has_more && at_top && self.admin.event_log_autoload.get() != asked {
+        let asked = Some(page.events.len());
+        let mark = self
+            .admin
+            .event_log_page
+            .as_ref()
+            .filter(|open| open.chat == chat_id)
+            .map(|open| &open.autoload);
+        if page.has_more
+            && at_top
+            && let Some(mark) = mark
+            && mark.get() != asked
+        {
             // Short lists never scroll, so the next page is asked for here,
             // once for each length the list reaches in a chat (the mark is
             // cleared when the list starts over).
-            self.admin.event_log_autoload.set(asked);
+            mark.set(asked);
             self.defer_screen(cx, move |this, cx| this.load_more_event_log(chat_id, cx));
         }
         let rows = Rc::clone(&entries);

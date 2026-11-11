@@ -3,7 +3,7 @@
 //! columns of different widths; and the budgets of laid-out widths, sizes
 //! and texts (`docs/decisions/paragraph-cache-widths.md`).
 use super::{
-    Budget, Cache, Entry, Key, LAID_OUT, Pool, Width, held_in_tests, layouts_in_tests,
+    Budget, Cache, Entry, Key, LAID_OUT, Layout, Pool, Width, held_in_tests, layouts_in_tests,
     relayouts_in_tests, reset_in_tests, trim_layouts,
 };
 use crate::ui::selectable_text::SelectableRichText;
@@ -274,8 +274,10 @@ fn width(wrap: Option<f32>, paragraph: Option<&Rc<BidiParagraph>>, drawn: u64, u
     Width {
         wrap: wrap.map(f32::to_bits),
         size: paragraph.map(|p| p.size()).unwrap_or_default(),
-        paragraph: paragraph.cloned(),
-        bytes: 0,
+        layout: paragraph.map_or(Layout::SizeOnly, |p| Layout::Held {
+            paragraph: p.clone(),
+            bytes: 0,
+        }),
         drawn,
         used,
     }
@@ -297,7 +299,7 @@ fn a_frame_lets_go_only_of_widest_line_layouts_wider_than_its_window(cx: &mut Te
             widths: vec![
                 // Unconstrained: a size only, as measured.
                 Width {
-                    paragraph: None,
+                    layout: Layout::SizeOnly,
                     ..width(None, p, 0, 1)
                 },
                 width(Some(natural), p, 0, 2),
@@ -312,7 +314,7 @@ fn a_frame_lets_go_only_of_widest_line_layouts_wider_than_its_window(cx: &mut Te
         entry
             .widths
             .iter()
-            .filter(|w| w.paragraph.is_some())
+            .filter(|w| w.layout.is_held())
             .map(|w| w.used)
             .collect::<Vec<u64>>()
     };
@@ -367,7 +369,10 @@ fn fill(cache: &mut Cache, paragraph: &Rc<BidiParagraph>, texts: u64, bytes: usi
     for n in 0..texts {
         for (one_line, used) in [(false, 2 * n + 1), (true, 2 * n + 2)] {
             cache.laid_out(key(n), one_line, bytes).add(Width {
-                bytes,
+                layout: Layout::Held {
+                    paragraph: paragraph.clone(),
+                    bytes,
+                },
                 ..width(Some(100.), Some(paragraph), used, used)
             });
         }
@@ -417,7 +422,10 @@ fn both_kinds_keep_to_one_budget_of_bytes(cx: &mut TestAppContext) {
     assert_eq!(laid_out(&cache), (vec![5, 7, 9, 11], vec![6, 8, 10, 12]));
     // One more, past the budget again: down to three quarters of it.
     cache.laid_out(key(6), false, eighth).add(Width {
-        bytes: eighth,
+        layout: Layout::Held {
+            paragraph: paragraph.clone(),
+            bytes: eighth,
+        },
         ..width(Some(100.), Some(&paragraph), 13, 13)
     });
     cache.end_frame(13, 600.);
@@ -443,7 +451,7 @@ fn past_the_budget_the_least_recently_used_layouts_go(cx: &mut TestAppContext) {
             .entries
             .values()
             .flat_map(|e| &e.widths)
-            .filter(|w| w.paragraph.is_some())
+            .filter(|w| w.layout.is_held())
             .map(|w| w.used)
             .collect();
         used.sort_unstable();
@@ -506,7 +514,7 @@ fn past_the_budget_the_least_recently_used_sizes_go(cx: &mut TestAppContext) {
     assert_eq!(used(&pool), vec![7, 9, 10, 11, 12]);
     // Once their layouts have gone, paragraph 1 goes with its last width.
     for width in pool.entries.values_mut().flat_map(|e| &mut e.widths) {
-        width.paragraph = None;
+        width.layout = Layout::SizeOnly;
     }
     pool.trim_widths(12, 2);
     assert_eq!(used(&pool), vec![12]);

@@ -84,7 +84,7 @@ impl QuillApp {
         };
         self.call_boxes.add_people = Some(AddPeopleBox::new(call_id));
         if let Some(live) = self.live.as_mut()
-            && live.driver.session.users_state.contacts.is_none()
+            && live.driver.session.users_state.contacts.data().is_none()
         {
             let _ = live.driver.fetch_contacts();
         }

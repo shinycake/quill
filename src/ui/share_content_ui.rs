@@ -32,7 +32,7 @@ impl QuillApp {
     /// The chat a share can go to: the open chat when the user may post.
     pub(super) fn share_target(&self) -> Option<ChatId> {
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         session.chats.get(&chat_id.0)?.can_post().then_some(chat_id)
     }
 
@@ -271,7 +271,7 @@ impl QuillApp {
                 move |content, window, cx| {
                     let body = body_app.update(cx, |this, cx| {
                         let focus = this.chat_ui.contact_dialog.as_mut().and_then(|dialog| {
-                            std::mem::take(&mut dialog.focus_on_mount).then(|| dialog.query.clone())
+                            dialog.mount.take_first_draw().then(|| dialog.query.clone())
                         });
                         focus_after_mount(focus, window, cx);
                         this.share_content_panel(cx)

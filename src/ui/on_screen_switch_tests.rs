@@ -105,7 +105,9 @@ fn a_switch_closes_the_checkout(cx: &mut TestAppContext) {
     frames(&mut vcx);
     app.update_in(&mut vcx, |app, window, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.form_loading = true;
+            session.payments.checkout = quill::state::CheckoutForm::Loading {
+                request: quill::ids::RequestId(1),
+            };
         }
         app.open_payment_dialog(window, cx);
     });
@@ -141,7 +143,7 @@ fn a_switch_saves_the_typed_text_and_empties_the_composer(cx: &mut TestAppContex
         assert_eq!(app.open_chat_id(), None);
         let session = app.session().expect("session");
         let draft = session.draft_for(CHAT, DraftTopic::Chat).expect("saved");
-        assert_eq!(draft.text, "meet at 5");
+        assert_eq!(draft.text(), "meet at 5");
         assert!(!session.draft_is_dirty(CHAT, DraftTopic::Chat));
     });
 }
@@ -178,12 +180,12 @@ fn a_switch_closes_boxes_holding_the_old_accounts_ids(cx: &mut TestAppContext) {
         HeldBox {
             dialog: "SessionsConfirm",
             field: "privacy",
-            open: |app| app.privacy.sessions_confirm.is_some(),
+            open: |app| app.privacy.devices.confirm().is_some(),
         },
         HeldBox {
             dialog: "ClearCalls",
             field: "chat_list",
-            open: |app| app.chat_list.global.clear_calls_open,
+            open: |app| app.chat_list.global.clear_calls.is_some(),
         },
         HeldBox {
             dialog: "BlockBar",
@@ -205,7 +207,7 @@ fn a_switch_closes_boxes_holding_the_old_accounts_ids(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     frames(&mut vcx);
     app.update_in(&mut vcx, |app, _, cx| {
-        app.open_group_confirm(CHAT, GroupConfirmAction::DeleteChat, cx);
+        app.open_group_confirm(GroupConfirmAction::DeleteChat { chat_id: CHAT }, cx);
         app.folders.delete_confirm = Some(FolderDeleteConfirm {
             folder_id: 2,
             name: "Work".into(),
@@ -213,8 +215,8 @@ fn a_switch_closes_boxes_holding_the_old_accounts_ids(cx: &mut TestAppContext) {
             shared: false,
             keep: Default::default(),
         });
-        app.privacy.sessions_confirm = Some(SessionsConfirm::TerminateAll);
-        app.chat_list.global.clear_calls_open = true;
+        app.privacy.devices.ask(SessionsConfirm::TerminateAll);
+        app.chat_list.global.clear_calls = Some(Default::default());
         app.dialogs.block_bar_dialog = Some(BlockBarDialog {
             chat_id: CHAT,
             user_id: 5,
@@ -309,8 +311,8 @@ fn files_waiting_for_a_chat_survive_a_switch(cx: &mut TestAppContext) {
     frames(&mut vcx);
     app.read_with(&vcx, |app, _| {
         assert_eq!(
-            app.start_files.choosing,
-            vec![file.clone()],
+            app.start_files.choosing.files(),
+            std::slice::from_ref(&file),
             "the files wait"
         );
         assert!(QuillShell::open_dialog_names(app).contains(&"StartFiles"));
@@ -360,7 +362,9 @@ fn a_switch_closes_a_dialog_hidden_behind_another(cx: &mut TestAppContext) {
     app.update_in(&mut vcx, |app, window, cx| {
         app.open_giveaway_form(CHAT, None, window, cx);
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.form_loading = true;
+            session.payments.checkout = quill::state::CheckoutForm::Loading {
+                request: quill::ids::RequestId(1),
+            };
         }
         app.open_payment_dialog(window, cx);
     });
@@ -487,10 +491,6 @@ fn the_story_viewer_blocks_shortcuts_in_the_main_window_only(cx: &mut TestAppCon
         caption: String::new(),
         caption_entities: Vec::new(),
         duration_label: None,
-        duration_secs: None,
-        video_file_id: None,
-        is_live: false,
-        live_call: None,
         areas: Vec::new(),
     };
     app.update_in(&mut vcx, |app, window, cx| {

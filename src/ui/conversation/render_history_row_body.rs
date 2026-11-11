@@ -79,7 +79,7 @@ impl QuillApp {
                         downloading,
                         &shared.media_roots,
                         session,
-                        &self.message_ui.spoiler_revealed,
+                        &self.message_ui.revealed,
                         corner,
                         cx,
                     );
@@ -97,7 +97,7 @@ impl QuillApp {
                     // Settings → Appearance: font size + bubble/plain style.
                     look,
                     session,
-                    &self.message_ui.spoiler_revealed,
+                    &self.message_ui.revealed,
                     corner,
                     cx,
                 )
@@ -157,7 +157,7 @@ impl QuillApp {
                         MessageContent::Sticker(sticker) => {
                             // tdesktop `Sticker::mirrorHorizontal`.
                             let mirror = crate::ui::sticker_player::mirrors(
-                                sticker.premium_animation.is_some(),
+                                sticker.premium_animation().is_some(),
                                 quill::chat_wide::has_right_layout(message.is_outgoing, look.wide),
                             );
                             let (w, h) = crate::ui::message_media::sticker_box(
@@ -189,7 +189,7 @@ impl QuillApp {
                     self.message_custom_emoji_frames(message, cx),
                     inline,
                     widget,
-                    &self.message_ui.spoiler_revealed,
+                    &self.message_ui.revealed,
                     inputs.is_secret,
                     inputs.fact_check_expanded,
                     self.session(),
@@ -382,7 +382,7 @@ impl QuillApp {
             // Thread and topic windows page forward on their own.
             let sent = if in_thread {
                 live.driver.fetch_thread_history_newer()
-            } else if live.driver.session.open_topic.is_some() {
+            } else if live.driver.session.open_forum_topic().is_some() {
                 live.driver.fetch_topic_history_newer()
             } else {
                 live.driver.fetch_history_newer()
@@ -406,7 +406,7 @@ impl QuillApp {
         let in_topic = self
             .live
             .as_ref()
-            .is_some_and(|live| live.driver.session.open_topic.is_some());
+            .is_some_and(|live| live.driver.session.open_forum_topic().is_some());
         let replaced = if in_thread {
             self.live
                 .as_mut()
@@ -419,7 +419,7 @@ impl QuillApp {
             self.live.as_mut().is_some_and(|live| {
                 live.driver
                     .session
-                    .open_chat
+                    .open_chat_id()
                     .is_some_and(|chat| live.driver.session.history_has_newer(chat))
                     && live.driver.jump_to_latest().is_ok()
             })
@@ -427,7 +427,7 @@ impl QuillApp {
         if !replaced {
             if !in_thread
                 && let Some(session) = self.session_mut()
-                && let Some(chat) = session.open_chat
+                && let Some(chat) = session.open_chat_id()
                 && let Some(history) = session.histories.get_mut(&chat.0)
             {
                 history.end_unread_open();
@@ -448,7 +448,7 @@ impl QuillApp {
         let unread = !self.thread_active()
             && self
                 .session()
-                .and_then(|session| session.open_chat)
+                .and_then(|session| session.open_chat_id())
                 .is_some_and(|chat| self.first_unread_below_view(chat));
         if !unread {
             self.jump_to_latest_messages(cx);
@@ -459,7 +459,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.jump_down();
         } else if let Some(session) = self.demo_session.as_mut()
-            && let Some(chat) = session.open_chat
+            && let Some(chat) = session.open_chat_id()
         {
             // The demo history is all in memory: no page to load.
             let _ = session.show_first_unread(chat);
@@ -522,7 +522,7 @@ impl QuillApp {
             super::spoiler_fx::media_cover(
                 &message.content,
                 super::spoiler_fx::media_key(message.chat_id, message.id),
-                &self.message_ui.spoiler_revealed,
+                &self.message_ui.revealed,
             ),
             Some(super::spoiler_fx::MediaCover::Covered)
         )
@@ -536,7 +536,7 @@ impl QuillApp {
         let redraw = match super::spoiler_fx::media_cover(
             &message.content,
             key,
-            &self.message_ui.spoiler_revealed,
+            &self.message_ui.revealed,
         ) {
             Some(super::spoiler_fx::MediaCover::Fading(_)) => true,
             Some(super::spoiler_fx::MediaCover::Covered) => {
@@ -558,7 +558,7 @@ impl QuillApp {
                 live.driver.fetch_saved_sublist_history()
             } else if live.driver.session.threads.thread.is_some() {
                 live.driver.fetch_thread_history()
-            } else if live.driver.session.open_topic.is_some() {
+            } else if live.driver.session.open_forum_topic().is_some() {
                 live.driver.fetch_topic_history()
             } else {
                 live.driver.fetch_history()

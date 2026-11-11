@@ -114,7 +114,7 @@ fn enter_opens_the_chat_of_the_selected_tile(cx: &mut TestAppContext) {
     press(vcx, "down");
     press(vcx, "right");
     press(vcx, "enter");
-    let open = app.update(vcx, |app, _| app.session().and_then(|s| s.open_chat));
+    let open = app.update(vcx, |app, _| app.session().and_then(|s| s.open_chat_id()));
     assert_eq!(open, tiles.get(1).copied());
 }
 
@@ -158,7 +158,7 @@ fn clicking_a_tile_opens_its_chat(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx);
     let vcx = &mut vcx;
     click(vcx, "top-tile-32");
-    let open = app.update(vcx, |app, _| app.session().and_then(|s| s.open_chat));
+    let open = app.update(vcx, |app, _| app.session().and_then(|s| s.open_chat_id()));
     assert_eq!(open, Some(ChatId(32)));
 }
 
@@ -186,7 +186,7 @@ fn the_menu_removes_one_person_or_asks_before_disabling(cx: &mut TestAppContext)
     frames(vcx);
     click(vcx, "top-menu-disable");
     let confirm = app.update(vcx, |app, _| {
-        app.session().and_then(|s| s.search.search.confirm)
+        app.session().and_then(|s| s.search.search.confirm.clone())
     });
     assert_eq!(confirm, Some(SearchConfirm::DisableTopChats));
     app.update(vcx, |app, cx| app.accept_search_confirm(cx));
@@ -195,7 +195,7 @@ fn the_menu_removes_one_person_or_asks_before_disabling(cx: &mut TestAppContext)
 }
 
 fn open_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<ChatId> {
-    app.update(vcx, |app, _| app.session().and_then(|s| s.open_chat))
+    app.update(vcx, |app, _| app.session().and_then(|s| s.open_chat_id()))
 }
 
 /// Press on a tile, drag it by `dx` with the left button down, release.
@@ -270,7 +270,7 @@ fn the_strip_fits_the_one_column_layout(cx: &mut TestAppContext) {
     // One column shows the list only while no chat is open.
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.open_chat = None;
+            session.open = quill::state::OpenView::of(None);
         }
         cx.notify();
     });

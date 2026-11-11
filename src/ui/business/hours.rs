@@ -75,7 +75,7 @@ impl QuillApp {
 
     fn business_time_zones(&self) -> Vec<TimeZone> {
         self.session()
-            .and_then(|s| s.settings.business.time_zones.clone())
+            .and_then(|s| s.settings.business.time_zones.data().cloned())
             .unwrap_or_default()
     }
 
@@ -87,7 +87,7 @@ impl QuillApp {
             .dialogs
             .business_dialog
             .as_ref()
-            .and_then(|d| d.hours.as_ref())
+            .and_then(|d| d.screen.hours())
             .map(|h| h.time_zone_id.clone())
             .unwrap_or_default();
         let zones = self.business_time_zones();
@@ -102,13 +102,13 @@ impl QuillApp {
         self.dialogs
             .business_dialog
             .as_ref()
-            .and_then(|d| d.hours.as_ref())
+            .and_then(|d| d.screen.hours())
             .map(|h| h.week.clone())
             .unwrap_or_default()
     }
 
     fn set_business_day(&mut self, day: usize, intervals: &[Interval], cx: &mut Context<Self>) {
-        if let Some(h) = self.business_mut().and_then(|d| d.hours.as_mut()) {
+        if let Some(h) = self.business_mut().and_then(|d| d.screen.hours_mut()) {
             h.week = replace_day(&h.week, day, intervals);
         }
         cx.notify();
@@ -128,8 +128,10 @@ impl QuillApp {
                 close: time_field(window, cx, close),
             })
             .collect();
-        if let Some(d) = self.business_mut() {
-            d.day_rows = rows;
+        if let Some(d) = self.business_mut()
+            && let Some(slot) = d.screen.day_rows_mut()
+        {
+            *slot = rows;
         }
     }
 
@@ -138,7 +140,8 @@ impl QuillApp {
             .business_dialog
             .as_ref()
             .map(|d| {
-                d.day_rows
+                d.screen
+                    .day_rows()
                     .iter()
                     .map(|r| (field_minute(&r.open, cx), field_minute(&r.close, cx)))
                     .collect()
@@ -156,8 +159,10 @@ impl QuillApp {
             close: time_field(window, cx, close),
         };
         if let Some(d) = self.business_mut() {
-            d.day_rows.push(row);
-            d.local_error = None;
+            if let Some(rows) = d.screen.day_rows_mut() {
+                rows.push(row);
+            }
+            d.clear_error();
         }
         cx.notify();
     }
@@ -184,7 +189,7 @@ impl QuillApp {
             .dialogs
             .business_dialog
             .as_ref()
-            .and_then(|d| d.hours.as_ref())
+            .and_then(|d| d.screen.hours())
             .map(|h| h.enabled)
         else {
             return div();
@@ -205,7 +210,8 @@ impl QuillApp {
                             .checked(enabled)
                             .accessibility_label(tr(keys::HOURS_SHOW))
                             .on_click(cx.listener(|this, &on: &bool, _, cx| {
-                                if let Some(h) = this.business_mut().and_then(|d| d.hours.as_mut())
+                                if let Some(h) =
+                                    this.business_mut().and_then(|d| d.screen.hours_mut())
                                 {
                                     h.enabled = on;
                                 }
@@ -288,7 +294,8 @@ impl QuillApp {
     pub(super) fn business_day_body(&mut self, cx: &mut Context<Self>) -> Div {
         let muted = cx.theme().muted_foreground;
         let Some(rows) = self.dialogs.business_dialog.as_ref().map(|d| {
-            d.day_rows
+            d.screen
+                .day_rows()
                 .iter()
                 .map(|r| (r.open.clone(), r.close.clone()))
                 .collect::<Vec<_>>()
@@ -347,9 +354,10 @@ impl QuillApp {
                                 .text_color(cx.theme().danger)
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     if let Some(d) = this.business_mut()
-                                        && index < d.day_rows.len()
+                                        && let Some(rows) = d.screen.day_rows_mut()
+                                        && index < rows.len()
                                     {
-                                        d.day_rows.remove(index);
+                                        rows.remove(index);
                                     }
                                     cx.notify();
                                 })),
@@ -423,7 +431,7 @@ impl QuillApp {
                 )
                 .when(!chosen, |row| row.pl(px(36.)))
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    if let Some(h) = this.business_mut().and_then(|d| d.hours.as_mut()) {
+                    if let Some(h) = this.business_mut().and_then(|d| d.screen.hours_mut()) {
                         h.time_zone_id = id.clone();
                     }
                     this.business_go(View::Hours, window, cx);
@@ -446,7 +454,7 @@ impl QuillApp {
             .dialogs
             .business_dialog
             .as_ref()
-            .and_then(|d| d.hours.as_ref())
+            .and_then(|d| d.screen.hours())
             .map(|h| {
                 (
                     h.enabled,

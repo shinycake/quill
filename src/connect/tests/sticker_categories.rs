@@ -86,7 +86,7 @@ fn category_strip_loads_once_and_each_category_searches_its_own_way() {
         .unwrap();
     let found = &driver.session.stickers.stickers.found_stickers;
     assert_eq!(found.len(), 1);
-    assert!(found[0].premium_animation.is_some());
+    assert!(found[0].premium_animation().is_some());
 
     // A search category sends its emoji, space-separated, and drops the
     // Premium list the moment it is chosen.

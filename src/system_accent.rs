@@ -72,15 +72,13 @@ pub fn effective(custom_rgb: u32, use_system: bool, system: Option<u32>) -> u32 
 /// The OS accent as 0xRRGGBB (never 0), if the platform reports one.
 ///
 /// macOS and Windows read it directly (cheap calls). Linux runs `gdbus` and
-/// `gsettings`, so it never waits for them: this returns the last value a
-/// background thread stored, starts a refresh when none is running, and
-/// gives up for good after one failed read (neither tool, or no accent), as
-/// the idle-time read in `passcode` does. Poll [`pending`] to learn when a
-/// refresh has finished.
+/// `gsettings`, so a lookup never waits for them: this returns the last
+/// value a background read stored and starts nothing. [`refresh`] starts a
+/// read; poll [`pending`] to learn when it has finished.
 pub fn read() -> Option<u32> {
     #[cfg(target_os = "linux")]
     {
-        linux_cached()
+        crate::locks::lock_or_recover(&LINUX).last()
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -88,11 +86,23 @@ pub fn read() -> Option<u32> {
     }
 }
 
+/// Starts a background read of the accent (Linux only; the other
+/// platforms read in [`read`]). Nothing starts while one runs, and after
+/// one failed (neither tool, or no accent) it gives up for good, as the
+/// idle-time read in `passcode` does.
+pub fn refresh() {
+    #[cfg(target_os = "linux")]
+    linux_refresh();
+}
+
 /// Whether a background read is still running (Linux only).
 pub fn pending() -> bool {
     #[cfg(target_os = "linux")]
     {
-        crate::locks::lock_or_recover(&LINUX).running
+        matches!(
+            *crate::locks::lock_or_recover(&LINUX),
+            AccentRead::Reading { .. }
+        )
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -100,24 +110,36 @@ pub fn pending() -> bool {
     }
 }
 
+/// Where the background accent read stands; the last value read stays in
+/// every stage.
 #[cfg(target_os = "linux")]
-#[derive(Default)]
-struct LinuxState {
-    value: Option<u32>,
-    running: bool,
+enum AccentRead {
+    Idle {
+        last: Option<u32>,
+    },
+    Reading {
+        last: Option<u32>,
+    },
     /// A read found nothing; never retried.
-    failed: bool,
+    Failed {
+        last: Option<u32>,
+    },
 }
 
 #[cfg(target_os = "linux")]
-static LINUX: std::sync::Mutex<LinuxState> = std::sync::Mutex::new(LinuxState {
-    value: None,
-    running: false,
-    failed: false,
-});
+impl AccentRead {
+    fn last(&self) -> Option<u32> {
+        match self {
+            Self::Idle { last } | Self::Reading { last } | Self::Failed { last } => *last,
+        }
+    }
+}
 
-/// Ends a read: `running` clears and the next call may start another (a
-/// panicked read counts as failed, so it is not retried every frame).
+#[cfg(target_os = "linux")]
+static LINUX: std::sync::Mutex<AccentRead> = std::sync::Mutex::new(AccentRead::Idle { last: None });
+
+/// Ends a read: a read that panicked counts as failed, so it is not retried
+/// every frame. A finished read has already left `Reading`.
 #[cfg(target_os = "linux")]
 struct ReadDone;
 
@@ -125,34 +147,33 @@ struct ReadDone;
 impl Drop for ReadDone {
     fn drop(&mut self) {
         let mut state = crate::locks::lock_or_recover(&LINUX);
-        state.running = false;
-        if state.value.is_none() {
-            state.failed = true;
+        if let AccentRead::Reading { last } = *state {
+            *state = AccentRead::Failed { last };
         }
     }
 }
 
 #[cfg(target_os = "linux")]
-fn linux_cached() -> Option<u32> {
+fn linux_refresh() {
     let mut state = crate::locks::lock_or_recover(&LINUX);
-    if !state.running && !state.failed {
-        state.running = true;
-        let spawned = crate::thread_guard::spawn_guarded("system-accent", || {
-            // Clears `running` even when the read panics.
-            let _done = ReadDone;
-            let value = read_native().map(|rgb| rgb.max(1));
-            let mut state = crate::locks::lock_or_recover(&LINUX);
-            state.failed = value.is_none();
-            if value.is_some() {
-                state.value = value;
-            }
-        });
-        if spawned.is_err() {
-            state.running = false;
-            state.failed = true;
+    let AccentRead::Idle { last } = *state else {
+        return;
+    };
+    *state = AccentRead::Reading { last };
+    let spawned = crate::thread_guard::spawn_guarded("system-accent", || {
+        let _done = ReadDone;
+        let value = read_native().map(|rgb| rgb.max(1));
+        let mut state = crate::locks::lock_or_recover(&LINUX);
+        if let AccentRead::Reading { last } = *state {
+            *state = match value {
+                Some(value) => AccentRead::Idle { last: Some(value) },
+                None => AccentRead::Failed { last },
+            };
         }
+    });
+    if spawned.is_err() {
+        *state = AccentRead::Failed { last };
     }
-    state.value
 }
 
 #[cfg(all(target_os = "macos", feature = "ui"))]

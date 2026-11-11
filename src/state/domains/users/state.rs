@@ -3,6 +3,115 @@
 //! with `new`.
 use crate::state::*;
 
+/// The verdict of a `checkChatUsername`: the checked text and what the
+/// server said.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileUsernameVerdict {
+    pub text: String,
+    pub result: UsernameCheckResult,
+}
+
+/// Where the edit-profile dialog's username check stands.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ProfileUsernameCheck {
+    /// Nothing asked since the dialog opened.
+    #[default]
+    Idle,
+    /// A check of `text` is out as `request`; `last` is the verdict before
+    /// it (it still stands for its own text).
+    Checking {
+        request: RequestId,
+        text: String,
+        last: Option<ProfileUsernameVerdict>,
+    },
+    /// The latest check answered.
+    Checked(ProfileUsernameVerdict),
+}
+
+impl ProfileUsernameCheck {
+    /// The newest verdict held.
+    pub fn verdict(&self) -> Option<&ProfileUsernameVerdict> {
+        match self {
+            Self::Idle => None,
+            Self::Checking { last, .. } => last.as_ref(),
+            Self::Checked(verdict) => Some(verdict),
+        }
+    }
+
+    /// The verdict for exactly `text`.
+    pub fn verdict_for(&self, text: &str) -> Option<UsernameCheckResult> {
+        self.verdict()
+            .filter(|verdict| verdict.text == text)
+            .map(|verdict| verdict.result)
+    }
+
+    /// Whether a check of exactly `text` is out.
+    pub fn is_checking(&self, text: &str) -> bool {
+        matches!(self, Self::Checking { text: asked, .. } if asked == text)
+    }
+
+    /// The request in flight.
+    pub fn pending(&self) -> Option<RequestId> {
+        match self {
+            Self::Checking { request, .. } => Some(*request),
+            _ => None,
+        }
+    }
+
+    /// A check of `text` goes out as `request`.
+    pub fn begin(&mut self, request: RequestId, text: &str) {
+        let last = std::mem::take(self).into_verdict();
+        *self = Self::Checking {
+            request,
+            text: text.to_string(),
+            last,
+        };
+    }
+
+    /// The check that never left, or failed: back to the verdict held
+    /// before it. Only the request in flight counts (`request`); whether it
+    /// was.
+    pub fn end(&mut self, request: RequestId) -> bool {
+        if self.pending() != Some(request) {
+            return false;
+        }
+        *self = match std::mem::take(self).into_verdict() {
+            Some(verdict) => Self::Checked(verdict),
+            None => Self::Idle,
+        };
+        true
+    }
+
+    /// The answer to `request`: the text it asked and the verdict, when it
+    /// is the check in flight.
+    pub fn answer(&mut self, request: RequestId, result: UsernameCheckResult) -> bool {
+        let Self::Checking {
+            request: current,
+            text,
+            ..
+        } = self
+        else {
+            return false;
+        };
+        if *current != request {
+            return false;
+        }
+        *self = Self::Checked(ProfileUsernameVerdict {
+            text: std::mem::take(text),
+            result,
+        });
+        true
+    }
+
+    fn into_verdict(self) -> Option<ProfileUsernameVerdict> {
+        match self {
+            Self::Idle => None,
+            Self::Checking { last, .. } => last,
+            Self::Checked(verdict) => Some(verdict),
+        }
+    }
+}
+
 pub struct UsersState {
     /// The requests the profile boxes wait on before they close.
     pub saves: SaveWatch,
@@ -26,11 +135,10 @@ pub struct UsersState {
     /// A group or channel's photo history, by chat id. Dropped on
     /// `updateChatPhoto`.
     pub chat_photo_history: HashMap<i64, ChatPhotosFetch>,
-    /// Phase 6: `getContacts` result — user ids, in server order. `None`
-    /// until the first `users` response; `contacts_error` records a failed
-    /// fetch so the UI can offer a retry.
-    pub contacts: Option<Vec<i64>>,
-    pub contacts_error: bool,
+    /// Phase 6: `getContacts` result — user ids, in server order. Idle
+    /// until asked (and again after a contact change invalidates it); a
+    /// failed fetch is `Failed` so the UI can offer a retry.
+    pub contacts: crate::state::fetch::Fetch<Vec<i64>>,
     /// Slice A6: outcome line for contacts mutations (`removeContacts`,
     /// `importContacts`, `clearImportedContacts`) — set on ok and on
     /// error, cleared by the next mutation; shown in the contacts
@@ -52,15 +160,12 @@ pub struct UsersState {
     /// `(user id, photo id)` whose full info was asked for to learn the
     /// clips of a video userpic (`Session::take_userpic_full_info_ask`).
     pub userpic_full_info_asked: std::collections::HashSet<(i64, i64)>,
-    /// A5: latest `checkChatUsername` verdict for the edit-profile
-    /// dialog: (checked username text, result). Written by the driver
-    /// before `apply` takes the pending request; the dialog only shows it
-    /// when it matches the current input text (stale verdicts ignored).
-    pub username_check: Option<(String, UsernameCheckResult)>,
-    /// A5: the in-flight `checkChatUsername` and the text it checks. Its
-    /// answer or its error is matched by this request, not by purpose: an
-    /// earlier check's reply never stands for the latest text.
-    pub username_check_pending: Option<(RequestId, String)>,
+    /// A5: the `checkChatUsername` of the edit-profile dialog: the
+    /// request in flight with the text it checks, and the latest verdict.
+    /// The dialog shows a verdict only when it matches the current input
+    /// text (stale verdicts ignored), and an answer or error only counts
+    /// for the request in flight, not for an earlier check's reply.
+    pub username_check: ProfileUsernameCheck,
     /// `bio_length_max` option (TDLib default 70, Premium raises it):
     /// the edit-profile bio counter.
     pub bio_length_max: usize,
@@ -76,23 +181,16 @@ pub struct UsersState {
     pub peer_color_error: Option<String>,
     /// `getDefaultBackgroundCustomEmojiStickers` answer: the custom emoji
     /// the color editor offers as reply and profile icons.
-    pub background_emoji_icons: Vec<StickerItem>,
-    /// The icon request failed; the editor shows a retry hint.
-    pub background_emoji_icons_failed: bool,
+    pub background_emoji_icons: crate::state::fetch::Fetch<Vec<StickerItem>>,
     /// `getDefaultProfilePhotoCustomEmojiStickers` answer: the emoji the
     /// avatar builder offers.
-    pub profile_photo_emoji_icons: Vec<StickerItem>,
-    /// The builder request failed.
-    pub profile_photo_emoji_icons_failed: bool,
+    pub profile_photo_emoji_icons: crate::state::fetch::Fetch<Vec<StickerItem>>,
     /// `getDefaultChatPhotoCustomEmojiStickers` answer: the emoji the
     /// builder offers for a group or channel photo.
-    pub chat_photo_emoji_icons: Vec<StickerItem>,
-    pub chat_photo_emoji_icons_failed: bool,
+    pub chat_photo_emoji_icons: crate::state::fetch::Fetch<Vec<StickerItem>>,
     /// Gifts with wearable colors (`getReceivedGifts` with
     /// `exclude_without_colors`), for the color editor.
-    pub wearable_gifts: Vec<crate::premium_hub::ReceivedGift>,
-    /// The wearable gifts request answered or failed.
-    pub wearable_gifts_loaded: bool,
+    pub wearable_gifts: crate::state::fetch::Fetch<Vec<crate::premium_hub::ReceivedGift>>,
     /// Phase B1: secret-chat records keyed by `secret_chat_id`
     /// (`updateSecretChat` / `getSecretChat` answers). Kept at the
     /// session level because `updateSecretChat` is guaranteed to arrive
@@ -108,20 +206,72 @@ pub struct UsersState {
     /// A user whose private chat the driver opens on the next ingest:
     /// the `getSupportUser` answer (Settings > Ask a Question) or a
     /// contact just created by phone (New Contact).
-    pub user_chat_to_open: Option<i64>,
-    /// The answer to the New Contact box's `importContacts`, taken by the
-    /// box: tdesktop's `AddContactBox::save` opens the chat when the phone
-    /// belongs to a Telegram user and otherwise shows "not joined". Keyed by
-    /// the import it answers: only the box that sent it applies it.
-    pub new_contact_outcome: Option<(RequestId, NewContactOutcome)>,
-    /// The `importContacts` the open New Contact box waits for. Closing the
-    /// box forgets it: its answer then opens no chat, and the next box's
-    /// Create is sent instead of waiting for it.
-    pub new_contact_request: Option<RequestId>,
+    /// The New Contact box's `importContacts`: the request it waits for,
+    /// then its answer (taken by the box), keyed by the import it answers
+    /// so only the box that sent it applies it. Closing the box forgets
+    /// it: the answer then opens no chat, and the next box's Create is sent
+    /// instead of waiting for it.
+    pub new_contact: NewContact,
     /// Phase 6: the open user / supergroup info panel, if any.
     pub open_info_panel: Option<InfoPanelTarget>,
     /// The QR box's backdrops, contact link and free-code answers.
     pub peer_qr: crate::peer_qr::session::PeerQrData,
+}
+
+/// The New Contact box's import, from Create to its taken answer.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum NewContact {
+    /// No box waits for an import.
+    #[default]
+    Closed,
+    /// `importContacts` `RequestId` is out.
+    Sending(RequestId),
+    /// The phone belongs to this Telegram user: the driver opens the chat,
+    /// then the box is told (`Done` with `Joined`). Closing the box ends it.
+    Opening(RequestId, i64),
+    /// The import answered; the box takes it. tdesktop's
+    /// `AddContactBox::save` opens the chat when the phone belongs to a
+    /// Telegram user and otherwise shows "not joined".
+    Done(RequestId, NewContactOutcome),
+}
+
+impl NewContact {
+    /// The chat to open for the joined phone, taken (the stage moves to
+    /// `Done` with the outcome).
+    pub fn take_opening(&mut self) -> Option<i64> {
+        let Self::Opening(request, user) = *self else {
+            return None;
+        };
+        *self = Self::Done(request, NewContactOutcome::Joined(user));
+        Some(user)
+    }
+
+    /// The import in flight.
+    pub fn sending(&self) -> Option<RequestId> {
+        match self {
+            Self::Sending(request) => Some(*request),
+            _ => None,
+        }
+    }
+
+    /// The answer waiting to be taken.
+    pub fn outcome(&self) -> Option<&NewContactOutcome> {
+        match self {
+            Self::Done(_, outcome) => Some(outcome),
+            _ => None,
+        }
+    }
+
+    /// Take the answer; the stage is closed.
+    pub fn take_outcome(&mut self) -> Option<(RequestId, NewContactOutcome)> {
+        match std::mem::take(self) {
+            Self::Done(request, outcome) => Some((request, outcome)),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
 }
 
 /// How the New Contact box's import ended.
@@ -136,6 +286,32 @@ pub enum NewContactOutcome {
 }
 
 impl UsersState {
+    /// The reply and profile icons the color editor offers.
+    pub fn background_icons(&self) -> &[StickerItem] {
+        self.background_emoji_icons
+            .data()
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// The emoji the avatar builder offers.
+    pub fn profile_photo_icons(&self) -> &[StickerItem] {
+        self.profile_photo_emoji_icons
+            .data()
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// The emoji the group or channel photo builder offers.
+    pub fn chat_photo_icons(&self) -> &[StickerItem] {
+        self.chat_photo_emoji_icons
+            .data()
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// The gifts whose colors can be worn.
+    pub fn wearable_gift_list(&self) -> &[crate::premium_hub::ReceivedGift] {
+        self.wearable_gifts.data().map_or(&[], Vec::as_slice)
+    }
+
     /// Fold the options this domain reads (`bio_length_max`).
     pub(crate) fn apply_option(
         &mut self,
@@ -165,32 +341,24 @@ impl UsersState {
             user_profile_photos: HashMap::new(),
             chat_current_photos: HashMap::new(),
             chat_photo_history: HashMap::new(),
-            contacts: None,
-            contacts_error: false,
+            contacts: crate::state::fetch::Fetch::Idle,
             contacts_notice: None,
             replies_block: None,
             replies_blocked: Vec::new(),
             replies_bot_chat_id: None,
             user_full_infos: UserFullInfos::default(),
             userpic_full_info_asked: Default::default(),
-            username_check: None,
-            username_check_pending: None,
+            username_check: ProfileUsernameCheck::Idle,
             bio_length_max: 70,
             profile_edit_error: None,
             peer_color_error: None,
-            background_emoji_icons: Vec::new(),
-            background_emoji_icons_failed: false,
-            profile_photo_emoji_icons: Vec::new(),
-            profile_photo_emoji_icons_failed: false,
-            chat_photo_emoji_icons: Vec::new(),
-            chat_photo_emoji_icons_failed: false,
-            wearable_gifts: Vec::new(),
-            wearable_gifts_loaded: false,
+            background_emoji_icons: Default::default(),
+            profile_photo_emoji_icons: Default::default(),
+            chat_photo_emoji_icons: Default::default(),
+            wearable_gifts: Default::default(),
             secret_chat_states: HashMap::new(),
             secret_chat_fetch_queue: Vec::new(),
-            user_chat_to_open: None,
-            new_contact_outcome: None,
-            new_contact_request: None,
+            new_contact: NewContact::Closed,
             open_info_panel: None,
             peer_qr: crate::peer_qr::session::PeerQrData::default(),
         }
@@ -211,5 +379,46 @@ mod bio_limit_tests {
         users.apply_option("bio_length_max", &OptionValue::Integer(0));
         users.apply_option("other", &OptionValue::Integer(5));
         assert_eq!(users.bio_length_max, 140);
+    }
+}
+
+#[cfg(test)]
+mod username_check_tests {
+    use super::*;
+
+    #[test]
+    fn only_the_check_in_flight_is_answered_or_ended() {
+        let mut check = ProfileUsernameCheck::Idle;
+        check.begin(RequestId(1), "old");
+        check.begin(RequestId(2), "new");
+        assert!(!check.answer(RequestId(1), UsernameCheckResult::Occupied));
+        assert!(!check.end(RequestId(1)));
+        assert!(check.is_checking("new"));
+        assert!(check.answer(RequestId(2), UsernameCheckResult::Available));
+        assert_eq!(
+            check.verdict_for("new"),
+            Some(UsernameCheckResult::Available)
+        );
+        assert_eq!(check.verdict_for("old"), None);
+    }
+
+    #[test]
+    fn a_failed_check_gives_back_the_verdict_held_before_it() {
+        let mut check = ProfileUsernameCheck::Idle;
+        check.begin(RequestId(1), "a");
+        check.answer(RequestId(1), UsernameCheckResult::Occupied);
+        check.begin(RequestId(2), "b");
+        assert_eq!(
+            check.verdict_for("a"),
+            Some(UsernameCheckResult::Occupied),
+            "the earlier text keeps its verdict while another is checked"
+        );
+        assert!(check.end(RequestId(2)));
+        assert_eq!(check.pending(), None);
+        assert_eq!(check.verdict_for("a"), Some(UsernameCheckResult::Occupied));
+        let mut first = ProfileUsernameCheck::Idle;
+        first.begin(RequestId(3), "c");
+        assert!(first.end(RequestId(3)));
+        assert_eq!(first, ProfileUsernameCheck::Idle);
     }
 }

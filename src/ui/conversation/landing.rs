@@ -12,6 +12,7 @@
 //! clicking or keys end it.
 
 use super::*;
+use crate::ui::history_state::ScrollAim;
 
 /// What the open history is brought to.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -117,7 +118,7 @@ impl QuillApp {
             }
             LandingGoal::Message(_) => 0.,
         };
-        self.history.landing = Some(Landing {
+        self.history.aim = ScrollAim::Landing(Landing {
             goal,
             corrections: 0,
             misses: 0,
@@ -130,7 +131,7 @@ impl QuillApp {
 
     /// The reader took over the view.
     pub(in crate::ui) fn end_landing(&mut self) {
-        self.history.landing = None;
+        self.history.aim.end_landing();
     }
 
     /// Ends a landing when the reader scrolls over the history with a wheel
@@ -157,7 +158,7 @@ impl QuillApp {
 
     /// What the next paint measures for the landing, if one is running.
     pub(in crate::ui) fn landing_probe(&self) -> Option<LandingProbe> {
-        match self.history.landing?.goal {
+        match self.history.aim.landing()?.goal {
             LandingGoal::Bar => Some(LandingProbe::Bar),
             LandingGoal::Message(id) => Some(
                 self.history
@@ -174,16 +175,20 @@ impl QuillApp {
     /// waits while newer messages are still to load, and otherwise gives
     /// way to the bottom: the unread run fits on the last screen.
     pub(in crate::ui) fn advance_landing(&mut self, error: LandingError, cx: &mut Context<Self>) {
-        let Some(mut landing) = self.history.landing else {
+        let Some(mut landing) = self.history.aim.landing() else {
             return;
         };
         let Some(error) = error else {
             landing.misses = landing.misses.saturating_add(1);
-            self.history.landing = (landing.misses < MAX_MISSES).then_some(landing);
+            self.history.aim = if landing.misses < MAX_MISSES {
+                ScrollAim::Landing(landing)
+            } else {
+                ScrollAim::Free
+            };
             return;
         };
         if error.abs() < 0.5 {
-            self.history.landing = None;
+            self.end_landing();
             if landing.goal == LandingGoal::Bar {
                 self.learn_bar_offset(cx);
             }
@@ -200,19 +205,19 @@ impl QuillApp {
                 // Rows still to come may bring the bar up.
                 LandingGoal::Bar if self.history.had_newer => {}
                 LandingGoal::Bar => {
-                    self.history.landing = None;
+                    self.end_landing();
                     self.drop_unread_bar_for_bottom(cx);
                 }
-                LandingGoal::Message(_) => self.history.landing = None,
+                LandingGoal::Message(_) => self.end_landing(),
             }
             return;
         }
         if (error < 0. && above < px(1.)) || landing.corrections >= MAX_CORRECTIONS {
-            self.history.landing = None;
+            self.end_landing();
             return;
         }
         landing.corrections += 1;
-        self.history.landing = Some(landing);
+        self.history.aim = ScrollAim::Landing(landing);
         self.history
             .scroller
             .update(cx, |state, cx| state.scroll_by(px(error), cx));

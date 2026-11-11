@@ -18,7 +18,6 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
-use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::privacy::{PrivacyKeyState, PrivacyRuleDetail};
 use quill::state::fetch::Fetch;
@@ -85,12 +84,7 @@ impl QuillApp {
     /// "Last seen" warning. They belong to the page, so leaving it (or
     /// Settings) closes them.
     pub(crate) fn close_privacy_layers(&mut self) {
-        self.privacy.last_seen_warning = None;
-        self.privacy.editor = None;
-        self.privacy.exceptions = None;
-        self.privacy.exception_picker_open = false;
-        self.privacy.block_picker_open = false;
-        self.privacy.unblock_confirm = None;
+        self.privacy.layer.close_all();
     }
 
     /// Live: all privacy rules, the read-date setting, the first blocked
@@ -115,14 +109,7 @@ impl QuillApp {
     /// exceptions-picker → editor → main overlay), like TGX's back stack.
     #[allow(clippy::if_same_then_else)]
     pub(super) fn close_privacy_top(&mut self, cx: &mut Context<Self>) {
-        if self.privacy.exception_picker_open || self.privacy.block_picker_open {
-            self.privacy.exception_picker_open = false;
-            self.privacy.block_picker_open = false;
-        } else if self.privacy.exceptions.take().is_some() {
-        } else {
-            self.privacy.editor = None;
-        }
-        self.privacy.unblock_confirm = None;
+        self.privacy.layer.close_top();
         cx.notify();
     }
 
@@ -208,11 +195,7 @@ impl QuillApp {
                             .label(tr(keys::Q_PREFS_CLEAR_SAVED_PAYMENT_SHIPPING_INFO))
                             .custom(super::security::quiet_danger(cx))
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_group_confirm(
-                                    ChatId(0),
-                                    GroupConfirmAction::ClearPaymentInfo,
-                                    cx,
-                                );
+                                this.open_group_confirm(GroupConfirmAction::ClearPaymentInfo, cx);
                             })),
                     ),
                     cx,
@@ -325,7 +308,7 @@ impl QuillApp {
                             .label(tr(keys::Q_PREFS_BLOCK))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.privacy.block_picker_open = true;
+                                this.privacy.layer.open_block_picker();
                                 if let Some(live) = this.live.as_mut() {
                                     let _ = live.driver.fetch_contacts();
                                 }
@@ -377,7 +360,7 @@ impl QuillApp {
                     .child(watch(rows, cx, Self::blocked_more)),
             );
         }
-        if self.privacy.block_picker_open {
+        if self.privacy.layer.block_picker_open() {
             section = section.child(self.block_picker(cx, &list));
         }
         section.into_any_element()
@@ -420,7 +403,7 @@ impl QuillApp {
             .and_then(|s| s.users.get(&user_id))
             .map(|u| u.display_name())
             .unwrap_or_else(|| tr_with(keys::Q_PREFS_USER, &[("user_id", &user_id.to_string())]));
-        let confirming = self.privacy.unblock_confirm == Some(user_id);
+        let confirming = self.privacy.layer.unblock_confirm() == Some(user_id);
         let mut row = div()
             .id(format!("privacy-blocked-{user_id}"))
             .flex()
@@ -448,7 +431,7 @@ impl QuillApp {
                             .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.privacy.unblock_confirm = None;
+                                this.privacy.layer.clear_unblock();
                                 cx.notify();
                             })),
                     ),
@@ -460,7 +443,7 @@ impl QuillApp {
                     .label(tr(keys::Q_PREFS_UNBLOCK))
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.privacy.unblock_confirm = Some(user_id);
+                        this.privacy.layer.ask_unblock(user_id);
                         cx.notify();
                     })),
             );
@@ -517,7 +500,7 @@ impl QuillApp {
     /// Slice S3: block a user (`setMessageSenderBlockList` with
     /// `blockListMain`). Optimistic; the `ok`/error confirms or fails it.
     fn block_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
-        self.privacy.block_picker_open = false;
+        self.privacy.layer.close_block_picker();
         if let Some(live) = self.live.as_mut() {
             let result = { live.driver.block_sender(user_id) };
             if let Err(err) = result {
@@ -543,7 +526,7 @@ impl QuillApp {
     /// Slice S3: unblock a user (`setMessageSenderBlockList` with a null
     /// block list — TGX `Tdlib.unblockSender`). Optimistic.
     fn unblock_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
-        self.privacy.unblock_confirm = None;
+        self.privacy.layer.clear_unblock();
         if let Some(live) = self.live.as_mut() {
             let result = { live.driver.unblock_sender(user_id) };
             if let Err(err) = result {
@@ -569,7 +552,7 @@ impl QuillApp {
     /// me by my number" choice under a hidden phone number, and the gift
     /// settings under Gifts.
     pub(crate) fn privacy_editor_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let target = self.privacy.editor?;
+        let target = self.privacy.layer.editor()?;
         match target {
             PrivacyEditorTarget::NewChat => return Some(self.new_chat_editor(cx)),
             PrivacyEditorTarget::FileOpen => return Some(self.file_open_editor(cx)),
@@ -829,19 +812,20 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
     session.settings.privacy_data.ignore_sensitive = Some(false);
     session.settings.privacy_data.check_password_suggested = true;
     session.settings.privacy_data.inactive_session_ttl_days = Some(180);
-    session.settings.read_date_show = Some(true);
+    session.settings.read_date = quill::state::ReadDate::Known(true);
     // box-host: demo
-    session.chat_list.archive_chat_list_settings =
-        Some(quill::telegram::requests::ArchiveChatListSettings {
+    session.chat_list.edit_archive_settings(Some(
+        quill::telegram::requests::ArchiveChatListSettings {
             archive_and_mute_new_chats_from_unknown_users: true,
             keep_unmuted_chats_archived: false,
             keep_chats_from_folders_archived: true,
-        });
+        },
+    ));
     session.calls.privacy_allow_calls = Some(PrivacyWho::Contacts);
     session.calls.privacy_p2p = Some(PrivacyWho::Everybody);
     session.settings.blocked_senders = Fetch::Ready(vec![63]);
     session.settings.blocked_total = 1;
-    session.users_state.contacts = Some(vec![61, 62, 63]);
+    session.users_state.contacts = quill::state::fetch::Fetch::Ready(vec![61, 62, 63]);
 }
 /// Slice S3: the Privacy-screen row value for one rule key: the base
 /// choice, with the always/never exception counts when non-zero (TGX

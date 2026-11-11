@@ -19,8 +19,29 @@ impl Clock for SystemClock {
     }
 }
 
+/// Whether the UI thread is beating, and how often it has.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Beats {
+    /// Before [`Heartbeat::start`] and after [`Heartbeat::stop`]: every
+    /// launch is answered at once.
+    NotRunning,
+    Running {
+        count: u64,
+    },
+}
+
+impl Beats {
+    /// The count while running.
+    fn count(self) -> Option<u64> {
+        match self {
+            Self::NotRunning => None,
+            Self::Running { count } => Some(count),
+        }
+    }
+}
+
 pub struct Heartbeat {
-    beats: Mutex<Option<u64>>,
+    beats: Mutex<Beats>,
     beat: Condvar,
 }
 
@@ -36,7 +57,7 @@ pub static UI: Heartbeat = Heartbeat::new();
 impl Heartbeat {
     pub const fn new() -> Self {
         Self {
-            beats: Mutex::new(None),
+            beats: Mutex::new(Beats::NotRunning),
             beat: Condvar::new(),
         }
     }
@@ -45,17 +66,19 @@ impl Heartbeat {
     /// after [`Self::stop`], every launch is answered at once.
     pub fn start(&self) {
         let mut beats = crate::locks::lock_or_recover(&self.beats);
-        beats.get_or_insert(0);
+        if *beats == Beats::NotRunning {
+            *beats = Beats::Running { count: 0 };
+        }
     }
 
     pub fn stop(&self) {
-        *crate::locks::lock_or_recover(&self.beats) = None;
+        *crate::locks::lock_or_recover(&self.beats) = Beats::NotRunning;
         self.beat.notify_all();
     }
 
     pub fn beat(&self) {
         let mut beats = crate::locks::lock_or_recover(&self.beats);
-        if let Some(count) = beats.as_mut() {
+        if let Beats::Running { count } = &mut *beats {
             *count = count.wrapping_add(1);
         }
         drop(beats);
@@ -64,7 +87,7 @@ impl Heartbeat {
 
     /// The mark to pass to [`Self::answered_since`].
     pub(super) fn mark(&self) -> Option<u64> {
-        *crate::locks::lock_or_recover(&self.beats)
+        crate::locks::lock_or_recover(&self.beats).count()
     }
 
     /// Whether the UI beat after `mark` by `deadline` on `clock`, or does
@@ -77,7 +100,7 @@ impl Heartbeat {
     ) -> bool {
         let mut beats = crate::locks::lock_or_recover(&self.beats);
         loop {
-            if beats.is_none() || mark.is_none() || *beats != mark {
+            if mark.is_none() || beats.count() != mark {
                 return true;
             }
             let left = deadline.saturating_duration_since(clock.now());

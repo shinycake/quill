@@ -83,8 +83,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.session.groups.event_logs.remove(&chat_id.0);
-        self.session.groups.event_log_waits.remove(&chat_id.0);
+        self.session.groups.reset_event_log_fetch(chat_id.0);
         self.fetch_chat_event_log(chat_id)
     }
 
@@ -93,33 +92,19 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// query does not refetch by itself — the UI follows with
     /// `refresh_chat_event_log`.
     pub fn set_chat_event_log_query(&mut self, chat_id: ChatId, query: &str) {
-        let query = query.trim().to_string();
-        if query.is_empty() {
-            self.session.groups.event_log_queries.remove(&chat_id.0);
-        } else {
-            self.session
-                .groups
-                .event_log_queries
-                .insert(chat_id.0, query);
-        }
+        self.session
+            .groups
+            .event_logs
+            .entry(chat_id.0)
+            .or_default()
+            .query = query.trim().to_string();
     }
 
     /// Flip one admin in the chat's server-side event-log filter
     /// (`getChatEventLog.user_ids`). The UI follows with a refresh.
     pub fn toggle_chat_event_log_user(&mut self, chat_id: ChatId, user_id: i64) {
-        let mut users = self
-            .session
-            .groups
-            .event_log_users
-            .get(&chat_id.0)
-            .cloned()
-            .unwrap_or_default();
-        crate::admin_extras::toggle_event_log_user(&mut users, user_id);
-        if users.is_empty() {
-            self.session.groups.event_log_users.remove(&chat_id.0);
-        } else {
-            self.session.groups.event_log_users.insert(chat_id.0, users);
-        }
+        let log = self.session.groups.event_logs.entry(chat_id.0).or_default();
+        crate::admin_extras::toggle_event_log_user(&mut log.users, user_id);
     }
 
     /// Store both halves of the Recent actions filter at once (the filter
@@ -131,27 +116,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         categories: Option<ChatEventLogFilterSet>,
         admins: Vec<i64>,
     ) {
-        match categories.filter(|set| set.any_enabled()) {
-            Some(set) => {
-                self.session.groups.event_log_filters.insert(chat_id.0, set);
-            }
-            None => {
-                self.session.groups.event_log_filters.remove(&chat_id.0);
-            }
-        }
-        if admins.is_empty() {
-            self.session.groups.event_log_users.remove(&chat_id.0);
-        } else {
-            self.session
-                .groups
-                .event_log_users
-                .insert(chat_id.0, admins);
-        }
+        let log = self.session.groups.event_logs.entry(chat_id.0).or_default();
+        log.filter = categories.filter(|set| set.any_enabled());
+        log.users = admins;
     }
 
     /// Show every admin again.
     pub fn clear_chat_event_log_users(&mut self, chat_id: ChatId) {
-        self.session.groups.event_log_users.remove(&chat_id.0);
+        if let Some(log) = self.session.groups.event_logs.get_mut(&chat_id.0) {
+            log.users.clear();
+        }
     }
 
     /// Slice G2: flip one event-log filter category for the chat
@@ -162,19 +136,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         toggle: impl FnOnce(&mut ChatEventLogFilterSet),
     ) {
-        let mut set = self
-            .session
-            .groups
-            .event_log_filters
-            .get(&chat_id.0)
-            .copied()
-            .unwrap_or_default();
+        let log = self.session.groups.event_logs.entry(chat_id.0).or_default();
+        let mut set = log.filter.unwrap_or_default();
         toggle(&mut set);
-        if set.any_enabled() {
-            self.session.groups.event_log_filters.insert(chat_id.0, set);
-        } else {
-            self.session.groups.event_log_filters.remove(&chat_id.0);
-        }
+        log.filter = set.any_enabled().then_some(set);
     }
 
     /// Phase D3c: the next older page of the event log. The paging cursor
@@ -185,7 +150,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        let from_event_id = match self.session.groups.event_logs.get(&chat_id.0) {
+        let from_event_id = match self.session.groups.event_log_fetch(chat_id.0) {
             Some(ChatEventLogFetch::Loaded(page)) if page.has_more => {
                 page.events.last().map(|event| event.id).unwrap_or(0)
             }
@@ -220,7 +185,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !matches!(
-            self.session.groups.event_logs.get(&chat_id.0),
+            self.session.groups.event_log_fetch(chat_id.0),
             Some(ChatEventLogFetch::Loaded(_))
         ) || self.event_log_wait(chat_id).poll.is_some()
         {
@@ -245,7 +210,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if from_event_id == 0
             && !polling
             && matches!(
-                self.session.groups.event_logs.get(&chat_id.0),
+                self.session.groups.event_log_fetch(chat_id.0),
                 Some(ChatEventLogFetch::Loading | ChatEventLogFetch::Loaded(_))
             )
         {
@@ -257,30 +222,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if from_event_id == 0 && !polling {
             self.session
                 .groups
-                .event_logs
-                .insert(chat_id.0, ChatEventLogFetch::Loading);
+                .set_event_log_fetch(chat_id.0, ChatEventLogFetch::Loading);
         }
         let filters = self
             .session
             .groups
-            .event_log_filters
-            .get(&chat_id.0)
-            .copied()
+            .event_log_filter(chat_id.0)
             .filter(|filters| filters.any_enabled());
-        let query = self
-            .session
-            .groups
-            .event_log_queries
-            .get(&chat_id.0)
-            .cloned()
-            .unwrap_or_default();
-        let user_ids = self
-            .session
-            .groups
-            .event_log_users
-            .get(&chat_id.0)
-            .cloned()
-            .unwrap_or_default();
+        let query = self.session.groups.event_log_query(chat_id.0).to_string();
+        let user_ids = self.session.groups.event_log_users(chat_id.0).to_vec();
         let extra = self
             .session
             .request(RequestPurpose::Groups(purpose), Some(chat_id));
@@ -295,16 +245,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         )) {
             self.session.requests.take(extra);
             if from_event_id == 0 && !polling {
-                self.session.groups.event_logs.remove(&chat_id.0);
+                self.session.groups.reset_event_log_fetch(chat_id.0);
             }
             return Err(err);
         }
-        let wait = self
+        let wait = &mut self
             .session
             .groups
-            .event_log_waits
+            .event_logs
             .entry(chat_id.0)
-            .or_default();
+            .or_default()
+            .wait;
         if polling {
             wait.poll = Some(extra);
         } else {
@@ -317,9 +268,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn event_log_wait(&self, chat_id: ChatId) -> crate::state::EventLogWait {
         self.session
             .groups
-            .event_log_waits
+            .event_logs
             .get(&chat_id.0)
-            .copied()
+            .map(|log| log.wait)
             .unwrap_or_default()
     }
 

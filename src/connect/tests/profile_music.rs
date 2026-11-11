@@ -65,7 +65,7 @@ fn driver_with_playlist(ids: &[i32]) -> Setup {
 
 fn order(driver: &ConnectDriver<Arc<RecordingSender>>) -> Vec<i32> {
     driver.session.media.playlists[&ME]
-        .tracks
+        .tracks()
         .iter()
         .map(|t| t.file_id.0)
         .collect()
@@ -161,7 +161,7 @@ fn removing_and_moving_tracks_update_the_list_and_tell_telegram() {
     assert_eq!(request["@type"], "removeProfileAudio");
     assert_eq!(request["file_id"], 3);
     assert_eq!(order(&driver), [1, 2]);
-    assert_eq!(driver.session.media.playlists[&ME].total_count, 2);
+    assert_eq!(driver.session.media.playlists[&ME].total_count(), 2);
     let _ = std::fs::remove_dir_all(dir);
 }
 

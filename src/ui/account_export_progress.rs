@@ -32,7 +32,7 @@ impl QuillApp {
             .session()
             .and_then(|s| s.settings.account_export.as_ref())
         else {
-            self.dialogs.account_export_seen = None;
+            self.dialogs.account_export.forget_seen();
             return RedrawNeed::Nothing;
         };
         let progress = export.progress();
@@ -41,14 +41,13 @@ impl QuillApp {
             if let Some(session) = self.session_mut() {
                 session.settings.account_export = None;
             }
-            self.dialogs.account_export_seen = None;
+            self.dialogs.account_export.forget_seen();
             self.set_note(StatusNote::info(ended_note(&progress)));
             return RedrawNeed::Now;
         }
-        let changed = self.dialogs.account_export_seen.as_ref() != Some(&progress);
-        let need = super::export_progress::progress_redraw(changed, progress.is_settled(), hidden);
-        self.dialogs.account_export_seen = Some(progress);
-        need
+        let settled = progress.is_settled();
+        let changed = self.dialogs.account_export.note_seen(progress);
+        super::export_progress::progress_redraw(changed, settled, hidden)
     }
 
     /// Body and footer of the dialog while an export exists.
@@ -137,7 +136,7 @@ impl QuillApp {
                         if let Some(live) = this.live.as_mut() {
                             live.driver.session.settings.account_export = None;
                         }
-                        this.dialogs.account_export_seen = None;
+                        this.dialogs.account_export.forget_seen();
                         cx.notify();
                         this.close_kit_dialog_if_done(DialogKind::AccountExport, window, cx);
                     })),

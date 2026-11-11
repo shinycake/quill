@@ -50,7 +50,7 @@ impl QuillApp {
                 let Some(chat) = self.session().and_then(|s| s.chats.get(&id.0)) else {
                     return div().into_any_element();
                 };
-                let open = self.session().and_then(|s| s.open_chat);
+                let open = self.session().and_then(|s| s.open_chat_id());
                 let selected = open == Some(chat.id);
                 // Parity slice: folder names + tags flag for chat-row chips,
                 // built with the item list this row belongs to.
@@ -161,7 +161,7 @@ impl QuillApp {
                 } else {
                     self.chat_swipe_label(chat)
                 };
-                let pin_drag = self.chat_list.pin_reorder.as_ref().map(|drag| {
+                let pin_drag = self.chat_list.pin.drag().map(|drag| {
                     let r = &drag.reorder;
                     let now = std::time::Instant::now();
                     (r.offset(chat.id.0, now), r.lift(chat.id.0, now))

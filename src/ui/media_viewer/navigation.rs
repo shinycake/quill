@@ -210,10 +210,9 @@ impl QuillApp {
         self.viewer_leave_video_fullscreen();
         // MED1: orientation and playback error are per-item state.
         self.viewer.orientation = Default::default();
-        self.viewer.rotated = None;
-        self.viewer.cancel_reorient();
+        self.viewer.reorient.reset();
         self.viewer.hdr.reset();
-        self.viewer.clip_error = None;
+        self.viewer.clip.clear_error();
         self.viewer.extra.share_at = None;
         if let Some(item) = self.viewer.state.current()
             && let Some(turns) = self
@@ -225,7 +224,7 @@ impl QuillApp {
             self.viewer.orientation.turns = *turns;
         }
         self.apply_viewer_quality_pref();
-        self.viewer.extra.inactive_paused = false;
+        self.viewer.extra.loop_pause = LoopPause::Free;
         self.stop_viewer_video();
         self.ensure_viewer_download(cx);
         self.download_viewer_strip_thumbs();
@@ -236,7 +235,7 @@ impl QuillApp {
         self.ask_profile_photo_message_actions();
         if !matches!(
             self.viewer.state.source(),
-            ViewerSource::Profile | ViewerSource::Poll
+            ViewerSource::Profile(_) | ViewerSource::Poll
         ) && let (Some(item), Some(live)) =
             (self.screen.viewer.state.current(), self.live.as_mut())
         {
@@ -267,11 +266,10 @@ impl QuillApp {
         // Reopening the same item starts with its caption collapsed.
         self.viewer.extra.caption = Default::default();
         self.viewer.state.close();
-        self.viewer.cancel_reorient();
         // A turned photo is a full-size picture of its own (up to about
         // 20 MB, and as much again on the GPU); opening the next item
         // replaced it, but nothing did until then.
-        self.viewer.rotated = None;
+        self.viewer.reorient.reset();
         self.viewer.hdr.reset();
         self.viewer.over_controls = false;
         // A pan held when the viewer closed ends with it.
@@ -340,14 +338,22 @@ impl QuillApp {
         if self.viewer_swipe(dx, dy, source, event.touch_phase, at, cx) {
             return;
         }
-        let action = self.screen.viewer.wheel.feed(WheelInput {
-            dx,
-            dy,
-            primary: event.modifiers.secondary(cx),
-            source,
-            zoomed: self.screen.viewer.zoom.is_zoomed(),
-            at,
-        });
+        let spent = self.screen.viewer.swipe.is_spent();
+        let action = self.screen.viewer.wheel.feed(
+            WheelInput {
+                dx,
+                dy,
+                primary: event.modifiers.secondary(cx),
+                source,
+                zoomed: self.screen.viewer.zoom.is_zoomed(),
+                at,
+            },
+            spent,
+        );
+        // A trackpad gesture moves or zooms at most once.
+        if matches!(source, WheelSource::Trackpad { .. }) && action != WheelAction::None {
+            self.screen.viewer.swipe.spend(at);
+        }
         match action {
             WheelAction::None => {}
             WheelAction::Zoom { delta_y } => {

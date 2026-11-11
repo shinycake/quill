@@ -52,9 +52,7 @@ fn open_playlist(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
         let session = app.demo_session.as_mut().expect("demo session");
         session.my_user_id = Some(ME);
         let playlist = session.media.playlists.entry(ME).or_default();
-        playlist.tracks = vec![track(1), track(2), track(3)];
-        playlist.total_count = 3;
-        playlist.loaded = true;
+        playlist.set_ready(vec![track(1), track(2), track(3)]);
         session.media.shared_media.playlist_user = Some(ME);
         cx.notify();
     });
@@ -64,7 +62,7 @@ fn open_playlist(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
 fn order(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Vec<i32> {
     app.read_with(vcx, |app, _| {
         app.session().expect("session").media.playlists[&ME]
-            .tracks
+            .tracks()
             .iter()
             .map(|t| t.file_id.0)
             .collect()
@@ -97,12 +95,12 @@ fn the_track_menu_opens_and_delete_asks_before_removing(cx: &mut TestAppContext)
     });
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
-        let menu: Option<PlaylistMenu> = app.playback.playlist_menu;
+        let menu: Option<PlaylistMenu> = app.playback.playlist.menu();
         assert_eq!(menu.map(|m| m.file_id), Some(FileId(2)));
     });
     // Delete: the confirmation opens and nothing is removed yet.
     app.update_in(vcx, |app, _, cx| {
-        app.playback.playlist_menu = None;
+        app.playback.playlist.close_menu();
         app.ask_remove_playlist_track(FileId(2), cx);
     });
     vcx.run_until_parked();
@@ -117,7 +115,7 @@ fn the_track_menu_opens_and_delete_asks_before_removing(cx: &mut TestAppContext)
     app.read_with(vcx, |app, _| {
         assert_eq!(app.connection.status_note(), removed_toast());
         assert_eq!(
-            app.session().expect("session").media.playlists[&ME].total_count,
+            app.session().expect("session").media.playlists[&ME].total_count(),
             2
         );
     });
@@ -154,7 +152,7 @@ fn escape_closes_the_track_menu(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
         assert!(
-            app.playback.playlist_menu.is_none(),
+            app.playback.playlist.menu().is_none(),
             "Escape closed the menu"
         );
         assert!(!app.context_menu_open());
@@ -199,14 +197,13 @@ fn closing_the_playlist_goes_back_to_the_gallery_under_it(cx: &mut TestAppContex
             .expect("demo session")
             .media
             .shared_media;
-        shared.open = true;
         shared.chat_id = Some(quill::ids::ChatId(5));
         app.close_playlist_ui(cx);
     });
     app.read_with(vcx, |app, _| {
         let shared = &app.session().expect("session").media.shared_media;
         assert_eq!(shared.playlist_user, None);
-        assert!(shared.open, "the gallery stays");
+        assert!(shared.open(), "the gallery stays");
         assert_eq!(shared.chat_id, Some(quill::ids::ChatId(5)));
     });
 }

@@ -65,14 +65,12 @@ mod tests {
                     ChecklistTask {
                         id: 3,
                         text: "Passport".into(),
-                        completed_by: None,
-                        completion_date: 0,
+                        completion: None,
                     },
                     ChecklistTask {
                         id: 7,
                         text: "Tickets".into(),
-                        completed_by: None,
-                        completion_date: 0,
+                        completion: None,
                     },
                 ],
                 others_can_add_tasks: false,

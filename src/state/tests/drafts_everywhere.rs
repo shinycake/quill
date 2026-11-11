@@ -12,14 +12,7 @@ fn draft_json(text: &str) -> String {
 }
 
 fn text_draft(text: &str) -> ChatDraft {
-    ChatDraft {
-        text: text.into(),
-        rich: None,
-        item: Default::default(),
-        reply_to_message_id: None,
-        quote: None,
-        suggested_post: None,
-    }
+    ChatDraft::text_only(text)
 }
 
 fn new_chat(session: &mut Session, seq: &AtomicU64, sink: &Arc<MemorySink>, id: i64, kind: &str) {
@@ -413,8 +406,8 @@ fn a_thread_restores_its_draft_from_message_thread_info() {
     let draft = session
         .draft_for(ChatId(14), DraftTopic::Thread(501))
         .expect("thread draft restored");
-    assert_eq!(draft.text, "in the thread");
-    assert_eq!(draft.reply_to_message_id, Some(MessageId(502)));
+    assert_eq!(draft.text(), "in the thread");
+    assert_eq!(draft.reply_to_message_id(), Some(MessageId(502)));
     // The chat's own slot stays empty: the thread draft is not a chat draft.
     assert_eq!(session.draft_for(ChatId(14), DraftTopic::Chat), None);
     assert_eq!(session.chats.get(&14).unwrap().draft_preview(), None);

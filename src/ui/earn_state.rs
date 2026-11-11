@@ -38,6 +38,30 @@ pub(crate) struct SetupSliders {
     pub(super) duration: (Entity<SliderState>, Vec<i32>),
 }
 
+/// The history row box that is open; one at a time, and it leaves to `None`
+/// when closed.
+pub(crate) enum TxBox {
+    None,
+    Ton(TonTx),
+    Star(StarTx),
+}
+
+impl TxBox {
+    pub(super) fn ton(&self) -> Option<&TonTx> {
+        match self {
+            TxBox::Ton(tx) => Some(tx),
+            TxBox::None | TxBox::Star(_) => None,
+        }
+    }
+
+    pub(super) fn star(&self) -> Option<&StarTx> {
+        match self {
+            TxBox::Star(tx) => Some(tx),
+            TxBox::None | TxBox::Ton(_) => None,
+        }
+    }
+}
+
 pub(crate) struct EarnUi {
     /// The Stars to withdraw (tdesktop `AddInputFieldForCredits`).
     pub(super) amount: Entity<InputState>,
@@ -58,10 +82,9 @@ pub(crate) struct EarnUi {
     pub(super) learn: bool,
     /// The learn box's TON easter egg (tdesktop counts diamonds).
     pub(super) diamonds: u32,
-    /// A TON history row's details box.
-    pub(super) ton_tx: Option<TonTx>,
-    /// A Stars history row's receipt.
-    pub(super) star_tx: Option<StarTx>,
+    /// A history row's details box: a TON row's details, or a Stars row's
+    /// receipt.
+    pub(super) tx_box: TxBox,
     /// The boost box a locked switch opens.
     pub(super) ask_boost: Option<AskBoost>,
     /// The setup page's sliders, built for one bot's program and rebuilt
@@ -71,9 +94,6 @@ pub(crate) struct EarnUi {
     pub(super) scroll: ScrollHandle,
     /// The programs box's list.
     pub(super) box_scroll: ScrollHandle,
-    /// When the referral link box appeared: its link icon plays once
-    /// (tdesktop's `starref_link` animation).
-    pub(super) link_shown: Option<std::time::Instant>,
 }
 
 /// The earn boxes (setup confirm, programs, join, link, revoke, the
@@ -115,13 +135,11 @@ impl EarnUi {
             fade: None,
             learn: false,
             diamonds: 0,
-            ton_tx: None,
-            star_tx: None,
+            tx_box: TxBox::None,
             ask_boost: None,
             sliders: None,
             scroll: ScrollHandle::new(),
             box_scroll: ScrollHandle::new(),
-            link_shown: None,
         }
     }
 }

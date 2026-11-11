@@ -37,6 +37,15 @@ impl Session {
                     .chat_action_error
                     .push(format!("could not load similar bots (error {})", err.code));
             }
+            // The chat shows the keyboard among its loaded messages and
+            // does not ask again at every re-select.
+            Some(RequestPurpose::GetChatReplyMarkupMessage) => {
+                if let Some(pending) = pending
+                    && let Some(chat) = pending.chat_id
+                {
+                    self.fail_reply_markup_fetch(chat, pending.id);
+                }
+            }
             Some(RequestPurpose::SetMessageSenderBotVerification) => {
                 self.chats_state
                     .chat_action_error
@@ -129,18 +138,20 @@ impl Session {
                 .pending_bot_messages
                 .get_mut(&(chat_id.0, topic_id))
             && draft.draft_id == draft_id
+            && draft.stop == BotStopStage::Stopping(request.id)
         {
             draft.stop = BotStopStage::Failed;
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetGameHighScores) {
-            // Slice bots-games: a refused `getGameHighScores` closes the
-            // scores panel (it never spins forever) and surfaces as a
-            // status note via the callback-answer channel.
+            // Slice bots-games: a refused `getGameHighScores` leaves the
+            // panel `Failed` (it never spins forever; the panel draws Retry)
+            // and surfaces as a status note via the callback-answer channel.
             if let Some(pending) = pending
                 && let (Some(chat_id), Some(message_id)) =
                     (pending.chat_id, pending.around_message_id)
+                && let Some(scores) = self.bots.game_scores.get_mut(&(chat_id.0, message_id.0))
             {
-                self.bots.game_scores.remove(&(chat_id.0, message_id.0));
+                scores.fail("couldn't load the scores");
             }
             self.note_callback_answer(
                 pending.and_then(|p| p.chat_id),

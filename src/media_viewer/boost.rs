@@ -43,11 +43,18 @@ pub enum BoostRelease {
 /// fires toggles pause, and a hold past it plays at 2x until the release,
 /// which then does not toggle.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct BoostState {
-    pressed_at: Option<Instant>,
-    /// The last press or key repeat.
-    last_seen: Option<Instant>,
-    active: bool,
+pub enum BoostState {
+    /// No press is held.
+    #[default]
+    Idle,
+    /// Pressed at `since`, the hold timer has not fired: a release is a tap.
+    Armed {
+        since: Instant,
+        /// The last press or key repeat.
+        last_seen: Instant,
+    },
+    /// Held long enough: playing at the boost rate until the release.
+    Boosting { last_seen: Instant },
 }
 
 impl BoostState {
@@ -56,70 +63,75 @@ impl BoostState {
     /// missed, so a boost that was on ends: callers compare
     /// [`Self::is_active`] before and after.
     pub fn press(&mut self, now: Instant) -> BoostPress {
-        let stale = self.last_seen.is_some_and(|seen| {
+        let stale = self.last_seen().is_some_and(|seen| {
             now.saturating_duration_since(seen) > Duration::from_millis(BOOST_STALE_MS)
         });
         if stale {
-            *self = Self::default();
+            *self = Self::Idle;
         }
-        self.last_seen = Some(now);
-        if self.pressed_at.is_some() || self.active {
-            return BoostPress::Repeat;
+        match self {
+            Self::Idle => {
+                *self = Self::Armed {
+                    since: now,
+                    last_seen: now,
+                };
+                BoostPress::Armed
+            }
+            Self::Armed { last_seen, .. } | Self::Boosting { last_seen } => {
+                *last_seen = now;
+                BoostPress::Repeat
+            }
         }
-        self.pressed_at = Some(now);
-        BoostPress::Armed
     }
 
     /// The hold timer looked at `now`: `true` when the boost starts now.
     pub fn tick(&mut self, now: Instant) -> bool {
-        if self.active || !self.held_long_enough(now) {
+        let Self::Armed { since, last_seen } = *self else {
+            return false;
+        };
+        if now.saturating_duration_since(since) < Duration::from_millis(SPEED_BOOST_HOLD_MS) {
             return false;
         }
-        self.active = true;
+        *self = Self::Boosting { last_seen };
         true
     }
 
     /// Time left until a press becomes a hold, while one is pending.
     pub fn wait(&self, now: Instant) -> Option<Duration> {
-        if self.active {
+        let Self::Armed { since, .. } = self else {
             return None;
-        }
-        let pressed_at = self.pressed_at?;
+        };
         let hold = Duration::from_millis(SPEED_BOOST_HOLD_MS);
-        Some(hold.saturating_sub(now.saturating_duration_since(pressed_at)))
+        Some(hold.saturating_sub(now.saturating_duration_since(*since)))
     }
 
-    /// Space went up at `now`.
+    /// Space went up.
     /// tdesktop `handleKeyRelease`: a hold timer that has not fired yet
     /// makes the release a tap, however late the release is handled.
     pub fn release(&mut self) -> BoostRelease {
-        let was_active = self.active;
-        let pressed = self.pressed_at.is_some();
-        *self = Self::default();
-        match (was_active, pressed) {
-            (true, _) => BoostRelease::EndBoost,
-            (false, true) => BoostRelease::TogglePause,
-            (false, false) => BoostRelease::Nothing,
+        match std::mem::take(self) {
+            Self::Boosting { .. } => BoostRelease::EndBoost,
+            Self::Armed { .. } => BoostRelease::TogglePause,
+            Self::Idle => BoostRelease::Nothing,
         }
     }
 
     /// The key-up will never come (the window lost focus, the clip
     /// changed): forget the press. `true` when the boost was on.
     pub fn cancel(&mut self) -> bool {
-        let was_active = self.active;
-        *self = Self::default();
-        was_active
+        matches!(std::mem::take(self), Self::Boosting { .. })
     }
 
     /// Playing at the boost rate now.
     pub fn is_active(&self) -> bool {
-        self.active
+        matches!(self, Self::Boosting { .. })
     }
 
-    fn held_long_enough(&self, now: Instant) -> bool {
-        self.pressed_at.is_some_and(|at| {
-            now.saturating_duration_since(at) >= Duration::from_millis(SPEED_BOOST_HOLD_MS)
-        })
+    fn last_seen(&self) -> Option<Instant> {
+        match self {
+            Self::Idle => None,
+            Self::Armed { last_seen, .. } | Self::Boosting { last_seen } => Some(*last_seen),
+        }
     }
 }
 

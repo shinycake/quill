@@ -449,7 +449,7 @@ fn a_refused_payment_form_send_leaves_no_checkout_behind() {
     assert!(t.driver.send_payment_form_request(invoice).is_err());
     let payments = &t.driver.session.payments;
     assert!(payments.request.is_none());
-    assert!(payments.form_request.is_none());
+    assert!(!payments.checkout.is_loading());
 }
 
 #[test]
@@ -476,7 +476,7 @@ fn a_buy_in_flight_is_not_replaced_by_another_resale_box() {
         is_channel: false,
     };
     let mut buy = crate::gift_market::ResaleBuy::new(listing, recipient, false);
-    buy.sending = true;
+    buy.phase = crate::gift_market::BuyPhase::Sending { request: 7 };
     market.buy = Some(buy);
     assert!(t.driver.open_gift_resale(5, "Pepe").is_err());
     assert!(t.driver.start_gift_resale_buy("x", None, false).is_err());
@@ -487,7 +487,7 @@ fn a_buy_in_flight_is_not_replaced_by_another_resale_box() {
             .gift_market
             .buy
             .as_ref()
-            .is_some_and(|b| b.sending),
+            .is_some_and(|b| b.sending()),
         "the purchase keeps its box"
     );
 }
@@ -588,22 +588,22 @@ fn a_star_history_or_gifts_first_page_that_cannot_be_sent_shows_its_error() {
             .set_star_transactions_filter(crate::premium_hub::TxFilter::Outgoing)
             .is_err()
     );
-    assert!(t.driver.session.payments.hub.tx_error.is_some());
+    assert!(t.driver.session.payments.hub.tx.error().is_some());
     assert!(
         t.driver
             .open_received_gifts(crate::telegram::envelope::MessageSender::User { user_id: ME })
             .is_err()
     );
     let hub = &t.driver.session.payments.hub;
-    assert!(hub.gifts_error.is_some() && !hub.gifts_loading);
+    assert!(hub.gifts_page.error().is_some() && !hub.gifts_page.is_loading());
 }
 
 #[test]
-fn a_stale_gift_refetch_waits_for_a_page_in_flight_and_is_cleared_by_its_answer() {
+fn an_invalidated_gift_list_is_refetched_and_the_page_it_abandons_is_dropped() {
     let mut t = Flaky::new();
     let owner = crate::telegram::envelope::MessageSender::User { user_id: ME };
     t.driver.open_received_gifts(owner).unwrap();
-    t.driver.session.payments.hub.gifts_stale = true;
+    t.driver.session.payments.hub.gifts_op = crate::state::fetch::ListOp::Stale;
     // The first page is still out: no second first-page request.
     assert!(
         t.driver
@@ -612,27 +612,28 @@ fn a_stale_gift_refetch_waits_for_a_page_in_flight_and_is_cleared_by_its_answer(
             .is_none()
     );
     assert_eq!(t.sender.count("getReceivedGifts"), 1);
-    assert!(t.driver.session.payments.hub.gifts_stale);
+    assert!(t.driver.session.payments.hub.gifts_op.is_stale());
     t.answer(
         "getReceivedGifts",
         json!({"@type": "receivedGifts", "total_count": 0, "gifts": [], "next_offset": ""}),
     );
-    assert!(!t.driver.session.payments.hub.gifts_stale);
+    assert!(!t.driver.session.payments.hub.gifts_op.is_stale());
     // A refetch whose send is refused is not retried every frame.
-    t.driver.session.payments.hub.gifts_stale = true;
+    t.driver.session.payments.hub.gifts_op = crate::state::fetch::ListOp::Stale;
     t.sender.refuse(&["getReceivedGifts"]);
     assert!(t.driver.refresh_received_gifts_if_stale().is_err());
-    assert!(!t.driver.session.payments.hub.gifts_stale);
-    assert!(t.driver.session.payments.hub.gifts_error.is_some());
+    assert!(!t.driver.session.payments.hub.gifts_op.is_stale());
+    assert!(t.driver.session.payments.hub.gifts_page.error().is_some());
 }
 
 #[test]
 fn reopening_the_gifts_box_keeps_the_lock_of_a_mutation_in_flight() {
     let mut t = Flaky::new();
     let owner = crate::telegram::envelope::MessageSender::User { user_id: ME };
-    t.driver.session.payments.hub.gift_mutating = true;
+    t.driver.session.payments.hub.gifts_op =
+        crate::state::fetch::ListOp::Mutating(crate::ids::RequestId(900));
     t.driver.open_received_gifts(owner).unwrap();
-    assert!(t.driver.session.payments.hub.gift_mutating);
+    assert!(t.driver.session.payments.hub.gifts_op.is_mutating());
 }
 
 #[test]
@@ -793,7 +794,8 @@ fn a_stale_subscriptions_refetch_waits_for_an_appended_page_and_is_kept_when_ref
     t.driver.maybe_fetch_star_subscriptions().unwrap();
     t.answer("getStarSubscriptions", subs("more"));
     t.driver.fetch_more_star_subscriptions().unwrap();
-    t.driver.session.payments.star_subscriptions_stale = true;
+    // An edit landed while the appended page is out.
+    t.driver.session.payments.star_subscriptions.edit_done();
     // The appended page is out: no first-page request beside it.
     assert!(
         t.driver
@@ -811,16 +813,85 @@ fn a_stale_subscriptions_refetch_waits_for_an_appended_page_and_is_kept_when_ref
         "",
         "a first page"
     );
-    assert!(t.driver.session.payments.star_subscriptions_stale);
+    assert!(
+        t.driver.session.payments.star_subscriptions.is_loading(),
+        "the refetch is the page waited for now"
+    );
     // The refetch is cleared by its own answer.
     t.answer("getStarSubscriptions", subs(""));
-    assert!(!t.driver.session.payments.star_subscriptions_stale);
+    let list = &t.driver.session.payments.star_subscriptions;
+    assert!(!list.is_stale() && !list.is_loading());
     // A refetch that is refused shows its error and is not asked every frame.
-    t.driver.session.payments.star_subscriptions_stale = true;
+    t.driver.session.payments.star_subscriptions.edit_done();
     t.sender.refuse(&["getStarSubscriptions"]);
     assert!(t.driver.refresh_star_subscriptions_if_stale().is_err());
     let payments = &t.driver.session.payments;
-    assert!(!payments.star_subscriptions_stale);
-    assert!(payments.star_subscriptions_error.is_some());
-    assert!(!payments.star_subscriptions_loading());
+    assert!(!payments.star_subscriptions.is_stale());
+    assert!(payments.star_subscriptions.error().is_some());
+    assert!(!payments.star_subscriptions.is_loading());
+}
+
+#[test]
+fn a_gift_mutation_does_not_make_a_failed_first_page_owed_again() {
+    let mut t = Flaky::new();
+    t.sender.refuse(&["getReceivedGifts"]);
+    let owner = crate::telegram::envelope::MessageSender::User { user_id: ME };
+    assert!(t.driver.open_received_gifts(owner).is_err());
+    // The user toggles or sells a gift: the mutation starts and ends.
+    let hub = &mut t.driver.session.payments.hub;
+    hub.gifts_op.begin(crate::ids::RequestId(900));
+    hub.gifts_op.failed(Some(crate::ids::RequestId(900)));
+    // The tick's refresh sends nothing: the failed page is not an
+    // invalidated list.
+    for _ in 0..2 {
+        assert!(
+            t.driver
+                .refresh_received_gifts_if_stale()
+                .unwrap()
+                .is_none()
+        );
+    }
+    assert!(t.driver.session.payments.hub.gifts_page.error().is_some());
+}
+
+#[test]
+fn a_stale_proxy_list_whose_refetch_cannot_be_sent_is_not_asked_every_tick() {
+    use crate::proxy::ProxyFetch;
+    let mut t = Flaky::new();
+    t.sender.refuse(&["getProxies"]);
+    t.driver.session.settings.proxy.fetch = ProxyFetch::Stale;
+    assert!(t.driver.refresh_proxies_if_stale().is_err());
+    assert_eq!(
+        t.driver.session.settings.proxy.fetch,
+        ProxyFetch::FailedStale
+    );
+    assert!(
+        t.driver.session.settings.proxy.busy(),
+        "the held list is not planned on"
+    );
+    // The ticks that follow send nothing and report nothing.
+    for _ in 0..3 {
+        assert!(matches!(t.driver.refresh_proxies_if_stale(), Ok(None)));
+        assert!(matches!(t.driver.maybe_fetch_proxies(), Ok(None)));
+    }
+    // The dialog's Refresh is the way out.
+    assert!(t.driver.fetch_proxies().is_err());
+}
+
+/// A Saved Messages tags request that never left lands in `Failed`, so the
+/// pump waits for the connection instead of asking at every pass.
+#[test]
+fn a_refused_saved_tags_send_is_not_asked_at_every_pump() {
+    let mut t = Flaky::new();
+    t.sender.refuse(&["getSavedMessagesTags"]);
+    assert!(t.driver.load_saved_tags(0).is_err());
+    assert!(t.driver.session.threads.saved.tags.error().is_some());
+    assert!(t.driver.session.threads.saved.waiting_to_retry());
+    t.sender.refuse(&[]);
+    assert_eq!(t.driver.load_saved_tags(0).unwrap(), None);
+    assert_eq!(t.sender.count("getSavedMessagesTags"), 0);
+    // Back online the failure is forgotten and the next pass asks.
+    t.driver.session.threads.saved.retry_after_reconnect();
+    assert!(t.driver.load_saved_tags(0).unwrap().is_some());
+    assert!(t.driver.session.threads.saved.tags.is_loading());
 }

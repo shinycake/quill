@@ -136,7 +136,7 @@ fn the_cover_picker_opens_and_closes(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     vcx.run_until_parked();
     let open = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
-        app.read_with(vcx, |app, _| app.stories.viewer_ui().cover.is_some())
+        app.read_with(vcx, |app, _| app.stories.viewer_ui().cover().is_some())
     };
     assert!(open(&app, vcx), "the demo opens it over the viewer");
     app.update_in(vcx, |app, _, cx| app.toggle_story_cover_edit(13, 7, cx));

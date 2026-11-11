@@ -52,7 +52,7 @@ fn frames(vcx: &mut VisualTestContext) {
 
 fn other_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> ChatId {
     app.read_with(vcx, |app, _| {
-        let open = app.session().and_then(|s| s.open_chat);
+        let open = app.session().and_then(|s| s.open_chat_id());
         app.session()
             .and_then(|s| {
                 s.chats
@@ -94,7 +94,10 @@ fn closing_settings_drops_log_out(cx: &mut TestAppContext) {
     frames(vcx);
     vcx.update(|window, cx| window.click("settings-row-log-out", cx));
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.settings.log_out_confirm));
+    assert!(app.read_with(vcx, |app, _| {
+        app.settings
+            .box_open(crate::ui::settings_state::SettingsBox::LogOut)
+    }));
     let chat = other_chat(&app, vcx);
     app.update_in(vcx, |app, window, cx| {
         app.select_listed_chat(chat, window, cx)
@@ -109,7 +112,10 @@ fn closing_settings_drops_log_out(cx: &mut TestAppContext) {
         vcx.update(|window, _| window.try_find("log-out-confirm").is_none()),
         "no Log out?"
     );
-    assert!(!app.read_with(vcx, |app, _| app.settings.log_out_confirm));
+    assert!(!app.read_with(vcx, |app, _| {
+        app.settings
+            .box_open(crate::ui::settings_state::SettingsBox::LogOut)
+    }));
 }
 
 /// The privacy rule editor and its exceptions list close with Settings,
@@ -128,8 +134,10 @@ fn closing_settings_closes_the_privacy_editor(cx: &mut TestAppContext) {
     frames(vcx);
     assert!(vcx.update(|window, _| !window.find_all("privacy-close-editor").is_empty()));
     app.update(vcx, |app, cx| {
-        let rule = app.privacy.editor.expect("the rule editor is open");
-        app.privacy.exceptions = Some((rule, PrivacyExceptionKind::Always));
+        let rule = app.privacy.layer.editor().expect("the rule editor is open");
+        app.privacy
+            .layer
+            .open_exceptions(rule, PrivacyExceptionKind::Always);
         cx.notify();
     });
     frames(vcx);
@@ -140,8 +148,11 @@ fn closing_settings_closes_the_privacy_editor(cx: &mut TestAppContext) {
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert!(!app.settings.open);
-        assert!(app.privacy.editor.is_none(), "the editor closed");
-        assert!(app.privacy.exceptions.is_none(), "the exceptions closed");
+        assert!(app.privacy.layer.editor().is_none(), "the editor closed");
+        assert!(
+            app.privacy.layer.exceptions().is_none(),
+            "the exceptions closed"
+        );
     });
     assert!(vcx.update(|window, _| window.find_all("privacy-close-editor").is_empty()));
     assert!(vcx.update(|window, _| window.find_all("privacy-close-exceptions").is_empty()));
@@ -315,7 +326,7 @@ fn aborting_the_recovery_email_asks_inside_the_2fa_box(cx: &mut TestAppContext) 
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert_eq!(
-            app.twofa.confirm,
+            app.twofa.confirm(),
             Some(crate::ui::dialogs::TwofaConfirm::AbortRecoveryEmail)
         );
         assert!(app.admin.group_confirm_dialog.is_none(), "no box under it");

@@ -45,14 +45,9 @@ pub(crate) struct AdminUi {
     pub(super) event_log_list: ListState,
     /// The event ids the list was last built for (`event_log_list::plan_sync`).
     pub(super) event_log_ids: std::cell::RefCell<Vec<i64>>,
-    /// Counts search edits so only the last one searches.
-    pub(super) event_log_keystroke: u64,
-    /// The list reports its scrolling to the app (set up once).
-    pub(super) event_log_hooked: bool,
-    /// The list length an automatic "load earlier" was last asked for.
-    pub(super) event_log_autoload: std::cell::Cell<Option<(ChatId, usize)>>,
-    /// The chat whose recent-actions poll is running (one timer task).
-    pub(super) event_log_poll: Option<ChatId>,
+    /// The recent-actions page last opened, with the timers that belong to
+    /// it. Opening it for another chat replaces it, and its timers stop.
+    pub(super) event_log_page: Option<EventLogPage>,
     /// B7: group / channel settings dialog (topics, history, reactions,
     /// discussion group, ...).
     pub(super) group_settings_dialog: Option<GroupSettingsDialog>,
@@ -62,6 +57,32 @@ pub(crate) struct AdminUi {
     pub(super) welcome_dialog: Option<WelcomeDialog>,
     /// The group or channel Edit box (`group_edit_box/`).
     pub(super) group_edit_box: Option<super::group_edit_box::GroupEditBox>,
+}
+
+/// The recent-actions page of one chat and what runs for it. The timer
+/// tasks are owned here: replacing the page or dropping the screen stops
+/// them, and a newer one replaces an older one of its kind.
+pub(super) struct EventLogPage {
+    pub(super) chat: ChatId,
+    /// The list length an automatic "load earlier" was last asked for in
+    /// this page (cleared when the list starts over).
+    pub(super) autoload: std::cell::Cell<Option<usize>>,
+    /// The search debounce: each edit replaces it, so only the last one
+    /// searches.
+    pub(super) typed: Option<gpui_kit::Task<()>>,
+    /// The poll timer, which ends by itself when the page closes.
+    pub(super) poll: Option<gpui_kit::Task<()>>,
+}
+
+impl EventLogPage {
+    pub(super) fn new(chat: ChatId) -> Self {
+        Self {
+            chat,
+            autoload: std::cell::Cell::new(None),
+            typed: None,
+            poll: None,
+        }
+    }
 }
 
 /// The boost box keeps its state in the session (`groups.boost_box`),
@@ -107,10 +128,7 @@ impl AdminUi {
             event_log_search: None,
             event_log_list: super::event_log::new_event_log_list(),
             event_log_ids: std::cell::RefCell::new(Vec::new()),
-            event_log_keystroke: 0,
-            event_log_hooked: false,
-            event_log_autoload: std::cell::Cell::new(None),
-            event_log_poll: None,
+            event_log_page: None,
             group_settings_dialog: None,
             join_requests_dialog: None,
             welcome_dialog: None,

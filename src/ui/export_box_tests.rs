@@ -40,22 +40,25 @@ fn the_box_edits_its_draft_and_shows_both_views(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, _, cx| app.start_chat_export(ChatId(1), cx));
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
-        let draft = app.dialogs.chat_export_dialog.as_ref().expect("box open");
+        let draft = app.dialogs.chat_export.draft().expect("box open");
         assert_eq!(draft.settings.format, ExportFormat::Html);
         assert!(draft.settings.media.contains(MediaKind::Photo));
     });
     // Switch the calendar on for each end of the range and pick a day.
     for field in [DateField::From, DateField::Till] {
         app.update_in(vcx, |app, _, cx| {
-            let draft = app.dialogs.chat_export_dialog.as_mut().unwrap();
-            draft.picking = Some(field);
+            let draft = app.dialogs.chat_export.draft_mut().unwrap();
+            draft.page = super::ExportPage::Calendar {
+                field,
+                month: quill::search_filters::YearMonth::of(1_700_000_000),
+            };
             cx.notify();
         });
         vcx.run_until_parked();
     }
     app.update_in(vcx, |app, _, cx| {
-        let draft = app.dialogs.chat_export_dialog.as_mut().unwrap();
-        draft.picking = None;
+        let draft = app.dialogs.chat_export.draft_mut().unwrap();
+        draft.page = super::ExportPage::Options;
         draft.settings.set_from_day(19_700);
         draft.settings.set_till_day(19_710);
         draft.settings.media = draft.settings.media.with(MediaKind::File, true);
@@ -63,7 +66,7 @@ fn the_box_edits_its_draft_and_shows_both_views(cx: &mut TestAppContext) {
     });
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
-        let settings = &app.dialogs.chat_export_dialog.as_ref().unwrap().settings;
+        let settings = &app.dialogs.chat_export.draft().unwrap().settings;
         assert!(settings.from > 0 && settings.from < settings.till);
         assert!(settings.media.contains(MediaKind::File));
     });
@@ -75,11 +78,43 @@ fn closing_the_box_drops_the_draft(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| app.start_chat_export(ChatId(1), cx));
     app.update_in(vcx, |app, _, cx| {
-        app.dialogs.chat_export_dialog = None;
+        app.dialogs.chat_export.reset();
         cx.notify();
     });
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
-        assert!(app.dialogs.chat_export_dialog.is_none());
+        assert!(app.dialogs.chat_export.draft().is_none());
     });
+}
+
+/// The progress box's "hidden" choice lives with the export, so reopening
+/// the box shows the export again and a hidden one stays hidden.
+#[gpui_kit::test]
+fn a_hidden_export_stays_hidden_until_the_box_is_asked_for_again(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let dir = std::env::temp_dir().join(format!("quill-chat-box-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let settings = quill::export::ExportSettings::new(16, "Export".into(), dir.clone());
+    // A worker nobody answers: it stays at its first step.
+    let export = quill::export::ChatExport::start(settings, dir.clone(), None).unwrap();
+    app.update_in(vcx, |app, _, cx| {
+        app.demo_session.as_mut().unwrap().settings.chat_export = Some(export);
+        app.set_chat_export_view(quill::export::ExportView::Hidden);
+        cx.notify();
+    });
+    let shown = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.session()
+                .and_then(|s| s.settings.chat_export.as_ref())
+                .map(|export| export.view)
+        })
+    };
+    assert_eq!(shown(&app, vcx), Some(quill::export::ExportView::Hidden));
+    app.update_in(vcx, |app, _, cx| app.start_chat_export(ChatId(1), cx));
+    assert_eq!(shown(&app, vcx), Some(quill::export::ExportView::Shown));
+    app.update_in(vcx, |app, _, _| {
+        app.demo_session.as_mut().unwrap().settings.chat_export = None;
+    });
+    let _ = std::fs::remove_dir_all(&dir);
 }

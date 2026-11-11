@@ -20,10 +20,65 @@ use gpui_kit::*;
 use quill::composer::{ComposerEdit, ComposerReplyTo, DeleteConfirm};
 use quill::ids::{ChatId, MessageId, TopicId};
 
+/// Which info cards are open in a chat. A thread's card opens over a
+/// topic's and the topic's is back when the thread closes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum InfoCard {
+    #[default]
+    Closed,
+    /// Under the open forum topic's strip.
+    Topic,
+    /// Under the open reply thread's root bar.
+    Thread,
+    /// Both: the topic's card stays under the thread's.
+    Both,
+}
+
+impl InfoCard {
+    pub(crate) fn topic(self) -> bool {
+        matches!(self, Self::Topic | Self::Both)
+    }
+
+    pub(crate) fn thread(self) -> bool {
+        matches!(self, Self::Thread | Self::Both)
+    }
+
+    fn of(topic: bool, thread: bool) -> Self {
+        match (topic, thread) {
+            (false, false) => Self::Closed,
+            (true, false) => Self::Topic,
+            (false, true) => Self::Thread,
+            (true, true) => Self::Both,
+        }
+    }
+
+    /// The thread view closed (or another opened): its card goes, a
+    /// topic's stays.
+    pub(super) fn close_thread(&mut self) {
+        *self = Self::of(self.topic(), false);
+    }
+
+    /// The topic's card opens (its menu's Info).
+    pub(super) fn open_topic(&mut self) {
+        *self = Self::of(true, self.thread());
+    }
+
+    /// A tap on the topic card's button.
+    pub(super) fn toggle_topic(&mut self) {
+        *self = Self::of(!self.topic(), self.thread());
+    }
+
+    /// A tap on the thread card's button.
+    pub(super) fn toggle_thread(&mut self) {
+        *self = Self::of(self.topic(), !self.thread());
+    }
+}
+
 /// The composer while a message is edited: the edit, the normal draft and
 /// reply stashed for it (`DraftType::Normal`), and the "Cancel editing?" box
 /// (`DialogKind::CancelEditConfirm`). One value, so the box cannot outlive
 /// the edit.
+
 #[derive(Debug)]
 pub(super) struct EditMode {
     /// Told apart from every other edit: a picker or an answer started for
@@ -139,11 +194,11 @@ pub(crate) struct ChatUi {
     /// `ConversationKey`). A forum's topics share the chat id, so without
     /// it an edit opened in one topic stayed in the next topic's composer.
     topic: TopicId,
-    /// M2: the rich editor is open — the composer textarea is interpreted
-    /// as block markup (`quill::rich::markup_to_blocks`) and sends via
-    /// `inputMessageRichMessage`. Opened via the ⛶ button (visible after
-    /// 3+ lines, per the anniversary post).
-    pub(super) rich_editor_open: bool,
+    /// M2: the rich editor (opened via the ⛶ button, visible after 3+
+    /// lines, per the anniversary post) and the rich draft's "discard" or
+    /// "Remove Formatting" box over the composer: its buttons act on this
+    /// chat's draft.
+    pub(super) rich: super::rich_draft::RichComposer,
     /// The composer's "send as" identity list is open.
     pub(super) send_as_open: bool,
     /// Messages of this chat whose fact-check block is expanded (tdesktop
@@ -158,20 +213,10 @@ pub(crate) struct ChatUi {
     /// The bot command list above the composer: closed, opened by a typed
     /// `/` token, or opened by the bot's Menu button.
     pub(super) command_menu: super::composer::CommandMenu,
-    /// Bots slice: `@botname query` inline-mode results dropdown above
-    /// the composer. `inline_results_selected` is the highlighted row
-    /// (Up/Down/Enter). `inline_query_armed` is the `(username, query)` a
-    /// debounce timer is currently armed for — `poll_live` re-runs the
-    /// inline progress check after every batch of session updates, and the
-    /// armed identity keeps it from spawning a duplicate timer per poll.
-    pub(super) inline_results_open: bool,
-    pub(super) inline_results_selected: usize,
-    pub(super) inline_query_armed: Option<(String, String)>,
-    /// The trigger's query waits for the session: the bot is being
-    /// resolved, or an older query of this chat and bot is in flight.
-    /// `progress_inline_mode` sends it when updates land, in whichever
-    /// window this value is in.
-    pub(super) inline_query_waiting: bool,
+    /// Bots slice: `@botname query` inline-mode results dropdown above the
+    /// composer: closed, or open with its highlighted row and what its
+    /// query waits for (the 100ms debounce timer of TGX, or the session).
+    pub(super) inline: super::inline_stage::InlineMode,
     /// This window's copy of the session's resolution of the trigger's bot
     /// (the session has one slot any window's trigger replaces).
     pub(super) inline_bot: Option<quill::state::InlineBotResolve>,
@@ -194,7 +239,7 @@ pub(crate) struct ChatUi {
     /// a typed trigger) in this secret chat (TGX `SecretChatContextBotAlert`);
     /// the stashed query is inserted on Confirm. It lives with the chat
     /// that asked, so another chat never confirms it.
-    pub(super) pending_inline_bot_alert: Option<String>,
+    pub(super) bot_alert: super::inline_mode::BotAlert,
     /// What the last rich send took out of the field, until TDLib answers.
     pub(super) sent_text: super::composer::SentText,
     /// The draft the last AI composer action was asked about.
@@ -206,9 +251,6 @@ pub(crate) struct ChatUi {
     pub(super) date_dialog: Option<super::composer_date::ComposerDateDialog>,
     /// The "Code Language" box for the fenced block under the caret.
     pub(super) code_language: Option<super::composer_shortcuts::CodeLanguageDialog>,
-    /// The rich draft's "discard" or "Remove Formatting" box: its buttons
-    /// act on this chat's draft.
-    pub(super) rich_draft_box: super::rich_draft::RichDraftBox,
     /// Delete confirm (tdesktop `DeleteMessagesBox` / Unigram popup).
     pub(super) pending_delete: Option<DeleteConfirm>,
     /// B4: pending "Stop poll" confirm (`stopPoll`, schema 1.8.67 line
@@ -228,11 +270,11 @@ pub(crate) struct ChatUi {
     /// M1: the scheduled-messages dialog (view/delete). Here so that a
     /// chat change closes it: its rows act on the chat shown.
     pub(super) scheduled_dialog_open: bool,
-    /// M1: the schedule picker popup above the composer.
-    pub(super) schedule_popup_open: bool,
-    /// The date+time picker behind the schedule popup (created when the
-    /// popup opens, see `open_schedule_picker`). Its Reschedule target is
-    /// a message id of this chat, so the picker goes with the chat.
+    /// M1: the schedule picker popup above the composer: `Some` while it is
+    /// open, with the date+time picker it holds (created when the popup
+    /// opens, see `open_schedule_picker`). Its Reschedule target is a message
+    /// id of this chat, so the picker goes with the chat. The share box's
+    /// schedule step is a picker of its own target in the same slot.
     pub(super) schedule_picker: Option<super::scheduled::SchedulePicker>,
     /// Phase 4.2: poll creation dialog (open above the composer). Here so
     /// that a chat change closes it: Create posts to the chat shown.
@@ -243,10 +285,9 @@ pub(crate) struct ChatUi {
     /// The attach menu's contact chooser. Here so that a chat change closes
     /// it: the contact goes to the chat this value was made for.
     pub(super) contact_dialog: Option<super::ShareContentDialog>,
-    /// The info card under the open forum topic's strip.
-    pub(super) topic_info_open: bool,
-    /// The info card under the open reply thread's root bar.
-    pub(super) thread_info_open: bool,
+    /// The info card under the open forum topic's strip or the open reply
+    /// thread's root bar: one at a time, and gone with the chat.
+    pub(super) info_card: InfoCard,
     /// Text a chat open handed over without a window at hand, for this
     /// chat's composer (`QuillApp::apply_compose_after_open`).
     pub(super) compose_after_open: Option<String>,
@@ -264,6 +305,25 @@ pub(crate) struct ChatUi {
 }
 
 impl ChatUi {
+    /// Hide the schedule popup above the composer. The share box's schedule
+    /// step is not that popup and stays.
+    pub(super) fn hide_schedule_popup(&mut self) {
+        if self
+            .schedule_picker
+            .as_ref()
+            .is_some_and(|picker| picker.target != super::scheduled::ScheduleTarget::Share)
+        {
+            self.schedule_picker = None;
+        }
+    }
+
+    /// The popup above the composer is showing.
+    pub(super) fn schedule_popup_shown(&self) -> bool {
+        self.schedule_picker
+            .as_ref()
+            .is_some_and(|picker| picker.target != super::scheduled::ScheduleTarget::Share)
+    }
+
     /// A fresh value for `chat`.
     pub(super) fn for_chat(chat: Option<ChatId>) -> Self {
         Self {
@@ -558,7 +618,7 @@ impl QuillApp {
     /// any slot change); an edit does not, since its message is the old
     /// topic's, and the slot's draft goes back into the field it held.
     pub(super) fn sync_chat_ui(&mut self, cx: &mut Context<Self>) {
-        let Some(chat) = self.session().and_then(|session| session.open_chat) else {
+        let Some(chat) = self.session().and_then(|session| session.open_chat_id()) else {
             // The reducer closed the chat (removed, left, kicked) with no
             // goodbye of the view's own: what was open for it goes, or it
             // came back with the chat the next time it opens.
@@ -588,7 +648,7 @@ impl QuillApp {
                 // draft. A Saved sublist or a thread inside a forum topic
                 // keeps the draft slot, so no switch path restores it.
                 let field_is_not_the_draft =
-                    self.chat_ui.is_editing() || self.chat_ui.rich_editor_open;
+                    self.chat_ui.is_editing() || self.chat_ui.rich.editor_open();
                 self.replace_chat_ui(next);
                 if field_is_not_the_draft {
                     self.request_draft_restore();

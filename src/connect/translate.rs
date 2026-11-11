@@ -36,7 +36,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .message_translation(chat_id, message_id, to_language)
         {
-            Some(Translation::Pending | Translation::Done { .. }) => return Ok(()),
+            Some(Translation::Pending { .. } | Translation::Done { .. }) => return Ok(()),
             Some(Translation::Failed(_)) | None => {}
         }
         let (job, extra) = self.session.begin_translation(

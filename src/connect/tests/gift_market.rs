@@ -224,7 +224,7 @@ fn resale_buy_sends_the_confirmed_price_and_handles_a_change() {
     );
     let buy = f.driver.session.payments.gift_market.buy.clone().unwrap();
     assert_eq!(buy.price(), Some(GiftPrice::Stars(1700)));
-    assert!(!buy.sending);
+    assert!(!buy.sending());
     f.driver
         .buy_gift_resale(GiftPrice::Stars(1700), "", false)
         .unwrap();
@@ -498,8 +498,46 @@ fn craft_loads_both_lists_and_crafts() {
     assert!(f.driver.craft_gift().is_err());
     f.answer("craftGift", json!({"@type": "craftGiftResultFail"}));
     let craft = f.driver.session.payments.gift_market.craft.clone().unwrap();
-    assert!(!craft.crafting);
-    assert_eq!(craft.result, Some(CraftResult::Fail));
+    assert!(!craft.crafting());
+    assert_eq!(craft.result(), Some(&CraftResult::Fail));
+}
+
+/// A failed "your gifts" list is an error the box draws, and asking again
+/// (the next open, or Retry) sends the first page once more.
+#[test]
+fn a_failed_craft_candidates_list_is_asked_again() {
+    let mut f = Fixture::new();
+    f.driver
+        .open_gift_craft(CraftGift::parse_received(&received(1)).unwrap())
+        .unwrap();
+    f.answer(
+        "getGiftsForCrafting",
+        json!({"@type": "error", "code": 500, "message": "INTERNAL"}),
+    );
+    let stage = |f: &Fixture| {
+        f.driver
+            .session
+            .payments
+            .gift_market
+            .craft
+            .as_ref()
+            .map(|c| c.candidates_load.clone())
+    };
+    assert!(stage(&f).is_some_and(|s| s.error().is_some()));
+    let before = f.sent("getGiftsForCrafting").len();
+    // Only Retry asks again: the preload of an open does not.
+    f.driver.preload_craft_lists().unwrap();
+    assert_eq!(f.sent("getGiftsForCrafting").len(), before);
+    f.driver.retry_craft_candidates().unwrap();
+    assert_eq!(f.sent("getGiftsForCrafting").len(), before + 1);
+    assert!(stage(&f).is_some_and(|s| s.is_loading()));
+    f.answer(
+        "getGiftsForCrafting",
+        json!({"@type": "giftsForCrafting", "total_count": 1, "gifts": [received(2)],
+            "next_offset": ""}),
+    );
+    assert!(stage(&f).is_some_and(|s| s == crate::gift_market::PageLoad::Ready));
+    assert!(f.driver.retry_craft_candidates().is_err());
 }
 
 /// A craft in flight is not orphaned: a new craft box is refused until its
@@ -527,11 +565,15 @@ fn a_new_craft_session_does_not_orphan_a_craft_in_flight() {
         "the forge is still out"
     );
     let craft = f.driver.session.payments.gift_market.craft.clone().unwrap();
-    assert!(craft.crafting);
+    assert!(craft.crafting());
     assert_eq!(craft.slots[0].received_gift_id, "r1");
     f.answer("craftGift", json!({"@type": "craftGiftResultFail"}));
     let craft = f.driver.session.payments.gift_market.craft.clone().unwrap();
-    assert_eq!(craft.result, Some(CraftResult::Fail), "its outcome landed");
+    assert_eq!(
+        craft.result(),
+        Some(&CraftResult::Fail),
+        "its outcome landed"
+    );
 }
 
 #[test]
@@ -557,6 +599,42 @@ fn craft_buys_a_listing_into_a_slot() {
     assert_eq!(craft.slots[1].received_gift_id, "bought");
     assert!(craft.market.listings.is_empty());
     assert!(f.driver.session.take_gift_market_toasts().is_empty());
+}
+
+/// A failed "your gifts" list in Select Gifts keeps its error for the box to
+/// draw, and its Retry asks the first page again.
+#[test]
+fn a_failed_craft_candidates_list_retries() {
+    let mut f = Fixture::new();
+    let primary = CraftGift::parse_received(&received(1)).unwrap();
+    f.driver.open_gift_craft(primary).unwrap();
+    assert!(f.driver.retry_craft_candidates().is_err(), "not failed yet");
+    f.answer(
+        "getGiftsForCrafting",
+        json!({"@type": "error", "code": 500, "message": "boom"}),
+    );
+    let craft = f.driver.session.payments.gift_market.craft.clone().unwrap();
+    assert!(craft.candidates_load.error().is_some() && craft.candidates.is_empty());
+    f.driver.retry_craft_candidates().unwrap();
+    assert!(
+        f.driver
+            .session
+            .payments
+            .gift_market
+            .craft
+            .as_ref()
+            .unwrap()
+            .candidates_load
+            .is_loading()
+    );
+    f.answer(
+        "getGiftsForCrafting",
+        json!({"@type": "giftsForCrafting", "total_count": 1, "gifts": [received(2)],
+            "attribute_persistence_probabilities": [], "next_offset": ""}),
+    );
+    let craft = f.driver.session.payments.gift_market.craft.clone().unwrap();
+    assert_eq!(craft.candidates.len(), 1);
+    assert!(craft.candidates_load.error().is_none());
 }
 
 /// A preview in flight is not asked twice; a failed one says so, and is
@@ -604,7 +682,7 @@ fn opening_the_resale_list_keeps_a_buy_that_is_out() {
         "refused while the buy is out"
     );
     let buy = f.driver.session.payments.gift_market.buy.clone();
-    assert!(buy.is_some_and(|buy| buy.sending), "the buy is still out");
+    assert!(buy.is_some_and(|buy| buy.sending()), "the buy is still out");
     f.answer(
         "sendResoldGift",
         json!({"@type": "giftResaleResultOk", "received_gift_id": "rx"}),

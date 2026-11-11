@@ -139,16 +139,6 @@ fn seconds_left_counts_down_to_one() {
 }
 
 #[test]
-fn the_picker_offer_is_per_message() {
-    let paid = PaidReactions {
-        offered: Some((1, 10)),
-        ..PaidReactions::default()
-    };
-    assert!(paid.offered_for(1, 10));
-    assert!(!paid.offered_for(1, 11));
-}
-
-#[test]
 fn paid_reactors_parse_sorted_with_anonymous_hidden() {
     use crate::telegram::envelope::{MessageSender, parse_message_reactions};
     let reactions = parse_message_reactions(Some(&serde_json::json!({
@@ -306,4 +296,22 @@ fn a_refused_undo_releases_the_stars_and_does_not_commit() {
     paid.refused(RequestId(4));
     assert_eq!(paid.total_pending(), 0);
     assert!(paid.due(u64::MAX).is_empty());
+}
+
+/// The senders of a chat are asked for once; a failed ask may be tried
+/// again, and an answer for one chat is not another's.
+#[test]
+fn the_senders_of_a_chat_are_asked_again_only_after_a_failure() {
+    use crate::telegram::envelope::MessageSender;
+    let mut paid = PaidReactions::default();
+    assert!(paid.can_ask_senders(5));
+    paid.senders_asked(5);
+    assert!(!paid.can_ask_senders(5), "in flight");
+    paid.senders_failed(5);
+    assert!(paid.can_ask_senders(5), "failed: asked again");
+    paid.senders_asked(5);
+    paid.set_senders(5, &[MessageSender::Chat { chat_id: -9 }]);
+    assert!(!paid.can_ask_senders(5), "answered");
+    assert_eq!(paid.channels_for(5), &[-9]);
+    assert!(paid.channels_for(6).is_empty());
 }

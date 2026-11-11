@@ -4,12 +4,13 @@
 use super::*;
 use crate::ids::RequestId;
 use crate::proxy::{
-    PingStatus, ProxyDraft, ProxyEntry, ProxyFetch, RotationAction, SystemStepState,
+    LinkCheck, PingStatus, ProxyDraft, ProxyEntry, ProxyFetch, ProxyMutation, RotationAction,
+    SystemStepState,
 };
 use crate::proxy_sync::{ProxySyncStep, plan_proxy_sync};
 use crate::settings::save_proxy_prefs;
 use crate::state::SettingsPurpose;
-use crate::state::{LINK_PING_ID, RequestPurpose, ShutdownPhase};
+use crate::state::{RequestPurpose, ShutdownPhase};
 use crate::system_proxy::{Detected, SYSTEM_PROXY_COMMENT, SystemProxyStep, plan_system_proxy};
 use crate::telegram::envelope::ConnectionState;
 use crate::telegram::requests::{
@@ -30,8 +31,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let proxy = &self.session.settings.proxy;
-        let wanted = (proxy.list.is_none() && !proxy.fetch_attempted) || proxy.stale;
-        if !wanted || proxy.fetch.loading() {
+        if !proxy.fetch.wanted() {
             return Ok(None);
         }
         // Background refetch: the box's error line is the user's, and a
@@ -54,13 +54,22 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(RequestPurpose::GetProxies, None);
+        let was_stale = matches!(
+            self.session.settings.proxy.fetch,
+            ProxyFetch::Stale | ProxyFetch::FailedStale
+        );
         self.session.settings.proxy.fetch = ProxyFetch::Loading(extra);
-        self.session.settings.proxy.fetch_attempted = true;
         match self.sender.send_json(&get_proxies(extra)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.proxy.fetch = ProxyFetch::Idle;
+                // Not retried by the tick, owed or not: the dialog's
+                // open / Refresh asks again.
+                self.session.settings.proxy.fetch = if was_stale {
+                    ProxyFetch::FailedStale
+                } else {
+                    ProxyFetch::Failed
+                };
                 Err(err)
             }
         }
@@ -71,7 +80,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn refresh_proxies_if_stale(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         // `parity:data-proxy-web`: carriers TDLib opened or closed.
         self.run_carrier_work();
-        if !self.session.settings.proxy.stale {
+        if !self.session.settings.proxy.fetch.stale() {
             return Ok(None);
         }
         self.maybe_fetch_proxies()
@@ -87,11 +96,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         by: Option<&SystemProxyStep>,
         build: impl FnOnce(RequestId) -> String,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.proxy_path_active() || self.session.settings.proxy.mutating {
+        if !self.proxy_path_active() || self.session.settings.proxy.mutation.in_flight() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(RequestPurpose::MutateProxy, None);
-        self.session.settings.proxy.mutating = true;
+        self.session.settings.proxy.mutation = ProxyMutation::InFlight(extra);
         let proxy = &mut self.session.settings.proxy;
         match by {
             None => proxy.error = None,
@@ -107,7 +116,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.proxy.mutating = false;
+                self.session.settings.proxy.mutation = ProxyMutation::Idle;
                 Err(err)
             }
         }
@@ -235,9 +244,25 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// `pingProxy` for the link-confirmation box's proxy (not in the
-    /// list; result kept under [`LINK_PING_ID`]).
+    /// list); the box's stage becomes `Checking` with this request.
     pub fn ping_link_proxy(&mut self, draft: &ProxyDraft) -> Result<RequestId, ConnectSendError> {
-        self.ping_draft(LINK_PING_ID, draft)
+        if !self.proxy_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(
+            RequestPurpose::Settings(SettingsPurpose::PingLinkProxy),
+            None,
+        );
+        match self.sender.send_json(&ping_proxy(extra, draft)) {
+            Ok(()) => {
+                self.session.settings.proxy.link_check = LinkCheck::Checking(extra);
+                Ok(extra)
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
     }
 
     fn ping_draft(&mut self, slot: i32, draft: &ProxyDraft) -> Result<RequestId, ConnectSendError> {
@@ -313,7 +338,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return true;
         }
         let proxy = &self.session.settings.proxy;
-        if proxy.mutating || proxy.stale || proxy.fetch.loading() {
+        if proxy.busy() {
             return false;
         }
         let Some(current) = proxy.all_entries() else {
@@ -349,7 +374,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return false;
         }
         let proxy = &self.session.settings.proxy;
-        if proxy.list.is_none() || proxy.mutating || proxy.stale || proxy.fetch.loading() {
+        if proxy.list.is_none() || proxy.busy() {
             return false;
         }
         let step = plan_system_proxy(

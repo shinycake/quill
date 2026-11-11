@@ -60,18 +60,23 @@ pub enum PublicChatsFetch {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicLinkRevoke {
     pub chat_id: ChatId,
+    /// The requests whose answers are still out.
     pub requests: Vec<RequestId>,
-    pub failed: bool,
 }
 
 /// A revoke from the limit box: idle, its two requests out, or both
 /// answered and the link free. `Freed` leaves when the UI takes it
-/// ([`Session::take_public_link_freed`]) or a new revoke starts.
+/// ([`Session::take_public_link_freed`]) or a new revoke starts. A refused
+/// or unsent request moves `Revoking` to `RevokingFailed`; with the other
+/// answers in, the revoke ends in `Idle` with a note and the list is asked
+/// again.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum PublicLinkStage {
     #[default]
     Idle,
     Revoking(PublicLinkRevoke),
+    /// One of the requests failed; the others are still awaited.
+    RevokingFailed(PublicLinkRevoke),
     Freed,
 }
 
@@ -79,20 +84,29 @@ impl PublicLinkStage {
     /// The revoke whose answers are out.
     pub fn revoking(&self) -> Option<&PublicLinkRevoke> {
         match self {
-            Self::Revoking(revoke) => Some(revoke),
+            Self::Revoking(revoke) | Self::RevokingFailed(revoke) => Some(revoke),
             _ => None,
         }
     }
 
     pub fn revoking_mut(&mut self) -> Option<&mut PublicLinkRevoke> {
         match self {
-            Self::Revoking(revoke) => Some(revoke),
+            Self::Revoking(revoke) | Self::RevokingFailed(revoke) => Some(revoke),
             _ => None,
         }
     }
 
     pub fn is_revoking(&self) -> bool {
-        matches!(self, Self::Revoking(_))
+        self.revoking().is_some()
+    }
+
+    /// A request of the revoke failed: the revoke can no longer free the
+    /// link.
+    pub fn request_failed(&mut self) {
+        *self = match std::mem::take(self) {
+            Self::Revoking(revoke) => Self::RevokingFailed(revoke),
+            other => other,
+        };
     }
 }
 
@@ -352,11 +366,14 @@ impl Session {
             return;
         }
         revoke.requests.retain(|id| *id != pending.id);
-        revoke.failed |= failed;
-        if !revoke.requests.is_empty() {
+        let all_in = revoke.requests.is_empty();
+        if failed {
+            state.revoke.request_failed();
+        }
+        if !all_in {
             return;
         }
-        if revoke.failed {
+        if matches!(state.revoke, PublicLinkStage::RevokingFailed(_)) {
             state.revoke = PublicLinkStage::Idle;
             state.public_chats = PublicChatsFetch::None;
             self.chats_state
@@ -367,9 +384,10 @@ impl Session {
         state.revoke = PublicLinkStage::Freed;
         state.public_limit_reached = Some(false);
         state.public_chats = PublicChatsFetch::None;
-        if self.payments.hub.limit_box.map(|(kind, _)| kind) == Some(PremiumLimitKind::PublicLinks)
+        if self.payments.hub.limit_box().map(|(kind, _)| kind)
+            == Some(PremiumLimitKind::PublicLinks)
         {
-            self.payments.hub.limit_box = None;
+            self.payments.hub.close_limit_box();
         }
     }
 }

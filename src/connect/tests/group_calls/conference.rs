@@ -65,7 +65,7 @@ fn bound_call(driver: &ConnectDriver<Arc<RecordingSender>>) -> Option<(i32, Opti
     driver
         .conference_crypto
         .as_ref()
-        .map(|known| (known.key, known.crypto.group_call_id()))
+        .map(|known| (known.key.engine_key(), known.crypto.group_call_id()))
 }
 
 #[test]
@@ -320,7 +320,8 @@ fn a_dead_conference_gives_way_to_a_new_join() {
         .active_group_call
         .as_mut()
         .unwrap()
-        .transport_error = Some("screen share failed".into());
+        .transport
+        .fail("screen share failed");
     assert_eq!(
         harness
             .1
@@ -500,7 +501,7 @@ fn add_people_searches_the_server_and_lists_people_outside_your_contacts() {
     let mut harness = conference_driver();
     feed(&mut harness, &user_json(41, "Noa", "Peretz"));
     feed(&mut harness, &user_json(50, "Dana", "Levi"));
-    harness.1.session.users_state.contacts = Some(vec![41, 50]);
+    harness.1.session.users_state.contacts = crate::state::fetch::Fetch::Ready(vec![41, 50]);
     harness.1.search_add_people("  da ").expect("search sends");
     let mine = sent_request(&harness.2, "searchChatsOnServer");
     let public = sent_request(&harness.2, "searchPublicChats");
@@ -542,7 +543,7 @@ fn add_people_searches_the_server_and_lists_people_outside_your_contacts() {
     assert_eq!(view.empty, Some(crate::state::AddPeopleEmpty::NoResults));
     // Clearing the field forgets the search.
     harness.1.search_add_people("").expect("cleared");
-    assert!(harness.1.session.calls.add_people_search.query.is_empty());
+    assert!(harness.1.session.calls.add_people_search.query().is_empty());
     let _ = std::fs::remove_dir_all(&harness.0);
 }
 
@@ -641,7 +642,10 @@ fn the_invite_toast_goes_with_its_conference_and_the_account() {
     assert_eq!(harness.1.session.calls.invite_results, None);
     // The server ending the call drops it.
     invited_into(&mut harness, 600);
-    harness.1.session.calls.left_group_call = None;
+    // (TDLib has confirmed the leave by now.)
+    if let Some(call) = harness.1.session.calls.group_call_mut(600) {
+        call.rejoin.leave_over();
+    }
     feed(
         &mut harness,
         &conference_update(600, "https://t.me/call/xyz", false)
@@ -666,7 +670,7 @@ fn the_invite_toast_goes_with_its_conference_and_the_account() {
         r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateLoggingOut"}}"#,
     );
     assert_eq!(harness.1.session.calls.invite_results, None);
-    assert!(harness.1.session.calls.add_people_search.query.is_empty());
+    assert!(harness.1.session.calls.add_people_search.query().is_empty());
     let _ = std::fs::remove_dir_all(&harness.0);
 }
 
@@ -684,7 +688,7 @@ fn ending_the_search_works_offline_and_ends_with_the_call() {
         Err(ConnectSendError::InvalidRequest)
     );
     assert_eq!(driver.search_add_people(""), Ok(()));
-    assert!(driver.session.calls.add_people_search.query.is_empty());
+    assert!(driver.session.calls.add_people_search.query().is_empty());
     let _ = std::fs::remove_dir_all(&dir);
     drop((sink, seq));
 
@@ -699,7 +703,7 @@ fn ending_the_search_works_offline_and_ends_with_the_call() {
         ),
     );
     assert!(harness.1.session.calls.active_call.is_none());
-    assert!(harness.1.session.calls.add_people_search.query.is_empty());
+    assert!(harness.1.session.calls.add_people_search.query().is_empty());
     let _ = std::fs::remove_dir_all(&harness.0);
 }
 
@@ -740,5 +744,22 @@ fn a_conference_whose_payload_failed_sends_nothing_and_can_be_tried_again() {
         .accept_group_call_invitation(3, 42)
         .expect("try again");
     assert_eq!(sent_count(&harness.2, "joinGroupCall"), 1);
+    let _ = std::fs::remove_dir_all(&harness.0);
+}
+
+/// An offer that fails before the join is answered ends the whole join: the
+/// session's pending join, the crypto, the offer and the engine instance.
+#[test]
+fn a_failed_offer_ends_the_whole_join_in_one_step() {
+    let mut harness = conference_driver();
+    harness
+        .1
+        .accept_group_call_invitation(3, 42)
+        .expect("accept sends");
+    assert!(harness.1.session.calls.pending_conference.is_some());
+    harness.1.abandon_conference_join();
+    assert!(harness.1.session.calls.pending_conference.is_none());
+    assert!(harness.1.conference_crypto.is_none());
+    assert!(harness.3.conferences().is_empty(), "the instance is gone");
     let _ = std::fs::remove_dir_all(&harness.0);
 }

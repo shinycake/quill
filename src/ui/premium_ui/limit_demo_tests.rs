@@ -36,7 +36,7 @@ fn set_premium(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, premium: boo
     app.update_in(vcx, |app, _, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             session.payments.premium_option = Some(premium);
-            session.payments.hub.limit_box = None;
+            session.payments.hub.close_limit_box();
         }
         cx.notify();
     });
@@ -56,7 +56,7 @@ fn toasts(vcx: &mut VisualTestContext) -> usize {
 fn limit_box(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<PremiumLimitKind> {
     app.read_with(vcx, |app, _| {
         app.session()
-            .and_then(|s| s.payments.hub.limit_box)
+            .and_then(|s| s.payments.hub.limit_box())
             .map(|(kind, _)| kind)
     })
 }
@@ -95,7 +95,7 @@ fn toast_kinds_push_a_toast_and_open_no_box(cx: &mut TestAppContext) {
         assert_eq!(toasts(vcx), before + 1, "{kind:?} (#{n})");
         assert_eq!(limit_box(&app, vcx), None, "{kind:?}");
         let queued = app.read_with(vcx, |app, _| {
-            app.session().and_then(|s| s.payments.hub.limit_toast)
+            app.session().and_then(|s| s.payments.hub.limit_toast())
         });
         assert_eq!(queued, None);
     }
@@ -144,7 +144,7 @@ fn a_story_refused_over_a_limit_opens_its_box_over_the_composer(cx: &mut TestApp
         app.update_in(vcx, |app, window, cx| {
             app.open_story_composer(window, cx);
             if let Some(session) = app.demo_session.as_mut() {
-                session.payments.hub.limit_box = None;
+                session.payments.hub.close_limit_box();
             }
             let target = app.story_composer_target_chat();
             app.story_composer_after_check(target, Ok(answer.clone()), cx);
@@ -156,7 +156,9 @@ fn a_story_refused_over_a_limit_opens_its_box_over_the_composer(cx: &mut TestApp
             kind.is_some(),
             "{answer:?}"
         );
-        let reason = app.read_with(vcx, |app, _| app.stories.composer.local_error.clone());
+        let reason = app.read_with(vcx, |app, _| {
+            app.stories.composer.error().map(str::to_string)
+        });
         assert_eq!(reason, Some(answer.user_message()));
     }
 }

@@ -14,6 +14,29 @@ fn suggested_purpose(pending: Option<&PendingRequest>) -> Option<SuggestedPostPu
 }
 
 impl Session {
+    /// The approve or decline of this post was sent and its answer has not
+    /// come: the pending request is the only record of it, so an answer, an
+    /// error or a lost request frees the post.
+    pub fn suggested_post_busy(&self, chat_id: i64, message_id: i64) -> bool {
+        [
+            SuggestedPostPurpose::Approve {
+                chat_id,
+                message_id,
+            },
+            SuggestedPostPurpose::Decline {
+                chat_id,
+                message_id,
+            },
+        ]
+        .into_iter()
+        .any(|purpose| {
+            self.requests
+                .has_purpose(RequestPurpose::Payments(PaymentsPurpose::SuggestedPost(
+                    purpose,
+                )))
+        })
+    }
+
     pub(crate) fn apply_suggested_post(&mut self, payload: SuggestedPostPayload) {
         match payload {
             SuggestedPostPayload::InfoUpdated {
@@ -24,20 +47,10 @@ impl Session {
                 self.edit_loaded_message(chat_id, message_id, |message| {
                     message.extras.suggested_post = info;
                 });
-                // `busy` is the approve or decline's own: only its answer
-                // (or error) clears it, not an offer update that lands first.
             }
             SuggestedPostPayload::GramBalance(nanos) => {
                 self.payments.suggested_posts.gram_balance = Some(nanos);
             }
-        }
-    }
-
-    /// `ok` for an approve or decline: the state update follows, so the
-    /// buttons only stop waiting.
-    pub(crate) fn apply_suggested_post_ok(&mut self, pending: Option<&PendingRequest>) {
-        if let Some(purpose) = suggested_purpose(pending) {
-            self.payments.suggested_posts.settle_busy(purpose);
         }
     }
 
@@ -51,7 +64,7 @@ impl Session {
         let bars = &mut self.payments.suggested_posts.bars;
         if bars
             .get(&chat_id)
-            .is_some_and(|bar| bar.send.waits_for(pending.map(|p| p.id)))
+            .is_some_and(|bar| bar.send().waits_for(pending.map(|p| p.id)))
         {
             bars.remove(&chat_id);
         }
@@ -64,12 +77,11 @@ impl Session {
         request: Option<RequestId>,
     ) {
         let posts = &mut self.payments.suggested_posts;
-        posts.settle_busy(purpose);
         if let SuggestedPostPurpose::SendChange { chat_id, .. } = purpose
             && let Some(bar) = posts.bars.get_mut(&chat_id)
-            && bar.send.waits_for(request)
+            && bar.send().waits_for(request)
         {
-            bar.send = BarSend::Idle;
+            bar.set_send(BarSend::Idle);
         }
         if err.earn_hint == Some(crate::earn::EarnErrorHint::BalanceTooLow) {
             posts.balance_low.push(purpose);

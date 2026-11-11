@@ -105,7 +105,7 @@ impl QuillApp {
             date.as_deref(),
             &limits,
         );
-        self.suggested_posts.accept = Some(AcceptBox {
+        self.suggested_posts.set_accept(AcceptBox {
             chat_id,
             message_id,
             send_date,
@@ -117,26 +117,21 @@ impl QuillApp {
     }
 
     fn close_suggest_accept(&mut self, cx: &mut Context<Self>) {
-        self.suggested_posts.accept = None;
+        self.suggested_posts.close_accept();
         cx.notify();
     }
 
     /// The approve or decline of this post was sent and its answer has not
     /// come.
     fn publish_busy(&self, chat_id: ChatId, message_id: MessageId) -> bool {
-        self.session().is_some_and(|session| {
-            session
-                .payments
-                .suggested_posts
-                .busy
-                .contains(&(chat_id.0, message_id.0))
-        })
+        self.session()
+            .is_some_and(|session| session.suggested_post_busy(chat_id.0, message_id.0))
     }
 
     /// The Accept Terms box of a post that is no longer pending (decided
     /// or expired, here or by the other side) closes with nothing sent.
     pub(super) fn close_decided_accept(&mut self, cx: &mut Context<Self>) {
-        let Some(accept) = self.suggested_posts.accept.as_ref() else {
+        let Some(accept) = self.suggested_posts.accept() else {
             return;
         };
         let (chat_id, message_id) = (accept.chat_id, accept.message_id);
@@ -150,7 +145,7 @@ impl QuillApp {
 
     /// "Publish": a member is checked against the balance first.
     pub(super) fn confirm_suggest_accept(&mut self, cx: &mut Context<Self>) {
-        let Some(accept) = self.suggested_posts.accept.clone() else {
+        let Some(accept) = self.suggested_posts.accept().cloned() else {
             return;
         };
         // A second Publish while the first is on its way does nothing and
@@ -165,7 +160,7 @@ impl QuillApp {
             .suggestion(accept.chat_id, accept.message_id)
             .is_none_or(|s| s.info.state == SuggestedPostState::Pending);
         if !pending {
-            self.suggested_posts.accept = None;
+            self.suggested_posts.close_accept();
             self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULDNT_PUBLISH_THE_POST,
             )));
@@ -173,11 +168,11 @@ impl QuillApp {
             return;
         }
         if let Some(short) = accept.pays.and_then(|price| self.suggest_shortfall(price)) {
-            self.suggested_posts.accept = None;
+            self.suggested_posts.close_accept();
             self.ask_for_balance(short, BalanceFor::Accept, cx);
             return;
         }
-        self.suggested_posts.accept = None;
+        self.suggested_posts.close_accept();
         match self.live.as_mut() {
             Some(live) => {
                 if live
@@ -248,7 +243,7 @@ impl QuillApp {
         .detach();
         // The reason field takes the keyboard (tdesktop focuses it).
         reason.update(cx, |input, cx| input.focus(window, cx));
-        self.suggested_posts.decline = Some(DeclineBox {
+        self.suggested_posts.set_decline(DeclineBox {
             chat_id,
             message_id,
             text: decline_text(suggestion.admin, &suggestion.from, &suggestion.channel),
@@ -259,12 +254,12 @@ impl QuillApp {
     }
 
     fn close_suggest_decline(&mut self, cx: &mut Context<Self>) {
-        self.suggested_posts.decline = None;
+        self.suggested_posts.close_decline();
         cx.notify();
     }
 
     pub(super) fn confirm_suggest_decline(&mut self, cx: &mut Context<Self>) {
-        let Some(decline) = self.suggested_posts.decline.take() else {
+        let Some(decline) = self.suggested_posts.take_decline() else {
             return;
         };
         let reason: String = decline
@@ -454,7 +449,7 @@ impl QuillApp {
                 this.close_suggest_accept(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(accept) = this.suggested_posts.accept.as_ref() else {
+            let Some(accept) = this.suggested_posts.accept() else {
                 return dialog.on_close(on_close);
             };
             let publishing = this.publish_busy(accept.chat_id, accept.message_id);
@@ -518,7 +513,7 @@ impl QuillApp {
                 this.close_suggest_decline(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(decline) = this.suggested_posts.decline.as_ref() else {
+            let Some(decline) = this.suggested_posts.decline() else {
                 return dialog.on_close(on_close);
             };
             let body = div()
@@ -570,7 +565,7 @@ impl QuillApp {
     }
 
     fn close_grams_needed(&mut self, cx: &mut Context<Self>) {
-        self.suggested_posts.grams_needed = None;
+        self.suggested_posts.close_grams_needed();
         cx.notify();
     }
 
@@ -585,7 +580,7 @@ impl QuillApp {
                 this.close_grams_needed(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(price) = this.suggested_posts.grams_needed else {
+            let Some(price) = this.suggested_posts.grams_needed() else {
                 return dialog.on_close(on_close);
             };
             let title = low_ton_title(price);
@@ -632,21 +627,21 @@ crate::ui::shell::register_dialogs! {
     /// "{amount} Grams Needed" before paying for a suggested post.
     SuggestGramsNeeded => DialogSpec::new(
         3962,
-        |app| app.suggested_posts.grams_needed.is_some(),
+        |app| app.suggested_posts.grams_needed().is_some(),
         QuillApp::build_grams_needed_dialog,
     )
     .close(|app, _, cx| app.close_grams_needed(cx)),
     /// "Accept Terms" of a suggested post.
     SuggestAccept => DialogSpec::new(
         3964,
-        |app| app.suggested_posts.accept.is_some(),
+        |app| app.suggested_posts.accept().is_some(),
         QuillApp::build_suggest_accept_dialog,
     )
     .close(|app, _, cx| app.close_suggest_accept(cx)),
     /// "Decline" of a suggested post, with the reason.
     SuggestDecline => DialogSpec::new(
         3966,
-        |app| app.suggested_posts.decline.is_some(),
+        |app| app.suggested_posts.decline().is_some(),
         QuillApp::build_suggest_decline_dialog,
     )
     .close(|app, _, cx| app.close_suggest_decline(cx)),

@@ -173,7 +173,7 @@ impl QuillApp {
         session.open_chat(ChatId(chat_id));
         self.open_chat_look_dialog(chat_id, cx);
         if let Some(dialog) = self.dialogs.chat_look_dialog.as_mut() {
-            dialog.background = Some(901);
+            dialog.wallpaper = crate::ui::chat_look_ui::WallpaperChoice::Installed(901);
         }
         cx.notify();
     }

@@ -35,12 +35,18 @@ pub(super) fn on_brand() -> Rgba {
 pub(super) fn preview_stickers(
     hub: &quill::premium_hub::PremiumHub,
 ) -> impl Iterator<Item = &quill::telegram::envelope::StickerItem> {
-    let requested = hub.premium_requested.as_ref();
+    let requested = hub.premium_requested();
     requested
         .into_iter()
-        .chain(hub.premium_stickers.iter().filter(move |sticker| {
-            requested.is_none_or(|requested| requested.file_id != sticker.file_id)
-        }))
+        .chain(
+            hub.premium_stickers
+                .data()
+                .into_iter()
+                .flatten()
+                .filter(move |sticker| {
+                    requested.is_none_or(|requested| requested.file_id != sticker.file_id)
+                }),
+        )
         .take(super::preview::STICKER_TILES)
 }
 
@@ -49,10 +55,10 @@ pub(super) fn preview_stickers(
 /// their answer is in. It is a function of the state alone, with no
 /// deadline: an answer that comes late is downloaded when it comes.
 pub(super) fn preview_downloads(hub: &quill::premium_hub::PremiumHub) -> Vec<(i32, i32)> {
-    let PromoPage::Preview { feature, .. } = hub.promo_page else {
+    let PromoPage::Preview { feature, .. } = hub.promo_page() else {
         return Vec::new();
     };
-    if !hub.premium_open {
+    if !hub.premium_open() {
         return Vec::new();
     }
     let clip = hub
@@ -100,7 +106,7 @@ impl QuillApp {
     /// The page the Premium dialog is on.
     pub(super) fn promo_page(&self) -> PromoPage {
         self.session()
-            .map(|s| s.payments.hub.promo_page)
+            .map(|s| s.payments.hub.promo_page())
             .unwrap_or_default()
     }
 
@@ -121,8 +127,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.open_premium_at(PremiumFeature::UniqueStickers, cx);
-        if let Some(hub) = self.hub_mut() {
-            hub.premium_requested = sticker;
+        if let Some(open) = self.hub_mut().and_then(|hub| hub.premium_box.as_mut()) {
+            open.requested = sticker;
         }
     }
 
@@ -144,7 +150,7 @@ impl QuillApp {
             self.start_sticker_examples();
         }
         if let Some(hub) = self.hub_mut() {
-            hub.promo_page = page;
+            hub.set_promo_page(page);
         }
         cx.notify();
     }
@@ -230,10 +236,10 @@ impl QuillApp {
                     },
                 )),
         );
-        if let Some(err) = hub.premium_error.as_ref() {
-            body = body.child(div().text_sm().child(err.clone()));
+        if let Some(err) = hub.premium.error() {
+            body = body.child(div().text_sm().child(err.to_string()));
         }
-        if hub.premium_loading && hub.premium.is_none() {
+        if hub.premium.is_loading() && hub.premium.data().is_none() {
             body = body.child(
                 div()
                     .text_sm()
@@ -241,7 +247,7 @@ impl QuillApp {
                     .child(tr(keys::Q_MONEY_LOADING_FEATURES)),
             );
         }
-        if let Some(info) = hub.premium.as_ref() {
+        if let Some(info) = hub.premium.data() {
             let mut list = div().flex().flex_col().gap_1();
             for (index, &feature) in info.features.iter().enumerate() {
                 let target = PromoPage::for_feature(feature.into(), PreviewOpen::Overview);
@@ -355,7 +361,7 @@ impl QuillApp {
     /// "Doubled limits": each limit with its free and Premium value.
     fn promo_limits(&self, cx: &mut Context<Self>) -> Div {
         let muted = cx.theme().muted_foreground;
-        let info = self.session().and_then(|s| s.payments.hub.premium.as_ref());
+        let info = self.session().and_then(|s| s.payments.hub.premium.data());
         let mut body = div().flex().flex_col().gap_2().child(
             div()
                 .text_sm()

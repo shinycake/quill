@@ -3,7 +3,7 @@
 //! feature for gpui-kit's test support).
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
-use crate::ui::request_share::{Locate, RequestShareKind};
+use crate::ui::request_share::{RequestShareKind, ShareStage};
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::Root;
@@ -52,8 +52,8 @@ fn pressing_the_button_opens_the_box_and_the_location_arrives(cx: &mut TestAppCo
             RequestShareKind::Location { one_time: true }
         ));
         assert!(matches!(
-            share.locate,
-            Some(Locate::Done(GeoOutcome::Found(_)))
+            share.stage,
+            ShareStage::Located(GeoOutcome::Found(_))
         ));
     });
 }
@@ -85,9 +85,9 @@ fn closing_the_box_drops_its_lookup(cx: &mut TestAppContext) {
             .message_ui
             .request_share
             .as_ref()
-            .and_then(|share| share.locate.as_ref())
+            .map(|share| &share.stage)
         {
-            Some(Locate::Searching(task)) => std::rc::Rc::downgrade(task),
+            Some(ShareStage::Locating(task)) => std::rc::Rc::downgrade(task),
             _ => panic!("the box is searching"),
         }
     });

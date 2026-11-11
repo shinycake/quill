@@ -197,7 +197,10 @@ impl Session {
                 // The old numbers are gone; the next open refetches.
                 let network = &mut self.settings.privacy_data.network;
                 *network = if network.is_loading() {
-                    crate::state::fetch::Fetch::Loading { stale: None }
+                    crate::state::fetch::Fetch::Loading {
+                        stale: None,
+                        request: None,
+                    }
                 } else {
                     crate::state::fetch::Fetch::Idle
                 };
@@ -227,6 +230,11 @@ impl Session {
                     self.payments.paid_messages.save.settle(pending.id);
                 }
             }
+            Some(RequestPurpose::HideContactCloseBirthdays) => {
+                if let Some(pending) = pending {
+                    self.chat_list.suggestions.birthdays_hidden_by(pending.id);
+                }
+            }
             _ => {}
         }
     }
@@ -248,11 +256,12 @@ impl Session {
                 return;
             }
             RequestPurpose::HideContactCloseBirthdays => {
-                self.chat_list.suggestions.birthdays_hidden = false;
-                self.chats_state.chat_action_error.push(format!(
-                    "could not hide the suggestion (error {})",
-                    err.code
-                ));
+                if pending.is_some_and(|p| self.chat_list.suggestions.birthdays_hide_failed(p.id)) {
+                    self.chats_state.chat_action_error.push(format!(
+                        "could not hide the suggestion (error {})",
+                        err.code
+                    ));
+                }
                 return;
             }
             _ => {}

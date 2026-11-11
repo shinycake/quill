@@ -87,7 +87,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // Slice CL: the peek preview is the most transient layer.
     layer!(
         "chat-preview",
-        |app| app.chat_list.preview.is_some() || app.chat_list.preview_press.is_some(),
+        |app| app.chat_list.peek.open().is_some(),
         |app, _, cx| app.close_chat_preview(cx)
     ),
     // Drawn in the call windows, not the main window: Esc there closes
@@ -95,7 +95,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // and never closes on Escape.
     layer!(
         "screen-privacy",
-        |app| app.screen_share.privacy_for.is_some(),
+        |app| app.screen_share.chooser.privacy_for().is_some(),
         |app, _, cx| app.close_screen_privacy(cx)
     ),
     layer!(
@@ -126,7 +126,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         "story-reply-recording",
         |app| app.story_reply_recording_active(),
         |app, _, cx| {
-            if app.recording.locked {
+            if app.recording.locked() {
                 app.set_note(StatusNote::silent(tr(
                     keys::Q_MISC_RECORDING_IS_LOCKED_UNLOCK_IT,
                 )));
@@ -141,7 +141,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app| app.story_reply_panel_active(),
         |app, _, cx| {
             if let Some(open) = app.stories.viewer_ui_mut() {
-                open.reply_panel = false;
+                open.set_reply_panel(false);
             }
             app.close_media_panel(cx);
         }
@@ -183,14 +183,14 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // confirm row (locked recordings ignore Esc beyond a hint).
     layer!(
         "record-discard-confirm",
-        |app| app.recording.discard_confirm && app.recording_here(),
+        |app| app.recording.discard_confirming() && app.recording_here(),
         |app, _, cx| {
-            app.recording.discard_confirm = false;
+            app.recording.set_discard_confirming(false);
             cx.notify();
         }
     ),
     layer!("recording", |app| app.recording_here(), |app, _, cx| {
-        if app.recording.locked {
+        if app.recording.locked() {
             app.set_note(StatusNote::silent(tr(
                 keys::Q_MISC_RECORDING_IS_LOCKED_UNLOCK_IT,
             )));
@@ -215,9 +215,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // then the editor), like TGX's back stack.
     layer!(
         "privacy",
-        |app| app.privacy.editor.is_some()
-            || app.privacy.exceptions.is_some()
-            || app.privacy.block_picker_open,
+        |app| app.privacy.layer.is_open(),
         |app, _, cx| app.close_privacy_top(cx)
     ),
     layer!(
@@ -236,9 +234,11 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "sponsored-report",
-        |app| app
-            .session()
-            .is_some_and(|session| session.messages.sponsored_report.is_some()),
+        |app| app.session().is_some_and(|session| session
+            .messages
+            .sponsored_report
+            .flight()
+            .is_some()),
         |app, _, cx| app.dismiss_sponsored_report_ui(cx)
     ),
     layer!("send-as", |app| app.chat_ui.send_as_open, |app, _, cx| {
@@ -267,7 +267,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     layer!(
         "shared-media",
         |app| app.session().is_some_and(|session| {
-            session.media.shared_media.open || session.media.shared_media.playlist_user.is_some()
+            session.media.shared_media.open() || session.media.shared_media.playlist_user.is_some()
         }),
         |app, _, cx| {
             // Esc leaves the Playlist page first, back to the gallery.
@@ -303,7 +303,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         "selection-mode",
         |app| app
             .session()
-            .and_then(|session| session.open_chat)
+            .and_then(|session| session.open_chat_id())
             .is_some_and(|chat| app.selecting_in(chat)),
         |app, window, cx| app.end_selection(window, cx)
     ),
@@ -364,13 +364,22 @@ const FOCUS_RETURN_LAYERS: &[&str] = &[
 
 /// Bookkeeping for [`QuillApp::track_layer_focus`]. Weak handles only: a
 /// strong one would keep a closed dialog's focus handle alive.
-#[derive(Default)]
-pub(super) struct LayerFocus {
-    /// Focus as of the last frame with no tracked layer open.
-    base: Option<WeakFocusHandle>,
-    /// Focus as of the last frame with a tracked layer open.
-    open_focus: Option<WeakFocusHandle>,
-    was_open: bool,
+pub(super) enum LayerFocus {
+    /// No tracked layer was open at the last frame; `base` is the focus
+    /// then.
+    Closed { base: Option<WeakFocusHandle> },
+    /// A tracked layer was open at the last frame; `base` is the focus
+    /// before the first of them, `focus` the focus now.
+    Open {
+        base: Option<WeakFocusHandle>,
+        focus: Option<WeakFocusHandle>,
+    },
+}
+
+impl Default for LayerFocus {
+    fn default() -> Self {
+        LayerFocus::Closed { base: None }
+    }
 }
 
 impl QuillApp {
@@ -393,21 +402,30 @@ impl QuillApp {
     pub(super) fn track_layer_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let open = self.focus_return_layer_open();
         let focused = window.focused(cx);
-        let state = &mut self.frame.menu.layers;
-        if open {
-            state.open_focus = focused.map(|handle| handle.downgrade());
-        } else if state.was_open {
-            let open_focus = state.open_focus.take().and_then(|weak| weak.upgrade());
-            let untouched = focused.is_none() || focused == open_focus;
-            let base = state.base.take().and_then(|weak| weak.upgrade());
-            if untouched && let Some(base) = base {
-                window.focus(&base, cx);
+        let weak = |handle: Option<FocusHandle>| handle.map(|handle| handle.downgrade());
+        let before = std::mem::take(&mut self.frame.menu.layers);
+        self.frame.menu.layers = match (open, before) {
+            (true, LayerFocus::Closed { base } | LayerFocus::Open { base, .. }) => {
+                LayerFocus::Open {
+                    base,
+                    focus: weak(focused),
+                }
             }
-            state.base = window.focused(cx).map(|handle| handle.downgrade());
-        } else {
-            state.base = focused.map(|handle| handle.downgrade());
-        }
-        self.frame.menu.layers.was_open = open;
+            (false, LayerFocus::Open { base, focus }) => {
+                let open_focus = focus.and_then(|weak| weak.upgrade());
+                let untouched = focused.is_none() || focused == open_focus;
+                let base = base.and_then(|weak| weak.upgrade());
+                if untouched && let Some(base) = base {
+                    window.focus(&base, cx);
+                }
+                LayerFocus::Closed {
+                    base: weak(window.focused(cx)),
+                }
+            }
+            (false, LayerFocus::Closed { .. }) => LayerFocus::Closed {
+                base: weak(focused),
+            },
+        };
     }
 }
 
@@ -588,10 +606,16 @@ mod dispatch_tests {
     /// One opener per hand-drawn overlay, with the layer name it must show.
     fn openers() -> Vec<(&'static str, Opener)> {
         vec![
-            ("privacy", |app, _, _| app.privacy.editor = Some(any_rule())),
             ("privacy", |app, _, _| {
-                app.privacy.editor = Some(any_rule());
-                app.privacy.exception_picker_open = true;
+                app.privacy.layer.open_editor(any_rule())
+            }),
+            ("privacy", |app, _, _| {
+                app.privacy
+                    .layer
+                    .open_exceptions(any_rule(), crate::ui::privacy::PrivacyExceptionKind::Always);
+                app.privacy
+                    .layer
+                    .open_exception_picker(crate::ui::privacy_layer::ExceptionPicker::Contacts);
             }),
             ("story-page", |app, window, cx| {
                 app.stories.page =
@@ -620,9 +644,12 @@ mod dispatch_tests {
             app.update_in(vcx, open);
             assert_eq!(top(&app, vcx), Some(name), "{name} should be on top");
             vcx.simulate_keystrokes("escape");
-            // The privacy picker peels first; a second press closes the rest.
-            if top(&app, vcx) == Some("privacy") {
-                vcx.simulate_keystrokes("escape");
+            // The privacy picker peels first, then the exceptions list, then
+            // the editor: one press each.
+            for _ in 0..3 {
+                if top(&app, vcx) == Some("privacy") {
+                    vcx.simulate_keystrokes("escape");
+                }
             }
             assert_eq!(top(&app, vcx), None, "Escape should close {name}");
         }
@@ -651,7 +678,12 @@ mod dispatch_tests {
                 crate::ui::dialogs::group_call::GroupCallTitleDialog::new(window, cx, "x"),
             );
             app.group_call_screen.settings_open = true;
-            app.screen_share.privacy_for = Some(crate::ui::screen_share_state::ScreenFor::Group);
+            app.screen_share.chooser = crate::ui::screen_share_state::Chooser::PrivacyBox(
+                crate::ui::screen_share_state::ChooserTarget {
+                    for_call: crate::ui::screen_share_state::ScreenFor::Group,
+                    group_call: None,
+                },
+            );
             app.stories.page = Some(crate::ui::story_page::StoryPage::new(ChatId(1), window, cx));
         });
         assert_eq!(top(&app, vcx), Some("story-page"));
@@ -660,7 +692,7 @@ mod dispatch_tests {
         app.read_with(vcx, |app, _| {
             assert!(app.group_call_screen.title_dialog.is_some());
             assert!(app.group_call_screen.settings_open);
-            assert!(app.screen_share.privacy_for.is_some());
+            assert!(app.screen_share.chooser.privacy_for().is_some());
         });
     }
 
@@ -669,7 +701,7 @@ mod dispatch_tests {
         let (app, mut vcx) = new_app(cx);
         let vcx = &mut vcx;
         app.update_in(vcx, |app, window, cx| {
-            app.privacy.editor = Some(any_rule());
+            app.privacy.layer.open_editor(any_rule());
             app.stories.page = Some(crate::ui::story_page::StoryPage::new(ChatId(1), window, cx));
             app.chat_ui.link_popup = Some(crate::ui::entity_links::LinkPopup {
                 position: point(px(10.), px(10.)),
@@ -679,7 +711,7 @@ mod dispatch_tests {
         assert_eq!(top(&app, vcx), Some("link-popup"));
         vcx.simulate_keystrokes("escape");
         assert_eq!(top(&app, vcx), Some("story-page"));
-        assert!(app.read_with(vcx, |app, _| app.privacy.editor.is_some()));
+        assert!(app.read_with(vcx, |app, _| app.privacy.layer.editor().is_some()));
         vcx.simulate_keystrokes("escape");
         assert_eq!(top(&app, vcx), Some("privacy"));
         vcx.simulate_keystrokes("escape");
@@ -691,13 +723,13 @@ mod dispatch_tests {
         let (app, mut vcx) = new_app(cx);
         let vcx = &mut vcx;
         app.update_in(vcx, |app, _, _| {
-            app.privacy.editor = Some(any_rule());
+            app.privacy.layer.open_editor(any_rule());
             app.account.passcode.force_locked(true);
         });
         vcx.simulate_keystrokes("escape");
         let (still_open, still_locked) = app.read_with(vcx, |app, _| {
             (
-                app.privacy.editor.is_some(),
+                app.privacy.layer.editor().is_some(),
                 app.account.passcode.is_locked(),
             )
         });
@@ -731,8 +763,12 @@ mod dispatch_tests {
             (
                 "marketplace",
                 // box-host: a test sets the flag directly
-                |a| a.payments.marketplace_open = true,
-                |a| a.payments.marketplace_open,
+                |a| {
+                    a.payments
+                        .marketplace
+                        .open_for(quill::ids::ChatId(1), false)
+                },
+                |a| a.payments.marketplace.is_open(),
             ),
             (
                 "passcode settings",
@@ -747,6 +783,7 @@ mod dispatch_tests {
                     a.privacy.extra.file_open = Some(crate::ui::privacy_extra::FileOpenConfirm {
                         path: std::path::PathBuf::from("setup.bin"),
                         warning: quill::file_prefs::OpenWarning::Executable,
+                        remember: false,
                     });
                 },
                 |a| a.privacy.extra.file_open.is_some(),

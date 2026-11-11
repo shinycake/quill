@@ -14,7 +14,7 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return;
         };
-        let message_gone = self.message_ui.menu.is_some_and(|menu| {
+        let message_gone = self.message_ui.menu.at().is_some_and(|menu| {
             !session
                 .histories
                 .get(&menu.chat_id.0)
@@ -26,7 +26,7 @@ impl QuillApp {
                 .menu
                 .is_some_and(|menu| !session.chats.contains_key(&menu.chat_id.0));
         let list_elsewhere = self.history.pinned_list_open.as_ref().is_some_and(|key| {
-            Some(key.chat) != session.open_chat || key.account != session.account
+            Some(key.chat) != session.open_chat_id() || key.account != session.account
         });
         if list_elsewhere {
             self.history.pinned_list_open = None;

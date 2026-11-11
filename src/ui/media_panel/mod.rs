@@ -107,7 +107,7 @@ pub(super) struct PanelKey {
     session_revision: u64,
     recent_emoji: usize,
     premium: bool,
-    category: Option<usize>,
+    category: Option<quill::telegram::EmojiCategorySource>,
     unicode_only: bool,
 }
 
@@ -138,9 +138,10 @@ pub(super) struct MediaPanel {
     pub key: Option<PanelKey>,
     pub active_section: usize,
     pub hovered: Option<FileId>,
-    /// The sticker category chosen in the strip under the search field
-    /// (an index into `Session::stickers.emoji.sticker_categories`).
-    pub category: Option<usize>,
+    /// The sticker category chosen in the strip under the search field,
+    /// by what it searches: a reload of the category list cannot make it
+    /// name another one.
+    pub category: Option<quill::telegram::EmojiCategorySource>,
 }
 
 impl Default for MediaPanel {
@@ -222,7 +223,7 @@ fn push_custom_packs(
         } else {
             set.title.clone().into()
         };
-        let items = session.media.media_library.set_stickers.get(&set.id);
+        let items = session.media.media_library.get(&set.id);
         let cells: Vec<PanelCell> = match (items, matches) {
             (Some(items), matches) => items
                 .iter()
@@ -311,7 +312,7 @@ impl QuillApp {
     ) {
         // Not `close_message_menu`: the selector shows this message's
         // reaction options, which that would drop.
-        self.message_ui.menu = None;
+        self.message_ui.menu.close();
         self.pickers.reaction_search_input.update(cx, |input, cx| {
             input.set_value("", window, cx);
             input.focus(window, cx);
@@ -372,7 +373,7 @@ impl QuillApp {
     pub(super) fn panel_item(&self, source: StickerSource, ix: usize) -> Option<&StickerItem> {
         let session = self.session()?;
         match source {
-            StickerSource::Set(id) => session.media.media_library.set_stickers.get(&id)?.get(ix),
+            StickerSource::Set(id) => session.media.media_library.get(&id)?.get(ix),
             StickerSource::Recent => session.stickers.stickers.recent.get(ix),
             StickerSource::Favorites => session.stickers.stickers.favorites.get(ix),
             StickerSource::Found => session.stickers.stickers.found_stickers.get(ix),
@@ -433,7 +434,7 @@ impl QuillApp {
                 .session()
                 .map_or(0, |s| s.settings.media_prefs.recent_emoji.len()),
             premium: self.session().is_some_and(|s| s.my_is_premium()),
-            category: self.pickers.media_panel.category,
+            category: self.pickers.media_panel.category.clone(),
             unicode_only: self.group_title_emoji_active(),
         };
         self.sync_media_panel_search(&query);
@@ -688,7 +689,7 @@ impl QuillApp {
                 label: title,
                 set_id: Some(set.id),
             });
-            match session.media.media_library.set_stickers.get(&set.id) {
+            match session.media.media_library.get(&set.id) {
                 Some(items) => push_grid(
                     &mut rows,
                     (0..items.len())

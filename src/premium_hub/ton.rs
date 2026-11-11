@@ -11,6 +11,7 @@
 use super::{GiftInfo, TxFilter, group_digits, parse_gift_info, parse_gift_sticker};
 use crate::ids::RequestId;
 use crate::lang::{keys, tr};
+use crate::state::fetch::Fetch;
 use crate::telegram::envelope::{MessageSender, ParsedFile, StickerContent};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
@@ -459,16 +460,17 @@ pub struct GramsHub {
     pub open: bool,
     /// Known after the first answer (probe or page).
     pub balance_nano: Option<i64>,
-    /// The Settings probe was sent this session.
-    pub probed: bool,
+    /// The Settings probe of the balance, asked once per session: a
+    /// failure leaves the row hidden and is not asked again until the
+    /// session restarts.
+    pub probe: Fetch<()>,
     pub filter: TxFilter,
     pub entries: Vec<TonTx>,
     pub next_offset: String,
-    pub loaded: bool,
-    pub loading: bool,
-    pub error: Option<String>,
-    /// `@extra` of the newest page request; older answers are dropped.
-    pub request: u64,
+    /// The newest page request (older answers are dropped), its answer or
+    /// its failure ([`crate::gift_market::PageLoad`]); the rows stay under
+    /// every stage.
+    pub load: crate::gift_market::PageLoad,
     /// The first All page had incoming / outgoing rows (tdesktop shows the
     /// tabs only when both directions exist).
     pub has_in: bool,
@@ -483,15 +485,23 @@ pub struct GramsHub {
     /// placeholder that never fills.
     pub missing_users: BTreeSet<i64>,
     pub missing_chats: BTreeSet<i64>,
-    /// A page landed; its peers still need checking.
-    pub peers_dirty: bool,
+    /// How many of `entries` have had their peers checked; the rows after
+    /// it still need checking. A new first page starts again at zero.
+    pub peers_checked: usize,
     /// Collect's password box or security check, while open.
     pub withdraw: Option<GramWithdraw>,
-    /// Fragment's page from `getGramWithdrawalUrl`, for the UI to open
-    /// once (through the link policy).
-    pub withdraw_url: Option<String>,
-    /// `AMOUNT_TOO_SMALL` closed the box: the UI shows the toast once.
-    pub withdraw_too_small: bool,
+    /// What closed the box, for the UI to act on once.
+    pub withdraw_outcome: Option<WithdrawOutcome>,
+}
+
+/// How Collect's box ended, for the window to act on once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WithdrawOutcome {
+    /// Fragment's page from `getGramWithdrawalUrl`, to open through the
+    /// link policy.
+    Url(String),
+    /// `AMOUNT_TOO_SMALL` closed the box: show the toast.
+    TooSmall,
 }
 
 impl GramsHub {
@@ -505,16 +515,13 @@ impl GramsHub {
         self.filter = filter;
         self.entries.clear();
         self.next_offset.clear();
-        self.loaded = false;
-        self.loading = false;
-        self.error = None;
+        self.load = crate::gift_market::PageLoad::Idle;
+        self.peers_checked = 0;
         self.selected = None;
     }
 
     pub fn apply_page(&mut self, page: TonTxPage, append: bool) {
-        self.loading = false;
-        self.error = None;
-        self.loaded = true;
+        self.load = crate::gift_market::PageLoad::Ready;
         self.balance_nano = Some(page.balance_nano);
         self.next_offset = page.next_offset;
         if !append && self.filter == TxFilter::All {
@@ -523,6 +530,7 @@ impl GramsHub {
         }
         if !append {
             self.entries.clear();
+            self.peers_checked = 0;
         }
         let mut keys: BTreeSet<String> = self.entries.iter().map(|tx| tx.key.clone()).collect();
         for mut tx in page.transactions {
@@ -535,12 +543,21 @@ impl GramsHub {
             keys.insert(tx.key.clone());
             self.entries.push(tx);
         }
-        self.peers_dirty = true;
     }
 
-    /// Peers the loaded rows name, for the resolver.
-    pub fn peers(&self) -> impl Iterator<Item = MessageSender> + '_ {
-        self.entries.iter().filter_map(TonTx::peer)
+    /// Peers of the rows not checked yet, for the resolver. Pass the
+    /// number of rows that were handled to [`Self::peers_handled`].
+    pub fn unchecked_peers(&self) -> impl Iterator<Item = (usize, Option<MessageSender>)> + '_ {
+        self.entries
+            .iter()
+            .enumerate()
+            .skip(self.peers_checked)
+            .map(|(index, tx)| (index, tx.peer()))
+    }
+
+    /// Rows up to (not including) `count` have had their peers checked.
+    pub fn peers_handled(&mut self, count: usize) {
+        self.peers_checked = self.peers_checked.max(count.min(self.entries.len()));
     }
 
     /// Whether the All / Incoming / Outgoing tabs show.

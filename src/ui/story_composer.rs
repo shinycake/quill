@@ -170,7 +170,7 @@ impl QuillApp {
             self.stories.composer.link_url_error()
         };
         if let Some(error) = error {
-            self.stories.composer.local_error = Some(error.into());
+            self.stories.composer.set_error(error);
             cx.notify();
             return;
         }
@@ -183,7 +183,7 @@ impl QuillApp {
         // `live` borrow below.
         let target = self.story_composer_target_chat();
         if let Some(live) = self.live.as_mut() {
-            self.screen.stories.composer.local_error = None;
+            self.screen.stories.composer.clear_error();
             live.driver.session.stories.post.check.clear();
             live.driver.session.stories.post.outcomes.clear();
             // The stage is entered only once the check went out, with its
@@ -194,13 +194,15 @@ impl QuillApp {
                         ComposerStage::Checking { request, target };
                 }
                 Err(_) => {
-                    self.stories.composer.local_error =
-                        Some(tr(keys::Q_MEDIA_COULD_NOT_CHECK_POSTING_ELIGIBILITY).into());
+                    self.stories
+                        .composer
+                        .set_error(tr(keys::Q_MEDIA_COULD_NOT_CHECK_POSTING_ELIGIBILITY));
                 }
             }
         } else if self.demo_session.is_some() {
-            self.stories.composer.local_error =
-                Some(tr(keys::Q_MEDIA_DEMO_POSTING_RUNS_WITH_LIVE).into());
+            self.stories
+                .composer
+                .set_error(tr(keys::Q_MEDIA_DEMO_POSTING_RUNS_WITH_LIVE));
         }
         cx.notify();
     }
@@ -224,7 +226,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
         media: Option<&StoryMedia>,
     ) {
-        let Some((poster_chat_id, story_id)) = self.stories.composer.edit_target else {
+        let Some((poster_chat_id, story_id)) = self.stories.composer.edit_target() else {
             return;
         };
         let caption = self.stories.composer_caption.read(cx).value().to_string();
@@ -233,12 +235,13 @@ impl QuillApp {
         // untouched when the media is kept.
         let areas = content.as_ref().map(|_| self.stories.composer.areas_json());
         let Some(live) = self.live.as_mut() else {
-            self.stories.composer.local_error =
-                Some(tr(keys::Q_MEDIA_DEMO_EDITING_RUNS_WITH_LIVE).into());
+            self.stories
+                .composer
+                .set_error(tr(keys::Q_MEDIA_DEMO_EDITING_RUNS_WITH_LIVE));
             cx.notify();
             return;
         };
-        self.screen.stories.composer.local_error = None;
+        self.screen.stories.composer.clear_error();
         match live.driver.edit_story(
             ChatId(poster_chat_id),
             story_id,
@@ -248,8 +251,9 @@ impl QuillApp {
         ) {
             Ok(request) => self.stories.composer.stage = ComposerStage::Saving { request },
             Err(_) => {
-                self.stories.composer.local_error =
-                    Some(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_EDIT).into());
+                self.stories
+                    .composer
+                    .set_error(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_EDIT));
             }
         }
         cx.notify();
@@ -266,17 +270,17 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         match answer {
-            Err(error) => self.stories.composer.local_error = Some(error),
+            Err(error) => self.stories.composer.set_error(error),
             Ok(result) => {
                 if !result.can_post() {
-                    self.stories.composer.local_error = Some(result.user_message());
+                    self.stories.composer.set_error(result.user_message());
                     if let Some(kind) = result.premium_limit() {
                         self.show_premium_limit(kind, 0, cx);
                     }
                 } else {
                     // Phase 9.5: `target` is the chat the check was asked for,
                     // so the post goes where the eligibility was computed.
-                    let from_story = self.stories.composer.repost_source;
+                    let from_story = self.stories.composer.repost_source();
                     let media = self.stories.composer.media.clone();
                     if let (Some(live), Some(media)) = (self.live.as_mut(), media) {
                         let caption = self
@@ -309,7 +313,7 @@ impl QuillApp {
                             protect_content,
                         ) {
                             Ok(request) => {
-                                self.screen.stories.composer.local_error = None;
+                                self.screen.stories.composer.clear_error();
                                 // Phase 9.3: request sent, answer not yet landed —
                                 // the Post button stays disabled (busy) until the
                                 // outcome of this request lands, so a second press
@@ -320,13 +324,15 @@ impl QuillApp {
                                 live.driver.session.stories.post.check.clear();
                             }
                             Err(_) => {
-                                self.stories.composer.local_error =
-                                    Some(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_POST).into());
+                                self.stories
+                                    .composer
+                                    .set_error(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_POST));
                             }
                         }
                     } else if self.live.is_none() {
-                        self.stories.composer.local_error =
-                            Some(tr(keys::Q_MEDIA_DEMO_POSTING_RUNS_WITH_LIVE).into());
+                        self.stories
+                            .composer
+                            .set_error(tr(keys::Q_MEDIA_DEMO_POSTING_RUNS_WITH_LIVE));
                     }
                 }
             }
@@ -362,7 +368,7 @@ impl QuillApp {
     ) {
         let composer = &mut self.stories.composer;
         if !paths.iter().any(|path| composer.pick_media(path)) {
-            composer.local_error = Some(tr(keys::Q_MEDIA_ONLY_PHOTOS_AND_VIDEOS_STORIES).into());
+            composer.set_error(tr(keys::Q_MEDIA_ONLY_PHOTOS_AND_VIDEOS_STORIES));
         }
         cx.notify();
     }
@@ -372,11 +378,11 @@ impl QuillApp {
     /// outcome, then the eligibility check state.
     pub(super) fn story_composer_status(&self) -> Option<String> {
         let composer = &self.stories.composer;
-        if let Some(error) = &composer.local_error {
+        if let Some(error) = composer.error() {
             return Some(format!("✗ {error}"));
         }
         // Phase 9.5: edit-mode save state — the tick closes the
-        // composer on success or moves the failure into local_error.
+        // composer on success or moves the failure into the composer's error line.
         match &composer.stage {
             ComposerStage::Saving { .. } => Some(tr(keys::Q_MEDIA_SAVING).into()),
             ComposerStage::Checking { .. } => Some(tr(keys::Q_MEDIA_CHECKING_ELIGIBILITY).into()),
@@ -393,7 +399,7 @@ impl QuillApp {
             ComposerStage::Posted => Some(tr(keys::Q_MEDIA_POSTED_IT_WILL_APPEAR_IN).into()),
             // A "Post as" list that failed to load says so under the
             // picker (`post_as`), not here.
-            ComposerStage::Editing => None,
+            ComposerStage::Editing | ComposerStage::Failed(_) => None,
         }
     }
 
@@ -415,7 +421,7 @@ impl QuillApp {
         // fields); the areas are only editable when the media is being
         // replaced (schema: areas can't change unless content does).
         let is_edit = self.stories.composer.is_edit();
-        let is_repost = self.stories.composer.repost_source.is_some();
+        let is_repost = self.stories.composer.repost_source().is_some();
         let show_privacy = !is_edit && self.stories.composer.as_chat_id.is_none();
         let areas_editable = !is_edit || media.is_some();
         let title = if is_edit {
@@ -533,7 +539,7 @@ impl QuillApp {
                     if let Some(&privacy) = StoryPrivacy::ALL.get(ix) {
                         this.stories.composer.privacy = privacy;
                     }
-                    this.stories.composer.local_error = None;
+                    this.stories.composer.clear_error();
                     cx.notify();
                 })),
         );
@@ -596,7 +602,7 @@ impl QuillApp {
                     if let Some(&expiry) = StoryExpiry::ALL.get(ix) {
                         this.stories.composer.expiry = expiry;
                     }
-                    this.stories.composer.local_error = None;
+                    this.stories.composer.clear_error();
                     cx.notify();
                 })),
         );
@@ -608,13 +614,13 @@ impl QuillApp {
             .child(
                 // Phase 6: kit Checkboxes (were: ghost buttons with ☑/☐
                 // labels). Controlled: write the requested value, keep
-                // clearing local_error on change.
+                // clearing the error line on change.
                 Checkbox::new("story-composer-post-to-chat-page")
                     .label(tr(keys::Q_MEDIA_POST_TO_CHAT_PAGE_KEEP))
                     .checked(self.stories.composer.post_to_chat_page)
                     .on_click(cx.listener(|this, &on, _, cx| {
                         this.stories.composer.post_to_chat_page = on;
-                        this.stories.composer.local_error = None;
+                        this.stories.composer.clear_error();
                         cx.notify();
                     })),
             )
@@ -624,7 +630,7 @@ impl QuillApp {
                     .checked(self.stories.composer.protect_content)
                     .on_click(cx.listener(|this, &on, _, cx| {
                         this.stories.composer.protect_content = on;
-                        this.stories.composer.local_error = None;
+                        this.stories.composer.clear_error();
                         cx.notify();
                     })),
             );
@@ -694,7 +700,7 @@ impl QuillApp {
                     if let Some(chosen) = chosen {
                         this.stories.composer.as_chat_id = chosen;
                     }
-                    this.stories.composer.local_error = None;
+                    this.stories.composer.clear_error();
                     cx.notify();
                 }));
             div()

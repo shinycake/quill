@@ -5,6 +5,7 @@
 //! group is upgraded first); Cancel with a change asks first.
 #![deny(clippy::indexing_slicing)]
 
+use super::EditSub;
 use crate::ui::app::QuillApp;
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::button::*;
@@ -18,28 +19,33 @@ use quill::telegram::envelope::ChatKind;
 
 impl QuillApp {
     fn history_box_choice(&self) -> Option<bool> {
-        self.group_edit_box()?.history_box
+        self.group_edit_box()?.history_box()
     }
 
     fn set_history_box_choice(&mut self, visible: bool, cx: &mut Context<Self>) {
         if let Some(edit) = self.group_edit_box_mut()
-            && edit.history_box.is_some()
+            && let EditSub::History(open) = &mut edit.sub
         {
-            edit.history_box = Some(visible);
+            *open = visible;
         }
         cx.notify();
     }
 
     fn close_history_box(&mut self, cx: &mut Context<Self>) {
-        if let Some(edit) = self.group_edit_box_mut() {
-            edit.history_box = None;
+        if let Some(edit) = self.group_edit_box_mut()
+            && matches!(edit.sub, EditSub::History(_))
+        {
+            edit.sub = EditSub::None;
         }
         cx.notify();
     }
 
     fn save_history_box(&mut self, cx: &mut Context<Self>) {
-        if let Some(edit) = self.group_edit_box_mut() {
-            edit.history_visible = edit.history_box.take();
+        if let Some(edit) = self.group_edit_box_mut()
+            && let EditSub::History(visible) = edit.sub
+        {
+            edit.history_visible = Some(visible);
+            edit.sub = EditSub::None;
         }
         cx.notify();
     }
@@ -160,7 +166,7 @@ crate::ui::shell::register_dialogs! {
     /// Over the Edit box that opened it.
     GroupHistoryBox => DialogSpec::new(
         7690,
-        |app| app.group_edit_box().is_some_and(|edit| edit.history_box.is_some()),
+        |app| app.group_edit_box().is_some_and(|edit| edit.history_box().is_some()),
         QuillApp::build_group_history_box,
     )
     .close(|app, _, cx| app.close_history_box(cx)),

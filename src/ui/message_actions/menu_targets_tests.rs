@@ -46,13 +46,13 @@ fn message_menu_closes_when_its_message_is_removed(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     let (chat, message) = app.read_with(vcx, |app, _| {
         let session = app.session().expect("demo session");
-        let open = session.open_chat.expect("the demo opens a chat");
+        let open = session.open_chat_id().expect("the demo opens a chat");
         let history = session.histories.get(&open.0).expect("history");
         let id = *history.messages.keys().next().expect("a message");
         (open, MessageId(id))
     });
     app.update(vcx, |app, cx| {
-        app.message_ui.menu = Some(MessageMenuState {
+        app.message_ui.menu.open_at(MessageMenuState {
             chat_id: chat,
             message_id: message,
             position: point(px(400.), px(300.)),
@@ -60,7 +60,7 @@ fn message_menu_closes_when_its_message_is_removed(cx: &mut TestAppContext) {
         cx.notify();
     });
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.message_ui.menu.is_some()));
+    assert!(app.read_with(vcx, |app, _| app.message_ui.menu.is_open()));
     app.update(vcx, |app, cx| {
         if let Some(history) = app.session_mut().and_then(|s| s.histories.get_mut(&chat.0)) {
             history.messages.remove(&message.0);
@@ -68,7 +68,7 @@ fn message_menu_closes_when_its_message_is_removed(cx: &mut TestAppContext) {
         cx.notify();
     });
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.message_ui.menu.is_none()));
+    assert!(app.read_with(vcx, |app, _| !app.message_ui.menu.is_open()));
 }
 
 #[gpui_kit::test]
@@ -77,7 +77,7 @@ fn chat_menu_closes_when_its_chat_is_removed(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     let chat = app.read_with(vcx, |app, _| {
         let session = app.session().expect("demo session");
-        let open = session.open_chat.expect("the demo opens a chat");
+        let open = session.open_chat_id().expect("the demo opens a chat");
         session
             .chats
             .keys()
@@ -104,7 +104,7 @@ fn chat_menu_closes_when_its_chat_is_removed(cx: &mut TestAppContext) {
 fn other_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> (ChatId, ChatId) {
     app.read_with(vcx, |app, _| {
         let session = app.session().expect("demo session");
-        let open = session.open_chat.expect("the demo opens a chat");
+        let open = session.open_chat_id().expect("the demo opens a chat");
         let other = session
             .chats
             .keys()
@@ -143,13 +143,13 @@ fn the_inline_bot_warning_stash_stays_with_the_chat_that_asked(cx: &mut TestAppC
     let vcx = &mut vcx;
     let (_, other) = other_chat(&app, vcx);
     app.update_in(vcx, |app, window, cx| {
-        app.chat_ui.pending_inline_bot_alert = Some("query".into());
+        app.chat_ui.bot_alert = crate::ui::inline_mode::BotAlert::Switch("query".into());
         app.select_listed_chat(other, window, cx);
     });
     frames(vcx);
     assert_eq!(
-        app.read_with(vcx, |app, _| app.chat_ui.pending_inline_bot_alert.clone()),
-        None,
+        app.read_with(vcx, |app, _| app.chat_ui.bot_alert.clone()),
+        crate::ui::inline_mode::BotAlert::None,
         "another chat's composer never receives it"
     );
 }

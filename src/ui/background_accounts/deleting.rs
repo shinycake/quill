@@ -118,16 +118,15 @@ impl QuillApp {
     /// Once per run, at the first connection: the folders an earlier run
     /// left for deletion.
     pub(in crate::ui) fn startup_sweep(&mut self) -> Option<Sweep> {
-        if self.background.swept {
+        if self.background.local != LocalData::Fresh {
             return None;
         }
-        self.background.swept = true;
+        self.background.local = LocalData::Swept;
         let root = self.client_accounts_root()?;
         let mut skip: HashSet<AccountKey> = self.background.deleting.clone();
         skip.extend(self.background.closing.keys());
-        skip.extend(self.background.starting.iter().cloned());
-        skip.extend(self.background.preparing.keys().cloned());
-        skip.extend(self.background.clients.iter().map(|c| c.key.clone()));
+        skip.extend(self.background.prepare.keys().cloned());
+        skip.extend(self.background.clients().iter().map(|c| c.key.clone()));
         skip.extend(
             self.live
                 .iter()
@@ -217,7 +216,7 @@ impl QuillApp {
         root: PathBuf,
         cx: &mut Context<Self>,
     ) -> Result<(), String> {
-        if self.background.wiping {
+        if self.background.wiping() {
             return Ok(());
         }
         let accounts: Vec<AccountKey> = list_accounts(&root).into_iter().map(|r| r.key).collect();
@@ -230,7 +229,7 @@ impl QuillApp {
             return Err(message);
         }
         quill::passcode::forget_passcode(&root, &quill::passcode::global_unlock());
-        self.background.wiping = true;
+        self.background.local = LocalData::Wiping;
         // A connection being prepared must not open now.
         self.connect.generation += 1;
         self.close_screen_client(cx);
@@ -240,7 +239,7 @@ impl QuillApp {
             accounts,
             |this, deletion, cx| match deletion {
                 Deletion::Done { error: None } => {
-                    this.background.wiping = false;
+                    this.background.local = LocalData::Swept;
                     this.disk_accounts_wiped();
                     this.start_connection(cx);
                 }
@@ -327,7 +326,7 @@ impl QuillApp {
         }
         let open = |key: &AccountKey| {
             background.closing.contains(key)
-                || background.preparing(key)
+                || background.prepare.running(key)
                 || background
                     .client(key)
                     .is_some_and(|client| client.live.is_some())

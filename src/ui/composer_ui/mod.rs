@@ -104,8 +104,7 @@ pub(super) fn apply_ready_sticker_playback(
                 thumb_file_id: None,
                 thumb_width: 0,
                 thumb_height: 0,
-                requires_premium: false,
-                premium_animation: None,
+                premium: None,
             });
     }
     for id in [101, 102, 103, 401] {
@@ -170,7 +169,7 @@ impl QuillApp {
         if self.route_story_reply_gif(file_id, duration, (width, height), cx) {
             return;
         }
-        let chat_id = self.session().and_then(|session| session.open_chat);
+        let chat_id = self.session().and_then(|session| session.open_chat_id());
         let Some(chat_id) = chat_id else {
             return;
         };
@@ -230,7 +229,10 @@ impl QuillApp {
     }
 
     pub(super) fn close_sticker_panel(&mut self, cx: &mut Context<Self>) {
-        if self.settings.sticker_settings_open {
+        if self
+            .settings
+            .box_open(crate::ui::settings_state::SettingsBox::Stickers)
+        {
             self.close_stickers_manager(cx);
             return;
         }
@@ -566,7 +568,7 @@ impl QuillApp {
             };
             let spoiler = attachment.spoiler;
             let is_photo = attachment.kind == AttachmentKind::Photo;
-            let rendering = attachment.extras.photo_render.is_some();
+            let rendering = attachment.extras.photo_render().is_some();
             // "Edit video" and "Cover" on a video, no spoiler on paid media
             // (`send_box_options.rs`).
             let video_actions = self.video_card_actions(index, attachment, cx);
@@ -714,7 +716,7 @@ impl QuillApp {
                                         ComposerAttachment::set_send_as_files(tray, !as_files)
                                     });
                                     // Back to media: read the videos again.
-                                    this.composer_sends.reads.sound_checked.clear();
+                                    this.composer_sends.reads.sound.clear_done();
                                     this.check_tray_videos(cx);
                                     cx.notify();
                                 })),

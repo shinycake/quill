@@ -232,7 +232,7 @@ impl Sim {
     /// latest message (`history_message_list`). A window shorter than the
     /// viewport shows both ends.
     fn render(&mut self) {
-        let Some(chat) = self.driver.session.open_chat else {
+        let Some(chat) = self.driver.session.open_chat_id() else {
             return;
         };
         let rows = self
@@ -313,7 +313,7 @@ impl Sim {
                 let has_newer = self
                     .driver
                     .session
-                    .open_chat
+                    .open_chat_id()
                     .is_some_and(|c| self.driver.session.history_has_newer(c));
                 if has_newer {
                     let _ = self.driver.jump_to_latest();
@@ -417,7 +417,7 @@ impl Sim {
     /// Everything has answered: the open chat shows messages, and the edge
     /// the reader holds has loaded to the end of the chat.
     fn check(&self, round: usize) {
-        let Some(chat) = self.driver.session.open_chat else {
+        let Some(chat) = self.driver.session.open_chat_id() else {
             return;
         };
         let ids = &self.server[&chat.0];
@@ -429,7 +429,7 @@ impl Sim {
                 history.and_then(|h| h.oldest_id()),
                 history.and_then(|h| h.newest_id()),
                 history.map_or(0, |h| h.messages.len()),
-                history.is_some_and(|h| h.loaded_complete),
+                history.is_some_and(|h| h.loaded_complete()),
                 self.driver.session.history_has_newer(chat),
                 self.edge,
                 self.log[self.log.len().saturating_sub(40)..].join("\n")
@@ -487,7 +487,11 @@ fn run_long(seed: u64, rounds: usize) {
     for round in 0..rounds {
         if sim.rng.chance(35) {
             let n = 1 + sim.rng.below(400) as i64;
-            let open = sim.driver.session.open_chat.map_or(CHATS[0], |chat| chat.0);
+            let open = sim
+                .driver
+                .session
+                .open_chat_id()
+                .map_or(CHATS[0], |chat| chat.0);
             sim.burst(open, n);
         } else {
             sim.random_action();
@@ -734,7 +738,7 @@ fn a_chat_left_open_at_the_bottom_pages_back_after_its_trim() {
     sim.check(0);
     let history = &sim.driver.session.histories[&7];
     assert!(history.messages.len() <= crate::state::HISTORY_WINDOW_CAP);
-    assert!(!history.loaded_complete);
+    assert!(!history.loaded_complete());
 
     sim.edge = Edge::Top;
     sim.settle();

@@ -6,15 +6,12 @@ use quill::ids::ChatId;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextPromptKind {
     /// `setChatMemberTag` custom title (schema 1.8.67, line 13598).
-    CustomTitle { user_id: i64 },
+    CustomTitle { chat_id: ChatId, user_id: i64 },
     /// Slice G10: `setCommunityName` (schema 1.8.67, line 11811).
-    /// `chat_id` on the dialog is unused for this kind; the community
-    /// id rides the variant.
     CommunityName { community_id: i64 },
 }
 
 pub struct UsernameDialog {
-    pub(crate) chat_id: ChatId,
     pub(crate) kind: TextPromptKind,
     pub(crate) input: Entity<TextareaState>,
     /// The last Save: the box closes on its answer, stays on its error.
@@ -25,7 +22,6 @@ impl UsernameDialog {
     pub(crate) fn new(
         window: &mut Window,
         cx: &mut Context<QuillApp>,
-        chat_id: ChatId,
         kind: TextPromptKind,
         current: &str,
         placeholder: &str,
@@ -49,7 +45,6 @@ impl UsernameDialog {
             .detach();
         }
         Self {
-            chat_id,
             kind,
             input,
             submit: Default::default(),

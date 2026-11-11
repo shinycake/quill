@@ -112,10 +112,22 @@ impl Session {
     }
 
     /// `updateSavedMessagesTags` / `getSavedMessagesTags`.
-    pub(crate) fn apply_saved_tags(&mut self, topic_id: i64, tags: Vec<SavedMessagesTag>) {
+    /// An answer (`request`) lands only in the fetch that waits for it; an
+    /// update (`None`) is the server's current list, whatever the fetch.
+    pub(crate) fn apply_saved_tags(
+        &mut self,
+        topic_id: i64,
+        tags: Vec<SavedMessagesTag>,
+        request: Option<RequestId>,
+    ) {
         if topic_id == 0 {
-            self.threads.saved.tags = tags;
-            self.threads.saved.tags_loaded = true;
+            let fetch = &mut self.threads.saved.tags;
+            match request {
+                Some(_) => {
+                    fetch.answered(request, tags);
+                }
+                None => fetch.succeed(tags),
+            }
         } else {
             self.threads.saved.topic_tags.insert(topic_id, tags);
         }
@@ -170,7 +182,6 @@ impl Session {
             topic_id,
             tag,
             history: TopicHistory::default(),
-            loaded: false,
             page: SavedPage::Idle,
         });
         self.view_generation.bump();
@@ -195,7 +206,7 @@ impl Session {
     /// offers Retry. It is not complete: only TDLib saying so ends it.
     pub(crate) fn fail_saved_tag_page(&mut self, pending: Option<&PendingRequest>) {
         if let Some(search) = self.awaiting_saved_tag_search(pending) {
-            search.history.older = OlderEnd::Failed;
+            search.history.fail_older();
         }
     }
 
@@ -209,7 +220,7 @@ impl Session {
             && view.page == SavedPage::Asking(pending.id)
         {
             view.page = SavedPage::Idle;
-            view.history.older = OlderEnd::Failed;
+            view.history.fail_older();
         }
     }
 
@@ -257,7 +268,7 @@ impl Session {
                 .insert(id, history_message(message, false));
         }
         if empty {
-            view.history.loaded_complete = true;
+            view.history.mark_complete();
         }
         if let Some(oldest) = oldest {
             view.history.next_from_message_id = MessageId(oldest);
@@ -296,11 +307,10 @@ impl Session {
                 .insert(message.id.0, history_message(message, false));
         }
         if next_from_message_id.0 == 0 || empty {
-            search.history.loaded_complete = true;
+            search.history.mark_complete();
         }
         search.history.next_from_message_id = next_from_message_id;
         search.history.total_count = total_count.max(search.history.messages.len() as i32);
-        search.loaded = true;
         self.view_generation.bump();
     }
 
@@ -345,7 +355,7 @@ impl Session {
     /// own tags (named from the global list) or all tags.
     pub fn saved_tag_choices(&self) -> Vec<SavedMessagesTag> {
         let Some(view) = &self.threads.saved.sublist else {
-            return self.threads.saved.tags.clone();
+            return self.threads.saved.tag_list().to_vec();
         };
         self.threads
             .saved
@@ -359,7 +369,7 @@ impl Session {
                             && let Some(named) = self
                                 .threads
                                 .saved
-                                .tags
+                                .tag_list()
                                 .iter()
                                 .find(|other| other.tag == tag.tag)
                         {

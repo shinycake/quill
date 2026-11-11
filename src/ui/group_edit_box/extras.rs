@@ -112,7 +112,7 @@ impl QuillApp {
                     tr(keys::RIGHTS_GIGAGROUP_CONVERT),
                     false,
                     cx.listener(move |this, _, _, cx| {
-                        this.open_group_confirm(chat_id, GroupConfirmAction::BroadcastIntro, cx);
+                        this.open_group_confirm(GroupConfirmAction::BroadcastIntro { chat_id }, cx);
                     }),
                     cx,
                 ))
@@ -157,7 +157,7 @@ impl QuillApp {
                 },
                 true,
                 cx.listener(move |this, _, _, cx| {
-                    this.open_group_confirm(chat_id, GroupConfirmAction::DeleteChat, cx);
+                    this.open_group_confirm(GroupConfirmAction::DeleteChat { chat_id }, cx);
                 }),
                 cx,
             ));
@@ -194,12 +194,8 @@ impl QuillApp {
         ]
         .iter()
         .any(|p| session.requests.has_purpose_for_chat(*p, chat_id));
-        let loading = [
-            RequestPurpose::GetInstalledStickerSets,
-            RequestPurpose::GetInstalledEmojiSets,
-        ]
-        .iter()
-        .any(|p| session.requests.has_purpose(*p));
+        let loading = session.stickers.stickers.lists.installed.is_loading()
+            || session.stickers.emoji.lists.installed.is_loading();
         let mut section = div().flex().flex_col().gap_1().child(
             Button::new("group-load-sticker-packs")
                 .label(if loading {

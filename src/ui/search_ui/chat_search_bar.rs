@@ -304,7 +304,7 @@ impl QuillApp {
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             let trimmed = query.trim();
-            if session.search.search.open
+            if session.search.search.is_open()
                 && session.search.search.query == trimmed
                 && !matches!(session.search.search.status(), SearchStatus::Closed)
             {
@@ -415,7 +415,7 @@ impl QuillApp {
                 return;
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            if let Some(prev) = session.open_chat
+            if let Some(prev) = session.open_chat_id()
                 && prev != chat_id
             {
                 let topic = session.open_draft_topic(prev);
@@ -470,7 +470,7 @@ impl QuillApp {
                 return;
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            if let Some(prev) = session.open_chat
+            if let Some(prev) = session.open_chat_id()
                 && prev != chat_id
             {
                 let topic = session.open_draft_topic(prev);
@@ -607,7 +607,7 @@ impl QuillApp {
         let filters = session.search.search.filters;
         let tab = SearchTab::of(&filters);
         let query = session.search.search.query.trim().to_string();
-        let has_chat = session.open_chat.is_some();
+        let has_chat = session.open_chat_id().is_some();
         let strip = self.search_tab_strip(tab, cx);
         // The strip and the chips name no chat: the UI driver keeps them
         // inside the results list (`redact::CONTROLS`).
@@ -667,12 +667,10 @@ impl QuillApp {
         confirm: SearchConfirm,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let paid_price = self
-            .session()
-            .and_then(|s| s.search.search.tabs.limits)
-            .map_or(0, |limits| limits.star_count);
         let (text, action): (String, String) = match confirm {
-            SearchConfirm::PaidPostSearch => (
+            SearchConfirm::PaidPostSearch {
+                price: paid_price, ..
+            } => (
                 tr_with(
                     keys::Q_CHAT_SEARCH_PUBLIC_POSTS_FOR_THE,
                     &[("paid_price", &paid_price.to_string())],

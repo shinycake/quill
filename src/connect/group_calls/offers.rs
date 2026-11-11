@@ -120,21 +120,20 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .story_stream
                     .as_ref()
                     .is_some_and(|call| call.id == id);
-                calls.left_group_call != Some(id)
+                !calls.group_call_left(id)
                     && (story || calls.active_call.is_none())
                     && calls.group_call(id).is_some_and(|call| !call.is_joined)
             }
             OfferSend::Rejoin { .. } => {
-                calls.left_group_call != Some(id) && calls.group_call(id).is_some()
+                !calls.group_call_left(id) && calls.group_call(id).is_some()
             }
             OfferSend::Conference => calls
                 .pending_conference
                 .as_ref()
                 .is_some_and(|pending| pending.request == extra),
-            OfferSend::Screen => calls
-                .active_group_call
-                .as_ref()
-                .is_some_and(|call| call.id == id && call.is_joined && call.screen_share_pending),
+            OfferSend::Screen => calls.active_group_call.as_ref().is_some_and(|call| {
+                call.id == id && call.is_joined && call.screen_share.is_starting()
+            }),
         }
     }
 
@@ -301,7 +300,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // The share failed; the call it was for still works.
             call.screen_share_error = Some(err.to_string());
         } else if let Some(call) = self.session.calls.group_call_mut(id) {
-            call.transport_error = Some(err.to_string());
+            call.transport.fail(err.to_string());
             if matches!(send, OfferSend::Rejoin { .. }) {
                 // The attempt counts: the next one is due, or none is left.
                 call.rejoin.attempt_failed(extra);
@@ -320,13 +319,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                     call.rejoin.attempt_unsent(extra);
                 }
             }
-            OfferSend::Conference => {
-                self.session.calls.pending_conference = None;
-                self.forget_conference_crypto();
-            }
+            OfferSend::Conference => self.abandon_conference_join(),
             OfferSend::Screen => {
                 if let Some(call) = self.session.calls.group_call_mut(id) {
-                    call.screen_share_pending = false;
+                    call.screen_share.cancel_start();
                 }
             }
         }

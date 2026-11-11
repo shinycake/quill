@@ -218,8 +218,8 @@ fn private_draft_debounces_then_flushes_and_skips_channels() {
             )
             .unwrap();
     let restored = driver.session.chats.get(&7).unwrap().draft.clone().unwrap();
-    assert_eq!(restored.text, "meet at 6");
-    assert_eq!(restored.reply_to_message_id, Some(MessageId(3)));
+    assert_eq!(restored.text(), "meet at 6");
+    assert_eq!(restored.reply_to_message_id(), Some(MessageId(3)));
     let outcome = driver
         .note_composer_draft(ChatId(7), "meet at 6!", None, 1_000, true)
         .unwrap();
@@ -248,7 +248,7 @@ fn private_draft_debounces_then_flushes_and_skips_channels() {
             .draft
             .as_ref()
             .unwrap()
-            .text,
+            .text(),
         "meet at 6!"
     );
     let flushed = driver
@@ -391,10 +391,10 @@ fn quoted_draft_round_trips_input_text_quote() {
     assert!(draft_json.contains("\"inputTextQuote\""));
     assert!(draft_json.contains("meet at"));
     let saved = driver.session.chats.get(&7).unwrap().draft.clone().unwrap();
-    assert_eq!(saved.text, "sounds good");
-    assert_eq!(saved.reply_to_message_id, Some(MessageId(3)));
+    assert_eq!(saved.text(), "sounds good");
+    assert_eq!(saved.reply_to_message_id(), Some(MessageId(3)));
     assert_eq!(
-        saved.quote,
+        saved.quote().cloned(),
         Some(crate::composer::QuoteSelection::plain("meet at", 0))
     );
     assert!(!sink.rendered().contains("CANARY"));
@@ -484,10 +484,10 @@ fn search_open_flushes_leaving_draft_and_media_send_drops_reply() {
             1_500,
         )
         .unwrap();
-    assert_eq!(driver.session.open_chat, Some(ChatId(8)));
+    assert_eq!(driver.session.open_chat_id(), Some(ChatId(8)));
     let saved = driver.session.chats.get(&7).unwrap().draft.clone().unwrap();
-    assert_eq!(saved.text, "hello");
-    assert_eq!(saved.reply_to_message_id, Some(MessageId(3)));
+    assert_eq!(saved.text(), "hello");
+    assert_eq!(saved.reply_to_message_id(), Some(MessageId(3)));
     let sent = recorder.snapshot();
     assert!(sent.iter().any(|json| {
         json.contains("setChatDraftMessage")
@@ -509,8 +509,8 @@ fn search_open_flushes_leaving_draft_and_media_send_drops_reply() {
         .note_composer_draft(ChatId(7), "caption", None, 2_100, false)
         .unwrap();
     let after = driver.session.chats.get(&7).unwrap().draft.clone().unwrap();
-    assert_eq!(after.text, "caption");
-    assert_eq!(after.reply_to_message_id, None);
+    assert_eq!(after.text(), "caption");
+    assert_eq!(after.reply_to_message_id(), None);
     driver
         .note_composer_draft(
             ChatId(7),
@@ -632,7 +632,7 @@ fn driver_poll_draft_guards_and_request_shape() {
         allows_multiple_answers: false,
         allows_revoting: false,
         shuffle_options: true,
-        open_period: 2 * 3600,
+        deadline: Some(crate::poll::PollClose::Period(2 * 3600)),
         country_codes: vec!["US".into()],
         ..Default::default()
     };
@@ -686,11 +686,14 @@ fn driver_quiz_draft_sends_quiz_type() {
     use crate::poll::PollDraft;
 
     let (dir, mut driver, recorder, sink, _dyn_sink, _seq) = poll_driver();
+    let marked = |text: &str| crate::poll::DraftOption {
+        correct: true,
+        ..text.into()
+    };
     let quiz = PollDraft {
         question: "Capital of France?".into(),
-        options: vec!["Paris".into(), "London".into()],
+        options: vec![marked("Paris"), marked("London")],
         is_quiz: true,
-        quiz_correct: vec![1, 0, 1],
         quiz_explanation: "think Eiffel".into(),
         allows_multiple_answers: true, // a quiz may have several right answers
         allows_revoting: true,         // normalized off for quizzes

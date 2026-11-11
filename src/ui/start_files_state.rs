@@ -9,10 +9,57 @@ use quill::composer::{SendKeyMode, should_send_on_enter};
 use quill::lang::{keys, tr};
 use std::path::PathBuf;
 
+/// The "Forward to…" chooser (tdesktop `MainWidget::handleStartFiles`):
+/// closed, or open over the files it is about.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) enum StartFiles {
+    #[default]
+    Idle,
+    Choosing {
+        files: Vec<PathBuf>,
+    },
+}
+
+impl StartFiles {
+    pub(super) fn is_choosing(&self) -> bool {
+        matches!(self, Self::Choosing { .. })
+    }
+
+    /// The files the chooser is about.
+    #[cfg(test)]
+    pub(super) fn files(&self) -> &[PathBuf] {
+        match self {
+            Self::Idle => &[],
+            Self::Choosing { files } => files,
+        }
+    }
+
+    /// Open the chooser for `new`; files already being chosen for stay.
+    pub(super) fn add(&mut self, new: Vec<PathBuf>) {
+        let mut files = std::mem::take(self).into_files();
+        for file in new {
+            if !files.contains(&file) {
+                files.push(file);
+            }
+        }
+        *self = Self::Choosing { files };
+    }
+
+    /// Close the chooser, handing back its files.
+    pub(super) fn take(&mut self) -> Vec<PathBuf> {
+        std::mem::take(self).into_files()
+    }
+
+    fn into_files(self) -> Vec<PathBuf> {
+        match self {
+            Self::Idle => Vec::new(),
+            Self::Choosing { files } => files,
+        }
+    }
+}
+
 pub(crate) struct StartFilesUi {
-    /// The files the "Forward to…" chooser is about (tdesktop
-    /// `MainWidget::handleStartFiles`); empty while the chooser is closed.
-    pub(super) choosing: Vec<PathBuf>,
+    pub(super) choosing: StartFiles,
     /// The chooser's "Search chats" field.
     pub(super) search: Entity<TextareaState>,
 }
@@ -50,8 +97,27 @@ impl StartFilesUi {
         )
         .detach();
         Self {
-            choosing: Vec::new(),
+            choosing: StartFiles::Idle,
             search,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StartFiles;
+    use std::path::PathBuf;
+
+    #[test]
+    fn files_wait_once_and_leave_with_the_chooser() {
+        let mut chooser = StartFiles::default();
+        assert!(!chooser.is_choosing());
+        let a = PathBuf::from("a.txt");
+        chooser.add(vec![a.clone(), a.clone()]);
+        chooser.add(vec![PathBuf::from("b.txt"), a.clone()]);
+        assert!(chooser.is_choosing());
+        assert_eq!(chooser.take(), vec![a, PathBuf::from("b.txt")]);
+        assert!(!chooser.is_choosing(), "taking the files closes it");
+        assert!(chooser.take().is_empty());
     }
 }

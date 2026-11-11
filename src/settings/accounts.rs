@@ -52,8 +52,44 @@ pub struct AccountRecord {
     pub display_name: String,
 }
 
+/// What the registry holds for one account key. Listing and a folder
+/// owed for deletion are one stage per key, not two lists kept in step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AccountEntry {
+    /// In the account list.
+    Listed(AccountRecord),
+    /// Out of the list; its folder is still to be deleted
+    /// ([`begin_remove_account`]).
+    Removing(AccountKey),
+    /// In the list, and its folder is wiped before any client opens it
+    /// again ([`mark_for_deletion`]: the lock-screen log out).
+    WipeOnNextStart(AccountRecord),
+}
+
+impl AccountEntry {
+    fn key(&self) -> &AccountKey {
+        match self {
+            Self::Listed(record) | Self::WipeOnNextStart(record) => &record.key,
+            Self::Removing(key) => key,
+        }
+    }
+
+    fn record(&self) -> Option<&AccountRecord> {
+        match self {
+            Self::Listed(record) | Self::WipeOnNextStart(record) => Some(record),
+            Self::Removing(_) => None,
+        }
+    }
+
+    fn is_pending(&self) -> bool {
+        matches!(self, Self::Removing(_) | Self::WipeOnNextStart(_))
+    }
+}
+
+/// `accounts.json` as written: the list and the folders owed beside it.
+/// [`AccountRegistry`] keeps both as one entry per key.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct AccountRegistry {
+struct RegistryFile {
     accounts: Vec<AccountRecord>,
     #[serde(default)]
     active: Option<AccountKey>,
@@ -68,17 +104,179 @@ struct AccountRegistry {
     pending_deletes: Vec<AccountKey>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(from = "RegistryFile", into = "RegistryFile")]
+struct AccountRegistry {
+    entries: Vec<AccountEntry>,
+    /// The startup account: always one of the listed ones once tidied.
+    active: Option<AccountKey>,
+    notify_from_all: bool,
+}
+
+impl From<RegistryFile> for AccountRegistry {
+    fn from(file: RegistryFile) -> Self {
+        // Hand-edited garbage and duplicate keys are dropped here.
+        let mut owed = std::collections::HashSet::new();
+        let pending: Vec<AccountKey> = file
+            .pending_deletes
+            .into_iter()
+            .filter(|key| AccountKey::new(&key.0).is_some() && owed.insert(key.clone()))
+            .collect();
+        let mut seen = std::collections::HashSet::new();
+        let mut entries: Vec<AccountEntry> = file
+            .accounts
+            .into_iter()
+            .filter(|r| AccountKey::new(&r.key.0).is_some() && seen.insert(r.key.clone()))
+            .map(|record| {
+                if owed.contains(&record.key) {
+                    AccountEntry::WipeOnNextStart(record)
+                } else {
+                    AccountEntry::Listed(record)
+                }
+            })
+            .collect();
+        entries.extend(
+            pending
+                .into_iter()
+                .filter(|key| !seen.contains(key))
+                .map(AccountEntry::Removing),
+        );
+        Self {
+            entries,
+            active: file.active,
+            notify_from_all: file.notify_from_all,
+        }
+    }
+}
+
+impl From<AccountRegistry> for RegistryFile {
+    fn from(registry: AccountRegistry) -> Self {
+        Self {
+            accounts: registry.listed(),
+            active: registry.active.clone(),
+            notify_from_all: registry.notify_from_all,
+            pending_deletes: registry.pending(),
+        }
+    }
+}
+
 impl Default for AccountRegistry {
     fn default() -> Self {
         Self {
-            accounts: vec![AccountRecord {
+            entries: vec![AccountEntry::Listed(AccountRecord {
                 key: AccountKey::primary(),
                 display_name: "Primary".to_string(),
-            }],
+            })],
             active: Some(AccountKey::primary()),
             notify_from_all: true,
-            pending_deletes: Vec::new(),
         }
+    }
+}
+
+impl AccountRegistry {
+    /// The accounts in the list, in order.
+    fn listed(&self) -> Vec<AccountRecord> {
+        self.entries
+            .iter()
+            .filter_map(|entry| entry.record().cloned())
+            .collect()
+    }
+
+    fn listed_count(&self) -> usize {
+        self.entries.iter().filter(|e| e.record().is_some()).count()
+    }
+
+    fn is_listed(&self, key: &AccountKey) -> bool {
+        self.entries
+            .iter()
+            .any(|e| e.record().is_some_and(|r| &r.key == key))
+    }
+
+    /// Folders owed for deletion, in order.
+    fn pending(&self) -> Vec<AccountKey> {
+        self.entries
+            .iter()
+            .filter(|e| e.is_pending())
+            .map(|e| e.key().clone())
+            .collect()
+    }
+
+    fn is_pending(&self, key: &AccountKey) -> bool {
+        self.entries
+            .iter()
+            .any(|e| e.is_pending() && e.key() == key)
+    }
+
+    fn record_mut(&mut self, key: &AccountKey) -> Option<&mut AccountRecord> {
+        self.entries.iter_mut().find_map(|entry| match entry {
+            AccountEntry::Listed(record) | AccountEntry::WipeOnNextStart(record)
+                if &record.key == key =>
+            {
+                Some(record)
+            }
+            _ => None,
+        })
+    }
+
+    /// Point `active` at a listed account: where it is, else the first.
+    fn repoint_active(&mut self) {
+        let listed = self.listed();
+        if self
+            .active
+            .as_ref()
+            .is_none_or(|k| !listed.iter().any(|r| &r.key == k))
+        {
+            self.active = listed.first().map(|r| r.key.clone());
+        }
+    }
+
+    /// Take `key` out of the list, its folder staying owed.
+    fn remove_listed(&mut self, key: &AccountKey) {
+        for entry in &mut self.entries {
+            if entry.record().is_some_and(|r| &r.key == key) {
+                *entry = AccountEntry::Removing(key.clone());
+            }
+        }
+        self.repoint_active();
+    }
+
+    /// Owe `key`'s folder a wipe while it stays listed (or, for a key
+    /// that is not known, on its own).
+    fn mark_wipe(&mut self, key: &AccountKey) {
+        if self.is_pending(key) {
+            return;
+        }
+        match self
+            .entries
+            .iter_mut()
+            .find(|e| e.record().is_some_and(|r| &r.key == key))
+        {
+            Some(entry) => {
+                if let AccountEntry::Listed(record) = entry {
+                    *entry = AccountEntry::WipeOnNextStart(record.clone());
+                }
+            }
+            None => self.entries.push(AccountEntry::Removing(key.clone())),
+        }
+    }
+
+    /// `key`'s folder is gone: a removed account is forgotten, a listed one
+    /// goes back to being just listed. Whether anything was owed.
+    fn finish_pending(&mut self, key: &AccountKey) -> bool {
+        if !self.is_pending(key) {
+            return false;
+        }
+        self.entries = std::mem::take(&mut self.entries)
+            .into_iter()
+            .filter_map(|entry| match entry {
+                AccountEntry::Removing(k) if &k == key => None,
+                AccountEntry::WipeOnNextStart(record) if &record.key == key => {
+                    Some(AccountEntry::Listed(record))
+                }
+                other => Some(other),
+            })
+            .collect();
+        true
     }
 }
 
@@ -160,11 +358,11 @@ fn load_registry(app_root: &Path) -> AccountRegistry {
                 .map(recover_pending_deletes)
                 .unwrap_or_default();
             quarantine_registry(&path);
-            let registry = AccountRegistry {
-                pending_deletes: owed,
-                ..AccountRegistry::default()
-            };
-            if !registry.pending_deletes.is_empty()
+            let mut registry = AccountRegistry::default();
+            for key in &owed {
+                registry.mark_wipe(key);
+            }
+            if !owed.is_empty()
                 && let Err(err) = save_registry(app_root, &registry)
             {
                 eprintln!("quill: could not keep the pending account wipes: {err}");
@@ -213,26 +411,10 @@ fn recover_pending_deletes(bytes: &[u8]) -> Vec<AccountKey> {
 }
 
 fn tidy_registry(mut registry: AccountRegistry) -> AccountRegistry {
-    // Drop hand-edited garbage and duplicate keys.
-    registry
-        .accounts
-        .retain(|r| AccountKey::new(&r.key.0).is_some());
-    let mut seen = std::collections::HashSet::new();
-    registry.accounts.retain(|r| seen.insert(r.key.clone()));
-    let mut seen = std::collections::HashSet::new();
-    registry
-        .pending_deletes
-        .retain(|key| AccountKey::new(&key.0).is_some() && seen.insert(key.clone()));
-    if registry.accounts.is_empty() {
+    if registry.listed_count() == 0 {
         return AccountRegistry::default();
     }
-    if registry
-        .active
-        .as_ref()
-        .is_none_or(|k| !registry.accounts.iter().any(|r| &r.key == k))
-    {
-        registry.active = registry.accounts.first().map(|r| r.key.clone());
-    }
+    registry.repoint_active();
     registry
 }
 
@@ -292,7 +474,7 @@ fn quarantine_registry(path: &Path) {
 
 /// All known accounts; missing or corrupt registry ⇒ `[primary]`.
 pub fn list_accounts(app_root: &Path) -> Vec<AccountRecord> {
-    load_registry(app_root).accounts
+    load_registry(app_root).listed()
 }
 
 /// The account to connect at startup; persisted in the registry,
@@ -325,7 +507,7 @@ fn update_registry<E: From<std::io::Error>>(
 /// Persist the startup account. Errors when `key` is not in the registry.
 pub fn set_active_account(app_root: &Path, key: &AccountKey) -> std::io::Result<()> {
     update_registry(app_root, |registry| {
-        if !registry.accounts.iter().any(|r| &r.key == key) {
+        if !registry.is_listed(key) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 format!("no such account: {key}"),
@@ -359,13 +541,11 @@ pub fn add_account(app_root: &Path, display_name: &str) -> std::io::Result<Accou
                 std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid account key")
             })?;
             // A key whose old folder is still to be deleted is not free yet.
-            if !registry.accounts.iter().any(|r| r.key == candidate)
-                && !registry.pending_deletes.contains(&candidate)
-            {
-                registry.accounts.push(AccountRecord {
+            if !registry.is_listed(&candidate) && !registry.is_pending(&candidate) {
+                registry.entries.push(AccountEntry::Listed(AccountRecord {
                     key: candidate.clone(),
                     display_name: display_name.to_string(),
-                });
+                }));
                 added = Some(candidate);
                 return Ok(true);
             }
@@ -391,7 +571,7 @@ pub fn rename_account(
         ));
     }
     let mut registry = load_registry(app_root);
-    let Some(record) = registry.accounts.iter_mut().find(|r| &r.key == key) else {
+    let Some(record) = registry.record_mut(key) else {
         return Err(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             format!("no such account: {key}"),

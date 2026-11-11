@@ -67,7 +67,7 @@ fn banner(vcx: &mut VisualTestContext) -> bool {
 }
 
 fn open_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<ChatId> {
-    app.update(vcx, |app, _| app.session().and_then(|s| s.open_chat))
+    app.update(vcx, |app, _| app.session().and_then(|s| s.open_chat_id()))
 }
 
 fn dragging(vcx: &mut VisualTestContext) -> bool {
@@ -195,7 +195,8 @@ fn a_drop_on_a_channel_the_user_cannot_post_in_changes_nothing(cx: &mut TestAppC
                 supergroup_id: 4242,
                 is_channel: true,
             };
-            summary.my_member_status = Some(quill::telegram::envelope::ChannelMemberStatus::Member);
+            summary
+                .assume_member_status(Some(quill::telegram::envelope::ChannelMemberStatus::Member));
         }
     });
     frames(vcx);

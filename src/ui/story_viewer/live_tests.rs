@@ -7,8 +7,8 @@
 //! controller). Nothing reaches Telegram: the app
 //! has no connection and joins nothing.
 use super::live_state::{
-    EFFECT_DURATION, FlyingStars, SendAction, StarsBoxMode, StarsFlow, effect_progress, pin_label,
-    pinned_comments, send_action,
+    AfterStars, EFFECT_DURATION, FlyingStars, SendAction, StarsBoxMode, StarsFlow, effect_progress,
+    pin_label, pinned_comments, send_action,
 };
 use super::live_story::live_item;
 use crate::ui::app::QuillApp;
@@ -101,25 +101,20 @@ fn only_a_live_item_with_a_call_is_joined() {
     let mut item = StoryViewerItem {
         chat_id: ChatId(7),
         story_id: 6,
-        kind: StoryViewerKind::Live,
+        kind: StoryViewerKind::Live(LiveStoryCall {
+            group_call_id: 1,
+            is_rtmp_stream: true,
+        }),
         display_file_ids: Vec::new(),
         download_file_id: FileId(0),
         caption: String::new(),
         caption_entities: Vec::new(),
         duration_label: None,
-        duration_secs: None,
-        video_file_id: None,
-        is_live: true,
-        live_call: Some(LiveStoryCall {
-            group_call_id: 1,
-            is_rtmp_stream: true,
-        }),
         areas: Vec::new(),
     };
     assert_eq!(live_item(Some(&item)), Some((ChatId(7), 6)));
-    item.live_call = None;
-    assert_eq!(live_item(Some(&item)), None);
     item.kind = StoryViewerKind::Photo;
+    assert_eq!(live_item(Some(&item)), None);
     assert_eq!(live_item(None), None);
 }
 
@@ -393,7 +388,7 @@ fn stars_past_the_balance_open_the_stars_top_up(cx: &mut TestAppContext) {
             session.payments.hub.balance =
                 Some(quill::premium_hub::StarAmount { stars: 3, nanos: 0 });
         }
-        app.open_live_stars_box(StarsBoxMode::Reaction, 0, false, cx);
+        app.open_live_stars_box(StarsBoxMode::Reaction, 0, AfterStars::Nothing, cx);
     });
     frames(vcx);
     app.update_in(vcx, |app, window, cx| app.submit_live_stars_box(window, cx));
@@ -419,7 +414,7 @@ fn stars_past_the_balance_open_the_stars_top_up(cx: &mut TestAppContext) {
     });
     assert!(chosen.is_some_and(|stars| stars > 3));
     app.update(vcx, |app, cx| {
-        app.open_live_stars_box(StarsBoxMode::Reaction, 0, false, cx);
+        app.open_live_stars_box(StarsBoxMode::Reaction, 0, AfterStars::Nothing, cx);
     });
     app.read_with(vcx, |app, _| {
         assert_eq!(app.stories.live.stars.boxed().map(|b| b.stars), chosen);
@@ -439,7 +434,7 @@ fn a_stale_top_up_never_sends_a_later_comment(cx: &mut TestAppContext) {
             session.payments.hub.balance =
                 Some(quill::premium_hub::StarAmount { stars: 3, nanos: 0 });
         }
-        app.open_live_stars_box(StarsBoxMode::Comment, 20, true, cx);
+        app.open_live_stars_box(StarsBoxMode::Comment, 20, AfterStars::SendComment, cx);
     });
     frames(vcx);
     app.update_in(vcx, |app, window, cx| app.submit_live_stars_box(window, cx));
@@ -449,10 +444,16 @@ fn a_stale_top_up_never_sends_a_later_comment(cx: &mut TestAppContext) {
     });
     // A price edit reopening the box does not send the waiting comment.
     app.update(vcx, |app, cx| {
-        app.open_live_stars_box(StarsBoxMode::Comment, 0, false, cx);
+        app.open_live_stars_box(StarsBoxMode::Comment, 0, AfterStars::Nothing, cx);
     });
     app.read_with(vcx, |app, _| {
-        assert!(app.stories.live.stars.boxed().is_some_and(|b| !b.then_send));
+        assert!(
+            app.stories
+                .live
+                .stars
+                .boxed()
+                .is_some_and(|b| b.then == AfterStars::Nothing)
+        );
     });
     // The top-up, then the Send that went out: the flow is idle again.
     app.update(vcx, |app, cx| {
@@ -467,11 +468,11 @@ fn a_stale_top_up_never_sends_a_later_comment(cx: &mut TestAppContext) {
         assert!(matches!(app.stories.live.stars, StarsFlow::Idle));
     });
     app.update(vcx, |app, cx| {
-        app.open_live_stars_box(StarsBoxMode::Comment, 0, false, cx);
+        app.open_live_stars_box(StarsBoxMode::Comment, 0, AfterStars::Nothing, cx);
     });
     app.read_with(vcx, |app, _| {
         let boxed = app.stories.live.stars.boxed();
-        assert!(boxed.is_some_and(|b| !b.then_send && b.stars != 40));
+        assert!(boxed.is_some_and(|b| b.then == AfterStars::Nothing && b.stars != 40));
     });
     // Remove Stars also forgets a top-up.
     app.update(vcx, |app, cx| {
@@ -588,7 +589,7 @@ fn the_emoji_panel_closes_with_the_reply_row(cx: &mut TestAppContext) {
     app.read_with(vcx, |app, _| {
         assert!(!app.story_reply_panel_active());
         assert!(
-            !app.stories.viewer_ui().reply_open,
+            !app.stories.viewer_ui().reply_open(),
             "the reply row is not left open"
         );
     });
@@ -643,7 +644,7 @@ fn a_story_stream_that_failed_offers_retry(cx: &mut TestAppContext) {
             .as_mut()
             .and_then(|s| s.calls.story_stream.as_mut())
         {
-            call.transport_error = Some("another call needs it".into());
+            call.transport.fail("another call needs it");
         }
         cx.notify();
     });
@@ -714,7 +715,7 @@ fn a_stream_in_pip_leaves_the_header_of_another_story_alone(cx: &mut TestAppCont
     // live comment field.
     app.update(vcx, |app, cx| {
         if let Some(open) = app.stories.viewer_ui_mut() {
-            open.reply_open = true;
+            open.open_reply();
         }
         app.toggle_story_reply_panel(crate::ui::media_panel::PanelTab::Emoji, cx);
     });
@@ -835,8 +836,7 @@ fn burst_sticker(file: FileId) -> StickerItem {
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,
-        requires_premium: false,
-        premium_animation: None,
+        premium: None,
     }
 }
 

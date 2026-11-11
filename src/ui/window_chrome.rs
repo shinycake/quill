@@ -44,7 +44,9 @@ impl QuillApp {
         let total = (self.frame.title_badge.borrow_mut())
             .get(session, &session.settings.badge_prefs)
             .saturating_add(quill::notify_accounts::other_accounts_unread().count);
-        let open = session.open_chat.and_then(|id| session.chats.get(&id.0));
+        let open = session
+            .open_chat_id()
+            .and_then(|id| session.chats.get(&id.0));
         let topic = open.and_then(|chat| session.open_topic_info(chat.id));
         let name = open.map(|chat| {
             if let Some(topic) = &topic {

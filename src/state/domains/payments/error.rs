@@ -19,9 +19,8 @@ impl Session {
             // (rendered only there) would stay invisible.
             // An earlier checkout's form fetch failing is not this one's.
             Some(RequestPurpose::GetPaymentForm) => {
-                if extra.is_some() && self.payments.form_request == extra {
-                    self.payments.form_request = None;
-                    self.payments.form_loading = false;
+                if extra.is_some() && self.payments.checkout.waits_for(extra) {
+                    self.payments.checkout = CheckoutForm::Closed;
                     self.payments.note = Some(crate::lang::tr_with(
                         crate::lang::keys::Q_MONEY_PAYMENT_FAILED_REASON,
                         &[("reason", &error_reason(err))],
@@ -36,7 +35,6 @@ impl Session {
                     )
                 {
                     self.payments.order_info = OrderInfoStage::Unvalidated;
-                    self.payments.form_loading = false;
                     self.payments.note = Some(crate::lang::tr_with(
                         crate::lang::keys::Q_MONEY_PAYMENT_FAILED_REASON,
                         &[("reason", &error_reason(err))],
@@ -68,10 +66,10 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetMarketplaceGift | RequestPurpose::SendMarketplaceGift) => {
-                if let Some(gift) = self.payments.marketplace_gift.as_mut() {
-                    gift.loading = false;
-                    gift.sending = false;
-                    gift.note = Some(format!("Gift request failed: {}", error_reason(err)));
+                if let Some(gift) = self.payments.marketplace_gift.as_mut()
+                    && pending.is_some_and(|p| gift.waits_for(p.id))
+                {
+                    gift.fail(format!("Gift request failed: {}", error_reason(err)));
                 }
             }
             // No card info: the menu keeps only "Copy Card Number".
@@ -108,7 +106,10 @@ impl Session {
             Some(RequestPurpose::Payments(PaymentsPurpose::GetAwardMembers { generation })) => {
                 self.payments.giveaway.award_members.fail(
                     generation,
-                    format!("Couldn't load the members: {}", error_reason(err)),
+                    crate::lang::tr_with(
+                        crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_MEMBERS_REASON,
+                        &[("reason", &error_reason(err))],
+                    ),
                 );
             }
             Some(RequestPurpose::GetStarGiftOptions) => {
@@ -118,9 +119,10 @@ impl Session {
                 );
             }
             Some(RequestPurpose::GetStarPackOptions) => {
-                let packs = &mut self.payments.star_packs;
-                packs.loading = false;
-                packs.error = Some(format!("Couldn't load Star packs: {}", error_reason(err)));
+                self.payments
+                    .star_packs
+                    .options
+                    .fail_dropping_data(format!("Couldn't load Star packs: {}", error_reason(err)));
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::AddPendingPaidReaction { .. })) => {
                 if let Some(id) = extra {
@@ -166,44 +168,48 @@ impl Session {
             // Only the newest history request fails the list: an older one
             // answering late must not stop the spinner of the live one.
             Some(RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { .. })) => {
-                if pending.is_some_and(|p| p.id.0 == self.payments.hub.tx_request) {
-                    self.payments.hub.tx_loading = false;
-                    self.payments.hub.tx_error =
-                        Some(format!("Couldn't load transactions: {}", error_reason(err)));
+                if let Some(pending) = pending {
+                    self.payments.hub.tx.fail(
+                        pending.id,
+                        format!("Couldn't load transactions: {}", error_reason(err)),
+                    );
                 }
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GetWearableGifts)) => {
-                self.users_state.wearable_gifts_loaded = true;
+                self.users_state.wearable_gifts.fail(error_reason(err));
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { .. })) => {
                 // Only the newest page's error counts (an older page's is
                 // not the list on screen's).
-                if pending.is_some_and(|p| p.id.0 == self.payments.hub.gifts_request) {
-                    self.payments.hub.gifts_loading = false;
+                let counted = pending.is_some_and(|pending| {
+                    self.payments.hub.gifts_page.fail(
+                        pending.id,
+                        crate::lang::tr_with(
+                            crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_GIFTS_REASON,
+                            &[("reason", &error_reason(err))],
+                        ),
+                    )
+                });
+                if counted {
                     // A failed refetch is not asked again every frame.
-                    self.payments.hub.gifts_stale = false;
-                    self.payments.hub.gifts_error = Some(crate::lang::tr_with(
-                        crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_GIFTS_REASON,
-                        &[("reason", &error_reason(err))],
-                    ));
+                    self.payments.hub.gifts_op.refetched();
                 }
             }
             Some(
                 RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { .. })
                 | RequestPurpose::SellGift,
             ) => {
-                self.payments.hub.gift_mutating = false;
-                self.payments.hub.gift_convert_confirm = None;
-                self.payments.hub.gifts_error =
+                self.payments.hub.gifts_op.failed(pending.map(|p| p.id));
+                self.payments.hub.gift_view.abandon_confirmation();
+                self.payments.hub.gift_notice =
                     Some(format!("Couldn't update the gift: {}", error_reason(err)));
             }
             // The Business screen keeps tdesktop's fallback order.
             Some(RequestPurpose::GetBusinessFeatures) => {
-                self.payments.hub.business_features_loading = false;
+                self.payments.hub.business_features.fail(error_reason(err));
             }
             Some(RequestPurpose::GetPremiumFeatures) => {
-                self.payments.hub.premium_loading = false;
-                self.payments.hub.premium_error = Some(format!(
+                self.payments.hub.premium.fail(format!(
                     "Couldn't load Premium features: {}",
                     error_reason(err)
                 ));
@@ -211,18 +217,15 @@ impl Session {
             Some(RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { .. })) => {
                 // Only the page in flight fails the list; an error does not
                 // leave the list stale to be asked every frame.
-                if extra.is_some() && self.payments.star_subscriptions_request == extra {
-                    self.payments.star_subscriptions_request = None;
-                    self.payments.star_subscriptions_stale = false;
-                    self.payments.star_subscriptions_error = Some(format!(
-                        "Couldn't load subscriptions: {}",
-                        error_reason(err)
-                    ));
+                if let Some(request) = extra {
+                    self.payments.star_subscriptions.page_failed(
+                        request,
+                        format!("Couldn't load subscriptions: {}", error_reason(err)),
+                    );
                 }
             }
             Some(RequestPurpose::EditStarSubscription | RequestPurpose::ReuseStarSubscription) => {
-                self.payments.star_subscriptions_mutating = false;
-                self.payments.star_subscriptions_error = Some(format!(
+                self.payments.star_subscriptions.edit_failed(format!(
                     "Couldn't update the subscription: {}",
                     error_reason(err)
                 ));
@@ -266,8 +269,7 @@ impl Session {
             }
             // The next look at the sticker preview asks again.
             Some(RequestPurpose::GetPremiumStickerExamples) => {
-                self.payments.hub.premium_stickers_loading = false;
-                self.payments.hub.premium_stickers_asked = false;
+                self.payments.hub.premium_stickers.fail(error_reason(err));
             }
             _ => {}
         }

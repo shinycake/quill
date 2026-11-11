@@ -115,7 +115,7 @@ impl QuillApp {
                     .media
                     .playlists
                     .values()
-                    .flat_map(|playlist| &playlist.tracks)
+                    .flat_map(|playlist| playlist.tracks())
                     .find(|track| quill::state::playlist_message_id(track.file_id) == id)
             })
         {
@@ -276,7 +276,7 @@ impl QuillApp {
             .iter()
             .find(|(_, playlist)| {
                 playlist
-                    .tracks
+                    .tracks()
                     .iter()
                     .any(|track| quill::state::playlist_message_id(track.file_id) == id)
             })
@@ -300,6 +300,7 @@ impl QuillApp {
             PlaybackKind::Audio => {
                 let ids = self.playlist_audio_ids(chat);
                 let mv = Move {
+                    chat,
                     current: current.0,
                     step,
                     auto,
@@ -518,7 +519,7 @@ impl QuillApp {
         };
         let playing = self.is_playing();
         let slider = self.player_bar_slider(cx);
-        let elapsed = self.playback.seek_preview_secs.unwrap_or(position);
+        let elapsed = self.playback.scrub.preview().unwrap_or(position);
         let time = format!(
             "{} / {}",
             format_voice_duration(elapsed as i32),
@@ -534,7 +535,7 @@ impl QuillApp {
             .seek_hover
             .filter(|hover| hover.site == SeekSite::PlayerBar)
             .map(|hover| hover.at);
-        let dragging = self.playback.seek_preview_secs.is_some();
+        let dragging = self.playback.scrub.is_dragging();
         let music = kind == PlaybackKind::Audio;
         let (can_previous, can_next) = self.playlist_can_move();
         let (repeat, order) = (self.playback.player.repeat, self.playback.player.order);

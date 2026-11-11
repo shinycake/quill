@@ -19,10 +19,9 @@ pub struct ActiveCall {
     /// When the call was created (outgoing) or first rang (incoming) —
     /// drives the "ringing" time on the overlay.
     pub started_at: Instant,
-    /// When `callStateReady` arrived — the call-duration clock starts
-    /// here.
-    pub ready_at: Option<Instant>,
-    pub ready: Option<ReadyParams>,
+    /// The call is ready (`callStateReady`): what it carried and when it
+    /// arrived, where the call-duration clock starts. `None` before.
+    pub ready: Option<CallReady>,
     /// The media transport, its retained connect parameters and its
     /// error, as one value (see `CallTransport`).
     pub transport: CallTransport,
@@ -35,15 +34,10 @@ pub struct ActiveCall {
     /// Phase C1b: local-only mute toggle state. Tracked but a no-op
     /// without media transport (C2) — the UI labels it honestly.
     pub muted: bool,
-    /// Phase C2e: local camera intent (UI toggle). Initialized from
+    /// What you send as video (see [`LocalVideo`]). Initialized from
     /// `is_video` — a video call starts with the camera on, a voice
-    /// call with it off. The engine picks it up through
-    /// `set_camera`.
-    pub camera_on: bool,
-    /// Phase C2i: local screen-share send intent (UI toggle). The
-    /// engine picks it up through `set_screen_share_enabled`; screen
-    /// share replaces the camera (a 1:1 call has one video track).
-    pub screen_sharing: bool,
+    /// call with it off.
+    pub video: LocalVideo,
     /// Phase C2e: peer camera state from the engine hook; `Inactive`
     /// until the first state callback arrives.
     pub remote_video: RemoteVideoState,
@@ -65,10 +59,19 @@ pub struct ActiveCall {
     pub signal_bars: Option<u8>,
 }
 
+/// What `callStateReady` brought, and when.
+#[derive(Debug, Clone)]
+pub struct CallReady {
+    pub params: Option<ReadyParams>,
+    pub since: Instant,
+}
+
 /// The rating card of an ended call. The card is drawn while it is
 /// `Offered` or `Failed`; `Sending` leaves on the answer to that request.
+/// `NotNeeded`: TDLib did not ask for a rating (`need_rating` false).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallRating {
+    NotNeeded,
     Offered,
     Sending(RequestId),
     Sent,
@@ -84,9 +87,10 @@ impl CallRating {
 
 /// One upload from the call-end card (diagnostics, call log). `Sending`
 /// leaves on the answer to that request, so an answer for another call's
-/// upload never lands here.
+/// upload never lands here. `NotNeeded`: TDLib did not ask for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallUpload {
+    NotNeeded,
     Idle,
     Sending(RequestId),
     Sent,
@@ -102,7 +106,7 @@ impl CallUpload {
     pub fn error(&self) -> Option<&str> {
         match self {
             Self::Failed(error) => Some(error),
-            Self::Idle | Self::Sending(_) | Self::Sent => None,
+            Self::NotNeeded | Self::Idle | Self::Sending(_) | Self::Sent => None,
         }
     }
 }
@@ -122,18 +126,13 @@ pub struct CallSummary {
     pub had_audio: bool,
     /// Human-readable end line (reason-aware).
     pub end_line: String,
-    pub need_rating: bool,
     /// An outgoing call the peer declined before it connected: tdesktop
     /// shows "line busy" with Redial / Cancel.
     pub busy: bool,
-    /// `need_debug_information` / `need_log` are out of this slice
-    /// (no media log exists; debug-info upload is C2) — kept so the
-    /// end screen can say so honestly.
-    pub need_debug_information: bool,
-    pub need_log: bool,
-    /// The rating card's stage; one value so the card comes back when
-    /// the send fails.
+    /// The rating card's stage (`need_rating`); one value so the card comes
+    /// back when the send fails.
     pub rating: CallRating,
+    /// `sendCallDebugInformation` upload stage (`need_debug_information`).
     pub debug_information: CallUpload,
     /// Phase C2i: `sendCallLog` upload stage (`need_log` from
     /// `callStateDiscarded`, schema 1.8.67 :7080).
@@ -276,16 +275,21 @@ impl ActiveCall {
             user_id,
             is_outgoing,
             is_video,
+            ready: matches!(state, CallState::Ready).then(|| CallReady {
+                params: ready,
+                since: Instant::now(),
+            }),
             state,
             started_at: Instant::now(),
-            ready_at: None,
-            ready,
             transport: CallTransport::default(),
             signaling_queue: Vec::new(),
             signaling_dropped: 0,
             muted: false,
-            camera_on: is_video,
-            screen_sharing: false,
+            video: if is_video {
+                LocalVideo::Camera
+            } else {
+                LocalVideo::Off
+            },
             remote_video: RemoteVideoState::Inactive,
             remote_screen: RemoteVideoState::Inactive,
             remote_audio_muted: false,
@@ -294,11 +298,48 @@ impl ActiveCall {
         }
     }
 
+    /// The camera is what you send.
+    pub fn camera_on(&self) -> bool {
+        self.video == LocalVideo::Camera
+    }
+
+    /// The screen is what you send.
+    pub fn screen_sharing(&self) -> bool {
+        self.video == LocalVideo::Screen
+    }
+
+    /// The camera turns on (replacing a screen share) or off (a share
+    /// stays).
+    pub fn set_camera_on(&mut self, on: bool) {
+        if on {
+            self.video = LocalVideo::Camera;
+        } else if self.camera_on() {
+            self.video = LocalVideo::Off;
+        }
+    }
+
+    /// The screen share turns on (replacing the camera) or off (the camera
+    /// stays).
+    pub fn set_screen_sharing(&mut self, on: bool) {
+        if on {
+            self.video = LocalVideo::Screen;
+        } else if self.screen_sharing() {
+            self.video = LocalVideo::Off;
+        }
+    }
+
     /// Seconds since `callStateReady` (the billable call duration).
     pub fn connected_secs(&self) -> i64 {
-        self.ready_at
-            .map(|t| t.elapsed().as_secs() as i64)
+        self.ready
+            .as_ref()
+            .map(|ready| ready.since.elapsed().as_secs() as i64)
             .unwrap_or(0)
+    }
+
+    /// The parameters `callStateReady` carried (the key emojis, the group
+    /// call support).
+    pub fn ready_params(&self) -> Option<&ReadyParams> {
+        self.ready.as_ref().and_then(|ready| ready.params.as_ref())
     }
 }
 
@@ -320,6 +361,18 @@ pub struct GroupCallVerificationState {
 /// manual Rejoin is left.
 pub const MAX_GROUP_CALL_REJOIN_ATTEMPTS: usize = 3;
 
+/// The video you send in a 1:1 call: a call has one video track, so the
+/// camera and a screen share replace each other. The UI toggles are the
+/// intent; the engine picks it up through `set_camera` and
+/// `set_screen_share_enabled`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LocalVideo {
+    #[default]
+    Off,
+    Camera,
+    Screen,
+}
+
 /// 10830, `updateGroupCallVerificationState` 10836).
 #[derive(Debug, Clone)]
 pub struct ActiveGroupCall {
@@ -328,8 +381,6 @@ pub struct ActiveGroupCall {
     pub is_video_chat: bool,
     pub is_live_story: bool,
     pub is_joined: bool,
-    /// `need_rejoin` arrived (kicked by network loss).
-    pub need_rejoin: bool,
     /// Where Quill's own rejoin after a network loss stands (the
     /// C2d 1:1 reconnect discipline, at most
     /// `MAX_GROUP_CALL_REJOIN_ATTEMPTS`). Reset by a joined
@@ -358,24 +409,13 @@ pub struct ActiveGroupCall {
     pub mute_new_participants: bool,
     pub can_toggle_mute_new_participants: bool,
     pub verification: Option<GroupCallVerificationState>,
-    /// The `Text` join payload returned by `joinVideoChat`; Phase C2g
-    /// consumes it in the driver pump to finish the native group
-    /// handshake.
-    pub join_payload: String,
-    /// Phase C2g: whether the native group transport handshake has
-    /// completed (`connect_group_call` with the `joinVideoChat` answer). False
-    /// when the join went out with the honest no-device params (no
-    /// engine) or while the answer is still in flight.
-    pub transport_ready: bool,
-    /// Phase C2g: last native group-transport error (offer/connect/
-    /// subscribe failures), mirroring the 1:1 call's `transport_error`.
-    /// The join itself is never blocked by these.
-    pub transport_error: Option<String>,
-    /// Phase C2g: screen-share presentation state. `screen_share_pending`
-    /// while the `startGroupCallScreenSharing` answer is in flight;
-    /// `screen_sharing` once the presentation transport connected.
-    pub screen_share_pending: bool,
-    pub screen_sharing: bool,
+    /// The native group transport: the `joinVideoChat` answer the driver
+    /// pump connects, the completed handshake, or its failure (offer,
+    /// connect, subscribe). The join itself is never blocked by these.
+    pub transport: GroupTransport,
+    /// Screen-share presentation: the `startGroupCallScreenSharing`
+    /// handshake, then the connected presentation.
+    pub screen_share: GroupScreenShare,
     /// Your shared window is hidden, so the share is paused (the driver
     /// sent `toggleGroupCallScreenSharingIsPaused`). Your own tile shows
     /// the paused state at once, before the participant update.
@@ -384,10 +424,6 @@ pub struct ActiveGroupCall {
     /// stop). Kept apart from `transport_error`: a failed share leaves
     /// the call itself working.
     pub screen_share_error: Option<String>,
-    /// The `Text` presentation answer from
-    /// `startGroupCallScreenSharing`; consumed by the driver pump to
-    /// finish the presentation handshake.
-    pub screen_share_answer: String,
     /// Speaker and listener links from `getVideoChatInviteLink`,
     /// fetched on demand (`crate::calls::share_links`).
     pub share_links: crate::calls::share_links::VideoChatShareLinks,
@@ -418,13 +454,12 @@ pub struct ActiveGroupCall {
     /// (`record_duration` seconds, 0 = not recording).
     pub record_duration: i32,
     pub is_video_recorded: bool,
-    /// "Join as" choices from `getVideoChatAvailableParticipants` (empty
-    /// until loaded, or when the call has no alternatives to offer).
-    pub join_as_options: Vec<MessageSender>,
+    /// "Join as" choices from `getVideoChatAvailableParticipants`: asked
+    /// once per tracked call (a failure leaves the picker out, the join
+    /// goes ahead as yourself); empty when there are no alternatives.
+    pub join_as_options: crate::state::fetch::Fetch<Vec<MessageSender>>,
     /// The identity the next join uses; `None` joins as yourself.
     pub join_as: Option<MessageSender>,
-    /// The options request was sent (once per tracked call).
-    pub join_as_requested: bool,
     /// How the joined call carries media, from the engine after the
     /// native connect (`CallEngine::group_call_mode`). Stream modes get their
     /// segments from TDLib (`calls::engine::StreamFeeder`).
@@ -449,11 +484,12 @@ pub struct ActiveGroupCall {
     /// for a video chat, or a conference this session didn't join.
     pub conference: Option<ConferenceCall>,
 }
-
 /// Quill's own rejoin of a group call that TDLib (or a stream feeder)
-/// says needs one. One value, so "a rejoin is due" and "the banner shows"
-/// cannot drift apart: the driver sends a rejoin only from `Wanted`, and
-/// a repeated `need_rejoin` while one is `InFlight` changes nothing.
+/// says needs one, and the leave that ends it. One value, so "a rejoin is
+/// due", "the banner shows" and "the user left" cannot drift apart: the
+/// driver sends a rejoin only from `Wanted`, a repeated `need_rejoin`
+/// while one is `InFlight` changes nothing, and a call the user left
+/// never rejoins.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GroupCallRejoin {
     /// Joined, or never dropped.
@@ -466,9 +502,32 @@ pub enum GroupCallRejoin {
     InFlight { request: RequestId, attempt: usize },
     /// Every attempt failed; only the manual Rejoin is left.
     GaveUp,
+    /// The user left (or ended) the call with `leaveGroupCall` and TDLib
+    /// has not said it is no longer joined: a late joined update must not
+    /// take the slot back, and no rejoin is due. Any in-flight rejoin
+    /// ends here.
+    Left,
 }
 
 impl GroupCallRejoin {
+    /// The user left the call.
+    pub fn leave(&mut self) {
+        *self = GroupCallRejoin::Left;
+    }
+
+    /// The call was left and TDLib said so, or the user joins it again:
+    /// joined updates count once more.
+    pub fn leave_over(&mut self) {
+        if *self == GroupCallRejoin::Left {
+            *self = GroupCallRejoin::Idle;
+        }
+    }
+
+    /// The user left the call and TDLib has not confirmed it yet.
+    pub fn is_left(&self) -> bool {
+        *self == GroupCallRejoin::Left
+    }
+
     /// TDLib's `need_rejoin` (or a stream's own rejoin): a drop starts
     /// one rejoin series, and a series already under way goes on.
     pub fn want(&mut self) {
@@ -500,7 +559,7 @@ impl GroupCallRejoin {
         match *self {
             GroupCallRejoin::Wanted { .. } => self.next_attempt().is_some(),
             GroupCallRejoin::InFlight { .. } => true,
-            GroupCallRejoin::Idle | GroupCallRejoin::GaveUp => false,
+            GroupCallRejoin::Idle | GroupCallRejoin::GaveUp | GroupCallRejoin::Left => false,
         }
     }
 
@@ -589,19 +648,19 @@ impl ActiveGroupCall {
     /// `need_rejoin` until the rejoined `updateGroupCall`, the spent
     /// state included (the banner is the manual Rejoin).
     pub fn reconnecting(&self) -> bool {
-        self.rejoin != GroupCallRejoin::Idle
+        !matches!(self.rejoin, GroupCallRejoin::Idle | GroupCallRejoin::Left)
     }
 
     /// The join or its transport failed, or the rejoins are spent: only a
     /// manual retry brings it back.
     pub fn join_failed(&self) -> bool {
-        self.transport_error.is_some() || self.rejoin == GroupCallRejoin::GaveUp
+        self.transport.error().is_some() || self.rejoin == GroupCallRejoin::GaveUp
     }
 
     /// The window offers Rejoin: the connection was lost, or the join
     /// itself failed (a failed camera on a connected call is not one).
     pub fn offers_rejoin(&self) -> bool {
-        self.reconnecting() || (self.join_failed() && !self.transport_ready)
+        self.reconnecting() || (self.join_failed() && !self.transport.is_connected())
     }
 
     /// Blank tracked call for a newly seen call id. Participant state
@@ -613,7 +672,6 @@ impl ActiveGroupCall {
             is_video_chat: false,
             is_live_story: false,
             is_joined: false,
-            need_rejoin: false,
             rejoin: GroupCallRejoin::Idle,
             can_be_managed: false,
             is_owned: false,
@@ -628,14 +686,10 @@ impl ActiveGroupCall {
             mute_new_participants: false,
             can_toggle_mute_new_participants: false,
             verification: None,
-            join_payload: String::new(),
-            transport_ready: false,
-            transport_error: None,
-            screen_share_pending: false,
-            screen_sharing: false,
+            transport: GroupTransport::NoTransport,
+            screen_share: GroupScreenShare::Off,
             screen_share_paused: false,
             screen_share_error: None,
-            screen_share_answer: String::new(),
             share_links: Default::default(),
             is_rtmp_stream: false,
             scheduled_start_date: 0,
@@ -649,9 +703,8 @@ impl ActiveGroupCall {
             messages: Vec::new(),
             record_duration: 0,
             is_video_recorded: false,
-            join_as_options: Vec::new(),
+            join_as_options: Default::default(),
             join_as: None,
-            join_as_requested: false,
             stream_mode: Default::default(),
             stream: Default::default(),
             viewer_count: 0,
@@ -769,12 +822,21 @@ impl CallSummary {
             duration_secs,
             had_audio,
             end_line,
-            need_rating,
-            need_debug_information,
-            need_log,
-            rating: CallRating::Offered,
-            debug_information: CallUpload::Idle,
-            log: CallUpload::Idle,
+            rating: if need_rating {
+                CallRating::Offered
+            } else {
+                CallRating::NotNeeded
+            },
+            debug_information: if need_debug_information {
+                CallUpload::Idle
+            } else {
+                CallUpload::NotNeeded
+            },
+            log: if need_log {
+                CallUpload::Idle
+            } else {
+                CallUpload::NotNeeded
+            },
             final_transport: None,
             reconnect_attempts: 0,
             muted: false,
@@ -787,6 +849,17 @@ pub(crate) const MAX_QUEUED_SIGNALING_CHUNKS: usize = 32;
 
 /// A link whose `getWebPageInstantView` failed (TDLib 404: no Instant View
 /// for the page): the window that asked opens it in the browser.
+/// A `getWebPageInstantView` request in flight (`RequestPurpose` stays
+/// `Copy`, so the URL rides `MessagesState::instant_view_requests` keyed by
+/// the `RequestId`). It leaves with its answer or its error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstantViewAsk {
+    pub url: String,
+    /// Sent while the agent UI driver injected input
+    /// (`guard::injecting`): the browser fallback opens as part of that step.
+    pub from_agent: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstantViewFallback {
     /// The chat window that asked; `None` is the main window.

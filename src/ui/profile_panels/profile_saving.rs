@@ -37,6 +37,13 @@ impl QuillApp {
         false
     }
 
+    /// Open the profile box on `dialog`: the box and the window that shows
+    /// it are set together, so one cannot be left without the other.
+    pub(in crate::ui) fn open_profile_dialog(&mut self, dialog: ProfileDialog) {
+        self.dialogs.profile_dialog = Some(dialog);
+        self.open_box(DialogKind::ProfilePanel);
+    }
+
     /// The box is closed or replaced: its request is no longer waited on.
     pub(super) fn forget_profile_saving(&mut self) {
         let Some(ProfileDialog::Saving { request, .. }) = &self.dialogs.profile_dialog else {

@@ -143,7 +143,12 @@ impl QuillApp {
         };
         let session = self.session();
         let spec = session.and_then(|s| s.chat_list.fresh_spec(folder_id).cloned());
-        let error = session.and_then(|s| s.chat_list.folder_spec_errors.get(&folder_id).cloned());
+        let error = session.and_then(|s| {
+            s.chat_list
+                .folder_specs
+                .error(folder_id)
+                .map(str::to_string)
+        });
         let Some(dialog) = self.folders.editor.as_mut() else {
             return;
         };
@@ -183,9 +188,12 @@ impl QuillApp {
             self.send_folder_editor_spec(Some(folder_id), spec, cx);
             return;
         }
-        let error = self
-            .session()
-            .and_then(|s| s.chat_list.folder_spec_errors.get(&folder_id).cloned());
+        let error = self.session().and_then(|s| {
+            s.chat_list
+                .folder_specs
+                .error(folder_id)
+                .map(str::to_string)
+        });
         let in_flight = self.session().is_some_and(|s| {
             s.requests
                 .has_purpose_for_folder(quill::state::RequestPurpose::GetChatFolder, folder_id)

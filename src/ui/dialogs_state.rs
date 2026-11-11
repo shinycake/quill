@@ -58,16 +58,13 @@ pub(crate) struct DialogUi {
     /// An installed wallpaper waiting for "Delete" to be confirmed.
     pub(super) wallpaper_remove: Option<i64>,
     /// The "Export chat history" box.
-    pub(super) chat_export_dialog: Option<super::export_box::ChatExportDraft>,
-    /// The running export's progress is not on screen; its result shows as a
-    /// note instead.
-    pub(super) chat_export_progress_hidden: bool,
-    /// Last progress drawn, to redraw only when it changes.
-    pub(super) chat_export_seen: Option<quill::export::Progress>,
+    pub(super) chat_export:
+        super::export_state::ExportBox<super::export_box::ChatExportDraft, quill::export::Progress>,
     /// The "Export Telegram data" box (full account export).
-    pub(super) account_export_dialog: Option<super::account_export_box::AccountExportDraft>,
-    /// Last account export progress drawn.
-    pub(super) account_export_seen: Option<quill::export::account::AccountProgress>,
+    pub(super) account_export: super::export_state::ExportBox<
+        super::account_export_box::AccountExportDraft,
+        quill::export::account::AccountProgress,
+    >,
     /// The Saved Messages sublist list, which pages near its end
     /// (`scroll_load`).
     pub(super) saved_scroll: ScrollHandle,
@@ -103,7 +100,7 @@ impl crate::ui::on_screen::Farewell for DialogUi {
             live.driver.forget_new_contact();
         }
         // The appearance box's status choices are resolved while the
-        // session's `chat_status_open` is set.
+        // session's `status_picker` is `ChatAppearance`.
         app.close_chat_appearance_dialog(cx);
         if app
             .session()
@@ -144,11 +141,8 @@ impl DialogUi {
             wallpaper_preview: None,
             wallpaper_applies: Vec::new(),
             wallpaper_remove: None,
-            chat_export_dialog: None,
-            chat_export_progress_hidden: false,
-            chat_export_seen: None,
-            account_export_dialog: None,
-            account_export_seen: None,
+            chat_export: Default::default(),
+            account_export: Default::default(),
             saved_scroll: ScrollHandle::new(),
             saved_asked: Default::default(),
             rating_detail: None,

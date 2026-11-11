@@ -15,6 +15,9 @@ const RECENT_CAP: usize = 50;
 pub enum DownloadOrigin {
     /// Thumbnails, avatars, sounds, auto-download of chat media.
     Auto,
+    /// An automatic download of the media of the open chat `ChatId` (rows
+    /// the chat shows): its progress redraws the rows of that chat.
+    AutoChat(ChatId),
     /// A history row, the viewer or the downloads manager. Listed in the
     /// downloads manager and pausable.
     User,
@@ -32,6 +35,8 @@ pub enum DownloadOrigin {
 enum Phase {
     /// The request is out; TDLib's file state tells how far it is.
     Requested,
+    /// The request is out and the user paused it (a listed user download).
+    Paused,
     /// The request ended without completing (an error answer, or an active
     /// to idle update). User requests offer Retry; automatic ones are not
     /// re-sent on every ingest.
@@ -44,8 +49,14 @@ enum Phase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Intent {
     origin: DownloadOrigin,
-    paused: bool,
     phase: Phase,
+}
+
+impl Phase {
+    /// A request is out and not cancelled (paused ones included).
+    fn is_out(self) -> bool {
+        matches!(self, Self::Requested | Self::Paused)
+    }
 }
 
 /// What a row shows for a file.
@@ -92,13 +103,16 @@ impl DownloadIntents {
         let paused = self
             .entries
             .get(&file_id)
-            .is_some_and(|i| i.phase == Phase::Requested && i.paused && origin == i.origin);
+            .is_some_and(|i| i.phase == Phase::Paused && origin == i.origin);
         self.put(
             file_id,
             Some(Intent {
                 origin,
-                paused,
-                phase: Phase::Requested,
+                phase: if paused {
+                    Phase::Paused
+                } else {
+                    Phase::Requested
+                },
             }),
         );
     }
@@ -116,7 +130,7 @@ impl DownloadIntents {
             }
         };
         if let Some(old) = old {
-            if old.phase == Phase::Requested {
+            if old.phase.is_out() {
                 self.requested = self.requested.saturating_sub(1);
             }
             self.user.remove(&file_id);
@@ -125,10 +139,10 @@ impl DownloadIntents {
         }
         if let Some(new) = intent {
             match (new.phase, new.origin) {
-                (Phase::Requested, DownloadOrigin::User) => {
+                (Phase::Requested | Phase::Paused, DownloadOrigin::User) => {
                     self.user.insert(file_id);
                 }
-                (Phase::Requested, DownloadOrigin::Preload) => {
+                (Phase::Requested | Phase::Paused, DownloadOrigin::Preload) => {
                     self.preloads.insert(file_id);
                 }
                 (Phase::Ended, DownloadOrigin::User) => {
@@ -136,7 +150,7 @@ impl DownloadIntents {
                 }
                 _ => {}
             }
-            if new.phase == Phase::Requested {
+            if new.phase.is_out() {
                 self.requested += 1;
             }
         }
@@ -176,7 +190,6 @@ impl DownloadIntents {
             file_id,
             Some(Intent {
                 origin,
-                paused: false,
                 phase: Phase::Ended,
             }),
         );
@@ -197,13 +210,12 @@ impl DownloadIntents {
     /// The user cancelled.
     pub fn cancel(&mut self, file_id: i32) {
         if let Some(intent) = self.get(file_id).copied()
-            && intent.phase == Phase::Requested
+            && intent.phase.is_out()
         {
             self.put(
                 file_id,
                 Some(Intent {
                     phase: Phase::Cancelled,
-                    paused: false,
                     ..intent
                 }),
             );
@@ -219,7 +231,6 @@ impl DownloadIntents {
             file_id,
             Some(Intent {
                 origin,
-                paused: false,
                 phase: Phase::Cancelled,
             }),
         );
@@ -243,9 +254,14 @@ impl DownloadIntents {
     pub fn set_paused(&mut self, file_id: i32, paused: bool) {
         if let Some(intent) = self.get(file_id).copied()
             && intent.origin == DownloadOrigin::User
-            && intent.phase == Phase::Requested
+            && intent.phase.is_out()
         {
-            self.put(file_id, Some(Intent { paused, ..intent }));
+            let phase = if paused {
+                Phase::Paused
+            } else {
+                Phase::Requested
+            };
+            self.put(file_id, Some(Intent { phase, ..intent }));
         }
     }
 
@@ -329,18 +345,45 @@ impl DownloadIntents {
 
     /// A request is out and not cancelled (paused ones included).
     pub fn is_requested(&self, file_id: i32) -> bool {
-        self.get(file_id)
-            .is_some_and(|i| i.phase == Phase::Requested)
+        self.get(file_id).is_some_and(|i| i.phase.is_out())
     }
 
     pub fn is_user(&self, file_id: i32) -> bool {
         self.get(file_id)
-            .is_some_and(|i| i.phase == Phase::Requested && i.origin == DownloadOrigin::User)
+            .is_some_and(|i| i.phase.is_out() && i.origin == DownloadOrigin::User)
     }
 
     pub fn is_paused(&self, file_id: i32) -> bool {
-        self.get(file_id)
-            .is_some_and(|i| i.phase == Phase::Requested && i.paused)
+        self.get(file_id).is_some_and(|i| i.phase == Phase::Paused)
+    }
+
+    /// The open chat whose media rows asked for this download, while it is
+    /// out.
+    pub fn asked_by_chat(&self, file_id: i32) -> Option<ChatId> {
+        match self.get(file_id) {
+            Some(Intent {
+                origin: DownloadOrigin::AutoChat(chat),
+                phase,
+            }) if phase.is_out() => Some(*chat),
+            _ => None,
+        }
+    }
+
+    /// The automatic download of `file_id` that is out was asked by the rows
+    /// of the open chat `chat_id`. Another origin keeps its own.
+    pub fn note_open_chat(&mut self, file_id: i32, chat_id: ChatId) {
+        if let Some(intent) = self.get(file_id).copied()
+            && intent.origin == DownloadOrigin::Auto
+            && intent.phase.is_out()
+        {
+            self.put(
+                file_id,
+                Some(Intent {
+                    origin: DownloadOrigin::AutoChat(chat_id),
+                    ..intent
+                }),
+            );
+        }
     }
 
     /// The Downloads panel lists the file: a finished or failed user
@@ -412,7 +455,7 @@ impl DownloadIntents {
         self.finished.iter().copied().filter(|id| {
             files
                 .get(id)
-                .is_none_or(|f| f.local.is_downloading_completed)
+                .is_none_or(|f| f.local.is_downloading_completed())
         })
     }
 
@@ -421,14 +464,13 @@ impl DownloadIntents {
     /// Downloading unless the user cancelled it.
     pub fn status(&self, file_id: i32, files: &FileMap) -> DownloadStatus {
         let local = files.get(&file_id).map(|f| &f.local);
-        if local.is_some_and(|l| l.is_downloading_completed) {
+        if local.is_some_and(|l| l.is_downloading_completed()) {
             return DownloadStatus::Done;
         }
-        let active = local.is_some_and(|l| l.is_downloading_active);
+        let active = local.is_some_and(|l| l.is_downloading_active());
         match self.get(file_id) {
             Some(Intent {
-                phase: Phase::Requested,
-                paused: true,
+                phase: Phase::Paused,
                 ..
             }) => DownloadStatus::Paused,
             Some(Intent {
@@ -454,7 +496,8 @@ impl DownloadIntents {
     /// end reads as `Idle` in `status`, which only fails user downloads).
     pub fn ended_without_file(&self, file_id: i32, files: &FileMap) -> bool {
         let local = files.get(&file_id).map(|f| &f.local);
-        let running = local.is_some_and(|l| l.is_downloading_active || l.is_downloading_completed);
+        let running =
+            local.is_some_and(|l| l.is_downloading_active() || l.is_downloading_completed());
         !running && self.get(file_id).is_some_and(|i| i.phase == Phase::Ended)
     }
 

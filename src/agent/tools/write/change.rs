@@ -47,7 +47,11 @@ fn flag(value: &Value, key: &str) -> bool {
 }
 
 fn done(text: String, data: Value) -> ToolOutput {
-    ToolOutput { text, data }
+    ToolOutput {
+        text,
+        data,
+        images: Vec::new(),
+    }
 }
 
 pub fn edit_schema() -> Value {

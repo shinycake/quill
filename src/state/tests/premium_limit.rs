@@ -36,7 +36,7 @@ fn pin_over_the_limit_opens_the_pins_box() {
         "Maximum number of pinned chats exceeded",
     );
     assert_eq!(
-        session.payments.hub.limit_box,
+        session.payments.hub.limit_box(),
         Some((PremiumLimitKind::Pins, 0))
     );
     assert!(session.chats_state.chat_action_error.is_empty());
@@ -52,7 +52,7 @@ fn other_pin_errors_stay_error_lines() {
         Some(ChatId(11)),
         "Chat not found",
     );
-    assert_eq!(session.payments.hub.limit_box, None);
+    assert_eq!(session.payments.hub.limit_box(), None);
     assert!(!session.chats_state.chat_action_error.is_empty());
 }
 
@@ -67,7 +67,7 @@ fn joining_too_many_communities_opens_the_channels_box() {
         "CHANNELS_TOO_MUCH",
     );
     assert_eq!(
-        session.payments.hub.limit_box,
+        session.payments.hub.limit_box(),
         Some((PremiumLimitKind::Channels, 0))
     );
 }
@@ -83,10 +83,10 @@ fn public_link_and_caption_errors_route_to_their_boxes() {
         "CHANNELS_ADMIN_PUBLIC_TOO_MUCH",
     );
     assert_eq!(
-        session.payments.hub.limit_box,
+        session.payments.hub.limit_box(),
         Some((PremiumLimitKind::PublicLinks, 0))
     );
-    session.payments.hub.limit_box = None;
+    session.payments.hub.close_limit_box();
     fail(
         &mut session,
         &sink,
@@ -95,7 +95,7 @@ fn public_link_and_caption_errors_route_to_their_boxes() {
         "MEDIA_CAPTION_TOO_LONG",
     );
     assert_eq!(
-        session.payments.hub.limit_box,
+        session.payments.hub.limit_box(),
         Some((PremiumLimitKind::Caption, 0))
     );
 }
@@ -117,10 +117,12 @@ fn premium_availability_follows_the_option() {
 #[test]
 fn invite_link_join_over_the_limit_opens_the_channels_box() {
     let (mut session, sink) = session();
-    session.chats_state.deep_link = Some(DeepLinkState::ResolvingChat {
-        action: DeepLinkAction::JoinInvite { hash: "h".into() },
-        generation: 3,
-    });
+    session
+        .chats_state
+        .enter_deep_link_stage(DeepLinkState::ResolvingChat {
+            action: DeepLinkAction::JoinInvite { hash: "h".into() },
+            generation: 3,
+        });
     fail(
         &mut session,
         &sink,
@@ -128,9 +130,9 @@ fn invite_link_join_over_the_limit_opens_the_channels_box() {
         None,
         "CHANNELS_TOO_MUCH",
     );
-    assert_eq!(session.chats_state.deep_link, None);
+    assert_eq!(session.chats_state.deep_link_stage().cloned(), None);
     assert_eq!(
-        session.payments.hub.limit_box,
+        session.payments.hub.limit_box(),
         Some((PremiumLimitKind::Channels, 0))
     );
 }
@@ -149,8 +151,8 @@ fn a_stale_invite_link_join_opens_no_limit_box() {
         None,
         "CHANNELS_TOO_MUCH",
     );
-    assert_eq!(session.chats_state.deep_link, None);
-    assert_eq!(session.payments.hub.limit_box, None);
+    assert_eq!(session.chats_state.deep_link_stage().cloned(), None);
+    assert_eq!(session.payments.hub.limit_box(), None);
 }
 
 /// 05-066: a failure of the current flow's request is shown whatever stage
@@ -158,14 +160,16 @@ fn a_stale_invite_link_join_opens_no_limit_box() {
 #[test]
 fn a_join_failure_is_shown_when_the_flow_sits_at_the_preview() {
     let (mut session, sink) = session();
-    session.chats_state.deep_link = Some(DeepLinkState::InvitePreview {
-        hash: "h".into(),
-        title: "Club".into(),
-        member_count: 3,
-        creates_join_request: false,
-        is_channel: false,
-        generation: 3,
-    });
+    session
+        .chats_state
+        .enter_deep_link_stage(DeepLinkState::InvitePreview {
+            hash: "h".into(),
+            title: "Club".into(),
+            member_count: 3,
+            creates_join_request: false,
+            is_channel: false,
+            generation: 3,
+        });
     fail(
         &mut session,
         &sink,
@@ -174,7 +178,7 @@ fn a_join_failure_is_shown_when_the_flow_sits_at_the_preview() {
         "INVITE_HASH_EXPIRED",
     );
     assert!(matches!(
-        session.chats_state.deep_link,
+        session.chats_state.deep_link_stage().cloned(),
         Some(DeepLinkState::InvitePreview { .. })
     ));
     fail(
@@ -185,7 +189,7 @@ fn a_join_failure_is_shown_when_the_flow_sits_at_the_preview() {
         "INVITE_HASH_EXPIRED",
     );
     assert!(matches!(
-        session.chats_state.deep_link,
+        session.chats_state.deep_link_stage().cloned(),
         Some(DeepLinkState::ShowText(_))
     ));
 }
@@ -201,7 +205,7 @@ fn a_saved_messages_pin_over_the_limit_opens_its_own_box() {
         "The maximum number of pinned chats exceeded",
     );
     assert_eq!(
-        session.payments.hub.limit_box,
+        session.payments.hub.limit_box(),
         Some((PremiumLimitKind::SavedPins, 0))
     );
     assert!(session.chats_state.chat_action_error.is_empty());
@@ -245,9 +249,48 @@ fn the_saved_pin_check_counts_pinned_sublists_against_the_limit() {
 fn toast_kinds_queue_a_toast_instead_of_a_box() {
     let (mut session, _sink) = session();
     session.open_premium_limit(PremiumLimitKind::FavoriteStickers, 0);
-    assert_eq!(session.payments.hub.limit_box, None);
+    assert_eq!(session.payments.hub.limit_box(), None);
     assert_eq!(
-        session.payments.hub.limit_toast,
+        session.payments.hub.take_limit_toast(),
+        Some(PremiumLimitKind::FavoriteStickers)
+    );
+}
+
+#[test]
+fn a_toast_kind_raised_over_an_open_box_still_toasts_and_the_box_stays() {
+    let (mut session, _sink) = session();
+    session.open_premium_limit(PremiumLimitKind::Pins, 0);
+    session.open_premium_limit(PremiumLimitKind::FavoriteStickers, 0);
+    assert_eq!(
+        session.payments.hub.take_limit_toast(),
+        Some(PremiumLimitKind::FavoriteStickers)
+    );
+    assert_eq!(session.payments.hub.take_limit_toast(), None, "once");
+    assert_eq!(
+        session.payments.hub.limit_box(),
+        Some((PremiumLimitKind::Pins, 0))
+    );
+    // A toast still waiting when the box closes is shown after it.
+    session.open_premium_limit(PremiumLimitKind::OwnedBots, 0);
+    session.payments.hub.close_limit_box();
+    assert_eq!(session.payments.hub.limit_box(), None);
+    assert_eq!(
+        session.payments.hub.take_limit_toast(),
+        Some(PremiumLimitKind::OwnedBots)
+    );
+}
+
+#[test]
+fn a_box_raised_before_the_window_drains_a_toast_keeps_the_toast() {
+    let (mut session, _sink) = session();
+    session.open_premium_limit(PremiumLimitKind::FavoriteStickers, 0);
+    session.open_premium_limit(PremiumLimitKind::Pins, 0);
+    assert_eq!(
+        session.payments.hub.limit_box(),
+        Some((PremiumLimitKind::Pins, 0))
+    );
+    assert_eq!(
+        session.payments.hub.take_limit_toast(),
         Some(PremiumLimitKind::FavoriteStickers)
     );
 }

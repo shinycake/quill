@@ -17,6 +17,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::demo::{demo_file_json, demo_media_allowlist};
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use crate::ui::showcase_demo::{MAYA, Scene, apply_ready_showcase};
+use crate::ui::stories_state::ViewerPanel;
 use gpui_kit::*;
 use quill::diagnostics::DiagnosticSink;
 use quill::ids::ChatId;
@@ -77,14 +78,14 @@ impl QuillApp {
         }
         match variant.as_str() {
             "gone" => {
-                session.stories.missing.insert((LEO, 99));
+                session.stories.story_fetch.gone((LEO, 99));
                 self.open_story_viewer(ChatId(LEO), 99, StoryOpenScope::Link, cx);
             }
             "own" | "own-viewers" | "own-viewers-loading" => {
                 self.open_story_viewer(ChatId(LEO), 3, StoryOpenScope::Single, cx);
                 if variant != "own" {
                     if let Some(open) = self.stories.viewer_ui_mut() {
-                        open.viewers_open = true;
+                        open.show(ViewerPanel::Viewers);
                     }
                     if let Some(session) = self.demo_session.as_mut() {
                         session.stories.viewers =
@@ -174,8 +175,8 @@ fn demo_viewers(loading: bool) -> quill::state::StoryViewersState {
     let row = |user_id: i64, minutes: i32, emoji: Option<&str>| StoryInteractionView {
         actor: MessageSender::User { user_id },
         interaction_date: now - minutes * 60,
-        reaction_emoji: emoji.map(str::to_string),
-        reaction_extra: None,
+        reaction: emoji
+            .map(|emoji| quill::telegram::envelope::StoryReaction::Emoji(emoji.to_string())),
         kind: StoryInteractionKind::View,
     };
     quill::state::StoryViewersState {

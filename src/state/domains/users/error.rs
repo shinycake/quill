@@ -14,16 +14,7 @@ impl Session {
         // The failed check is over: its text no longer reads "Checking…".
         // A superseded check (the person typed on) is not the current one:
         // its failure says nothing about the text now being checked.
-        let current_check = extra.is_some()
-            && self
-                .users_state
-                .username_check_pending
-                .as_ref()
-                .map(|(id, _)| *id)
-                == extra;
-        if current_check {
-            self.users_state.username_check_pending = None;
-        }
+        let current_check = extra.is_some_and(|id| self.users_state.username_check.end(id));
         if pending.map(|p| p.purpose) == Some(RequestPurpose::CheckUsername) && !current_check {
             return;
         }
@@ -73,13 +64,19 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetProfilePhotoEmojiIcons) => {
-                self.users_state.profile_photo_emoji_icons_failed = true;
+                self.users_state
+                    .profile_photo_emoji_icons
+                    .fail(error_reason(err));
             }
             Some(RequestPurpose::GetChatPhotoEmojiIcons) => {
-                self.users_state.chat_photo_emoji_icons_failed = true;
+                self.users_state
+                    .chat_photo_emoji_icons
+                    .fail(error_reason(err));
             }
             Some(RequestPurpose::GetProfileShareThemeBackdrops) => {
-                self.users_state.peer_qr.backdrops.fail();
+                if let Some(pending) = pending {
+                    self.users_state.peer_qr.backdrops.fail(pending.id);
+                }
             }
             Some(RequestPurpose::Users(UsersPurpose::GetShareThemeGifts {
                 owner, serial, ..
@@ -98,7 +95,9 @@ impl Session {
                 self.users_state.peer_qr.fail_link(free, error_reason(err));
             }
             Some(RequestPurpose::GetBackgroundEmojiIcons) => {
-                self.users_state.background_emoji_icons_failed = true;
+                self.users_state
+                    .background_emoji_icons
+                    .fail(error_reason(err));
             }
             // B10: profile panel fetches keep the reason for a Retry row;
             // refused edits surface as a toast.
@@ -170,10 +169,11 @@ impl Session {
             }
             Some(RequestPurpose::AddContactByPhone) => {
                 let id = pending.map(|p| p.id);
-                if id.is_some() && self.users_state.new_contact_request == id {
-                    self.users_state.new_contact_request = None;
-                    self.users_state.new_contact_outcome =
-                        pending.map(|p| (p.id, NewContactOutcome::Failed(err.code)));
+                if let Some(id) = id
+                    && self.users_state.new_contact.sending() == Some(id)
+                {
+                    self.users_state.new_contact =
+                        NewContact::Done(id, NewContactOutcome::Failed(err.code));
                 }
             }
             Some(RequestPurpose::ClearImportedContacts) => {
@@ -187,7 +187,11 @@ impl Session {
         // Phase 6: a failed `getContacts` surfaces a retry in the
         // contacts tab instead of a stuck spinner.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetContacts) {
-            self.users_state.contacts_error = true;
+            self.users_state.contacts.failed(
+                pending.map(|p| p.id),
+                format!("error {}", err.code),
+                true,
+            );
         }
     }
 }

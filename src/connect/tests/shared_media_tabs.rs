@@ -40,7 +40,7 @@ fn opening_the_gallery_asks_for_counts_and_the_profile_tabs_of_a_user() {
             .ingest(copy_and_parse(json, &seq, &sink).unwrap())
             .unwrap();
     }
-    driver.session.open_chat = Some(ChatId(7));
+    driver.session.open = crate::state::OpenView::of(Some(ChatId(7)));
     let before = recorder.snapshot().len();
     assert!(driver.open_shared_media().unwrap());
     let sent = types_sent(&recorder)[before..].to_vec();
@@ -75,7 +75,7 @@ fn opening_the_gallery_asks_for_counts_and_the_profile_tabs_of_a_user() {
 
     // A group has no stories or gifts.
     driver.close_shared_media();
-    driver.session.open_chat = Some(ChatId(-5));
+    driver.session.open = crate::state::OpenView::of(Some(ChatId(-5)));
     let before = recorder.snapshot().len();
     assert!(driver.open_shared_media().unwrap());
     let sent = types_sent(&recorder)[before..].to_vec();
@@ -102,7 +102,7 @@ fn splitting_media_fetches_the_tab_it_moves_to() {
             .unwrap(),
         )
         .unwrap();
-    driver.session.open_chat = Some(ChatId(7));
+    driver.session.open = crate::state::OpenView::of(Some(ChatId(7)));
     driver.open_shared_media().unwrap();
     let before = recorder.snapshot().len();
     driver.set_shared_media_split(true).unwrap();
@@ -174,7 +174,7 @@ fn an_offline_playlist_page_fails_and_keeps_its_retry() {
             .media
             .playlists
             .get(&31)
-            .is_some_and(|p| p.error.is_some() && !p.loading)
+            .is_some_and(|p| p.error().is_some() && !p.loading())
     };
     assert!(failed(&driver), "the page shows the failure, not Loading");
     driver.retry_playlist(31);
@@ -184,7 +184,7 @@ fn an_offline_playlist_page_fails_and_keeps_its_retry() {
     let before = recorder.snapshot().len();
     driver.retry_playlist(31);
     assert_eq!(recorder.snapshot().len(), before + 1);
-    assert!(driver.session.media.playlists[&31].loading);
+    assert!(driver.session.media.playlists[&31].loading());
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -200,7 +200,7 @@ fn a_failed_stories_tab_ends_its_loading() {
     driver
         .ingest(copy_and_parse(chat, &seq, &sink).unwrap())
         .unwrap();
-    driver.session.open_chat = Some(ChatId(7));
+    driver.session.open = crate::state::OpenView::of(Some(ChatId(7)));
     driver.open_shared_media().unwrap();
     let request = sent_request(&recorder, "getChatPostedToChatPageStories");
     let failed = format!(
@@ -211,7 +211,7 @@ fn a_failed_stories_tab_ends_its_loading() {
         .ingest(copy_and_parse(&failed, &seq, &sink).unwrap())
         .unwrap();
     let tab = &driver.session.media.shared_media.tabs[SharedMediaTab::Stories.index()];
-    assert_eq!(tab.status, crate::state::SharedMediaTabStatus::Failed);
-    assert!(!tab.loading_more);
+    assert!(tab.status.is_failed());
+    assert!(!tab.loading_more());
     let _ = std::fs::remove_dir_all(dir);
 }

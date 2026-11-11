@@ -162,7 +162,7 @@ fn a_transfer_goes_only_to_the_contact_the_confirmation_names() {
     let manage = &p.0.session.payments.gifts_manage;
     assert!(manage.flow.is_none());
     assert_eq!(
-        manage.transferred,
+        manage.transferred().cloned(),
         Some(GiftTransferred {
             gift_name: "Plush Pepe #4".into(),
             recipient: "Maya".into(),
@@ -228,7 +228,7 @@ fn the_export_url_is_asked_only_from_the_password_box() {
     let manage = &p.0.session.payments.gifts_manage;
     assert!(manage.flow.is_none());
     assert_eq!(
-        manage.export_url.as_deref(),
+        manage.export_url(),
         Some("https://fragment.com/gift/PlushPepe-4?export=1")
     );
 }
@@ -268,7 +268,7 @@ fn fail_export_at(step: Step, message: &str, code: i32) -> Option<TransferStage>
         &mut p,
         json!({"@type": "error", "@extra": extra, "code": code, "message": message}),
     );
-    assert!(p.0.session.payments.gifts_manage.export_url.is_none());
+    assert!(p.0.session.payments.gifts_manage.export_url().is_none());
     let state = format!("{:?}", p.0.session.payments.gifts_manage);
     assert!(!state.contains(PASSWORD));
     stage(&p)
@@ -393,7 +393,7 @@ fn a_url_answer_to_the_probe_is_never_opened() {
             "url": "https://fragment.com/gift/PlushPepe-4?export=1"}),
     );
     let manage = &p.0.session.payments.gifts_manage;
-    assert!(manage.export_url.is_none());
+    assert!(manage.export_url().is_none());
     assert_eq!(stage(&p), Some(password_stage()));
 }
 
@@ -408,7 +408,7 @@ fn fail_probe(message: &str, has_password: Option<bool>) -> Option<TransferStage
     if let Some(has_password) = has_password {
         password_state(&mut p, has_password);
     }
-    assert!(p.0.session.payments.gifts_manage.export_url.is_none());
+    assert!(p.0.session.payments.gifts_manage.export_url().is_none());
     stage(&p)
 }
 
@@ -485,7 +485,7 @@ fn cancel_waits_for_the_transfer_and_the_answer_still_opens_the_chat() {
     feed(&mut p, json!({"@type": "ok", "@extra": extra.as_extra()}));
     let manage = &p.0.session.payments.gifts_manage;
     assert!(manage.flow.is_none());
-    let moved = manage.transferred.as_ref().expect("the toast and chat");
+    let moved = manage.transferred().expect("the toast and chat");
     assert_eq!((moved.user_id, moved.recipient.as_str()), (21, "Maya"));
 }
 
@@ -513,8 +513,8 @@ fn a_failed_transfer_returns_to_the_confirmation() {
         Some(TransferStage::ConfirmPeer { user_id: 21, error: Some(ref reason), .. })
             if reason.starts_with("Couldn't transfer the gift")
     ));
-    assert!(p.0.session.payments.hub.gifts_error.is_none());
-    assert!(!p.0.session.payments.hub.gift_mutating);
+    assert!(p.0.session.payments.hub.gift_notice.is_none());
+    assert!(!p.0.session.payments.hub.gifts_op.is_mutating());
 }
 
 /// 05-119: the answer of an export the user left (its picker closed, then
@@ -579,5 +579,5 @@ fn a_transfer_ok_leaves_a_different_open_flow_alone() {
     feed(&mut p, json!({"@type": "ok", "@extra": extra.as_extra()}));
     let manage = &p.0.session.payments.gifts_manage;
     assert!(matches!(manage.flow, Some(GiftFlow::Resale { .. })));
-    assert_eq!(manage.transferred, None);
+    assert_eq!(manage.transferred(), None);
 }

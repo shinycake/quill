@@ -100,17 +100,55 @@ struct Active {
     queued: Instant,
     /// Its play head.
     head: HeadId,
-    /// The sticker playing and when it was given (wall clock).
-    view: Option<(StickerView, Instant)>,
+    /// Waiting for its sticker, or the sticker playing and when it was
+    /// given (wall clock).
+    playback: Playback,
     seed: u64,
-    /// A Premium sticker's effect (`premium_sticker_effect`): placed around
-    /// the sticker, not an emoji.
-    premium: bool,
-    /// A message effect (`message_effect_play`): centred on the message's
-    /// effect badge.
-    message: Option<MessageEffectPlay>,
+    kind: EffectKind,
     /// How long a sticker that has not arrived is waited for.
     wait: Duration,
+}
+
+/// What an effect is: an emoji's, a Premium sticker's
+/// (`premium_sticker_effect`: placed around the sticker, not an emoji), or a
+/// message effect (`message_effect_play`: centred on the message's effect
+/// badge).
+enum EffectKind {
+    Emoji,
+    Premium,
+    Message(MessageEffectPlay),
+}
+
+/// An effect leaves `Waiting` when its sticker arrives and the chat has room;
+/// it ends when the sticker has played or the wait ran out.
+enum Playback {
+    Waiting,
+    Playing { view: StickerView, given: Instant },
+}
+
+impl Active {
+    fn is_premium(&self) -> bool {
+        matches!(self.kind, EffectKind::Premium)
+    }
+
+    fn is_message(&self) -> bool {
+        matches!(self.kind, EffectKind::Message(_))
+    }
+
+    fn is_emoji(&self) -> bool {
+        matches!(self.kind, EffectKind::Emoji)
+    }
+
+    fn started(&self) -> bool {
+        matches!(self.playback, Playback::Playing { .. })
+    }
+
+    fn playing(&self) -> Option<(&StickerView, Instant)> {
+        match &self.playback {
+            Playback::Playing { view, given } => Some((view, *given)),
+            Playback::Waiting => None,
+        }
+    }
 }
 
 struct Drawn {
@@ -206,7 +244,7 @@ pub(super) fn premium_playing(key: Key) -> bool {
         active
             .borrow()
             .iter()
-            .any(|a| a.premium && (a.effect.chat_id.0, a.effect.message_id.0) == key)
+            .any(|a| a.is_premium() && (a.effect.chat_id.0, a.effect.message_id.0) == key)
     })
 }
 
@@ -219,7 +257,7 @@ pub(super) fn message_effect_playing(key: Key) -> bool {
         active
             .borrow()
             .iter()
-            .any(|a| a.message.is_some() && (a.effect.chat_id.0, a.effect.message_id.0) == key)
+            .any(|a| a.is_message() && (a.effect.chat_id.0, a.effect.message_id.0) == key)
     })
 }
 
@@ -232,9 +270,9 @@ pub(crate) fn emoji_effects_on(key: Key) -> Vec<(EmojiEffect, bool)> {
         active
             .borrow()
             .iter()
-            .filter(|a| !a.premium && a.message.is_none())
+            .filter(|a| a.is_emoji())
             .filter(|a| (a.effect.chat_id.0, a.effect.message_id.0) == key)
-            .map(|a| (a.effect.clone(), a.view.is_some()))
+            .map(|a| (a.effect.clone(), a.started()))
             .collect()
     })
 }
@@ -252,9 +290,8 @@ pub(super) fn push_premium(effect: EmojiEffect, outgoing: bool, now: Instant) {
             effect,
             queued: now,
             head: next_head(),
-            view: None,
-            premium: true,
-            message: None,
+            playback: Playback::Waiting,
+            kind: EffectKind::Premium,
             wait: START_WAIT,
         });
     });
@@ -280,9 +317,8 @@ pub(super) fn push_message(
             effect,
             queued: now,
             head: next_head(),
-            view: None,
-            premium: false,
-            message: Some(MessageEffectPlay {
+            playback: Playback::Waiting,
+            kind: EffectKind::Message(MessageEffectPlay {
                 effect_id,
                 last: None,
                 missing: None,
@@ -302,7 +338,7 @@ fn follow_badges(chat: ChatId, now: Instant) {
             if a.effect.chat_id != chat {
                 continue;
             }
-            let Some(play) = a.message.as_mut() else {
+            let EffectKind::Message(play) = &mut a.kind else {
                 continue;
             };
             let key = (a.effect.chat_id.0, a.effect.message_id.0);
@@ -467,9 +503,9 @@ fn may_start(playing: &[(Duration, Duration)]) -> bool {
 
 /// The edge of `active`'s effect in points.
 fn effect_side(active: &Active) -> f32 {
-    if active.message.is_some() {
+    if active.is_message() {
         MESSAGE_EFFECT_SIDE
-    } else if active.premium {
+    } else if active.is_premium() {
         let key = (active.effect.chat_id.0, active.effect.message_id.0);
         premium_sticker_effect::anchor(key)
             .map(|sticker| premium_sticker_effect::effect_rect(sticker, active.outgoing).0)
@@ -617,9 +653,8 @@ impl QuillApp {
                         effect,
                         queued: started,
                         head: next_head(),
-                        view: None,
-                        premium: false,
-                        message: None,
+                        playback: Playback::Waiting,
+                        kind: EffectKind::Emoji,
                         wait: START_WAIT,
                     });
                 }
@@ -638,9 +673,9 @@ impl QuillApp {
                         key: (a.effect.chat_id.0, a.effect.message_id.0),
                         outgoing: a.outgoing,
                         seed: a.seed,
-                        premium: a.premium,
-                        message: a.message.is_some(),
-                        view: a.view.as_ref()?.0.clone(),
+                        premium: a.is_premium(),
+                        message: a.is_message(),
+                        view: a.playing()?.0.clone(),
                         painted: Cell::new(None),
                     })
                 })
@@ -660,7 +695,7 @@ impl QuillApp {
             let here = active.borrow();
             here.iter()
                 .filter(|a| a.effect.chat_id == open)
-                .all(|a| a.view.is_some())
+                .all(|a| a.started())
         });
         if every_one_drawn {
             let effects = drawn.clone();
@@ -709,7 +744,7 @@ impl QuillApp {
                 .borrow()
                 .iter()
                 .enumerate()
-                .filter(|(_, a)| a.view.is_none() && a.effect.chat_id == open)
+                .filter(|(_, a)| !a.started() && a.effect.chat_id == open)
                 .map(|(i, a)| (i, a.effect.sticker.file_id.0))
                 .collect()
         });
@@ -738,7 +773,7 @@ impl QuillApp {
                 let playing: Vec<(Duration, Duration)> = active
                     .iter()
                     .filter(|a| a.effect.chat_id == open)
-                    .filter_map(|a| a.view.as_ref())
+                    .filter_map(|a| a.playing())
                     .map(|(view, _)| progress(view))
                     .collect();
                 // `sticker_view` ran between collecting `index` and here; if
@@ -751,10 +786,10 @@ impl QuillApp {
                 {
                     // Plays once from its first frame, whatever the loop
                     // setting says.
-                    entry.view = Some((view, now));
+                    entry.playback = Playback::Playing { view, given: now };
                     // tdesktop `stickerClearLoopPlayed` as an interaction
                     // starts: the lone emoji under it plays along.
-                    if !entry.premium && entry.message.is_none() {
+                    if entry.is_emoji() {
                         replays.push((entry.effect.chat_id, entry.effect.message_id));
                     }
                     if entry.effect.incoming {
@@ -766,11 +801,16 @@ impl QuillApp {
                 if a.effect.chat_id != open {
                     return shown.contains(&a.effect.chat_id.0);
                 }
-                a.message
-                    .is_none_or(|play| play.missing.is_none_or(|at| badge_within_grace(now, at)))
-                    && match &a.view {
-                        Some((view, given)) => still_playing(view, *given, now),
-                        None => !sticker_wait_over(now, a.queued, a.wait),
+                let badge_ok = match &a.kind {
+                    EffectKind::Message(play) => {
+                        play.missing.is_none_or(|at| badge_within_grace(now, at))
+                    }
+                    EffectKind::Emoji | EffectKind::Premium => true,
+                };
+                badge_ok
+                    && match &a.playback {
+                        Playback::Playing { view, given } => still_playing(view, *given, now),
+                        Playback::Waiting => !sticker_wait_over(now, a.queued, a.wait),
                     }
             });
         });
@@ -888,8 +928,7 @@ mod tests {
                 thumb_file_id: None,
                 thumb_width: 0,
                 thumb_height: 0,
-                requires_premium: false,
-                premium_animation: None,
+                premium: None,
             },
             incoming: false,
         }

@@ -105,7 +105,7 @@ fn a_failed_page_resumes_on_the_tick_after_its_wait() {
     lists.answer(&main, FAILED);
     assert_eq!(lists.pages(), [], "no page while waiting");
     assert!(!lists.driver.active_stories_tick(Instant::now()));
-    let (at, wait) = lists.driver.session.stories.main_paging.retry.unwrap();
+    let (at, wait) = lists.driver.session.stories.main_paging.retry().unwrap();
     assert!(wait > Duration::ZERO);
     assert!(
         lists
@@ -116,7 +116,10 @@ fn a_failed_page_resumes_on_the_tick_after_its_wait() {
             .may_load(at)
     );
     // The wait is measured from the failure, so a tick past it sends.
-    lists.driver.session.stories.main_paging.retry = Some((Instant::now(), wait));
+    lists.driver.session.stories.main_paging = crate::state::ActiveStoriesPaging::Waiting {
+        until: Instant::now(),
+        wait,
+    };
     assert!(lists.driver.active_stories_tick(Instant::now()));
     assert_eq!(lists.pages()[0].0, "storyListMain");
     assert!(

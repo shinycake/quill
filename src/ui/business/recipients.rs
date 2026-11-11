@@ -44,18 +44,18 @@ impl QuillApp {
     pub(super) fn business_recipients(&self, target: Recipients) -> Option<&BusinessRecipients> {
         let d = self.dialogs.business_dialog.as_ref()?;
         match target {
-            Recipients::Greeting => d.greeting.as_ref().map(|g| &g.recipients),
-            Recipients::Away => d.away.as_ref().map(|a| &a.recipients),
-            Recipients::Bot => d.chatbot.as_ref().map(|b| &b.recipients),
+            Recipients::Greeting => d.screen.greeting().map(|g| &g.recipients),
+            Recipients::Away => d.screen.away().map(|a| &a.recipients),
+            Recipients::Bot => d.screen.chatbot().map(|b| &b.recipients),
         }
     }
 
     fn business_recipients_mut(&mut self, target: Recipients) -> Option<&mut BusinessRecipients> {
         let d = self.business_mut()?;
         match target {
-            Recipients::Greeting => d.greeting.as_mut().map(|g| &mut g.recipients),
-            Recipients::Away => d.away.as_mut().map(|a| &mut a.recipients),
-            Recipients::Bot => d.chatbot.as_mut().map(|b| &mut b.recipients),
+            Recipients::Greeting => d.screen.greeting_mut().map(|g| &mut g.recipients),
+            Recipients::Away => d.screen.away_mut().map(|a| &mut a.recipients),
+            Recipients::Bot => d.screen.chatbot_mut().map(|b| &mut b.recipients),
         }
     }
 
@@ -111,7 +111,7 @@ impl QuillApp {
         };
         let search = super::live_input(window, cx, tr(keys::Q_OPS_SEARCH));
         if let Some(d) = self.business_mut() {
-            d.picker = Some(PickerDraft {
+            d.screen.open_picker(PickerDraft {
                 target,
                 include,
                 chats,
@@ -128,7 +128,7 @@ impl QuillApp {
             .dialogs
             .business_dialog
             .as_ref()
-            .and_then(|d| d.picker.as_ref())
+            .and_then(|d| d.screen.picker())
         else {
             return true;
         };
@@ -141,7 +141,7 @@ impl QuillApp {
 
     /// Done in the picker: tdesktop's save rules, then back.
     pub(super) fn finish_business_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(picker) = self.business_mut().and_then(|d| d.picker.take()) else {
+        let Some(picker) = self.business_mut().and_then(|d| d.screen.take_picker()) else {
             return;
         };
         let target = picker.target;
@@ -153,7 +153,11 @@ impl QuillApp {
                 (_, false) => recipients.set_excluded(picker.chats),
             }
         }
-        let back = View::Picker.parent(Some(target));
+        let back = match target {
+            Recipients::Away => View::Away,
+            Recipients::Bot => View::Chatbots,
+            Recipients::Greeting => View::Greeting,
+        };
         self.business_go(back, window, cx);
     }
 
@@ -394,7 +398,7 @@ impl QuillApp {
             .dialogs
             .business_dialog
             .as_ref()
-            .and_then(|d| d.picker.as_ref())
+            .and_then(|d| d.screen.picker())
         else {
             return div();
         };
@@ -416,7 +420,7 @@ impl QuillApp {
                 .checked(chosen.types.has(kind))
                 .label(kind.label())
                 .on_click(cx.listener(move |this, &on: &bool, _, cx| {
-                    if let Some(p) = this.business_mut().and_then(|d| d.picker.as_mut()) {
+                    if let Some(p) = this.business_mut().and_then(|d| d.screen.picker_mut()) {
                         p.chats.types.set(kind, on);
                     }
                     cx.notify();
@@ -459,7 +463,7 @@ impl QuillApp {
                                 }
                                 let added = this
                                     .business_mut()
-                                    .and_then(|d| d.picker.as_mut())
+                                    .and_then(|d| d.screen.picker_mut())
                                     .is_some_and(|p| p.chats.toggle_chat(chat_id));
                                 if !added {
                                     this.business_error(

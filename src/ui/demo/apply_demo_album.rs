@@ -29,7 +29,7 @@ impl QuillApp {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        let Some(chat_id) = session.open_chat else {
+        let Some(chat_id) = session.open_chat_id() else {
             return;
         };
         let caption = quill::composer::strip_barrier(text.trim());
@@ -105,7 +105,7 @@ impl QuillApp {
         attachment: Option<&ComposerAttachment>,
         reply: Option<&ComposerReplyTo>,
     ) {
-        let Some(chat_id) = self.demo_session.as_ref().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = self.demo_session.as_ref().and_then(|s| s.open_chat_id()) else {
             return;
         };
         self.apply_demo_outgoing_to(chat_id, text, attachment, reply);
@@ -219,8 +219,8 @@ impl QuillApp {
         // In an open forum topic the message belongs to it, and TDLib then
         // reports the topic read up to it.
         let topic = session
-            .open_topic
-            .filter(|_| session.open_chat == Some(chat_id));
+            .open_forum_topic()
+            .filter(|_| session.open_chat_id() == Some(chat_id));
         let json = match topic {
             Some(topic) => json.replacen(
                 r#""is_outgoing":true,"#,
@@ -430,13 +430,16 @@ impl QuillApp {
             return;
         };
         let extra = session.request(RequestPurpose::ForwardMessages, Some(dest));
-        session.messages.in_flight_forward = Some(quill::state::ForwardFlight {
-            extra,
-            dest_chat_id: dest,
-            from_chat_id: draft.from_chat_id,
-            from_topic: draft.from_topic,
-            requested: draft.message_ids.len(),
-        });
+        session
+            .messages
+            .forwards
+            .begin(quill::state::ForwardFlight {
+                extra,
+                dest_chat_id: dest,
+                from_chat_id: draft.from_chat_id,
+                from_topic: draft.from_topic,
+                requested: draft.message_ids.len(),
+            });
         let origin_user = session
             .chats
             .get(&draft.from_chat_id.0)

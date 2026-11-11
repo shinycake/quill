@@ -38,14 +38,14 @@ impl QuillApp {
             .map(|attachment| attachment.path.clone())
             .filter(|path| {
                 let send_box = &self.composer_sends.reads;
-                !send_box.thumbnailing.contains_key(path) && !send_box.thumbnailed.contains(path)
+                send_box.thumbnails.is_unread(path)
             })
             .collect();
         for path in paths {
             let send_box = &mut self.composer_sends.reads;
             send_box.thumbnail_jobs += 1;
             let job = send_box.thumbnail_jobs;
-            send_box.thumbnailing.insert(path.clone(), job);
+            send_box.thumbnails.start(path.clone(), job);
             let source = path.clone();
             let worker = cx.background_spawn(async move { write_file_thumbnail(&source) });
             let timer = cx.background_executor().timer(GIVE_UP_AFTER);
@@ -83,10 +83,10 @@ impl QuillApp {
 
     /// Thumbnails of the open slot's tray files are still being made.
     pub(super) fn tray_thumbnails_pending(&self) -> bool {
-        let making = &self.composer_sends.reads.thumbnailing;
+        let making = &self.composer_sends.reads.thumbnails;
         self.pending_attachments()
             .iter()
-            .any(|attachment| making.contains_key(&attachment.path))
+            .any(|attachment| making.is_reading(&attachment.path))
     }
 }
 
@@ -94,12 +94,7 @@ impl super::send_box_state::TrayReads {
     /// End thumbnail job `job` for `path`: `false` when it is no longer
     /// the current one (given up on, superseded, or the batch cleared).
     fn settle_thumbnail(&mut self, path: &Path, job: u64) -> bool {
-        if self.thumbnailing.get(path) != Some(&job) {
-            return false;
-        }
-        self.thumbnailing.remove(path);
-        self.thumbnailed.insert(path.to_path_buf());
-        true
+        self.thumbnails.finish(path, job, ())
     }
 }
 

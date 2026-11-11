@@ -51,10 +51,10 @@ fn the_microphone_opens_on_a_worker_and_the_pump_picks_it_up() {
         "opened off the driver's thread"
     );
 
-    let answer = driver.call_audio.opening.take().unwrap().recv().unwrap();
+    let answer = driver.call_audio.take_opening().unwrap().recv().unwrap();
     let (worker, opening) = std::sync::mpsc::channel();
     worker.send(answer).unwrap();
-    driver.call_audio.opening = Some(opening);
+    driver.call_audio.set_opening(opening);
     driver.pump_call_audio(std::time::Instant::now()).unwrap();
     assert!(driver.call_audio.is_open(), "the pump took the source");
     let _ = std::fs::remove_dir_all(dir);
@@ -84,7 +84,11 @@ fn a_tap_opened_after_the_call_stopped_wanting_it_is_dropped() {
 
     driver.session.calls.active_group_call = Some(joined_unmuted_call(4242));
     driver.pump_call_audio(std::time::Instant::now()).unwrap();
-    assert_eq!(driver.call_audio.error, None, "nobody waits for that open");
+    assert_eq!(
+        driver.call_audio.error(),
+        None,
+        "nobody waits for that open"
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
 

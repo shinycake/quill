@@ -90,8 +90,8 @@ fn a_media_tab_on_an_empty_field_lists_that_kind_everywhere() {
     assert_eq!(search[0]["offset"], "");
     // No chat or public-chat lookups for an empty query.
     assert!(fx.requests("searchPublicChats").is_empty());
-    assert!(fx.driver.session.search.search.open);
-    assert!(!fx.driver.session.search.search.recents);
+    assert!(fx.driver.session.search.search.is_open());
+    assert!(!fx.driver.session.search.search.is_recents());
 }
 
 #[test]
@@ -129,7 +129,7 @@ fn going_back_to_chats_on_an_empty_field_asks_for_recents() {
     fx.open_tab(SearchTab::Voice);
     fx.open_tab(SearchTab::Chats);
     assert_eq!(fx.requests("searchRecentlyFoundChats").len(), before + 1);
-    assert!(fx.driver.session.search.search.recents);
+    assert!(fx.driver.session.search.search.is_recents());
 }
 
 #[test]
@@ -170,8 +170,8 @@ fn the_channels_tab_asks_for_recommendations_once() {
         r#""total_count":2,"chat_ids":[21,22]"#,
     );
     let tabs = &fx.driver.session.search.search.tabs;
-    assert_eq!(tabs.recommended, vec![ChatId(21), ChatId(22)]);
-    assert!(tabs.recommended_loaded && !tabs.recommended_loading);
+    assert_eq!(tabs.recommended.data(), Some(&vec![ChatId(21), ChatId(22)]));
+    assert!(!tabs.recommended.is_loading());
     fx.open_tab(SearchTab::Chats);
     fx.open_tab(SearchTab::Channels);
     assert_eq!(fx.requests("getRecommendedChats").len(), 1);
@@ -412,7 +412,12 @@ fn a_paid_search_is_refused_while_free_ones_remain() {
         "publicPostSearchLimits",
         r#""daily_free_query_count":5,"remaining_free_query_count":3,"next_free_query_in":0,"star_count":25,"is_current_query_free":true"#,
     );
-    assert!(fx.driver.search_public_posts_paid().unwrap().is_none());
+    assert!(
+        fx.driver
+            .search_public_posts_paid("dune", 25)
+            .unwrap()
+            .is_none()
+    );
     assert!(
         fx.requests("searchPublicPosts")
             .iter()
@@ -430,7 +435,7 @@ fn the_paid_search_sends_the_reported_price_only_when_called() {
         "foundPublicPosts",
         r#""next_offset":"","are_limits_exceeded":true,"messages":[]"#,
     );
-    assert!(fx.driver.session.search.search.public_limits_exceeded);
+    assert!(fx.driver.session.search.search.public_limits_exceeded());
     // Nothing paid went out on its own.
     assert!(
         fx.requests("searchPublicPosts")
@@ -438,7 +443,7 @@ fn the_paid_search_sends_the_reported_price_only_when_called() {
             .all(|request| request["star_count"] == 0)
     );
     // The explicit paid search carries the price and the same query.
-    let flight = fx.driver.search_public_posts_paid().unwrap();
+    let flight = fx.driver.search_public_posts_paid("dune", 25).unwrap();
     assert!(matches!(flight, Some(SearchFlight::PublicPosts(_))));
     let paid = fx.requests("searchPublicPosts").pop().unwrap();
     assert_eq!(paid["star_count"], 25);
@@ -453,7 +458,9 @@ fn a_paid_search_needs_a_plain_query_and_a_price() {
     fx.driver
         .search_hashtag("#dune", crate::search_filters::SearchScope::PublicPosts)
         .unwrap();
-    fx.driver.session.search.search.public_limits_exceeded = true;
+    let search = &mut fx.driver.session.search.search;
+    search.accept_messages(Vec::new(), false);
+    search.note_public_limits(true);
     fx.driver.session.search.search.tabs.limits = Some(crate::state::PublicPostLimits {
         daily_free: 5,
         remaining_free: 0,
@@ -462,7 +469,12 @@ fn a_paid_search_needs_a_plain_query_and_a_price() {
         current_query_free: false,
     });
     // A tag search is never paid.
-    assert!(fx.driver.search_public_posts_paid().unwrap().is_none());
+    assert!(
+        fx.driver
+            .search_public_posts_paid("#dune", 25)
+            .unwrap()
+            .is_none()
+    );
     assert!(
         fx.requests("searchPublicPosts")
             .iter()
@@ -531,7 +543,7 @@ fn a_calendar_day_with_no_media_keeps_the_box_open_with_a_note() {
     fx.driver.jump_to_date(19_000).unwrap();
     let search = &fx.driver.session.search;
     assert!(search.history_calendar.is_some());
-    assert!(search.date_jump_note.is_some());
+    assert!(search.date_jump_note().is_some());
     assert!(fx.requests("searchChatMessages").is_empty());
 }
 
@@ -569,4 +581,49 @@ fn the_quota_of_an_older_query_does_not_label_the_new_one() {
     let quota = fx.driver.session.search.search.tabs.limits.unwrap();
     assert_eq!(quota.star_count, 25);
     assert!(!quota.current_query_free);
+}
+
+/// The paid search spends what the box showed: another price or another
+/// query than the confirmed ones is another purchase and sends nothing;
+/// the one sent is `Paying` its request until the answer.
+#[test]
+fn a_paid_search_is_bound_to_the_confirmed_query_and_price() {
+    let mut fx = Fixture::new();
+    exceeded_posts_search(&mut fx);
+    fx.answer(
+        "searchPublicPosts",
+        "foundPublicPosts",
+        r#""next_offset":"","are_limits_exceeded":true,"messages":[]"#,
+    );
+    // TDLib reported 25; the box showed 10, or another query.
+    assert!(
+        fx.driver
+            .search_public_posts_paid("dune", 10)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        fx.driver
+            .search_public_posts_paid("arrakis", 25)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        fx.requests("searchPublicPosts")
+            .iter()
+            .all(|request| request["star_count"] == 0)
+    );
+    let flight = fx.driver.search_public_posts_paid("dune", 25).unwrap();
+    let Some(SearchFlight::PublicPosts(request)) = flight else {
+        panic!("the confirmed search goes out");
+    };
+    let search = &fx.driver.session.search.search;
+    assert_eq!(search.paying(), Some((request, 25)));
+    assert_eq!(search.status(), crate::state::SearchStatus::Searching);
+    fx.answer(
+        "searchPublicPosts",
+        "foundPublicPosts",
+        r#""next_offset":"","are_limits_exceeded":false,"messages":[]"#,
+    );
+    assert_eq!(fx.driver.session.search.search.paying(), None);
 }

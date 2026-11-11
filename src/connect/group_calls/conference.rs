@@ -18,9 +18,30 @@ use std::sync::Arc;
 /// (`CallEngine::rekey_group_call`). TDLib's group call ids are positive.
 pub(crate) const PENDING_CONFERENCE_KEY: i32 = -1;
 
+/// The engine key a conference call's instance is under.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum ConferenceKey {
+    /// The join is out and unanswered: the instance waits under
+    /// [`PENDING_CONFERENCE_KEY`], with its offer, until the answer names
+    /// the call.
+    Joining,
+    /// The call's own id.
+    Call(i32),
+}
+
+impl ConferenceKey {
+    /// The key the engine knows the instance by.
+    pub(crate) fn engine_key(self) -> i32 {
+        match self {
+            Self::Joining => PENDING_CONFERENCE_KEY,
+            Self::Call(id) => id,
+        }
+    }
+}
+
 /// A conference call's frame encryption and the engine key it is under.
 pub(crate) struct ConferenceCrypto {
-    pub(crate) key: i32,
+    pub(crate) key: ConferenceKey,
     pub(crate) crypto: Arc<GroupCallCrypto>,
 }
 
@@ -75,8 +96,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(call)
                 if matches!(call.state, CallState::Ready)
                     && call
-                        .ready
-                        .as_ref()
+                        .ready_params()
                         .is_some_and(|ready| ready.is_group_call_supported) =>
             {
                 ConferenceUpgrade {
@@ -189,7 +209,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let crypto = Arc::new(GroupCallCrypto::new(link));
         let extra = self.session.request(RequestPurpose::JoinConference, None);
         self.conference_crypto = Some(ConferenceCrypto {
-            key: PENDING_CONFERENCE_KEY,
+            key: ConferenceKey::Joining,
             crypto: crypto.clone(),
         });
         self.session.begin_conference(extra, origin, muted);
@@ -226,7 +246,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         send: OfferSend,
     ) {
         let crypto = match &self.conference_crypto {
-            Some(known) if known.key == group_call_id => known.crypto.clone(),
+            Some(known) if known.key == ConferenceKey::Call(group_call_id) => known.crypto.clone(),
             _ => {
                 let link = self
                     .sender
@@ -235,7 +255,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 let crypto = Arc::new(GroupCallCrypto::new(link));
                 crypto.bind(group_call_id);
                 self.conference_crypto = Some(ConferenceCrypto {
-                    key: group_call_id,
+                    key: ConferenceKey::Call(group_call_id),
                     crypto: crypto.clone(),
                 });
                 crypto
@@ -271,9 +291,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                     eprintln!("quill: conference call instance not renamed: {err}");
                 }
                 if let Some(known) = self.conference_crypto.as_mut()
-                    && known.key == PENDING_CONFERENCE_KEY
+                    && known.key == ConferenceKey::Joining
                 {
-                    known.key = group_call_id;
+                    known.key = ConferenceKey::Call(group_call_id);
                     known.crypto.bind(group_call_id);
                 }
             }
@@ -293,10 +313,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self
             .conference_crypto
             .as_ref()
-            .is_some_and(|known| known.key == group_call_id)
+            .is_some_and(|known| known.key == ConferenceKey::Call(group_call_id))
         {
             self.forget_conference_crypto();
         }
+    }
+
+    /// A join that did not reach a call (its offer failed): the session's
+    /// pending join and the driver's crypto, offer and instance go in one
+    /// step.
+    pub(crate) fn abandon_conference_join(&mut self) {
+        self.session.calls.pending_conference = None;
+        self.forget_conference_crypto();
     }
 
     /// Unbinds the crypto (waking every frame waiting on TDLib), then
@@ -304,10 +332,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub(super) fn forget_conference_crypto(&mut self) {
         if let Some(known) = self.conference_crypto.take() {
             known.crypto.unbind();
-            if known.key == PENDING_CONFERENCE_KEY {
-                self.drop_group_offers(PENDING_CONFERENCE_KEY);
+            if known.key == ConferenceKey::Joining {
+                let engine_key = known.key.engine_key();
+                self.drop_group_offers(engine_key);
                 if let Some(engine) = self.call_engine.as_deref_mut() {
-                    let _ = engine.leave_group_call(PENDING_CONFERENCE_KEY);
+                    let _ = engine.leave_group_call(engine_key);
                 }
             }
         }
@@ -380,7 +409,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .filter(|call| !call.invite_link.is_empty())
             .and_then(|call| {
-                let upgrade = call.conference.as_ref()?.upgrade.clone()?;
+                let upgrade = call.conference.as_ref()?.upgrade()?.clone();
                 Some((call.id, call.invite_link.clone(), upgrade))
             });
         let Some((group_call_id, invite_link, upgrade)) = ready else {
@@ -393,9 +422,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_mut()
             .and_then(|call| call.conference.as_mut())
         {
-            conference.upgrade = None;
-            conference.migrated_from = Some(upgrade.call_id);
-            conference.link_open = upgrade.share_link && upgrade.invite.is_empty();
+            let from = upgrade.call_id;
+            conference.stage = if upgrade.share_link && upgrade.invite.is_empty() {
+                crate::state::ConferenceStage::SharingLink { from }
+            } else {
+                crate::state::ConferenceStage::Upgraded { from }
+            };
         }
         let mut result = Ok(());
         let mut invites = ConferenceInviteResults::default();
@@ -443,7 +475,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.calls.add_people_search.query == query {
+        if self.session.calls.add_people_search.query() == query {
             return Ok(());
         }
         let mine = self

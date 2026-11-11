@@ -26,7 +26,7 @@ impl QuillApp {
         self.session().is_some_and(|session| {
             let media = &session.media.shared_media;
             media.playlist_user.is_some()
-                || (media.open
+                || (media.open()
                     && media.chat_id.is_some()
                     && media.tab_at(media.active_tab).is_some())
         })
@@ -34,7 +34,7 @@ impl QuillApp {
 
     pub(super) fn shared_media_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let shared = &self.session()?.media.shared_media;
-        if shared.playlist_user.is_none() && !shared.open {
+        if shared.playlist_user.is_none() && !shared.open() {
             return None;
         }
         self.shared_media_panel_body(cx)
@@ -50,7 +50,7 @@ impl QuillApp {
         if let Some(user_id) = session.media.shared_media.playlist_user {
             return Some(self.playlist_panel(user_id, cx));
         }
-        if !session.media.shared_media.open {
+        if !session.media.shared_media.open() {
             return None;
         }
         let chat_id = session.media.shared_media.chat_id?;
@@ -70,13 +70,13 @@ impl QuillApp {
         let active_tab = session.media.shared_media.active_tab;
         let visible_tabs = session.shared_media_visible_tabs();
         let tab = session.media.shared_media.tab_at(active_tab)?;
-        let status = tab.status;
+        let status = tab.status.clone();
         let total_count = tab.total_count;
         let searching = !tab.query.is_empty();
         // `error` stays an owned clone: the panel tree is boxed into
         // `AnyElement` (requires 'static), so borrowed `&str` children don't
         // compile here — same for the row labels below.
-        let error = tab.error.clone();
+        let error = tab.error().to_string();
 
         // Its width is the shell's (`shell_layout`).
         let mut panel = div()
@@ -132,11 +132,7 @@ impl QuillApp {
                 for tab_option in &visible_tabs {
                     let is_active = *tab_option == active_tab;
                     let name = tab_option.label_in(is_channel);
-                    let label = if is_active
-                        && !searching
-                        && total_count > 0
-                        && status == SharedMediaTabStatus::Ready
-                    {
+                    let label = if is_active && !searching && total_count > 0 && status.is_ready() {
                         format!("{name} · {total_count}")
                     } else {
                         name.to_string()
@@ -168,7 +164,7 @@ impl QuillApp {
                     ))
                     .into_any_element()
             }
-            SharedMediaTabStatus::Failed => {
+            SharedMediaTabStatus::Failed(_) => {
                 EmptyState::new("shared-media-failed", IconName::TriangleAlert)
                     .title(tr_with(
                         keys::Q_LEFTOVERS_COULD_NOT_LOAD_MEDIA,
@@ -192,12 +188,12 @@ impl QuillApp {
             SharedMediaTabStatus::Empty => {
                 self.shared_media_empty_state(active_tab, is_channel, cx)
             }
-            SharedMediaTabStatus::Ready
+            SharedMediaTabStatus::Ready { .. }
                 if matches!(active_tab, SharedMediaTab::Stories | SharedMediaTab::Gifts) =>
             {
                 self.shared_media_grid(active_tab, cx)
             }
-            SharedMediaTabStatus::Ready
+            SharedMediaTabStatus::Ready { .. }
                 if matches!(
                     active_tab,
                     SharedMediaTab::Media
@@ -208,7 +204,7 @@ impl QuillApp {
             {
                 self.shared_media_tile_grid(active_tab, cx)
             }
-            SharedMediaTabStatus::Ready => self.shared_media_ready_list(active_tab, cx),
+            SharedMediaTabStatus::Ready { .. } => self.shared_media_ready_list(active_tab, cx),
         };
         if let Some(bar) = self.shared_media_selection_bar(active_tab, cx) {
             panel = panel.child(bar);
@@ -244,7 +240,7 @@ impl QuillApp {
         let split = self.chat_prefs.profile_media_tabs_expanded;
         if let Some(live) = self.live.as_mut() {
             let gallery = &mut live.driver.session.media.shared_media;
-            if !gallery.open {
+            if !gallery.open() {
                 gallery.media_split = split;
             }
         }
@@ -266,7 +262,7 @@ impl QuillApp {
                 }
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            match session.open_chat {
+            match session.open_chat_id() {
                 Some(chat_id) => {
                     session.media.shared_media.open_for(chat_id);
                     self.set_note(StatusNote::silent(tr(keys::Q_OPS_SHARED_MEDIA)));

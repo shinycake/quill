@@ -98,7 +98,7 @@ pub(in crate::ui) fn seed_earn_bots(
     limits.can_withdraw_chat_revenue = true;
     limits.starref_join_allowed = true;
     limits.starref_setup_allowed = true;
-    limits.app_config_loaded = true;
+    limits.app_config.succeed(());
 }
 
 fn star_stats() -> StarRevenueStats {
@@ -151,7 +151,7 @@ pub(in crate::ui) fn seed_channel_monetization(
     );
     apply(session, sink, seq, &[full_info]);
     if let Some(chat) = session.chats.get_mut(&DEMO_CHANNEL) {
-        chat.my_member_status = Some(ChannelMemberStatus::Creator);
+        chat.assume_member_status(Some(ChannelMemberStatus::Creator));
     }
     let peer = EarnPeer::Chat(DEMO_CHANNEL);
     let mut page = EarnPage::new(peer, EarnScreen::Monetization);
@@ -296,8 +296,5 @@ pub(in crate::ui) fn open_join_box(session: &mut Session) {
 
 /// The link box of the joined program.
 pub(in crate::ui) fn open_link_box(session: &mut Session, recipient: EarnPeer) {
-    session.payments.earn.link_box = Some(LinkBox {
-        program: joined_program(),
-        recipient,
-    });
+    session.payments.earn.link_box = Some(LinkBox::new(joined_program(), recipient));
 }

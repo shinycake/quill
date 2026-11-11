@@ -21,10 +21,9 @@ use gpui_kit::*;
 use quill::calls::proxy::ProxyKind;
 use quill::lang::{keys, tr, tr_with};
 use quill::proxy::{
-    AUTO_SWITCH_TIMEOUTS, PingStatus, ProxyDraft, ProxyEntry, ProxyIssue, ProxyMode, kind_label,
-    parse_proxy_link, proxy_link_from_text,
+    AUTO_SWITCH_TIMEOUTS, LinkCheck, PingStatus, ProxyDraft, ProxyEntry, ProxyIssue, ProxyMode,
+    kind_label, parse_proxy_link, proxy_link_from_text,
 };
-use quill::state::LINK_PING_ID;
 use quill::telegram::envelope::ConnectionState;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -77,8 +76,6 @@ enum ProxySave {
 /// The "Proxy Server — Connect Proxy" confirmation for a proxy link.
 pub(crate) struct ProxyLinkBox {
     draft: ProxyDraft,
-    /// Showing the one-time "this exposes your IP" warning.
-    warn: bool,
 }
 
 /// Editor validation message (tdesktop highlights the bad field; Quill
@@ -536,7 +533,7 @@ impl QuillApp {
                 prefs.auto_switch_secs = secs;
             }
             // The clock restarts with the new settings.
-            driver.session.settings.proxy.disconnected_since_ms = None;
+            driver.session.settings.proxy.rotation = quill::proxy::Rotation::Watching;
             driver.save_proxy_prefs()
         });
         cx.notify();
@@ -551,15 +548,10 @@ impl QuillApp {
         };
         match parsed {
             Ok(draft) => {
-                self.settings.proxy.link = Some(ProxyLinkBox { draft, warn: false });
+                self.settings.proxy.link = Some(ProxyLinkBox { draft });
                 self.open_box(crate::ui::shell::DialogKind::ProxyLink);
                 if let Some(live) = self.live.as_mut() {
-                    live.driver
-                        .session
-                        .settings
-                        .proxy
-                        .pings
-                        .remove(&LINK_PING_ID);
+                    live.driver.session.settings.proxy.link_check = LinkCheck::Review;
                     let _ = live.driver.maybe_fetch_proxies();
                 }
             }
@@ -574,7 +566,16 @@ impl QuillApp {
 
     fn close_proxy_link(&mut self, cx: &mut Context<Self>) {
         self.settings.proxy.link = None;
+        self.reset_link_check();
         cx.notify();
+    }
+
+    /// The link box's stage goes back to `Review`: a check still in flight
+    /// no longer matches and is ignored.
+    fn reset_link_check(&mut self) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.settings.proxy.link_check = LinkCheck::Review;
+        }
     }
 
     /// "Connect Proxy": enable the listed proxy, or add and enable it.
@@ -582,6 +583,7 @@ impl QuillApp {
         let Some(link) = self.settings.proxy.link.take() else {
             return;
         };
+        self.reset_link_check();
         let existing = self.session().and_then(|s| {
             s.settings
                 .proxy
@@ -609,14 +611,18 @@ impl QuillApp {
 
     fn check_link_proxy(&mut self, cx: &mut Context<Self>) {
         let acked = self.settings.proxy.ip_warning_acked;
-        let Some(link) = self.settings.proxy.link.as_mut() else {
+        let Some(link) = self.settings.proxy.link.as_ref() else {
             return;
         };
-        link.warn = !acked;
         let draft = link.draft.clone();
-        if acked {
-            let _ = self.proxy_driver(|driver| driver.ping_link_proxy(&draft));
-        }
+        let _ = self.proxy_driver(|driver| {
+            if acked {
+                driver.session.settings.proxy.link_check = LinkCheck::Review;
+                let _ = driver.ping_link_proxy(&draft);
+            } else {
+                driver.session.settings.proxy.link_check = LinkCheck::Warn;
+            }
+        });
         cx.notify();
     }
 
@@ -875,8 +881,7 @@ impl QuillApp {
                     quill::proxy_web::WebRowState::for_entry(
                         entry.is_enabled,
                         connected,
-                        state.carrier_failed == Some(entry.id)
-                            || !state.can_enable(entry.proxy.kind),
+                        state.carriers.failed_for(entry.id) || !state.can_enable(entry.proxy.kind),
                     )
                 });
                 rows = rows.child(this.proxy_row(entry, ping, web, cx));

@@ -4,7 +4,7 @@
 //! caller acts when it resolves.
 use super::app::QuillApp;
 use super::image_decode::{DecodeError, DecodeSize, decode_file};
-use gpui_kit::{AppContext, Context};
+use gpui_kit::{AppContext, Context, Task};
 use std::path::PathBuf;
 
 impl QuillApp {
@@ -33,12 +33,23 @@ impl QuillApp {
         done: impl FnOnce(&mut Self, T, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) {
+        self.run_off_ui_held(work, done, cx).detach();
+    }
+
+    /// [`Self::run_off_ui_then`] for an owner that keeps the task: it
+    /// stops with the owner, and `done` does not run for an owner that
+    /// went away.
+    pub(super) fn run_off_ui_held<T: Send + 'static>(
+        &mut self,
+        work: impl FnOnce() -> T + Send + 'static,
+        done: impl FnOnce(&mut Self, T, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> Task<()> {
         let task = cx.background_spawn(async move { work() });
         self.spawn_screen(cx, async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| done(this, result, cx));
         })
-        .detach();
     }
 
     /// [`Self::run_off_ui_then`] for work whose result lands in the window

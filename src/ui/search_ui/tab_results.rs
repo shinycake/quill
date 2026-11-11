@@ -50,12 +50,14 @@ impl QuillApp {
         let tabs = &session.search.search.tabs;
         let recommended: Vec<(ChatId, String, String)> = tabs
             .recommended
-            .iter()
+            .data()
+            .into_iter()
+            .flatten()
             .filter(|id| !joined.iter().any(|chat| chat.id == **id))
             .filter_map(|id| session.chats.get(&id.0))
             .map(|chat| (chat.id, chat.title.clone(), chat.sidebar_preview()))
             .collect();
-        let loading = tabs.recommended_loading;
+        let loading = tabs.recommended.is_loading();
         let muted = cx.theme().muted_foreground;
         let section = |id: &'static str,
                        prefix: &'static str,
@@ -369,7 +371,7 @@ impl QuillApp {
     pub(super) fn posts_paid_block(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         let search = &session.search.search;
-        if !search.public_limits_exceeded || search.query.trim().is_empty() {
+        if !search.public_limits_exceeded() || search.query.trim().is_empty() {
             return None;
         }
         let muted = cx.theme().muted_foreground;
@@ -388,6 +390,7 @@ impl QuillApp {
             return None;
         }
         let unlock = limits.unlock_line();
+        let price = limits.star_count;
         Some(
             div()
                 .id("search-posts-paid")
@@ -402,8 +405,15 @@ impl QuillApp {
                         ))
                         .small()
                         .accessibility_label(tr(keys::Q_CHAT_SEARCH_PUBLIC_POSTS_WITH_STARS))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.set_search_prompt(Some(SearchConfirm::PaidPostSearch), cx);
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            let query = this
+                                .session()
+                                .map(|s| s.search.search.query.trim().to_string())
+                                .unwrap_or_default();
+                            this.set_search_prompt(
+                                Some(SearchConfirm::PaidPostSearch { query, price }),
+                                cx,
+                            );
                         })),
                 )
                 .children(unlock.map(|line| div().text_xs().text_color(muted).child(line)))
@@ -414,12 +424,17 @@ impl QuillApp {
     /// The confirmed paid search: the only request that spends Stars. Never
     /// for an agent driving the window (the sender refuses the request
     /// too, by its `star_count`).
-    pub(super) fn search_public_posts_paid_ui(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn search_public_posts_paid_ui(
+        &mut self,
+        query: &str,
+        price: i64,
+        cx: &mut Context<Self>,
+    ) {
         if quill::agent::ui_driver::guard::refuse_if_injecting("pay for a public post search") {
             return;
         }
         if let Some(live) = self.live.as_mut()
-            && live.driver.search_public_posts_paid().is_err()
+            && live.driver.search_public_posts_paid(query, price).is_err()
         {
             self.set_note(StatusNote::error(tr(
                 keys::Q_CHAT_COULD_NOT_SEARCH_PUBLIC_POSTS,

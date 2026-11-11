@@ -14,6 +14,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::super::app::QuillApp;
+use super::super::group_call_state::VideoChatCreate;
 use super::super::group_call_stream_layout::StreamJoinIntent;
 use super::super::scheduled::{TimePicker, new_date_time_picker, picked_unix};
 use super::super::shell::{DialogKind, QuillShell};
@@ -348,6 +349,7 @@ impl QuillApp {
         }
 
         let failed = std::mem::take(&mut session.calls.failed_creates);
+        let answered = std::mem::take(&mut session.calls.answered_creates);
         if abandoned {
             self.group_call_boxes.start_dialog = None;
             cx.notify();
@@ -355,15 +357,20 @@ impl QuillApp {
         if let Some(answer) = answer {
             self.accept_create_join_as(answer, window, cx);
         }
-        if let Some(request) = self.group_call_boxes.create_request
+        if let VideoChatCreate::Sent(request) = self.group_call_boxes.create
+            && answered.contains(&request)
+        {
+            self.group_call_boxes.create = VideoChatCreate::Idle;
+        }
+        if let VideoChatCreate::Sent(request) = self.group_call_boxes.create
             && failed.contains(&request)
         {
-            self.group_call_boxes.create_request = None;
+            self.group_call_boxes.create = VideoChatCreate::Idle;
             if matches!(
-                self.group_call_screen.stream_join,
+                self.group_call_screen.stream_wish(),
                 Some((StreamJoinIntent::Created { .. }, _))
             ) {
-                self.group_call_screen.stream_join = None;
+                self.group_call_screen.clear_stream_wish();
             }
             server_error_toast(window, cx);
             cx.notify();
@@ -416,7 +423,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.group_call_boxes.create_request = sent;
+        self.group_call_boxes.create = sent.map_or(VideoChatCreate::Idle, VideoChatCreate::Sent);
         match sent {
             None => server_error_toast(window, cx),
             Some(_) if join => self.note_stream_join_intent(StreamJoinIntent::Created {
@@ -458,7 +465,7 @@ impl QuillApp {
         } else {
             self.leave_active_group_call(cx);
         }
-        self.group_call_screen.stream_joining = None;
+        self.group_call_screen.clear_stream_joining();
     }
 
     /// The registered dialog: the step on screen.

@@ -55,8 +55,12 @@ impl Session {
                 } else if self.apply_web_app_users(&user_ids, pending) {
                     // Apps tab: `getGrossingWebAppBots`.
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetContacts) {
-                    self.users_state.contacts = Some(user_ids);
-                    self.users_state.contacts_error = false;
+                    // Only the fetch that waits for it takes the list: an
+                    // older one, answered after a change dropped the list,
+                    // would bring back what the change removed.
+                    self.users_state
+                        .contacts
+                        .answered(pending.map(|p| p.id), user_ids);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCloseFriends) {
                     // B14: `getCloseFriends` answer.
                     self.stories.close_friends = CloseFriendsList::Ready(user_ids);
@@ -130,7 +134,8 @@ impl Session {
                 ) {
                     self.apply_created_bot(user_id, pending);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSupportUser) {
-                    self.users_state.user_chat_to_open = Some(user_id);
+                    // The driver opens the support chat from the answer
+                    // itself (`ConnectDriver::ingest`).
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetChatOwnerAfterLeaving)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
@@ -142,11 +147,11 @@ impl Session {
                     && let Some(DeepLinkState::ResolvingChat {
                         action: DeepLinkAction::UserPhone { draft, .. },
                         generation: slot,
-                    }) = self.chats_state.deep_link.clone()
+                    }) = self.chats_state.deep_link_stage().cloned()
                     && slot == generation
                 {
                     // `searchUserByPhoneNumber` answer: open the private chat.
-                    self.chats_state.deep_link = Some(DeepLinkState::Info {
+                    self.chats_state.enter_deep_link_stage(DeepLinkState::Info {
                         text: String::new(),
                         need_update: false,
                         action: Some(DeepLinkAction::OpenUserDraft { user_id, draft }),
@@ -253,32 +258,35 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::AddContactByPhone) {
                     // tdesktop `AddContactBox::save`: a user id means the
                     // phone is on Telegram (open the chat), 0 means not.
-                    self.users_state.contacts = None;
-                    self.users_state.contacts_error = false;
+                    self.users_state.contacts = crate::state::fetch::Fetch::Idle;
                     // A box closed before its answer opens nothing.
-                    let id = pending.map(|p| p.id);
-                    if id.is_none() || self.users_state.new_contact_request != id {
+                    let Some(id) = pending.map(|p| p.id) else {
+                        return;
+                    };
+                    if self.users_state.new_contact.sending() != Some(id) {
                         return;
                     }
-                    self.users_state.new_contact_request = None;
                     let user_id = user_ids.first().copied().unwrap_or_default();
-                    let outcome = if user_id != 0 {
-                        self.users_state.user_chat_to_open = Some(user_id);
-                        NewContactOutcome::Joined(user_id)
+                    // A joined phone waits for the driver to open the chat;
+                    // the box is told once that is done.
+                    self.users_state.new_contact = if user_id != 0 {
+                        NewContact::Opening(id, user_id)
                     } else {
-                        NewContactOutcome::NotJoined
+                        NewContact::Done(id, NewContactOutcome::NotJoined)
                     };
-                    self.users_state.new_contact_outcome = pending.map(|p| (p.id, outcome));
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::ImportContacts) {
-                    self.users_state.contacts = None;
-                    self.users_state.contacts_error = false;
+                    self.users_state.contacts = crate::state::fetch::Fetch::Idle;
                     self.users_state.contacts_notice = Some("Contacts imported.".to_string());
                 }
             }
             UsersPayload::ProfileShareThemeBackdrops(backdrops) => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetProfileShareThemeBackdrops)
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::GetProfileShareThemeBackdrops
                 {
-                    self.users_state.peer_qr.backdrops.accept(backdrops);
+                    self.users_state
+                        .peer_qr
+                        .backdrops
+                        .accept(pending.id, backdrops);
                 }
             }
             UsersPayload::UserLink(answer) => {

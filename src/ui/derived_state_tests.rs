@@ -252,6 +252,10 @@ fn a_chat_that_leaves_the_list_drops_out_of_the_bulk_selection(cx: &mut TestAppC
         app.read_with(vcx, |app, _| app.selected_chat_ids().len()),
         2
     );
+    assert!(
+        !app.read_with(vcx, |app, _| app.chat_list.selected.contains(&9_999)),
+        "the list rebuild forgot the chat that left"
+    );
     assert!(app.read_with(vcx, |app, _| app.selecting_chats()));
     let rows = app.read_with(vcx, |app, _| app.rows_selecting());
     assert!(rows, "the drawn rows agree with the count");
@@ -340,7 +344,7 @@ fn sending_drops_a_reply_to_a_message_deleted_since_the_last_frame(cx: &mut Test
     let before = ids(&app, vcx);
     vcx.update(|window, cx| {
         app.update(cx, |app, cx| {
-            app.submit_composer("sounds good".into(), window, cx)
+            app.submit_composer("sounds good".into(), Default::default(), window, cx)
         })
     });
     assert!(
@@ -354,7 +358,11 @@ fn sending_drops_a_reply_to_a_message_deleted_since_the_last_frame(cx: &mut Test
                 h.messages
                     .iter()
                     .filter(|(id, _)| !before.contains(id))
-                    .filter(|(_, m)| m.reply_to.as_ref().is_some_and(|r| r.message_id == REPLIED))
+                    .filter(|(_, m)| {
+                        m.reply_to
+                            .as_ref()
+                            .is_some_and(|r| r.message_id() == REPLIED)
+                    })
                     .count()
             })
             .unwrap_or_default()
@@ -378,7 +386,7 @@ fn submitting_an_edit_of_a_deleted_message_sends_nothing(cx: &mut TestAppContext
     let before = history_len(&app, vcx);
     vcx.update(|window, cx| {
         app.update(cx, |app, cx| {
-            app.submit_composer("new words".into(), window, cx)
+            app.submit_composer("new words".into(), Default::default(), window, cx)
         })
     });
     assert!(app.read_with(vcx, |app, _| !app.chat_ui.is_editing()));

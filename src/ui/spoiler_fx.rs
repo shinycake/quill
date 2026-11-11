@@ -562,11 +562,11 @@ pub(super) enum MediaCover {
 pub(super) fn media_cover(
     content: &quill::telegram::envelope::MessageContent,
     key: RevealKey,
-    revealed: &std::collections::HashSet<RevealKey>,
+    revealed: &crate::ui::message_text::revealed::Revealed,
 ) -> Option<MediaCover> {
     if !quill::media_spoiler::has_media_spoiler(content) {
         None
-    } else if revealed.contains(&key) {
+    } else if revealed.spoiler_shown(&key) {
         reveal_fade(key).map(MediaCover::Fading)
     } else {
         Some(MediaCover::Covered)

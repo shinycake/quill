@@ -17,7 +17,7 @@
 use crate::bubble_layout::LARGE_EMOJI_SIZE;
 use crate::telegram::envelope::TextContent;
 use crate::text::TextEntityKind;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// A message: chat id and message id.
 pub type MessageKey = (i64, i64);
@@ -164,74 +164,101 @@ pub enum EmojiPlay {
     Rest,
 }
 
+/// Where one emoji's play stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlayState {
+    /// It played; its view rests on the first frame.
+    Played,
+    /// A replay was asked for and has not started yet.
+    Replaying,
+}
+
+/// One emoji's plays: the one its view is on (0, plus one for each tap and
+/// each interaction effect since the chat opened) and where it stands.
+#[derive(Debug, Clone, Copy)]
+struct Play {
+    generation: u32,
+    state: PlayState,
+}
+
 /// The lone animated emoji played in the open chat (tdesktop
 /// `HistoryInner::_animatedStickersPlayed`) and the replays taps asked for.
 #[derive(Debug, Default)]
 pub struct EmojiPlays {
-    played: HashSet<MessageKey>,
-    /// Taps (and the other side's taps) since the chat opened.
-    generations: HashMap<MessageKey, u32>,
-    /// Replays asked for and not started yet.
-    replays: HashSet<MessageKey>,
+    plays: HashMap<MessageKey, Play>,
 }
 
 impl EmojiPlays {
     /// The play of `key` its view is on: 0, plus one for each replay.
     pub fn generation(&self, key: MessageKey) -> u32 {
-        self.generations.get(&key).copied().unwrap_or(0)
+        self.plays.get(&key).map_or(0, |play| play.generation)
     }
 
     /// What the view of `key` does; `head_alive`: the head of its current
     /// generation is still known to the player (it may be mid-play).
     pub fn play(&self, key: MessageKey, head_alive: bool) -> EmojiPlay {
         let generation = self.generation(key);
-        if head_alive || !self.played.contains(&key) || self.replays.contains(&key) {
+        let resting = matches!(
+            self.plays.get(&key),
+            Some(Play {
+                state: PlayState::Played,
+                ..
+            })
+        );
+        if head_alive || !resting {
             EmojiPlay::Play { generation }
         } else {
             EmojiPlay::Rest
         }
     }
 
+    /// Room for `key`: past [`MAX_PLAYED`] the record starts over.
+    fn make_room(&mut self, key: MessageKey) {
+        if self.plays.len() >= MAX_PLAYED && !self.plays.contains_key(&key) {
+            self.plays.clear();
+        }
+    }
+
     /// The view of `key` showed its first frame: it counts as played.
     pub fn started(&mut self, key: MessageKey) {
-        self.replays.remove(&key);
-        if self.played.len() >= MAX_PLAYED && !self.played.contains(&key) {
-            self.played.clear();
-        }
-        self.played.insert(key);
+        self.make_room(key);
+        self.plays
+            .entry(key)
+            .and_modify(|play| play.state = PlayState::Played)
+            .or_insert(Play {
+                generation: 0,
+                state: PlayState::Played,
+            });
     }
 
     /// Whether `key` played since the chat opened.
     pub fn has_played(&self, key: MessageKey) -> bool {
-        self.played.contains(&key)
+        self.plays.contains_key(&key)
     }
 
     /// A tap, or an interaction effect starting on it: play `key` again
     /// from the start.
     pub fn replay(&mut self, key: MessageKey) {
-        if self.generations.len() >= MAX_PLAYED && !self.generations.contains_key(&key) {
-            self.generations.clear();
-        }
-        let generation = self.generations.entry(key).or_insert(0);
-        *generation = generation.wrapping_add(1);
-        self.replays.insert(key);
+        self.make_room(key);
+        let play = self.plays.entry(key).or_insert(Play {
+            generation: 0,
+            state: PlayState::Replaying,
+        });
+        play.generation = play.generation.wrapping_add(1);
+        play.state = PlayState::Replaying;
     }
 
     /// `chat` was left: its emoji play again next time it shows (tdesktop
     /// `stickerClearLoopPlayed` when its `HistoryInner` goes). Those of
     /// chats other windows show stay as they are.
     pub fn leave_chat(&mut self, chat: i64) {
-        self.played.retain(|key| key.0 != chat);
-        self.generations.retain(|key, _| key.0 != chat);
-        self.replays.retain(|key| key.0 != chat);
+        self.plays.retain(|key, _| key.0 != chat);
     }
 
     /// Every chat was left (another account, the loop setting changed):
     /// everything plays again.
     pub fn clear(&mut self) {
-        self.played.clear();
-        self.generations.clear();
-        self.replays.clear();
+        self.plays.clear();
     }
 }
 

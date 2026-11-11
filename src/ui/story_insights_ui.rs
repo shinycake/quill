@@ -12,8 +12,8 @@ use super::chat_theme::{accent, bg_canvas, border, danger, text_menu, text_muted
 use super::scroll_load::{load_due, loading_row, scrolled_near_end, watch_scroll};
 use super::statistics::format_stat_count;
 use super::statistics_graph::stat_graph_block;
-use super::stories_state::ViewerPanel;
 use crate::ui::status_note::StatusNote;
+use crate::ui::stories_state::{PanelKind, ViewerPanel};
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -35,11 +35,9 @@ impl QuillApp {
             return;
         };
         if let Some(open) = self.stories.viewer_ui_mut() {
-            open.stats_open = !open.stats_open;
+            open.toggle(PanelKind::Stats, ViewerPanel::Stats);
         }
-        if self.stories.viewer_ui().stats_open {
-            self.stories
-                .with_viewer_ui(|open| open.close_other_panels(ViewerPanel::Stats));
+        if self.stories.viewer_ui().is_open(PanelKind::Stats) {
             self.fetch_story_stats(&item.chat_id, item.story_id, cx);
         }
         cx.notify();
@@ -87,7 +85,7 @@ impl QuillApp {
         else {
             return;
         };
-        if !self.stories.viewer_ui().stats_open
+        if !self.stories.viewer_ui().is_open(PanelKind::Stats)
             || (state.forwards_error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.stories.stats_scroll),
@@ -674,7 +672,7 @@ impl QuillApp {
     /// Rows of the open reply thread's info card.
     pub(super) fn thread_info_card(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let thread = session.thread_for_chat(session.open_chat?)?;
+        let thread = session.thread_for_chat(session.open_chat_id()?)?;
         let root = thread.root_message();
         let started_by = root
             .and_then(|m| m.sender.as_ref())

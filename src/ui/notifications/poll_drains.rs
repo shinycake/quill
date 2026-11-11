@@ -21,7 +21,7 @@ impl QuillApp {
         if let Some(result) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.messages.last_forward.take())
+            .and_then(|live| live.driver.session.messages.forwards.take_result())
         {
             self.present_forward_answer(result, cx);
             progressed = true;
@@ -32,20 +32,16 @@ impl QuillApp {
         // M1: a `messageLink` response lands here (`getMessageLink`) —
         // copy the link to the clipboard, exactly like tdesktop's "Copy
         // Message Link".
-        if let Some(link) = self
+        if let Some(answer) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.messages.message_link_result.take())
+            .and_then(|live| live.driver.session.messages.message_link.take())
         {
-            cx.write_to_clipboard(ClipboardItem::new_string(link));
+            cx.write_to_clipboard(ClipboardItem::new_string(answer.link));
             // Telegram Desktop `CopyPostLink`: a public link says so; a
             // private one warns that only members can open it.
-            let public = self
-                .live
-                .as_ref()
-                .is_some_and(|live| live.driver.session.messages.message_link_public);
             self.set_note(StatusNote::info(quill::message_menu::link_copied_note(
-                public,
+                answer.is_public,
             )));
             progressed = true;
         }
@@ -365,6 +361,7 @@ impl QuillApp {
             | self.drain_public_link_freed(cx)
             | self.drain_show_or_premium(cx)
             | self.drain_language(cx)
+            | self.drain_bot_create(cx)
             | self.drain_peer_qr(cx)
             | self.drain_story_stealth(cx)
             | self.drain_communities(cx)

@@ -76,7 +76,7 @@ pub(super) fn sponsored_message_row(
     files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &crate::ui::message_text::revealed::Revealed,
     // Settings → Appearance: font size + bubble/plain style.
     look: BubbleLook,
     cx: &mut Context<QuillApp>,
@@ -330,7 +330,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         let ad = spot
             .card
             .then(|| session.sponsored_message(chat_id, spot.ad_id).cloned())
@@ -338,12 +338,14 @@ impl QuillApp {
         let report = session
             .messages
             .sponsored_report
-            .clone()
+            .flight()
+            .cloned()
             .filter(|flight| spot.report && flight.chat_id == chat_id);
         let outcome = session
             .messages
-            .last_sponsored_report
-            .clone()
+            .sponsored_report
+            .outcome()
+            .cloned()
             .filter(|outcome| spot.outcome && outcome.chat_id == chat_id);
         if ad.is_none() && report.is_none() && outcome.is_none() {
             return None;
@@ -420,7 +422,7 @@ impl QuillApp {
                 files,
                 downloading,
                 &media_roots,
-                &self.message_ui.spoiler_revealed,
+                &self.message_ui.revealed,
                 look,
                 cx,
             );
@@ -437,7 +439,7 @@ impl QuillApp {
         if !window_active || shown.is_empty() {
             return;
         }
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|s| s.open_chat_id()) else {
             return;
         };
         // Painted in another chat (it changed between the paint and this
@@ -581,7 +583,7 @@ impl QuillApp {
     pub(super) fn pick_sponsored_report_option(&mut self, option_id: &str, cx: &mut Context<Self>) {
         let Some(flight) = self
             .session()
-            .and_then(|s| s.messages.sponsored_report.clone())
+            .and_then(|s| s.messages.sponsored_report.flight().cloned())
         else {
             return;
         };

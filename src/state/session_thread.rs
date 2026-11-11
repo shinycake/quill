@@ -8,8 +8,8 @@ impl Session {
     pub fn begin_thread(&mut self, chat_id: ChatId, message_id: MessageId) {
         let mut view = ThreadView::resolving(chat_id, message_id);
         // A thread opened from inside a forum topic keeps that topic.
-        if self.open_chat == Some(chat_id) && self.chat_has_topics(chat_id) {
-            view.forum_topic_id = self.open_topic;
+        if self.open_chat_id() == Some(chat_id) && self.chat_has_topics(chat_id) {
+            view.forum_topic_id = self.open_forum_topic();
         }
         self.threads.thread = Some(view);
         self.view_generation.bump();
@@ -36,7 +36,7 @@ impl Session {
         self.threads.thread.as_ref().is_some_and(|thread| {
             matches!(thread.status, ThreadStatus::Failed(_))
                 || self
-                    .open_chat
+                    .open_chat_id()
                     .and_then(|chat| self.thread_for_chat(chat))
                     .is_none()
         })
@@ -68,7 +68,7 @@ impl Session {
         for message in &info.messages {
             self.remember_files(&message.files);
         }
-        let open_chat = self.open_chat;
+        let open_chat = self.open_chat_id();
         let Some(thread) = self.threads.thread.as_mut() else {
             return;
         };
@@ -100,8 +100,11 @@ impl Session {
         thread.unread_anchor = (thread.unread_count > 0).then_some(MessageId(
             thread.last_read_inbox_message_id.max(thread.thread_id),
         ));
-        thread.status = ThreadStatus::LoadingHistory;
-        thread.needs_chat_switch = open_chat != Some(info.chat_id);
+        thread.status = if open_chat != Some(info.chat_id) {
+            ThreadStatus::SwitchingChat
+        } else {
+            ThreadStatus::Starting
+        };
         let rows: Vec<HistoryMessage> = info
             .messages
             .into_iter()
@@ -166,14 +169,14 @@ impl Session {
             // The newer side: an empty page says the window reached the
             // newest reply whatever the server reported before.
             if added == 0 {
-                thread.history.has_newer = false;
+                thread.history.newer_exists(false);
             } else {
                 thread.refresh_has_newer();
             }
         } else {
-            thread.history.older = OlderEnd::Open;
+            thread.history.reopen_older();
             if empty || added == 0 || reached_root || oldest_reply.is_none() {
-                thread.history.loaded_complete = true;
+                thread.history.mark_complete();
             }
             if let Some(oldest) = oldest_reply {
                 thread.history.next_from_message_id = MessageId(oldest);
@@ -189,7 +192,7 @@ impl Session {
         };
         let trimmed = thread.trim_after_page(far_end) > 0;
         thread.history.total_count = thread.history.messages.len() as i32;
-        if thread.status == ThreadStatus::LoadingHistory {
+        if thread.status.is_opening() {
             thread.status = ThreadStatus::Ready;
         }
         if trimmed {
@@ -223,11 +226,11 @@ impl Session {
             return;
         }
         if newer {
-            thread.history.newer_failed = true;
-        } else if thread.status != ThreadStatus::Ready {
+            thread.history.fail_newer();
+        } else if !thread.status.is_loaded() {
             thread.status = ThreadStatus::Failed(line);
         } else {
-            thread.history.older = OlderEnd::Failed;
+            thread.history.fail_older();
         }
     }
 
@@ -384,10 +387,7 @@ impl Session {
     /// reported rows is read.
     pub(crate) fn prepare_thread_marks(&mut self, chat_id: ChatId) {
         let history = self.histories.entry(chat_id.0).or_default();
-        history.viewed.clear();
-        history.viewing.clear();
-        history.visible.clear();
-        history.visible_reported = true;
+        history.views.restart_reported();
         history.end_unread_open();
     }
 }

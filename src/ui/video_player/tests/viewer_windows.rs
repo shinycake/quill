@@ -86,8 +86,13 @@ fn chat_window_with_clip(
             &app.demo_ui.seq,
         );
         session.media.files.update(CLIP_FILE, |file| {
-            file.local.is_downloading_completed = local;
-            file.local.is_downloading_active = false;
+            file.local = quill::telegram::envelope::LocalFileState::from_parts(
+                file.local.path().to_string(),
+                file.local.can_be_downloaded(),
+                false,
+                local,
+                file.local.downloaded_size(),
+            );
         });
         if let Some(chat) = session.chats.get_mut(&CHAT.0) {
             chat.unread_count = 0;
@@ -143,7 +148,10 @@ fn a_chat_windows_hold_ends_when_it_goes_to_the_background(cx: &mut TestAppConte
     };
     app.update(vcx, |app, cx| {
         app.in_window_scope(Some(CHAT), cx, |app, cx| {
-            assert!(app.viewer.player.is_some(), "the clip plays in its window");
+            assert!(
+                app.viewer.clip.player().is_some(),
+                "the clip plays in its window"
+            );
             let now = cx.background_executor().now();
             let _ = app.viewer.controls.boost.press(now);
             let later = now + Duration::from_millis(quill::media_viewer::SPEED_BOOST_HOLD_MS + 50);
@@ -202,7 +210,7 @@ fn the_main_viewer_playing_leaves_a_chat_windows_parked_clip(cx: &mut TestAppCon
     });
     settle(vcx);
     assert!(
-        app.read_with(vcx, |app, _| app.viewer.player.is_some()),
+        app.read_with(vcx, |app, _| app.viewer.clip.player().is_some()),
         "the main window's GIF plays"
     );
     assert_eq!(

@@ -678,14 +678,11 @@ fn reading_a_chat_withdraws_its_shown_notification() {
     // The UI shows the toast and drains the queue.
     session.settings.pending_notifications.clear();
     apply_json(&mut session, &seq, &sink, READ_ALL);
-    assert_eq!(
-        session.settings.pending_notification_clears,
-        vec![ChatId(14)]
-    );
+    assert_eq!(session.settings.notified.clears_due(), vec![ChatId(14)]);
     // Nothing is cleared twice.
-    session.settings.pending_notification_clears.clear();
+    session.settings.notified.take_clears();
     apply_json(&mut session, &seq, &sink, READ_ALL);
-    assert!(session.settings.pending_notification_clears.is_empty());
+    assert!(session.settings.notified.clears_due().is_empty());
 }
 
 #[test]
@@ -713,7 +710,7 @@ fn a_partial_read_keeps_the_notification() {
         &sink,
         r#"{"@type":"updateChatReadInbox","chat_id":14,"last_read_inbox_message_id":40,"unread_count":2}"#,
     );
-    assert!(session.settings.pending_notification_clears.is_empty());
+    assert!(session.settings.notified.clears_due().is_empty());
 }
 
 #[test]
@@ -731,17 +728,14 @@ fn an_emptied_notification_group_withdraws_the_toast() {
         &sink,
         r#"{"@type":"updateNotificationGroup","notification_group_id":1,"type":{"@type":"notificationGroupTypeMessages"},"chat_id":14,"notification_settings_chat_id":14,"notification_sound_id":"0","total_count":1,"added_notifications":[],"removed_notification_ids":[5]}"#,
     );
-    assert!(session.settings.pending_notification_clears.is_empty());
+    assert!(session.settings.notified.clears_due().is_empty());
     apply_json(
         &mut session,
         &seq,
         &sink,
         r#"{"@type":"updateNotificationGroup","notification_group_id":1,"type":{"@type":"notificationGroupTypeMessages"},"chat_id":14,"notification_settings_chat_id":14,"notification_sound_id":"0","total_count":0,"added_notifications":[],"removed_notification_ids":[6]}"#,
     );
-    assert_eq!(
-        session.settings.pending_notification_clears,
-        vec![ChatId(14)]
-    );
+    assert_eq!(session.settings.notified.clears_due(), vec![ChatId(14)]);
 }
 
 #[test]
@@ -755,23 +749,10 @@ fn active_notifications_from_a_previous_launch_can_be_cleared() {
         &sink,
         r#"{"@type":"updateActiveNotifications","groups":[{"@type":"notificationGroup","id":1,"type":{"@type":"notificationGroupTypeMessages"},"chat_id":14,"total_count":2,"notifications":[]},{"@type":"notificationGroup","id":2,"type":{"@type":"notificationGroupTypeMessages"},"chat_id":15,"total_count":0,"notifications":[]}]}"#,
     );
-    assert!(
-        session
-            .settings
-            .shown_notification_chats
-            .contains(&ChatId(14))
-    );
-    assert!(
-        !session
-            .settings
-            .shown_notification_chats
-            .contains(&ChatId(15))
-    );
+    assert!(session.settings.notified.is_shown(ChatId(14)));
+    assert!(!session.settings.notified.is_shown(ChatId(15)));
     apply_json(&mut session, &seq, &sink, READ_ALL);
-    assert_eq!(
-        session.settings.pending_notification_clears,
-        vec![ChatId(14)]
-    );
+    assert_eq!(session.settings.notified.clears_due(), vec![ChatId(14)]);
 }
 
 const REACTION_SETTINGS_ALL: &str = r#"{"@type":"updateReactionNotificationSettings","notification_settings":{"@type":"reactionNotificationSettings","message_reaction_source":{"@type":"reactionNotificationSourceAll"},"story_reaction_source":{"@type":"reactionNotificationSourceNone"},"poll_vote_source":{"@type":"reactionNotificationSourceNone"},"sound_id":"-1","show_preview":true}}"#;
@@ -846,7 +827,7 @@ fn default_auto_delete_roundtrip_and_failure() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetDefaultAutoDelete, None);
-    session.settings.default_auto_delete_busy = true;
+    session.settings.default_auto_delete.begin();
     apply_json(
         &mut session,
         &seq,
@@ -856,27 +837,33 @@ fn default_auto_delete_roundtrip_and_failure() {
             extra.0
         ),
     );
-    assert_eq!(session.settings.default_auto_delete_secs, Some(604_800));
-    assert!(!session.settings.default_auto_delete_busy);
+    assert_eq!(
+        session.settings.default_auto_delete.data().copied(),
+        Some(604_800)
+    );
+    assert!(!session.settings.default_auto_delete.is_loading());
 
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds: 86_400 }),
         None,
     );
-    session.settings.default_auto_delete_busy = true;
+    session.settings.default_auto_delete.begin();
     apply_json(
         &mut session,
         &seq,
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert_eq!(session.settings.default_auto_delete_secs, Some(86_400));
+    assert_eq!(
+        session.settings.default_auto_delete.data().copied(),
+        Some(86_400)
+    );
 
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds: 0 }),
         None,
     );
-    session.settings.default_auto_delete_busy = true;
+    session.settings.default_auto_delete.begin();
     apply_json(
         &mut session,
         &seq,
@@ -887,12 +874,12 @@ fn default_auto_delete_roundtrip_and_failure() {
         ),
     );
     assert_eq!(
-        session.settings.default_auto_delete_secs,
+        session.settings.default_auto_delete.data().copied(),
         Some(86_400),
         "a refusal keeps the old value"
     );
-    assert!(session.settings.default_auto_delete_error.is_some());
-    assert!(!session.settings.default_auto_delete_busy);
+    assert!(session.settings.default_auto_delete.error().is_some());
+    assert!(!session.settings.default_auto_delete.is_loading());
 }
 
 #[test]

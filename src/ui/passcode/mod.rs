@@ -108,8 +108,9 @@ pub(crate) struct PasscodeUi {
     /// it is still the account on screen, so a switch under the lock (the
     /// lock card's Answer) needs no hand clear.
     pub(crate) connect_at_unlock: Option<quill::ids::AccountKey>,
-    /// Offer the system prompt as soon as the lock screen shows.
-    suggest_system_unlock: bool,
+    /// The lock screen's extra: the system prompt to offer, or the Log
+    /// out confirmation.
+    pub(crate) screen: lock_screen::LockScreen,
     pub(crate) open: bool,
     pub(crate) view: PasscodeView,
     pub(crate) old: Entity<InputState>,
@@ -124,7 +125,6 @@ pub(crate) struct PasscodeUi {
     pub(crate) job: PasscodeJob,
     pub(crate) autolock_secs: u32,
     pub(crate) system_unlock: bool,
-    pub(crate) logout_confirm: bool,
     shake_started: Option<Instant>,
     idle: IdleTracker,
     /// Master key kept while locked so Touch ID can unlock again without the
@@ -195,7 +195,7 @@ impl PasscodeUi {
             } else {
                 None
             },
-            suggest_system_unlock: false,
+            screen: lock_screen::LockScreen::Entry,
             open: false,
             view: PasscodeView::Status,
             old,
@@ -210,7 +210,6 @@ impl PasscodeUi {
                 .as_ref()
                 .map_or(passcode::DEFAULT_AUTOLOCK_SECS, |c| c.autolock_secs),
             system_unlock: config.as_ref().is_some_and(|c| c.system_unlock),
-            logout_confirm: false,
             shake_started: None,
             idle: IdleTracker::default(),
             system_unlock_key: None,
@@ -596,10 +595,9 @@ impl QuillApp {
         state.clear();
         self.set_locked(true, cx);
         self.reset_lock_fields();
-        self.account.passcode.suggest_system_unlock =
-            self.account.passcode.system_unlock_key.is_some();
+        self.account.passcode.screen =
+            lock_screen::LockScreen::on_locked(self.account.passcode.system_unlock_key.is_some());
         self.account.passcode.lock_error = Default::default();
-        self.account.passcode.logout_confirm = false;
         self.close_for_lock(cx);
         cx.notify();
     }
@@ -607,7 +605,7 @@ impl QuillApp {
     fn unlock_done(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.set_locked(false, cx);
         self.account.passcode.lock_error = Default::default();
-        self.account.passcode.logout_confirm = false;
+        self.account.passcode.screen = lock_screen::LockScreen::Entry;
         self.account
             .passcode
             .lock
@@ -801,7 +799,7 @@ impl QuillApp {
         let locked = self.account.passcode.is_locked();
         self.account.passcode.lock.frame(locked, window, cx);
         if locked {
-            if std::mem::take(&mut self.account.passcode.suggest_system_unlock) {
+            if self.account.passcode.screen.take_system_offer() {
                 self.unlock_with_system(window, cx);
             }
             if self.account.passcode.shaking() {
@@ -888,7 +886,7 @@ impl QuillApp {
                     ),
             );
         }
-        column = if ui.logout_confirm {
+        column = if ui.screen.confirming_logout() {
             column.child(
                 div()
                     .w_full()
@@ -920,7 +918,8 @@ impl QuillApp {
                                     .label(tr(keys::CANCEL))
                                     .ghost()
                                     .on_click(cx.listener(|this, _, _, cx| {
-                                        this.account.passcode.logout_confirm = false;
+                                        this.account.passcode.screen =
+                                            lock_screen::LockScreen::Entry;
                                         cx.notify();
                                     })),
                             )
@@ -940,7 +939,7 @@ impl QuillApp {
                     .label(tr(keys::PASSCODE_LOGOUT))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.account.passcode.logout_confirm = true;
+                        this.account.passcode.screen = lock_screen::LockScreen::ConfirmLogout;
                         cx.notify();
                     })),
             )
@@ -977,6 +976,7 @@ mod lock_field;
 mod lock_gate;
 mod lock_logout;
 mod lock_notice;
+pub(crate) mod lock_screen;
 mod unlock_intents;
 pub(in crate::ui) use unlock_intents::UnlockIntents;
 pub(crate) mod lock_layer;

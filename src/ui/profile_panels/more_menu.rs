@@ -275,7 +275,6 @@ impl QuillApp {
                         self.toggle_bot_block(id, blocked, window, cx);
                     } else {
                         self.open_group_confirm(
-                            ChatId(0),
                             crate::ui::GroupConfirmAction::BlockContact {
                                 user_id: id,
                                 block: !blocked,
@@ -298,7 +297,6 @@ impl QuillApp {
             E::DeleteContact => {
                 if let Some(id) = user {
                     self.open_group_confirm(
-                        ChatId(0),
                         crate::ui::GroupConfirmAction::DeleteContact { user_id: id },
                         cx,
                     );

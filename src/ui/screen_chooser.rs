@@ -23,7 +23,7 @@
 use super::app::QuillApp;
 use super::frame_clock::follow_app;
 use super::group_call_panel::{MEMBER_MUTED_ICON, MEMBERS_BG, MEMBERS_BG_OVER};
-use super::screen_share_state::{ChooserSource, ScreenFor};
+use super::screen_share_state::{Chooser, ChooserSource, ChooserTarget, OpenChooser, ScreenFor};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_kit::component::checkbox::Checkbox;
@@ -159,12 +159,12 @@ impl QuillApp {
                         .calls
                         .active_call
                         .as_ref()
-                        .is_some_and(|call| call.screen_sharing)
+                        .is_some_and(|call| call.screen_sharing())
                         || session
                             .calls
                             .active_group_call
                             .as_ref()
-                            .is_some_and(|call| call.screen_sharing || call.screen_share_pending);
+                            .is_some_and(|call| call.screen_share.is_on());
                     screen.chosen().filter(|_| sharing).cloned()
                 })
             }
@@ -191,7 +191,9 @@ impl QuillApp {
     }
 
     pub(super) fn set_screen_audio(&mut self, on: bool, cx: &mut Context<Self>) {
-        self.screen_share.with_audio = on;
+        if let Some(open) = self.screen_share.chooser.open_mut() {
+            open.with_audio = on;
+        }
         cx.notify();
     }
 
@@ -205,35 +207,58 @@ impl QuillApp {
         let Some(backend) = self.screen_backend() else {
             return false;
         };
-        if for_call == ScreenFor::Group {
-            self.screen_share.group_call = self.tracked_group_call_id();
-        }
+        let target = ChooserTarget {
+            for_call,
+            group_call: (for_call == ScreenFor::Group)
+                .then(|| self.tracked_group_call_id())
+                .flatten(),
+        };
         if backend.access() == ScreenAccess::Denied {
-            self.screen_share.privacy_for = Some(for_call);
+            // A chooser window still open goes: the box replaces it.
+            self.close_screen_chooser(cx);
+            self.screen_share.chooser = Chooser::PrivacyBox(target);
             cx.notify();
             return true;
         }
         if backend.system_picker() {
             // The OS asks what to share (Wayland): no chooser, the button
             // starts or stops (tdesktop `uniqueDesktopCaptureSource`).
-            self.share_with_system_picker(for_call, cx);
+            self.share_with_system_picker(target, cx);
             return true;
         }
-        self.screen_share.for_call = Some(for_call);
-        if let Some(handle) = self.screen_share.window {
-            // tdesktop `activate()`: one chooser per call, brought forward.
-            let _ = handle.update(cx, |_, window, _| window.activate_window());
-            return true;
+        let epoch = self.screen_epoch();
+        // A second ask while a chooser is up or being made retargets it
+        // (the old `for_call` was set on every ask).
+        match &mut self.screen_share.chooser {
+            Chooser::Open(open) => {
+                open.target = target;
+                if let Some(handle) = open.window {
+                    // tdesktop `activate()`: one chooser per call, brought forward.
+                    let _ = handle.update(cx, |_, window, _| window.activate_window());
+                }
+                // Without a window yet, it is being made.
+                return true;
+            }
+            // Listing on this screen already. One started on an earlier
+            // screen does not count: its continuation was dropped with
+            // that screen and will never finish it.
+            Chooser::Listing {
+                target: listing,
+                epoch: listing_epoch,
+                ..
+            } if *listing_epoch == epoch => {
+                *listing = target;
+                return true;
+            }
+            Chooser::Listing { .. } | Chooser::Closed | Chooser::PrivacyBox(_) => {}
         }
-        // Listing on this screen already. One started on an earlier screen
-        // does not count: its continuation was dropped with that screen
-        // and will never put the flag back.
-        if self.screen_share.opening == Some(self.screen_epoch()) {
-            return true;
-        }
-        self.screen_share.opening = Some(self.screen_epoch());
         self.screen_share.generation = self.screen_share.generation.wrapping_add(1);
         let generation = self.screen_share.generation;
+        self.screen_share.chooser = Chooser::Listing {
+            target,
+            epoch: self.screen_epoch(),
+            generation,
+        };
         self.spawn_screen(cx, async move |this, cx| {
             let listing = backend.clone();
             let sources = cx
@@ -252,14 +277,11 @@ impl QuillApp {
     }
 
     /// Start the system picker's share, or stop the running one.
-    fn share_with_system_picker(&mut self, for_call: ScreenFor, cx: &mut Context<Self>) {
-        self.screen_share.for_call = Some(for_call);
+    fn share_with_system_picker(&mut self, target: ChooserTarget, cx: &mut Context<Self>) {
         if self.active_screen_source().is_some() {
-            self.stop_screen_source(cx);
+            self.stop_screen_source_for(target.for_call, cx);
         } else {
-            self.screen_share.selected = Some(SourceId(SYSTEM_PICKER_SOURCE.into()));
-            self.screen_share.with_audio = false;
-            self.accept_screen_source(cx);
+            self.accept_screen_choice(SourceId(SYSTEM_PICKER_SOURCE.into()), false, target, cx);
         }
     }
 
@@ -271,37 +293,53 @@ impl QuillApp {
         sources: Result<Vec<ScreenSource>, quill::calls::capture::CaptureError>,
         cx: &mut Context<Self>,
     ) -> bool {
-        if generation != self.screen_share.generation {
+        // Only the listing in flight is answered; a chooser closed or
+        // replaced meanwhile drops the answer.
+        let Chooser::Listing {
+            target,
+            generation: listing,
+            ..
+        } = self.screen_share.chooser
+        else {
+            return false;
+        };
+        if listing != generation {
             return false;
         }
-        self.screen_share.opening = None;
         let sources = match sources {
             Ok(sources) => sources,
             Err(err) => {
-                self.screen_share.for_call = None;
+                self.screen_share.chooser = Chooser::Closed;
                 self.set_note(StatusNote::error(err.to_string()));
                 cx.notify();
                 return false;
             }
         };
         if sources.is_empty() {
-            self.screen_share.for_call = None;
+            self.screen_share.chooser = Chooser::Closed;
             cx.notify();
             return false;
         }
         let active = self.active_screen_source();
-        self.screen_share.selected = initial_selection(&sources, active.as_ref());
-        self.screen_share.with_audio = active.is_some() && self.active_screen_audio();
+        let selected = initial_selection(&sources, active.as_ref());
+        let with_audio = active.is_some() && self.active_screen_audio();
         let labels = source_labels(&sources);
-        self.screen_share.sources = sources
-            .into_iter()
-            .zip(labels)
-            .map(|(source, label)| ChooserSource {
-                source,
-                label: label_text(label),
-                thumbnail: None,
-            })
-            .collect();
+        self.screen_share.chooser = Chooser::Open(OpenChooser {
+            target,
+            generation,
+            window: None,
+            selected,
+            with_audio,
+            sources: sources
+                .into_iter()
+                .zip(labels)
+                .map(|(source, label)| ChooserSource {
+                    source,
+                    label: label_text(label),
+                    thumbnail: None,
+                })
+                .collect(),
+        });
         self.open_screen_chooser_window(cx);
         true
     }
@@ -349,7 +387,17 @@ impl QuillApp {
             owner.update(cx, |app, cx| {
                 app.in_screen_scope(screen, cx, |app, cx| {
                     match result {
-                        Ok(handle) => app.screen_share.window = Some(handle.into()),
+                        Ok(handle) => match app.screen_share.chooser.open_mut() {
+                            Some(open) => open.window = Some(handle.into()),
+                            // The chooser was closed while its window was
+                            // being made: the window goes too.
+                            None => {
+                                cx.defer(move |cx| {
+                                    let _ =
+                                        handle.update(cx, |_, window, _| window.remove_window());
+                                });
+                            }
+                        },
                         Err(_) => app.screen_chooser_closed(cx),
                     }
                     cx.notify();
@@ -361,12 +409,10 @@ impl QuillApp {
     /// The window is gone: forget the chooser.
     fn screen_chooser_closed(&mut self, cx: &mut Context<Self>) {
         let share = &mut self.screen_share;
-        share.window = None;
-        share.opening = None;
-        share.for_call = None;
-        share.sources.clear();
-        share.selected = None;
-        share.with_audio = false;
+        // The access box is not the chooser's: it stays.
+        if !matches!(share.chooser, Chooser::PrivacyBox(_)) {
+            share.chooser = Chooser::Closed;
+        }
         share.generation = share.generation.wrapping_add(1);
         cx.notify();
     }
@@ -379,9 +425,9 @@ impl QuillApp {
 
     /// Whether `for_call` is still the call on screen: the 1:1 call of
     /// that id, or the video chat the chooser or box was opened for.
-    fn screen_call_current(&self, for_call: ScreenFor) -> bool {
-        match for_call {
-            ScreenFor::Group => self.tracked_group_call_id() == self.screen_share.group_call,
+    fn screen_call_current(&self, target: ChooserTarget) -> bool {
+        match target.for_call {
+            ScreenFor::Group => self.tracked_group_call_id() == target.group_call,
             ScreenFor::Private(id) => self
                 .session()
                 .and_then(|session| session.calls.active_call.as_ref())
@@ -396,24 +442,26 @@ impl QuillApp {
     pub(super) fn sync_screen_share_call(&mut self, cx: &mut Context<Self>) {
         if self
             .screen_share
-            .for_call
-            .is_some_and(|for_call| !self.screen_call_current(for_call))
+            .chooser
+            .sharing_into()
+            .is_some_and(|target| !self.screen_call_current(target))
         {
             self.close_screen_chooser(cx);
         }
         if self
             .screen_share
-            .privacy_for
-            .is_some_and(|for_call| !self.screen_call_current(for_call))
+            .chooser
+            .privacy_for()
+            .is_some_and(|target| !self.screen_call_current(target))
         {
-            self.screen_share.privacy_for = None;
+            self.screen_share.chooser = Chooser::Closed;
             cx.notify();
         }
     }
 
     /// Cancel, and after Share Screen or Stop Sharing.
     pub(super) fn close_screen_chooser(&mut self, cx: &mut Context<Self>) {
-        let handle = self.screen_share.window.take();
+        let handle = self.screen_share.chooser.window();
         self.screen_chooser_closed(cx);
         if let Some(handle) = handle {
             // The click that closes it runs inside that window: remove it
@@ -425,25 +473,40 @@ impl QuillApp {
     }
 
     pub(super) fn select_screen_source(&mut self, id: SourceId, cx: &mut Context<Self>) {
-        self.screen_share.selected = Some(id);
+        if let Some(open) = self.screen_share.chooser.open_mut() {
+            open.selected = Some(id);
+        }
         cx.notify();
     }
 
     /// Share Screen: share the selection, or switch a running share to it
     /// (tdesktop `chooseSourceAccepted`).
     pub(super) fn accept_screen_source(&mut self, cx: &mut Context<Self>) {
-        let (Some(id), Some(for_call)) = (
-            self.screen_share.selected.clone(),
-            self.screen_share.for_call,
-        ) else {
+        let Some(open) = self.screen_share.chooser.open() else {
             return;
         };
+        let (Some(id), target, with_audio) = (open.selected.clone(), open.target, open.with_audio)
+        else {
+            return;
+        };
+        self.accept_screen_choice(id, with_audio, target, cx);
+    }
+
+    /// Share `id` into the call `target` (tdesktop `chooseSourceAccepted`).
+    fn accept_screen_choice(
+        &mut self,
+        id: SourceId,
+        with_audio: bool,
+        target: ChooserTarget,
+        cx: &mut Context<Self>,
+    ) {
+        let for_call = target.for_call;
         // The call it was opened for ended meanwhile: share into no other.
-        if !self.screen_call_current(for_call) {
+        if !self.screen_call_current(target) {
             self.close_screen_chooser(cx);
             return;
         }
-        let with_audio = self.screen_share.with_audio && self.offers_system_audio();
+        let with_audio = with_audio && self.offers_system_audio();
         if let Some(live) = self.live.as_mut() {
             live.driver.choose_call_screen_source(id, with_audio);
             let session = &live.driver.session;
@@ -452,12 +515,12 @@ impl QuillApp {
                     .calls
                     .active_group_call
                     .as_ref()
-                    .is_some_and(|call| call.screen_sharing || call.screen_share_pending),
+                    .is_some_and(|call| call.screen_share.is_on()),
                 ScreenFor::Private(_) => session
                     .calls
                     .active_call
                     .as_ref()
-                    .is_some_and(|call| call.screen_sharing),
+                    .is_some_and(|call| call.screen_sharing()),
             };
             if !sharing {
                 self.start_screen_share(for_call, cx);
@@ -472,9 +535,13 @@ impl QuillApp {
 
     /// Stop Sharing (tdesktop `chooseSourceStop`).
     pub(super) fn stop_screen_source(&mut self, cx: &mut Context<Self>) {
-        let Some(for_call) = self.screen_share.for_call else {
+        let Some(target) = self.screen_share.chooser.sharing_into() else {
             return;
         };
+        self.stop_screen_source_for(target.for_call, cx);
+    }
+
+    fn stop_screen_source_for(&mut self, for_call: ScreenFor, cx: &mut Context<Self>) {
         if self.live.is_some() {
             self.stop_screen_share(for_call, cx);
         } else {
@@ -498,12 +565,12 @@ impl QuillApp {
                 .calls
                 .active_group_call
                 .as_ref()
-                .is_some_and(|call| call.screen_sharing || call.screen_share_pending),
+                .is_some_and(|call| call.screen_share.is_on()),
             ScreenFor::Private(_) => session
                 .calls
                 .active_call
                 .as_ref()
-                .is_some_and(|call| call.screen_sharing),
+                .is_some_and(|call| call.screen_sharing()),
         });
         if !sharing {
             return;
@@ -521,13 +588,17 @@ impl QuillApp {
         match for_call {
             ScreenFor::Group => {
                 if let Some(call) = session.calls.active_group_call.as_mut() {
-                    call.screen_sharing = on;
+                    if on {
+                        call.screen_share.connected();
+                    } else {
+                        call.screen_share.stop();
+                    }
                     call.screen_share_paused = false;
                 }
             }
             ScreenFor::Private(_) => {
                 if let Some(call) = session.calls.active_call.as_mut() {
-                    call.screen_sharing = on;
+                    call.set_screen_sharing(on);
                 }
             }
         }
@@ -536,9 +607,18 @@ impl QuillApp {
     /// The chooser window's content.
     fn screen_chooser_body(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let active = self.active_screen_source();
-        let selected = self.screen_share.selected.clone();
+        let selected = self
+            .screen_share
+            .chooser
+            .open()
+            .and_then(|open| open.selected.clone());
         let offers_audio = self.offers_system_audio();
-        let with_audio = offers_audio && self.screen_share.with_audio;
+        let with_audio = offers_audio
+            && self
+                .screen_share
+                .chooser
+                .open()
+                .is_some_and(|open| open.with_audio);
         let stop = shows_stop(
             selected.as_ref(),
             active.as_ref(),
@@ -553,7 +633,12 @@ impl QuillApp {
             .pt(px(MARGIN_TOP))
             .pb(px(MARGIN_BOTTOM))
             .px(px(MARGIN_LEFT));
-        for (index, entry) in self.screen_share.sources.iter().enumerate() {
+        let sources = self
+            .screen_share
+            .chooser
+            .open()
+            .map_or(&[][..], |open| open.sources.as_slice());
+        for (index, entry) in sources.iter().enumerate() {
             let chosen = selected.as_ref() == Some(&entry.source.id);
             grid = grid.child(source_view(index, entry, chosen, cx));
         }
@@ -642,7 +727,7 @@ impl QuillApp {
         group: bool,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let shown = match self.screen_share.privacy_for? {
+        let shown = match self.screen_share.chooser.privacy_for()?.for_call {
             ScreenFor::Group => group,
             ScreenFor::Private(_) => !group,
         };
@@ -700,14 +785,16 @@ impl QuillApp {
     }
 
     pub(super) fn close_screen_privacy(&mut self, cx: &mut Context<Self>) {
-        self.screen_share.privacy_for = None;
+        if self.screen_share.chooser.privacy_for().is_some() {
+            self.screen_share.chooser = Chooser::Closed;
+        }
         cx.notify();
     }
 
     /// Esc in a call window: close the privacy box shown over that window
     /// (`group` as in `screen_privacy_overlay`). Whether it did.
     pub(super) fn escape_screen_privacy(&mut self, group: bool, cx: &mut Context<Self>) -> bool {
-        let shown = match self.screen_share.privacy_for {
+        let shown = match self.screen_share.chooser.privacy_for().map(|t| t.for_call) {
             Some(ScreenFor::Group) => group,
             Some(ScreenFor::Private(_)) => !group,
             None => false,
@@ -840,10 +927,16 @@ async fn load_thumbnails(
 ) {
     let Ok(sources) = this.update(cx, |app, _| {
         app.screen_share
-            .sources
-            .iter()
-            .map(|entry| entry.source.clone())
-            .collect::<Vec<_>>()
+            .chooser
+            .open()
+            .filter(|open| open.generation == generation)
+            .map(|open| {
+                open.sources
+                    .iter()
+                    .map(|entry| entry.source.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
     }) else {
         return;
     };
@@ -859,11 +952,15 @@ async fn load_thumbnails(
             })
             .await;
         let current = this.update(cx, |app, cx| {
-            if app.screen_share.generation != generation {
-                return false;
-            }
-            if let Some(entry) = app
+            let Some(open) = app
                 .screen_share
+                .chooser
+                .open_mut()
+                .filter(|open| open.generation == generation)
+            else {
+                return false;
+            };
+            if let Some(entry) = open
                 .sources
                 .iter_mut()
                 .find(|entry| entry.source.id == wanted)

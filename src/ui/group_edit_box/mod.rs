@@ -52,14 +52,10 @@ pub(crate) struct GroupEditBox {
     pub(crate) photo_note: Option<String>,
     /// The camera and emoji panels.
     pub(crate) sources: PhotoSources,
-    /// The name field's emoji toggle opened the emoji panel.
-    pub(crate) title_emoji: bool,
     /// Where the last Save is.
     saving: SaveStage,
-    /// Save found the name empty (tdesktop `validateTitle`).
-    title_empty: bool,
-    /// The Type box, open over this one.
-    pub(crate) type_box: Option<crate::ui::group_type_box::GroupTypeBox>,
+    /// The box open over this one, if any.
+    pub(crate) sub: EditSub,
     /// What the Type box's Save chose; sent with this box's Save.
     pub(crate) type_choice: Option<GroupTypeData>,
     /// The signature switches as the box shows them; sent on Save.
@@ -68,8 +64,43 @@ pub(crate) struct GroupEditBox {
     pub(crate) auto_translate: Option<bool>,
     /// What the history box's Save chose; sent with this box's Save.
     pub(crate) history_visible: Option<bool>,
-    /// The history box, open over this one, with its current choice.
-    pub(crate) history_box: Option<bool>,
+}
+
+/// The box open over the Edit box: one at a time. It leaves when its own
+/// Save or Cancel closes it, or with the Edit box. (The name field's emoji
+/// panel is the media panel's `PanelMode::GroupTitle`.)
+#[derive(Default)]
+pub(crate) enum EditSub {
+    #[default]
+    None,
+    /// The Type box, with its draft.
+    Type(crate::ui::group_type_box::GroupTypeBox),
+    /// The history box, with its current choice.
+    History(bool),
+}
+
+impl GroupEditBox {
+    pub(crate) fn type_box(&self) -> Option<&crate::ui::group_type_box::GroupTypeBox> {
+        match &self.sub {
+            EditSub::Type(open) => Some(open),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn type_box_mut(&mut self) -> Option<&mut crate::ui::group_type_box::GroupTypeBox> {
+        match &mut self.sub {
+            EditSub::Type(open) => Some(open),
+            _ => None,
+        }
+    }
+
+    /// The history box's current choice, while it is open.
+    pub(crate) fn history_box(&self) -> Option<bool> {
+        match self.sub {
+            EditSub::History(visible) => Some(visible),
+            _ => None,
+        }
+    }
 }
 
 /// How the last Save went, as far as the box itself knows. TDLib's
@@ -79,6 +110,9 @@ pub(crate) enum SaveStage {
     /// No Save sent anything yet.
     #[default]
     Editing,
+    /// Save found the name empty or too long (tdesktop `validateTitle`);
+    /// the next edit of the name leaves this stage.
+    TitleInvalid,
     /// The text and setting requests of the last Save.
     Saving(Vec<RequestId>),
     /// Delete or Leave of the chat is out. No field names its answer, so
@@ -108,7 +142,7 @@ pub(crate) enum EditBoxState {
 impl GroupEditBox {
     fn state(&self, session: Option<&Session>) -> EditBoxState {
         let sent = match &self.saving {
-            SaveStage::Editing => return EditBoxState::Editing,
+            SaveStage::Editing | SaveStage::TitleInvalid => return EditBoxState::Editing,
             SaveStage::Refused(reason) => {
                 return EditBoxState::Failed {
                     field: GroupInfoField::Settings,
@@ -245,8 +279,10 @@ impl QuillApp {
         // The counter and the name's error follow every keystroke.
         cx.subscribe(&title_input, |this, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
-                if let Some(edit) = this.admin.group_edit_box.as_mut() {
-                    edit.title_empty = false;
+                if let Some(edit) = this.admin.group_edit_box.as_mut()
+                    && edit.saving == SaveStage::TitleInvalid
+                {
+                    edit.saving = SaveStage::Editing;
                 }
                 cx.notify();
             }
@@ -268,14 +304,11 @@ impl QuillApp {
             photo_note: None,
             sources: PhotoSources::default(),
             saving: SaveStage::Editing,
-            title_empty: false,
-            title_emoji: false,
-            type_box: None,
+            sub: EditSub::None,
             type_choice: None,
             signatures: None,
             auto_translate: None,
             history_visible: None,
-            history_box: None,
         });
         self.open_box(DialogKind::GroupEditBox);
         cx.notify();
@@ -380,7 +413,7 @@ impl QuillApp {
             Ok(edits) => edits,
             Err(GroupInfoInvalid::EmptyTitle | GroupInfoInvalid::TitleTooLong) => {
                 if let Some(edit) = self.admin.group_edit_box.as_mut() {
-                    edit.title_empty = true;
+                    edit.saving = SaveStage::TitleInvalid;
                 }
                 cx.notify();
                 return;
@@ -472,8 +505,7 @@ impl QuillApp {
             )),
             _ => None,
         };
-        let title_error = edit
-            .title_empty
+        let title_error = (edit.saving == SaveStage::TitleInvalid)
             .then(|| error_line(tr(keys::Q_PEOPLE_TITLE_MUST_BE_1_128).to_string()))
             .or_else(|| failed(GroupInfoField::Title));
         let used = edit.description_input.read(cx).value().chars().count();

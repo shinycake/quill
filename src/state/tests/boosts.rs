@@ -86,7 +86,13 @@ fn unrestrict_value_applies_on_ok_and_drops_on_error() {
         RequestPurpose::SetSupergroupUnrestrictBoostCount,
         Some(ChatId(13)),
     );
-    session.groups.unrestrict_boost_pending.insert(13, 4);
+    session.groups.unrestrict_boost_saves.insert(
+        13,
+        UnrestrictSave {
+            request: extra,
+            value: 4,
+        },
+    );
     assert_eq!(session.chat_unrestrict_boost_count(ChatId(13)), 4);
     apply_json(
         &mut session,
@@ -94,14 +100,20 @@ fn unrestrict_value_applies_on_ok_and_drops_on_error() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(session.groups.unrestrict_boost_pending.is_empty());
+    assert!(session.groups.unrestrict_boost_saves.is_empty());
     assert_eq!(session.chat_unrestrict_boost_count(ChatId(13)), 4);
 
     let extra = session.request(
         RequestPurpose::SetSupergroupUnrestrictBoostCount,
         Some(ChatId(13)),
     );
-    session.groups.unrestrict_boost_pending.insert(13, 0);
+    session.groups.unrestrict_boost_saves.insert(
+        13,
+        UnrestrictSave {
+            request: extra,
+            value: 0,
+        },
+    );
     apply_json(
         &mut session,
         &seq,
@@ -111,7 +123,7 @@ fn unrestrict_value_applies_on_ok_and_drops_on_error() {
             extra.0
         ),
     );
-    assert!(session.groups.unrestrict_boost_pending.is_empty());
+    assert!(session.groups.unrestrict_boost_saves.is_empty());
     assert_eq!(session.chat_unrestrict_boost_count(ChatId(13)), 4);
 }
 
@@ -130,7 +142,52 @@ fn unrestrict_setting_is_for_supergroup_rights_only() {
 fn a_boost_count_save_in_flight_is_reported_until_it_answers() {
     let (mut session, _sink) = super::common::session();
     assert!(!session.unrestrict_boost_saving(ChatId(13)));
-    session.groups.unrestrict_boost_pending.insert(13, 4);
+    session.groups.unrestrict_boost_saves.insert(
+        13,
+        UnrestrictSave {
+            request: RequestId(1),
+            value: 4,
+        },
+    );
     assert!(session.unrestrict_boost_saving(ChatId(13)));
     assert!(!session.unrestrict_boost_saving(ChatId(14)));
+}
+
+/// An answer of an older save does not settle the save that replaced it.
+#[test]
+fn an_older_boost_save_answer_does_not_settle_the_newer_save() {
+    let (mut session, sink) = super::common::session();
+    let seq = AtomicU64::new(0);
+    let old = session.request(
+        RequestPurpose::SetSupergroupUnrestrictBoostCount,
+        Some(ChatId(13)),
+    );
+    let new = session.request(
+        RequestPurpose::SetSupergroupUnrestrictBoostCount,
+        Some(ChatId(13)),
+    );
+    session.groups.unrestrict_boost_saves.insert(
+        13,
+        UnrestrictSave {
+            request: new,
+            value: 3,
+        },
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, old.0),
+    );
+    assert!(
+        session.unrestrict_boost_saving(ChatId(13)),
+        "still the newer"
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, new.0),
+    );
+    assert!(!session.unrestrict_boost_saving(ChatId(13)));
 }

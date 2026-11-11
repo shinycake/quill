@@ -11,8 +11,10 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ids::RequestId;
+use crate::state::fetch::Fetch;
 use crate::telegram::envelope::MessageSender;
 use serde_json::Value;
+use std::collections::HashMap;
 
 /// How long a tap waits before the Stars are committed (tdesktop
 /// `kPaidAccumulatePeriod`).
@@ -152,16 +154,11 @@ impl PendingPaid {
 #[derive(Debug, Clone, Default)]
 pub struct PaidReactions {
     pending: Vec<PendingPaid>,
-    /// The message whose reaction picker offered the Star reaction (from
-    /// `getMessageAvailableReactions`).
-    pub offered: Option<(i64, i64)>,
     /// `paid_reaction_star_count_max`, once known.
     pub max_stars: Option<i64>,
-    /// Channels the account may send Stars as in a chat
-    /// (`getChatAvailablePaidMessageReactionSenders`), for one chat.
-    pub senders: Option<(i64, Vec<i64>)>,
-    /// The last refusal, shown in the status line.
-    pub note: Option<String>,
+    /// Channels the account may send Stars as in each chat
+    /// (`getChatAvailablePaidMessageReactionSenders`), by chat.
+    senders: HashMap<i64, Fetch<Vec<i64>>>,
 }
 
 impl PaidReactions {
@@ -180,20 +177,34 @@ impl PaidReactions {
                 MessageSender::User { .. } => None,
             })
             .collect();
-        self.senders = Some((chat_id, channels));
+        self.senders.entry(chat_id).or_default().succeed(channels);
+    }
+
+    /// Whether the senders of `chat_id` may be asked for: never asked, or
+    /// the last ask failed. One in flight or answered is not asked again.
+    pub fn can_ask_senders(&self, chat_id: i64) -> bool {
+        self.senders.get(&chat_id).is_none_or(Fetch::can_ask)
+    }
+
+    /// The senders of `chat_id` were asked for.
+    pub fn senders_asked(&mut self, chat_id: i64) {
+        self.senders.entry(chat_id).or_default().begin();
+    }
+
+    /// The ask for the senders of `chat_id` failed: it may be tried again.
+    pub fn senders_failed(&mut self, chat_id: i64) {
+        self.senders
+            .entry(chat_id)
+            .or_default()
+            .fail("senders unavailable");
     }
 
     /// Channels to send as in `chat_id`.
     pub fn channels_for(&self, chat_id: i64) -> &[i64] {
-        match &self.senders {
-            Some((chat, channels)) if *chat == chat_id => channels,
-            _ => &[],
-        }
-    }
-
-    /// Whether the picker for this message offers the Star reaction.
-    pub fn offered_for(&self, chat_id: i64, message_id: i64) -> bool {
-        self.offered == Some((chat_id, message_id))
+        self.senders
+            .get(&chat_id)
+            .and_then(Fetch::data)
+            .map_or(&[], Vec::as_slice)
     }
 
     /// Stars still held for Undo on a message.

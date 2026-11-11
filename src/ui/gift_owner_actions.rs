@@ -34,7 +34,7 @@ pub(super) fn gift_owner_actions(
 ) -> AnyElement {
     let hub = &session.payments.hub;
     let manage = &session.payments.gifts_manage;
-    let busy = hub.gift_mutating;
+    let busy = hub.gifts_op.is_mutating();
     let now = now_unix();
     let balance = hub.balance;
     let poor = |cost: i64| balance.is_some_and(|b| b.stars < cost);
@@ -48,7 +48,7 @@ pub(super) fn gift_owner_actions(
         )
     };
     let mut col = div().flex().flex_col().gap_2();
-    col = pin_section(col, gift, mine, manage, hub.gifts.as_slice(), busy, cx);
+    col = pin_section(col, gift, mine, manage, &hub.gifts, busy, cx);
     if let Some(cost) = gift.upgrade_cost(mine) {
         col = upgrade_section(
             col,

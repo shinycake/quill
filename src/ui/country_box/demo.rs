@@ -22,7 +22,9 @@ fn open_requested() -> bool {
 /// Open the demo channel as its owner, so the composer and poll show.
 pub(super) fn open_demo_channel(session: &mut quill::state::Session) {
     if let Some(chat) = session.chats.get_mut(&13) {
-        chat.my_member_status = Some(quill::telegram::envelope::ChannelMemberStatus::Creator);
+        chat.assume_member_status(Some(
+            quill::telegram::envelope::ChannelMemberStatus::Creator,
+        ));
     }
     session.open_chat(quill::ids::ChatId(13));
 }
@@ -86,7 +88,7 @@ impl QuillApp {
 
     fn demo_country_payment(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            session.payments.form = Some(shipping_form());
+            session.payments.checkout = quill::state::CheckoutForm::Ready(shipping_form());
         }
         self.open_payment_dialog(window, cx);
         if let Some(dialog) = self.payments.dialog.as_mut() {

@@ -26,20 +26,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A set whose load failed (a FLOOD_WAIT while scrolling fast) is
         // asked for again when the panel opens next, not left blank until
         // restart.
-        self.session.media.media_library.failed.clear();
-        if !self.session.stickers.stickers.installed_loaded
+        self.session.media.media_library.forget_failures();
+        if !self.session.stickers.stickers.installed_loaded()
             && !self
                 .session
                 .requests
                 .has_purpose(RequestPurpose::GetInstalledStickerSets)
         {
-            let extra = self
-                .session
-                .request(RequestPurpose::GetInstalledStickerSets, None);
-            if let Err(err) = self.sender.send_json(&get_installed_sticker_sets(extra)) {
-                self.session.requests.take(extra);
-                return Err(err);
-            }
+            self.sticker_request(
+                RequestPurpose::GetInstalledStickerSets,
+                get_installed_sticker_sets,
+            )?;
         }
         if self.session.stickers.emoji.installed_sets.is_empty()
             && !self
@@ -47,18 +44,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .requests
                 .has_purpose(RequestPurpose::GetInstalledEmojiSets)
         {
-            let extra = self
-                .session
-                .request(RequestPurpose::GetInstalledEmojiSets, None);
-            if let Err(err) =
-                self.sender
-                    .send_json(&crate::telegram::requests_emoji::get_installed_emoji_sets(
-                        extra,
-                    ))
-            {
-                self.session.requests.take(extra);
-                return Err(err);
-            }
+            self.emoji_set_request(
+                RequestPurpose::GetInstalledEmojiSets,
+                crate::telegram::requests_emoji::get_installed_emoji_sets,
+            )?;
         }
         if self.session.stickers.stickers.recent.is_empty()
             && !self
@@ -95,7 +84,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 return Err(err);
             }
-            self.session.media.media_library.loading.insert(set_id);
+            self.session.media.media_library.begin_load(set_id, extra);
         }
         Ok(())
     }

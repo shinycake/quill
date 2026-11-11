@@ -428,23 +428,58 @@ fn the_open_floor_leaves_room_to_migrate_the_largest_database() {
 
 #[test]
 fn one_low_reading_waits_for_a_second_before_full() {
+    use super::{Calm, DiskStage};
     use DiskState::{Full, Healthy, Low};
-    assert_eq!(Healthy.confirmed(Some(0), &FLOORS, false), (Healthy, true));
-    assert_eq!(Healthy.confirmed(Some(0), &FLOORS, true), (Full, false));
-    assert_eq!(Low.confirmed(Some(99), &FLOORS, false), (Low, true));
-    assert_eq!(Low.confirmed(Some(99), &FLOORS, true), (Full, false));
+    let doubt_healthy = DiskStage::Doubt(Calm::Healthy);
+    let doubt_low = DiskStage::Doubt(Calm::Low);
     assert_eq!(
-        Low.confirmed(Some(500), &FLOORS, true),
-        (Low, false),
+        DiskStage::Healthy.read(Some(0), &FLOORS),
+        (Healthy, doubt_healthy)
+    );
+    assert_eq!(
+        doubt_healthy.read(Some(0), &FLOORS),
+        (Full, DiskStage::Full)
+    );
+    assert_eq!(DiskStage::Low.read(Some(99), &FLOORS), (Low, doubt_low));
+    assert_eq!(doubt_low.read(Some(99), &FLOORS), (Full, DiskStage::Full));
+    assert_eq!(
+        doubt_low.read(Some(500), &FLOORS),
+        (Low, DiskStage::Low),
         "the second read disagreed"
     );
     assert_eq!(
-        Low.confirmed(None, &FLOORS, true),
-        (Low, true),
+        doubt_low.read(None, &FLOORS),
+        (Low, doubt_low),
         "no reading"
     );
-    assert_eq!(Full.confirmed(Some(0), &FLOORS, false), (Full, false));
-    assert_eq!(Full.confirmed(Some(250), &FLOORS, false), (Low, false));
+    assert_eq!(
+        DiskStage::Full.read(Some(0), &FLOORS),
+        (Full, DiskStage::Full)
+    );
+    assert_eq!(
+        DiskStage::Full.read(Some(250), &FLOORS),
+        (Low, DiskStage::Low)
+    );
+}
+
+#[test]
+fn a_call_holds_only_the_full_stage_and_leaving_full_ends_the_hold() {
+    use super::DiskStage;
+    assert_eq!(DiskStage::Low.hold_for_call(true), DiskStage::Low);
+    let held = DiskStage::Full.hold_for_call(true);
+    assert!(held.held_for_call());
+    assert_eq!(held.state(), DiskState::Full);
+    assert_eq!(
+        held.read(Some(0), &FLOORS),
+        (DiskState::Full, DiskStage::FullHeld),
+        "still full: still held"
+    );
+    assert_eq!(
+        held.read(Some(250), &FLOORS),
+        (DiskState::Low, DiskStage::Low),
+        "space came back: the hold goes with Full"
+    );
+    assert_eq!(held.hold_for_call(false), DiskStage::Full);
 }
 
 #[test]

@@ -3,7 +3,7 @@
 //! page (the tab changed in flight) is dropped.
 use super::gift_manage::{PasswordCheckFailure, password_check_failure};
 use crate::earn::EarnErrorHint;
-use crate::premium_hub::ton::{GramWithdraw, GramsPayload, GramsPurpose};
+use crate::premium_hub::ton::{GramWithdraw, GramsPayload, GramsPurpose, WithdrawOutcome};
 use crate::state::*;
 
 impl Session {
@@ -20,9 +20,10 @@ impl Session {
                 match purpose {
                     Some((GramsPurpose::Probe, _)) => {
                         self.payments.hub.grams.balance_nano = Some(page.balance_nano);
+                        self.payments.hub.grams.probe.succeed(());
                     }
                     Some((GramsPurpose::Page { append }, id))
-                        if id.0 == self.payments.hub.grams.request =>
+                        if self.payments.hub.grams.load.waits_for(id.0) =>
                     {
                         self.remember_files(&files);
                         self.payments.hub.grams.apply_page(page, append);
@@ -56,13 +57,13 @@ impl Session {
         let peer = pending.and_then(|p| p.chat_id).map(|id| id.0);
         match purpose {
             // The Settings row just stays hidden.
-            GramsPurpose::Probe | GramsPurpose::Revenue => {}
+            GramsPurpose::Probe => grams.probe.fail(error_reason(err)),
+            GramsPurpose::Revenue => {}
             GramsPurpose::PeerUser => grams.missing_users.extend(peer),
             GramsPurpose::PeerChat => grams.missing_chats.extend(peer),
             GramsPurpose::Page { .. } => {
-                if pending.is_some_and(|p| p.id.0 == grams.request) {
-                    grams.loading = false;
-                    grams.error = Some(error_reason(err));
+                if pending.is_some_and(|p| grams.load.waits_for(p.id.0)) {
+                    grams.load = crate::gift_market::PageLoad::Failed(error_reason(err));
                 }
             }
             GramsPurpose::WithdrawalUrl => {
@@ -82,7 +83,7 @@ impl Session {
         }
         grams.withdraw = None;
         if !url.is_empty() {
-            grams.withdraw_url = Some(url);
+            grams.withdraw_outcome = Some(WithdrawOutcome::Url(url));
         }
     }
 
@@ -107,7 +108,7 @@ impl Session {
         }
         if err.earn_hint == Some(EarnErrorHint::AmountTooSmall) {
             grams.withdraw = None;
-            grams.withdraw_too_small = true;
+            grams.withdraw_outcome = Some(WithdrawOutcome::TooSmall);
             return;
         }
         grams.withdraw = Some(match password_check_failure(err, &error_reason(err)) {

@@ -320,7 +320,7 @@ fn select_chat_at_requests_history_around_the_message_and_highlights_it() {
         .select_chat_at(ChatId(8), Some(MessageId(40)))
         .unwrap()
         .expect("history around the target");
-    assert_eq!(driver.session.open_chat, Some(ChatId(8)));
+    assert_eq!(driver.session.open_chat_id(), Some(ChatId(8)));
     let sent = recorder.snapshot();
     let history: Vec<_> = sent
         .iter()

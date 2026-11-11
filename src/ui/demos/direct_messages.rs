@@ -74,7 +74,11 @@ impl QuillApp {
                 session.apply(owned);
             }
         }
-        session.histories.entry(DIRECT).or_default().loaded_complete = true;
+        session
+            .histories
+            .entry(DIRECT)
+            .or_default()
+            .set_loaded_complete(true);
         if let Some(view) = mode.strip_prefix("admin") {
             self.demo_direct_admin(view == "-all", window, cx);
             return;

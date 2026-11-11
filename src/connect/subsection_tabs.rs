@@ -92,15 +92,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             (chat.is_forum_chat() || self.session.bot_topics(chat_id).is_some())
                 && (chat.in_main_list || chat.in_archive || !chat.folder_positions.is_empty())
         });
-        if !listed
-            || !self.chats_path_active()
-            || self.session.threads.forum_row_asked.contains(&chat_id.0)
-        {
+        if !listed || !self.chats_path_active() || self.session.threads.forum_row_asked(chat_id.0) {
             return;
         }
-        if self.maybe_fetch_forum_topics(chat_id).is_ok() {
-            self.session.threads.forum_row_asked.insert(chat_id.0);
-        }
+        let _ = self.maybe_fetch_forum_topics(chat_id);
     }
 
     /// A topic whose TDLib state may have changed: its read position or
@@ -115,7 +110,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Some((ChatId(info.chat_id), info.forum_topic_id))
             }
             EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
-                message.topic_id.map(|topic| (message.chat_id, topic))
+                message.topic_id().map(|topic| (message.chat_id, topic))
             }
             _ => None,
         }

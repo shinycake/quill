@@ -8,6 +8,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         animation: AnimationSend,
     ) -> Result<RequestId, ConnectSendError> {
+        let place = self.send_place(chat_id);
+        self.send_animation_to(chat_id, &place, animation)
+    }
+
+    /// [`Self::send_animation`] to `place`, fixed when the user chose it.
+    pub fn send_animation_to(
+        &mut self,
+        chat_id: ChatId,
+        place: &SendPlace,
+        animation: AnimationSend,
+    ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -16,19 +27,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chats
             .get(&chat_id.0)
             .is_some_and(|chat| chat.supported());
-        if !supported || animation.file_id.0 == 0 || self.topic_send_is_closed(chat_id) {
+        if !supported || animation.file_id.0 == 0 || self.place_is_closed(chat_id, place) {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
             .request(RequestPurpose::SendMessage, Some(chat_id));
-        let topic_id = self.send_topic(chat_id);
+        let topic_id = place.topic;
         let animation = AnimationSend {
             topic_id,
             ..animation
         };
         let json = send_animation(extra, chat_id, animation);
-        let json = self.thread_routed(chat_id, json);
+        let json = self.place_routed(chat_id, place, json);
         match self.sender.send_json(&json) {
             Ok(()) => {
                 let _ = self.cancel_outgoing_typing();
@@ -47,6 +58,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         sticker: StickerSend<'_>,
     ) -> Result<RequestId, ConnectSendError> {
+        let place = self.send_place(chat_id);
+        self.send_sticker_to(chat_id, &place, sticker)
+    }
+
+    /// [`Self::send_sticker`] to `place`, fixed when the user chose it.
+    pub fn send_sticker_to(
+        &mut self,
+        chat_id: ChatId,
+        place: &SendPlace,
+        sticker: StickerSend<'_>,
+    ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -58,19 +80,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chats
             .get(&chat_id.0)
             .is_some_and(|chat| chat.supported());
-        if !supported || sticker.file_id.0 <= 0 || self.topic_send_is_closed(chat_id) {
+        if !supported || sticker.file_id.0 <= 0 || self.place_is_closed(chat_id, place) {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
             .request(RequestPurpose::SendMessage, Some(chat_id));
-        let topic_id = self.send_topic(chat_id);
+        let topic_id = place.topic;
         let sticker = StickerSend {
             topic_id,
             ..sticker
         };
         let json = send_sticker(extra, chat_id, sticker);
-        let json = self.thread_routed(chat_id, json);
+        let json = self.place_routed(chat_id, place, json);
         match self.sender.send_json(&json) {
             Ok(()) => {
                 let _ = self.cancel_outgoing_typing();
@@ -84,8 +106,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// `sendMessageAlbum` for 2–10 local photos and/or videos, or 2–10 files.
-    pub(crate) fn send_album_snapshot(
+    /// An album of photos, videos or files to `place`, fixed at Send.
+    pub(crate) fn send_album_snapshot_to(
         &mut self,
+        place: &SendPlace,
         snapshot: &ComposerSnapshot,
     ) -> Result<RequestId, ConnectSendError> {
         let chat_id = snapshot.chat_id();
@@ -94,7 +118,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chats
             .get(&chat_id.0)
             .is_some_and(|chat| chat.supported());
-        if !supported || !snapshot.is_album() || self.topic_send_is_closed(chat_id) {
+        if !supported || !snapshot.is_album() || self.place_is_closed(chat_id, place) {
             return Err(ConnectSendError::InvalidRequest);
         }
         let caption = snapshot.caption();
@@ -173,14 +197,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::SendMessageAlbum, Some(chat_id));
-        let topic_id = self.send_topic(chat_id);
+        let topic_id = place.topic;
         let json = send_message_album(extra, chat_id, topic_id, reply_to, contents);
         let json = crate::telegram::requests::with_message_send_options(
             json,
             &snapshot.send_options,
             false,
         );
-        let json = self.thread_routed(chat_id, json);
+        let json = self.place_routed(chat_id, place, json);
         match self.sender.send_json(&json) {
             Ok(()) => {
                 let _ = self.cancel_outgoing_typing();
@@ -202,7 +226,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         reply_to: Option<SendReply>,
         play_once: bool,
     ) -> Result<RequestId, ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         let place = self.send_place(chat_id);
@@ -283,7 +307,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         draft: &crate::video::VideoNoteDraft,
         reply_to: Option<SendReply>,
     ) -> Result<RequestId, ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         let place = self.send_place(chat_id);

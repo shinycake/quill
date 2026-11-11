@@ -110,7 +110,7 @@ fn public_posts_fill_the_messages_and_flag_an_exhausted_quota() {
     );
     assert_eq!(session.search.search.status(), SearchStatus::Ready);
     assert_eq!(session.search.search.messages.len(), 1);
-    assert!(!session.search.search.public_limits_exceeded);
+    assert!(!session.search.search.public_limits_exceeded());
 
     let search_gen = session.search.search.begin_query("arrakis");
     session.search.search.begin_public_scope();
@@ -121,7 +121,7 @@ fn public_posts_fill_the_messages_and_flag_an_exhausted_quota() {
         &sink,
         &public_post_json(extra, true, false),
     );
-    assert!(session.search.search.public_limits_exceeded);
+    assert!(session.search.search.public_limits_exceeded());
     assert_eq!(session.search.search.status(), SearchStatus::Empty);
 }
 
@@ -177,9 +177,8 @@ fn frequent_contacts_load_and_the_option_hides_them() {
 #[test]
 fn removing_one_recent_keeps_the_rest_and_idles_when_empty() {
     let mut search = SearchState {
-        recents: true,
+        surface: SearchSurface::Recents,
         chat_ids: vec![ChatId(1), ChatId(2)],
-        open: true,
         ..SearchState::default()
     };
     assert!(search.remove_recent(ChatId(1)));
@@ -189,7 +188,7 @@ fn removing_one_recent_keeps_the_rest_and_idles_when_empty() {
     assert!(search.remove_recent(ChatId(2)));
     assert_eq!(search.status(), SearchStatus::Idle);
     // Typed results are not "recents": nothing to remove.
-    search.recents = false;
+    search.surface = SearchSurface::Query;
     search.chat_ids = vec![ChatId(3)];
     assert!(!search.remove_recent(ChatId(3)));
 }

@@ -152,7 +152,7 @@ impl QuillApp {
                     .collect();
                 (
                     sets,
-                    matches!(emoji.installed, quill::state::fetch::Fetch::Ready(())),
+                    matches!(emoji.lists.installed, quill::state::fetch::Fetch::Ready(())),
                 )
             })
             .unwrap_or_default();

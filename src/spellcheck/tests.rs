@@ -327,7 +327,7 @@ impl SpellBackend for ClearsDuringJudge {
         if call == 0
             && let Some(checker) = self.checker.get().and_then(std::sync::Weak::upgrade)
         {
-            checker.clear_cache();
+            checker.set_app_words(Vec::<String>::new());
         }
         Some(call == 0)
     }

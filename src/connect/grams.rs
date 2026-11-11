@@ -43,13 +43,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Ask for the Grams balance once per session, for the Settings row
     /// (tdesktop `Credits::tonLoad`). `Ok(None)` when already asked.
     pub fn probe_grams_balance(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if self.session.payments.hub.grams.probed {
+        if !self.session.payments.hub.grams.probe.is_idle() {
             return Ok(None);
         }
         let sent = self.send_grams(GramsPurpose::Probe, |extra| {
             get_ton_transactions(extra, TxFilter::All, "", 1)
         })?;
-        self.session.payments.hub.grams.probed = true;
+        self.session.payments.hub.grams.probe.begin();
         Ok(Some(sent))
     }
 
@@ -59,26 +59,30 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Returns whether anything was sent.
     pub fn grams_tick(&mut self, settings_open: bool) -> bool {
         let mut sent = false;
-        if settings_open && !self.session.payments.hub.grams.probed {
+        if settings_open && self.session.payments.hub.grams.probe.is_idle() {
             sent |= matches!(self.probe_grams_balance(), Ok(Some(_)));
         }
-        if !self.session.payments.hub.grams.peers_dirty || !self.chats_path_active() {
+        if !self.chats_path_active() {
             return sent;
         }
-        let grams = &mut self.session.payments.hub.grams;
-        grams.peers_dirty = false;
-        let peers: Vec<MessageSender> = grams.peers().collect();
-        for peer in peers {
+        let rows: Vec<(usize, Option<MessageSender>)> =
+            self.session.payments.hub.grams.unchecked_peers().collect();
+        let mut handled = self.session.payments.hub.grams.peers_checked;
+        for (index, peer) in rows {
             let grams = &self.session.payments.hub.grams;
             let ask = match peer {
-                MessageSender::User { user_id } => (self.session.user(user_id).is_none()
+                Some(MessageSender::User { user_id }) => (self.session.user(user_id).is_none()
                     && !grams.asked_users.contains(&user_id))
                 .then_some((GramsPurpose::PeerUser, user_id)),
-                MessageSender::Chat { chat_id } => (!self.session.chats.contains_key(&chat_id)
-                    && !grams.asked_chats.contains(&chat_id))
-                .then_some((GramsPurpose::PeerChat, chat_id)),
+                Some(MessageSender::Chat { chat_id }) => {
+                    (!self.session.chats.contains_key(&chat_id)
+                        && !grams.asked_chats.contains(&chat_id))
+                    .then_some((GramsPurpose::PeerChat, chat_id))
+                }
+                None => None,
             };
             let Some((purpose, id)) = ask else {
+                handled = index.saturating_add(1);
                 continue;
             };
             let result = self.send_grams_for(purpose, Some(ChatId(id)), |extra| {
@@ -93,7 +97,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 // Never left: not asked. Try again on the next tick (the
                 // names still wait) instead of keeping the placeholder for
                 // the session.
-                grams.peers_dirty = true;
                 break;
             }
             if purpose == GramsPurpose::PeerUser {
@@ -101,8 +104,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             } else {
                 grams.asked_chats.insert(id);
             }
+            handled = index.saturating_add(1);
             sent = true;
         }
+        self.session.payments.hub.grams.peers_handled(handled);
         sent
     }
 
@@ -119,8 +124,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(page) => page,
             Err(err) => {
                 // The dialog is open: say why it is empty.
-                self.session.payments.hub.grams.error =
-                    Some(crate::lang::tr(crate::lang::keys::Q_GRAMS_COULD_NOT_LOAD).to_string());
+                self.session.payments.hub.grams.load = crate::gift_market::PageLoad::Failed(
+                    crate::lang::tr(crate::lang::keys::Q_GRAMS_COULD_NOT_LOAD).to_string(),
+                );
                 return Err(err);
             }
         };
@@ -134,7 +140,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Next page of the current tab; `Ok(None)` = no more pages.
     pub fn fetch_more_grams(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         let grams = &self.session.payments.hub.grams;
-        if !grams.has_more() || grams.loading {
+        if !grams.has_more() || grams.load.is_loading() {
             return Ok(None);
         }
         self.fetch_grams_page(true).map(Some)
@@ -146,7 +152,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         filter: TxFilter,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         let grams = &mut self.session.payments.hub.grams;
-        if grams.filter == filter && grams.loaded {
+        if grams.filter == filter && grams.load == crate::gift_market::PageLoad::Ready {
             return Ok(None);
         }
         grams.restart(filter);
@@ -167,17 +173,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let grams = &mut self.session.payments.hub.grams;
         match sent {
             Ok(extra) => {
-                grams.loading = true;
-                grams.error = None;
-                grams.request = extra.0;
+                grams.load.begin(extra.0, append);
                 Ok(extra)
             }
             Err(err) => {
                 // A tab switch or a refetch that never left ends in the
                 // error line, not in an empty list.
-                grams.loading = false;
-                grams.error =
-                    Some(crate::lang::tr(crate::lang::keys::Q_GRAMS_COULD_NOT_LOAD).to_string());
+                grams.load = crate::gift_market::PageLoad::Failed(
+                    crate::lang::tr(crate::lang::keys::Q_GRAMS_COULD_NOT_LOAD).to_string(),
+                );
                 Err(err)
             }
         }

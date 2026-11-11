@@ -25,12 +25,36 @@ use quill::group_type::{GroupTypeData, USERNAME_MAX, plan_group_type_save};
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::new_chat::{
-    NewChatBack, NewChatInvalid, NewChatKind, NewChatStage, NewChatStep, NewChatView,
-    plan_new_chat, view,
+    CreateProgress, NewChatBack, NewChatInvalid, NewChatKind, NewChatStage, NewChatStep,
+    NewChatView, TypeSaveStage, plan_new_chat, view,
 };
 
 /// The description shows three lines and grows to eight.
 const DESCRIPTION_ROWS: (usize, usize) = (3, 8);
+
+/// The name the last Confirm judged, so the name field's error is about that
+/// text: typing anything else ends it with no reset, whoever refused it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum TitleCheck {
+    /// Nothing judged yet.
+    Fine,
+    /// Confirm found this name empty or too long.
+    Rejected(String),
+    /// This name went to TDLib; its `NO_CHAT_TITLE` refusal is about it.
+    Sent(String),
+}
+
+impl TitleCheck {
+    /// The error shows while the field still holds the judged text and it
+    /// was refused by the dialog's own check or by TDLib.
+    pub(crate) fn shows_error(&self, server_rejected: bool, current: &str) -> bool {
+        match self {
+            Self::Fine => false,
+            Self::Rejected(text) => text == current,
+            Self::Sent(text) => server_rejected && text == current,
+        }
+    }
+}
 
 pub(crate) struct NewChatDialog {
     pub(crate) kind: NewChatKind,
@@ -50,8 +74,9 @@ pub(crate) struct NewChatDialog {
     pub(crate) auto_delete: Option<i32>,
     /// The auto-delete step's picker over [`TTL_CHOICES`].
     auto_delete_picker: Entity<SelectState<Vec<SharedString>>>,
-    /// Confirm found the name empty or too long.
-    title_error: bool,
+    /// What the name field shows: the dialog's own check on Confirm, or
+    /// TDLib's `NO_CHAT_TITLE` (`NewChatView::failure`), one verdict.
+    title: TitleCheck,
     /// The type step of a supergroup or channel (tdesktop
     /// `SetupChannelBox`, which starts on Public).
     type_box: Option<GroupTypeBox>,
@@ -61,11 +86,16 @@ impl QuillApp {
     /// What the open New Group / New Channel dialog shows.
     pub(crate) fn new_chat_view(&self) -> Option<NewChatView> {
         let dialog = self.admin.create_chat_dialog.as_ref()?;
-        let facts = self
-            .session()
-            .map(|session| session.new_chat_facts(&dialog.stage))
-            .unwrap_or_default();
-        Some(view(dialog.kind, &dialog.stage, &facts))
+        let settled = self.settled_new_chat_stage(&dialog.stage);
+        Some(view(dialog.kind, &settled))
+    }
+
+    /// `stage` with the session's answers to its requests folded in.
+    fn settled_new_chat_stage(&self, stage: &NewChatStage) -> NewChatStage {
+        match self.session() {
+            Some(session) => session.settled_new_chat(stage),
+            None => stage.clone(),
+        }
     }
 
     fn new_chat_step(&self) -> Option<NewChatStep> {
@@ -114,7 +144,7 @@ impl QuillApp {
     fn new_chat_auto_delete(&self, dialog: &NewChatDialog) -> i32 {
         dialog.auto_delete.unwrap_or_else(|| {
             self.session()
-                .and_then(|s| s.settings.default_auto_delete_secs)
+                .and_then(|s| s.settings.default_auto_delete.data().copied())
                 .unwrap_or(0)
         })
     }
@@ -149,11 +179,8 @@ impl QuillApp {
             .map(|secs| SharedString::from(quill::auto_delete::format_ttl(*secs)))
             .collect();
         let auto_delete_picker = cx.new(|cx| SelectState::new(choices, None, window, cx));
-        cx.subscribe(&title_input, |this, _, event: &InputEvent, cx| {
+        cx.subscribe(&title_input, |_, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
-                if let Some(dialog) = this.admin.create_chat_dialog.as_mut() {
-                    dialog.title_error = false;
-                }
                 cx.notify();
             }
         })
@@ -209,7 +236,7 @@ impl QuillApp {
             sources: PhotoSources::default(),
             auto_delete: None,
             auto_delete_picker,
-            title_error: false,
+            title: TitleCheck::Fine,
             type_box,
         });
         self.open_box(DialogKind::CreateChat);
@@ -219,6 +246,15 @@ impl QuillApp {
     /// Poll drain: a plain group that was made ends its dialog, which
     /// takes its creation row with it.
     pub(in crate::ui) fn drain_new_chat_done(&mut self, cx: &mut Context<Self>) -> bool {
+        // The answers the stage waits for are taken into it here.
+        let settled = self
+            .admin
+            .create_chat_dialog
+            .as_ref()
+            .map(|dialog| self.settled_new_chat_stage(&dialog.stage));
+        if let (Some(settled), Some(dialog)) = (settled, self.admin.create_chat_dialog.as_mut()) {
+            dialog.stage = settled;
+        }
         if !matches!(self.new_chat_step(), Some(NewChatStep::Done(_))) {
             return false;
         }
@@ -276,7 +312,7 @@ impl QuillApp {
         let Some(dialog) = self.new_chat_dialog() else {
             return;
         };
-        if self.new_chat_view().is_some_and(|view| view.busy) {
+        if self.new_chat_view().is_some_and(|view| view.busy()) {
             return;
         }
         let kind = dialog.kind;
@@ -285,7 +321,7 @@ impl QuillApp {
         match plan_new_chat(kind, &title, &description, &[], None, 0) {
             Err(NewChatInvalid::EmptyTitle | NewChatInvalid::TitleTooLong) => {
                 if let Some(dialog) = self.new_chat_dialog_mut() {
-                    dialog.title_error = true;
+                    dialog.title = TitleCheck::Rejected(title);
                     let input = dialog.title_input.clone();
                     input.update(cx, |input, cx| input.focus(window, cx));
                 }
@@ -332,7 +368,17 @@ impl QuillApp {
         };
         match live.driver.create_new_chat(&request, photo) {
             Ok(Some(request)) => {
-                self.set_new_chat_stage(NewChatStage::Creating { request, back }, cx);
+                if let Some(dialog) = self.admin.create_chat_dialog.as_mut() {
+                    dialog.title = TitleCheck::Sent(title);
+                }
+                self.set_new_chat_stage(
+                    NewChatStage::Creating {
+                        request,
+                        back,
+                        progress: CreateProgress::InFlight,
+                    },
+                    cx,
+                );
             }
             Ok(None) => {}
             Err(err) => {
@@ -374,7 +420,7 @@ impl QuillApp {
                 self.set_new_chat_stage(
                     NewChatStage::Type {
                         chat,
-                        saving: Some(sent),
+                        save: TypeSaveStage::Saving(sent),
                     },
                     cx,
                 );
@@ -392,48 +438,32 @@ impl QuillApp {
     /// A typed link hides the refusal of the last Save; a Save still out
     /// stays, so its answer moves the step on.
     pub(super) fn new_chat_link_edited(&mut self) {
-        let out = match self.admin.create_chat_dialog.as_ref().map(|d| &d.stage) {
-            Some(NewChatStage::Type {
-                saving: Some(sent), ..
-            }) => self
-                .session()
-                .is_some_and(|session| sent.iter().any(|id| session.requests.get(*id).is_some())),
-            _ => false,
-        };
-        if !out
-            && let Some(dialog) = self.admin.create_chat_dialog.as_mut()
-            && let NewChatStage::Type { saving, .. } = &mut dialog.stage
+        let settled = self
+            .admin
+            .create_chat_dialog
+            .as_ref()
+            .map(|dialog| self.settled_new_chat_stage(&dialog.stage));
+        if let (Some(mut settled), Some(dialog)) = (settled, self.admin.create_chat_dialog.as_mut())
         {
-            *saving = None;
+            if let NewChatStage::Type { save, .. } = &mut settled
+                && matches!(save, TypeSaveStage::Refused(_))
+            {
+                *save = TypeSaveStage::Editing;
+            }
+            dialog.stage = settled;
         }
     }
 
     /// Why TDLib refused the type step's link.
     pub(super) fn new_chat_username_failure(&self) -> Option<String> {
         let dialog = self.new_chat_dialog()?;
-        let NewChatStage::Type {
-            chat,
-            saving: Some(sent),
-        } = &dialog.stage
-        else {
-            return None;
-        };
-        let session = self.session()?;
-        if !session.new_chat_facts(&dialog.stage).type_failed {
-            return None;
+        match self.settled_new_chat_stage(&dialog.stage) {
+            NewChatStage::Type {
+                save: TypeSaveStage::Refused(reason),
+                ..
+            } => Some(reason),
+            _ => None,
         }
-        session
-            .groups
-            .info_edit_errors
-            .get(&chat.0)
-            .map(|error| error.reason.clone())
-            .or_else(|| {
-                session
-                    .groups
-                    .new_chats
-                    .type_save_failure(sent)
-                    .map(str::to_string)
-            })
     }
 
     /// The subscribers step's Add (tdesktop `inviteSelectedUsers`).

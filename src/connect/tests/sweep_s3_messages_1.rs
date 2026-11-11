@@ -201,37 +201,27 @@ fn stopping_a_poll_finds_it_in_a_topic_history() {
 
 #[test]
 fn a_failed_stickers_manager_step_keeps_the_commits_behind_it() {
-    use crate::state::ManagerCommit;
+    use crate::state::{CommitStep, ManagerCommit};
     let mut rig = Rig::new();
     rig.driver
         .session
         .stickers
         .manager
         .commits
-        .push_back(ManagerCommit {
-            masks: false,
-            removals: [11, 12].into(),
-            order: None,
-            sent: None,
-        });
+        .push_back(ManagerCommit::new(false, [11, 12], None));
     rig.driver
         .session
         .stickers
         .manager
         .commits
-        .push_back(ManagerCommit {
-            masks: false,
-            removals: [21].into(),
-            order: None,
-            sent: None,
-        });
+        .push_back(ManagerCommit::new(false, [21], None));
     rig.refuse(true);
     assert!(rig.driver.advance_manager_commit().is_err());
     // Only the step that did not go out is lost.
     let commits = &rig.driver.session.stickers.manager.commits;
     assert_eq!(commits.len(), 2);
-    assert_eq!(commits[0].removals, [12]);
-    assert_eq!(commits[1].removals, [21]);
+    assert_eq!(commits[0].steps, [CommitStep::Remove(12)]);
+    assert_eq!(commits[1].steps, [CommitStep::Remove(21)]);
     assert!(rig.driver.session.stickers.manager.failure.is_some());
     // The queue goes on once the sender is back.
     rig.refuse(false);
@@ -353,8 +343,7 @@ fn a_failed_category_strip_is_asked_again_when_the_panel_opens_again() {
 fn creating_a_forum_topic_lets_the_chat_list_row_ask_for_its_topics_again() {
     let mut rig = Rig::new();
     let threads = &mut rig.driver.session.threads;
-    threads.forum_row_asked.insert(7);
-    threads.forum_topics_failed.insert(7);
+    threads.forum_topics.fail(7, "failed");
     let created = rig.driver.session.request(
         crate::state::RequestPurpose::CreateForumTopic,
         Some(ChatId(7)),
@@ -364,8 +353,8 @@ fn creating_a_forum_topic_lets_the_chat_list_row_ask_for_its_topics_again() {
         created.0
     ));
     let threads = &rig.driver.session.threads;
-    assert!(!threads.forum_row_asked.contains(&7));
-    assert!(!threads.forum_topics_failed.contains(&7));
+    assert!(!threads.forum_row_asked(7));
+    assert!(!threads.forum_topics_failed(7));
 }
 
 #[test]

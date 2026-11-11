@@ -33,7 +33,7 @@ impl Session {
                         .settings
                         .rich_html_exports
                         .iter_mut()
-                        .find(|export| export.link.pending == Some(pending.id))
+                        .find(|export| export.link.pending() == Some(pending.id))
                 {
                     export.link.reply(pending.id, value);
                 }
@@ -213,10 +213,10 @@ impl Session {
                 // Back online: stories that failed while offline are asked
                 // for again at once.
                 if state == ConnectionState::Ready && self.connection != ConnectionState::Ready {
-                    self.stories.story_retry.clear();
-                    self.threads.saved.retry_when_online = false;
+                    self.stories.story_fetch.forget_retries();
+                    self.threads.saved.retry_after_reconnect();
                     // So do sticker and emoji sets whose load failed.
-                    self.media.media_library.failed.clear();
+                    self.media.media_library.forget_failures();
                 }
                 self.connection = state;
             }
@@ -254,7 +254,7 @@ impl Session {
                 ))) => self.apply_passkey_parameters(pending.map(|p| p.id), &text),
                 Some(RequestPurpose::Settings(SettingsPurpose::Passkeys(
                     crate::passkeys::PasskeysPurpose::LoginParameters,
-                ))) => self.apply_passkey_login_parameters(&text),
+                ))) => self.apply_passkey_login_parameters(pending.map(|p| p.id), &text),
                 Some(RequestPurpose::Bots(purpose @ BotsPurpose::GetBotEditText { .. })) => {
                     self.apply_owned_bot_text(purpose, text, pending);
                 }

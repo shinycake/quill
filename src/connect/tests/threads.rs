@@ -84,8 +84,7 @@ fn comments_thread_open_load_send_and_close() {
         let thread = driver.session.threads.thread.as_ref().unwrap();
         assert_eq!(thread.chat_id, ChatId(14));
         assert_eq!(thread.thread_id, 501);
-        assert_eq!(thread.status, ThreadStatus::LoadingHistory);
-        assert!(thread.needs_chat_switch);
+        assert_eq!(thread.status, ThreadStatus::SwitchingChat);
         assert_eq!(thread.subtitle(), "3 comments");
         assert_eq!(thread.unread_anchor, Some(MessageId(502)));
         assert_eq!(thread.root_message().unwrap().id, MessageId(501));
@@ -98,7 +97,7 @@ fn comments_thread_open_load_send_and_close() {
         .switch_to_thread_chat()
         .unwrap()
         .expect("history page requested");
-    assert_eq!(driver.session.open_chat, Some(ChatId(14)));
+    assert_eq!(driver.session.open_chat_id(), Some(ChatId(14)));
     assert_eq!(requests_of(&recorder, "closeChat").len(), 1);
     assert_eq!(
         requests_of(&recorder, "openChat").last().unwrap()["chat_id"],
@@ -130,7 +129,7 @@ fn comments_thread_open_load_send_and_close() {
     {
         let thread = driver.session.threads.thread.as_ref().unwrap();
         assert_eq!(thread.status, ThreadStatus::Ready);
-        assert!(thread.history.loaded_complete, "the root ends the thread");
+        assert!(thread.history.loaded_complete(), "the root ends the thread");
         let ids: Vec<i64> = thread.ordered().iter().map(|m| m.id.0).collect();
         assert_eq!(ids, vec![501, 502, 503, 504]);
     }
@@ -205,7 +204,7 @@ fn comments_thread_open_load_send_and_close() {
     assert_eq!(driver.close_thread(), Some(ChatId(13)));
     assert!(driver.session.threads.thread.is_none());
     driver.select_chat(ChatId(13)).unwrap();
-    assert_eq!(driver.session.open_chat, Some(ChatId(13)));
+    assert_eq!(driver.session.open_chat_id(), Some(ChatId(13)));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -257,7 +256,7 @@ fn group_reply_thread_pages_older_and_fails_with_retry() {
         ),
     );
     let thread = driver.session.threads.thread.as_ref().unwrap();
-    assert!(!thread.needs_chat_switch, "same chat");
+    assert_eq!(thread.status, ThreadStatus::Starting, "same chat");
     assert!(!thread.is_comments());
     assert_eq!(thread.subtitle(), "1 reply");
     let page = driver
@@ -282,7 +281,7 @@ fn group_reply_thread_pages_older_and_fails_with_retry() {
             .as_ref()
             .unwrap()
             .history
-            .loaded_complete
+            .loaded_complete()
     );
     let older = driver.fetch_thread_history().unwrap().expect("older page");
     let history = requests_of(&recorder, "getMessageThreadHistory");
@@ -303,7 +302,7 @@ fn group_reply_thread_pages_older_and_fails_with_retry() {
             .as_ref()
             .unwrap()
             .history
-            .loaded_complete
+            .loaded_complete()
     );
     // Closing in the same chat needs no chat switch.
     assert_eq!(driver.close_thread(), None);
@@ -506,7 +505,7 @@ fn unread_thread_opens_at_the_read_position_and_jumps_to_the_latest_replies() {
             .as_ref()
             .unwrap()
             .history
-            .has_newer
+            .has_newer()
     );
     assert!(!driver.thread_needs_reload());
 
@@ -536,7 +535,7 @@ fn unread_thread_opens_at_the_read_position_and_jumps_to_the_latest_replies() {
     {
         let thread = driver.session.threads.thread.as_ref().unwrap();
         assert_eq!(thread.unread_anchor, None);
-        assert!(!thread.history.has_newer);
+        assert!(!thread.history.has_newer());
         assert_eq!(thread.history.window_epoch, 1);
     }
     ingest(
@@ -574,7 +573,7 @@ fn unread_thread_opens_at_the_read_position_and_jumps_to_the_latest_replies() {
         let thread = driver.session.threads.thread.as_ref().unwrap();
         let ids: Vec<i64> = thread.ordered().iter().map(|m| m.id.0).collect();
         assert_eq!(ids, vec![47, 48, 49]);
-        assert!(!thread.history.has_newer);
+        assert!(!thread.history.has_newer());
         assert_eq!(thread.history.next_from_message_id, MessageId(47));
     }
     // With the newest replies shown, the button only scrolls.
@@ -593,4 +592,62 @@ fn unread_thread_opens_at_the_read_position_and_jumps_to_the_latest_replies() {
         0
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A first page that cannot be sent leaves the thread `Failed` (drawn with
+/// its retry), not `LoadingHistory` with nothing in flight.
+#[test]
+fn a_first_page_that_cannot_be_sent_fails_the_thread() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    };
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":14,"title":"Group","type":{"@type":"chatTypeSupergroup","supergroup_id":14,"is_channel":false},"unread_count":0}}"#,
+    );
+    driver.select_chat(ChatId(14)).unwrap();
+    let extra = driver
+        .open_thread(ChatId(14), MessageId(40))
+        .unwrap()
+        .unwrap();
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"messageThreadInfo","@extra":"{}","chat_id":14,"message_thread_id":40,"reply_info":{{"@type":"messageReplyInfo","reply_count":1,"recent_replier_ids":[],"last_read_inbox_message_id":0,"last_read_outbox_message_id":0,"last_message_id":90}},"unread_message_count":0,"messages":[{}]}}"#,
+            extra.0,
+            text_message(40, 14, 40, "root")
+        ),
+    );
+    recorder.refuse(Some("getMessageThreadHistory"));
+    assert!(driver.start_thread_in_open_chat().is_err());
+    let thread = driver.session.threads.thread.as_ref().unwrap();
+    assert!(matches!(thread.status, ThreadStatus::Failed(_)));
+    assert!(!driver.thread_needs_start(), "no per-frame resend");
+
+    // A sent page carries its request id.
+    recorder.refuse(None);
+    let extra = driver.retry_thread().unwrap().unwrap();
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"messageThreadInfo","@extra":"{}","chat_id":14,"message_thread_id":40,"reply_info":{{"@type":"messageReplyInfo","reply_count":1,"recent_replier_ids":[],"last_read_inbox_message_id":0,"last_read_outbox_message_id":0,"last_message_id":90}},"unread_message_count":0,"messages":[{}]}}"#,
+            extra.0,
+            text_message(40, 14, 40, "root")
+        ),
+    );
+    let page = driver.start_thread_in_open_chat().unwrap().unwrap();
+    assert_eq!(
+        driver.session.threads.thread.as_ref().unwrap().status,
+        ThreadStatus::LoadingHistory(page)
+    );
+    drop(dir);
 }

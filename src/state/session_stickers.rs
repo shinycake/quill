@@ -11,19 +11,26 @@ impl Session {
             &self.stickers.stickers.favorites,
             &self.stickers.stickers.found_stickers,
             &self.stickers.stickers.suggestions,
-            &self.payments.hub.premium_stickers,
         ]
         .into_iter()
         .flatten()
-        .chain(self.media.media_library.set_stickers.values().flatten())
+        .chain(
+            self.payments
+                .hub
+                .premium_stickers
+                .data()
+                .into_iter()
+                .flatten(),
+        )
+        .chain(self.media.media_library.values().flatten())
         .find(|sticker| sticker.file_id == file_id)
     }
 
     pub fn sticker_requires_premium(&self, file_id: FileId) -> bool {
         self.panel_sticker(file_id)
-            .is_some_and(|sticker| sticker.requires_premium)
+            .is_some_and(|sticker| sticker.requires_premium())
             || self.histories.values().flat_map(|history| history.messages.values()).chain(self.threads.topic_histories.values().flat_map(|history| history.messages.values())).any(|message| {
-                matches!(&message.content, MessageContent::Sticker(sticker) if sticker.file_id == file_id && sticker.requires_premium)
+                matches!(&message.content, MessageContent::Sticker(sticker) if sticker.file_id == file_id && sticker.requires_premium())
             })
     }
 
@@ -98,7 +105,7 @@ impl Session {
 
     pub fn accept_installed_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
         self.stickers.stickers.sets = sets;
-        self.stickers.stickers.installed_loaded = true;
+        self.stickers.stickers.lists.installed.succeed(());
         if self.stickers.stickers.tab != StickerTab::Installed {
             return;
         }
@@ -179,8 +186,7 @@ impl Session {
     /// Slice S12: drop the composer sticker suggestions.
     pub fn clear_sticker_suggestions(&mut self) {
         self.stickers.stickers.suggestions.clear();
-        self.stickers.stickers.suggest_for = None;
-        self.stickers.stickers.suggest_waiting_for_sets = false;
+        self.stickers.stickers.suggest_for = SuggestFor::Nothing;
     }
 
     /// Slice S12: store a `searchStickers` answer issued for the
@@ -216,7 +222,7 @@ impl Session {
     /// cache so the panel refetches the authoritative list instead of
     /// showing a stale order.
     pub fn invalidate_installed_sticker_sets(&mut self) {
-        self.stickers.stickers.installed_loaded = false;
+        self.stickers.stickers.lists.installed = crate::state::fetch::Fetch::Idle;
         self.stickers.stickers.sets.clear();
         self.stickers.stickers.selected_set_id = None;
         self.stickers.stickers.set = StickerSetStage::Idle;
@@ -259,11 +265,7 @@ impl Session {
     }
 
     pub fn accept_saved_animations(&mut self, animations: Vec<AnimationItem>) {
-        self.stickers.gifs.loading = false;
-        self.stickers.gifs.failed = false;
-        self.stickers.gifs.stale = false;
-        self.stickers.gifs.animations = animations;
-        self.stickers.gifs.loaded = true;
+        self.stickers.gifs.saved_answered(animations);
     }
 
     /// Slice S9: store a GIF-search `inlineQueryResults` page. A first page
@@ -273,12 +275,17 @@ impl Session {
     /// `first_page`.
     pub fn accept_gif_search_results(
         &mut self,
+        request: Option<RequestId>,
         animations: Vec<AnimationItem>,
         next_offset: String,
         first_page: bool,
     ) {
-        self.stickers.gifs.search_loading = false;
-        self.stickers.gifs.search_failed = false;
+        // A page of an earlier search, or of one that was left, is not the
+        // search's now.
+        if !self.stickers.gifs.search_waits_for(request) {
+            return;
+        }
+        self.stickers.gifs.search_answered();
         if first_page {
             self.stickers.gifs.search_results = animations;
         } else {
@@ -301,8 +308,8 @@ impl Session {
                 next_offset
             };
         let gifs = &mut self.stickers.gifs;
-        gifs.searches_kept
-            .keep(&gifs.search_query, &gifs.search_results);
+        let query = gifs.search_query().to_string();
+        gifs.searches_kept.keep(&query, &gifs.search_results);
     }
 
     /// The answer of `request`; one for a set that is no longer the asked

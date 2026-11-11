@@ -145,8 +145,8 @@ fn new_login_yes_confirms_the_unconfirmed_session() {
         &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
     );
     assert_eq!(
-        f.1.session.settings.notices.review_outcome,
-        Some(LoginReview::Allowed)
+        f.1.session.settings.notices.review.outcome(),
+        Some(&LoginReview::Allowed)
     );
     assert_eq!(f.1.session.settings.notices.unconfirmed_count, 0);
     assert!(f.1.session.settings.notices.unconfirmed_entries.is_empty());
@@ -169,8 +169,8 @@ fn new_login_no_terminates_and_names_the_attempt() {
         &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
     );
     assert_eq!(
-        f.1.session.settings.notices.review_outcome,
-        Some(LoginReview::Prevented {
+        f.1.session.settings.notices.review.outcome(),
+        Some(&LoginReview::Prevented {
             places: vec!["Berlin, Germany (Pixel 9)".into()]
         })
     );
@@ -192,7 +192,7 @@ fn new_login_review_error_keeps_the_alert() {
         ),
     );
     assert!(f.1.session.settings.notices.review.error().is_some());
-    assert!(f.1.session.settings.notices.review_outcome.is_none());
+    assert!(f.1.session.settings.notices.review.outcome().is_none());
     assert_eq!(f.1.session.settings.notices.unconfirmed_count, 1);
     assert!(!f.1.session.settings.notices.review.busy());
     cleanup(f);
@@ -259,14 +259,14 @@ fn terms_of_service_accept_round_trip() {
         r#"{"@type":"updateTermsOfService","terms_of_service_id":"tos-1","terms_of_service":{"@type":"termsOfService","text":{"@type":"formattedText","text":"Be nice.","entities":[]},"min_user_age":0,"show_popup":true}}"#,
     );
     assert_eq!(
-        f.1.session.settings.notices.terms.as_ref().unwrap().id,
+        f.1.session.settings.notices.terms.terms().unwrap().id,
         "tos-1"
     );
     f.1.accept_terms().unwrap();
     let request = last_request(&f.2);
     assert_eq!(request["@type"], "acceptTermsOfService");
     assert_eq!(request["terms_of_service_id"], "tos-1");
-    assert!(f.1.session.settings.notices.terms_accept.is_loading());
+    assert!(f.1.session.settings.notices.terms.is_accepting());
     assert_invalid(f.1.accept_terms());
     let extra = request["@extra"].as_str().unwrap().to_string();
     ingest(
@@ -275,8 +275,7 @@ fn terms_of_service_accept_round_trip() {
         &f.3,
         &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
     );
-    assert!(f.1.session.settings.notices.terms.is_none());
-    assert!(f.1.session.settings.notices.terms_accept.is_idle());
+    assert!(f.1.session.settings.notices.terms.terms().is_none());
     cleanup(f);
 }
 
@@ -303,7 +302,7 @@ fn accepting_old_terms_does_not_clear_newer_terms() {
             .settings
             .notices
             .terms
-            .as_ref()
+            .terms()
             .map(|t| t.id.as_str()),
         Some("tos-2")
     );
@@ -327,8 +326,8 @@ fn terms_accept_failure_keeps_the_prompt_with_an_error() {
         &f.3,
         &format!(r#"{{"@type":"error","code":500,"message":"x","@extra":"{extra}"}}"#),
     );
-    assert!(f.1.session.settings.notices.terms.is_some());
-    assert!(f.1.session.settings.notices.terms_accept.error().is_some());
+    assert!(f.1.session.settings.notices.terms.terms().is_some());
+    assert!(f.1.session.settings.notices.terms.error().is_some());
     cleanup(f);
 }
 
@@ -347,7 +346,7 @@ fn clear_storage_sends_optimize_storage_and_reports_freed_bytes() {
     assert_eq!(request["file_types"][1]["@type"], "fileTypeVideo");
     assert_eq!(request["chat_ids"], serde_json::json!([]));
     assert_eq!(request["return_deleted_file_statistics"], true);
-    assert!(f.1.session.settings.storage_clearing);
+    assert!(f.1.session.settings.storage_clear.is_clearing());
     // One clear at a time.
     assert_invalid(f.1.clear_storage(&[], &[]));
     let extra = request["@extra"].as_str().unwrap().to_string();
@@ -359,10 +358,10 @@ fn clear_storage_sends_optimize_storage_and_reports_freed_bytes() {
             r#"{{"@type":"storageStatistics","size":"5242880","count":3,"by_chat":[],"@extra":"{extra}"}}"#
         ),
     );
-    assert_eq!(f.1.session.settings.storage_freed, Some(5_242_880));
-    assert!(!f.1.session.settings.storage_clearing);
+    assert_eq!(f.1.session.settings.storage_clear.freed(), Some(5_242_880));
+    assert!(!f.1.session.settings.storage_clear.is_clearing());
     // The usage numbers are refetched on the same ingest.
-    assert!(f.1.session.settings.storage_stats_loading);
+    assert!(f.1.session.settings.storage_stats.is_loading());
     assert_eq!(requests_of(&f.2, "getStorageStatistics").len(), 1);
     cleanup(f);
 }
@@ -388,9 +387,9 @@ fn clear_storage_failure_reports_and_frees_the_gate() {
         &f.3,
         &format!(r#"{{"@type":"error","code":500,"message":"x","@extra":"{extra}"}}"#),
     );
-    assert!(!f.1.session.settings.storage_clearing);
-    assert!(f.1.session.settings.data_storage_error.is_some());
-    assert!(f.1.session.settings.storage_freed.is_none());
+    assert!(!f.1.session.settings.storage_clear.is_clearing());
+    assert!(f.1.session.settings.storage_clear.failed().is_some());
+    assert!(f.1.session.settings.storage_clear.freed().is_none());
     cleanup(f);
 }
 
@@ -499,7 +498,12 @@ fn wrong_recovery_email_code_reports_without_changing_state() {
         &f.3,
         &format!(r#"{{"@type":"error","code":400,"message":"CODE_INVALID","@extra":"{extra}"}}"#),
     );
-    let line = f.1.session.auth_state.password_op_error.clone().unwrap();
+    let line =
+        f.1.session
+            .auth_state
+            .password_op_error()
+            .unwrap()
+            .to_string();
     assert!(line.contains("confirm the recovery email"), "{line}");
     assert!(line.contains("wrong or has expired"), "{line}");
     assert!(
@@ -533,11 +537,7 @@ fn forgot_password_requests_a_code_then_recovers_with_a_new_password() {
         ),
     );
     assert_eq!(
-        f.1.session
-            .auth_state
-            .twofa_flow
-            .recovery_code_sent_to
-            .as_deref(),
+        f.1.session.auth_state.twofa_flow.code_wait.recovery(),
         Some("i***@example.com")
     );
     assert!(!f.1.session.auth_state.password_state_loading());
@@ -561,7 +561,8 @@ fn forgot_password_requests_a_code_then_recovers_with_a_new_password() {
         f.1.session
             .auth_state
             .twofa_flow
-            .recovery_code_sent_to
+            .code_wait
+            .recovery()
             .is_none()
     );
     assert_eq!(
@@ -575,21 +576,19 @@ fn forgot_password_requests_a_code_then_recovers_with_a_new_password() {
 fn a_refused_request_keeps_the_code_sent_to_step() {
     let mut f = fixture();
     seed_password_state(&mut f, PASSWORD_STATE_ON);
-    f.1.session.auth_state.twofa_flow.recovery_code_sent_to = Some("i***@example.com".into());
-    f.1.session.auth_state.twofa_flow.login_email_code_sent_to = Some("m***@example.com".into());
+    f.1.session.auth_state.twofa_flow.code_wait =
+        crate::state::CodeWait::Recovery("i***@example.com".into());
     // Another 2FA request is out: both starters are refused.
     f.1.refresh_password_state().unwrap();
     assert_invalid(f.1.request_twofa_recovery_code());
     assert_invalid(f.1.set_login_email("me@example.com"));
     let flow = &f.1.session.auth_state.twofa_flow;
-    assert_eq!(
-        flow.recovery_code_sent_to.as_deref(),
-        Some("i***@example.com")
-    );
-    assert_eq!(
-        flow.login_email_code_sent_to.as_deref(),
-        Some("m***@example.com")
-    );
+    assert_eq!(flow.code_wait.recovery(), Some("i***@example.com"));
+    f.1.session.auth_state.twofa_flow.code_wait =
+        crate::state::CodeWait::LoginEmail("m***@example.com".into());
+    assert_invalid(f.1.set_login_email("me@example.com"));
+    let flow = &f.1.session.auth_state.twofa_flow;
+    assert_eq!(flow.code_wait.login_email(), Some("m***@example.com"));
     cleanup(f);
 }
 
@@ -709,11 +708,7 @@ fn login_email_change_is_code_confirmed() {
         ),
     );
     assert_eq!(
-        f.1.session
-            .auth_state
-            .twofa_flow
-            .login_email_code_sent_to
-            .as_deref(),
+        f.1.session.auth_state.twofa_flow.code_wait.login_email(),
         Some("m***@example.com")
     );
     f.1.resend_login_email_code().unwrap();
@@ -743,7 +738,8 @@ fn login_email_change_is_code_confirmed() {
         f.1.session
             .auth_state
             .twofa_flow
-            .login_email_code_sent_to
+            .code_wait
+            .login_email()
             .is_none()
     );
     assert_eq!(
@@ -792,7 +788,9 @@ fn the_first_ready_sets_tdesktops_cache_limits_once() {
     );
     let paths = f.1.paths.clone();
     assert!(
-        !crate::data_settings::load_data_storage_prefs(&paths).storage_limits_seeded,
+        !crate::data_settings::load_data_storage_prefs(&paths)
+            .storage_limits_seeded
+            .is_seeded(),
         "not before TDLib has them"
     );
     let mut f = f;
@@ -802,14 +800,24 @@ fn the_first_ready_sets_tdesktops_cache_limits_once() {
         &f.3,
         r#"{"@type":"updateOption","name":"use_storage_optimizer","value":{"@type":"optionValueBoolean","value":true}}"#,
     );
-    assert!(crate::data_settings::load_data_storage_prefs(&paths).storage_limits_seeded);
+    assert!(
+        crate::data_settings::load_data_storage_prefs(&paths)
+            .storage_limits_seeded
+            .is_seeded()
+    );
     cleanup(f);
 }
 
 #[test]
 fn limits_tdlib_never_took_are_sent_again_on_the_next_ready() {
     let mut f = fixture();
-    assert!(!f.1.session.settings.data_storage.storage_limits_seeded);
+    assert!(
+        !f.1.session
+            .settings
+            .data_storage
+            .storage_limits_seeded
+            .is_seeded()
+    );
     f.2.sent.lock().unwrap().clear();
     f.1.maybe_seed_storage_limits().unwrap();
     assert!(
@@ -817,7 +825,7 @@ fn limits_tdlib_never_took_are_sent_again_on_the_next_ready() {
         "once per session"
     );
     // The process died before the echo: a new session starts unseeded.
-    f.1.session.settings.storage_limits_seed_sent = false;
+    f.1.session.settings.data_storage.storage_limits_seeded = crate::data_settings::Seed::Unseeded;
     f.1.maybe_seed_storage_limits().unwrap();
     assert_eq!(requests_of(&f.2, "setOption").len(), 4);
     cleanup(f);
@@ -826,13 +834,12 @@ fn limits_tdlib_never_took_are_sent_again_on_the_next_ready() {
 #[test]
 fn a_later_start_or_an_earlier_choice_is_left_alone() {
     let mut f = fixture();
-    f.1.session.settings.data_storage.storage_limits_seeded = true;
-    f.1.session.settings.storage_limits_seed_sent = false;
+    f.1.session.settings.data_storage.storage_limits_seeded = crate::data_settings::Seed::Seeded;
     f.2.sent.lock().unwrap().clear();
     f.1.maybe_seed_storage_limits().unwrap();
     assert!(requests_of(&f.2, "setOption").is_empty(), "seeded once");
 
-    f.1.session.settings.data_storage.storage_limits_seeded = false;
+    f.1.session.settings.data_storage.storage_limits_seeded = crate::data_settings::Seed::Unseeded;
     let no_limit =
         crate::telegram::envelope::OptionValue::Integer(crate::storage_limits::UNLIMITED_KIB);
     f.1.session
@@ -844,7 +851,13 @@ fn a_later_start_or_an_earlier_choice_is_left_alone() {
         requests_of(&f.2, "setOption").is_empty(),
         "an earlier No limit sticks"
     );
-    assert!(f.1.session.settings.data_storage.storage_limits_seeded);
+    assert!(
+        f.1.session
+            .settings
+            .data_storage
+            .storage_limits_seeded
+            .is_seeded()
+    );
     cleanup(f);
 }
 
@@ -877,8 +890,8 @@ fn a_retried_review_skips_the_sessions_already_reviewed() {
     assert_eq!(sent[2]["session_id"], 6);
     f.1.session.finish_login_review(6, None);
     assert_eq!(
-        f.1.session.settings.notices.review_outcome,
-        Some(LoginReview::Prevented {
+        f.1.session.settings.notices.review.outcome(),
+        Some(&LoginReview::Prevented {
             places: vec!["City 5 (Device 5)".into(), "City 6 (Device 6)".into()]
         })
     );
@@ -899,22 +912,15 @@ fn terms_accept_that_cannot_be_sent_says_so() {
         test_credentials(),
         prepared,
     );
-    driver.session.settings.notices.terms = Some(crate::telegram::envelope::TermsOfService {
-        id: "tos-1".into(),
-        text: "Be nice.".into(),
-        min_user_age: 0,
-        show_popup: true,
-    });
+    driver.session.settings.notices.terms =
+        crate::state::TermsState::Offered(crate::telegram::envelope::TermsOfService {
+            id: "tos-1".into(),
+            text: "Be nice.".into(),
+            min_user_age: 0,
+            show_popup: true,
+        });
     assert_invalid(driver.accept_terms());
-    assert!(
-        driver
-            .session
-            .settings
-            .notices
-            .terms_accept
-            .error()
-            .is_some()
-    );
+    assert!(driver.session.settings.notices.terms.error().is_some());
     drop(driver);
     std::fs::remove_dir_all(dir).unwrap();
 }

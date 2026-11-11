@@ -55,7 +55,7 @@ impl QuillApp {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        let open = session.open_chat;
+        let open = session.open_chat_id();
         if step.is_multiple_of(2)
             && stream_into_open_chat()
             && let Some(json) = open.and_then(|chat| open_chat_update(session, chat, step / 2))
@@ -122,7 +122,7 @@ fn apply_json(app: &mut QuillApp, json: &str, cx: &mut Context<QuillApp>) {
         return;
     };
     let need = quill::state::redraw_need(session, &envelope);
-    let seq = session.last_seq + 1;
+    let seq = app.demo_ui.next_seq(session.last_seq);
     session.apply(OwnedEnvelope {
         seq,
         client_id: None,

@@ -100,7 +100,7 @@ fn wait_for(mut done: impl FnMut() -> bool) {
 fn joined_group_call(muted: bool) -> ActiveGroupCall {
     let mut call = tracked_group_call(false, false, false);
     call.is_muted_self = muted;
-    call.transport_ready = true;
+    call.transport.connected();
     let json: Value =
         serde_json::from_str(&group_participant_json(777, true, "null", "null")).unwrap();
     let mut me = parse_group_call_participant(json.get("participant")).unwrap();
@@ -139,7 +139,7 @@ fn group_call_microphone_feeds_the_engine_and_follows_mute() {
 
     // Joined but the transport is not up yet: still nothing.
     let mut call = joined_group_call(false);
-    call.transport_ready = false;
+    call.transport.reset();
     driver.session.calls.active_group_call = Some(call);
     pump_until_mic_answers(&mut driver);
     assert!(mics.opened.lock().unwrap().is_empty());
@@ -386,7 +386,7 @@ fn a_lost_microphone_needs_no_telegram_update() {
     assert!(driver.request_tick(t0), "the call window shows the note");
     assert_eq!(driver.call_capture().target(), None);
     assert_eq!(
-        driver.call_capture().error.as_deref(),
+        driver.call_capture().error(),
         Some("The microphone was disconnected.")
     );
     let t1 = t0 + Duration::from_secs(1);
@@ -406,7 +406,7 @@ fn a_lost_microphone_needs_no_telegram_update() {
     }
     assert_eq!(mics.opened.lock().unwrap().len(), 2);
     assert!(driver.call_capture().target().is_some());
-    assert_eq!(driver.call_capture().error, None);
+    assert_eq!(driver.call_capture().error(), None);
     assert_eq!(
         driver.next_deadline(t2, 0),
         Some(Duration::from_millis(92)),

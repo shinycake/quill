@@ -161,7 +161,7 @@ pub(in crate::ui) fn document_chip(
     let size_label = format_bytes(size);
     let kind = document_kind_label(&doc.file_name, &doc.mime_type);
     let meta = if downloading_now {
-        let done = file.map(|f| f.local.downloaded_size).unwrap_or(0);
+        let done = file.map(|f| f.local.downloaded_size()).unwrap_or(0);
         let mut text = match (done > 0, size_label.is_empty()) {
             (true, false) => format!("{} of {}", format_bytes(done), size_label),
             _ => tr(keys::Q_MISC_DOWNLOADING).to_string(),

@@ -6,6 +6,86 @@
 //! The previous answer stays reachable while a refetch runs or after it
 //! fails, so a list does not blank out under a spinner or an error line.
 
+/// What a fetched list is doing besides loading: one change at a time under
+/// its request, or waiting for a refetch after a change (or after something
+/// else moved the list). Only that request's answer or error ends the
+/// change; an older request's late answer leaves a newer one waiting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ListOp {
+    #[default]
+    Idle,
+    /// A change is in flight under this request; its controls stay disabled.
+    Mutating(crate::ids::RequestId),
+    /// A change is in flight and something else moved the list meanwhile:
+    /// the list is fetched again whether the change lands or is refused.
+    MutatingStale(crate::ids::RequestId),
+    /// The list is kept for display and fetched again before it is trusted.
+    Stale,
+}
+
+impl ListOp {
+    pub fn is_mutating(self) -> bool {
+        matches!(self, Self::Mutating(_) | Self::MutatingStale(_))
+    }
+
+    pub fn is_stale(self) -> bool {
+        self == Self::Stale
+    }
+
+    /// A change goes out under `request`.
+    pub fn begin(&mut self, request: crate::ids::RequestId) {
+        *self = match *self {
+            Self::Stale | Self::MutatingStale(_) => Self::MutatingStale(request),
+            _ => Self::Mutating(request),
+        };
+    }
+
+    /// `request` came back with a refusal, or never left: the change did
+    /// not happen. Another request's late answer changes nothing; an answer
+    /// that names no request (its entry is gone) frees the list, or it
+    /// would stay locked for good.
+    pub fn failed(&mut self, request: Option<crate::ids::RequestId>) {
+        match *self {
+            Self::Mutating(waiting) if request.is_none_or(|id| id == waiting) => *self = Self::Idle,
+            Self::MutatingStale(waiting) if request.is_none_or(|id| id == waiting) => {
+                *self = Self::Stale;
+            }
+            _ => {}
+        }
+    }
+
+    /// `request` changed the list on the server: it is fetched again. A
+    /// newer change in flight keeps its place and marks the list when it
+    /// lands.
+    pub fn changed(&mut self, request: Option<crate::ids::RequestId>) {
+        match *self {
+            Self::Mutating(waiting) | Self::MutatingStale(waiting)
+                if request.is_some_and(|id| id != waiting) =>
+            {
+                *self = Self::MutatingStale(waiting);
+            }
+            _ => *self = Self::Stale,
+        }
+    }
+
+    /// Something else moved the list (not a change of ours): fetch it
+    /// again, unless a change is in flight (its landing marks the list).
+    pub fn mark_stale(&mut self) {
+        match *self {
+            Self::Idle => *self = Self::Stale,
+            Self::Mutating(request) => *self = Self::MutatingStale(request),
+            Self::Stale | Self::MutatingStale(_) => {}
+        }
+    }
+
+    /// The refetch went out, was answered or failed: no longer waiting.
+    pub fn refetched(&mut self) {
+        if *self == Self::Stale {
+            *self = Self::Idle;
+        }
+    }
+}
+
 /// The state of a fetched `T`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Fetch<T> {
@@ -13,9 +93,18 @@ pub enum Fetch<T> {
     #[default]
     Idle,
     /// A request is in flight; `stale` is the last answer, if any.
-    Loading { stale: Option<T> },
+    /// `request` is the one that asked (`None` until it is sent, or for a
+    /// fetch whose answer needs no matching): only its own answer or error
+    /// acts through [`Fetch::answered`] and [`Fetch::failed`].
+    Loading {
+        stale: Option<T>,
+        request: Option<crate::ids::RequestId>,
+    },
     /// The latest request answered.
     Ready(T),
+    /// A change landed after the answer: the old answer, if any, stays
+    /// visible until the refetch replaces it (never optimistic).
+    Outdated(Option<T>),
     /// The latest request failed; `stale` is the last answer, if any.
     Failed { error: String, stale: Option<T> },
 }
@@ -29,6 +118,27 @@ impl<T> Fetch<T> {
     /// last try failed. A request in flight or an answer is not asked again.
     pub fn can_ask(&self) -> bool {
         matches!(self, Self::Idle | Self::Failed { .. })
+    }
+
+    /// The answer is out of date and a refetch is due.
+    pub fn is_outdated(&self) -> bool {
+        matches!(self, Self::Outdated(_))
+    }
+
+    /// A change landed: what is held stays visible and is asked for
+    /// again, also when nothing was held (the change needs the answer). A
+    /// request in flight asked before the change, so it is dropped with its
+    /// mark: a first ask with nothing held becomes `Outdated(None)` too,
+    /// whose answer would otherwise land without the change. The owner that
+    /// refetches asks again.
+    pub fn outdate(&mut self) {
+        *self = Self::Outdated(self.take_data());
+    }
+
+    /// Something is being waited for: a request in flight, or a refetch due
+    /// with nothing held to show meanwhile. What draws a spinner.
+    pub fn shows_loading(&self) -> bool {
+        matches!(self, Self::Loading { .. } | Self::Outdated(None))
     }
 
     pub fn is_loading(&self) -> bool {
@@ -49,7 +159,9 @@ impl<T> Fetch<T> {
         match self {
             Self::Idle => None,
             Self::Ready(value) => Some(value),
-            Self::Loading { stale } | Self::Failed { stale, .. } => stale.as_ref(),
+            Self::Outdated(held)
+            | Self::Loading { stale: held, .. }
+            | Self::Failed { stale: held, .. } => held.as_ref(),
         }
     }
 
@@ -57,7 +169,9 @@ impl<T> Fetch<T> {
         match self {
             Self::Idle => None,
             Self::Ready(value) => Some(value),
-            Self::Loading { stale } | Self::Failed { stale, .. } => stale.as_mut(),
+            Self::Outdated(held)
+            | Self::Loading { stale: held, .. }
+            | Self::Failed { stale: held, .. } => held.as_mut(),
         }
     }
 
@@ -66,7 +180,9 @@ impl<T> Fetch<T> {
         match std::mem::take(self) {
             Self::Idle => None,
             Self::Ready(value) => Some(value),
-            Self::Loading { stale } | Self::Failed { stale, .. } => stale,
+            Self::Outdated(held)
+            | Self::Loading { stale: held, .. }
+            | Self::Failed { stale: held, .. } => held,
         }
     }
 
@@ -78,22 +194,97 @@ impl<T> Fetch<T> {
             return;
         }
         *self = match std::mem::take(self) {
-            Self::Loading { .. } => Self::Loading {
+            Self::Loading { request, .. } => Self::Loading {
                 stale: Some(make()),
+                request,
             },
             Self::Failed { error, .. } => Self::Failed {
                 error,
                 stale: Some(make()),
             },
+            Self::Outdated(_) => Self::Outdated(Some(make())),
             Self::Idle | Self::Ready(_) => Self::Ready(make()),
         };
+    }
+
+    /// Whether a request should go out now: never asked, or a refetch is
+    /// owed. A request in flight, an answer and a failure wait.
+    pub fn wants_fetch(&self) -> bool {
+        matches!(self, Self::Idle | Self::Outdated(_))
     }
 
     /// A request goes out. The last answer stays visible, the last error is
     /// gone.
     pub fn begin(&mut self) {
         let stale = self.take_data();
-        *self = Self::Loading { stale };
+        *self = Self::Loading {
+            stale,
+            request: None,
+        };
+    }
+
+    /// The request that was begun went out as `request`.
+    pub fn sent(&mut self, request: crate::ids::RequestId) {
+        if let Self::Loading { request: slot, .. } = self {
+            *slot = Some(request);
+        }
+    }
+
+    /// The fetch waits for the answer of `request`.
+    pub fn waits_for(&self, request: crate::ids::RequestId) -> bool {
+        matches!(self, Self::Loading { request: Some(asked), .. } if *asked == request)
+    }
+
+    /// `request` answered: taken only by the fetch that waits for it
+    /// (`false` and no change for an older request, or after the fetch was
+    /// dropped for a new one).
+    pub fn answered(&mut self, request: Option<crate::ids::RequestId>, value: T) -> bool {
+        if request.is_some_and(|request| self.waits_for(request)) {
+            *self = Self::Ready(value);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// `request` failed: only the fetch that waits for it fails. The held
+    /// data goes when `drop_data`.
+    pub fn failed(
+        &mut self,
+        request: Option<crate::ids::RequestId>,
+        error: impl Into<String>,
+        drop_data: bool,
+    ) -> bool {
+        if !request.is_some_and(|request| self.waits_for(request)) {
+            return false;
+        }
+        if drop_data {
+            self.fail_dropping_data(error);
+        } else {
+            self.fail(error);
+        }
+        true
+    }
+
+    /// The request answered, unless a change outdated the list meanwhile:
+    /// that answer predates the change, so it is dropped and the refetch
+    /// that follows asks again. `false` when it was dropped.
+    pub fn answer(&mut self, value: T) -> bool {
+        if self.is_outdated() {
+            return false;
+        }
+        *self = Self::Ready(value);
+        true
+    }
+
+    /// The request failed, unless a change outdated the list meanwhile (the
+    /// refetch that follows asks again). `false` when it was dropped.
+    pub fn answer_failed(&mut self, error: impl Into<String>) -> bool {
+        if self.is_outdated() {
+            return false;
+        }
+        self.fail(error);
+        true
     }
 
     /// The request answered.
@@ -138,6 +329,13 @@ impl<T> Fetch<T> {
                 None => Self::Idle,
             };
         }
+    }
+}
+
+impl<T> Fetch<Vec<T>> {
+    /// The newest list held, empty when there is none.
+    pub fn items(&self) -> &[T] {
+        self.data().map(Vec::as_slice).unwrap_or(&[])
     }
 }
 
@@ -295,7 +493,10 @@ mod tests {
         };
         bare.clear_error();
         assert!(bare.is_idle());
-        let mut loading: Fetch<i32> = Fetch::Loading { stale: None };
+        let mut loading: Fetch<i32> = Fetch::Loading {
+            stale: None,
+            request: None,
+        };
         loading.clear_error();
         assert!(loading.is_loading());
     }
@@ -307,13 +508,17 @@ mod tests {
         idle.data_mut().into_iter().for_each(|list| list.push(1));
         assert_eq!(idle, Fetch::Ready(vec![1]));
 
-        let mut loading: Fetch<Vec<i32>> = Fetch::Loading { stale: None };
+        let mut loading: Fetch<Vec<i32>> = Fetch::Loading {
+            stale: None,
+            request: None,
+        };
         loading.insert_data_if_missing(Vec::new);
         loading.data_mut().into_iter().for_each(|list| list.push(2));
         assert_eq!(
             loading,
             Fetch::Loading {
-                stale: Some(vec![2])
+                stale: Some(vec![2]),
+                request: None,
             }
         );
 

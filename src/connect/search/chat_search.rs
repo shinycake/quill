@@ -22,14 +22,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Ok(false);
         };
         // Reopening the gallery for the same chat keeps the already-fetched
         // tabs (`SharedMediaState::open_for`); only a fresh open fetches the
         // active tab.
-        let reopening = self.session.media.shared_media.open
-            && self.session.media.shared_media.chat_id == Some(chat_id);
+        let reopening = self.session.media.shared_media.chat_id == Some(chat_id);
         let initial = self.session.main_profile_gallery_tab(chat_id);
         let tab = self
             .session
@@ -142,10 +141,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(()),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session
-                    .media
-                    .shared_media
-                    .fail_more(chat_id, tab, generation);
+                self.session.media.shared_media.fail_more(
+                    chat_id,
+                    tab,
+                    generation,
+                    crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_LOAD_MORE_MEDIA)
+                        .to_string(),
+                );
                 Err(err)
             }
         }
@@ -171,7 +173,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.search.chat_search.open && !self.session.open_chat_search() {
+        if !self.session.search.chat_search.is_open() && !self.session.open_chat_search() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let trimmed = query.trim();
@@ -207,14 +209,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(ChatSearchQueryOutcome::Unchanged);
         }
         if self
-            .pending_typed_chat_search
-            .as_ref()
-            .is_some_and(|(_, q)| q == trimmed)
+            .session
+            .search
+            .chat_search
+            .typed
+            .armed()
+            .is_some_and(|q| q == trimmed)
             && self.session.search.chat_search.query == trimmed
         {
             return Ok(ChatSearchQueryOutcome::Unchanged);
         }
-        if self.pending_typed_chat_search.is_none()
+        if self.session.search.chat_search.typed.is_idle()
             && self.session.search.chat_search.query == trimmed
             && matches!(
                 self.session.search.chat_search.status,
@@ -227,9 +232,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(ChatSearchQueryOutcome::Unchanged);
         }
         let _search_gen = self.session.search.chat_search.begin_query(trimmed);
-        self.chat_search_debounce_token = self.chat_search_debounce_token.saturating_add(1);
-        let token = self.chat_search_debounce_token;
-        self.pending_typed_chat_search = Some((token, trimmed.to_string()));
+        let token = self
+            .session
+            .search
+            .chat_search
+            .typed
+            .arm(trimmed.to_string());
         Ok(ChatSearchQueryOutcome::Debounced { token })
     }
 
@@ -251,7 +259,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         sender: Option<MessageSender>,
     ) -> Result<ChatSearchQueryOutcome, ConnectSendError> {
-        if !self.chats_path_active() || !self.session.search.chat_search.open {
+        if !self.chats_path_active() || !self.session.search.chat_search.is_open() {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.search.chat_search.sender = sender;
@@ -270,7 +278,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         media: SearchMediaKind,
     ) -> Result<ChatSearchQueryOutcome, ConnectSendError> {
-        if !self.chats_path_active() || !self.session.search.chat_search.open {
+        if !self.chats_path_active() || !self.session.search.chat_search.is_open() {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.search.chat_search.media = media;
@@ -302,7 +310,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .search
             .chat_search
             .chat_id
-            .or(self.session.open_chat)
+            .or(self.session.open_chat_id())
         else {
             return Err(ConnectSendError::InvalidRequest);
         };
@@ -351,7 +359,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .search
             .chat_search
             .chat_id
-            .or(self.session.open_chat)
+            .or(self.session.open_chat_id())
         else {
             return Err(ConnectSendError::InvalidRequest);
         };
@@ -466,18 +474,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .and_then(|c| c.shared_tab)
         {
-            self.session.search.date_jump_note = None;
+            self.session.search.clear_date_jump_note();
             self.jump_shared_media_to_day(tab, day_number)?;
             return Ok(None);
         }
         let Some(calendar) = self.session.search.history_calendar.take() else {
             return Ok(None);
         };
-        self.session.search.date_jump_note = None;
+        self.session.search.clear_date_jump_note();
         // The jump runs in the view in place: it must be the chat the box
         // was opened for (a box left over from a view that is gone has
         // nothing to jump in).
-        if self.session.open_chat != Some(calendar.chat_id) {
+        if self.session.open_chat_id() != Some(calendar.chat_id) {
             return Ok(None);
         }
         if let Some(day) = calendar.day(day_number) {
@@ -505,19 +513,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         token: u64,
     ) -> Result<Option<ChatSearchFlight>, ConnectSendError> {
-        let Some((pending_token, query)) = self.pending_typed_chat_search.clone() else {
+        let Some(query) = self.session.search.chat_search.typed.take_if(token) else {
             return Ok(None);
         };
-        if pending_token != token {
-            return Ok(None);
-        }
-        self.pending_typed_chat_search = None;
         self.send_chat_search(&query)
     }
 
     fn clear_chat_search_debounce(&mut self) {
-        self.pending_typed_chat_search = None;
-        self.chat_search_debounce_token = self.chat_search_debounce_token.saturating_add(1);
+        self.session.search.chat_search.typed.cancel();
     }
 
     fn send_chat_search(
@@ -529,7 +532,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .search
             .chat_search
             .chat_id
-            .or(self.session.open_chat)
+            .or(self.session.open_chat_id())
         else {
             return Err(ConnectSendError::InvalidRequest);
         };
@@ -593,7 +596,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .search
                     .chat_search
                     .chat_id
-                    .or(self.session.open_chat)
+                    .or(self.session.open_chat_id())
                 {
                     self.session.reset_history_window(chat_id);
                 }
@@ -651,7 +654,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         message_id: MessageId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         let extra = self.session.request_history_around(chat_id, message_id);

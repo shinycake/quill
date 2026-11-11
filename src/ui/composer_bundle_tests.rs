@@ -88,15 +88,20 @@ fn the_repeat_choice_rides_the_schedule_for_premium(cx: &mut TestAppContext) {
         schedule_with_repeat(app, 7 * DAY, window, cx);
         assert!(matches!(
             app.pending_send().scheduling,
-            ComposerScheduling::SendAtDate(_)
+            ComposerScheduling::SendAtDate { .. }
         ));
-        assert_eq!(app.pending_send().schedule_repeat, 7 * DAY);
-        let options = app.composer_send_options();
-        assert_eq!(options.schedule_repeat_period, 7 * DAY);
+        assert_eq!(app.pending_send().scheduling.repeat_period(), 7 * DAY);
+        let options = app.composer_send_options(Default::default());
+        assert_eq!(options.scheduling.repeat_period(), 7 * DAY);
         // The choice is as one-shot as the schedule: clearing the schedule
         // drops it from the options.
         app.update_pending_send(|send| send.scheduling = ComposerScheduling::None);
-        assert_eq!(app.composer_send_options().schedule_repeat_period, 0);
+        assert_eq!(
+            app.composer_send_options(Default::default())
+                .scheduling
+                .repeat_period(),
+            0
+        );
     });
 }
 
@@ -112,7 +117,7 @@ fn without_premium_the_repeat_choice_is_dropped_and_the_button_is_locked(cx: &mu
         assert!(!app.repeat_allowed(ScheduleTarget::Composer));
         app.close_schedule_picker(cx);
         schedule_with_repeat(app, DAY, window, cx);
-        assert_eq!(app.pending_send().schedule_repeat, 0);
+        assert_eq!(app.pending_send().scheduling.repeat_period(), 0);
     });
 }
 
@@ -168,15 +173,17 @@ fn silent_send_and_just_send_need_something_to_send(cx: &mut TestAppContext) {
         assert!(app.send_silently_by_key(window, cx));
         assert!(app.composer.read(cx).value().is_empty());
         // The silence was for that one send.
-        assert!(!app.composer_ui.send_silent_once);
         assert!(!app.composer_effective_silent());
         app.composer
             .update(cx, |input, cx| input.set_value("loud", window, cx));
         assert!(app.just_send_by_key(window, cx));
         assert!(app.composer.read(cx).value().is_empty());
         // The option itself reaches the wire options.
-        app.composer_ui.send_silent_once = true;
-        assert!(app.composer_send_options().disable_notification);
+        let once = crate::ui::composer_sends::SendOnce {
+            silent: true,
+            ..Default::default()
+        };
+        assert!(app.composer_send_options(once).disable_notification);
     });
 }
 
@@ -216,8 +223,11 @@ fn archive_and_the_recent_actions_apply_to_the_open_chat(cx: &mut TestAppContext
         assert!(!app.admin_log_by_key(window, cx));
         let session = app.demo_session.as_mut().expect("demo session");
         session.open_chat(CHANNEL);
-        session.chats.get_mut(&CHANNEL.0).unwrap().my_member_status =
-            Some(ChannelMemberStatus::Creator);
+        session
+            .chats
+            .get_mut(&CHANNEL.0)
+            .unwrap()
+            .assume_member_status(Some(ChannelMemberStatus::Creator));
         assert!(app.admin_log_by_key(window, cx));
         assert!(
             app.session()

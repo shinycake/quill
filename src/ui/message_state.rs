@@ -5,26 +5,15 @@ use super::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::ids::MessageId;
-use std::collections::HashSet;
 
 pub(crate) struct MessageUi {
-    /// M1: right-click context menu target + window position.
-    pub(super) menu: Option<MessageMenuState>,
-    /// Message text selected when the message menu opened, if the
-    /// selection lies in that message (Quote & Reply, Copy Selected Text).
-    pub(super) menu_selection: Option<String>,
-    /// Which occurrence of `menu_selection` in the message the selection
-    /// started at (0 for the first); where Quote & Reply points.
-    pub(super) menu_selection_nth: usize,
+    /// M1: right-click context menu target + window position, and what
+    /// it was opened over (`message_menu_state`).
+    pub(super) menu: super::message_menu_state::MessageMenu,
     /// Page, report and sticker-set dialogs of the message menu's extras.
     pub(super) menu_ui: super::message_menu_ui::MessageMenuUi,
-    /// The link the open message menu was opened over.
-    pub(super) menu_link: Option<quill::text::LinkTarget>,
     /// The link under the latest right-press, and where it was pressed.
     pub(super) right_clicked_link: Option<(Point<Pixels>, quill::text::LinkTarget)>,
-    /// The checklist task or poll option the open message menu was opened
-    /// over (the whole message when none).
-    pub(super) menu_item: quill::composer::ReplyItem,
     /// The task or option under the latest right-press, and where.
     pub(super) right_clicked_item: Option<(Point<Pixels>, quill::composer::ReplyItem)>,
     /// The "Open this link?" box (`DialogKind::OpenLink`).
@@ -34,24 +23,19 @@ pub(crate) struct MessageUi {
     pub(super) pending_link: Option<super::entity_links::PendingLink>,
     /// A left press on a row that may become a drag selection, and the
     /// range it covers once it did (`selection_drag`).
-    pub(super) selection_drag: Option<super::selection_drag::DragSelect>,
-    /// The 15 ms pointer poll of a held press is running.
-    pub(super) selection_drag_loop: bool,
+    pub(super) selection_drag: super::selection_drag::SelectionDrag,
     /// Keyboard focus of the history while selecting: a row press or a
     /// drag moves focus here, so Space, Up and Down act on the rows and
     /// not on the composer (tdesktop focuses `HistoryInner`).
     pub(super) history_focus: FocusHandle,
     /// Screen-reader focus among the history's messages (`history_a11y`).
     pub(super) a11y: super::history_a11y::HistoryA11y,
-    /// tdesktop hover React / Unigram ReactionButton picker (emoji only).
-    /// The message menu's reaction strip is expanded to every reaction.
-    pub(super) reactions_expanded: bool,
     /// M1: swipe-to-reply press origin (chat, message, press x).
     pub(super) swipe_reply_start: Option<(ChatId, MessageId, Pixels)>,
     /// Phase 4.1: revealed text-entity spoilers, keyed by
     /// (chat id, message id, run index, is-caption block). Message ids are
     /// only unique within a chat, so the chat id is part of the key.
-    pub(super) spoiler_revealed: HashSet<(i64, u64, u64, bool)>,
+    pub(super) revealed: super::message_text::revealed::Revealed,
     /// B1: one-time custom keyboards the user already tapped
     /// (`(chat_id, message_id)`), hidden locally after use.
     pub(super) dismissed_keyboards: std::collections::HashSet<(i64, i64)>,
@@ -65,15 +49,11 @@ pub(crate) struct MessageUi {
     /// frame, with the chat painted; reported to TDLib as viewed at the next
     /// frame start (`report_visible_sponsored`) when that chat is still open.
     pub(super) rendered_sponsored: std::rc::Rc<std::cell::RefCell<Vec<(ChatId, i64)>>>,
-    /// The custom emoji card already on screen, with the tap it was shown
-    /// for (it times itself out; a new tap of the same emoji starts the
-    /// timer over).
-    pub(super) custom_emoji_card_seen: Option<(quill::state::CustomEmojiPreview, u64)>,
-    /// Counts taps of custom emoji, so each one has its own card timer.
-    pub(super) custom_emoji_tap_count: u64,
-    /// The custom emoji last tapped in this window: its card shows here,
-    /// over the window of the tap (the session keeps one preview).
-    pub(super) custom_emoji_tapped: Option<i64>,
+    /// The custom emoji card of this window: tapped, asked for, shown (it
+    /// times itself out; a new tap of the same emoji starts the timer over).
+    /// It shows here, over the window of the tap (the session keeps one
+    /// preview, as the answer).
+    pub(super) custom_emoji: super::custom_emoji_card::CustomEmojiCard,
     /// B4: poll voter-list viewer.
     pub(super) poll_voters_dialog: Option<PollVotersDialog>,
     /// B15: the inline "Add an Option" panel (`addPollOption`).
@@ -88,31 +68,23 @@ pub(crate) struct MessageUi {
 impl MessageUi {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         Self {
-            menu: None,
-            menu_selection: None,
-            menu_selection_nth: 0,
+            menu: Default::default(),
             menu_ui: super::message_menu_ui::MessageMenuUi::new(window, cx),
-            menu_link: None,
             right_clicked_link: None,
-            menu_item: quill::composer::ReplyItem::Message,
             right_clicked_item: None,
             open_link_confirm: None,
             pending_link: None,
-            selection_drag: None,
-            selection_drag_loop: false,
+            selection_drag: Default::default(),
             history_focus: cx.focus_handle(),
             a11y: Default::default(),
-            reactions_expanded: false,
             swipe_reply_start: None,
-            spoiler_revealed: HashSet::new(),
+            revealed: Default::default(),
             dismissed_keyboards: std::collections::HashSet::new(),
             collapsed_keyboards: std::collections::HashSet::new(),
             request_share: None,
             sponsored_about: None,
             rendered_sponsored: Default::default(),
-            custom_emoji_card_seen: None,
-            custom_emoji_tap_count: 0,
-            custom_emoji_tapped: None,
+            custom_emoji: Default::default(),
             poll_voters_dialog: None,
             poll_add_option: None,
             fact_check_dialog: None,
@@ -128,10 +100,16 @@ impl MessageUi {
 impl super::on_screen::Farewell for MessageUi {
     fn farewell(
         app: &mut super::app::QuillApp,
-        _: &mut gpui_kit::Window,
+        window: &mut gpui_kit::Window,
         cx: &mut gpui_kit::Context<super::app::QuillApp>,
     ) {
         super::emoji_effect::forget_account_notes();
+        if app
+            .session()
+            .is_some_and(|session| session.messages.message_report.is_some())
+        {
+            app.close_message_report(window, cx);
+        }
         if app
             .session()
             .is_some_and(|session| session.users_state.replies_block.is_some())

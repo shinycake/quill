@@ -28,15 +28,19 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     let mut vcx = VisualTestContext::from_window(handle.into(), cx);
     app.update(&mut vcx, |app, _| {
         let session = app.demo_session.as_mut().expect("demo session");
-        session.payments.hub.premium = Some(parse_premium_features(&serde_json::json!({
-            "features": [
-                {"@type": "premiumFeatureIncreasedLimits"},
-                {"@type": "premiumFeatureVoiceRecognition"},
-                {"@type": "premiumFeatureEmojiStatus"},
-                {"@type": "premiumFeatureDisabledAds"},
-            ],
-            "limits": [],
-        })));
+        session
+            .payments
+            .hub
+            .premium
+            .succeed(parse_premium_features(&serde_json::json!({
+                "features": [
+                    {"@type": "premiumFeatureIncreasedLimits"},
+                    {"@type": "premiumFeatureVoiceRecognition"},
+                    {"@type": "premiumFeatureEmojiStatus"},
+                    {"@type": "premiumFeatureDisabledAds"},
+                ],
+                "limits": [],
+            })));
     });
     frames(&mut vcx);
     (app, vcx)
@@ -62,8 +66,8 @@ fn open(
 fn premium(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<(PromoPage, String)> {
     app.read_with(vcx, |app, _| {
         let hub = &app.session()?.payments.hub;
-        hub.premium_open
-            .then(|| (hub.promo_page, hub.premium_ref.clone()))
+        hub.premium_open()
+            .then(|| (hub.promo_page(), hub.premium_ref().to_string()))
     })
 }
 
@@ -171,7 +175,7 @@ fn a_refused_hide_ads_opens_the_no_ads_preview(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
         let session = app.demo_session.as_mut().expect("demo session");
-        let chat_id = session.open_chat.unwrap_or(quill::ids::ChatId(1));
+        let chat_id = session.open_chat_id().unwrap_or(quill::ids::ChatId(1));
         session.payments.hub.promo_request = Some(quill::premium_hub::PromoRequest {
             feature: PremiumFeature::DisabledAds.into(),
             chat_id,

@@ -201,7 +201,7 @@ fn a_story_reply_finished_after_a_switch_is_not_sent(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     vcx.update(|window, cx| window.render_frame(cx));
     app.update(&mut vcx, |app, _| {
-        app.stories.with_viewer_ui(|open| open.reply_open = true)
+        app.stories.with_viewer_ui(|open| open.open_reply())
     });
     fake_microphone(&app, &mut vcx);
     start(&app, CaptureFor::StoryReply, &mut vcx);
@@ -233,14 +233,14 @@ fn play_once_and_lock_end_with_the_recording_whoever_takes_it(cx: &mut TestAppCo
     vcx.run_until_parked();
     app.update(&mut vcx, |app, cx| {
         app.toggle_record_once(cx);
-        app.recording.locked = true;
+        app.recording.set_locked(true);
         // A story reply sends the capture without reading "Play once".
         assert!(app.recording.take_voice().is_some());
         assert!(
-            !app.recording.once,
+            !app.recording.play_once(),
             "the next voice message is not view-once"
         );
-        assert!(!app.recording.locked);
+        assert!(!app.recording.locked());
     });
 }
 

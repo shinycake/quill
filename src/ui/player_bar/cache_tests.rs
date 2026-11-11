@@ -214,7 +214,7 @@ fn a_saved_track_has_no_neighbours_in_the_chat(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     let saved = quill::state::playlist_message_id(quill::ids::FileId(5));
     app.update(vcx, |app, _| {
-        app.playback.playing_audio = Some(saved);
+        app.playback.active = crate::ui::playback_state::ActiveTrack::Audio(saved);
     });
     assert_eq!(
         app.read_with(vcx, |app, _| app.playlist_can_move()),
@@ -228,16 +228,16 @@ fn give_saved_track(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     app.update(vcx, |app, _| {
         let session = app.demo_session.as_mut().expect("demo session");
         let playlist = session.media.playlists.entry(77).or_default();
-        playlist.tracks = vec![quill::telegram::envelope::ProfileAudio {
+        playlist.set_ready(vec![quill::telegram::envelope::ProfileAudio {
             file_id: quill::ids::FileId(5),
             title: "Saved".into(),
             performer: String::new(),
             file_name: String::new(),
             duration: 30,
-        }];
-        playlist.total_count = 1;
-        playlist.loaded = true;
-        app.playback.playing_audio = Some(quill::state::playlist_message_id(quill::ids::FileId(5)));
+        }]);
+        app.playback.active = crate::ui::playback_state::ActiveTrack::Audio(
+            quill::state::playlist_message_id(quill::ids::FileId(5)),
+        );
         app.playback.player.chat = Some(CHAT);
     });
 }

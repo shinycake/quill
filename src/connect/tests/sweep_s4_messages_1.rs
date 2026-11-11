@@ -117,11 +117,17 @@ fn suggestions_waiting_for_the_sets_stop_waiting_when_the_sets_fail() {
     let mut t = Flaky::new();
     t.driver.session.settings.media_prefs.sticker_suggest_mode = StickerSuggestMode::InstalledOnly;
     t.driver.update_sticker_suggestions("😀").unwrap();
-    assert!(t.driver.session.stickers.stickers.suggest_waiting_for_sets);
+    assert!(
+        t.driver
+            .session
+            .stickers
+            .stickers
+            .suggest_for
+            .waiting_for_sets()
+    );
     t.fail("getInstalledStickerSets", "boom");
     let stickers = &t.driver.session.stickers.stickers;
-    assert!(!stickers.suggest_waiting_for_sets);
-    assert!(stickers.suggest_for.is_none());
+    assert!(stickers.suggest_for.is_nothing());
     assert!(t.driver.composer_suggestions_idle("plain text"));
 }
 
@@ -170,7 +176,7 @@ fn a_sticker_set_edit_answer_ends_only_its_own_edit_and_every_toast_shows() {
     let second = rename(session);
     t.feed(json!({"@type":"ok","@extra":first.as_extra()}));
     let view = t.driver.session.stickers.sticker_set_view.as_ref().unwrap();
-    assert_eq!(view.edits.in_flight, [second]);
+    assert_eq!(view.edits.in_flight(), [second]);
     // An answer of an edit made under an earlier box ends none of these.
     t.feed(json!({"@type":"ok","@extra":RequestId(9_999).as_extra()}));
     let view = t.driver.session.stickers.sticker_set_view.as_ref().unwrap();
@@ -213,8 +219,8 @@ fn a_mask_list_asked_before_a_change_does_not_land_after_it() {
         {"@type":"stickerSetInfo","id":"3","size":1,"is_installed":true}]}),
     );
     let masks = &t.driver.session.stickers.masks;
-    assert!(!masks.installed_loaded);
-    assert!(masks.installed.is_empty());
+    assert!(masks.installed.is_idle());
+    assert!(masks.installed.items().is_empty());
 }
 
 #[test]
@@ -264,10 +270,10 @@ fn typing_moves_with_the_topic_and_the_cancel_goes_where_the_action_went() {
         "type":{"@type":"chatTypeSupergroup","supergroup_id":107,"is_channel":false},
         "unread_count":0,"permissions":{"@type":"chatPermissions","can_send_basic_messages":true}}}));
     t.driver.select_chat(ChatId(-1_007)).unwrap();
-    t.driver.session.open_topic = Some(5);
+    t.driver.session.open = t.driver.session.open.with_topic(5);
     t.driver.sync_outgoing_typing("hi", false, 1_000).unwrap();
     // Another topic of the same chat, inside the 4 s interval.
-    t.driver.session.open_topic = Some(6);
+    t.driver.session.open = t.driver.session.open.with_topic(6);
     t.driver.sync_outgoing_typing("hi", false, 1_500).unwrap();
     let actions: Vec<(String, i64)> = t
         .sender
@@ -306,8 +312,12 @@ fn a_stop_pressed_again_after_a_failure_leaves_the_failed_stage() {
     t.fail("stopPendingMessage", "boom");
     let stage = |t: &Flaky| t.driver.session.messages.pending_bot_messages[&(7, 0)].stop;
     assert_eq!(stage(&t), BotStopStage::Failed);
-    t.driver.stop_pending_bot_message(ChatId(7), 0, 12).unwrap();
-    assert_eq!(stage(&t), BotStopStage::Running);
+    let again = t
+        .driver
+        .stop_pending_bot_message(ChatId(7), 0, 12)
+        .unwrap()
+        .expect("sent");
+    assert_eq!(stage(&t), BotStopStage::Stopping(again));
 }
 
 #[test]
@@ -354,19 +364,21 @@ fn the_reply_bar_copy_shows_an_edit_and_the_oldest_copy_is_the_one_dropped() {
 }
 
 #[test]
-fn each_create_gets_its_own_start_number_and_a_reset_keeps_the_count() {
+fn each_create_gets_its_own_generation_and_a_reset_never_reuses_one() {
     let mut t = Flaky::new();
-    let starts = |t: &Flaky| t.driver.session.bots.owned.create.starts;
-    let before = starts(&t);
+    let generation = |t: &Flaky| t.driver.session.bots.owned.create.generation;
+    let before = generation(&t);
     t.driver
-        .create_managed_bot(900, "A", "a_bot", false)
+        .create_managed_bot(900, "A", "a_bot", false, None)
         .unwrap();
-    let first = starts(&t);
+    let first = generation(&t);
     assert_eq!(first, before + 1);
     t.driver
-        .create_managed_bot(900, "B", "b_bot", false)
+        .create_managed_bot(900, "B", "b_bot", false, None)
         .unwrap();
-    assert_eq!(starts(&t), first + 1);
+    assert_eq!(generation(&t), first + 1);
+    // The older create's answer finds a newer submission and drops.
     t.driver.reset_create_bot();
-    assert_eq!(starts(&t), first + 1);
+    assert_eq!(generation(&t), first + 2);
+    assert!(!t.driver.session.bots.owned.create.creating());
 }

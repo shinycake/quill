@@ -334,21 +334,40 @@ pub fn linux_session(
     }
 }
 
+/// Where the controller's hook stands.
+#[derive(Debug)]
+enum HookStage<H> {
+    Off,
+    Active {
+        key: String,
+        handle: H,
+    },
+    /// The last start of `key` failed; not retried until
+    /// [`Controller::retry`].
+    Failed {
+        key: String,
+        state: HookState,
+    },
+    /// A failed start may be tried again on the next `sync`; Settings
+    /// keeps showing why it failed until then.
+    RetryDue {
+        state: HookState,
+    },
+}
+
+static OFF: HookState = HookState::Off;
+static ACTIVE: HookState = HookState::Active;
+
 /// Owns at most one live hook and decides when to (re)start or stop it.
 #[derive(Debug)]
 pub struct Controller<H> {
-    running: Option<(String, H)>,
-    /// Key whose last start failed; not retried until [`Controller::retry`].
-    failed_for: Option<String>,
-    state: HookState,
+    stage: HookStage<H>,
 }
 
 impl<H> Default for Controller<H> {
     fn default() -> Self {
         Controller {
-            running: None,
-            failed_for: None,
-            state: HookState::Off,
+            stage: HookStage::Off,
         }
     }
 }
@@ -363,34 +382,42 @@ impl<H: HookLife> Controller<H> {
         want: Option<&str>,
         start: impl FnOnce(&str) -> Result<H, StartError>,
     ) -> bool {
-        let before = self.state.clone();
-        if let Some((key, why)) = self
-            .running
-            .as_ref()
-            .and_then(|(key, hook)| Some((key.clone(), hook.ended()?)))
-        {
-            self.running = None;
-            self.failed_for = Some(key);
-            self.state = HookState::Failed(why);
+        let before = self.state().clone();
+        let ended = match &self.stage {
+            HookStage::Active { key, handle } => handle.ended().map(|why| (key.clone(), why)),
+            _ => None,
+        };
+        if let Some((key, why)) = ended {
+            self.stage = HookStage::Failed {
+                key,
+                state: HookState::Failed(why),
+            };
         }
         let moved = self.sync_wanted(want, start);
-        moved || self.state != before
+        moved || *self.state() != before
     }
 }
 
 impl<H> Controller<H> {
     pub fn state(&self) -> &HookState {
-        &self.state
+        match &self.stage {
+            HookStage::Off => &OFF,
+            HookStage::Active { .. } => &ACTIVE,
+            HookStage::Failed { state, .. } | HookStage::RetryDue { state } => state,
+        }
     }
 
     /// Whether a hook is delivering system-wide key events.
     pub fn is_active(&self) -> bool {
-        self.running.is_some()
+        matches!(self.stage, HookStage::Active { .. })
     }
 
     /// Allow a failed start to be attempted again on the next `sync`.
     pub fn retry(&mut self) {
-        self.failed_for = None;
+        if let HookStage::Failed { state, .. } = &mut self.stage {
+            let state = std::mem::replace(state, HookState::Off);
+            self.stage = HookStage::RetryDue { state };
+        }
     }
 
     /// Bring the hook in line with `want` (the key while joined with
@@ -400,35 +427,33 @@ impl<H> Controller<H> {
         want: Option<&str>,
         start: impl FnOnce(&str) -> Result<H, StartError>,
     ) -> bool {
-        let before = self.state.clone();
+        let before = self.state().clone();
         match want {
-            None => {
-                self.running = None;
-                self.failed_for = None;
-                self.state = HookState::Off;
-            }
+            None => self.stage = HookStage::Off,
             Some(key) => {
-                if self.running.as_ref().is_some_and(|(k, _)| k == key)
-                    || self.failed_for.as_deref() == Some(key)
-                {
-                    return false;
+                match &self.stage {
+                    HookStage::Active { key: k, .. } | HookStage::Failed { key: k, .. }
+                        if k == key =>
+                    {
+                        return false;
+                    }
+                    _ => {}
                 }
                 // Stop the old key's hook before starting the new one.
-                self.running = None;
-                match start(key) {
-                    Ok(handle) => {
-                        self.running = Some((key.to_string(), handle));
-                        self.failed_for = None;
-                        self.state = HookState::Active;
-                    }
-                    Err(err) => {
-                        self.failed_for = Some(key.to_string());
-                        self.state = HookState::from(&err);
-                    }
-                }
+                self.stage = HookStage::Off;
+                self.stage = match start(key) {
+                    Ok(handle) => HookStage::Active {
+                        key: key.to_string(),
+                        handle,
+                    },
+                    Err(err) => HookStage::Failed {
+                        key: key.to_string(),
+                        state: HookState::from(&err),
+                    },
+                };
             }
         }
-        self.state != before
+        *self.state() != before
     }
 }
 

@@ -136,8 +136,8 @@ impl Session {
         );
         let search = &self.calls.add_people_search;
         let mut global: Vec<AddPeopleRow> = Vec::new();
-        if !query.is_empty() && search.query == query {
-            for chat_id in search.local.iter().chain(search.server.iter()) {
+        if !query.is_empty() && search.query() == query {
+            for chat_id in search.local().iter().chain(search.server().iter()) {
                 let Some(user) = self
                     .private_chat_user_id(ChatId(*chat_id))
                     .and_then(|user_id| self.users.get(&user_id))
@@ -154,9 +154,11 @@ impl Session {
         }
         let empty = match (rows.is_empty() && global.is_empty(), query.is_empty()) {
             (false, _) => None,
-            (true, true) if self.users_state.contacts.is_some() => Some(AddPeopleEmpty::NoContacts),
+            (true, true) if self.users_state.contacts.data().is_some() => {
+                Some(AddPeopleEmpty::NoContacts)
+            }
             (true, true) => Some(AddPeopleEmpty::ContactsLoading),
-            (true, false) if search.query == query && search.is_searching() => {
+            (true, false) if search.query() == query && search.is_searching() => {
                 Some(AddPeopleEmpty::SearchLoading)
             }
             (true, false) => Some(AddPeopleEmpty::NoResults),

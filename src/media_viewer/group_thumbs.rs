@@ -518,7 +518,8 @@ mod tests {
     #[test]
     fn the_strip_downloads_the_small_size_of_the_photos_it_shows() {
         use crate::media_viewer::MediaViewer;
-        let viewer = MediaViewer::open_profile(gallery(30), 15, 30);
+        let viewer =
+            MediaViewer::open_profile(crate::state::PhotoOwner::User(1), gallery(30), 15, 30);
         let ids: Vec<i32> = (8..=22).map(|n| 10 * n + 1).collect();
         let want: Vec<FileId> = ids.into_iter().map(FileId).collect();
         assert_eq!(viewer.strip_downloads(WIDE), want);

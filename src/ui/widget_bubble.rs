@@ -20,7 +20,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
-use quill::message_widget::{Lifecycle, MAX_CRASHES, WidgetKey};
+use quill::message_widget::{Lifecycle, WidgetKey};
 use quill::state::HistoryMessage;
 use quill::telegram::envelope::MessageContent;
 use std::sync::Arc;
@@ -103,9 +103,7 @@ impl QuillApp {
             None => Look::Placeholder,
             Some(entry) => match (&entry.lifecycle, entry.frame.is_some()) {
                 (Lifecycle::Failed { .. }, _) => Look::Fallback,
-                (Lifecycle::Stopped { .. }, true) => Look::Frame {
-                    stopped: entry.crashes >= MAX_CRASHES || entry.runtime().is_none(),
-                },
+                (Lifecycle::Stopped { .. }, true) => Look::Frame { stopped: true },
                 (Lifecycle::Stopped { .. }, false) => Look::Fallback,
                 (_, true) => Look::Frame { stopped: false },
                 (_, false) => Look::Placeholder,
@@ -124,7 +122,10 @@ impl QuillApp {
                     let scale = frame_scale(*w, width);
                     let (w, h) = (*w * scale, *h * scale);
                     let image: Arc<RenderImage> = (**image).clone();
-                    let cursor = entry.map(|e| e.cursor.as_str()).and_then(cursor_style);
+                    let cursor = entry
+                        .and_then(|e| e.live())
+                        .map(|live| live.cursor.as_str())
+                        .and_then(cursor_style);
                     Box::new(move |corners: MediaCorners| {
                         div()
                             .id(("widget-frame", id))
@@ -168,18 +169,18 @@ impl QuillApp {
         let Some(entry) = self.widgets.entries.get_mut(&key) else {
             return false;
         };
-        let Some(runtime) = entry.lifecycle.runtime() else {
+        let Some(live) = entry.lifecycle.runtime_mut() else {
             return false;
         };
         let button = match button {
             MouseButton::Left => 0,
-            MouseButton::Right if entry.hold => 2,
+            MouseButton::Right if live.pointer.hold => 2,
             _ => return false,
         };
-        entry.pressed = Some(button);
+        live.pointer.pressed = Some(button);
         // What this press opens (a link, a copy) shows in this window.
         entry.input_window = window;
-        runtime.input(Input::Pointer {
+        live.runtime.input(Input::Pointer {
             action: 0,
             x,
             y,
@@ -193,11 +194,11 @@ impl QuillApp {
         let Some(entry) = self.widgets.entries.get_mut(&key) else {
             return;
         };
-        let Some(runtime) = entry.lifecycle.runtime() else {
+        let Some(live) = entry.lifecycle.runtime_mut() else {
             return;
         };
-        if let Some(button) = entry.pressed {
-            runtime.input(Input::Pointer {
+        if let Some(button) = live.pointer.pressed {
+            live.runtime.input(Input::Pointer {
                 action: 1,
                 x,
                 y,
@@ -205,15 +206,15 @@ impl QuillApp {
                 button,
             });
         } else if over {
-            entry.hovered = true;
-            runtime.input(Input::Hover {
+            live.pointer.hovered = true;
+            live.runtime.input(Input::Hover {
                 action: 0,
                 x,
                 y,
                 modifiers,
             });
-        } else if std::mem::take(&mut entry.hovered) {
-            runtime.input(Input::Hover {
+        } else if std::mem::take(&mut live.pointer.hovered) {
+            live.runtime.input(Input::Hover {
                 action: 1,
                 x,
                 y,
@@ -234,7 +235,7 @@ impl QuillApp {
         let Some(entry) = self.widgets.entries.get_mut(&key) else {
             return;
         };
-        let Some(runtime) = entry.lifecycle.runtime() else {
+        let Some(live) = entry.lifecycle.runtime_mut() else {
             return;
         };
         let released = match button {
@@ -242,11 +243,11 @@ impl QuillApp {
             MouseButton::Right => 2,
             _ => return,
         };
-        if entry.pressed != Some(released) {
+        if live.pointer.pressed != Some(released) {
             return;
         }
-        entry.pressed = None;
-        runtime.input(Input::Pointer {
+        live.pointer.pressed = None;
+        live.runtime.input(Input::Pointer {
             action: 2,
             x,
             y,
@@ -255,7 +256,7 @@ impl QuillApp {
         });
         if released == 0 {
             // What the press selected, for the message menu's copy.
-            runtime.selection(false);
+            live.runtime.selection(false);
         }
     }
 }

@@ -170,7 +170,7 @@ impl QuillApp {
         let Some(target) = self.begin_recording_send(&caption, cx) else {
             return;
         };
-        let play_once = self.recording.once && self.once_allowed_in(Some(target.chat_id));
+        let play_once = self.recording.play_once() && self.once_allowed_in(Some(target.chat_id));
         let Some(capture) = self.recording.take_voice() else {
             return;
         };
@@ -445,7 +445,7 @@ impl QuillApp {
                 self.spawn_voice_tick(cx);
                 let note = match purpose {
                     CaptureFor::Message => {
-                        self.recording.locked = lock;
+                        self.recording.set_locked(lock);
                         self.sync_voice_action();
                         keys::Q_MISC_RECORDING_VIDEO_NOTE
                     }

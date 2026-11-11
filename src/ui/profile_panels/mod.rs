@@ -371,12 +371,11 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if !mode.needs_file() {
-            self.dialogs.profile_dialog = Some(ProfileDialog::PersonalPhoto {
+            self.open_profile_dialog(ProfileDialog::PersonalPhoto {
                 user_id,
                 mode,
                 path: None,
             });
-            self.open_box(DialogKind::ProfilePanel);
             cx.notify();
             return;
         }
@@ -421,8 +420,7 @@ impl QuillApp {
                         return;
                     }
                     this.as_asked_by(window, |this| {
-                        this.open_box(DialogKind::ProfilePanel);
-                        this.dialogs.profile_dialog = Some(ProfileDialog::PersonalPhoto {
+                        this.open_profile_dialog(ProfileDialog::PersonalPhoto {
                             user_id,
                             mode,
                             path: Some(path.to_string_lossy().into_owned()),

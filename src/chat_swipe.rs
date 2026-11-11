@@ -231,6 +231,9 @@ pub enum Phase {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Orientation {
+    /// No nonzero horizontal delta yet, so no direction either.
+    NoDirection,
+    /// The direction is fixed; horizontal or vertical is not.
     Undecided,
     Horizontal,
     Vertical,
@@ -258,21 +261,34 @@ impl Anim {
     }
 }
 
+/// The reach bounce of a gesture, and whether the ratio is past the
+/// threshold (`reachRatio`).
+#[derive(Debug, Clone, Copy)]
+enum Reach {
+    Below(Anim),
+    Reached(Anim),
+}
+
+impl Reach {
+    fn anim(&self) -> &Anim {
+        match self {
+            Reach::Below(anim) | Reach::Reached(anim) => anim,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct Gesture<K, A> {
     key: Option<K>,
     /// What the panel behind the row offered at the latest event.
     action: Option<A>,
-    /// The first nonzero horizontal delta fixed the direction.
-    direction_set: bool,
     /// +1 when fingers moved left (the only direction that swipes a row).
     direction: f32,
     orientation: Orientation,
     /// Accumulated slowed delta (`state->delta`), x then y.
     delta: (f32, f32),
     ratio: f32,
-    reached: bool,
-    reach: Anim,
+    reach: Reach,
     last_event_ms: u64,
 }
 
@@ -345,18 +361,16 @@ impl<K: Copy + PartialEq, A: Copy> SwipeMachine<K, A> {
                 self.gesture = Some(Gesture {
                     key: None,
                     action: None,
-                    direction_set: false,
                     direction: 1.0,
-                    orientation: Orientation::Undecided,
+                    orientation: Orientation::NoDirection,
                     delta: (0.0, 0.0),
                     ratio: 0.0,
-                    reached: false,
-                    reach: Anim {
+                    reach: Reach::Below(Anim {
                         from: 0.0,
                         to: 0.0,
                         start_ms: now,
                         duration_ms: 0,
-                    },
+                    }),
                     last_event_ms: now,
                 });
                 self.update(dx, dy, key, now, true)
@@ -379,11 +393,11 @@ impl<K: Copy + PartialEq, A: Copy> SwipeMachine<K, A> {
         g.last_event_ms = now;
         // `args.delta = state->delta - ScrollDeltaF(w) * kSwipeSlow`.
         let args = (g.delta.0 - dx * WHEEL_SLOW, g.delta.1 - dy * WHEEL_SLOW);
-        if first || !g.direction_set {
+        if first || g.orientation == Orientation::NoDirection {
             // `fillFinishByTop`: only a nonzero horizontal delta fixes the
             // direction; the event's own delta is dropped (`delta = {}`).
             if args.0 != 0.0 {
-                g.direction_set = true;
+                g.orientation = Orientation::Undecided;
                 g.direction = if args.0 < 0.0 { -1.0 } else { 1.0 };
                 g.key = key.map(|(k, _)| k);
                 g.action = key.map(|(_, a)| a);
@@ -401,7 +415,7 @@ impl<K: Copy + PartialEq, A: Copy> SwipeMachine<K, A> {
             g.action = Some(action);
         }
         match g.orientation {
-            Orientation::Vertical => Feed::default(),
+            Orientation::Vertical | Orientation::NoDirection => Feed::default(),
             Orientation::Undecided => {
                 g.delta = args;
                 let diff = args.0.abs() - args.1.abs();
@@ -416,23 +430,24 @@ impl<K: Copy + PartialEq, A: Copy> SwipeMachine<K, A> {
                 g.delta = args;
                 let ratio = (args.0 * g.direction / THRESHOLD).max(0.0);
                 g.ratio = ratio;
-                if !g.reached && ratio >= 1.0 {
-                    g.reached = true;
-                    g.reach = Anim {
-                        from: 0.0,
-                        to: 1.0,
-                        start_ms: now,
-                        duration_ms: SLIDE_MS,
-                    };
-                } else if g.reached && ratio < RESET_REACHED_ON {
-                    let current = g.reach.value(now);
-                    g.reach = Anim {
-                        from: current,
-                        to: 0.0,
-                        start_ms: now,
-                        duration_ms: SLIDE_MS,
-                    };
-                    g.reached = false;
+                match g.reach {
+                    Reach::Below(_) if ratio >= 1.0 => {
+                        g.reach = Reach::Reached(Anim {
+                            from: 0.0,
+                            to: 1.0,
+                            start_ms: now,
+                            duration_ms: SLIDE_MS,
+                        });
+                    }
+                    Reach::Reached(anim) if ratio < RESET_REACHED_ON => {
+                        g.reach = Reach::Below(Anim {
+                            from: anim.value(now),
+                            to: 0.0,
+                            start_ms: now,
+                            duration_ms: SLIDE_MS,
+                        });
+                    }
+                    _ => {}
                 }
                 Feed {
                     consumed: true,
@@ -457,7 +472,7 @@ impl<K: Copy + PartialEq, A: Copy> SwipeMachine<K, A> {
         };
         let raw = (g.delta.0 * g.direction / THRESHOLD).max(0.0);
         let ratio = raw.clamp(0.0, MAX_RATIO);
-        let reach = g.reach.value(now);
+        let reach = g.reach.anim().value(now);
         self.releases.push(Release {
             key,
             action,
@@ -505,7 +520,7 @@ impl<K: Copy + PartialEq, A: Copy> SwipeMachine<K, A> {
         {
             return Some(RowSwipe {
                 ratio: g.ratio,
-                reach: g.reach.value(now),
+                reach: g.reach.anim().value(now),
                 shift: row_shift(g.ratio),
             });
         }
@@ -526,7 +541,11 @@ impl<K: Copy + PartialEq, A: Copy> SwipeMachine<K, A> {
     /// Frames are needed (reach bounce, spring back, pending action).
     /// A held horizontal swipe redraws from its events instead.
     pub fn animating(&self, now: u64) -> bool {
-        !self.releases.is_empty() || self.gesture.as_ref().is_some_and(|g| g.reach.running(now))
+        !self.releases.is_empty()
+            || self
+                .gesture
+                .as_ref()
+                .is_some_and(|g| g.reach.anim().running(now))
     }
 
     /// A gesture is in progress on a row (the list must not scroll).

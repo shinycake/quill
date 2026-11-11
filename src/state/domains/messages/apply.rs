@@ -150,13 +150,18 @@ impl Session {
                         MessageContent::Text(_) | MessageContent::RichMessage(_)
                     )
                 {
-                    let stopped = self
+                    // An update of the same draft keeps a Stop that is
+                    // stopped or on its way.
+                    let carried = self
                         .messages
                         .pending_bot_messages
                         .get(&(chat_id.0, forum_topic_id))
-                        .is_some_and(|old| {
-                            old.draft_id == draft_id && old.stop == BotStopStage::Stopped
+                        .filter(|old| old.draft_id == draft_id)
+                        .map(|old| old.stop)
+                        .filter(|stop| {
+                            matches!(stop, BotStopStage::Stopped | BotStopStage::Stopping(_))
                         });
+                    let stopped = carried == Some(BotStopStage::Stopped);
                     self.remember_files(&files);
                     self.messages.pending_bot_messages.insert(
                         (chat_id.0, forum_topic_id),
@@ -165,11 +170,7 @@ impl Session {
                             can_stop: can_stop && !stopped,
                             keep_on_stop,
                             content,
-                            stop: if stopped {
-                                BotStopStage::Stopped
-                            } else {
-                                BotStopStage::Running
-                            },
+                            stop: carried.unwrap_or(BotStopStage::Running),
                             expires_at_ms: unix_ms_now().saturating_add(
                                 self.messages.pending_bot_period_secs.saturating_mul(1000),
                             ),
@@ -193,9 +194,9 @@ impl Session {
                 old_message_id,
             } => {
                 let chat_id = message.chat_id;
-                let topic_id = message.topic_id;
-                let thread_id = message.thread_id;
-                let direct_topic = message.extras.direct_messages_topic_id;
+                let topic_id = message.topic_id();
+                let thread_id = message.thread_id();
+                let direct_topic = message.extras.direct_messages_topic_id();
                 self.note_last_message_send_state(
                     chat_id,
                     old_message_id,
@@ -248,13 +249,14 @@ impl Session {
                     self.messages.flood_notice.push(notice);
                 }
                 let chat_id = message.chat_id;
-                let topic_id = message.topic_id;
-                self.note_last_message_send_state(
-                    chat_id,
-                    old_message_id,
-                    message.id,
-                    crate::telegram::envelope::MessageSendState::Failed,
-                );
+                let topic_id = message.topic_id();
+                let failed = crate::telegram::envelope::MessageSendState::Failed {
+                    can_retry: matches!(
+                        message.send_state,
+                        crate::telegram::envelope::MessageSendState::Failed { can_retry: true }
+                    ),
+                };
+                self.note_last_message_send_state(chat_id, old_message_id, message.id, failed);
                 self.remember_files(&message.files);
                 self.stickers
                     .effects
@@ -267,7 +269,10 @@ impl Session {
                 // separately on `can_retry` (`resendMessages` via
                 // `driver.resend_failed_message`) — not every failed send
                 // may be retried.
-                let can_retry = message.can_retry;
+                let can_retry = matches!(
+                    failed,
+                    crate::telegram::envelope::MessageSendState::Failed { can_retry: true }
+                );
                 let mut row = history_message(message, true);
                 row.send = SendState::Failed { can_retry };
                 self.index_poll(&row);
@@ -321,7 +326,12 @@ impl Session {
                 });
                 // An unpin leaves the pinned list at once; a pin is added
                 // by the refetch the driver sends for the open chat.
-                if !is_pinned && let Some(list) = self.messages.pinned_messages.get_mut(&chat_id.0)
+                if !is_pinned
+                    && let Some(list) = self
+                        .messages
+                        .pinned_messages
+                        .get_mut(&chat_id.0)
+                        .and_then(|fetch| fetch.data_mut())
                 {
                     list.retain(|message| message.id != message_id);
                 }
@@ -338,10 +348,12 @@ impl Session {
                     // but sends no new `self_destruct_in` with the update.
                     if let Some(sd) = message.self_destruct.as_mut()
                         && let crate::telegram::envelope::SelfDestructKind::Timer { secs } = sd.kind
-                        && sd.expires_in_ms <= 0
+                        && !sd.is_counting()
                     {
-                        sd.expires_in_ms = i64::from(secs) * 1000;
-                        sd.fetched_at_ms = now_ms;
+                        sd.clock = crate::telegram::envelope::SelfDestructClock::from_ms(
+                            i64::from(secs) * 1000,
+                            now_ms,
+                        );
                     }
                 });
             }
@@ -399,7 +411,12 @@ impl Session {
                 } else {
                     message_ids
                 };
-                if let Some(list) = self.messages.pinned_messages.get_mut(&chat_id.0) {
+                if let Some(list) = self
+                    .messages
+                    .pinned_messages
+                    .get_mut(&chat_id.0)
+                    .and_then(|fetch| fetch.data_mut())
+                {
                     list.retain(|message| !message_ids.contains(&message.id));
                 }
                 self.forget_conference_invite(chat_id, &message_ids);
@@ -448,11 +465,15 @@ impl Session {
             }
             MessagesPayload::Message(message) => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatReplyMarkupMessage) {
-                    self.set_chat_reply_keyboard(
-                        message.chat_id,
-                        Some(message.id),
-                        message.reply_markup.clone(),
-                    );
+                    // An update that named the keyboard while this ran
+                    // is newer than the fetched message.
+                    if pending.is_some_and(|p| self.awaits_reply_markup(message.chat_id, p.id)) {
+                        self.set_chat_reply_keyboard(
+                            message.chat_id,
+                            Some(message.id),
+                            message.reply_markup.clone(),
+                        );
+                    }
                     return;
                 }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatMessageByDate) {
@@ -541,7 +562,7 @@ impl Session {
                 {
                     // view-in-place: the answer applies in the view that asked
                     // (`lands_in_view`), so this is the asking window's chat.
-                    if self.open_chat != Some(chat_id) {
+                    if self.open_chat_id() != Some(chat_id) {
                         self.diagnostics.record(Diagnostic {
                             category: "reducer",
                             type_name: Some("sponsoredMessages".into()),
@@ -563,9 +584,7 @@ impl Session {
             }
             MessagesPayload::MessageAutoDeleteTime { seconds } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetDefaultAutoDelete) {
-                    self.settings.default_auto_delete_secs = Some(seconds);
-                    self.settings.default_auto_delete_busy = false;
-                    self.settings.default_auto_delete_error = None;
+                    self.settings.default_auto_delete.succeed(seconds);
                 }
             }
             // M1: `getMessageLink` returns `messageLink`. The driver
@@ -599,7 +618,7 @@ impl Session {
                     && menu.message_id == message_id
                     && poll_option_key(&menu.option_id) == option_key
                 {
-                    menu.properties = Some(properties);
+                    menu.properties = crate::state::fetch::Fetch::Ready(properties);
                 }
             }
             MessagesPayload::MessageProperties(actions) => match pending.map(|p| p.purpose) {

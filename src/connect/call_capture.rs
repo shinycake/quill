@@ -46,25 +46,37 @@ pub type MicOpener = Arc<
 /// this long (the design's 2 s).
 const REOPEN_AFTER: Duration = Duration::from_secs(2);
 
-/// Driver-side state of the call microphone.
+/// Where the call microphone stands.
 #[derive(Default)]
-pub struct CallCapture {
-    active: Option<ActiveCapture>,
-    /// Your level, written by whichever capture runs; the level reader
-    /// (`call_audio`) keeps this across restarts.
-    level: Arc<LevelCell>,
-    opener: Option<MicOpener>,
-    failed_at: Option<Instant>,
+enum Mic {
+    /// Nothing is wanted, or nothing runs yet.
+    #[default]
+    Off,
+    /// Opening or running.
+    Active(ActiveCapture),
+    /// The microphone could not be opened or stopped at `at`; the error is
+    /// the call window's note. It opens again after [`REOPEN_AFTER`].
+    Failed { at: Instant, error: String },
     /// The call refused a run of frames while this was wanted (call,
     /// microphone, muted): reopening the same would be refused again, so
     /// it waits until the call, the microphone or the mute changes, or the
     /// call's transport goes down and comes back.
-    refused: Option<(CaptureTarget, Option<String>, bool)>,
+    Refused {
+        wanted: (CaptureTarget, Option<String>, bool),
+        error: String,
+    },
+}
+
+/// Driver-side state of the call microphone.
+#[derive(Default)]
+pub struct CallCapture {
+    mic: Mic,
+    /// Your level, written by whichever capture runs; the level reader
+    /// (`call_audio`) keeps this across restarts.
+    level: Arc<LevelCell>,
+    opener: Option<MicOpener>,
     /// System audio to mix into the microphone frames, while shared.
     system_audio: Option<Arc<SystemAudioMix>>,
-    /// Why the microphone could not be opened or stopped, for the call
-    /// window's note.
-    pub error: Option<String>,
     /// Poked when the open microphone has news; the poll loop's by default.
     sink_wake: Option<&'static Signal>,
 }
@@ -80,6 +92,29 @@ struct ActiveCapture {
 }
 
 impl CallCapture {
+    fn active(&self) -> Option<&ActiveCapture> {
+        match &self.mic {
+            Mic::Active(active) => Some(active),
+            _ => None,
+        }
+    }
+
+    fn active_mut(&mut self) -> Option<&mut ActiveCapture> {
+        match &mut self.mic {
+            Mic::Active(active) => Some(active),
+            _ => None,
+        }
+    }
+
+    /// Why the microphone could not be opened or stopped, for the call
+    /// window's note.
+    pub fn error(&self) -> Option<&str> {
+        match &self.mic {
+            Mic::Failed { error, .. } | Mic::Refused { error, .. } => Some(error),
+            Mic::Off | Mic::Active(_) => None,
+        }
+    }
+
     /// Use `opener` instead of cpal (tests, demos). Also turns capture
     /// on in builds and modes where it would be off.
     pub fn inject_opener(&mut self, opener: MicOpener) {
@@ -102,16 +137,13 @@ impl CallCapture {
 
     /// The call the microphone feeds right now.
     pub fn target(&self) -> Option<CaptureTarget> {
-        self.active
-            .as_ref()
+        self.active()
             .filter(|active| !active.run.is_opening())
             .map(|active| active.target)
     }
 
     pub fn opening(&self) -> bool {
-        self.active
-            .as_ref()
-            .is_some_and(|active| active.run.is_opening())
+        self.active().is_some_and(|active| active.run.is_opening())
     }
 
     /// The level written by the running capture.
@@ -121,8 +153,7 @@ impl CallCapture {
 
     /// Frames the engine accepted from the running capture.
     pub fn frames_sent(&self) -> u64 {
-        self.active
-            .as_ref()
+        self.active()
             .and_then(|active| active.run.running())
             .map_or(0, |feeder| feeder.stats().sent())
     }
@@ -130,31 +161,32 @@ impl CallCapture {
     /// The raw microphone's highest level since the last take while the
     /// running capture is muted (tgcalls' scale).
     pub fn take_muted_level(&self) -> Option<f32> {
-        self.active
-            .as_ref()
+        self.active()
             .and_then(|active| active.controls.muted_level().take())
     }
 
     /// Whether the running capture sends silence.
     pub fn muted(&self) -> Option<bool> {
-        self.active.as_ref().map(|active| active.controls.muted())
+        self.active().map(|active| active.controls.muted())
     }
 
     /// Whether the running capture denoises.
     pub fn noise_suppression(&self) -> Option<bool> {
-        self.active
-            .as_ref()
+        self.active()
             .map(|active| active.controls.noise_suppression())
     }
 
+    /// Close the running stream; a failure on record stays.
     fn stop(&mut self) {
-        self.active = None;
+        if matches!(self.mic, Mic::Active(_)) {
+            self.mic = Mic::Off;
+        }
     }
 
     /// Mix `mix` into the microphone frames (or stop mixing), now and in
     /// every microphone opened later.
     pub fn set_system_audio(&mut self, mix: Option<Arc<SystemAudioMix>>) {
-        if let Some(active) = self.active.as_ref() {
+        if let Some(active) = self.active() {
             active.controls.set_system_audio(mix.clone());
         }
         self.system_audio = mix;
@@ -167,13 +199,15 @@ impl CallCapture {
 
     /// Whether system audio is mixed into the running microphone.
     pub fn mixes_system_audio(&self) -> bool {
-        self.active
-            .as_ref()
+        self.active()
             .is_some_and(|active| active.controls.system_audio().is_some())
     }
 
     pub(crate) fn until_reopen(&self, now: Instant) -> Option<Duration> {
-        let waited = now.saturating_duration_since(self.failed_at?);
+        let Mic::Failed { at, .. } = &self.mic else {
+            return None;
+        };
+        let waited = now.saturating_duration_since(*at);
         REOPEN_AFTER
             .checked_sub(waited)
             .filter(|left| !left.is_zero())
@@ -207,7 +241,7 @@ impl CallCapture {
             },
             |mut mic| mic.stop(),
         );
-        self.active = Some(ActiveCapture {
+        self.mic = Mic::Active(ActiveCapture {
             target,
             device,
             controls,
@@ -219,11 +253,7 @@ impl CallCapture {
     }
 
     fn finish_open(&mut self, now: Instant) {
-        let Some(active) = self
-            .active
-            .as_mut()
-            .filter(|active| active.run.is_opening())
-        else {
+        let Some(active) = self.active_mut().filter(|active| active.run.is_opening()) else {
             return;
         };
         let Some(answer) = active.mic.opened() else {
@@ -233,17 +263,16 @@ impl CallCapture {
             Ok(()) => match CaptureFeeder::start(active.sink.clone(), active.sender.clone()) {
                 Ok(feeder) => {
                     active.run = DeviceRun::Running(feeder);
-                    self.failed_at = None;
-                    self.error = None;
                     return;
                 }
                 Err(err) => format!("Couldn't start the call microphone: {err}"),
             },
             Err(err) => err.to_string(),
         };
-        self.active = None;
-        self.failed_at = Some(now);
-        self.error = Some(failure);
+        self.mic = Mic::Failed {
+            at: now,
+            error: failure,
+        };
     }
 }
 
@@ -287,7 +316,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Some((CaptureTarget::Private(call.id), call.muted));
         }
         let call = self.session.calls.active_group_call.as_ref()?;
-        if !call.is_joined || !call.transport_ready {
+        if !call.is_joined || !call.transport.is_connected() {
             return None;
         }
         Some((
@@ -312,10 +341,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let shown = |driver: &Self| {
             (
                 driver.call_capture.target(),
-                driver.call_capture.error.clone(),
+                driver.call_capture.error().map(str::to_string),
                 driver.call_screen.target(),
                 driver.call_screen.paused(),
-                driver.call_screen.error.clone(),
+                driver.call_screen.error().map(str::to_string),
             )
         };
         let before = shown(self);
@@ -337,12 +366,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .active_group_call
                 .as_ref()
                 .is_some_and(|call| call.is_joined);
-        if self.call_devices_warmed || !coming {
+        if !matches!(self.call_devices_listing, DeviceListing::Cold) || !coming {
             return;
         }
         if self.call_engine.is_some() {
             self.refresh_call_devices();
-            self.call_devices_warmed = true;
         }
     }
 
@@ -354,13 +382,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let group_pref = self.session.calls.prefs.call_noise_suppression;
         let capture = &mut self.call_capture;
         // A different call or microphone: close the old stream first.
-        if capture.active.as_ref().is_some_and(|active| {
+        if capture.active().is_some_and(|active| {
             !wanted.is_some_and(|(target, _)| target == active.target) || active.device != device
         }) {
             capture.stop();
         }
         // A device that failed or went away: report it and retry later.
-        let failure = capture.active.as_ref().and_then(|active| {
+        let failure = capture.active().and_then(|active| {
             active
                 .sink
                 .take_events()
@@ -375,40 +403,42 @@ impl<S: JsonSender> ConnectDriver<S> {
                     CaptureEvent::Paused | CaptureEvent::Resumed => None,
                 })
         });
+        let reported = failure.is_some();
         if let Some((err, refused)) = failure {
-            capture.stop();
-            capture.error = Some(err);
-            if refused {
-                capture.refused = wanted.map(|(target, muted)| (target, device.clone(), muted));
-            } else {
-                capture.failed_at = Some(now);
-            }
+            capture.mic = match (refused, wanted) {
+                (true, Some((target, muted))) => Mic::Refused {
+                    wanted: (target, device.clone(), muted),
+                    error: err,
+                },
+                // Nothing is wanted any more, but the refusal is still
+                // the call window's note for this pass.
+                (true, None) | (false, _) => Mic::Failed {
+                    at: now,
+                    error: err,
+                },
+            };
         }
         let Some((target, muted)) = wanted else {
-            capture.failed_at = None;
-            capture.refused = None;
-            capture.error = None;
+            if !reported {
+                capture.mic = Mic::Off;
+            }
             return;
         };
         let noise_suppression = denoises(target, group_pref);
         capture.finish_open(now);
-        if let Some(active) = capture.active.as_ref() {
+        if let Some(active) = capture.active() {
             active.controls.set_muted(muted);
             active.controls.set_noise_suppression(noise_suppression);
             return;
         }
-        if capture
-            .refused
-            .as_ref()
-            .is_some_and(|refused| refused.0 == target && refused.1 == device && refused.2 == muted)
-        {
-            return;
+        if let Mic::Refused { wanted, .. } = &capture.mic {
+            if wanted.0 == target && wanted.1 == device && wanted.2 == muted {
+                return;
+            }
+            capture.mic = Mic::Off;
         }
-        capture.refused = None;
         if !capture.enabled()
-            || capture
-                .failed_at
-                .is_some_and(|at| now.saturating_duration_since(at) < REOPEN_AFTER)
+            || matches!(&capture.mic, Mic::Failed { at, .. } if now.saturating_duration_since(*at) < REOPEN_AFTER)
         {
             return;
         }
@@ -428,7 +458,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Settings box) to the running group call microphone now.
     pub fn apply_call_noise_suppression(&mut self) {
         let pref = self.session.calls.prefs.call_noise_suppression;
-        if let Some(active) = self.call_capture.active.as_ref() {
+        if let Some(active) = self.call_capture.active() {
             active
                 .controls
                 .set_noise_suppression(denoises(active.target, pref));

@@ -32,10 +32,10 @@ impl Session {
                 direct_messages_chat_topic_id: topic,
             };
         }
-        if self.open_chat != Some(chat_id) {
+        if self.open_chat_id() != Some(chat_id) {
             return TopicId::None;
         }
-        if let Some(topic) = self.open_topic {
+        if let Some(topic) = self.open_forum_topic() {
             return TopicId::forum(topic);
         }
         match self.threads.saved.sublist.as_ref() {
@@ -60,8 +60,8 @@ impl Session {
         if let Some(topic) = self.open_direct_topic(chat_id) {
             return DraftTopic::DirectMessages(topic);
         }
-        match self.open_topic {
-            Some(topic) if self.open_chat == Some(chat_id) => DraftTopic::Forum(topic),
+        match self.open_forum_topic() {
+            Some(topic) if self.open_chat_id() == Some(chat_id) => DraftTopic::Forum(topic),
             _ => DraftTopic::Chat,
         }
     }
@@ -253,7 +253,7 @@ impl ForumTopic {
             return None;
         }
         let text = draft.preview_text().replace('\n', " ").trim().to_string();
-        let reply = draft.reply_to_message_id.is_some();
+        let reply = draft.reply.is_some();
         (!text.is_empty() || reply).then_some(DraftPreview { text, reply })
     }
 }

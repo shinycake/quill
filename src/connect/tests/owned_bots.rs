@@ -70,8 +70,8 @@ fn opening_the_editor_asks_for_the_name_and_the_about_text() {
         &answer(&extra_of(&about), r#"{"@type":"text","text":"Short"}"#),
     );
     let edit = driver.session.bots.owned.edit.clone().unwrap();
-    assert_eq!(edit.name.as_deref(), Some("Old"));
-    assert_eq!(edit.about.as_deref(), Some("Short"));
+    assert_eq!(edit.name.text(), Some("Old"));
+    assert_eq!(edit.about.text(), Some("Short"));
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn saving_sends_only_what_changed_and_keeps_the_texts_on_ok() {
         &answer(&extra_of(&request), r#"{"@type":"ok"}"#),
     );
     let edit = driver.session.bots.owned.edit.clone().unwrap();
-    assert_eq!(edit.name.as_deref(), Some("New"));
+    assert_eq!(edit.name.text(), Some("New"));
     assert_eq!((edit.saving(), edit.saved), (0, 1));
 }
 
@@ -118,8 +118,8 @@ fn a_refused_save_is_reported_and_not_kept() {
     );
     let edit = driver.session.bots.owned.edit.clone().unwrap();
     assert_eq!(edit.saving(), 0);
-    assert!(edit.about.is_none());
-    assert!(edit.error.unwrap().contains("400"));
+    assert!(edit.about.text().is_none());
+    assert!(edit.error().unwrap().contains("400"));
 }
 
 /// Save, close, reopen the same bot: the first dialog's late answers
@@ -158,13 +158,16 @@ fn a_reopened_editor_takes_only_its_own_answers() {
     );
     let edit = driver.session.bots.owned.edit.clone().unwrap();
     assert_eq!((edit.saving(), edit.saved), (1, 0));
-    assert_eq!(edit.pending_name.as_deref(), Some("Newer"));
-    assert!(edit.name.is_none() && edit.error.is_none());
+    assert!(matches!(
+        &edit.name_save,
+        crate::state::BotSave::Saving { text, .. } if text == "Newer"
+    ));
+    assert!(edit.name.text().is_none() && edit.error().is_none());
 
     let save = sent_request(&recorder, "setBotName");
     feed(&mut driver, &seq, &sink, &answer(&extra_of(&save), ok));
     let edit = driver.session.bots.owned.edit.clone().unwrap();
-    assert_eq!(edit.name.as_deref(), Some("Newer"));
+    assert_eq!(edit.name.text(), Some("Newer"));
     assert_eq!((edit.saving(), edit.saved), (0, 1));
 }
 
@@ -193,7 +196,10 @@ fn the_username_verdict_answers_only_the_latest_check() {
             r#"{"@type":"checkChatUsernameResultOk"}"#,
         ),
     );
-    assert!(driver.session.bots.owned.create.check.is_none());
+    assert!(!matches!(
+        driver.session.bots.owned.create.check,
+        crate::state::BotUsernameCheck::Known { .. }
+    ));
     let sent = recorder.snapshot();
     let second: serde_json::Value = serde_json::from_str(sent.last().unwrap()).unwrap();
     assert_eq!(second["username"], "secondbot");
@@ -207,8 +213,8 @@ fn the_username_verdict_answers_only_the_latest_check() {
         ),
     );
     assert_eq!(
-        driver.session.bots.owned.create.check,
-        Some(("secondbot".to_string(), UsernameCheckResult::Occupied))
+        driver.session.bots.owned.create.verdict("secondbot"),
+        Some(UsernameCheckResult::Occupied)
     );
 }
 
@@ -216,12 +222,12 @@ fn the_username_verdict_answers_only_the_latest_check() {
 fn creating_a_bot_records_the_new_user() {
     let (mut driver, recorder, sink, seq) = driver_parts();
     driver
-        .create_managed_bot(5, "Cool", "coolbot", true)
+        .create_managed_bot(5, "Cool", "coolbot", true, None)
         .unwrap();
     let request = sent_request(&recorder, "createBot");
     assert_eq!(request["manager_bot_user_id"], 5);
     assert_eq!(request["via_link"], true);
-    assert!(driver.session.bots.owned.create.creating.is_some());
+    assert!(driver.session.bots.owned.create.creating());
     feed(
         &mut driver,
         &seq,
@@ -231,16 +237,24 @@ fn creating_a_bot_records_the_new_user() {
             r#"{"@type":"user","id":900,"first_name":"Cool","type":{"@type":"userTypeBot","can_be_edited":true}}"#,
         ),
     );
-    let create = &driver.session.bots.owned.create;
-    assert_eq!(create.created, Some(900));
-    assert!(create.creating.is_none());
+    assert!(!driver.session.bots.owned.create.creating());
+    let (submission, user_id) = driver.take_created_bot().expect("the new bot");
+    assert_eq!(user_id, 900);
+    assert_eq!(
+        (
+            submission.manager_id,
+            submission.name.as_str(),
+            submission.username.as_str()
+        ),
+        (5, "Cool", "coolbot")
+    );
 }
 
 #[test]
 fn creating_from_the_keyboard_button_is_not_via_link() {
     let (mut driver, recorder, _sink, _seq) = driver_parts();
     driver
-        .create_managed_bot(5, "Cool", "coolbot", false)
+        .create_managed_bot(5, "Cool", "coolbot", false, None)
         .unwrap();
     let request = sent_request(&recorder, "createBot");
     assert_eq!(request["via_link"], false);
@@ -251,7 +265,7 @@ fn creating_from_the_keyboard_button_is_not_via_link() {
 fn a_failed_create_keeps_the_dialog_open_with_a_reason() {
     let (mut driver, recorder, sink, seq) = driver_parts();
     driver
-        .create_managed_bot(5, "Cool", "coolbot", true)
+        .create_managed_bot(5, "Cool", "coolbot", true, None)
         .unwrap();
     let request = sent_request(&recorder, "createBot");
     feed(
@@ -264,17 +278,16 @@ fn a_failed_create_keeps_the_dialog_open_with_a_reason() {
         ),
     );
     let create = &driver.session.bots.owned.create;
-    assert!(create.created.is_none());
-    assert!(create.creating.is_none());
-    assert!(create.error.as_deref().unwrap().contains("BotFather"));
-    assert_eq!(driver.session.payments.hub.limit_toast, None);
+    assert!(!create.creating());
+    assert!(create.error().unwrap().contains("BotFather"));
+    assert_eq!(driver.session.payments.hub.take_limit_toast(), None);
 }
 
 #[test]
 fn the_bot_limit_shows_the_premium_toast_over_the_open_dialog() {
     let (mut driver, recorder, sink, seq) = driver_parts();
     driver
-        .create_managed_bot(5, "Cool", "coolbot", true)
+        .create_managed_bot(5, "Cool", "coolbot", true, None)
         .unwrap();
     let request = sent_request(&recorder, "createBot");
     feed(
@@ -287,10 +300,10 @@ fn the_bot_limit_shows_the_premium_toast_over_the_open_dialog() {
         ),
     );
     let create = &driver.session.bots.owned.create;
-    assert!(create.creating.is_none());
-    assert_eq!(create.error, None);
+    assert!(!create.creating());
+    assert_eq!(create.error(), None);
     assert_eq!(
-        driver.session.payments.hub.limit_toast,
+        driver.session.payments.hub.take_limit_toast(),
         Some(crate::premium_limits::PremiumLimitKind::OwnedBots)
     );
 }

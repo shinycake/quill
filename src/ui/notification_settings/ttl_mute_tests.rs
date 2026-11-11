@@ -52,7 +52,7 @@ fn shown(vcx: &mut VisualTestContext, selector: &'static str) -> bool {
 
 fn open_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> ChatId {
     app.read_with(vcx, |app, _| {
-        let Some(chat_id) = app.session().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = app.session().and_then(|s| s.open_chat_id()) else {
             panic!("demo has no open chat");
         };
         chat_id
@@ -70,12 +70,7 @@ fn ttl_of(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, chat_id: ChatId) 
 
 fn move_ttl_slider(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, index: usize) {
     app.update_in(vcx, |app, window, cx| {
-        let Some(slider) = app
-            .preferences
-            .index_sliders
-            .get(StepSlider::AutoDelete)
-            .cloned()
-        else {
+        let Some(slider) = app.index_sliders.get(StepSlider::AutoDelete).cloned() else {
             panic!("auto-delete slider missing");
         };
         slider.update(cx, |state, cx| {
@@ -100,9 +95,7 @@ fn auto_delete_slider_saves_the_period_it_is_on(cx: &mut TestAppContext) {
     assert!(!shown(vcx, "ttl-disable"), "Off is a slider step");
     // No timer yet: the slider starts on Off.
     let start = app.read_with(vcx, |app, cx| {
-        app.preferences
-            .index_sliders
-            .index(StepSlider::AutoDelete, cx)
+        app.index_sliders.index(StepSlider::AutoDelete, cx)
     });
     assert_eq!(start, Some(0));
 
@@ -118,9 +111,7 @@ fn auto_delete_slider_saves_the_period_it_is_on(cx: &mut TestAppContext) {
     app.update(vcx, |app, cx| app.open_ttl_picker(chat_id, cx));
     frames(vcx);
     let start = app.read_with(vcx, |app, cx| {
-        app.preferences
-            .index_sliders
-            .index(StepSlider::AutoDelete, cx)
+        app.index_sliders.index(StepSlider::AutoDelete, cx)
     });
     assert_eq!(start, Some(3));
     move_ttl_slider(&app, vcx, 0);
@@ -267,7 +258,7 @@ fn the_mute_box_keeps_the_chat_it_was_opened_for(cx: &mut TestAppContext) {
     });
     frames(&mut vcx);
     app.read_with(&vcx, |app, _| {
-        assert_eq!(app.session().and_then(|s| s.open_chat), Some(other));
+        assert_eq!(app.session().and_then(|s| s.open_chat_id()), Some(other));
         assert_eq!(app.notify.mute_chat(), Some(first), "the box's own chat");
     });
 }

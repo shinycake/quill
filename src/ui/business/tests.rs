@@ -1,7 +1,7 @@
 //! UI integration tests for the Telegram Business dialog against the demo
 //! `QuillApp` (gpui-kit's test support needs the `demo-capture` feature).
 //! Nothing here reaches a live account: demo mode refuses every save.
-use super::{MessageKind, Recipients, ScheduleChoice, View};
+use super::{BotNotice, MessageKind, Recipients, ScheduleChoice, View};
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -80,7 +80,7 @@ fn act(
 
 fn view(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> View {
     app.read_with(cx, |app, _| {
-        app.dialogs.business_dialog.as_ref().unwrap().view
+        app.dialogs.business_dialog.as_ref().unwrap().view()
     })
 }
 
@@ -90,14 +90,19 @@ fn error(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Option<String> {
             .business_dialog
             .as_ref()
             .unwrap()
-            .local_error
-            .clone()
+            .local_error()
+            .map(str::to_string)
     })
 }
 
 fn note(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Option<String> {
     app.read_with(cx, |app, _| {
-        app.dialogs.business_dialog.as_ref().unwrap().note.clone()
+        app.dialogs
+            .business_dialog
+            .as_ref()
+            .unwrap()
+            .note()
+            .map(str::to_string)
     })
 }
 
@@ -144,8 +149,8 @@ fn premium_page(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<P
     app.read_with(vcx, |app, _| {
         app.session()
             .map(|s| &s.payments.hub)
-            .filter(|hub| hub.premium_open)
-            .map(|hub| hub.promo_page)
+            .filter(|hub| hub.premium_open())
+            .map(|hub| hub.promo_page())
     })
 }
 
@@ -201,8 +206,8 @@ fn greeting_messages_open_quick_replies_above_the_hub(cx: &mut TestAppContext) {
             .business_dialog
             .as_ref()
             .unwrap()
-            .greeting
-            .as_ref()
+            .screen
+            .greeting()
             .unwrap()
             .enabled
     });
@@ -229,8 +234,8 @@ fn the_limit_keeps_away_messages_off(cx: &mut TestAppContext) {
             .business_dialog
             .as_ref()
             .unwrap()
-            .away
-            .as_ref()
+            .screen
+            .away()
             .unwrap()
             .enabled
     });
@@ -268,7 +273,7 @@ fn picking_chats_selects_only_those(cx: &mut TestAppContext) {
     let offered = app.read_with(vcx, |app, _| app.business_picker_chats());
     assert!(offered.iter().any(|(id, _)| *id == chat));
     act(&app, vcx, |app, _, cx| {
-        if let Some(p) = app.business_mut().and_then(|d| d.picker.as_mut()) {
+        if let Some(p) = app.business_mut().and_then(|d| d.screen.picker_mut()) {
             assert!(p.chats.toggle_chat(chat));
         }
         cx.notify();
@@ -282,8 +287,8 @@ fn picking_chats_selects_only_those(cx: &mut TestAppContext) {
             .business_dialog
             .as_ref()
             .unwrap()
-            .greeting
-            .as_ref()
+            .screen
+            .greeting()
             .unwrap()
             .recipients
             .clone()
@@ -299,8 +304,8 @@ fn picking_chats_selects_only_those(cx: &mut TestAppContext) {
             .business_dialog
             .as_ref()
             .unwrap()
-            .greeting
-            .as_ref()
+            .screen
+            .greeting()
             .unwrap()
             .recipients
             .all_but_excluded
@@ -328,8 +333,8 @@ fn a_day_gets_a_set_of_hours(cx: &mut TestAppContext) {
             .business_dialog
             .as_ref()
             .unwrap()
-            .hours
-            .as_ref()
+            .screen
+            .hours()
             .unwrap()
             .week
             .clone()
@@ -454,18 +459,18 @@ fn a_screen_waits_for_the_full_info_before_it_can_be_changed(cx: &mut TestAppCon
             let d = app.dialogs.business_dialog.as_ref().expect("dialog");
             match screen {
                 View::Greeting => d
-                    .greeting
-                    .as_ref()
+                    .screen
+                    .greeting()
                     .is_some_and(|g| g.enabled && g.days == 7),
-                View::Away => d.away.as_ref().is_some_and(|a| a.enabled && a.offline_only),
-                View::Hours => d.hours.as_ref().is_some_and(|h| h.enabled),
+                View::Away => d.screen.away().is_some_and(|a| a.enabled && a.offline_only),
+                View::Hours => d.screen.hours().is_some_and(|h| h.enabled),
                 View::Location => d
-                    .location
-                    .as_ref()
+                    .screen
+                    .location()
                     .is_some_and(|l| l.address.read(cx).value() == "1 Main St"),
                 View::StartPage => d
-                    .start_page
-                    .as_ref()
+                    .screen
+                    .start_page()
                     .is_some_and(|p| p.title.read(cx).value() == "Welcome"),
                 _ => false,
             }
@@ -514,7 +519,7 @@ fn an_away_message_needs_messages_and_a_valid_range(cx: &mut TestAppContext) {
     });
     // A custom range that ends before it starts keeps the screen open.
     act(&app, vcx, |app, window, cx| {
-        let away = app.business_mut().unwrap().away.as_mut().unwrap();
+        let away = app.business_mut().unwrap().screen.away_mut().unwrap();
         away.schedule = ScheduleChoice::Custom;
         let (start, end) = (away.start.clone(), away.end.clone());
         let value =
@@ -551,8 +556,7 @@ fn the_start_page_takes_a_sticker_from_the_panel(cx: &mut TestAppContext) {
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,
-        requires_premium: false,
-        premium_animation: None,
+        premium: None,
     };
     app.update(vcx, |app, _| {
         let panel = &mut app.demo_session.as_mut().unwrap().stickers.stickers;
@@ -576,8 +580,8 @@ fn the_start_page_takes_a_sticker_from_the_panel(cx: &mut TestAppContext) {
             .business_dialog
             .as_ref()
             .unwrap()
-            .start_page
-            .as_ref()
+            .screen
+            .start_page()
             .unwrap()
             .sticker
             .clone()
@@ -588,8 +592,8 @@ fn the_start_page_takes_a_sticker_from_the_panel(cx: &mut TestAppContext) {
         let title = app
             .business_mut()
             .unwrap()
-            .start_page
-            .as_ref()
+            .screen
+            .start_page()
             .unwrap()
             .title
             .clone();
@@ -603,8 +607,8 @@ fn the_start_page_takes_a_sticker_from_the_panel(cx: &mut TestAppContext) {
             .business_dialog
             .as_ref()
             .unwrap()
-            .start_page
-            .as_ref()
+            .screen
+            .start_page()
             .unwrap();
         page.title.read(cx).value().chars().count()
     });
@@ -684,8 +688,8 @@ fn a_link_opens_in_its_editor(cx: &mut TestAppContext) {
             .business_dialog
             .as_ref()
             .unwrap()
-            .link_edit
-            .as_ref()
+            .screen
+            .link_edit()
             .unwrap();
         (
             edit.text.read(cx).value().to_string(),
@@ -731,8 +735,8 @@ fn a_found_bot_is_added_and_asked_about_on_leave(cx: &mut TestAppContext) {
         let input = app
             .business_mut()
             .unwrap()
-            .chatbot
-            .as_ref()
+            .screen
+            .chatbot()
             .unwrap()
             .username
             .clone();
@@ -746,10 +750,11 @@ fn a_found_bot_is_added_and_asked_about_on_leave(cx: &mut TestAppContext) {
             .business_dialog
             .as_ref()
             .unwrap()
-            .chatbot
-            .as_ref()
+            .screen
+            .chatbot()
             .unwrap()
-            .confirm_leave
+            .notice
+            == BotNotice::ConfirmLeave
     });
     assert!(asked);
     act(&app, vcx, |app, _, cx| app.add_business_bot(bot, cx));
@@ -765,19 +770,19 @@ fn a_found_bot_is_added_and_asked_about_on_leave(cx: &mut TestAppContext) {
             .business_dialog
             .as_ref()
             .unwrap()
-            .chatbot
-            .as_ref()
+            .screen
+            .chatbot()
             .unwrap()
-            .warning
+            .notice
             .clone()
     });
     assert_eq!(
-        warning.as_deref(),
-        Some("The bot Shop will be able to transfer your stars.")
+        warning,
+        BotNotice::Warning("The bot Shop will be able to transfer your stars.".into())
     );
     // A bot's exclusions in "Only Selected Chats" are chats only.
     act(&app, vcx, |app, _, cx| {
-        let bot = app.business_mut().unwrap().chatbot.as_mut().unwrap();
+        let bot = app.business_mut().unwrap().screen.chatbot_mut().unwrap();
         bot.recipients.included.chat_ids = vec![1];
         bot.recipients.all_but_excluded = false;
         cx.notify();
@@ -859,7 +864,7 @@ fn closing_from_a_sub_screen_saves_its_parent_and_tells_what_it_could_not_send(
     open(&app, vcx);
     go(&app, vcx, View::Greeting);
     act(&app, vcx, |app, _, cx| {
-        if let Some(draft) = app.business_mut().and_then(|d| d.greeting.as_mut()) {
+        if let Some(draft) = app.business_mut().and_then(|d| d.screen.greeting_mut()) {
             draft.enabled = true;
         }
         cx.notify();

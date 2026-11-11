@@ -35,8 +35,8 @@ impl QuillApp {
     /// The menu is over a task of this checklist: Reply is "Reply to Task"
     /// and replaces the usual Reply row.
     pub(in crate::ui) fn menu_replies_to_task(&self, content: &MessageContent) -> bool {
-        matches!(self.message_ui.menu_item, ReplyItem::Task(_))
-            && item_text(content, &self.message_ui.menu_item).is_some()
+        matches!(self.message_ui.menu.item(), ReplyItem::Task(_))
+            && item_text(content, &self.message_ui.menu.item()).is_some()
     }
 
     /// What TDLib allowed for the right-clicked option, once it answered.
@@ -45,7 +45,7 @@ impl QuillApp {
         chat_id: ChatId,
         message_id: MessageId,
     ) -> Option<quill::telegram::envelope::PollOptionProperties> {
-        let ReplyItem::PollOption(option_id) = &self.message_ui.menu_item else {
+        let ReplyItem::PollOption(option_id) = &self.message_ui.menu.item() else {
             return None;
         };
         self.session()
@@ -55,7 +55,7 @@ impl QuillApp {
                     && menu.message_id == message_id
                     && menu.option_id == *option_id
             })
-            .and_then(|menu| menu.properties)
+            .and_then(|menu| menu.properties.data().copied())
     }
 
     pub(in crate::ui) fn menu_item_rows(
@@ -67,7 +67,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Vec<MenuRow> {
         let mut rows = Vec::new();
-        let item = self.message_ui.menu_item.clone();
+        let item = self.message_ui.menu.item();
         let text = item_text(content, &item);
         match &item {
             ReplyItem::Task(_) if can_reply && text.is_some() => {
@@ -119,7 +119,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Vec<MenuRow> {
         let mut rows = Vec::new();
-        let item = self.message_ui.menu_item.clone();
+        let item = self.message_ui.menu.item();
         let ReplyItem::PollOption(option_id) = &item else {
             return rows;
         };
@@ -405,7 +405,7 @@ mod demo_facts {
                 chat_id: GROUP,
                 message_id: POLL,
                 option_id: "b".into(),
-                properties: Some(PollOptionProperties {
+                properties: quill::state::fetch::Fetch::Ready(PollOptionProperties {
                     can_be_deleted: true,
                     can_get_link: true,
                     can_be_replied: true,

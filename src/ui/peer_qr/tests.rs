@@ -257,7 +257,7 @@ fn a_member_who_cannot_change_info_gets_no_colors(cx: &mut TestAppContext) {
             .as_mut()
             .and_then(|session| session.chats.get_mut(&GROUP_CHAT))
         {
-            chat.my_member_status = Some(ChannelMemberStatus::Member);
+            chat.assume_member_status(Some(ChannelMemberStatus::Member));
         }
         app.open_peer_qr_box(QrPeer::Chat(GROUP_CHAT), cx);
     });
@@ -434,7 +434,7 @@ fn the_clock_runs_only_while_a_countdown_shows(cx: &mut TestAppContext) {
             app.peer_qr
                 .open
                 .as_ref()
-                .is_some_and(|open| open.clock_running)
+                .is_some_and(|open| open.clock.is_some())
         })
     };
     assert!(!running(&app, vcx), "a username link never runs out");
@@ -578,9 +578,12 @@ fn a_card_whose_chat_did_not_open_is_not_attached_later(cx: &mut TestAppContext)
     // opens is another one.
     app.update(vcx, |app, cx| {
         app.peer_qr.pending_attach = Some((quill::ids::ChatId(424_242), card.clone()));
-        app.links.pending_deep_link_open = Some(crate::ui::links_state::PendingOpen::user(
-            quill::ids::ChatId(GROUP_CHAT),
-            quill::state::DeepLinkAction::ShareDraft { text: "hi".into() },
+        app.links.resolved = Some(crate::ui::links_state::ResolvedLink::open(
+            crate::ui::links_state::PendingOpen::user(
+                quill::ids::ChatId(GROUP_CHAT),
+                quill::state::DeepLinkAction::ShareDraft { text: "hi".into() },
+            ),
+            None,
         ));
         cx.notify();
     });

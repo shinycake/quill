@@ -13,7 +13,7 @@ pub(in crate::ui) fn rich_text_reserving(
     entities: &[TextEntity],
     msg_key: (i64, u64),
     is_caption: bool,
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &super::revealed::Revealed,
     font: Pixels,
     emoji_paths: &HashMap<i64, ImageSource>,
     // Animated custom emoji for the animation layer (see `paint_text_run`).
@@ -43,7 +43,7 @@ pub(super) fn rich_part_line(
     text: &str,
     entities: &[TextEntity],
     msg_key: (i64, u64),
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &super::revealed::Revealed,
     font: Pixels,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
@@ -90,7 +90,7 @@ fn text_at(
     entities: &[TextEntity],
     msg_key: (i64, u64),
     is_caption: bool,
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &super::revealed::Revealed,
     font: Pixels,
     emoji_paths: &HashMap<i64, ImageSource>,
     layered: &HashMap<i64, StickerView>,
@@ -191,7 +191,7 @@ pub(super) fn inline_paragraph(
     first_index: usize,
     msg_key: (i64, u64),
     is_caption: bool,
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &super::revealed::Revealed,
     emoji_paths: &HashMap<i64, ImageSource>,
     layered: &HashMap<i64, StickerView>,
     font: Pixels,
@@ -268,7 +268,7 @@ pub(super) fn inline_paragraph(
             InlineAction::Link(link) => this.queue_link(link, msg_key, cx),
             InlineAction::CopyCode(text) => this.copy_entity_text(text, cx),
             InlineAction::RevealSpoiler(key) => {
-                this.message_ui.spoiler_revealed.insert(key);
+                this.message_ui.revealed.reveal_spoiler(key);
                 super::super::spoiler_fx::mark_revealed(key);
                 cx.notify();
             }
@@ -322,7 +322,7 @@ pub(in crate::ui) fn message_text_block(
     // Animated frames of this message's custom emoji, when decoded; they
     // replace the still images.
     animated_emoji: &HashMap<i64, super::super::sticker_player::StickerView>,
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &super::revealed::Revealed,
     // Settings → Appearance: message font size.
     font: Pixels,
     big_emoji: bool,
@@ -725,7 +725,7 @@ pub(in crate::ui) fn message_rich_block(
     chat_id: ChatId,
     message_id: MessageId,
     rich: &quill::telegram::envelope::RichMessageContent,
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &super::revealed::Revealed,
     // Whether "Load full message" of this message is out (the button waits).
     loading_full: bool,
     // Settings → Appearance: message font size.

@@ -24,8 +24,8 @@ impl Session {
                 direct_messages_chat_topic_id: topic,
             });
         }
-        if self.open_chat == Some(chat_id) {
-            self.open_topic.map(crate::ids::TopicId::forum)
+        if self.open_chat_id() == Some(chat_id) {
+            self.open_forum_topic().map(crate::ids::TopicId::forum)
         } else {
             None
         }
@@ -95,7 +95,7 @@ impl Session {
             }
         }
         self.reset_history_window(chat_id);
-        self.history_entry(chat_id).loaded_complete = false;
+        self.history_entry(chat_id).set_loaded_complete(false);
         self.prepare_history_view(chat_id);
         self.view_generation.bump();
         true
@@ -145,7 +145,7 @@ impl Session {
             .get(&chat_id.0)?
             .messages
             .get(&message_id.0)
-            .map(|message| message.extras.direct_messages_topic_id)
+            .map(|message| message.extras.direct_messages_topic_id())
             .filter(|topic| *topic != 0)
     }
 
@@ -183,7 +183,7 @@ impl Session {
         let Some(chat_id) = pending.chat_id else {
             return;
         };
-        if self.stale_history_requests.contains(&pending.id.0) {
+        if self.history_request_stale(pending) {
             return;
         }
         if let Some(topic) = self.open_direct_topic(chat_id) {

@@ -20,10 +20,10 @@ pub fn with_message_send_options(json: String, options: &SendOptions, single: bo
         return json;
     };
     let options = SendOptions {
-        schedule_repeat_period: if single {
-            options.schedule_repeat_period
+        scheduling: if single {
+            options.scheduling
         } else {
-            0
+            options.scheduling.repeating(0)
         },
         ..*options
     };
@@ -53,8 +53,7 @@ mod tests {
     fn a_schedule_and_silence_reach_a_media_send() {
         let options = SendOptions {
             disable_notification: true,
-            scheduling: ComposerScheduling::SendAtDate(2_000_000_000),
-            schedule_repeat_period: 86_400,
+            scheduling: ComposerScheduling::at(2_000_000_000).repeating(86_400),
             ..SendOptions::default()
         };
         let v: Value =
@@ -71,8 +70,7 @@ mod tests {
     #[test]
     fn an_album_never_carries_a_repeat_period() {
         let options = SendOptions {
-            scheduling: ComposerScheduling::SendAtDate(2_000_000_000),
-            schedule_repeat_period: 86_400,
+            scheduling: ComposerScheduling::at(2_000_000_000).repeating(86_400),
             ..SendOptions::default()
         };
         let v: Value =

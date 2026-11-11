@@ -46,20 +46,42 @@ pub(crate) struct PendingSend {
     pub(super) paid_stars: i64,
     /// `messageSchedulingState*` for the next send.
     pub(super) scheduling: ComposerScheduling,
-    /// The repeat period (seconds) chosen with the schedule; zero for never.
-    pub(super) schedule_repeat: i32,
     /// The link preview choice (tdesktop keeps it in the draft as
     /// `WebPageDraft`).
     pub(super) preview: LinkPreviewChoice,
-    /// The text of a Send pressed while a photo edit was rendering, with
-    /// that send's one-time options: it goes out when the last one lands.
-    pub(super) held_send: Option<(String, SendOnce)>,
+    /// A Send pressed while a photo edit was rendering.
+    pub(super) send: TraySend,
+}
+
+/// Whether the tray's Send waits for the photo edits still rendering.
+#[derive(Debug, PartialEq)]
+pub(super) enum TraySend {
+    Idle,
+    /// The text of the Send pressed while a photo edit was rendering, with
+    /// that send's one-time options: it goes out when the last render
+    /// lands. Only [`PendingSend::hold_send`] makes one, and the tray lets
+    /// it go when no render is left.
+    Held {
+        text: String,
+        once: SendOnce,
+    },
+}
+
+/// What a finished render left in its tray.
+#[derive(Default)]
+pub(super) struct Landed {
+    /// The held Send and its one-time options, once nothing in that tray
+    /// renders.
+    pub(super) held: Option<(String, SendOnce)>,
+    /// The photo's file now, while it is still in the tray.
+    pub(super) path: Option<PathBuf>,
 }
 
 /// The options a single send carries and the next does not: "Send without
-/// sound" and "Send with Effect" (`ComposerUi::send_silent_once`,
-/// `send_effect_once`). A send that waits (a paid-message confirm, a photo
-/// edit still rendering) keeps its own copy, so it goes out with them.
+/// sound" and "Send with Effect". They are an argument of the send path
+/// (`submit_composer`), never a field. A send that waits (a paid-message
+/// confirm, a photo edit still rendering) keeps its own copy, so it goes
+/// out with them.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct SendOnce {
     pub(super) silent: bool,
@@ -75,14 +97,13 @@ impl PendingSend {
         group_media: None,
         paid_stars: 0,
         scheduling: ComposerScheduling::None,
-        schedule_repeat: 0,
         preview: LinkPreviewChoice {
             disabled: false,
             above_text: false,
             media: PreviewMediaSize::Auto,
             link_index: 0,
         },
-        held_send: None,
+        send: TraySend::Idle,
     };
 
     /// Drop the tray and the choices that only make sense with it.
@@ -93,20 +114,80 @@ impl PendingSend {
         self.hd_photos = false;
         self.group_media = None;
         self.paid_stars = 0;
-        self.held_send = None;
+        self.send = TraySend::Idle;
     }
 
     /// Some photo of the tray is still rendering its edit.
     pub(super) fn renders_an_edit(&self) -> bool {
         self.attachments
             .iter()
-            .any(|attachment| attachment.extras.photo_render.is_some())
+            .any(|attachment| attachment.extras.photo_render().is_some())
+    }
+
+    /// Hold a Send until the renders land. Without a render there is
+    /// nothing to wait for: it is refused, and the caller sends at once.
+    pub(super) fn hold_send(&mut self, text: String, once: SendOnce) -> bool {
+        if !self.renders_an_edit() {
+            return false;
+        }
+        self.send = TraySend::Held { text, once };
+        true
+    }
+
+    /// The render `render` of a tray photo ended: `saved` is the new file,
+    /// `None` when it failed. The held Send is released here, with the
+    /// render that ends it: it goes out once no render is left, and a
+    /// failed render drops it (it would carry the unedited photo).
+    pub(super) fn end_render(&mut self, render: u64, saved: Option<&Path>) -> Option<Landed> {
+        let attachment = self
+            .attachments
+            .iter_mut()
+            .find(|attachment| attachment.extras.photo_render() == Some(render))?;
+        let Some(saved) = saved else {
+            attachment.extras.abandon_render();
+            let path = attachment.path.clone();
+            self.send = TraySend::Idle;
+            return Some(Landed {
+                held: None,
+                path: Some(path),
+            });
+        };
+        let stem = attachment
+            .path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("photo")
+            .to_string();
+        attachment.path = saved.to_path_buf();
+        attachment.extras.land_render();
+        attachment.file_name = format!("{stem}.png");
+        attachment.kind = quill::composer::AttachmentKind::Photo;
+        let held = (!self.renders_an_edit())
+            .then(|| self.take_held_send())
+            .flatten();
+        Some(Landed {
+            held,
+            path: Some(saved.to_path_buf()),
+        })
+    }
+
+    /// What a finished render left in its tray.
+    fn take_held_send(&mut self) -> Option<(String, SendOnce)> {
+        match std::mem::replace(&mut self.send, TraySend::Idle) {
+            TraySend::Idle => None,
+            TraySend::Held { text, once } => Some((text, once)),
+        }
+    }
+
+    /// A Send is held for the renders.
+    pub(super) fn send_is_held(&self) -> bool {
+        matches!(self.send, TraySend::Held { .. })
     }
 
     /// A held Send waits only on a render that will land.
     fn release_idle_hold(&mut self) {
         if !self.renders_an_edit() {
-            self.held_send = None;
+            self.send = TraySend::Idle;
         }
     }
 
@@ -406,29 +487,6 @@ impl QuillApp {
         }
     }
 
-    /// The one-time options of the send being made now.
-    pub(super) fn send_once(&self) -> SendOnce {
-        SendOnce {
-            silent: self.composer_ui.send_silent_once,
-            effect: self.composer_ui.send_effect_once,
-        }
-    }
-
-    /// Run a send that waited with the one-time options it was made with.
-    pub(super) fn with_send_once<R>(
-        &mut self,
-        once: SendOnce,
-        f: impl FnOnce(&mut Self) -> R,
-    ) -> R {
-        let outer = self.send_once();
-        self.composer_ui.send_silent_once = once.silent;
-        self.composer_ui.send_effect_once = once.effect;
-        let result = f(self);
-        self.composer_ui.send_silent_once = outer.silent;
-        self.composer_ui.send_effect_once = outer.effect;
-        result
-    }
-
     /// The slot the composer on screen sends from: the account on screen,
     /// the open chat (the window's own while a chat window is in scope)
     /// and its topic.
@@ -523,7 +581,7 @@ impl QuillApp {
             matches!(&editor.purpose, super::photo_editor::EditorPurpose::Attachment(item) if item.slot == slot)
         });
         if on_sent_tray {
-            self.viewer.photo_editor = None;
+            self.viewer.photo_editor.take();
         }
     }
 

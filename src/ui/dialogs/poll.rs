@@ -5,7 +5,7 @@ use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::poll::{
-    POLL_DEFAULT_PERIOD_SECS, POLL_OPTIONS_MIN, PollClose, PollDraft, PollOptionInput,
+    DraftOption, POLL_DEFAULT_PERIOD_SECS, POLL_OPTIONS_MIN, PollClose, PollDraft, PollOptionInput,
 };
 
 /// What an option of the new poll carries beside its text.
@@ -28,6 +28,46 @@ impl OptionMediaSlot {
     }
 }
 
+/// What an option's attach area is doing: one thing at a time. Every mode
+/// leaves to `Idle`: the pick, Done or Cancel, the media being set, another
+/// option taking the sticker or emoji panel.
+#[derive(Clone)]
+pub(crate) enum AttachMode {
+    Idle,
+    /// The attach menu is open.
+    Menu,
+    /// The link field, while an address is being typed.
+    Link(Entity<TextareaState>),
+    /// Waiting for a sticker chosen in the sticker panel.
+    AwaitSticker,
+    /// The emoji panel is open for this option's field.
+    AwaitEmoji,
+}
+
+impl OptionAttach {
+    pub(crate) fn link_input(&self) -> Option<&Entity<TextareaState>> {
+        match &self.mode {
+            AttachMode::Link(input) => Some(input),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn awaiting_sticker(&self) -> bool {
+        matches!(self.mode, AttachMode::AwaitSticker)
+    }
+
+    pub(crate) fn awaiting_emoji(&self) -> bool {
+        matches!(self.mode, AttachMode::AwaitEmoji)
+    }
+
+    /// Back to `Idle` when in the mode `is` names; a different mode stays.
+    pub(crate) fn leave(&mut self, is: impl Fn(&AttachMode) -> bool) {
+        if is(&self.mode) {
+            self.mode = AttachMode::Idle;
+        }
+    }
+}
+
 /// The media of one option being written (a row of the new poll, or the
 /// option added to an open poll), and the little UI around it.
 pub(crate) struct OptionAttach {
@@ -36,14 +76,8 @@ pub(crate) struct OptionAttach {
     /// panel) is matched by this instead.
     pub(crate) id: u64,
     pub(crate) media: OptionMediaSlot,
-    /// The attach menu is open.
-    pub(crate) menu_open: bool,
-    /// The link field, while an address is being typed.
-    pub(crate) link_input: Option<Entity<TextareaState>>,
-    /// Waiting for a sticker chosen in the sticker panel.
-    pub(crate) sticker_wait: bool,
-    /// The emoji panel is open for this option's field.
-    pub(crate) emoji_wait: bool,
+    /// What the attach area under the field is doing.
+    pub(crate) mode: AttachMode,
     /// A frame of a picked video, drawn while it is attached.
     pub(crate) preview: Option<std::path::PathBuf>,
 }
@@ -54,10 +88,7 @@ impl Default for OptionAttach {
         Self {
             id: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             media: OptionMediaSlot::default(),
-            menu_open: false,
-            link_input: None,
-            sticker_wait: false,
-            emoji_wait: false,
+            mode: AttachMode::Idle,
             preview: None,
         }
     }
@@ -104,6 +135,23 @@ pub(crate) struct PollToggles {
     hide_results: bool,
 }
 
+/// The page the poll box shows. Every page leaves to `Form`: the pick, Esc
+/// or Cancel in a picker, "Keep editing" on the discard question; the box
+/// itself closes from any of them.
+pub(crate) enum PollPage {
+    /// Just opened: the form, and the question takes focus once the dialog
+    /// has mounted (the kit dialog takes focus when it opens, so focusing at
+    /// open time is lost). The first render moves on to `Form`.
+    Opening,
+    Form,
+    /// The allowed countries picker.
+    Country(crate::ui::country_box::CountryBox),
+    /// The custom deadline box.
+    Deadline(DeadlineBox),
+    /// "Discard this poll?" over the form (Cancel or Esc with input).
+    ConfirmDiscard,
+}
+
 /// The custom deadline box: a date and time picker under "Deadline".
 pub(crate) struct DeadlineBox {
     pub(crate) picker: TimePicker,
@@ -125,7 +173,6 @@ pub struct PollDialog {
     /// tdesktop's "Limit by Country" switch (channels); off keeps no codes.
     pub(crate) limit_by_country: bool,
     pub(crate) country_codes: Vec<String>,
-    pub(crate) country_box: Option<crate::ui::country_box::CountryBox>,
     /// The opposite of tdesktop's "Show Who Voted".
     pub(crate) is_anonymous: bool,
     pub(crate) allows_multiple_answers: bool,
@@ -145,15 +192,12 @@ pub struct PollDialog {
     pub(crate) hide_results_until_closes: bool,
     /// B15: "Restrict to Subscribers" (`members_only`, channels only).
     pub(crate) members_only: bool,
-    /// Focus the question once the dialog has mounted: the kit dialog
-    /// takes focus when it opens, so focusing at open time is lost.
-    pub(crate) focus_question: bool,
+    /// Which page the box shows (the form, a picker over it, or the discard
+    /// question).
+    pub(crate) page: PollPage,
     /// "Limit Duration" is on: the poll closes at `close`.
     pub(crate) limit_duration: bool,
     pub(crate) close: PollClose,
-    /// The custom deadline box, while it is open.
-    pub(crate) deadline_box: Option<DeadlineBox>,
-    pub(crate) confirming_discard: bool,
     /// A bot's one-time keyboard whose Poll button opened this box: it
     /// goes when the poll is sent, not when the box opens.
     pub(crate) dismiss_keyboard_on_send: Option<(ChatId, MessageId)>,
@@ -170,6 +214,53 @@ pub struct PollAddOption {
     pub(crate) error: Option<&'static str>,
     /// Focus the field once the dialog has mounted.
     pub(crate) focus_on_mount: bool,
+}
+
+impl PollDialog {
+    pub(crate) fn country_box(&self) -> Option<&crate::ui::country_box::CountryBox> {
+        match &self.page {
+            PollPage::Country(country_box) => Some(country_box),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn country_box_mut(&mut self) -> Option<&mut crate::ui::country_box::CountryBox> {
+        match &mut self.page {
+            PollPage::Country(country_box) => Some(country_box),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn deadline_box(&self) -> Option<&DeadlineBox> {
+        match &self.page {
+            PollPage::Deadline(deadline) => Some(deadline),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn confirming_discard(&self) -> bool {
+        matches!(self.page, PollPage::ConfirmDiscard)
+    }
+
+    /// A picker is up (the form's own buttons give way to the picker's).
+    pub(crate) fn picker_open(&self) -> bool {
+        matches!(self.page, PollPage::Country(_) | PollPage::Deadline(_))
+    }
+
+    /// Back to the form; the focus request of a fresh box is spent.
+    pub(crate) fn show_form(&mut self) {
+        self.page = PollPage::Form;
+    }
+
+    /// The first render after open: whether the question takes focus now.
+    pub(crate) fn take_focus_question(&mut self) -> bool {
+        if matches!(self.page, PollPage::Opening) {
+            self.page = PollPage::Form;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl PollDialog {
@@ -218,7 +309,6 @@ impl PollDialog {
             explanation_input,
             limit_by_country: false,
             country_codes: Vec::new(),
-            country_box: None,
             is_anonymous: in_channel,
             allows_multiple_answers: true,
             is_quiz: lock == QuizLock::Quiz,
@@ -230,11 +320,9 @@ impl PollDialog {
             allow_adding_options: !in_channel && lock != QuizLock::Quiz,
             hide_results_until_closes: false,
             members_only: false,
-            focus_question: true,
             limit_duration: false,
             close: PollClose::Period(POLL_DEFAULT_PERIOD_SECS),
-            deadline_box: None,
-            confirming_discard: false,
+            page: PollPage::Opening,
             dismiss_keyboard_on_send: None,
             baseline: None,
         };
@@ -261,47 +349,32 @@ impl PollDialog {
     pub(crate) fn draft(&self, cx: &App) -> PollDraft {
         let value = |input: &Entity<TextareaState>| input.read(cx).value().to_string();
         // Options carry their custom emoji as composer markup.
-        let options: Vec<String> = self
+        let options: Vec<DraftOption> = self
             .option_inputs
             .iter()
-            .map(|input| crate::ui::composer_field::field_doc(input.read(cx)).to_markup())
-            .collect();
-        // Map the marked rows to their indexes among the usable
-        // (non-empty) options.
-        let usable: Vec<usize> = options
-            .iter()
             .enumerate()
-            .filter(|(_, option)| !option.trim().is_empty())
-            .map(|(index, _)| index)
-            .collect();
-        let quiz_correct = self
-            .quiz_correct_rows
-            .iter()
-            .filter_map(|row| usable.iter().position(|index| index == row))
+            .map(|(row, input)| DraftOption {
+                text: crate::ui::composer_field::field_doc(input.read(cx)).to_markup(),
+                media: self
+                    .attach
+                    .get(row)
+                    .and_then(|attach| attach.media.ready().cloned()),
+                correct: self.quiz_correct_rows.contains(&row),
+            })
             .collect();
         let country_codes = if self.limit_by_country {
             self.country_codes.clone()
         } else {
             Vec::new()
         };
-        let (open_period, close_date) = match (self.limit_duration, self.close) {
-            (true, PollClose::Period(secs)) => (secs, 0),
-            (true, PollClose::Date(date)) => (0, date),
-            (false, _) => (0, 0),
-        };
+        let deadline = self.limit_duration.then_some(self.close);
         PollDraft {
             question: value(&self.question_input),
             description: value(&self.description_input),
-            option_media: self
-                .attach
-                .iter()
-                .map(|attach| attach.media.ready().cloned())
-                .collect(),
             options,
             is_anonymous: self.is_anonymous,
             allows_multiple_answers: self.allows_multiple_answers,
             is_quiz: self.is_quiz,
-            quiz_correct,
             quiz_explanation: value(&self.explanation_input),
             allows_revoting: self.allows_revoting,
             shuffle_options: self.shuffle_options,
@@ -309,8 +382,7 @@ impl PollDialog {
             allow_adding_options: self.allow_adding_options,
             hide_results_until_closes: self.limit_duration && self.hide_results_until_closes,
             members_only: self.members_only,
-            open_period,
-            close_date,
+            deadline,
             close_max: 0,
         }
     }

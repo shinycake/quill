@@ -254,8 +254,7 @@ impl QuillApp {
                             thumb_file_id: None,
                             thumb_width: 0,
                             thumb_height: 0,
-                            requires_premium: false,
-                            premium_animation: None,
+                            premium: None,
                         })
                         .collect(),
                     cover_files: Vec::new(),
@@ -313,8 +312,8 @@ impl QuillApp {
         session.settings.media_prefs.autoplay_videos = false;
         for file in [81, 92] {
             session.media.files.update(file, |file| {
-                file.local.path.clear();
-                file.local.is_downloading_completed = false;
+                file.local =
+                    quill::telegram::envelope::LocalFileState::Absent { can_download: true };
             });
         }
     }
@@ -337,8 +336,8 @@ impl QuillApp {
             .cloned()
         {
             let mut waiting = local.clone();
-            waiting.local.path.clear();
-            waiting.local.is_downloading_completed = false;
+            waiting.local =
+                quill::telegram::envelope::LocalFileState::Absent { can_download: true };
             if let Some(session) = self.demo_session.as_mut() {
                 session.media.files.insert(waiting);
             }
@@ -353,7 +352,7 @@ impl QuillApp {
             self.resume_play_intent(cx);
             demo_expect(
                 self.playback.intent.is_none()
-                    && self.playback.playing_voice == Some(MessageId(91)),
+                    && self.playback.active.voice() == Some(MessageId(91)),
                 "a voice note plays once its file lands",
             );
             self.stop_voice_playback();
@@ -368,7 +367,7 @@ impl QuillApp {
             CaptureFor::Message,
         );
         // MED2: demo shows the locked record bar + a transcribed note.
-        self.recording.locked = true;
+        self.recording.set_locked(true);
         self.set_note(StatusNote::silent(
             "screenshot demo — recording voice · locked",
         ));
@@ -430,11 +429,7 @@ impl QuillApp {
                     stickers.push(item);
                 }
             }
-            session
-                .media
-                .media_library
-                .set_stickers
-                .insert(77, stickers);
+            session.media.media_library.insert(77, stickers);
         }
         self.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
         self.pickers.media_panel.tab = crate::ui::media_panel::PanelTab::Stickers;

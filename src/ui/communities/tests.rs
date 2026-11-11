@@ -23,7 +23,13 @@ fn a_ban_waits_for_the_member_chats_then_warns_only_about_owned_ones() {
         BanStep::Cancel,
         "no ask in flight and no answer: the wait ends"
     );
-    assert_eq!(ban_step(&Fetch::Loading { stale: None }), BanStep::Wait);
+    assert_eq!(
+        ban_step(&Fetch::Loading {
+            stale: None,
+            request: None
+        }),
+        BanStep::Wait
+    );
     assert_eq!(ban_step(&Fetch::Ready(member_chats(&[]))), BanStep::BanNow);
     assert_eq!(
         ban_step(&Fetch::Ready(member_chats(&[7, 8]))),
@@ -43,12 +49,7 @@ fn a_failed_member_chats_ask_bans_without_the_warning() {
 #[test]
 fn an_answer_counts_down_three_seconds() {
     let started = Instant::now();
-    let undo = UndoAction {
-        chat_id: 7,
-        approve: true,
-        started,
-        _timer: None,
-    };
+    let undo = UndoAction::new(7, true, started, None);
     assert_eq!(undo.seconds_left(started), 3);
     assert_eq!(undo.seconds_left(started + Duration::from_millis(1_200)), 2);
     assert_eq!(
@@ -85,12 +86,7 @@ fn joined_chats_come_first_and_bots_are_never_just_viewable() {
 }
 
 fn waiting(chat_id: i64) -> UndoAction {
-    UndoAction {
-        chat_id,
-        approve: true,
-        started: Instant::now(),
-        _timer: None,
-    }
+    UndoAction::new(chat_id, true, Instant::now(), None)
 }
 
 #[test]

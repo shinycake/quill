@@ -51,7 +51,7 @@ impl TopicHistory {
         }
         match end {
             WindowEnd::Oldest => {
-                self.loaded_complete = false;
+                self.reopen_oldest();
                 let oldest = self
                     .messages
                     .keys()
@@ -64,8 +64,7 @@ impl TopicHistory {
             WindowEnd::Newest => {
                 let newest = doomed.iter().copied().max().unwrap_or(0);
                 self.latest_seen = self.latest_seen.max(newest);
-                self.has_newer = true;
-                self.newer_failed = false;
+                self.newer = NewerEnd::More;
             }
         }
         doomed.len()
@@ -99,11 +98,10 @@ impl TopicHistory {
     /// stay, and the next page request starts at the newest message.
     pub(crate) fn reset_window(&mut self) {
         self.messages.retain(|_, message| is_local(message));
-        self.loaded_complete = false;
+        self.reopen_oldest();
         self.next_from_message_id = MessageId(0);
         self.reader = ReaderPosition::Tail;
-        self.has_newer = false;
-        self.newer_failed = false;
+        self.newer = NewerEnd::AtLatest;
         self.older = OlderEnd::Open;
         self.window_epoch = self.window_epoch.wrapping_add(1);
     }
@@ -116,7 +114,7 @@ impl TopicHistory {
     #[must_use]
     fn note_live(&mut self, row: HistoryMessage) -> bool {
         let mut replaced = false;
-        if self.has_newer {
+        if self.has_newer() {
             if is_local(&row) {
                 self.reset_window();
                 replaced = true;
@@ -135,10 +133,12 @@ impl TopicHistory {
     /// A newer page landed: `added` rows past the old newest end. An empty
     /// page says the window reached the latest whatever was seen before.
     fn settle_newer_page(&mut self, added: usize) {
-        self.has_newer = added > 0
-            && self
-                .newest_loaded_id()
-                .is_some_and(|newest| newest.0 < self.latest_seen);
+        self.newer_exists(
+            added > 0
+                && self
+                    .newest_loaded_id()
+                    .is_some_and(|newest| newest.0 < self.latest_seen),
+        );
     }
 }
 
@@ -188,7 +188,7 @@ impl Session {
         let entry = self.topic_history_entry(chat_id, topic);
         // A newer page for a window that already reaches the latest was
         // asked for from one that has gone.
-        if entry.stale_pages.remove(&pending.id.0) || newer && !entry.has_newer {
+        if entry.stale_pages.remove(&pending.id.0) || newer && !entry.has_newer() {
             return;
         }
         let before = entry.newest_loaded_id().map_or(0, |id| id.0);
@@ -204,10 +204,10 @@ impl Session {
             WindowEnd::Oldest
         } else {
             if next_from_message_id.0 == 0 || empty {
-                entry.loaded_complete = true;
+                entry.mark_complete();
             }
             entry.next_from_message_id = next_from_message_id;
-            entry.older = OlderEnd::Open;
+            entry.reopen_older();
             WindowEnd::Newest
         };
         let trimmed = entry.trim_after_page(far_end, &[]) > 0;
@@ -234,11 +234,11 @@ impl Session {
         }
         match pending.purpose {
             RequestPurpose::GetTopicHistory => {
-                self.topic_history_entry(chat_id, topic).older = OlderEnd::Failed;
+                self.topic_history_entry(chat_id, topic).fail_older();
             }
             _ => {
                 if let Some(history) = self.threads.topic_histories.get_mut(&(chat_id.0, topic)) {
-                    history.newer_failed = true;
+                    history.fail_newer();
                 }
             }
         }

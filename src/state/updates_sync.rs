@@ -322,7 +322,7 @@ impl Session {
             return;
         }
         self.media.disk_search = DiskSearch::Done;
-        let low = self.media.disk_room.is_some();
+        let low = self.media.disk.is_pressed();
         let mut held = std::collections::BTreeSet::new();
         for download in found {
             let key = download
@@ -345,7 +345,6 @@ impl Session {
         }
         let saved = &mut self.settings.data_storage.disk_paused;
         saved.retain(|key| !asked.contains(key) || held.contains(key));
-        self.media.disk_paused_saved_changed = true;
     }
 
     /// The download left the list (removed here or on another device).

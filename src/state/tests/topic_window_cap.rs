@@ -111,7 +111,7 @@ fn reading_far_back_through_a_topic_keeps_its_window_bounded() {
     let history = topic(&session);
     assert!(history.messages.len() <= HISTORY_WINDOW_CAP);
     assert_eq!(ids(&session).0, 100_000 - 3 * CAP, "the reader's rows stay");
-    assert!(history.has_newer, "the latest messages page back in");
+    assert!(history.has_newer(), "the latest messages page back in");
     assert_eq!(history.latest_seen, 100_000);
 }
 
@@ -119,7 +119,7 @@ fn reading_far_back_through_a_topic_keeps_its_window_bounded() {
 fn scrolling_back_down_pages_the_newest_end_in_and_drops_the_oldest() {
     let (mut session, sink, seq) = read_back(100_000 - 2 * CAP);
     let (oldest, mut newest) = ids(&session);
-    while topic(&session).has_newer {
+    while topic(&session).has_newer() {
         newer_page(
             &mut session,
             &seq,
@@ -133,7 +133,7 @@ fn scrolling_back_down_pages_the_newest_end_in_and_drops_the_oldest() {
     assert_eq!(newest, 100_000, "back at the latest");
     let history = topic(&session);
     assert!(ids(&session).0 > oldest, "the far top went");
-    assert!(!history.loaded_complete);
+    assert!(!history.loaded_complete());
     assert_eq!(
         history.next_from_message_id,
         MessageId(ids(&session).0),
@@ -169,7 +169,7 @@ fn an_own_send_in_a_window_short_of_the_latest_opens_the_latest_page() {
     );
     let history = topic(&session);
     assert_eq!(history.messages.len(), 1, "only the send stays");
-    assert!(!history.has_newer);
+    assert!(!history.has_newer());
     assert_eq!(
         history.next_from_message_id,
         MessageId(0),
@@ -188,15 +188,15 @@ fn a_topic_left_open_at_the_latest_stays_within_the_cap() {
     let history = topic(&session);
     assert!(history.messages.len() <= HISTORY_WINDOW_CAP);
     assert_eq!(ids(&session).1, CAP + 400, "the latest stays");
-    assert!(!history.has_newer);
-    assert!(!history.loaded_complete, "older rows page back in");
+    assert!(!history.has_newer());
+    assert!(!history.loaded_complete(), "older rows page back in");
 }
 
 #[test]
 fn a_reader_near_the_top_keeps_the_oldest_rows_and_the_latest_waits() {
     let (mut session, sink, seq) = topic_session();
     older_page(&mut session, &seq, &sink, 1..=CAP);
-    assert!(topic(&session).loaded_complete);
+    assert!(topic(&session).loaded_complete());
     session.note_history_reader(
         (CHAT, Some(TOPIC), 0),
         ReaderPosition::Away { top: MessageId(50) },
@@ -204,8 +204,8 @@ fn a_reader_near_the_top_keeps_the_oldest_rows_and_the_latest_waits() {
     live(&mut session, &seq, &sink, CAP + 1);
     let history = topic(&session);
     assert_eq!(ids(&session).0, 1, "the rows above stay");
-    assert!(history.loaded_complete);
-    assert!(history.has_newer, "the newest end went and pages back in");
+    assert!(history.loaded_complete());
+    assert!(history.has_newer(), "the newest end went and pages back in");
     let newest = ids(&session).1;
     assert!(newest < CAP);
     live(&mut session, &seq, &sink, CAP + 2);
@@ -254,7 +254,7 @@ fn jumping_to_the_latest_replaces_the_window_and_forgets_pages_on_the_way() {
     assert!(!session.topic_history_load_failed(ChatId(CHAT), TOPIC));
     older_page(&mut session, &seq, &sink, 99_901..=100_000);
     assert_eq!(ids(&session), (99_901, 100_000));
-    assert!(!topic(&session).has_newer);
+    assert!(!topic(&session).has_newer());
 }
 
 #[test]
@@ -267,7 +267,7 @@ fn closing_a_topic_short_of_the_latest_forgets_its_window() {
         .unwrap();
     history.trim_to_tail(50);
     assert!(history.messages.is_empty());
-    assert!(!history.has_newer);
+    assert!(!history.has_newer());
     assert_eq!(history.next_from_message_id, MessageId(0));
 }
 
@@ -296,7 +296,7 @@ fn own_send_reset_drops_older_page_in_flight() {
     answer(&mut session, &seq, &sink, older, &ids, 96_900);
     let history = topic(&session);
     assert_eq!(history.messages.len(), 1, "no rows across the gap");
-    assert!(!history.has_newer);
+    assert!(!history.has_newer());
     assert!(
         !session.topic_page_in_flight(ChatId(CHAT), TOPIC, WindowEnd::Oldest),
         "the latest page can go out"
@@ -306,7 +306,7 @@ fn own_send_reset_drops_older_page_in_flight() {
 #[test]
 fn closing_short_topic_drops_newer_page_in_flight() {
     let (mut session, sink, seq) = read_back(100_000 - 2 * CAP);
-    assert!(topic(&session).has_newer);
+    assert!(topic(&session).has_newer());
     let newer = page_request(&mut session, RequestPurpose::GetTopicHistoryNewer);
     session.select_topic(ChatId(CHAT), TOPIC + 1);
     session.release_topic_history(ChatId(CHAT), TOPIC);

@@ -353,27 +353,15 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `getGrossingWebAppBots` for the Apps tab; once per session unless
     /// it failed.
     pub fn fetch_grossing_web_app_bots(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if self.session.bots.web_apps.grossing_loading
-            || self
-                .session
-                .bots
-                .web_apps
-                .grossing_bots
-                .as_ref()
-                .is_some_and(|bots| !bots.is_empty())
-        {
+        let grossing = &self.session.bots.web_apps.grossing;
+        if grossing.is_loading() || grossing.data().is_some_and(|bots| !bots.is_empty()) {
             return Ok(None);
         }
         let extra = self.web_app_extra(RequestPurpose::GetGrossingWebAppBots, None)?;
-        self.session.bots.web_apps.grossing_loading = true;
         let json = get_grossing_web_app_bots(extra, GROSSING_APPS_LIMIT);
-        match self.send_json_request(extra, &json) {
-            Ok(id) => Ok(Some(id)),
-            Err(err) => {
-                self.session.bots.web_apps.grossing_loading = false;
-                Err(err)
-            }
-        }
+        let id = self.send_json_request(extra, &json)?;
+        self.session.bots.web_apps.grossing.begin();
+        Ok(Some(id))
     }
 
     /// `sendWebAppCustomRequest` for `web_app_invoke_custom_method`;

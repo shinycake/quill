@@ -19,6 +19,7 @@ mod demo;
 mod tests;
 
 use super::app::QuillApp;
+use crate::ui::composer_sends::SendOnce;
 use crate::ui::message_text::rich_block_element;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
@@ -31,23 +32,95 @@ use quill::lang::{keys, tr};
 use quill::rich::RichDraft;
 use quill::state::Session;
 
-/// The rich draft's box open for the chat shown: "discard this message?"
-/// or "Remove Formatting". A field of `ChatUi`, so it goes when the
-/// window shows another chat (its buttons act on the draft of the chat
-/// it was opened for).
-#[derive(Default, Debug, Clone, PartialEq, Eq)]
-pub(in crate::ui) enum RichDraftBox {
+/// What the composer shows for a rich draft, and the box open over it:
+/// one value, so the editor and the box move together through its
+/// transitions and go together when the window shows another chat.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(in crate::ui) enum RichComposer {
+    /// The field (or the stored draft's preview).
     #[default]
-    Closed,
-    /// "Discard this message?".
+    Field,
+    /// The rich editor is open: the field is interpreted as block markup
+    /// (`quill::rich::markup_to_blocks`) and sends via
+    /// `inputMessageRichMessage`.
+    Editor,
+    /// "Discard this message?" over the field's preview (the preview shows
+    /// only while the editor is closed).
     Discard,
-    /// "Remove Formatting", with the draft flattened to message markup
-    /// for "Send Without Formatting".
-    PremiumChoice(String),
+    /// "Remove Formatting" over the field, with the draft flattened to
+    /// message markup for "Send Without Formatting".
+    Choice(String),
+    /// The same box over the open editor; closing it leaves the editor.
+    EditorChoice(String),
+}
+
+impl RichComposer {
+    pub(in crate::ui) fn editor_open(&self) -> bool {
+        matches!(self, Self::Editor | Self::EditorChoice(_))
+    }
+
+    /// Whether the discard box is open.
+    pub(in crate::ui) fn discarding(&self) -> bool {
+        matches!(self, Self::Discard)
+    }
+
+    /// The flattened text the "Remove Formatting" box holds.
+    pub(in crate::ui) fn choice(&self) -> Option<&str> {
+        match self {
+            Self::Choice(plain) | Self::EditorChoice(plain) => Some(plain),
+            _ => None,
+        }
+    }
+
+    /// Open (`true`) or close the editor. A "Remove Formatting" box stays
+    /// over it; the discard box (its draft moves into the editor) goes.
+    pub(in crate::ui) fn set_editor(&mut self, open: bool) {
+        *self = match (std::mem::take(self), open) {
+            (Self::Field | Self::Editor, true) | (Self::Discard, true) => Self::Editor,
+            (Self::Field | Self::Editor, false) => Self::Field,
+            (Self::Discard, false) => Self::Discard,
+            (Self::Choice(plain) | Self::EditorChoice(plain), true) => Self::EditorChoice(plain),
+            (Self::Choice(plain) | Self::EditorChoice(plain), false) => Self::Choice(plain),
+        };
+    }
+
+    /// Ask "discard this message?". The preview it belongs to shows only
+    /// while the editor is closed, so an open editor ignores it.
+    pub(in crate::ui) fn ask_discard(&mut self) {
+        if !self.editor_open() {
+            *self = Self::Discard;
+        }
+    }
+
+    /// Ask "Remove Formatting" for `plain`, over the editor when it is open.
+    pub(in crate::ui) fn ask_choice(&mut self, plain: String) {
+        *self = if self.editor_open() {
+            Self::EditorChoice(plain)
+        } else {
+            Self::Choice(plain)
+        };
+    }
+
+    /// Close the box; the editor stays as it was.
+    pub(in crate::ui) fn dismiss(&mut self) {
+        *self = if self.editor_open() {
+            Self::Editor
+        } else {
+            Self::Field
+        };
+    }
+
+    /// Take the "Remove Formatting" text with its box; any other state
+    /// stays as it was.
+    pub(in crate::ui) fn take_choice(&mut self) -> Option<String> {
+        let plain = self.choice()?.to_string();
+        self.dismiss();
+        Some(plain)
+    }
 }
 
 /// The composer's rich draft surfaces that are not the stored draft
-/// itself and not its boxes (`ChatUi::rich_draft_box`): the preview's
+/// itself and not its boxes (`ChatUi::rich`): the preview's
 /// scroll position and the paste notice.
 #[derive(Default)]
 pub(in crate::ui) struct RichDraftUi {
@@ -66,7 +139,7 @@ impl QuillApp {
     /// The open slot's rich draft while it shows in place of the field:
     /// not while a message is edited or the rich editor is open.
     pub(in crate::ui) fn shown_rich_draft(&self) -> Option<&RichDraft> {
-        if self.chat_ui.is_editing() || self.chat_ui.rich_editor_open {
+        if self.chat_ui.is_editing() || self.chat_ui.rich.editor_open() {
             return None;
         }
         let chat_id = self.open_chat_id()?;
@@ -75,7 +148,7 @@ impl QuillApp {
         if !session.accepts_composer_draft(chat_id, topic) {
             return None;
         }
-        session.draft_for(chat_id, topic)?.rich.as_ref()
+        session.draft_for(chat_id, topic)?.rich()
     }
 
     /// The draft's blocks drawn where the field is, capped at the field's
@@ -84,7 +157,7 @@ impl QuillApp {
         let rich = self.shown_rich_draft()?;
         let blocks = rich.preview_blocks();
         let label = rich.summary();
-        let revealed = std::collections::HashSet::new();
+        let revealed = crate::ui::message_text::revealed::Revealed::default();
         let font = self.msg_font();
         let mut body = div()
             .id("rich-draft-preview-blocks")
@@ -161,7 +234,7 @@ impl QuillApp {
                     if event.modifiers().secondary(cx) {
                         this.discard_rich_draft(cx);
                     } else {
-                        this.chat_ui.rich_draft_box = RichDraftBox::Discard;
+                        this.chat_ui.rich.ask_discard();
                         cx.notify();
                     }
                 }))
@@ -182,9 +255,10 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.chat_ui.rich_editor_open = true;
+        self.chat_ui.rich.set_editor(true);
         self.set_composer_markup(&rich.markup(), window, cx);
-        self.composer_ui.prev_text = self.composer.read(cx).value();
+        let value = self.composer.read(cx).value();
+        self.composer_ui.echo.set(value);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
         cx.notify();
@@ -195,7 +269,7 @@ impl QuillApp {
     /// editor's draft when its box closes); plain text stays in the field.
     pub(in crate::ui) fn close_rich_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let markup = self.composer_markup(cx);
-        self.chat_ui.rich_editor_open = false;
+        self.chat_ui.rich.set_editor(false);
         let Some(chat_id) = self.open_chat_id() else {
             self.set_composer_markup(&markup, window, cx);
             cx.notify();
@@ -216,7 +290,7 @@ impl QuillApp {
             // them; a draft that could not be saved stays as text.
             if self.stored_rich_draft() == Some(&rich) {
                 self.set_composer_markup("", window, cx);
-                self.composer_ui.prev_text = SharedString::default();
+                self.composer_ui.echo.set(SharedString::default());
                 cx.notify();
                 return;
             }
@@ -248,6 +322,7 @@ impl QuillApp {
     /// the press.
     pub(in crate::ui) fn submit_rich_draft(
         &mut self,
+        once: SendOnce,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -261,11 +336,11 @@ impl QuillApp {
         }
         let premium = self.session().is_some_and(Session::my_is_premium);
         if premium {
-            self.submit_rich_composer(rich.blocks(), window, cx);
+            self.submit_rich_composer(rich.blocks(), once, window, cx);
         } else if rich.uses_premium_formatting() {
             self.refuse_rich_send(&rich, window, cx);
         } else if let Some(plain) = rich.plain_markup() {
-            self.send_rich_draft_plain(plain, window, cx);
+            self.send_rich_draft_plain(plain, once, window, cx);
         }
         true
     }
@@ -289,7 +364,7 @@ impl QuillApp {
         });
         match plain {
             Some(plain) => {
-                self.chat_ui.rich_draft_box = RichDraftBox::PremiumChoice(plain);
+                self.chat_ui.rich.ask_choice(plain);
                 cx.notify();
             }
             None => self.show_rich_premium_toast(window, cx),
@@ -301,12 +376,13 @@ impl QuillApp {
     fn send_rich_draft_plain(
         &mut self,
         plain: String,
+        once: SendOnce,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.chat_ui.rich_editor_open = false;
+        self.chat_ui.rich.set_editor(false);
         self.set_composer_markup(&plain, window, cx);
-        self.submit_composer(plain.clone(), window, cx);
+        self.submit_composer(plain.clone(), once, window, cx);
         // A refused send leaves the draft: the field it hides goes back
         // to empty.
         if self.shown_rich_draft().is_some() && self.composer_markup(cx) == plain {

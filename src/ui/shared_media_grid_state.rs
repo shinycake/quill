@@ -7,7 +7,6 @@
 //! goes back to the top. Load more only appends, so it keeps the position.
 #![deny(clippy::indexing_slicing)]
 
-use super::scroll_load::Asked;
 use gpui_kit::component::*;
 use gpui_kit::{Point, ScrollHandle, px};
 use quill::state::{SharedMediaTab, SharedMediaTabState};
@@ -48,23 +47,20 @@ struct GridTab {
 }
 
 /// A month-sectioned list tab's place (files, links, voice, music): its
-/// scroll, its paging mark (`scroll_load`) and the page both belong to,
-/// one value, so another chat's list starts at the top and asks for its
-/// next page afresh.
+/// scroll and the page it belongs to, one value, so another chat's list
+/// starts at the top.
 struct ListTab {
     scroll: ScrollHandle,
-    asked: Asked,
     page: Cell<Option<PageKey>>,
 }
 
 impl ListTab {
-    fn for_page(&self, key: PageKey) -> (&ScrollHandle, &Asked) {
+    fn for_page(&self, key: PageKey) -> &ScrollHandle {
         if self.page.get() != Some(key) {
             self.scroll.set_offset(Point::new(px(0.), px(0.)));
-            self.asked.reset();
             self.page.set(Some(key));
         }
-        (&self.scroll, &self.asked)
+        &self.scroll
     }
 }
 
@@ -84,19 +80,14 @@ impl SharedMediaGridUi {
             }),
             list: std::array::from_fn(|_| ListTab {
                 scroll: ScrollHandle::new(),
-                asked: Asked::default(),
                 page: Cell::new(None),
             }),
         }
     }
 
-    /// A list tab's scroll handle and paging mark for the page `key`, both
-    /// back at the start when the tab last drew another page.
-    pub(super) fn list_scroll(
-        &self,
-        tab: SharedMediaTab,
-        key: PageKey,
-    ) -> Option<(&ScrollHandle, &Asked)> {
+    /// A list tab's scroll handle for the page `key`, back at the top when
+    /// the tab last drew another page.
+    pub(super) fn list_scroll(&self, tab: SharedMediaTab, key: PageKey) -> Option<&ScrollHandle> {
         Some(self.list.get(tab.index())?.for_page(key))
     }
 
@@ -145,19 +136,16 @@ mod tests {
         }
     }
 
-    /// Another chat's Files list starts at the top and asks for its next
-    /// page at the same length the last chat's had asked at.
+    /// Another chat's Files list starts at the top.
     #[test]
     fn a_list_tab_starts_over_on_another_chats_page() {
         let ui = SharedMediaGridUi::new();
         let tab = SharedMediaTab::Files;
-        let Some((scroll, asked)) = ui.list_scroll(tab, key(1)) else {
+        let Some(scroll) = ui.list_scroll(tab, key(1)) else {
             panic!("the Files tab has a list");
         };
         scroll.set_offset(Point::new(px(0.), px(-300.)));
-        assert!(asked.allow(20, false), "the first ask at 20 items");
-        assert!(!asked.allow(20, false), "asked already");
-        let Some((scroll, asked)) = ui.list_scroll(tab, key(1)) else {
+        let Some(scroll) = ui.list_scroll(tab, key(1)) else {
             panic!("the Files tab has a list");
         };
         assert_eq!(
@@ -165,8 +153,7 @@ mod tests {
             px(-300.),
             "the same page keeps its place"
         );
-        assert!(!asked.allow(20, false));
-        let Some((scroll, asked)) = ui.list_scroll(tab, key(2)) else {
+        let Some(scroll) = ui.list_scroll(tab, key(2)) else {
             panic!("the Files tab has a list");
         };
         assert_eq!(
@@ -174,11 +161,10 @@ mod tests {
             px(0.),
             "another chat's list is at the top"
         );
-        assert!(asked.allow(20, false), "and asks again");
     }
 
     /// Closing the gallery and opening the same chat again restamps its
-    /// tabs: the list starts at the top and asks for its paging afresh.
+    /// tabs: the list starts at the top.
     #[test]
     fn a_reopened_gallery_of_the_same_chat_is_a_new_page() {
         use quill::state::SharedMediaTabState;
@@ -186,17 +172,15 @@ mod tests {
         let tab = SharedMediaTab::Files;
         let mut state = SharedMediaTabState::default();
         let chat = Some(quill::ids::ChatId(1));
-        let Some((scroll, asked)) = ui.list_scroll(tab, PageKey::of(chat, &state)) else {
+        let Some(scroll) = ui.list_scroll(tab, PageKey::of(chat, &state)) else {
             panic!("the Files tab has a list");
         };
         scroll.set_offset(Point::new(px(0.), px(-300.)));
-        assert!(asked.allow(20, false));
         state.generation += 1;
-        let Some((scroll, asked)) = ui.list_scroll(tab, PageKey::of(chat, &state)) else {
+        let Some(scroll) = ui.list_scroll(tab, PageKey::of(chat, &state)) else {
             panic!("the Files tab has a list");
         };
         assert_eq!(scroll.offset().y, px(0.));
-        assert!(asked.allow(20, false), "the paging mark was reset");
     }
 
     /// Deleting the newest file is the same list: it keeps its place. A
@@ -208,18 +192,18 @@ mod tests {
         let tab = SharedMediaTab::Files;
         let mut state = SharedMediaTabState::default();
         let chat = Some(quill::ids::ChatId(1));
-        let Some((scroll, _)) = ui.list_scroll(tab, PageKey::of(chat, &state)) else {
+        let Some(scroll) = ui.list_scroll(tab, PageKey::of(chat, &state)) else {
             panic!("the Files tab has a list");
         };
         scroll.set_offset(Point::new(px(0.), px(-300.)));
         state.items.clear();
         state.total_count -= 1;
-        let Some((scroll, _)) = ui.list_scroll(tab, PageKey::of(chat, &state)) else {
+        let Some(scroll) = ui.list_scroll(tab, PageKey::of(chat, &state)) else {
             panic!("the Files tab has a list");
         };
         assert_eq!(scroll.offset().y, px(-300.), "the place stays");
         state.query = "report".into();
-        let Some((scroll, _)) = ui.list_scroll(tab, PageKey::of(chat, &state)) else {
+        let Some(scroll) = ui.list_scroll(tab, PageKey::of(chat, &state)) else {
             panic!("the Files tab has a list");
         };
         assert_eq!(scroll.offset().y, px(0.), "a search starts at the top");

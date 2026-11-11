@@ -103,7 +103,7 @@ fn registering_stops_at_the_passkey_limit() {
     assert!(!state.can_register());
     // Ten when the app config does not say (tdesktop's default).
     state.max_passkeys = None;
-    state.list = (0..10).map(|i| key(&i.to_string(), "k")).collect();
+    state.list = PasskeyList::Stale((0..10).map(|i| key(&i.to_string(), "k")).collect());
     assert!(!state.can_register());
 }
 
@@ -129,8 +129,8 @@ fn parameters_start_the_ceremony_and_the_added_passkey_joins_the_list() {
     assert!(!pending.fresh(now + Duration::from_millis(1000)));
     state.add = PasskeyAdd::Sending(RequestId(3));
     state.accept_added(key("n", "YubiKey"));
-    assert_eq!(state.list.len(), 2);
-    assert_eq!(state.list.last().unwrap().id, "n");
+    assert_eq!(state.passkeys().len(), 2);
+    assert_eq!(state.passkeys().last().unwrap().id, "n");
     assert!(state.take_added());
     assert!(matches!(state.add, PasskeyAdd::Idle) && !state.take_added());
     let value = serde_json::json!({"@type": "passkey", "id": "n", "name": "YubiKey"});
@@ -172,10 +172,10 @@ fn a_list_asked_before_a_removal_does_not_bring_the_passkey_back() {
     let asked = state.generation;
     state.finish_remove("a");
     state.accept_list(vec![key("a", "x"), key("b", "y")], asked);
-    assert_eq!(state.list.len(), 1);
-    assert!(state.stale);
+    assert_eq!(state.passkeys().len(), 1);
+    assert!(state.is_stale());
     state.accept_list(vec![key("b", "y")], state.generation);
-    assert!(!state.stale && state.known);
+    assert!(!state.is_stale() && state.is_known());
 }
 
 #[test]
@@ -210,23 +210,25 @@ fn a_fetched_list_stays_fresh_for_five_seconds() {
     let now = Instant::now();
     let mut state = PasskeysState::default();
     assert!(state.wants_fetch(now));
-    state.requested_at = Some(now);
+    state.list_asked(now);
     assert!(!state.wants_fetch(now + Duration::from_secs(5)));
     assert!(state.wants_fetch(now + Duration::from_secs(6)));
-    state.stale = true;
+    state.list = PasskeyList::Stale(Vec::new());
     assert!(state.wants_fetch(now));
 }
 
 #[test]
 fn a_removal_forgets_the_passkey_and_asks_again() {
     let mut state = known(vec![key("a", "x"), key("b", "y")]);
-    state.removing = Some("a".into());
-    state.requested_at = Some(Instant::now());
+    state.removing = Some(Removal {
+        passkey_id: "a".into(),
+        request: RequestId(2),
+    });
     state.finish_remove("a");
-    assert_eq!(state.list.len(), 1);
+    assert_eq!(state.passkeys().len(), 1);
     assert!(state.find("a").is_none());
-    assert!(!state.known);
-    assert!(state.stale);
+    assert!(!state.is_known());
+    assert!(state.is_stale());
     assert!(state.removing.is_none());
     assert!(state.wants_fetch(Instant::now()));
 }
@@ -282,4 +284,24 @@ fn reads_the_display_switch_from_the_app_config() {
             max: Some(5)
         }
     );
+}
+
+#[test]
+fn a_list_asked_again_or_failed_keeps_the_row_usable() {
+    let mut state = known(vec![key("a", "x")]);
+    let now = Instant::now();
+    state.list_asked(now);
+    assert!(state.is_known(), "the answered list stands under a re-ask");
+    assert_eq!(state.row_target(), Some(RowTarget::List));
+    state.list_failed(state.generation, "offline".into());
+    assert!(state.is_known(), "and under its failure");
+    assert_eq!(state.row_target(), Some(RowTarget::List));
+    // A list that never had an answer stays loading until one comes.
+    let mut fresh = PasskeysState::default();
+    fresh.list_asked(now);
+    assert!(!fresh.is_known() && fresh.row_target().is_none());
+    // A removal forgets the answer (tdesktop forgets the list).
+    state.finish_remove("a");
+    state.list_asked(now);
+    assert!(!state.is_known());
 }

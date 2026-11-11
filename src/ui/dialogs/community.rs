@@ -504,11 +504,7 @@ pub fn render_community_info_panel(
                 cx,
             )
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.open_group_confirm(
-                    quill::ids::ChatId(0),
-                    GroupConfirmAction::DeleteCommunity { community_id },
-                    cx,
-                );
+                this.open_group_confirm(GroupConfirmAction::DeleteCommunity { community_id }, cx);
             })),
         );
     }

@@ -11,6 +11,7 @@
 
 use super::app::QuillApp;
 use super::recording::RecordMode;
+use crate::ui::composer_sends::SendOnce;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -68,8 +69,13 @@ impl QuillApp {
     }
 
     /// Same guard as Enter-to-send: text, or attachments without a caption.
-    pub(super) fn submit_from_send_button(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.submit_rich_draft(window, cx) {
+    pub(super) fn submit_from_send_button(
+        &mut self,
+        once: SendOnce,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.submit_rich_draft(once, window, cx) {
             return;
         }
         let text = self.composer.read(cx).value().to_string();
@@ -78,7 +84,7 @@ impl QuillApp {
             || self.forward_bar_here()
         {
             let markup = self.composer_markup(cx);
-            self.submit_composer(markup, window, cx);
+            self.submit_composer(markup, once, window, cx);
         }
     }
 
@@ -159,7 +165,7 @@ impl QuillApp {
             .child(glyphs)
             .on_click(cx.listener(move |this, _, window, cx| {
                 if kind.submits() {
-                    this.submit_from_send_button(window, cx);
+                    this.submit_from_send_button(SendOnce::default(), window, cx);
                 } else {
                     this.start_recording(cx);
                 }

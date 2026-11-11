@@ -180,8 +180,8 @@ pub(super) fn pin_clock(at: Option<Instant>) {
 pub(super) fn open_chat_draft(
     session: &quill::state::Session,
 ) -> Option<(i32, &quill::state::PendingBotMessage)> {
-    let chat_id = session.open_chat?;
-    match session.open_topic {
+    let chat_id = session.open_chat_id()?;
+    match session.open_forum_topic() {
         Some(topic) => session
             .messages
             .pending_bot_messages
@@ -230,7 +230,7 @@ impl QuillApp {
     /// The open chat's streaming bot reply as a history message, or `None`.
     pub(super) fn streaming_bot_message(&self) -> Option<HistoryMessage> {
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         let (_, draft) = open_chat_draft(session)?;
         if draft.expires_at_ms <= unix_ms_now() {
             return None;

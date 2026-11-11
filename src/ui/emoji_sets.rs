@@ -16,7 +16,6 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::emoji::EmojiSetTab;
-use quill::ids::ChatId;
 use quill::lang::{keys, tr, trn};
 use quill::local_path::sandboxed_display_path;
 use quill::state::RequestPurpose;
@@ -241,11 +240,7 @@ impl QuillApp {
                 .tooltip(tr(keys::BOX_REMOVE))
                 .accessibility_label(format!("{} {title}", tr(keys::BOX_REMOVE)))
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.open_group_confirm(
-                        ChatId(0),
-                        GroupConfirmAction::RemoveEmojiSet { set_id: id },
-                        cx,
-                    );
+                    this.open_group_confirm(GroupConfirmAction::RemoveEmojiSet { set_id: id }, cx);
                 }))
                 .into_any_element()
         } else if set.is_installed {
@@ -350,11 +345,11 @@ impl QuillApp {
             EmojiSetTab::Search => panel.found_sets.iter().collect(),
         };
         let rows = sets.iter().fold(v_flex().w_full(), |rows, set| {
-            rows.child(self.emoji_pack_row(set, panel.tab, panel.mutating_set, cx))
+            rows.child(self.emoji_pack_row(set, panel.tab, panel.mutation.running(), cx))
         });
         let status = if loading && sets.is_empty() {
             Some(tr(keys::Q_MEDIA_LOADING_EMOJI_PACKS))
-        } else if panel.lists.of(panel.tab).error().is_some() || panel.mutation_failed {
+        } else if panel.lists.of(panel.tab).error().is_some() || panel.mutation.is_failed() {
             Some(tr(keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS))
         } else if sets.is_empty() && !loading {
             Some(tr(keys::Q_MEDIA_NO_EMOJI_PACKS_FOUND))

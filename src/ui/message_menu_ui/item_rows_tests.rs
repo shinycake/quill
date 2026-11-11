@@ -74,11 +74,11 @@ fn open_chat(app: &Entity<QuillApp>, cx: &mut VisualTestContext, chat: ChatId) {
 }
 
 fn menu_item(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> ReplyItem {
-    app.read_with(cx, |app, _| app.message_ui.menu_item.clone())
+    app.read_with(cx, |app, _| app.message_ui.menu.item())
 }
 
 fn menu_open(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> bool {
-    app.read_with(cx, |app, _| app.message_ui.menu.is_some())
+    app.read_with(cx, |app, _| app.message_ui.menu.is_open())
 }
 
 fn has(cx: &mut VisualTestContext, id: &'static str) -> bool {

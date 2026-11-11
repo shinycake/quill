@@ -14,6 +14,30 @@ impl Session {
         // The Edit box's Auto-translate switch is a Messages request: its
         // refusal keeps the box open with the reason.
         self.record_group_info_edit_error(err, pending);
+        // A preload that failed leaves no entry: the next pull asks again.
+        if let Some(p) = pending
+            && p.purpose == RequestPurpose::PreloadHistory
+            && let Some(chat_id) = p.chat_id
+            && self.chat_list.history_preloads.get(&chat_id.0)
+                == Some(&crate::state::HistoryPreload::Loading(p.id))
+        {
+            self.chat_list.history_preloads.remove(&chat_id.0);
+        }
+        // A failed pinned-messages fetch ends in `Failed`: the pull to the
+        // next channel does not ask again, the chat opening does.
+        if let Some(p) = pending
+            && p.purpose == RequestPurpose::GetPinnedMessages
+            && let Some(chat_id) = p.chat_id
+        {
+            self.messages
+                .pinned_messages
+                .entry(chat_id.0)
+                .or_default()
+                .fail(format!(
+                    "could not load the pinned messages (error {})",
+                    err.code
+                ));
+        }
         if let Some(RequestPurpose::GetRepliedMessage {
             chat_id,
             message_id,
@@ -27,6 +51,23 @@ impl Session {
         })) = pending.map(|p| p.purpose)
         {
             self.reject_composer_reply_target(chat_id, message_id, err);
+        }
+        // The option menu's facts: a refusal leaves `Loading` so the page
+        // stops waiting for rows that will not come.
+        if let Some(RequestPurpose::Messages(MessagesPurpose::GetPollOptionProperties {
+            chat_id,
+            message_id,
+            option_key,
+        })) = pending.map(|p| p.purpose)
+            && let Some(menu) = self.messages.poll_option_menu.as_mut()
+            && menu.chat_id == chat_id
+            && menu.message_id == message_id
+            && poll_option_key(&menu.option_id) == option_key
+        {
+            menu.properties = crate::state::fetch::Fetch::Failed {
+                error: format!("{:?}", err.class),
+                stale: None,
+            };
         }
         // A caption over the limit opens its box (tdesktop `CaptionLimitBox`).
         if matches!(
@@ -136,11 +177,11 @@ impl Session {
             Some(RequestPurpose::GetHistory | RequestPurpose::GetHistoryAround) => {
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
-                    && !self.take_stale_history_request(pending)
+                    && !self.history_request_stale(pending)
                 {
                     // R5: the empty window shows "Couldn't load messages ·
                     // Retry" instead of a skeleton that never settles.
-                    self.history_entry(chat_id).load_failed = true;
+                    self.history_entry(chat_id).fail_load();
                 }
             }
             // B15: a failed `getPollVoteStatistics` lands in the fetch
@@ -319,12 +360,12 @@ impl Session {
             // dismissed, or an earlier step, has nothing left to dismiss.
             let waits = pending.is_some_and(|p| {
                 self.messages
-                    .sponsored_report_target
+                    .sponsored_report
+                    .target()
                     .is_some_and(|target| target.request == Some(p.id))
             });
             if waits {
-                self.messages.sponsored_report = None;
-                self.messages.sponsored_report_target = None;
+                self.messages.sponsored_report = SponsoredReportFlow::Idle;
             }
         }
     }

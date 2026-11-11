@@ -127,7 +127,7 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_forward(session, &self.demo_ui.sink, &self.demo_ui.seq);
-            self.share.forward_result = session.messages.last_forward.clone();
+            self.share.forward_result = session.messages.forwards.latest_result().cloned();
         }
         if let Some(mut draft) =
             ForwardDraft::from_message(ChatId(11), quill::ids::TopicId::None, MessageId(101), false)
@@ -183,12 +183,12 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             super::reaction_fixtures::seed_reaction_options(session, ChatId(11), MessageId(101));
         }
-        self.message_ui.menu = Some(MessageMenuState {
+        self.message_ui.menu.open_at(MessageMenuState {
             chat_id: ChatId(11),
             message_id: MessageId(101),
             position: point(px(420.), px(200.)),
         });
-        self.message_ui.reactions_expanded = true;
+        self.message_ui.menu.expand_reactions();
         self.set_note(StatusNote::silent(
             "screenshot demo — react · unreact · chips",
         ));
@@ -196,7 +196,6 @@ impl QuillApp {
 
     fn demo_ready_secret_chat_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.demo_ready_reactions(window, cx);
-        self.message_ui.reactions_expanded = false;
         if let Some(session) = self.demo_session.as_mut() {
             if let Some(chat) = session.chats.get_mut(&11) {
                 chat.kind = ChatKind::Secret {
@@ -209,14 +208,14 @@ impl QuillApp {
                 message_id: MessageId(102),
             };
         }
-        self.message_ui.menu = Some(MessageMenuState {
+        self.message_ui.menu.open_at(MessageMenuState {
             chat_id: ChatId(11),
             message_id: MessageId(102),
             position: point(px(420.), px(200.)),
         });
         // `QUILL_DEMO_SECRET_CLOSE=1`: the Close Secret Chat box instead.
         if std::env::var_os("QUILL_DEMO_SECRET_CLOSE").is_some() {
-            self.message_ui.menu = None;
+            self.message_ui.menu.close();
             self.open_close_secret_chat_confirm(ChatId(11), cx);
         }
     }

@@ -10,9 +10,8 @@ impl QuillApp {
     /// that ends the long press, or Escape). Also cancels a pending
     /// long press.
     pub(in crate::ui) fn close_chat_preview(&mut self, cx: &mut Context<Self>) {
-        if self.chat_list.preview.is_some() || self.chat_list.preview_press.is_some() {
-            self.chat_list.preview = None;
-            self.chat_list.preview_press = None;
+        if !self.chat_list.peek.is_idle() {
+            self.chat_list.peek = crate::ui::chat_list_state::PeekPreview::Idle;
             cx.notify();
         }
     }
@@ -595,8 +594,10 @@ impl QuillApp {
                 cx,
                 {
                     this.open_group_confirm(
-                        chat_id,
-                        GroupConfirmAction::BlockUser { block: !blocked },
+                        GroupConfirmAction::BlockUser {
+                            chat_id,
+                            block: !blocked,
+                        },
                         cx,
                     );
                     this.chat_list.menu = None;
@@ -722,7 +723,7 @@ impl QuillApp {
                             ChatId(0),
                             MessageId(0),
                             &page.rich,
-                            &std::collections::HashSet::new(),
+                            &crate::ui::message_text::revealed::Revealed::default(),
                             false,
                             // Settings → Appearance: message font size.
                             self.msg_font(),
@@ -858,13 +859,13 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if !self.composer_ui.inline_bot_alert_shown && self.open_chat_is_secret() {
-            self.chat_ui.pending_inline_bot_alert = Some(query.to_string());
+            self.chat_ui.bot_alert = crate::ui::inline_mode::BotAlert::Switch(query.to_string());
             cx.notify();
             return;
         }
         // A stash left over from another chat (the open chat changed
         // since the gated press) never survives an ungated insert.
-        self.chat_ui.pending_inline_bot_alert = None;
+        self.chat_ui.bot_alert = crate::ui::inline_mode::BotAlert::None;
         let next = quill::composer::insert_switch_inline_text(&self.composer_markup(cx), query);
         self.set_composer_markup(&next, window, cx);
         self.sync_command_menu(cx);
@@ -883,8 +884,11 @@ impl QuillApp {
         if !self.open_chat_is_secret() {
             return;
         }
-        let Some(query) = self.chat_ui.pending_inline_bot_alert.take() else {
-            return;
+        let alert = std::mem::take(&mut self.chat_ui.bot_alert);
+        let query = match alert {
+            crate::ui::inline_mode::BotAlert::None => return,
+            crate::ui::inline_mode::BotAlert::Typed => String::new(),
+            crate::ui::inline_mode::BotAlert::Switch(query) => query,
         };
         self.composer_ui.inline_bot_alert_shown = true;
         if !query.is_empty() {
@@ -907,7 +911,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.close_chat_preview(cx);
-        let open = self.session().and_then(|session| session.open_chat);
+        let open = self.session().and_then(|session| session.open_chat_id());
         match go_to_target(open, chat_id, message_id) {
             GoToTarget::OtherChat {
                 chat_id,

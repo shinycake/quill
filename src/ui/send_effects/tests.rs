@@ -227,16 +227,17 @@ fn the_send_menu_offers_effects_and_sends_with_the_chosen_one(cx: &mut TestAppCo
 
     // The send carries the effect once, then the menu closes.
     app.update(vcx, |app, _| {
-        app.composer_ui.send_effect_once = fire;
-        assert_eq!(app.composer_send_options().effect_id, fire);
-        app.composer_ui.send_effect_once = 0;
+        let once = crate::ui::composer_sends::SendOnce {
+            effect: fire,
+            ..Default::default()
+        };
+        assert_eq!(app.composer_send_options(once).effect_id, fire);
     });
     vcx.update(|window, cx| window.click("send-with-effect", cx));
     frames(vcx);
     assert!(!menu_open(&app, vcx));
     app.update(vcx, |app, _| {
-        assert_eq!(app.composer_ui.send_effect_once, 0);
-        assert_eq!(app.composer_send_options().effect_id, 0);
+        assert_eq!(app.composer_send_options(Default::default()).effect_id, 0);
     });
 }
 
@@ -254,7 +255,7 @@ fn a_click_on_the_card_hides_it_and_one_outside_closes_the_menu(cx: &mut TestApp
     frames(vcx);
     app.update(vcx, |app, _| {
         let open = app.composer_ui.send_menu.open.as_ref().expect("still open");
-        assert!(open.preview.as_ref().is_some_and(|p| p.hiding.is_some()));
+        assert!(open.preview().is_some_and(|p| p.hiding.is_some()));
     });
     // A hiding card takes no presses.
     assert!(!shown(vcx, card));
@@ -323,13 +324,11 @@ fn the_full_list_shows_every_effect_and_searches_them(cx: &mut TestAppContext) {
 
     // A sticker effect opens its card from the list too.
     app.update_in(vcx, |app, window, cx| {
-        app.composer_ui
-            .send_menu
-            .open
-            .as_mut()
-            .expect("open")
-            .query
-            .clear();
+        if let Some(open) = app.composer_ui.send_menu.open.as_mut()
+            && let super::EffectList::Expanded { query, .. } = &mut open.list
+        {
+            query.clear();
+        }
         let _ = window;
         cx.notify();
     });

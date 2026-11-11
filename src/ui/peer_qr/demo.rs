@@ -29,7 +29,8 @@ use quill::peer_qr::color::Rgb;
 use quill::peer_qr::free::FreeMode;
 use quill::peer_qr::state::{QrAction, QrPanel, QrPeer, QrSubject};
 use quill::peer_qr::theme::{
-    Backdrops, GiftsRest, GiftsStage, ShareTheme, ThemeEmoji, ThemeGift, ThemeGifts, ThemeOwner,
+    Backdrops, BackdropsStage, GiftsRest, GiftsStage, ShareTheme, ThemeEmoji, ThemeGift,
+    ThemeGifts, ThemeOwner,
 };
 use quill::privacy::{NewChatPrivacy, NewChatPrivacyState};
 use quill::state::Session;
@@ -104,8 +105,9 @@ pub(super) fn seed_peer_qr_session(sink: Arc<MemorySink>) -> Session {
                 edge: Rgb::hex(*edge),
             })
             .collect(),
-        loading: false,
-        requested_at: Some(quill::local_time::now_unix()),
+        stage: BackdropsStage::Ready {
+            at: quill::local_time::now_unix(),
+        },
     };
     let root = super::super::demo::demo_media_allowlist();
     for (id, name) in [
@@ -179,8 +181,7 @@ fn sticker(file: i32) -> StickerContent {
         thumb_width: 0,
         thumb_height: 0,
         is_premium: false,
-        requires_premium: false,
-        premium_animation: None,
+        premium: None,
         set_id: 0,
     }
 }

@@ -565,6 +565,16 @@ pub struct Transfer<'a> {
     pub percent: u8,
 }
 
+/// What the one download (a dictionary loads at a time) is doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RowDownload<'a> {
+    #[default]
+    None,
+    Running(Transfer<'a>),
+    /// The last download of this code failed.
+    Failed(&'a str),
+}
+
 /// Everything the list is built from.
 pub struct RowInputs<'a> {
     /// Installed in the managed folder.
@@ -573,8 +583,7 @@ pub struct RowInputs<'a> {
     pub available: &'a [String],
     /// In use.
     pub active: &'a [String],
-    pub transfer: Option<Transfer<'a>>,
-    pub failed: Option<&'a str>,
+    pub download: RowDownload<'a>,
 }
 
 /// The rows for the manager: the catalog, then dictionaries found on the
@@ -582,7 +591,9 @@ pub struct RowInputs<'a> {
 pub fn build_rows(inputs: &RowInputs<'_>, query: &str) -> Vec<ManagerRow> {
     let mut rows = Vec::new();
     let state_of = |code: &str, bytes: u64| -> RowState {
-        if let Some(t) = inputs.transfer.filter(|t| t.code == code) {
+        if let RowDownload::Running(t) = inputs.download
+            && t.code == code
+        {
             RowState::Downloading { percent: t.percent }
         } else if inputs.available.iter().any(|a| a == code) {
             if inputs.active.iter().any(|a| a == code) {
@@ -590,7 +601,7 @@ pub fn build_rows(inputs: &RowInputs<'_>, query: &str) -> Vec<ManagerRow> {
             } else {
                 RowState::Installed
             }
-        } else if inputs.failed == Some(code) {
+        } else if inputs.download == RowDownload::Failed(code) {
             RowState::Failed
         } else {
             RowState::Available { bytes }
@@ -818,11 +829,19 @@ mod tests {
                 managed: &managed,
                 available: &available,
                 active: &active,
-                transfer: Some(Transfer {
+                download: RowDownload::Running(Transfer {
                     code: "fr",
                     percent: 42,
                 }),
-                failed: Some("it"),
+            },
+            "",
+        );
+        let failed = build_rows(
+            &RowInputs {
+                managed: &managed,
+                available: &available,
+                active: &active,
+                download: RowDownload::Failed("it"),
             },
             "",
         );
@@ -832,7 +851,9 @@ mod tests {
         assert_eq!(by("de").state, RowState::Installed);
         assert!(by("de").removable);
         assert_eq!(by("fr").status(), "Downloading 42%");
-        assert_eq!(by("it").state, RowState::Failed);
+        assert!(matches!(by("it").state, RowState::Available { .. }));
+        let failed_it = failed.iter().find(|r| r.code == "it").unwrap();
+        assert_eq!(failed_it.state, RowState::Failed);
         assert!(by("es").status().starts_with("Download size "));
         // A system dictionary outside the catalog is listed by its code.
         assert_eq!(by("tlh_XX").name, "tlh_XX");
@@ -853,8 +874,7 @@ mod tests {
                 managed: &managed,
                 available: &[],
                 active: &[],
-                transfer: None,
-                failed: None,
+                download: RowDownload::None,
             },
             "span",
         );

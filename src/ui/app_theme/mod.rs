@@ -157,9 +157,7 @@ pub(crate) fn preview_colors(palette: &Palette) -> [u32; 3] {
 pub(crate) struct AppThemeUi {
     /// Custom themes in the themes folder, read when the chooser first
     /// shows and after every change.
-    pub(super) custom: Option<Vec<CustomTheme>>,
-    /// The read of the themes folder running for `custom`.
-    custom_read: Option<Task<()>>,
+    pub(super) custom: CustomThemes,
     /// The custom themes read last, the newest at the end: name and
     /// palette (`None` when the file could not be read). Two, so a custom
     /// day theme and a custom night theme both stay read.
@@ -174,10 +172,21 @@ pub(crate) struct AppThemeUi {
     pub(super) editor: Option<editor::ThemeEditor>,
     /// The custom theme being read for the editor, by name.
     pub(crate) editor_read: Option<(String, Task<()>)>,
-    /// Omarchy's current theme, once looked for (`omarchy.rs`).
-    pub(super) omarchy: Option<omarchy::OmarchyState>,
-    omarchy_probed: bool,
-    omarchy_watched: bool,
+    /// Omarchy's current theme (`omarchy.rs`).
+    pub(super) omarchy: omarchy::Omarchy,
+}
+
+/// The themes folder as the chooser has read it.
+#[derive(Default)]
+pub(super) enum CustomThemes {
+    /// Not read yet, or forgotten after a change in the folder.
+    #[default]
+    Unread,
+    /// The read off the UI thread is running; dropping it cancels it.
+    Reading {
+        _task: Task<()>,
+    },
+    Read(Vec<CustomTheme>),
 }
 
 impl AppThemeUi {
@@ -247,7 +256,7 @@ impl QuillApp {
     /// color" is on and the OS reports one, else the theme's chosen one.
     pub(crate) fn theme_accent(&self, theme: BuiltinTheme) -> Option<u32> {
         if self.appearance.system_accent
-            && let Some(system) = self.preferences.system_accent
+            && let Some(system) = self.preferences.system_accent.color()
         {
             return Some(system);
         }
@@ -346,8 +355,7 @@ impl QuillApp {
     /// Forget what was read from the themes folder after a change there.
     fn refresh_custom_themes(&mut self) {
         let themes = &mut self.preferences.app_theme;
-        themes.custom = None;
-        themes.custom_read = None;
+        themes.custom = CustomThemes::Unread;
         themes.custom_cache.clear();
         themes.palette_read = None;
         themes.editor_read = None;

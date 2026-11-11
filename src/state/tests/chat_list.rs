@@ -549,7 +549,7 @@ fn cl1_pin_error_rolls_back_and_surfaces() {
     // A pin limit opens the Premium limit box instead of an error line.
     assert!(session.chats_state.chat_action_error.is_empty());
     assert_eq!(
-        session.payments.hub.limit_box,
+        session.payments.hub.limit_box(),
         Some((crate::premium_limits::PremiumLimitKind::Pins, 0))
     );
 }

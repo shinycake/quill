@@ -361,7 +361,7 @@ fn replay_reply_to_message_quote_and_jump() {
         .messages
         .get(&60)
         .unwrap();
-    assert_eq!(reply.reply_to.as_ref().map(|r| r.message_id.0), Some(50));
+    assert_eq!(reply.reply_to.as_ref().map(|r| r.message_id().0), Some(50));
     assert_eq!(
         session.reply_quote_preview(reply).as_deref(),
         Some("hello already loaded")
@@ -462,13 +462,16 @@ fn replay_forward_messages_result_and_attribution() {
         ],
     );
     let extra = session.request(RequestPurpose::ForwardMessages, Some(quill::ids::ChatId(8)));
-    session.messages.in_flight_forward = Some(quill::state::ForwardFlight {
-        extra,
-        dest_chat_id: quill::ids::ChatId(8),
-        from_chat_id: quill::ids::ChatId(7),
-        from_topic: quill::ids::TopicId::None,
-        requested: 1,
-    });
+    session
+        .messages
+        .forwards
+        .begin(quill::state::ForwardFlight {
+            extra,
+            dest_chat_id: quill::ids::ChatId(8),
+            from_chat_id: quill::ids::ChatId(7),
+            from_topic: quill::ids::TopicId::None,
+            requested: 1,
+        });
     apply_all_seq(
         &mut session,
         &sink,
@@ -480,8 +483,8 @@ fn replay_forward_messages_result_and_attribution() {
     );
     let result = session
         .messages
-        .last_forward
-        .as_ref()
+        .forwards
+        .latest_result()
         .expect("forward result");
     assert_eq!(result.dest_title, "Bob");
     assert_eq!(result.forwarded_ids, vec![quill::ids::MessageId(80)]);
@@ -582,7 +585,7 @@ fn replay_pin_and_unpin_message_is_pinned() {
             r#"{"@type":"updateNewMessage","message":{"id":50,"chat_id":7,"is_outgoing":false,"is_pinned":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hello already here","entities":[]}}}}"#,
         ],
     );
-    session.open_chat = Some(quill::ids::ChatId(7));
+    session.open = quill::state::OpenView::of(Some(quill::ids::ChatId(7)));
     assert!(session.open_chat_pinned_message().is_none());
     let extra = session.request(RequestPurpose::PinChatMessage, Some(quill::ids::ChatId(7)));
     apply_all_seq(

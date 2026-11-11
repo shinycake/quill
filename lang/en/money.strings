@@ -455,6 +455,8 @@
 "qll_money_could_not_delete_the_gift" = "Couldn't delete the gift: {reason}";
 "qll_money_could_not_load_boost_status" = "Couldn't load boost status";
 "qll_money_could_not_load_gifts" = "Couldn't load gifts";
+"qll_money_could_not_load_members" = "Couldn't load the members.";
+"qll_money_could_not_load_members_reason" = "Couldn't load the members: {reason}";
 "qll_money_could_not_load_more_subscriptions" = "Couldn't load more subscriptions";
 "qll_money_could_not_load_stars" = "Couldn't load Stars";
 "qll_money_could_not_load_statistics" = "Couldn't load statistics";

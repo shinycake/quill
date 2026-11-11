@@ -490,7 +490,7 @@ impl QuillApp {
     /// line 11640). Returns `None` for non-bot chats.
     pub(super) fn bot_info_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        session.bot_user_id_for_chat(session.open_chat?)?;
+        session.bot_user_id_for_chat(session.open_chat_id()?)?;
         self.bot_info_panel_body(cx)
     }
 
@@ -501,7 +501,7 @@ impl QuillApp {
     #[inline(never)]
     fn bot_info_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let open = session.open_chat?;
+        let open = session.open_chat_id()?;
         let bot_id = session.bot_user_id_for_chat(open)?;
         let info: BotInfo = session.bot_info_for_chat(open)?.clone();
         let start_param = session.bots.bot_start_params.get(&open.0).cloned();
@@ -620,7 +620,7 @@ impl QuillApp {
             "bot-restart",
             tr(keys::Q_MEDIA_RESTART_BOT),
             cx.listener(move |this, _, _, cx| {
-                this.open_group_confirm(open, GroupConfirmAction::RestartBot, cx);
+                this.open_group_confirm(GroupConfirmAction::RestartBot { chat_id: open }, cx);
             }),
         ));
         if !username.is_empty() {
@@ -643,8 +643,10 @@ impl QuillApp {
             },
             cx.listener(move |this, _, _, cx| {
                 this.open_group_confirm(
-                    open,
-                    GroupConfirmAction::BlockUser { block: !blocked },
+                    GroupConfirmAction::BlockUser {
+                        chat_id: open,
+                        block: !blocked,
+                    },
                     cx,
                 );
             }),
@@ -710,7 +712,16 @@ impl QuillApp {
                 }
                 panel = panel.child(row);
             }
-            _ => {
+            Some(SimilarBotsFetch::Loading) => {
+                panel = panel.child(
+                    div()
+                        .id("bot-similar-loading")
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(tr(keys::Q_MEDIA_LOADING_SIMILAR_BOTS)),
+                );
+            }
+            None => {
                 panel = panel.child(ghost_text_button(
                     "bot-similar-fetch",
                     tr(keys::SIMILAR_BOTS_TITLE),
@@ -759,15 +770,7 @@ impl QuillApp {
             .live
             .as_mut()
             .map(|live| match live.driver.fetch_similar_bots(bot_id) {
-                Ok(Some(_)) => {
-                    live.driver
-                        .session
-                        .bots
-                        .similar_bots
-                        .entry(bot_id)
-                        .or_insert(SimilarBotsFetch::Loading);
-                    StatusNote::silent(tr(keys::Q_MEDIA_LOADING_SIMILAR_BOTS))
-                }
+                Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_LOADING_SIMILAR_BOTS)),
                 Ok(None) => StatusNote::silent(tr(keys::Q_MEDIA_ALREADY_LOADING)),
                 Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
             });
@@ -785,7 +788,7 @@ impl QuillApp {
     /// (`HistoryWidget::updateCmdStartShown`); a second press hides it.
     pub(super) fn bot_menu_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let open = session.open_chat?;
+        let open = session.open_chat_id()?;
         let info = session.bot_info_for_chat(open)?;
         let url = info
             .menu_button

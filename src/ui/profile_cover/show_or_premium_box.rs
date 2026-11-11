@@ -15,7 +15,7 @@ use gpui_kit::*;
 use quill::ids::RequestId;
 use quill::lang::{Key, keys, tr, tr_with};
 use quill::privacy::{PrivacyKeyState, PrivacyRuleDetail};
-use quill::state::ReadDateStage;
+use quill::state::ReadDate;
 use quill::telegram::requests::PrivacyWho;
 use quill::telegram::requests_privacy::PrivacySettingKey;
 use std::cell::RefCell;
@@ -127,7 +127,7 @@ impl QuillApp {
             (ShowOrPremium::ReadTime, Some(live)) => Some(live.driver.set_read_date_privacy(true)),
             (ShowOrPremium::ReadTime, None) => {
                 if let Some(demo) = self.demo_session.as_mut() {
-                    demo.settings.read_date_show = Some(true);
+                    demo.settings.read_date = ReadDate::Known(true);
                 }
                 None
             }
@@ -189,9 +189,9 @@ impl QuillApp {
                     _ => Some(true),
                 }
             }
-            ShowOrPremium::ReadTime => match session.settings.read_date_stage {
-                ReadDateStage::Setting(_) => None,
-                ReadDateStage::Failed => Some(false),
+            ShowOrPremium::ReadTime => match session.settings.read_date {
+                ReadDate::Setting { .. } => None,
+                ReadDate::Failed { .. } => Some(false),
                 _ => Some(true),
             },
         });

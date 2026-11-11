@@ -373,3 +373,22 @@ fn requests_carry_the_right_fields() {
     );
     assert_eq!(v["limit"], 50);
 }
+
+#[test]
+fn a_failed_app_config_waits_for_the_next_profile_open() {
+    let mut earn = EarnState::default();
+    earn.limits.app_config.begin();
+    earn.limits.app_config.fail("offline");
+    assert!(
+        !earn.limits.app_config.is_idle(),
+        "the per-frame upkeep asks only a config never asked"
+    );
+    earn.forget_failed_app_config();
+    assert!(earn.limits.app_config.is_idle());
+    earn.limits.app_config.begin();
+    earn.forget_failed_app_config();
+    assert!(
+        earn.limits.app_config.is_loading(),
+        "a request in flight is not forgotten"
+    );
+}

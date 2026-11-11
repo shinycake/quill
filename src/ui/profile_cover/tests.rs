@@ -82,10 +82,7 @@ fn the_rating_pill_opens_the_rating_box(cx: &mut TestAppContext) {
     click(&mut vcx, "profile-rating");
     assert_eq!(dialog(&shell, &mut vcx), Some(DialogKind::StarsRating));
     click(&mut vcx, "rating-box-understood");
-    assert_eq!(
-        app.read_with(&vcx, |app, _| app.profile_cover.rating_box),
-        None
-    );
+    assert!(app.read_with(&vcx, |app, _| app.profile_cover.rating_box.is_none()));
     assert_ne!(dialog(&shell, &mut vcx), Some(DialogKind::StarsRating));
 }
 
@@ -117,8 +114,8 @@ fn hidden_last_seen_subscribes_with_the_lastseen_hidden_ref(cx: &mut TestAppCont
     let premium = app.read_with(&vcx, |app, _| {
         app.session().map(|session| {
             (
-                session.payments.hub.premium_open,
-                session.payments.hub.premium_ref.clone(),
+                session.payments.hub.premium_open(),
+                session.payments.hub.premium_ref().to_string(),
             )
         })
     });
@@ -174,9 +171,12 @@ fn your_rating_box_previews_the_pending_rating(cx: &mut TestAppContext) {
     click(&mut vcx, "profile-rating");
     assert_eq!(dialog(&shell, &mut vcx), Some(DialogKind::StarsRating));
     click(&mut vcx, "rating-box-preview");
-    assert!(app.read_with(&vcx, |app, _| app.profile_cover.rating_preview));
+    let mode = |vcx: &VisualTestContext| {
+        app.read_with(vcx, |app, _| app.profile_cover.rating_box.map(|b| b.mode))
+    };
+    assert_eq!(mode(&vcx), Some(super::RatingMode::Future));
     click(&mut vcx, "rating-box-preview");
-    assert!(!app.read_with(&vcx, |app, _| app.profile_cover.rating_preview));
+    assert_eq!(mode(&vcx), Some(super::RatingMode::Current));
 }
 
 #[gpui_kit::test]

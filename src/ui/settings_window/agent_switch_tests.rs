@@ -162,9 +162,10 @@ fn off_hides_the_chat_menu_entry_and_search(cx: &mut TestAppContext) {
     });
     settle(vcx);
     let hits = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
-        app.update(vcx, |app, _| {
-            app.settings.search.query = "agent".into();
-            app.settings_search_ids()
+        app.update_in(vcx, |app, window, cx| {
+            app.clear_settings_search(window, cx);
+            app.focus_settings_search(Some("agent"), window, cx);
+            app.settings_search_ids(cx)
         })
     };
     let off = hits(&app, vcx);

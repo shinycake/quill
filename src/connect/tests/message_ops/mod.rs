@@ -125,7 +125,7 @@ fn driver_send_reply_shape_and_jump_to_replied() {
     );
     assert_eq!(
         driver
-            .jump_to_replied_message(reply.reply_to.as_ref().unwrap().message_id)
+            .jump_to_replied_message(reply.reply_to.as_ref().unwrap().message_id())
             .unwrap(),
         None
     );
@@ -242,7 +242,9 @@ fn driver_send_album_rejects_overlong_caption() {
         ],
     );
     let sent_before = recorder.snapshot().len();
-    let err = driver.send_album_snapshot(&snap).unwrap_err();
+    let err = driver
+        .send_album_snapshot_to(&driver.send_place(snap.chat_id()), &snap)
+        .unwrap_err();
     assert!(matches!(err, ConnectSendError::CaptionTooLong { limit: 4 }));
     assert_eq!(recorder.snapshot().len(), sent_before);
     let _ = std::fs::remove_dir_all(&dir);
@@ -406,7 +408,7 @@ fn driver_instant_view_success_ingest() {
     // MED4: a `webPageInstantView` answer for a tracked
     // `GetWebPageInstantView` request populates `session.messages.instant_view`
     // (the UI drains it into the reader). The URL rides
-    // `instant_view_urls`, keyed by the request id.
+    // `instant_view_requests`, keyed by the request id.
     use crate::telegram::client::copy_and_parse;
 
     let store = MemorySecretStore::new();
@@ -423,11 +425,13 @@ fn driver_instant_view_success_ingest() {
     let extra = driver
         .session
         .request(RequestPurpose::GetWebPageInstantView, None);
-    driver
-        .session
-        .messages
-        .instant_view_urls
-        .insert(extra, "https://example.com/article".to_string());
+    driver.session.messages.instant_view_requests.insert(
+        extra,
+        crate::state::InstantViewAsk {
+            url: "https://example.com/article".to_string(),
+            from_agent: false,
+        },
+    );
 
     let json = format!(
         r#"{{"@type":"webPageInstantView","page_blocks":[],"@extra":"{id}"}}"#,
@@ -467,11 +471,13 @@ fn driver_instant_view_error_falls_back() {
     let extra = driver
         .session
         .request(RequestPurpose::GetWebPageInstantView, None);
-    driver
-        .session
-        .messages
-        .instant_view_urls
-        .insert(extra, "https://example.com/noiv".to_string());
+    driver.session.messages.instant_view_requests.insert(
+        extra,
+        crate::state::InstantViewAsk {
+            url: "https://example.com/noiv".to_string(),
+            from_agent: false,
+        },
+    );
 
     let json = format!(
         r#"{{"@type":"error","code":404,"message":"Not Found","@extra":"{id}"}}"#,
@@ -515,11 +521,13 @@ fn driver_instant_view_fallback_belongs_to_the_asking_window() {
             .session
             .request(RequestPurpose::GetWebPageInstantView, None);
         driver.session.enter_view(None);
-        driver
-            .session
-            .messages
-            .instant_view_urls
-            .insert(extra, url.to_string());
+        driver.session.messages.instant_view_requests.insert(
+            extra,
+            crate::state::InstantViewAsk {
+                url: url.to_string(),
+                from_agent: false,
+            },
+        );
         let json = format!(
             r#"{{"@type":"error","code":404,"message":"Not Found","@extra":"{id}"}}"#,
             id = extra.0,

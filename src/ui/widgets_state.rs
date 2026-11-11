@@ -188,9 +188,69 @@ impl Presence {
     }
 }
 
+/// What the pointer is doing to a widget. It goes when the runtime does:
+/// a press or hover that cannot end (the widget went off screen, its
+/// runtime stopped or restarted) would never see its release or leave.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct Pointer {
+    /// The widget claims long presses of the current press (a context menu of its own).
+    pub hold: bool,
+    /// The button of the press the widget took (0 primary, 2 secondary)
+    /// until its release.
+    pub pressed: Option<i32>,
+    /// The mouse is over it (it was told so).
+    pub hovered: bool,
+}
+
+impl Pointer {
+    /// A later move is a hover again, not a drag.
+    pub(super) fn release(&mut self) {
+        self.pressed = None;
+        self.hovered = false;
+        self.hold = false;
+    }
+}
+
+/// One running runtime and everything that belongs to it. It lives in the
+/// `Loading` and `Running` stages only, so a stopped, released or
+/// restarted widget starts with none of it.
+pub(super) struct Live<R = Runtime> {
+    pub runtime: R,
+    /// Queries with TDLib: Quill's token for each, to the token this
+    /// runtime gave it. A new runtime starts empty, so a late answer to the
+    /// runtime before never reaches it.
+    pub queries: HashMap<u64, u64>,
+    /// The theme and bubble color the runtime has, to send only changes.
+    pub theme: (String, [u8; 3]),
+    /// What the runtime itself asked for last (it animates): it ticks only
+    /// while it is shown ([`ticks`]); hidden, the ask stays here, so
+    /// coming back ticks it again.
+    pub wants_frames: bool,
+    pub cursor: String,
+    pub pointer: Pointer,
+}
+
+impl<R> Live<R> {
+    pub(super) fn new(runtime: R, theme: (String, [u8; 3])) -> Self {
+        Self {
+            runtime,
+            queries: HashMap::new(),
+            theme,
+            wants_frames: false,
+            cursor: String::new(),
+            pointer: Pointer::default(),
+        }
+    }
+}
+
+/// It takes a display frame now: its runtime animates and a window draws it.
+pub(super) fn ticks<R>(presence: &Presence, live: Option<&Live<R>>) -> bool {
+    presence.is_shown() && live.is_some_and(|live| live.wants_frames)
+}
+
 pub(super) struct WidgetEntry {
-    /// Its stage; the live stages hold its runtime.
-    pub lifecycle: Lifecycle<Runtime>,
+    /// Its stage; the live stages hold its runtime and what belongs to it.
+    pub lifecycle: Lifecycle<Live>,
     pub identity: Option<Identity>,
     /// The `WidgetData` JSON the runtime has.
     pub data: String,
@@ -205,61 +265,45 @@ pub(super) struct WidgetEntry {
     /// links it opens and the copies it makes show while that window draws
     /// it ([`Self::asking_window`]).
     pub input_window: Option<ChatId>,
-    /// Stops in a row ([`quill::message_widget::MAX_CRASHES`]).
-    pub crashes: u8,
-    /// What the runtime itself asked for last (it animates): it ticks only
-    /// while it is shown ([`Self::ticks`]); hidden, the ask stays here, so
-    /// coming back ticks it again.
-    pub wants_frames: bool,
-    pub cursor: String,
     pub poll: Poll,
     pub stored: Stored,
     /// The stored copy changed since the last write.
     pub unsaved: bool,
-    /// The widget claims long presses of the current press (a context menu of its own).
-    pub hold: bool,
-    /// The button of the press the widget took (0 primary, 2 secondary)
-    /// until its release.
-    pub pressed: Option<i32>,
-    /// The mouse is over it (it was told so).
-    pub hovered: bool,
-    /// The selected text, read after a press.
+    /// The selected text, read after a press. It stays through a stop or a
+    /// restart of the runtime and goes with the content.
     pub selection: String,
-    /// Queries with TDLib: Quill's token for each, to the token the
-    /// running runtime gave it. A new runtime starts empty, so a late
-    /// answer to the runtime before never reaches it.
-    pub queries: HashMap<u64, u64>,
-    /// The theme and bubble color the runtime has, to send only changes.
-    pub theme: Option<(String, [u8; 3])>,
 }
 
 impl WidgetEntry {
-    /// A press or a hover that cannot end: the widget went off screen, or
-    /// its runtime stopped or restarted, so the release or the leave would
-    /// never reach it. A later move is a hover again, not a drag.
+    /// A press or a hover that cannot end: the widget went off screen, so
+    /// the release or the leave would never reach it.
     pub(super) fn release_pointer(&mut self) {
-        self.pressed = None;
-        self.hovered = false;
-        self.hold = false;
+        if let Some(live) = self.live_mut() {
+            live.pointer.release();
+        }
     }
 
     /// New content: the part bound to the old content goes whole (its last
-    /// frame, height, poll, the runtime and what it asked for), so a runtime
-    /// that fails shows the failure and not the old picture.
+    /// frame, height, poll and the runtime with what it asked for and the
+    /// stops in a row), so a runtime that fails shows the failure and not
+    /// the old picture.
     pub(super) fn replace_content(&mut self, identity: Identity, height: f32) {
         self.lifecycle = Lifecycle::Idle;
-        self.crashes = 0;
         self.polled = None;
         self.frame = None;
         self.height = height;
         self.poll = Poll::Off;
-        self.wants_frames = false;
-        self.cursor.clear();
         self.selection.clear();
-        self.queries.clear();
-        self.theme = None;
-        self.release_pointer();
         self.identity = Some(identity);
+    }
+
+    /// The running runtime with what belongs to it.
+    pub(super) fn live(&self) -> Option<&Live> {
+        self.lifecycle.runtime()
+    }
+
+    pub(super) fn live_mut(&mut self) -> Option<&mut Live> {
+        self.lifecycle.runtime_mut()
     }
 
     pub(super) fn new(stored: Stored, height: f32) -> Self {
@@ -272,25 +316,17 @@ impl WidgetEntry {
             height,
             presence: Presence::Hidden { since: 0 },
             input_window: None,
-            crashes: 0,
-            wants_frames: false,
-            cursor: String::new(),
             poll: Poll::Off,
             stored,
             unsaved: false,
-            hold: false,
-            pressed: None,
-            hovered: false,
             selection: String::new(),
-            queries: HashMap::new(),
-            theme: None,
         }
     }
 
     /// It takes a display frame now: its runtime animates and a window
     /// draws it.
     pub(super) fn ticks(&self) -> bool {
-        self.presence.is_shown() && self.wants_frames
+        ticks(&self.presence, self.live())
     }
 
     /// It holds a runtime or a frame (a few MB): what the hidden pool keeps
@@ -304,14 +340,11 @@ impl WidgetEntry {
     pub(super) fn shed(&mut self) {
         self.lifecycle = Lifecycle::Idle;
         self.frame = None;
-        self.wants_frames = false;
-        self.queries.clear();
-        self.theme = None;
     }
 
     /// The runtime, while it is live.
     pub(super) fn runtime(&self) -> Option<&Runtime> {
-        self.lifecycle.runtime()
+        self.live().map(|live| &live.runtime)
     }
 
     /// The window its links and copies show in: the window of its last

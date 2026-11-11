@@ -39,8 +39,12 @@ impl Rig {
                 .ingest(copy_and_parse(json, &seq, &sink).unwrap())
                 .unwrap();
         }
-        driver.session.chats.get_mut(&13).unwrap().my_member_status =
-            Some(ChannelMemberStatus::Creator);
+        driver
+            .session
+            .chats
+            .get_mut(&13)
+            .unwrap()
+            .assume_member_status(Some(ChannelMemberStatus::Creator));
         driver.session.groups.supergroup_full_infos.insert(
             113,
             SupergroupFullInfoData {
@@ -87,7 +91,7 @@ fn a_gif_file_goes_out_as_an_animation_with_its_caption() {
     let mut rig = Rig::new(false);
     let gif = rig.file("fun.gif", b"GIF89a");
     let mut att = ComposerAttachment::pick(&gif, AttachmentKind::Video).unwrap();
-    att.extras.gif = true;
+    att.extras.set_gif(true);
     let snap = rig
         .snapshot(7, "CANARYGIFCAP", att)
         .with_caption_above_media(true);
@@ -309,7 +313,7 @@ fn paid_media_is_refused_where_it_is_not_allowed() {
     let gif_file =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs/screenshots/fixtures/demo-gif.gif");
     let mut gif = ComposerAttachment::pick(&gif_file, AttachmentKind::Video).unwrap();
-    gif.extras.gif = true;
+    gif.extras.set_gif(true);
     let snap = rig.snapshot(13, "", gif).with_media_options(paid(5));
     assert_eq!(
         rig.driver.send_snapshot(&snap),
@@ -322,7 +326,7 @@ fn paid_media_is_refused_where_it_is_not_allowed() {
 fn a_soundless_video_is_an_animation_alone_and_a_video_in_an_album() {
     let mut rig = Rig::new(false);
     let mut silent = ComposerAttachment::pick(&demo_clip(), AttachmentKind::Video).unwrap();
-    silent.extras.gif = true;
+    silent.extras.set_gif(true);
     // Alone: an animation.
     let snap = rig.snapshot(7, "alone", silent.clone());
     rig.driver.send_snapshot(&snap).unwrap();

@@ -8,10 +8,9 @@ use crate::state::*;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BusinessSettingsState {
-    /// `getTimeZones`, sorted for the picker; `None` until it answers.
-    pub time_zones: Option<Vec<TimeZone>>,
-    /// `getTimeZones` was sent.
-    pub time_zones_requested: bool,
+    /// `getTimeZones`, sorted for the picker: asked once per session, again
+    /// only after it failed.
+    pub time_zones: crate::state::fetch::Fetch<Vec<TimeZone>>,
     /// Saves sent and not answered yet.
     pub saving: Vec<BusinessSettingKind>,
     /// The last refused save, in words.
@@ -24,9 +23,17 @@ pub struct BusinessSettingsState {
     pub own_info_error: Option<String>,
 }
 
+impl BusinessSettingsState {
+    /// The refusal the Business screens draw: the last refused save, else
+    /// why the time zones failed to load.
+    pub fn refusal(&self) -> Option<&str> {
+        self.error.as_deref().or_else(|| self.time_zones.error())
+    }
+}
+
 impl Session {
     pub(crate) fn apply_time_zones(&mut self, zones: Vec<TimeZone>) {
-        self.settings.business.time_zones = Some(zones);
+        self.settings.business.time_zones.succeed(zones);
     }
 
     /// `ok` of a `setBusiness*` request.
@@ -54,7 +61,10 @@ impl Session {
             .requests
             .has_purpose_for_user(RequestPurpose::GetUserFullInfo, me)
         {
-            return Fetch::Loading { stale: None };
+            return Fetch::Loading {
+                stale: None,
+                request: None,
+            };
         }
         match &self.settings.business.own_info_error {
             Some(error) => Fetch::Failed {
@@ -85,8 +95,9 @@ impl Session {
         let state = &mut self.settings.business;
         match purpose {
             Some(RequestPurpose::Settings(SettingsPurpose::GetTimeZones)) => {
-                state.time_zones_requested = false;
-                state.error = Some(format!(
+                // The failure line lives in the fetch only; the screens read
+                // it from there ([`BusinessSettingsState::refusal`]).
+                state.time_zones.fail(format!(
                     "Couldn't load the time zones: {}",
                     error_reason(err)
                 ));

@@ -530,14 +530,7 @@ fn the_composer_send_goes_to_the_agent_path_and_read_only_refuses(cx: &mut TestA
                 session.store_composer_draft(
                     ChatId(11),
                     quill::composer::DraftTopic::Chat,
-                    Some(quill::telegram::ChatDraft {
-                        text: "hi there".into(),
-                        rich: None,
-                        reply_to_message_id: None,
-                        quote: None,
-                        item: Default::default(),
-                        suggested_post: None,
-                    }),
+                    Some(quill::telegram::ChatDraft::text_only("hi there")),
                 );
             }
         })
@@ -843,11 +836,14 @@ fn a_link_resolved_after_the_step_opens_a_granted_chat_only(cx: &mut TestAppCont
                     param: &str,
                     from_agent: bool| {
         app.update_in(vcx, |app, _, cx| {
-            app.links.pending_deep_link_open = Some(crate::ui::links_state::PendingOpen {
-                chat_id: ChatId(chat),
-                action: start(param),
-                from_agent,
-            });
+            app.links.resolved = Some(crate::ui::links_state::ResolvedLink::open(
+                crate::ui::links_state::PendingOpen {
+                    chat_id: ChatId(chat),
+                    action: start(param),
+                    from_agent,
+                },
+                None,
+            ));
             cx.notify();
         });
         settle(vcx);
@@ -899,16 +895,19 @@ fn a_share_the_user_picks_replaces_an_agents_waiting_open(cx: &mut TestAppContex
     let _ = guard::take_refusals();
     app.update_in(vcx, |app, _, cx| {
         // The agent's link led to chat 12, which is not granted.
-        app.links.pending_deep_link_open = Some(crate::ui::links_state::PendingOpen {
-            chat_id: ChatId(12),
-            action: DeepLinkAction::OpenUsername {
-                domain: "demo".into(),
-                start_param: Some("secret".into()),
-                post: None,
-                story_id: None,
+        app.links.resolved = Some(crate::ui::links_state::ResolvedLink::open(
+            crate::ui::links_state::PendingOpen {
+                chat_id: ChatId(12),
+                action: DeepLinkAction::OpenUsername {
+                    domain: "demo".into(),
+                    start_param: Some("secret".into()),
+                    post: None,
+                    story_id: None,
+                },
+                from_agent: true,
             },
-            from_agent: true,
-        });
+            None,
+        ));
         // Before the next frame the user shares a link to chat 12.
         app.share.link_text = Some("https://example.com/shared".into());
         app.choose_share_chat(ChatId(12), cx);

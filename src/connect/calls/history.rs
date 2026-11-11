@@ -1,6 +1,6 @@
 //! Connect driver: call debug logs, call history, call privacy and busy-call handling.
 use super::*;
-use crate::state::{CallUpload, PrivacyAsk};
+use crate::state::{CallUpload, PrivacyAsk, RecentCalls};
 
 impl<S: JsonSender> ConnectDriver<S> {
     pub(crate) fn call_debug_information(&self) -> Result<String, ConnectSendError> {
@@ -9,9 +9,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .calls
             .summary
             .as_ref()
-            .filter(|summary| {
-                summary.need_debug_information && summary.debug_information.can_send()
-            })
+            .filter(|summary| summary.debug_information.can_send())
             .ok_or(ConnectSendError::InvalidRequest)?;
         Ok(self.call_log_payload(summary).to_string())
     }
@@ -126,7 +124,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .calls
             .summary
             .as_ref()
-            .filter(|s| s.need_log && s.log.can_send())
+            .filter(|s| s.log.can_send())
             .ok_or(ConnectSendError::InvalidRequest)?;
         let log_text = self.call_log_payload(summary).to_string();
         let call_id = summary.call_id;
@@ -159,10 +157,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        if self.session.calls.recent_calls_clearing() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         self.session.calls.recent_calls.clear();
         self.session.calls.recent_calls_offset.clear();
-        self.session.calls.recent_calls_error = false;
-        self.session.calls.recent_calls_request = None;
+        self.session.calls.recent_calls_stage = RecentCalls::Idle;
         self.fetch_call_history_page()
     }
 
@@ -178,7 +178,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if !crate::chatlist_calls::can_clear(
             self.session.calls.recent_calls.len(),
-            self.session.calls.recent_calls_clearing,
+            self.session.calls.recent_calls_stage,
         ) {
             return Ok(None);
         }
@@ -192,7 +192,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.calls.recent_calls_clearing = true;
+        self.session.calls.recent_calls_stage = RecentCalls::Clearing { request: extra };
         Ok(Some(extra))
     }
 
@@ -206,7 +206,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     fn fetch_call_history_page(&mut self) -> Result<RequestId, ConnectSendError> {
-        if self.session.calls.recent_calls_loading() {
+        // A clear in flight keeps its stage: the list reloads after its answer.
+        if self.session.calls.recent_calls_loading() || self.session.calls.recent_calls_clearing() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
@@ -218,12 +219,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&search_call_messages(extra, &offset, 40))
         {
             self.session.requests.take(extra);
-            self.session.calls.recent_calls_error = true;
+            self.session.calls.recent_calls_stage = RecentCalls::Failed;
             return Err(err);
         }
-        self.session.calls.recent_calls_request = Some(extra);
         // A retry of a failed page shows as loading again.
-        self.session.calls.recent_calls_error = false;
+        self.session.calls.recent_calls_stage = RecentCalls::Loading { request: extra };
         Ok(extra)
     }
 

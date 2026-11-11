@@ -122,7 +122,7 @@ fn a_topic_at_its_latest_asks_for_no_newer_page() {
 #[test]
 fn a_topic_short_of_its_latest_pages_newer_from_its_newest_row() {
     let mut f = Fixture::topic_open();
-    f.topic().has_newer = true;
+    f.topic().newer_exists(true);
     f.topic().latest_seen = 300;
     assert!(f.driver.fetch_topic_history_newer().unwrap().is_some());
     let request = f.last_search();
@@ -137,10 +137,10 @@ fn a_topic_short_of_its_latest_pages_newer_from_its_newest_row() {
     );
     f.answer_page(&(150..=199).rev().collect::<Vec<_>>(), 0);
     assert_eq!(f.topic().newest_loaded_id(), Some(MessageId(199)));
-    assert!(f.topic().has_newer, "300 is still ahead");
+    assert!(f.topic().has_newer(), "300 is still ahead");
     assert!(f.driver.fetch_topic_history_newer().unwrap().is_some());
     f.answer_page(&[199], 0);
-    assert!(!f.topic().has_newer, "nothing newer: at the latest");
+    assert!(!f.topic().has_newer(), "nothing newer: at the latest");
     assert_eq!(
         f.topic().messages.keys().next(),
         Some(&101),
@@ -156,19 +156,19 @@ fn jumping_to_the_latest_replaces_a_short_window_with_the_latest_page() {
         None,
         "already there"
     );
-    f.topic().has_newer = true;
+    f.topic().newer_exists(true);
     assert!(f.driver.topic_jump_to_latest().unwrap().is_some());
     assert_eq!(f.last_search()["from_message_id"], 0);
     assert!(f.topic().messages.is_empty());
     f.answer_page(&(951..=1000).rev().collect::<Vec<_>>(), 951);
     assert_eq!(f.topic().newest_loaded_id(), Some(MessageId(1000)));
-    assert!(!f.topic().has_newer);
+    assert!(!f.topic().has_newer());
 }
 
 #[test]
 fn retry_after_a_failed_jump_asks_for_the_first_page_again() {
     let mut f = Fixture::topic_open();
-    f.topic().has_newer = true;
+    f.topic().newer_exists(true);
     assert!(f.driver.topic_jump_to_latest().unwrap().is_some());
     let extra = f.last_search()["@extra"].as_str().unwrap().to_owned();
     f.ingest(&format!(
@@ -204,8 +204,8 @@ fn a_topic_in_a_chat_window_pages_that_windows_chat() {
     assert_eq!(request["chat_id"], 16);
     assert_eq!(request["topic_id"]["forum_topic_id"], 3);
     // The main window's view is untouched.
-    assert_eq!(f.driver.session.open_chat, Some(ChatId(7)));
-    assert_eq!(f.driver.session.open_topic, None);
+    assert_eq!(f.driver.session.open_chat_id(), Some(ChatId(7)));
+    assert_eq!(f.driver.session.open_forum_topic(), None);
     let older = f
         .driver
         .with_window_chat(ChatId(16), |driver| driver.fetch_topic_history());

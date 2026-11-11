@@ -3,6 +3,24 @@
 //! with `new`.
 use crate::state::*;
 
+/// The stage of the recent-calls list (`searchCallMessages` pages and
+/// `deleteAllCallMessages`). Only the answer or error of the request in the
+/// stage lands: a reopen asks for the first page again at once, and
+/// "Clear all" forgets the page in flight, so an older page never fills
+/// the list.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RecentCalls {
+    #[default]
+    Idle,
+    /// A page waits for its answer; its error is `Failed`.
+    Loading { request: RequestId },
+    /// The last page failed; asking again shows it as loading.
+    Failed,
+    /// "Clear all" waits for TDLib; the list empties on `ok`, and its
+    /// error is `Idle` again.
+    Clearing { request: RequestId },
+}
+
 pub struct CallsState {
     /// Phase C1: the tracked live call, if any. **Signaling only** —
     /// TDLib transports no audio/video (official clients use
@@ -42,13 +60,9 @@ pub struct CallsState {
     /// active: its swap prompt, or the accept queued behind the current
     /// call's hang-up. Further incoming calls go to `busy_decline_queue`.
     pub second_call: SecondCall,
-    /// The active call's `discardCall` in flight, which owns its
-    /// `HangingUp` phase.
-    pub hang_up: Option<HangUp>,
-    /// The incoming call `acceptCall` went out for. Its state stays
-    /// `Pending` until TDLib's `updateCall`, but it no longer rings: a
-    /// close hangs it up.
-    pub answered_call: Option<i32>,
+    /// What this side did to the active call: answered it, or hung it up
+    /// (the `discardCall` in flight owns the `HangingUp` phase).
+    pub progress: CallProgress,
     /// Phase C2i: "who can call me"
     /// (`userPrivacySettingAllowCalls`, schema 1.8.67 :9006).
     pub privacy_allow_calls: Option<PrivacyWho>,
@@ -71,15 +85,9 @@ pub struct CallsState {
     /// `next_offset` from the last `foundMessages` page; empty starts
     /// (or restarts) the list.
     pub recent_calls_offset: String,
-    /// The `searchCallMessages` page the list waits for. Only its answer
-    /// or error lands: a reopen asks for the first page again at once, and
-    /// "Clear all" forgets the page in flight, so an older page never
-    /// fills the list.
-    pub recent_calls_request: Option<RequestId>,
-    /// The last `searchCallMessages` request failed.
-    pub recent_calls_error: bool,
-    /// A `deleteAllCallMessages` request is in flight.
-    pub recent_calls_clearing: bool,
+    /// Where the recent-calls list stands: its page or its "Clear all" in
+    /// flight, or the last page's failure.
+    pub recent_calls_stage: RecentCalls,
     /// Phase C3a: the tracked group call / voice chat, if any.
     /// **Signaling only** — TDLib transports no audio/video; the
     /// `joinVideoChat` response payload is stored (`join_payload`) and
@@ -98,6 +106,10 @@ pub struct CallsState {
     /// `createVideoChat` requests the server refused, until the UI shows
     /// them (matched by request id).
     pub failed_creates: Vec<RequestId>,
+    /// `createVideoChat` requests the server answered with the new call,
+    /// until the UI lets go of them (matched by request id), so a box that
+    /// waits on its create ends the wait on either answer.
+    pub answered_creates: Vec<RequestId>,
     /// Phase C3a: group-call ids whose full `groupCall` still needs a
     /// `getGroupCall` fetch (queued from the `createVideoChat`
     /// `groupCallId` answer). Drained by the driver.
@@ -112,10 +124,6 @@ pub struct CallsState {
     /// A call link that arrived while a call is on: the question to leave
     /// it, the wait for it to end, then what the offer found.
     pub call_link_stage: crate::call_link::CallLinkStage,
-    /// The group call just left with `leaveGroupCall`, until TDLib says
-    /// it is no longer joined: a late joined update for it must not take
-    /// the slot back.
-    pub left_group_call: Option<i32>,
     /// A conference call being joined or created, until its answer names
     /// the call (`crate::state::conference`).
     pub pending_conference: Option<PendingConference>,
@@ -151,16 +159,26 @@ impl CallsState {
 
     /// A recent-calls page is in flight.
     pub fn recent_calls_loading(&self) -> bool {
-        self.recent_calls_request.is_some()
+        matches!(self.recent_calls_stage, RecentCalls::Loading { .. })
+    }
+
+    /// The last `searchCallMessages` request failed.
+    pub fn recent_calls_error(&self) -> bool {
+        self.recent_calls_stage == RecentCalls::Failed
+    }
+
+    /// A `deleteAllCallMessages` request is in flight.
+    pub fn recent_calls_clearing(&self) -> bool {
+        matches!(self.recent_calls_stage, RecentCalls::Clearing { .. })
     }
 
     /// Whether `request` is the recent-calls page the list waits for; if
     /// so the list stops waiting for it.
     pub(crate) fn take_recent_calls_request(&mut self, request: RequestId) -> bool {
-        if self.recent_calls_request != Some(request) {
+        if self.recent_calls_stage != (RecentCalls::Loading { request }) {
             return false;
         }
-        self.recent_calls_request = None;
+        self.recent_calls_stage = RecentCalls::Idle;
         true
     }
 
@@ -170,6 +188,13 @@ impl CallsState {
             .into_iter()
             .flatten()
             .find(|call| call.id == id)
+    }
+
+    /// The group call `id` was just left (`leaveGroupCall`) and TDLib has
+    /// not yet said it is no longer joined.
+    pub fn group_call_left(&self, id: i32) -> bool {
+        self.group_call(id)
+            .is_some_and(|call| call.rejoin.is_left())
     }
 
     pub fn group_call_mut(&mut self, id: i32) -> Option<&mut ActiveGroupCall> {
@@ -206,27 +231,24 @@ impl CallsState {
             busy_declined_calls: std::collections::VecDeque::new(),
             busy_declined: Vec::new(),
             second_call: SecondCall::None,
-            hang_up: None,
-            answered_call: None,
+            progress: CallProgress::Idle,
             privacy_allow_calls: None,
             privacy_p2p: None,
             privacy_asks: CallPrivacyAsks::default(),
             prefs: CallPrefs::default(),
             recent_calls: Vec::new(),
             recent_calls_offset: String::new(),
-            recent_calls_request: None,
-            recent_calls_error: false,
-            recent_calls_clearing: false,
+            recent_calls_stage: RecentCalls::Idle,
             active_group_call: None,
             story_stream: None,
             rtmp_start: None,
             create_join_as: None,
             failed_creates: Vec::new(),
+            answered_creates: Vec::new(),
             group_call_fetch_queue: Vec::new(),
             pending_live_story_join: None,
             call_link: None,
             call_link_stage: crate::call_link::CallLinkStage::Idle,
-            left_group_call: None,
             pending_conference: None,
             call_upgrade: None,
             conference_invite: None,

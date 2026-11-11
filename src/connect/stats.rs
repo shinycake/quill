@@ -145,7 +145,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .groups
             .stats
             .message_for(chat_id.0, message_id.0)
-            .is_some_and(|state| state.forwards.total > 0 || !state.forwards.forwards.is_empty())
+            .is_some_and(|state| state.forwards.loaded())
     }
 
     /// One `getMessagePublicForwards` page; `offset` is the previous
@@ -186,10 +186,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra,
             &get_message_public_forwards(extra, chat_id, message_id, offset, FORWARDS_PAGE),
         )?;
-        self.session
-            .groups
-            .stats
-            .forwards_requested(chat_id.0, message_id.0, extra);
+        self.session.groups.stats.forwards_requested(
+            chat_id.0,
+            message_id.0,
+            extra,
+            !offset.is_empty(),
+        );
         Ok(Some(extra))
     }
 
@@ -198,11 +200,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(state) = self.session.groups.stats.message.as_ref() else {
             return Ok(None);
         };
-        if state.forwards.loading() || state.forwards.next_offset.is_empty() {
+        if state.forwards.loading() || state.forwards.next_offset().is_empty() {
             return Ok(None);
         }
         let (chat_id, message_id) = (ChatId(state.chat_id), MessageId(state.message_id));
-        let offset = state.forwards.next_offset.clone();
+        let offset = state.forwards.next_offset().to_string();
         self.fetch_message_public_forwards(chat_id, message_id, &offset)
     }
 

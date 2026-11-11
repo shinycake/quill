@@ -526,7 +526,7 @@ fn call_history_pages_accumulate_and_track_offset() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::SearchCallMessages, None);
-    session.calls.recent_calls_request = Some(extra);
+    session.calls.recent_calls_stage = crate::state::RecentCalls::Loading { request: extra };
     apply_json(
         &mut session,
         &seq,
@@ -539,9 +539,9 @@ fn call_history_pages_accumulate_and_track_offset() {
     assert_eq!(session.calls.recent_calls.len(), 1);
     assert_eq!(session.calls.recent_calls_offset, "page2");
     assert!(!session.calls.recent_calls_loading());
-    assert!(!session.calls.recent_calls_error);
+    assert!(!session.calls.recent_calls_error());
     let extra = session.request(RequestPurpose::SearchCallMessages, None);
-    session.calls.recent_calls_request = Some(extra);
+    session.calls.recent_calls_stage = crate::state::RecentCalls::Loading { request: extra };
     apply_json(
         &mut session,
         &seq,
@@ -561,8 +561,8 @@ fn call_history_pages_accumulate_and_track_offset() {
 fn set_account_ttl_ok_stores_confirmed_days() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.account_ttl_days = Some(90);
-    session.settings.account_mutating = true;
+    session.settings.account_ttl.succeed(90);
+    session.settings.account_ttl.begin();
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days: 365 }),
         None,
@@ -573,18 +573,22 @@ fn set_account_ttl_ok_stores_confirmed_days() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert_eq!(session.settings.account_ttl_days, Some(365));
-    assert!(!session.settings.account_mutating);
-    assert!(session.settings.account_error.is_none());
+    assert_eq!(session.settings.account_ttl.data().copied(), Some(365));
+    assert!(!session.settings.account_busy());
+    assert!(session.settings.account_error().is_none());
 }
 
 #[test]
 fn code_info_answer_stores_pending_number_for_matching_request() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.auth_state.change_number_loading = true;
-    session.auth_state.change_number_error = Some("stale".into());
+    session.auth_state.change_number = crate::state::ChangeNumber::Failed {
+        error: "stale".into(),
+        code: None,
+    };
+    assert!(session.auth_state.change_number.can_send());
     let extra = session.request(RequestPurpose::SendPhoneNumberCode, None);
+    session.auth_state.change_number.begin_send(extra);
     apply_json(
         &mut session,
         &seq,
@@ -594,13 +598,10 @@ fn code_info_answer_stores_pending_number_for_matching_request() {
             extra.0
         ),
     );
-    assert_eq!(
-        session.auth_state.change_number_phone.as_deref(),
-        Some("+15550199")
-    );
-    assert_eq!(session.auth_state.change_number_timeout, Some(60));
-    assert!(!session.auth_state.change_number_loading);
-    assert!(session.auth_state.change_number_error.is_none());
+    assert_eq!(session.auth_state.change_number.phone(), Some("+15550199"));
+    assert_eq!(session.auth_state.change_number.timeout(), Some(60));
+    assert!(!session.auth_state.change_number.is_sending());
+    assert!(session.auth_state.change_number.error().is_none());
 }
 
 #[test]
@@ -872,8 +873,7 @@ fn story_custom_emoji_stickers_are_bounded() {
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,
-        requires_premium: false,
-        premium_animation: None,
+        premium: None,
     };
     let total = crate::state::STORY_CUSTOM_EMOJI_CAP as i64 * 3;
     for id in 1..=total {

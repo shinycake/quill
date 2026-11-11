@@ -17,12 +17,12 @@ pub(super) enum DraftTimerStep {
     Fire(u64),
 }
 
+/// The timer is idle, or armed: a task waits on the latest keystroke's
+/// token and the instant its quiet window ends. One value, since the task
+/// runs exactly while a window is armed.
 #[derive(Debug, Default)]
 pub(super) struct DraftTimer {
-    /// The latest keystroke's token and the instant its window ends.
-    due: Option<(u64, Instant)>,
-    /// Whether a task is waiting on `due`.
-    running: bool,
+    armed: Option<(u64, Instant)>,
 }
 
 impl DraftTimer {
@@ -30,21 +30,20 @@ impl DraftTimer {
     /// caller must spawn the task; false when one is already waiting and
     /// will see the new due time.
     pub(super) fn arm(&mut self, token: u64, delay: Duration, now: Instant) -> bool {
-        self.due = Some((token, now.checked_add(delay).unwrap_or(now)));
-        !std::mem::replace(&mut self.running, true)
+        let spawn = self.armed.is_none();
+        self.armed = Some((token, now.checked_add(delay).unwrap_or(now)));
+        spawn
     }
 
     /// The task's next move at `now`.
     pub(super) fn step(&mut self, now: Instant) -> DraftTimerStep {
-        let Some((token, due)) = self.due else {
-            self.running = false;
+        let Some((token, due)) = self.armed else {
             return DraftTimerStep::Idle;
         };
         if now < due {
             return DraftTimerStep::Sleep(due.saturating_duration_since(now));
         }
-        self.due = None;
-        self.running = false;
+        self.armed = None;
         DraftTimerStep::Fire(token)
     }
 }

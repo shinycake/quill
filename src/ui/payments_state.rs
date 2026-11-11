@@ -24,15 +24,11 @@ pub(crate) struct PaymentUi {
     /// renders from the session's `payment_form`; this holds the live
     /// text fields.
     pub(super) dialog: Option<PaymentDialog>,
-    pub(super) marketplace_open: bool,
-    /// The chat "Buy a collectible by name" buys for, fixed when the box
-    /// opens: the Send Gift box's recipient, or the open chat from the
-    /// menu. Never the chat open behind it later.
-    pub(super) marketplace_chat: Option<quill::ids::ChatId>,
+    /// "Buy a collectible by name": closed, or open for the chat it buys
+    /// for (`super::marketplace_box`).
+    pub(super) marketplace: super::marketplace_box::MarketplaceBox,
     pub(super) marketplace_name_input: Entity<TextareaState>,
     pub(super) marketplace_comment_input: Entity<TextareaState>,
-    pub(super) marketplace_private: bool,
-    pub(super) marketplace_error: Option<String>,
     /// Resale price of a collectible in the gift view (`gift_manage_ui`).
     pub(super) gift_price_input: Entity<InputState>,
     /// Name of a new or renamed gift collection.
@@ -63,7 +59,6 @@ pub(crate) struct PaymentUi {
     pub(super) grams_scroll: ScrollHandle,
     /// The list length each paged dialog last asked at on its own, so a
     /// page that never arrives cannot start a request loop.
-    pub(super) giveaway_asked: super::scroll_load::Asked,
     pub(super) subs_asked: super::scroll_load::Asked,
     pub(super) stars_asked: super::scroll_load::Asked,
     pub(super) gifts_asked: super::scroll_load::Asked,
@@ -71,14 +66,11 @@ pub(crate) struct PaymentUi {
     /// The 2-step verification password of "Send via Blockchain"
     /// (`gift_transfer_ui`); emptied when it is sent and when the box
     /// closes.
-    pub(super) gift_export_password: Entity<InputState>,
-    /// The password box has taken the keyboard since it last opened.
-    pub(super) gift_export_password_focused: bool,
+    pub(super) gift_export_password: super::fragment_password::PasswordField,
     /// The 2-step verification password of the Gram withdrawal
     /// (`premium_ui::grams_withdraw`); emptied when it is sent and when the
     /// box closes.
-    pub(super) grams_withdraw_password: Entity<InputState>,
-    pub(super) grams_withdraw_password_focused: bool,
+    pub(super) grams_withdraw_password: super::fragment_password::PasswordField,
     /// The transfer picker's people for the current search
     /// (`gift_transfer_view`).
     pub(super) transfer_people:
@@ -188,8 +180,7 @@ impl PaymentUi {
         .detach();
         Self {
             dialog: None,
-            marketplace_open: false,
-            marketplace_chat: None,
+            marketplace: Default::default(),
             marketplace_name_input: cx.new(|cx| {
                 TextareaState::new(window, cx)
                     .placeholder(tr(keys::Q_MONEY_COLLECTIBLE_GIFT_NAME_E_G))
@@ -199,8 +190,6 @@ impl PaymentUi {
                     .placeholder(tr(keys::Q_MONEY_PERSONAL_COMMENT))
                     .submit_on_enter(false)
             }),
-            marketplace_private: true,
-            marketplace_error: None,
             gift_price_input: cx.new(|cx| {
                 InputState::new(window, cx)
                     .placeholder(tr(keys::Q_MONEY_PRICE_IN_STARS))
@@ -225,15 +214,16 @@ impl PaymentUi {
             stars_scroll: ScrollHandle::new(),
             gifts_scroll: ScrollHandle::new(),
             grams_scroll: ScrollHandle::new(),
-            giveaway_asked: Default::default(),
             subs_asked: Default::default(),
             stars_asked: Default::default(),
             gifts_asked: Default::default(),
             grams_asked: Default::default(),
-            gift_export_password,
-            gift_export_password_focused: false,
-            grams_withdraw_password,
-            grams_withdraw_password_focused: false,
+            gift_export_password: super::fragment_password::PasswordField::new(
+                gift_export_password,
+            ),
+            grams_withdraw_password: super::fragment_password::PasswordField::new(
+                grams_withdraw_password,
+            ),
             transfer_people: std::cell::RefCell::new(None),
             card_transport: None,
         }

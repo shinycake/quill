@@ -77,7 +77,8 @@ fn error(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Option<String> {
             .quick_replies_dialog
             .as_ref()
             .unwrap()
-            .local_error
+            .pane
+            .error
             .clone()
     })
 }
@@ -227,14 +228,19 @@ fn opening_the_box_clears_the_last_refusal_and_retries_a_failed_load(cx: &mut Te
     app.update(vcx, |app, _| {
         let state = &mut app.demo_session.as_mut().unwrap().settings.quick_replies;
         state.error = Some("Quick replies: FLOOD_WAIT".into());
-        state.messages_requested.insert(1);
-        state.messages_failed.insert(1);
+        state.messages.insert(
+            1,
+            quill::state::fetch::Fetch::Failed {
+                error: "FLOOD_WAIT".into(),
+                stale: None,
+            },
+        );
     });
     open(&app, vcx);
     app.read_with(vcx, |app, _| {
         let state = &app.demo_session.as_ref().unwrap().settings.quick_replies;
         assert!(state.error.is_none());
-        assert!(!state.messages_requested.contains(&1));
+        assert!(!state.messages.contains_key(&1));
         assert!(!state.messages_settled(1));
     });
 }
@@ -284,7 +290,7 @@ fn type_slash(app: &Entity<QuillApp>, cx: &mut VisualTestContext, text: &str) {
     cx.update(|window, cx| {
         app.update(cx, |app, cx| {
             let session = app.demo_session.as_mut().expect("demo session");
-            let chat = session.open_chat.expect("open chat");
+            let chat = session.open_chat_id().expect("open chat");
             let user_id = quill::ids::UserId(chat.0);
             session.chats.get_mut(&chat.0).unwrap().kind =
                 quill::telegram::envelope::ChatKind::Private { user_id };

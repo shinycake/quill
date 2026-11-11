@@ -61,7 +61,9 @@ impl QuillApp {
     #[cfg(target_os = "macos")]
     fn system_replace_owner(&self) -> Option<(i64, Option<i32>)> {
         let session = self.session()?;
-        session.open_chat.map(|chat| (chat.0, session.open_topic))
+        session
+            .open_chat_id()
+            .map(|chat| (chat.0, session.open_forum_topic()))
     }
 
     /// Swap the shortcut for its phrase, keeping the caret where the user
@@ -95,6 +97,7 @@ impl QuillApp {
         self.replace_composer_text(edit.range.clone(), &edit.with, window, cx);
         self.composer
             .update(cx, |input, cx| input.set_selected_range(caret, cx));
-        self.composer_ui.prev_text = self.composer.read(cx).value();
+        let value = self.composer.read(cx).value();
+        self.composer_ui.echo.set(value);
     }
 }

@@ -7,6 +7,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::composer_sends::SendOnce;
 use gpui_kit::*;
 use quill::agent::ui_driver::bridge::UiSend;
 use quill::agent::ui_driver::guard;
@@ -28,7 +29,7 @@ impl QuillApp {
             guard::refuse_if_injecting("forward messages");
             return;
         }
-        if self.chat_ui.rich_editor_open {
+        if self.chat_ui.rich.editor_open() {
             guard::refuse_if_injecting("send formatted blocks");
             return;
         }
@@ -53,7 +54,7 @@ impl QuillApp {
         // else the box could carry does (a schedule, a silent send, an
         // effect, a paid message, suggested-post terms). The tool path
         // checks the request again before sending.
-        let composer = self.composer_send_options();
+        let composer = self.composer_send_options(SendOnce::default());
         let options = SendOptions {
             link_preview_disabled: composer.link_preview_disabled,
             link_preview_above_text: composer.link_preview_above_text,

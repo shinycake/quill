@@ -56,7 +56,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         action: &str,
     ) -> Result<(), ConnectSendError> {
         let chat_id = chat
-            .or(self.session.open_chat)
+            .or(self.session.open_chat_id())
             .filter(|id| self.typing_chat_allowed(*id));
         let Some(chat_id) = chat_id.filter(|_| active) else {
             return self.cancel_outgoing_voice();
@@ -158,7 +158,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let composing = !editing && !text.trim().is_empty();
         let chat_id = self
             .session
-            .open_chat
+            .open_chat_id()
             .filter(|id| self.typing_chat_allowed(*id));
         let Some(chat_id) = chat_id.filter(|_| composing) else {
             return self.cancel_outgoing_typing();

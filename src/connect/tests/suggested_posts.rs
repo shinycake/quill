@@ -160,7 +160,7 @@ fn decline_sends_the_reason_and_an_error_becomes_a_note() {
         notes,
         vec!["Couldn't decline the post: invalid request.".to_string()]
     );
-    assert!(f.driver.session.payments.suggested_posts.busy.is_empty());
+    assert!(!f.driver.session.suggested_post_busy(CHAT.0, 6 << 20));
 }
 
 #[test]
@@ -396,12 +396,10 @@ fn info_updates_change_the_loaded_message() {
 /// keeps the terms, the answer takes the bar down.
 #[test]
 fn the_edit_bar_stays_until_the_send_answers() {
-    use crate::suggested_posts::{BarSend, SuggestMode};
+    use crate::suggested_posts::BarSend;
     let mut f = Fixture::new();
     f.open_direct_messages(true);
-    let mut bar = SuggestBar::new(stars(10, 0));
-    bar.mode = SuggestMode::Change;
-    bar.edit_of = Some(MessageId(8 << 20));
+    let bar = SuggestBar::editing(stars(10, 0), MessageId(8 << 20));
     f.driver
         .session
         .payments
@@ -411,7 +409,7 @@ fn the_edit_bar_stays_until_the_send_answers() {
     f.driver
         .send_suggested_change(CHAT, MessageId(8 << 20), "Text", false, stars(10, 0))
         .unwrap();
-    let sending = |f: &Fixture| f.driver.session.suggest_bar(CHAT).map(|bar| bar.send);
+    let sending = |f: &Fixture| f.driver.session.suggest_bar(CHAT).map(|bar| bar.send());
     assert!(sending(&f).is_some_and(BarSend::is_sending));
     // A second send waits for the first one's answer.
     assert!(

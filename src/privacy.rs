@@ -487,7 +487,7 @@ mod tests {
     use crate::diagnostics::{DiagnosticSink, MemorySink};
     use crate::ids::AccountKey;
     use crate::state::SettingsPurpose;
-    use crate::state::{ReadDateStage, RequestPurpose, Session};
+    use crate::state::{ReadDate, RequestPurpose, Session};
     use crate::telegram::client::copy_and_parse;
     use crate::telegram::requests_privacy::PrivacySettingKey;
     use std::sync::Arc;
@@ -758,7 +758,7 @@ mod tests {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
         let extra = session.request(RequestPurpose::GetReadDatePrivacy, None);
-        session.settings.read_date_stage = ReadDateStage::Getting(extra);
+        session.settings.read_date.start_get(extra);
         apply_json(
             &mut session,
             &seq,
@@ -768,12 +768,10 @@ mod tests {
                 extra.0,
             ),
         );
-        assert_eq!(session.settings.read_date_show, Some(false));
-        assert_eq!(session.settings.read_date_stage, ReadDateStage::Idle);
+        assert_eq!(session.settings.read_date, ReadDate::Known(false));
 
         let extra = session.request(RequestPurpose::SetReadDatePrivacy, None);
-        session.settings.read_date_show = Some(true); // optimistic set
-        session.settings.read_date_stage = ReadDateStage::Setting(extra);
+        session.settings.read_date.start_set(extra, true); // optimistic set
         apply_json(
             &mut session,
             &seq,
@@ -783,8 +781,8 @@ mod tests {
                 extra.0,
             ),
         );
-        assert_eq!(session.settings.read_date_stage, ReadDateStage::Failed);
-        assert_eq!(session.settings.read_date_show, None);
+        assert_eq!(session.settings.read_date, ReadDate::Failed { known: None });
+        assert_eq!(session.settings.read_date.show(), None);
     }
 
     /// A get answered after a set went out does not overwrite the set
@@ -794,10 +792,9 @@ mod tests {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
         let get = session.request(RequestPurpose::GetReadDatePrivacy, None);
-        session.settings.read_date_stage = ReadDateStage::Getting(get);
+        session.settings.read_date.start_get(get);
         let set = session.request(RequestPurpose::SetReadDatePrivacy, None);
-        session.settings.read_date_show = Some(false); // optimistic set
-        session.settings.read_date_stage = ReadDateStage::Setting(set);
+        session.settings.read_date.start_set(set, false); // optimistic set
         apply_json(
             &mut session,
             &seq,
@@ -807,10 +804,13 @@ mod tests {
                 get.0,
             ),
         );
-        assert_eq!(session.settings.read_date_show, Some(false));
+        assert_eq!(session.settings.read_date.show(), Some(false));
         assert_eq!(
-            session.settings.read_date_stage,
-            ReadDateStage::Setting(set)
+            session.settings.read_date,
+            ReadDate::Setting {
+                request: set,
+                show: false
+            }
         );
         apply_json(
             &mut session,
@@ -818,8 +818,7 @@ mod tests {
             &sink,
             &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, set.0),
         );
-        assert_eq!(session.settings.read_date_show, Some(false));
-        assert_eq!(session.settings.read_date_stage, ReadDateStage::Idle);
+        assert_eq!(session.settings.read_date, ReadDate::Known(false));
     }
 
     /// A page of a list that restarted since (or whose data was dropped)

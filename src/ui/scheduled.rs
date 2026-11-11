@@ -201,7 +201,7 @@ impl QuillApp {
     pub(super) fn schedule_kind(&self) -> ScheduleKind {
         let saved = self
             .session()
-            .and_then(|s| s.open_chat.map(|id| s.is_saved_messages(id)))
+            .and_then(|s| s.open_chat_id().map(|id| s.is_saved_messages(id)))
             .unwrap_or(false);
         ScheduleKind::for_saved_messages(saved)
     }
@@ -223,7 +223,10 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return false;
         };
-        let Some(chat) = session.open_chat.and_then(|id| session.chats.get(&id.0)) else {
+        let Some(chat) = session
+            .open_chat_id()
+            .and_then(|id| session.chats.get(&id.0))
+        else {
             return false;
         };
         match chat.kind {
@@ -245,12 +248,12 @@ impl QuillApp {
         let now = WallClock::of(cx).now();
         let existing = match target {
             ScheduleTarget::Composer => match self.pending_send().scheduling {
-                ComposerScheduling::SendAtDate(date) => Some(date),
+                ComposerScheduling::SendAtDate { date, .. } => Some(date),
                 _ => None,
             },
             ScheduleTarget::Share | ScheduleTarget::RescheduleSelected => None,
             ScheduleTarget::Reschedule(id) => self.session().and_then(|s| {
-                s.scheduled_in(s.open_chat?)
+                s.scheduled_in(s.open_chat_id()?)
                     .find(|m| m.id == id)
                     .and_then(|m| match m.scheduling_state {
                         Some(MessageSchedulingState::SendAtDate { send_date, .. }) => {
@@ -261,10 +264,8 @@ impl QuillApp {
             }),
         };
         // The change dialog starts from the repeat chosen before.
-        let repeat = match (target, self.pending_send().scheduling) {
-            (ScheduleTarget::Composer, ComposerScheduling::SendAtDate(_)) => {
-                self.pending_send().schedule_repeat
-            }
+        let repeat = match target {
+            ScheduleTarget::Composer => self.pending_send().scheduling.repeat_period(),
             _ => 0,
         };
         let initial = existing
@@ -284,7 +285,6 @@ impl QuillApp {
             send_effect: 0,
             slot,
         });
-        self.chat_ui.schedule_popup_open = true;
         cx.notify();
     }
 
@@ -294,7 +294,6 @@ impl QuillApp {
             self.chat_ui.schedule_picker.as_ref().map(|p| p.target),
             Some(ScheduleTarget::Reschedule(_) | ScheduleTarget::RescheduleSelected)
         );
-        self.chat_ui.schedule_popup_open = false;
         self.chat_ui.schedule_picker = None;
         if reopen {
             self.open_scheduled_dialog(cx);
@@ -313,12 +312,9 @@ impl QuillApp {
             .ok_or(ScheduleError::Invalid)
             .and_then(|unix| validate_send_date(unix, WallClock::of(cx).now()));
         match picked {
-            Ok(send_date) => self.apply_schedule(
-                target,
-                ComposerScheduling::SendAtDate(send_date),
-                window,
-                cx,
-            ),
+            Ok(send_date) => {
+                self.apply_schedule(target, ComposerScheduling::at(send_date), window, cx)
+            }
             Err(err) => {
                 if let Some(picker) = self.chat_ui.schedule_picker.as_mut() {
                     picker.error = Some(err.message());
@@ -352,14 +348,11 @@ impl QuillApp {
                 )
             })
             .unwrap_or((0, false, 0, None));
-        let repeat = if self.repeat_allowed(target)
-            && matches!(scheduling, ComposerScheduling::SendAtDate(_))
-        {
-            repeat
+        let scheduling = if self.repeat_allowed(target) {
+            scheduling.repeating(repeat)
         } else {
-            0
+            scheduling.repeating(0)
         };
-        self.chat_ui.schedule_popup_open = false;
         match target {
             ScheduleTarget::Composer => {
                 // The picker's own chat, which may no longer be on screen.
@@ -369,12 +362,11 @@ impl QuillApp {
                 };
                 self.composer_sends.update(&slot, |send| {
                     send.scheduling = scheduling;
-                    send.schedule_repeat = repeat;
                 });
                 // Sending now would send another chat's text.
                 let send_after = send_after && open.as_ref() == Some(&slot);
                 self.set_note(match (scheduling, kind) {
-                    (ComposerScheduling::SendAtDate(date), ScheduleKind::Reminder) => {
+                    (ComposerScheduling::SendAtDate { date, .. }, ScheduleKind::Reminder) => {
                         StatusNote::silent(tr_with(
                             keys::Q_OPS_REMINDER_SET_FOR,
                             &[(
@@ -383,7 +375,7 @@ impl QuillApp {
                             )],
                         ))
                     }
-                    (ComposerScheduling::SendAtDate(date), ScheduleKind::Schedule) => {
+                    (ComposerScheduling::SendAtDate { date, .. }, ScheduleKind::Schedule) => {
                         StatusNote::silent(tr_with(
                             keys::Q_OPS_SCHEDULED_FOR,
                             &[(
@@ -396,9 +388,11 @@ impl QuillApp {
                 });
                 cx.notify();
                 if send_after {
-                    self.composer_ui.send_effect_once = send_effect;
-                    self.send_composer_after_schedule(window, cx);
-                    self.composer_ui.send_effect_once = 0;
+                    let once = super::composer_sends::SendOnce {
+                        effect: send_effect,
+                        ..Default::default()
+                    };
+                    self.send_composer_after_schedule(once, window, cx);
                 }
             }
             ScheduleTarget::Reschedule(message_id) => {
@@ -413,7 +407,7 @@ impl QuillApp {
             }
             ScheduleTarget::Share => {
                 self.submit_share(
-                    quill::share_box::ShareSend::Scheduled(scheduling, repeat),
+                    quill::share_box::ShareSend::Scheduled(scheduling),
                     window,
                     cx,
                 );
@@ -432,7 +426,7 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        let Some(chat_id) = live.driver.session.open_chat else {
+        let Some(chat_id) = live.driver.session.open_chat_id() else {
             return;
         };
         let sending_now = scheduling == ComposerScheduling::None;
@@ -541,7 +535,7 @@ impl QuillApp {
     /// has scheduled messages.
     pub(super) fn scheduled_messages_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         if !session.chat_has_scheduled_messages(chat_id) {
             return None;
         }
@@ -605,7 +599,7 @@ impl QuillApp {
         let mut selected = self.chat_ui.scheduled_selected.clone();
         let existing: Vec<MessageId> = self
             .session()
-            .and_then(|s| Some(s.scheduled_in(s.open_chat?).map(|m| m.id).collect()))
+            .and_then(|s| Some(s.scheduled_in(s.open_chat_id()?).map(|m| m.id).collect()))
             .unwrap_or_default();
         quill::selection_pin::prune_selected(&mut selected, &existing);
         selected
@@ -739,7 +733,14 @@ impl QuillApp {
         let kind = self.schedule_kind();
         let messages: Vec<ParsedMessage> = self
             .session()
-            .and_then(|session| Some(session.scheduled_in(session.open_chat?).cloned().collect()))
+            .and_then(|session| {
+                Some(
+                    session
+                        .scheduled_in(session.open_chat_id()?)
+                        .cloned()
+                        .collect(),
+                )
+            })
             .unwrap_or_default();
         let selected = self.selected_scheduled();
         let bar = (!selected.is_empty()).then(|| self.scheduled_selection_bar(selected.len(), cx));

@@ -424,7 +424,7 @@ impl QuillApp {
         } else {
             self.live_of(account)
                 .and_then(|live| live.driver.session.draft_for(chat_id, topic))
-                .map(|draft| draft.text.clone())
+                .map(|draft| draft.text().to_string())
         };
         let tray_now: Vec<PathBuf> = self
             .composer_sends
@@ -463,7 +463,7 @@ impl QuillApp {
         // slot follows the pref again.
         self.composer_sends
             .update(&origin.slot, |send| send.group_media = None);
-        self.chat_ui.schedule_popup_open = false;
+        self.chat_ui.hide_schedule_popup();
         self.chat_ui.set_reply(None);
         self.clear_suggest_bar_after_send(chat_id);
         self.composer_sends.set_draft_clear(
@@ -504,7 +504,9 @@ impl QuillApp {
                 .draft_for(chat_id, topic)
                 .cloned()
                 .map(|mut draft| {
-                    draft.text = text.to_string();
+                    if let quill::telegram::envelope::DraftBody::Text(body) = &mut draft.body {
+                        *body = text.to_string();
+                    }
                     draft
                 });
             live.driver

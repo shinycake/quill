@@ -17,7 +17,7 @@ impl QuillApp {
         let status = session
             .map(|s| s.search.search.status())
             .unwrap_or(SearchStatus::Closed);
-        let recents = session.is_some_and(|s| s.search.search.recents);
+        let recents = session.is_some_and(|s| s.search.search.is_recents());
         let query = session
             .map(|s| s.search.search.query.clone())
             .unwrap_or_default();
@@ -39,7 +39,7 @@ impl QuillApp {
         let show_messages = !matches!(tab, SearchTab::Apps | SearchTab::Downloads)
             && !channels_idle
             && !(tab == SearchTab::Posts && query.trim().is_empty());
-        let limits_exceeded = session.is_some_and(|s| s.search.search.public_limits_exceeded);
+        let limits_exceeded = session.is_some_and(|s| s.search.search.public_limits_exceeded());
         let messages: Vec<(ChatId, MessageId, String, String, i32)> = session
             .map(|s| {
                 s.search
@@ -162,7 +162,7 @@ impl QuillApp {
         } else {
             tr(keys::Q_CHAT_MESSAGES)
         };
-        let confirm = session.and_then(|s| s.search.search.confirm);
+        let confirm = session.and_then(|s| s.search.search.confirm.clone());
         let messages_empty = messages.is_empty();
         // A new query, tab or filter starts the list from its top.
         if let Some(search) = session.map(|s| &s.search.search) {

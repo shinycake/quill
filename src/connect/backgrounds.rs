@@ -339,7 +339,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .get(&f.id.0)
                     .unwrap_or(f)
                     .local
-                    .is_downloading_completed
+                    .is_downloading_completed()
             })
             .map(|f| f.id)
             .collect();

@@ -41,7 +41,7 @@ impl Session {
             // Not a member (or no access): there is no personal
             // restriction to find, and the probe must not repeat.
             if let Some(chat) = self.chats.get_mut(&chat_id.0) {
-                chat.my_rights_fetched = true;
+                chat.note_no_member_record();
             }
         }
         // Too many communities or public links open the limit box (tdesktop
@@ -61,8 +61,7 @@ impl Session {
         self.apply_group_type_error(err, pending);
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::CanTransferOwnership) => {
-                self.groups.ownership.check_in_flight = false;
-                self.groups.ownership.check_error = Some(format!(
+                self.groups.ownership.check.fail_dropping_data(format!(
                     "Could not check whether you can transfer ownership: {}",
                     error_reason(err)
                 ));
@@ -124,8 +123,15 @@ impl Session {
             // The unrestrict-boosts value was never applied; drop it so the
             // slider shows the stored one again.
             Some(RequestPurpose::SetSupergroupUnrestrictBoostCount) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.groups.unrestrict_boost_pending.remove(&chat_id.0);
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && self
+                        .groups
+                        .unrestrict_boost_saves
+                        .get(&chat_id.0)
+                        .is_some_and(|save| save.request == pending.id)
+                {
+                    self.groups.unrestrict_boost_saves.remove(&chat_id.0);
                 }
                 self.chats_state
                     .chat_action_error
@@ -279,9 +285,9 @@ impl Session {
                     && let Some(chat_id) = pending.chat_id
                     && self
                         .groups
-                        .join_request_latest
+                        .join_requests
                         .get(&chat_id.0)
-                        .is_none_or(|latest| *latest == pending.id)
+                        .is_none_or(|fetch| fetch.expects(pending.id))
                 {
                     self.groups.join_requests.insert(
                         chat_id.0,
@@ -300,12 +306,17 @@ impl Session {
                 let current = pending.is_some_and(|pending| {
                     pending.chat_id.is_some_and(|chat_id| {
                         self.groups
-                            .join_request_latest
+                            .join_requests
                             .get(&chat_id.0)
-                            .is_none_or(|latest| *latest == pending.id)
+                            .is_none_or(|fetch| fetch.expects(pending.id))
                     })
                 });
                 if current {
+                    if let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                        && let Some(fetch) = self.groups.join_requests.get_mut(&chat_id.0)
+                    {
+                        fetch.forget_page_in_flight();
+                    }
                     self.groups.invite_link_error = Some(call_request_error_line(
                         err,
                         crate::lang::tr(
@@ -356,11 +367,10 @@ impl Session {
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
                     && let Some(state) = self.groups.invite_pages.members_mut(chat_id.0)
-                    && state.request == Some(pending.id)
+                    && state.stage.waits_for(pending.id)
                 {
-                    state.loading = false;
-                    state.request = None;
-                    state.error = Some(call_request_error_line(err, "Could not load members"));
+                    state.stage =
+                        PageStage::Failed(call_request_error_line(err, "Could not load members"));
                 }
             }
             Some(RequestPurpose::GetAdminChatInviteLinks { revoked }) => {
@@ -372,12 +382,13 @@ impl Session {
                         err,
                         "Could not load invite links",
                     ));
-                    if revoked && state.revoked_request == Some(pending.id) {
-                        state.revoked = failed;
-                        state.revoked_request = None;
-                    } else if !revoked && state.active_request == Some(pending.id) {
-                        state.active = failed;
-                        state.active_request = None;
+                    let slot = if revoked {
+                        &mut state.revoked
+                    } else {
+                        &mut state.active
+                    };
+                    if *slot == InviteLinkFetch::Loading(pending.id) {
+                        *slot = failed;
                     }
                 }
             }
@@ -385,11 +396,12 @@ impl Session {
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
                     && let Some(state) = self.groups.invite_pages.join_requests_mut(chat_id.0)
-                    && state.request == Some(pending.id)
+                    && state.stage.waits_for(pending.id)
                 {
-                    state.request = None;
-                    state.error =
-                        Some(call_request_error_line(err, "Could not load join requests"));
+                    state.stage = PageStage::Failed(call_request_error_line(
+                        err,
+                        "Could not load join requests",
+                    ));
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::ProcessLinkJoinRequests { .. })) => {
@@ -405,7 +417,7 @@ impl Session {
                     && state.waits_for(pending.id)
                 {
                     state.stage =
-                        BoostsStage::Failed(call_request_error_line(err, "Could not load boosts"));
+                        PageStage::Failed(call_request_error_line(err, "Could not load boosts"));
                 }
             }
             Some(RequestPurpose::GetChatBoostLink) => {
@@ -507,7 +519,11 @@ impl Session {
                     && let Some(chat_id) = pending.chat_id
                     && self.groups.take_member_more((chat_id.0, filter), pending)
                 {
-                    self.groups.member_more_failed.insert((chat_id.0, filter));
+                    self.groups
+                        .member_asks
+                        .entry((chat_id.0, filter))
+                        .or_default()
+                        .more = MoreMembers::Failed;
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers { filter })) => {
@@ -544,11 +560,11 @@ impl Session {
                     .and_then(|p| p.chat_id)
                     && (from_event_id == 0
                         || !matches!(
-                            self.groups.event_logs.get(&chat_id.0),
+                            self.groups.event_log_fetch(chat_id.0),
                             Some(ChatEventLogFetch::Loaded(_))
                         ))
                 {
-                    self.groups.event_logs.insert(
+                    self.groups.set_event_log_fetch(
                         chat_id.0,
                         ChatEventLogFetch::Failed(call_request_error_line(
                             err,
@@ -575,18 +591,14 @@ impl Session {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChatWelcomeMessages)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
-            self.groups.welcome_message_fetches.insert(
-                chat_id.0,
-                WelcomeMessagesFetch::Failed(call_request_error_line(
+            self.groups
+                .welcome_messages
+                .entry(chat_id.0)
+                .or_default()
+                .fail(call_request_error_line(
                     err,
                     "Could not load welcome messages",
-                )),
-            );
-        }
-        // Slice G2: the slots half of a boost failed — the chain
-        // cannot continue; drop the intent.
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBoostSlotsForBoost) {
-            self.groups.boost_intent = None;
+                ));
         }
         // A failed slots read or `boostChat` returns the boost box to its
         // counters with the reason (tdesktop shows the error as a toast).
@@ -601,7 +613,6 @@ impl Session {
                 .filter(|state| state.chat_id == chat_id.0)
         {
             state.phase = crate::boost_box::BoostPhase::Main;
-            state.reassigning = None;
             state.note = Some(call_request_error_line(err, "Could not boost"));
         }
     }

@@ -48,8 +48,6 @@ pub struct PeerQrData {
     /// The plain `getUserLink`, for an account with no username and a
     /// hidden number.
     pub contact_link: UserLinkFetch,
-    /// Why the last contact link failed, until the box has shown it.
-    pub contact_error: Option<String>,
     /// Free-code answers in arrival order.
     pub free_answers: Vec<(FreeTicket, FreeResult)>,
 }
@@ -73,8 +71,7 @@ impl PeerQrData {
     pub fn fail_link(&mut self, free: Option<FreeTicket>, reason: String) {
         match free {
             None => {
-                self.contact_link = UserLinkFetch::Failed;
-                self.contact_error = Some(reason);
+                self.contact_link = UserLinkFetch::Failed(Some(reason));
             }
             Some(ticket) => self.free_answers.push((ticket, Err(reason))),
         }
@@ -83,10 +80,18 @@ impl PeerQrData {
     /// A new box asks again after a failure (tdesktop makes a new
     /// `OwnQrLinkState` for each box).
     pub fn retry_contact_link(&mut self) {
-        if self.contact_link == UserLinkFetch::Failed {
+        if matches!(self.contact_link, UserLinkFetch::Failed(_)) {
             self.contact_link = UserLinkFetch::Idle;
         }
-        self.contact_error = None;
+    }
+
+    /// Why the last contact link failed, once: the box shows it and the
+    /// failure stays without it.
+    pub fn take_contact_error(&mut self) -> Option<String> {
+        match &mut self.contact_link {
+            UserLinkFetch::Failed(reason) => reason.take(),
+            _ => None,
+        }
     }
 
     pub fn take_free_answers(&mut self) -> Vec<(FreeTicket, FreeResult)> {

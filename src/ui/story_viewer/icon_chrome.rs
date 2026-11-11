@@ -9,6 +9,7 @@
 
 use super::*;
 use crate::ui::scroll_load::scrolled_near_end;
+use crate::ui::stories_state::PanelKind;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::ButtonCustomVariant;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
@@ -78,7 +79,7 @@ impl QuillApp {
                 .stories
                 .viewer
                 .current()
-                .is_some_and(|item| matches!(item.kind, StoryViewerKind::Video));
+                .is_some_and(|item| item.is_video());
             if is_video {
                 let (icon, label) = if self.stories.muted {
                     (IconName::VolumeX, tr(keys::Q_MEDIA_SOUND_OFF))
@@ -171,7 +172,7 @@ impl QuillApp {
         let busy = self
             .session()
             .is_some_and(|s| s.stories.manage.pending_for(item.chat_id.0, item.story_id));
-        let is_video = matches!(item.kind, StoryViewerKind::Video);
+        let is_video = item.is_video();
         let hidden = self.story_chat_hidden(item.chat_id.0);
         let mut out = Vec::new();
         let mut add = |act, label: &str, icon, disabled| {
@@ -436,7 +437,9 @@ impl QuillApp {
         let can_reply = story.as_ref().is_some_and(|s| s.can_be_replied);
         let can_share = story.as_ref().is_some_and(can_share_story);
         let interactions = story.as_ref().is_some_and(|s| s.can_get_interactions);
-        let chosen = story.as_ref().and_then(|s| s.chosen_reaction_emoji.clone());
+        let chosen = story
+            .as_ref()
+            .and_then(|s| s.chosen_reaction_emoji().map(str::to_string));
         let mut row = div().flex().w(px(360.)).items_center().gap_1();
         let placeholder = self.story_reply_placeholder();
         if interactions {
@@ -452,7 +455,7 @@ impl QuillApp {
                     .custom(chrome::ghost(cx))
                     .icon(Icon::new(IconName::Eye).with_size(px(ICON)))
                     .label(label)
-                    .selected(self.stories.viewer_ui().viewers_open)
+                    .selected(self.stories.viewer_ui().is_open(PanelKind::Viewers))
                     .tooltip(tr(keys::Q_MEDIA_VIEWERS))
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_story_viewers(cx))),
             );
@@ -482,7 +485,7 @@ impl QuillApp {
                 ))
                 .child(div().flex_1());
         } else {
-            if can_reply && !self.stories.viewer_ui().reply_open {
+            if can_reply && !self.stories.viewer_ui().reply_open() {
                 row = row.child(
                     div()
                         .id("story-reply")
@@ -538,7 +541,7 @@ impl QuillApp {
                         .on_click(cx.listener(|this, _, _, cx| this.quick_react_story(cx))),
                     ),
             );
-            if let Some(extra) = story.as_ref().and_then(|s| s.chosen_reaction_extra) {
+            if let Some(extra) = story.as_ref().and_then(|s| s.chosen_reaction_extra()) {
                 row = row.child(self.story_chosen_extra_badge(extra));
             }
         }
@@ -554,7 +557,7 @@ impl QuillApp {
             );
         }
         let mut column = div().flex().flex_col().gap_2().items_center();
-        if self.stories.viewer_ui().reply_open && !interactions {
+        if self.stories.viewer_ui().reply_open() && !interactions {
             column = column.child(self.story_reply_row(cx));
         }
         column.child(row).into_any_element()
@@ -581,7 +584,7 @@ impl QuillApp {
     /// Load the next viewers page when the list is scrolled near its end
     /// (live only; the demo has no further pages to fetch).
     pub(in crate::ui) fn story_viewers_scrolled(&mut self, cx: &mut Context<Self>) {
-        if !self.stories.viewer_ui().viewers_open || self.live.is_none() {
+        if !self.stories.viewer_ui().is_open(PanelKind::Viewers) || self.live.is_none() {
             return;
         }
         let more = self

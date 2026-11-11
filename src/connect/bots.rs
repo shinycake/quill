@@ -26,7 +26,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(());
         }
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Ok(());
         };
         let Some(user_id) = self.session.bot_user_id_for_chat(chat_id) else {
@@ -65,7 +65,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(());
         }
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Ok(());
         };
         let Some(user_id) = self.session.bot_user_id_for_chat(chat_id) else {
@@ -130,7 +130,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(());
         }
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Ok(());
         };
         if !matches!(
@@ -202,13 +202,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let purpose = RequestPurpose::GetBotSimilarBots;
-        if self
-            .session
-            .requests
-            .has_purpose_for_user(purpose, bot_user_id)
-        {
-            return Ok(None);
-        }
         let extra = self.session.request_for_user(purpose, bot_user_id);
         if let Err(err) = self
             .sender
@@ -217,6 +210,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        // The section is loading from the moment the request is out; its
+        // answer or its refusal ends the stage.
+        self.session
+            .bots
+            .similar_bots
+            .insert(bot_user_id, crate::state::SimilarBotsFetch::Loading);
         Ok(Some(extra))
     }
 
@@ -481,7 +480,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(());
         }
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Ok(());
         };
         let Some(message_id) = self.session.reply_markup_message_to_fetch(chat_id) else {
@@ -492,8 +491,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         let extra = self.session.request(purpose, Some(chat_id));
-        self.send_json_request(extra, &get_message(extra, chat_id, message_id))
-            .map(|_| ())
+        self.session.begin_reply_markup_fetch(chat_id, extra);
+        let sent = self.send_json_request(extra, &get_message(extra, chat_id, message_id));
+        if sent.is_err() {
+            self.session.fail_reply_markup_fetch(chat_id, extra);
+        }
+        sent.map(|_| ())
     }
 
     /// `getRecentInlineBots`, once per session, when the user types "@".
@@ -778,9 +781,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .messages
             .pending_bot_messages
             .get_mut(&(chat_id.0, topic_id))
-            .filter(|draft| draft.stop == crate::state::BotStopStage::Failed)
+            .filter(|draft| {
+                matches!(
+                    draft.stop,
+                    crate::state::BotStopStage::Running | crate::state::BotStopStage::Failed
+                )
+            })
         {
-            draft.stop = crate::state::BotStopStage::Running;
+            draft.stop = crate::state::BotStopStage::Stopping(extra);
         }
         Ok(Some(extra))
     }

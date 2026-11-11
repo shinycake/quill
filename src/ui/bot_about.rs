@@ -32,7 +32,7 @@ impl QuillApp {
             &info.description_entities,
             (chat.id.0, 0),
             false,
-            &self.message_ui.spoiler_revealed,
+            &self.message_ui.revealed,
             self.msg_font(),
             &std::collections::HashMap::new(),
             cx,

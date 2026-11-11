@@ -1,6 +1,7 @@
 //! Stories, the story tray, albums, archive, posting, viewers and close friends: the `stories` domain's share of `Session`.
 //! Added to by features in this domain only; `Session::new` builds it
 //! with `new`.
+use super::fetch::next_retry;
 use crate::state::fetch::Fetch;
 use crate::state::*;
 use crate::story_page::StoryPageOps;
@@ -69,30 +70,97 @@ impl CloseFriendsList {
 /// (`send_update_chat_active_stories` skips `public_order_ == 0`), so a list
 /// must page to its 404 before a new story past that point can show.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct ActiveStoriesPaging {
+pub enum ActiveStoriesPaging {
+    /// The next page may go out.
+    #[default]
+    Idle,
+    /// After a failure other than 404: no page goes out before `until`,
+    /// and `wait` doubles per failure.
+    Waiting { until: Instant, wait: Duration },
     /// `loadActiveStories` answered 404: the whole list is loaded.
-    pub exhausted: bool,
-    /// After any other failure: no page goes out before this instant, and
-    /// the wait before it, which doubles per failure.
-    pub retry: Option<(Instant, Duration)>,
+    Exhausted,
 }
 
 impl ActiveStoriesPaging {
     /// Whether the next page may go out at `now`.
     pub fn may_load(&self, now: Instant) -> bool {
-        !self.exhausted && !self.retry.is_some_and(|(at, _)| now < at)
+        match self {
+            Self::Idle => true,
+            Self::Waiting { until, .. } => now >= *until,
+            Self::Exhausted => false,
+        }
+    }
+
+    /// The clock of a failed page, if one is running.
+    pub fn retry(&self) -> Option<(Instant, Duration)> {
+        match self {
+            Self::Waiting { until, wait } => Some((*until, *wait)),
+            _ => None,
+        }
     }
 
     /// `loadActiveStories` failed with `code`: 404 means everything is
     /// loaded; anything else (a timeout, FLOOD_WAIT, a 500) waits and tries
     /// again.
     pub fn failed(&mut self, code: i32, now: Instant) {
-        if code == 404 {
-            self.exhausted = true;
-            self.retry = None;
-        } else {
-            self.retry = Some(next_retry(self.retry, now));
+        *self = match self {
+            _ if code == 404 => Self::Exhausted,
+            // Nothing left to load: a late failure changes nothing.
+            Self::Exhausted => Self::Exhausted,
+            _ => {
+                let (until, wait) = next_retry(self.retry(), now);
+                Self::Waiting { until, wait }
+            }
+        };
+    }
+
+    /// A page answered: a wait for the next one is over.
+    pub fn answered(&mut self) {
+        if matches!(self, Self::Waiting { .. }) {
+            *self = Self::Idle;
         }
+    }
+}
+
+/// The story picker's `getCustomEmojiStickers` fetch after failures.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum CustomEmojiFetch {
+    #[default]
+    Idle,
+    /// It failed `failures` times in a row: no new fetch before `until`,
+    /// and `wait` doubles per failure. An answer ends it.
+    Backoff {
+        failures: u32,
+        until: Instant,
+        wait: Duration,
+    },
+}
+
+impl CustomEmojiFetch {
+    /// How many fetches failed in a row. The story viewer's warm-up record
+    /// carries it, so a failure makes the next tick fetch again.
+    pub fn failures(&self) -> u32 {
+        match self {
+            Self::Idle => 0,
+            Self::Backoff { failures, .. } => *failures,
+        }
+    }
+
+    pub fn waiting(&self, now: Instant) -> bool {
+        matches!(self, Self::Backoff { until, .. } if now < *until)
+    }
+
+    pub fn failed(&mut self, now: Instant) {
+        let previous = match self {
+            Self::Backoff { until, wait, .. } => Some((*until, *wait)),
+            Self::Idle => None,
+        };
+        let (until, wait) = next_retry(previous, now);
+        *self = Self::Backoff {
+            failures: self.failures().saturating_add(1),
+            until,
+            wait,
+        };
     }
 }
 
@@ -114,13 +182,8 @@ pub struct StoriesState {
     /// reactions — the `getCustomEmojiStickers` response, keyed by
     /// sticker id (= custom emoji id).
     pub custom_emoji_stickers: HashMap<i64, StickerItem>,
-    /// `getCustomEmojiStickers` for the story picker failed: no new fetch
-    /// before this instant, and the wait before it, which doubles per
-    /// failure. An answer clears it.
-    pub custom_emoji_retry: Option<(Instant, Duration)>,
-    /// How many of those fetches failed. The story viewer's warm-up record
-    /// carries it, so a failure makes the next tick fetch again.
-    pub custom_emoji_failures: u32,
+    /// `getCustomEmojiStickers` for the story picker after failures.
+    pub custom_emoji_fetch: CustomEmojiFetch,
     /// Phase 9.2: poster chat ids whose active stories the driver should
     /// refresh with `getChatActiveStories`. Filled by the reducer on
     /// `updateStoryPostSucceeded` (a story posted from another client goes
@@ -189,19 +252,12 @@ pub struct StoriesState {
     pub main_paging: ActiveStoriesPaging,
     /// Paging of the hidden story list.
     pub hidden_paging: ActiveStoriesPaging,
-    /// Stories `getStory` failed for with an error that may pass (a
-    /// timeout, FLOOD_WAIT, a 500): no prefetch asks again before the
-    /// instant, and the wait before it, which doubles per failure. A user
-    /// opening the story drops its entry and asks at once.
-    pub story_retry: HashMap<(i64, i32), (Instant, Duration)>,
-    /// Stories replied to that `getStory` was sent for, so one is not
-    /// requested again on every refresh. A failure that may pass takes the
-    /// story out again, to be asked for after its wait.
-    pub reply_attempted: HashSet<(i64, i32)>,
-    /// Stories `getStory` answered with an error (deleted, expired or not
-    /// reachable): a forwarded-story card then says "This story has
-    /// expired" (tdesktop `NoStory::Deleted`).
-    pub missing: HashSet<(i64, i32)>,
+    /// Where each story's `getStory` stands: asked for a reply strip or
+    /// card, gone (a forwarded-story card then says "This story has
+    /// expired", tdesktop `NoStory::Deleted`), or waiting out a failure
+    /// that may pass. A user opening the story drops its wait and asks at
+    /// once.
+    pub story_fetch: StoryFetches,
     /// The live story the viewer is watching.
     pub live: Option<LiveStoryState>,
     /// Paid live story comment levels from `updateGroupCallMessageLevels`,
@@ -246,30 +302,14 @@ impl StoriesState {
             close_friends: CloseFriendsList::NotLoaded,
             main_paging: ActiveStoriesPaging::default(),
             hidden_paging: ActiveStoriesPaging::default(),
-            custom_emoji_retry: None,
-            custom_emoji_failures: 0,
-            story_retry: HashMap::new(),
-            reply_attempted: HashSet::new(),
-            missing: HashSet::new(),
+            custom_emoji_fetch: CustomEmojiFetch::Idle,
+            story_fetch: StoryFetches::default(),
             live: None,
             live_levels: Vec::new(),
             live_max_stars: None,
             live_bursts: LiveBursts::Unasked,
         }
     }
-}
-
-/// The first wait after a failed `loadActiveStories` or `getStory`; each
-/// later failure doubles it, up to [`STORIES_RETRY_MAX`].
-pub const STORIES_RETRY_FIRST: Duration = Duration::from_secs(5);
-pub const STORIES_RETRY_MAX: Duration = Duration::from_secs(5 * 60);
-
-/// The retry clock after one more failure at `now`.
-fn next_retry(previous: Option<(Instant, Duration)>, now: Instant) -> (Instant, Duration) {
-    let wait = previous.map_or(STORIES_RETRY_FIRST, |(_, wait)| {
-        wait.saturating_mul(2).min(STORIES_RETRY_MAX)
-    });
-    (now.checked_add(wait).unwrap_or(now), wait)
 }
 
 impl StoriesState {
@@ -290,16 +330,13 @@ impl StoriesState {
     /// `getStory` for `story` failed with an error that may pass. A card or
     /// reply header showing it asks again once the wait is over.
     pub fn story_fetch_failed(&mut self, story: (i64, i32), now: Instant) {
-        let previous = self.story_retry.get(&story).copied();
-        self.story_retry.insert(story, next_retry(previous, now));
-        self.reply_attempted.remove(&story);
+        self.story_fetch.failed(story, now);
     }
 
     /// `story` arrived (an answer or `updateStory`): whatever said it was
     /// gone or waiting no longer applies.
     pub fn story_arrived(&mut self, story: (i64, i32)) {
-        self.missing.remove(&story);
-        self.story_retry.remove(&story);
+        self.story_fetch.arrived(story);
     }
 
     /// The poster chat became known. TDLib refuses `getStory` with a 400
@@ -307,27 +344,22 @@ impl StoriesState {
     /// is gone, so the stories of this poster marked missing are asked for
     /// again.
     pub fn poster_chat_known(&mut self, chat_id: i64) {
-        self.missing.retain(|(chat, _)| *chat != chat_id);
-        self.story_retry.retain(|(chat, _), _| *chat != chat_id);
-        self.reply_attempted.retain(|(chat, _)| *chat != chat_id);
+        self.story_fetch.poster_known(chat_id);
     }
 
     /// The story picker's `getCustomEmojiStickers` failed at `now`.
     pub fn custom_emoji_fetch_failed(&mut self, now: Instant) {
-        self.custom_emoji_retry = Some(next_retry(self.custom_emoji_retry, now));
-        self.custom_emoji_failures = self.custom_emoji_failures.saturating_add(1);
+        self.custom_emoji_fetch.failed(now);
     }
 
     /// Whether the next picker fetch still waits out a failed one.
     pub fn custom_emoji_fetch_waiting(&self, now: Instant) -> bool {
-        self.custom_emoji_retry.is_some_and(|(at, _)| now < at)
+        self.custom_emoji_fetch.waiting(now)
     }
 
     /// Whether a prefetch of `story` still waits out a failed `getStory`.
     pub fn story_fetch_waiting(&self, story: (i64, i32), now: Instant) -> bool {
-        self.story_retry
-            .get(&story)
-            .is_some_and(|(at, _)| now < *at)
+        self.story_fetch.waiting(story, now)
     }
 
     /// A new Ready pages both lists from the start, and the stories that
@@ -335,7 +367,6 @@ impl StoriesState {
     pub fn reset_active_stories_paging(&mut self) {
         self.main_paging = ActiveStoriesPaging::default();
         self.hidden_paging = ActiveStoriesPaging::default();
-        self.story_retry.clear();
-        self.missing.clear();
+        self.story_fetch.forget_outcomes();
     }
 }

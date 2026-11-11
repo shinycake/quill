@@ -206,7 +206,7 @@ pub(in crate::ui) fn spoiler_cover(
         .tab_index(0)
         .cursor_pointer()
         .on_click(cx.listener(move |this, _, _, cx| {
-            this.message_ui.spoiler_revealed.insert(key);
+            this.message_ui.revealed.reveal_spoiler(key);
             crate::ui::spoiler_fx::mark_revealed(key);
             if let Some(file_id) = download {
                 this.request_media_download(file_id, None, cx);

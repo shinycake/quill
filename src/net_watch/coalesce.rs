@@ -2,48 +2,87 @@
 //! runs. Windows sends one network change as dozens of callbacks across
 //! its three registrations, on threads of its own.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 
+/// No run is under way.
+const IDLE: u8 = 0;
+/// A run is under way and no call came after it began.
+const RUNNING: u8 = 1;
+/// A run is under way and a call came after it began: it runs once more.
+const RUNNING_DIRTY: u8 = 2;
+
+/// One value, so "a run is under way" and "one more is wanted" cannot
+/// disagree.
 pub(super) struct Coalesce {
-    dirty: AtomicBool,
-    running: AtomicBool,
+    state: AtomicU8,
 }
 
-/// Clears `running` even when the work panics.
-struct Running<'a>(&'a AtomicBool);
+/// Ends the run when the work panics. A run that ends well hands the state
+/// back itself (see [`Coalesce::run`]), so the guard is disarmed first.
+struct Running<'a>(Option<&'a AtomicU8>);
+
+impl Running<'_> {
+    fn disarm(&mut self) {
+        self.0 = None;
+    }
+}
 
 impl Drop for Running<'_> {
     fn drop(&mut self) {
-        self.0.store(false, Ordering::Release);
+        if let Some(state) = self.0 {
+            state.store(IDLE, Ordering::Release);
+        }
     }
 }
 
 impl Coalesce {
     pub(super) const fn new() -> Self {
         Self {
-            dirty: AtomicBool::new(false),
-            running: AtomicBool::new(false),
+            state: AtomicU8::new(IDLE),
         }
     }
 
     /// Runs `work` now, or has the run under way run it once more when it
     /// is done.
     pub(super) fn run(&self, mut work: impl FnMut()) {
-        self.dirty.store(true, Ordering::Release);
         loop {
-            if self.running.swap(true, Ordering::AcqRel) {
-                return;
-            }
+            match self
+                .state
+                .compare_exchange(IDLE, RUNNING, Ordering::AcqRel, Ordering::Acquire)
             {
-                let _running = Running(&self.running);
-                while self.dirty.swap(false, Ordering::AcqRel) {
-                    work();
+                Ok(_) => break,
+                // Under way: ask it for one more run. It may have ended
+                // meanwhile, then this call runs it itself.
+                Err(RUNNING) => {
+                    if self
+                        .state
+                        .compare_exchange(
+                            RUNNING,
+                            RUNNING_DIRTY,
+                            Ordering::AcqRel,
+                            Ordering::Acquire,
+                        )
+                        .is_ok()
+                    {
+                        return;
+                    }
                 }
+                Err(_) => return,
             }
-            // A call that found the run under way after its last look.
-            if !self.dirty.load(Ordering::Acquire) {
+        }
+        let mut running = Running(Some(&self.state));
+        loop {
+            work();
+            // A call that came during the work wants one more run.
+            if self
+                .state
+                .compare_exchange(RUNNING, IDLE, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                running.disarm();
                 return;
             }
+            self.state.store(RUNNING, Ordering::Release);
         }
     }
 }

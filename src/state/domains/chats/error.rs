@@ -111,8 +111,7 @@ impl Session {
                 // the user already acted on is still that flow).
                 let stale = self
                     .chats_state
-                    .deep_link
-                    .as_ref()
+                    .deep_link_stage()
                     .and_then(DeepLinkState::generation)
                     != Some(generation);
                 // `joinChatByInviteLink` over the community limit opens the
@@ -135,7 +134,7 @@ impl Session {
                         Some(RequestPurpose::Chats(
                             ChatsPurpose::DeepLinkInternalType { .. }
                         ))
-                    ) && crate::text::openable_http_url(&self.chats_state.deep_link_original);
+                    ) && crate::text::openable_http_url(self.chats_state.deep_link_original());
                 // The Premium bot's `/start` was for the link that failed
                 // (stale or not): a later link to the bot must not send it
                 // unasked. Another flow's failure leaves it alone.
@@ -151,13 +150,14 @@ impl Session {
                 if limit_box {
                     self.chats_state.deep_link = None;
                 } else if !stale && web_fallback {
-                    let url = std::mem::take(&mut self.chats_state.deep_link_original);
-                    self.chats_state.deep_link = Some(DeepLinkState::Ui(
+                    let url = self.chats_state.deep_link_original().to_string();
+                    self.chats_state.enter_deep_link_stage(DeepLinkState::Ui(
                         crate::deep_link_types::DeepLinkUi::Browser { url },
                     ));
                 } else if !stale {
-                    let text = deep_link_error_text(self.chats_state.deep_link.as_ref(), err.code);
-                    self.chats_state.deep_link = Some(DeepLinkState::ShowText(text));
+                    let text = deep_link_error_text(self.chats_state.deep_link_stage(), err.code);
+                    self.chats_state
+                        .enter_deep_link_stage(DeepLinkState::ShowText(text));
                 }
             }
             _ => {}

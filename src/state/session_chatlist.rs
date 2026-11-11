@@ -1,14 +1,22 @@
 //! Chat-list management: pins, open chat, views, ordering.
 use super::*;
 
-/// Whether `Session::main_order` / `archive_order` are stale. While a poll
-/// batch is open (`deferred`), order changes are only recorded; closing the
-/// batch brings the lists up to date once.
+/// Whether a poll batch is open. While it is, order changes are only
+/// recorded; closing the batch brings the lists up to date once.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BatchOrder {
+    /// No batch: order changes bring the lists up to date at once.
+    #[default]
+    Live,
+    /// A batch is open (`begin_update_batch`). `resort`: the lists need a
+    /// full sort (changes made outside the position updates).
+    InBatch { resort: bool },
+}
+
+/// Whether `Session::main_order` / `archive_order` are stale.
 #[derive(Debug, Default)]
 pub(crate) struct ChatOrderSync {
-    /// The lists need a full sort (changes made outside the position updates).
-    pub(crate) dirty: bool,
-    pub(crate) deferred: bool,
+    pub(crate) batch: BatchOrder,
     /// Chats whose main or archive position changed since the last flush.
     pub(crate) moved: HashSet<i64>,
     /// Stored folder tab orders, dropped whenever a folder position changes.
@@ -114,39 +122,48 @@ impl Session {
     }
 
     pub(crate) fn rebuild_main_order(&mut self) {
-        self.chat_order_sync.dirty = true;
-        if !self.chat_order_sync.deferred {
-            self.flush_chat_order();
+        match &mut self.chat_order_sync.batch {
+            BatchOrder::InBatch { resort } => *resort = true,
+            BatchOrder::Live => self.flush_chat_order(true),
         }
     }
 
     /// Open a poll batch: chat-order sorts wait for `end_update_batch`.
     pub fn begin_update_batch(&mut self) {
-        self.chat_order_sync.deferred = true;
+        if self.chat_order_sync.batch == BatchOrder::Live {
+            self.chat_order_sync.batch = BatchOrder::InBatch { resort: false };
+        }
+    }
+
+    /// Whether a poll batch is open.
+    pub fn in_update_batch(&self) -> bool {
+        self.chat_order_sync.batch != BatchOrder::Live
     }
 
     /// Close a poll batch and update the chat lists if anything moved.
     pub fn end_update_batch(&mut self) {
-        self.chat_order_sync.deferred = false;
-        self.flush_chat_order();
+        let resort = matches!(
+            std::mem::take(&mut self.chat_order_sync.batch),
+            BatchOrder::InBatch { resort: true }
+        );
+        self.flush_chat_order(resort);
     }
 
     /// Bring the lists up to date with the positions recorded by
     /// `apply_position_fields`, now or when the open batch closes.
     pub(crate) fn sync_chat_order(&mut self) {
-        if !self.chat_order_sync.deferred {
-            self.flush_chat_order();
+        if self.chat_order_sync.batch == BatchOrder::Live {
+            self.flush_chat_order(false);
         }
     }
 
-    fn flush_chat_order(&mut self) {
-        if !self.chat_order_sync.dirty {
+    fn flush_chat_order(&mut self, resort: bool) {
+        if !resort {
             if !self.chat_order_sync.moved.is_empty() {
                 self.place_moved_chats();
             }
             return;
         }
-        self.chat_order_sync.dirty = false;
         self.chat_order_sync.moved.clear();
         // Sort the `(order, chat_id)` keys TDLib orders by (descending,
         // schema 1.8.67 `chatPosition.order`), never clones of whole
@@ -178,10 +195,11 @@ impl Session {
         // also bumps the generation, dropping in-flight fetches for the old
         // chat. Same-chat re-select never reaches this method (see
         // `ConnectDriver::select_chat`), so the gallery survives it.
-        if self.open_chat != Some(chat_id) {
+        if self.open_chat_id() != Some(chat_id) {
             self.media.shared_media.close();
         }
-        let previous = self.open_chat.replace(chat_id);
+        let before = std::mem::replace(&mut self.open, OpenView::Chat { chat: chat_id });
+        let previous = before.chat();
         // The Jump to date box and a date jump in the making belong to the
         // chat that was open.
         if let Some(left) = previous.filter(|previous| *previous != chat_id) {
@@ -191,7 +209,7 @@ impl Session {
         // Phase 5.1: switching chats leaves the topic view (re-selecting the
         // chat leaves it too); the topic's history is released against the
         // chat it was open in.
-        if let (Some(previous), Some(topic)) = (previous, self.open_topic.take()) {
+        if let (Some(previous), Some(topic)) = (previous, before.topic()) {
             self.release_topic_history(previous, topic);
         }
         // ... and the Saved Messages sublist / tag filter.
@@ -200,7 +218,7 @@ impl Session {
         // that failed while online (FLOOD_WAIT, a server error), which no
         // reconnect follows.
         if previous != Some(chat_id) && self.is_saved_messages(chat_id) {
-            self.threads.saved.retry_when_online = false;
+            self.threads.saved.retry_after_reconnect();
         }
         // ... and any comment thread that lives elsewhere.
         let left_thread_chat = self
@@ -236,11 +254,7 @@ impl Session {
         let view_generation = self.view_generation;
         let history = self.history_entry(chat_id);
         history.view_generation = view_generation;
-        history.viewed.clear();
-        history.viewing.clear();
-        history.visible.clear();
-        history.visible_reported = false;
-        history.on_screen.clear();
+        history.views.restart();
         history.reader = ReaderPosition::Tail;
         history.unread_anchor = unread_anchor;
         history.opened_with_unread = history.unread_anchor.is_some();
@@ -259,16 +273,9 @@ impl Session {
         let Some(history) = self.histories.get(&chat_id.0) else {
             return Vec::new();
         };
-        let due = |id: i64| id > 0 && !history.viewed.contains(&id) && !history.is_viewing(id);
-        if history.visible_reported {
-            let mut ids: BTreeSet<i64> = history
-                .visible
-                .iter()
-                .copied()
-                .filter(|id| due(*id))
-                .collect();
-            ids.extend(history.on_screen.iter().copied().filter(|id| due(*id)));
-            return ids.into_iter().map(MessageId).collect();
+        let due = |id: i64| history.views.is_due(id);
+        if history.views.reported() {
+            return history.views.due_ids().into_iter().map(MessageId).collect();
         }
         // Opened at the first unread message: nothing is read until the
         // UI reports what is actually on screen.
@@ -295,13 +302,7 @@ impl Session {
             return false;
         }
         let history = self.history_entry(chat_id);
-        history.visible_reported = true;
-        history.on_screen = ids.iter().map(|id| id.0).filter(|id| *id > 0).collect();
-        for id in ids {
-            if id.0 > 0 && !history.viewed.contains(&id.0) && !history.is_viewing(id.0) {
-                history.visible.insert(id.0);
-            }
-        }
+        history.views.report(ids.iter().map(|id| id.0));
         // Thread rows on screen also move the thread's own read position.
         self.thread_read_till(chat_id, ids);
         true
@@ -309,11 +310,7 @@ impl Session {
 
     pub fn mark_viewed(&mut self, chat_id: ChatId, ids: &[MessageId]) {
         let history = self.history_entry(chat_id);
-        for id in ids {
-            history.forget_viewing(id.0);
-            history.visible.remove(&id.0);
-            history.viewed.insert(id.0);
-        }
+        history.views.mark_done(ids.iter().map(|id| id.0));
     }
 
     /// The message "Mark as read" reads the chat till: the chat's last
@@ -362,18 +359,14 @@ impl Session {
     /// until TDLib answers that request (ok or error).
     pub fn begin_viewing(&mut self, chat_id: ChatId, request: RequestId, ids: &[MessageId]) {
         let history = self.history_entry(chat_id);
-        let held = history.viewing.entry(request).or_default();
-        for id in ids {
-            history.visible.remove(&id.0);
-            held.insert(id.0);
-        }
+        history.views.begin(request, ids.iter().map(|id| id.0));
     }
 
     /// The UI no longer shows `chat_id`'s rows (its window went inactive):
     /// none of them reads a reaction until the next report.
     pub fn leave_screen(&mut self, chat_id: ChatId) {
         if let Some(history) = self.histories.get_mut(&chat_id.0) {
-            history.on_screen.clear();
+            history.views.leave_screen();
         }
     }
 
@@ -383,8 +376,7 @@ impl Session {
     /// no longer counts either.
     pub(crate) fn reaction_unread(&mut self, chat_id: ChatId, message_id: MessageId) {
         if let Some(history) = self.histories.get_mut(&chat_id.0) {
-            history.viewed.remove(&message_id.0);
-            history.forget_viewing(message_id.0);
+            history.views.forget(message_id.0);
         }
     }
 
@@ -392,21 +384,16 @@ impl Session {
     /// answer whose ids a re-open of the chat already dropped finds none.
     pub(crate) fn commit_viewed(&mut self, chat_id: ChatId, request: RequestId) {
         let history = self.history_entry(chat_id);
-        if let Some(ids) = history.viewing.remove(&request) {
-            history.viewed.extend(ids);
-        }
+        history.views.commit(request);
     }
 
     /// TDLib refused `request` (or it was lost): its ids, and only its ids,
     /// are due again.
     pub(crate) fn abort_viewing(&mut self, chat_id: ChatId, request: RequestId) {
-        if let Some(history) = self.histories.get_mut(&chat_id.0)
-            && let Some(ids) = history.viewing.remove(&request)
-            // Reported rows stay due so the retry re-sends them; before any
-            // report the newest row is recomputed anyway.
-            && history.visible_reported
-        {
-            history.visible.extend(ids);
+        // Reported rows stay due so the retry re-sends them; before any
+        // report the newest row is recomputed anyway.
+        if let Some(history) = self.histories.get_mut(&chat_id.0) {
+            history.views.abort(request);
         }
     }
 

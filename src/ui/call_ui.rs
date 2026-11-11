@@ -28,7 +28,7 @@ impl QuillApp {
             .calls
             .summary
             .as_ref()
-            .is_some_and(|summary| summary.need_rating && summary.rating.is_open())
+            .is_some_and(|summary| summary.rating.is_open())
             && session.calls.active_call.is_none();
         let failed = session.calls.error.is_some() && session.calls.active_call.is_none();
         if !rating && !failed {
@@ -223,7 +223,7 @@ impl QuillApp {
         // E2E verification emojis, straight from `callStateReady`
         // (:7068) — same rendering as the group-call card. Hidden
         // until TDLib sends the 4-emoji fingerprint.
-        if let Some(ready) = &call.ready
+        if let Some(ready) = call.ready_params()
             && !ready.emojis.is_empty()
         {
             card = card.child(
@@ -293,7 +293,7 @@ impl QuillApp {
         // the screen instead of the camera (one video track); the flag
         // is the tracked toggle intent.
         let show_screen_share_note =
-            call.screen_sharing && matches!(call.state, CallState::Ready | CallState::Unknown(_));
+            call.screen_sharing() && matches!(call.state, CallState::Ready | CallState::Unknown(_));
         if show_screen_share_note {
             card = card.child(
                 div()
@@ -513,7 +513,7 @@ impl QuillApp {
                     if video_ready {
                         buttons = buttons.child(
                             Button::new("call-camera")
-                                .label(if call.camera_on {
+                                .label(if call.camera_on() {
                                     tr(keys::Q_OPS_CAMERA_OFF)
                                 } else {
                                     tr(keys::Q_OPS_CAMERA_ON)
@@ -545,7 +545,7 @@ impl QuillApp {
                     if screen_ready {
                         buttons = buttons.child(
                             Button::new("call-screenshare")
-                                .label(if call.screen_sharing {
+                                .label(if call.screen_sharing() {
                                     tr(keys::GROUP_CALL_SCREEN_SHARE_STOP)
                                 } else {
                                     tr(keys::GROUP_CALL_TOOLTIP_SCREEN)
@@ -619,7 +619,7 @@ impl QuillApp {
                     tr(keys::Q_OPS_NO_AUDIO_WAS_CARRIED)
                 }),
         );
-        if summary.need_debug_information && summary.debug_information.can_send() {
+        if summary.debug_information.can_send() {
             card = card.child(
                 Button::new("call-upload-diagnostics")
                     .label(tr(keys::Q_OPS_UPLOAD_DIAGNOSTICS))
@@ -644,7 +644,7 @@ impl QuillApp {
                     .child(error.to_string()),
             );
         }
-        if summary.need_log && summary.log.can_send() {
+        if summary.log.can_send() {
             card = card.child(
                 Button::new("call-upload-log")
                     .label(tr(keys::Q_OPS_UPLOAD_CALL_LOG))
@@ -669,7 +669,7 @@ impl QuillApp {
                     .child(error.to_string()),
             );
         }
-        if summary.need_rating && summary.rating.is_open() {
+        if summary.rating.is_open() {
             if let CallRating::Failed(error) = &summary.rating {
                 card = card.child(
                     div()

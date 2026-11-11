@@ -5,6 +5,48 @@ use crate::state::*;
 use crate::telegram::envelope::{ParsedBoostFeatures, ParsedBoostStatus};
 
 impl GroupsState {
+    /// Where `chat`'s event log fetch stands; `None` until it was asked.
+    pub fn event_log_fetch(&self, chat: i64) -> Option<&ChatEventLogFetch> {
+        self.event_logs
+            .get(&chat)
+            .map(|log| &log.fetch)
+            .filter(|fetch| !matches!(fetch, ChatEventLogFetch::Idle))
+    }
+
+    /// The text search `chat`'s event log is asked with.
+    pub fn event_log_query(&self, chat: i64) -> &str {
+        self.event_logs.get(&chat).map_or("", |log| &log.query)
+    }
+
+    /// `chat`'s event-type filter; `None` = every type.
+    pub fn event_log_filter(&self, chat: i64) -> Option<ChatEventLogFilterSet> {
+        self.event_logs.get(&chat).and_then(|log| log.filter)
+    }
+
+    /// The admins `chat`'s event log is filtered to; empty = everyone.
+    pub fn event_log_users(&self, chat: i64) -> &[i64] {
+        self.event_logs.get(&chat).map_or(&[], |log| &log.users)
+    }
+
+    /// `chat`'s event log has a filter or an admin filter set.
+    pub fn event_log_filtered(&self, chat: i64) -> bool {
+        self.event_log_filter(chat).is_some() || !self.event_log_users(chat).is_empty()
+    }
+
+    /// `chat`'s log forgets its fetch and the requests it waits for (a
+    /// refresh): what it is asked with stays.
+    pub(crate) fn reset_event_log_fetch(&mut self, chat: i64) {
+        if let Some(log) = self.event_logs.get_mut(&chat) {
+            log.fetch = ChatEventLogFetch::Idle;
+            log.wait = EventLogWait::default();
+        }
+    }
+
+    /// `chat`'s event log is asked for, settled by `fetch`.
+    pub(crate) fn set_event_log_fetch(&mut self, chat: i64, fetch: ChatEventLogFetch) {
+        self.event_logs.entry(chat).or_default().fetch = fetch;
+    }
+
     /// `chat`'s member and admin caches were dropped: the UI refetches
     /// what it shows of them (`member_list_stale`, drained by the poll).
     pub(crate) fn mark_member_list_stale(&mut self, chat: i64) {
@@ -24,9 +66,40 @@ impl GroupsState {
     /// The query the member list `key` was asked with ("" for one asked
     /// before queries were kept, or filled elsewhere).
     pub fn member_query(&self, key: (i64, MemberListFilter)) -> &str {
-        self.supergroup_member_queries
+        self.member_asks
             .get(&key)
-            .map_or("", |(_, query)| query.as_str())
+            .map_or("", |ask| ask.query.as_str())
+    }
+
+    /// A first page for `key` was sent as `request` with `query`: it
+    /// replaces how the list was asked, and drops a next page of the old one.
+    pub(crate) fn note_member_first(
+        &mut self,
+        key: (i64, MemberListFilter),
+        request: RequestId,
+        query: &str,
+    ) {
+        self.member_asks.insert(
+            key,
+            MemberAsk {
+                first: Some(request),
+                query: query.to_string(),
+                more: MoreMembers::Idle,
+            },
+        );
+    }
+
+    /// The members panel of `chat` takes the failed next pages: each goes
+    /// back to idle so the next scroll asks again. Whether any failed.
+    pub fn take_member_more_failures(&mut self, chat: i64) -> bool {
+        let mut any = false;
+        for (_, ask) in self.member_asks.iter_mut().filter(|(key, _)| key.0 == chat) {
+            if ask.more == MoreMembers::Failed {
+                ask.more = MoreMembers::Idle;
+                any = true;
+            }
+        }
+        any
     }
 
     /// Whether `pending` is the latest first-page request for `key`, the
@@ -36,16 +109,16 @@ impl GroupsState {
         key: (i64, MemberListFilter),
         pending: &PendingRequest,
     ) -> bool {
-        self.supergroup_member_queries
+        self.member_asks
             .get(&key)
-            .is_none_or(|(id, _)| *id == pending.id)
+            .and_then(|ask| ask.first)
+            .is_none_or(|id| id == pending.id)
     }
 
     /// A next-page request for `key` was sent: it extends the list the
     /// latest first page filled.
     pub(crate) fn note_member_more(&mut self, key: (i64, MemberListFilter), more: RequestId) {
-        let base = self.supergroup_member_queries.get(&key).map(|(id, _)| *id);
-        self.member_more_bases.insert(more, base);
+        self.member_asks.entry(key).or_default().more = MoreMembers::Asking(more);
     }
 
     /// Settle the next page `pending`: whether it extends the list `key`
@@ -56,11 +129,22 @@ impl GroupsState {
         key: (i64, MemberListFilter),
         pending: &PendingRequest,
     ) -> bool {
-        let Some(base) = self.member_more_bases.remove(&pending.id) else {
+        let Some(ask) = self.member_asks.get_mut(&key) else {
             return false;
         };
-        base == self.supergroup_member_queries.get(&key).map(|(id, _)| *id)
+        if ask.more != MoreMembers::Asking(pending.id) {
+            return false;
+        }
+        ask.more = MoreMembers::Idle;
+        true
     }
+}
+
+/// A "boosts needed to bypass restrictions" value on its way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnrestrictSave {
+    pub request: RequestId,
+    pub value: i32,
 }
 
 pub struct GroupsState {
@@ -100,12 +184,6 @@ pub struct GroupsState {
     pub invite_links: HashMap<i64, InviteLinkFetch>,
     /// Phase D3a: `getChatJoinRequests` fetch state, keyed by chat id.
     pub join_requests: HashMap<i64, JoinRequestFetch>,
-    /// B8: the search query the cached `join_requests` list was fetched
-    /// with (absent = no query), keyed by chat id.
-    pub join_request_queries: HashMap<i64, String>,
-    /// B8: newest join-request page request per chat; replies with any
-    /// other id are stale (an older search) and dropped.
-    pub join_request_latest: HashMap<i64, RequestId>,
     /// B8: `getChatInviteLinks` with `is_revoked = true`, keyed by chat id.
     pub revoked_invite_links: HashMap<i64, InviteLinkFetch>,
     /// The Invite Links section's pages for one chat: another admin's
@@ -134,20 +212,10 @@ pub struct GroupsState {
     /// Batch 8: `chatJoinRequestsInfo.user_ids` (the newest requesters)
     /// from the same update, for the requests bar's avatars.
     pub pending_join_request_users: HashMap<i64, Vec<i64>>,
-    /// Phase D3c: `getChatEventLog` fetch state, keyed by chat id.
-    pub event_logs: HashMap<i64, ChatEventLogFetch>,
-    /// The requests each chat's event log waits for, by chat id.
-    pub event_log_waits: HashMap<i64, EventLogWait>,
-    /// Slice G2: per-chat event-log filters (`chatEventLogFilters`,
-    /// schema 1.8.67, line 7956). Absent = all event types (the schema's
-    /// `null`).
-    pub event_log_filters: HashMap<i64, ChatEventLogFilterSet>,
-    /// Slice G2: per-chat event-log text search (the `query` parameter of
-    /// `getChatEventLog`, schema 1.8.67, line 15252). Absent = no search.
-    pub event_log_queries: HashMap<i64, String>,
-    /// Per-chat admin filter: the `user_ids` of `getChatEventLog` (the server
-    /// filters, so the admin list stays complete). Empty or absent = everyone.
-    pub event_log_users: HashMap<i64, Vec<i64>>,
+    /// Phase D3c: each chat's `getChatEventLog` state, keyed by chat id: the
+    /// search, the filters (schema 1.8.67, lines 7956 and 15252), the fetch
+    /// stage and the page and poll requests it waits for.
+    pub event_logs: HashMap<i64, EventLog>,
     /// Slice G2: `supergroup.sign_messages` (schema 1.8.67, line 2746),
     /// keyed by supergroup id. Drives the channel "Sign messages" toggle.
     pub supergroup_sign_messages: HashMap<i64, bool>,
@@ -183,10 +251,10 @@ pub struct GroupsState {
     /// / `updateChatHasWelcomeMessages` (line 10600), keyed by chat id.
     pub chat_has_welcome_messages: HashMap<i64, bool>,
     /// Slice G2: the welcome-message pack per chat
-    /// (`updateChatWelcomeMessages`, schema 1.8.67, line 10649).
-    pub welcome_messages: HashMap<i64, Vec<ParsedWelcomeMessage>>,
-    /// Slice G2: `loadChatWelcomeMessages` fetch state, keyed by chat id.
-    pub welcome_message_fetches: HashMap<i64, WelcomeMessagesFetch>,
+    /// (`loadChatWelcomeMessages`, `updateChatWelcomeMessages`, schema
+    /// 1.8.67, line 10649): asked, answered or failed, with the pack kept
+    /// beside a refetch. `Loading` is the in-flight guard.
+    pub welcome_messages: HashMap<i64, crate::state::fetch::Fetch<Vec<ParsedWelcomeMessage>>>,
     /// Slice G2: `(level, boost_count)` from `getChatBoostStatus`
     /// (schema 1.8.67, lines 13917/6943), keyed by chat id.
     pub chat_boost_status: HashMap<i64, (i32, i32)>,
@@ -196,9 +264,9 @@ pub struct GroupsState {
     /// `getChatBoostFeatures` level tables, keyed by chat id (the table
     /// differs for channels and groups).
     pub chat_boost_features: HashMap<i64, ParsedBoostFeatures>,
-    /// "Boosts needed to bypass restrictions" values sent and not yet
-    /// acknowledged, keyed by chat id.
-    pub unrestrict_boost_pending: HashMap<i64, i32>,
+    /// "Boosts needed to bypass restrictions" saves in flight, keyed by chat
+    /// id: the request and the value it sent. Its answer settles it.
+    pub unrestrict_boost_saves: HashMap<i64, UnrestrictSave>,
     /// TDLib option `supergroup_size_max` (0 until it arrives): the
     /// permissions box offers a broadcast group near it.
     pub supergroup_size_max: i32,
@@ -208,14 +276,10 @@ pub struct GroupsState {
     /// App config `stars_usd_withdraw_rate_x1000` / 1000: US cents per
     /// Star, for the dollar hint next to a link's monthly fee.
     pub stars_usd_rate: Option<f64>,
-    /// Slice G2: available boost slot ids from `getAvailableChatBoostSlots`
-    /// (schema 1.8.67, line 13914), keyed by chat id. The driver consumes
-    /// them to chain `boostChat` once per boost intent.
-    pub boost_slots_by_chat: HashMap<i64, Vec<crate::telegram::envelope::ParsedBoostSlot>>,
-    /// Slice G2: the chat id of a pending user boost intent — set by
-    /// `request_chat_boost`, consumed by the driver's `boostChat` chain.
-    pub boost_intent: Option<i64>,
-    /// The open boost box (`crate::boost_box`).
+    /// The open boost box (`crate::boost_box`). Its phase holds the Boost
+    /// press waiting for `getAvailableChatBoostSlots` (schema 1.8.67, line
+    /// 13914) and the slots that answer; the driver chains `boostChat` from
+    /// them.
     pub boost_box: Option<crate::boost_box::BoostBoxState>,
     /// `boosts_per_sent_gift` of the app config: boosts a gifted Premium
     /// subscription gives. `None` until asked.
@@ -257,17 +321,11 @@ pub struct GroupsState {
     /// promote member picker and the member-management dialog, keyed by
     /// (chat id, filter). One page per filter.
     pub supergroup_members: HashMap<(i64, MemberListFilter), SupergroupMembersFetch>,
-    /// The first-page `getSupergroupMembers` each entry of
-    /// `supergroup_members` comes from, and the query it asked with. A
-    /// search for another query sends a new request; only the latest one's
-    /// answer or error fills the entry.
-    pub supergroup_member_queries: HashMap<(i64, MemberListFilter), (RequestId, String)>,
-    /// Each next-page request in flight and the first-page request whose
-    /// list it extends (`None`: a list filled without one).
-    pub(crate) member_more_bases: HashMap<RequestId, Option<RequestId>>,
-    /// Lists whose last next-page request failed. The members panel takes
-    /// the mark and asks for that page again at its next scroll.
-    pub member_more_failed: HashSet<(i64, MemberListFilter)>,
+    /// How each entry of `supergroup_members` was asked: its first-page
+    /// request, its query and its next page. A search for another query
+    /// replaces the entry; only the latest first page's answer or error
+    /// fills the list, and a next page of an older query finds itself gone.
+    pub member_asks: HashMap<(i64, MemberListFilter), MemberAsk>,
     /// Slice G1: `getBasicGroupFullInfo` fetch state (the member list for
     /// basic groups), keyed by chat id. Reuses `SupergroupMembersFetch`
     /// (Loading / Loaded / Failed).
@@ -361,8 +419,6 @@ impl GroupsState {
             stats: StatsState::default(),
             invite_links: HashMap::new(),
             join_requests: HashMap::new(),
-            join_request_queries: HashMap::new(),
-            join_request_latest: HashMap::new(),
             revoked_invite_links: HashMap::new(),
             invite_pages: InvitePages::default(),
             chat_boost_lists: HashMap::new(),
@@ -374,10 +430,6 @@ impl GroupsState {
             pending_join_request_counts: HashMap::new(),
             pending_join_request_users: HashMap::new(),
             event_logs: HashMap::new(),
-            event_log_waits: HashMap::new(),
-            event_log_filters: HashMap::new(),
-            event_log_queries: HashMap::new(),
-            event_log_users: HashMap::new(),
             supergroup_sign_messages: HashMap::new(),
             supergroup_show_message_sender: HashMap::new(),
             supergroup_anti_spam_enabled: HashMap::new(),
@@ -389,16 +441,13 @@ impl GroupsState {
             supergroup_manage_video_chats_right: HashMap::new(),
             chat_has_welcome_messages: HashMap::new(),
             welcome_messages: HashMap::new(),
-            welcome_message_fetches: HashMap::new(),
             chat_boost_status: HashMap::new(),
             chat_boost_details: HashMap::new(),
             chat_boost_features: HashMap::new(),
-            unrestrict_boost_pending: HashMap::new(),
+            unrestrict_boost_saves: HashMap::new(),
             supergroup_size_max: 0,
             subscription_star_max: None,
             stars_usd_rate: None,
-            boost_slots_by_chat: HashMap::new(),
-            boost_intent: None,
             boost_box: None,
             boosts_per_gift: None,
             supergroup_usernames: HashMap::new(),
@@ -411,9 +460,7 @@ impl GroupsState {
             supergroup_invite_right: HashMap::new(),
             admin_lists: HashMap::new(),
             supergroup_members: HashMap::new(),
-            supergroup_member_queries: HashMap::new(),
-            member_more_bases: HashMap::new(),
-            member_more_failed: HashSet::new(),
+            member_asks: HashMap::new(),
             basic_group_members: HashMap::new(),
             basic_group_descriptions: HashMap::new(),
             info_edit_errors: HashMap::new(),

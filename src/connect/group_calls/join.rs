@@ -136,13 +136,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         // Joining it again: its joined updates count once more.
-        if self.session.calls.left_group_call == Some(group_call_id) {
-            self.session.calls.left_group_call = None;
-        }
         // A join starts over: a transport error left by the last time in
         // the call is not this join's failure.
         if let Some(call) = self.session.calls.active_group_call.as_mut() {
-            call.transport_error = None;
+            call.rejoin.leave_over();
+            call.transport.clear_error();
         }
         self.decline_ringing_invite(None);
         Ok(self.start_group_join(group_call_id))
@@ -225,7 +223,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         let group_call_id = match &self.session.calls.active_group_call {
-            Some(call) if !call.is_joined && !call.join_as_requested && call.is_video_chat => {
+            Some(call)
+                if !call.is_joined && call.join_as_options.is_idle() && call.is_video_chat =>
+            {
                 call.id
             }
             _ => return Ok(()),
@@ -250,7 +250,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Asked once; an answered or failed request is not repeated (the
         // picker is optional, so a failure just leaves it out).
         if let Some(call) = self.session.calls.active_group_call.as_mut() {
-            call.join_as_requested = true;
+            call.join_as_options.begin();
         }
         Ok(())
     }
@@ -434,7 +434,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(request);
         }
         // Explicit user intent starts the attempts over.
-        if manual && rejoin != GroupCallRejoin::Idle {
+        if manual && !matches!(rejoin, GroupCallRejoin::Idle | GroupCallRejoin::Left) {
             rejoin = GroupCallRejoin::Wanted { attempts: 0 };
         }
         let Some(attempt) = rejoin.next_attempt() else {
@@ -481,11 +481,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             // handshake again — reset the transport gate, the stale
             // answer, and the stale screen-share state so the pump
             // doesn't drop the new `joinVideoChat` answer.
-            call.transport_ready = false;
-            call.join_payload.clear();
-            call.screen_sharing = false;
-            call.screen_share_pending = false;
-            call.screen_share_answer.clear();
+            call.transport.reset();
+            call.screen_share.stop();
         }
         match conference.flatten() {
             Some(input) => {
@@ -589,7 +586,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.calls.left_group_call = Some(group_call_id);
+        if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
+            call.rejoin.leave();
+        }
         self.session.calls.invite_results = None;
         // Phase C2g: tear the native group transport down eagerly; the
         // pump's before/after backstop covers server-driven ends.
@@ -649,7 +648,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.calls.left_group_call = Some(group_call_id);
+        if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
+            call.rejoin.leave();
+        }
         self.session.calls.invite_results = None;
         // Phase C2g: same native teardown as leaving; the server-driven
         // end also lands via the pump backstop.

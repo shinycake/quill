@@ -131,7 +131,7 @@ impl QuillApp {
                     self.call_screen.window_open_failed = None;
                     cx.activate(true);
                     window.activate_window();
-                    if let Some(handle) = self.calls.window {
+                    if let Some(handle) = self.calls.window.handle() {
                         let _ = handle.update(cx, |_, window, _| window.activate_window());
                     }
                 }
@@ -143,7 +143,7 @@ impl QuillApp {
     /// window (its call bar) or the call window itself.
     fn call_ring_seen(&self, cx: &App) -> bool {
         cx.active_window().is_some_and(|active| {
-            Some(active) == self.main_window.handle || Some(active) == self.calls.window
+            Some(active) == self.main_window.handle || Some(active) == self.calls.window.handle()
         })
     }
 

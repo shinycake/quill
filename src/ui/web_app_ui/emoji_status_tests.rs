@@ -69,7 +69,7 @@ fn open_window(
     app.mini_apps.window = Some(MiniAppWindow {
         child: Some(child),
         writer: HelperWriter::spawn(stdin),
-        wedged: false,
+        helper: crate::ui::web_app_ui::launch_flow::HelperState::Ready,
         events: mpsc::channel().1,
         launch: WebAppLaunch {
             bot_user_id: BOT,
@@ -80,13 +80,11 @@ fn open_window(
             url: "https://example.com/app".into(),
         },
         theme: theme_params(cx),
-        ready: true,
         closing_confirmation: false,
         settings_button: false,
         popups: Default::default(),
         popup_seq: 0,
-        waiting_write_access: false,
-        data_sent: false,
+        write_access: crate::ui::web_app_ui::launch_flow::WriteAccess::Idle,
         privacy_policy_url: None,
         in_attachment_menu: false,
         emoji: Default::default(),
@@ -139,8 +137,7 @@ fn emoji_sticker(id: i64, alt: &str) -> StickerItem {
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,
-        requires_premium: false,
-        premium_animation: None,
+        premium: None,
     }
 }
 

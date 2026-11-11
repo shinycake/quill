@@ -172,7 +172,7 @@ fn a_neighbour_whose_story_is_gone_is_passed_over(cx: &mut TestAppContext) {
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             session.stories.stories.remove(&(NEWS, 1));
-            session.stories.missing.insert((NEWS, 1));
+            session.stories.story_fetch.gone((NEWS, 1));
         }
         cx.notify();
     });
@@ -263,7 +263,7 @@ fn the_reply_media_panel_hides_the_neighbours(cx: &mut TestAppContext) {
     let toggle = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
         app.update(vcx, |app, cx| {
             if let Some(open) = app.stories.viewer_ui_mut() {
-                open.reply_open = true;
+                open.open_reply();
             }
             app.toggle_story_reply_panel(PanelTab::Emoji, cx);
         });
@@ -303,7 +303,7 @@ fn a_poster_waiting_out_a_failed_fetch_is_passed_over(cx: &mut TestAppContext) {
     assert_eq!(shown(&app, vcx), Some((MAYA, 5)), "Next does not close");
     app.update(vcx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.stories.story_retry.clear();
+            session.stories.story_fetch.forget_retries();
         }
     });
     let back = app.read_with(vcx, |app, _| app.story_sibling_key(-1));
@@ -336,10 +336,6 @@ fn a_story_opened_over_the_viewer_does_not_inherit_the_reply_draft(cx: &mut Test
             caption: String::new(),
             caption_entities: Vec::new(),
             duration_label: None,
-            duration_secs: None,
-            video_file_id: None,
-            is_live: false,
-            live_call: None,
             areas: Vec::new(),
         };
         app.begin_story_viewer(vec![item], 0, cx);
@@ -373,11 +369,11 @@ fn a_refused_story_reply_keeps_the_text_and_the_row(cx: &mut TestAppContext) {
             "congrats!",
             "the typed text survives a refused send"
         );
-        assert!(app.stories.viewer_ui().reply_open, "the row stays open");
+        assert!(app.stories.viewer_ui().reply_open(), "the row stays open");
         app.finish_story_reply_text(Some(true), window, cx);
         assert_eq!(app.stories.reply_input.read(cx).value().to_string(), "");
         assert!(
-            !app.stories.viewer_ui().reply_open,
+            !app.stories.viewer_ui().reply_open(),
             "a sent reply closes it"
         );
     });

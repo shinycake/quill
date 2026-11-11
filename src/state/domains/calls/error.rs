@@ -47,9 +47,7 @@ impl Session {
             Some(RequestPurpose::Calls(CallsPurpose::AcceptCall { call_id })) => {
                 // The call was never answered and keeps ringing, so a
                 // close must leave it to ring.
-                if self.calls.answered_call == Some(call_id) {
-                    self.calls.answered_call = None;
-                }
+                self.calls.progress.answer_failed(call_id);
                 // An answer that fails after its call went must not land on
                 // the next one (tdesktop drops the request with its call).
                 if self.calls.active_call.as_ref().map(|call| call.id) == Some(call_id) {
@@ -60,7 +58,7 @@ impl Session {
             Some(RequestPurpose::DiscardCall) => {
                 // The active call's hang-up failed: the call goes on in
                 // the phase it had, and a swap waiting on it asks again.
-                if let Some(hang_up) = self.calls.hang_up.take_if(|h| Some(h.request) == extra) {
+                if let Some(hang_up) = self.calls.progress.hang_up_failed(extra) {
                     if let Some(call) = self.calls.active_call.as_mut()
                         && call.id == hang_up.call_id
                     {
@@ -104,11 +102,18 @@ impl Session {
             // flags), not the call overlay.
             Some(RequestPurpose::SearchCallMessages) => {
                 if pending.is_some_and(|p| self.calls.take_recent_calls_request(p.id)) {
-                    self.calls.recent_calls_error = true;
+                    self.calls.recent_calls_stage = RecentCalls::Failed;
                 }
             }
             Some(RequestPurpose::DeleteAllCallMessages) => {
-                self.calls.recent_calls_clearing = false;
+                if let Some(pending) = pending
+                    && self.calls.recent_calls_stage
+                        == (RecentCalls::Clearing {
+                            request: pending.id,
+                        })
+                {
+                    self.calls.recent_calls_stage = RecentCalls::Idle;
+                }
                 self.chats_state
                     .chat_action_error
                     .push(crate::chatlist_calls::clear_failed(err.code));
@@ -209,17 +214,17 @@ impl Session {
                         "Could not join the voice chat",
                     ));
                 } else {
-                    call.transport_error = Some(call_request_error_line(
+                    call.transport.fail(call_request_error_line(
                         err,
                         "Could not join the live story",
                     ));
                 }
             }
             // The live story's own leave (its slot is already gone, and it
-            // never sets `left_group_call`): nothing to show on the call.
+            // never leaves the call): nothing to show on the call.
             Some(RequestPurpose::Calls(CallsPurpose::LeaveGroupCall { group_call_id }))
                 if !self.calls.is_current_group_call(group_call_id)
-                    && self.calls.left_group_call != Some(group_call_id) => {}
+                    && !self.calls.group_call_left(group_call_id) => {}
             // Phase C2g: a failed screen-sharing handshake must
             // not leave the call stuck "sharing" — clear the
             // pending/active flags and surface an honest error.
@@ -229,9 +234,7 @@ impl Session {
                 if let Some(tracked) = self.calls.active_group_call.as_mut()
                     && tracked.id == group_call_id
                 {
-                    tracked.screen_share_pending = false;
-                    tracked.screen_sharing = false;
-                    tracked.screen_share_answer.clear();
+                    tracked.screen_share.stop();
                 }
                 self.calls.group_call_error = Some(call_request_error_line(
                     err,
@@ -244,9 +247,7 @@ impl Session {
                 if let Some(tracked) = self.calls.active_group_call.as_mut()
                     && tracked.id == group_call_id
                 {
-                    tracked.screen_share_pending = false;
-                    tracked.screen_sharing = false;
-                    tracked.screen_share_answer.clear();
+                    tracked.screen_share.stop();
                 }
                 self.calls.group_call_error = Some(call_request_error_line(
                     err,
@@ -270,7 +271,6 @@ impl Session {
             Some(
                 RequestPurpose::Calls(CallsPurpose::LeaveGroupCall { .. })
                 | RequestPurpose::Calls(CallsPurpose::EndGroupCall { .. })
-                | RequestPurpose::Calls(CallsPurpose::GetGroupCall { .. })
                 | RequestPurpose::Calls(CallsPurpose::LoadGroupCallParticipants { .. })
                 | RequestPurpose::Calls(CallsPurpose::SetVideoChatDefaultParticipant { .. })
                 | RequestPurpose::Calls(CallsPurpose::SetVideoChatTitle { .. })
@@ -318,11 +318,28 @@ impl Session {
             // because you were busy is not about the voice chat you are
             // in: nothing shows (tdesktop sends it with no fail handler).
             Some(RequestPurpose::Calls(CallsPurpose::DeclineGroupCallInvitation { .. })) => {}
+            // The call a link offered could not be fetched: its hash goes
+            // with it, or a later join of that call would send it.
+            Some(RequestPurpose::Calls(CallsPurpose::GetGroupCall { group_call_id })) => {
+                if self
+                    .calls
+                    .call_link
+                    .as_ref()
+                    .is_some_and(|link| link.group_call_id == group_call_id)
+                {
+                    self.calls.call_link = None;
+                }
+                self.calls.group_call_error =
+                    Some(call_request_error_line(err, "Voice chat request failed"));
+            }
             // The "join as" list is optional: a failure just leaves the
             // picker out and the join goes ahead as yourself.
             Some(RequestPurpose::Calls(CallsPurpose::GetVideoChatAvailableParticipants {
-                ..
-            })) => {}
+                group_call_id,
+            })) => self.fail_group_call_join_as_options(
+                group_call_id,
+                &call_request_error_line(err, "Couldn't load who you can join as"),
+            ),
             // A failed "Add People" search ends it with what the other
             // half found (tdesktop's `fail` handler refreshes the rows).
             Some(

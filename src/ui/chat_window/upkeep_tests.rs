@@ -92,7 +92,7 @@ fn a_topic_switch_in_a_forum_window_leaves_the_old_topics_text(cx: &mut TestAppC
     });
     draw(chat_window, cx);
     let (text, topic) = read(&h, Some(FORUM_CHAT), cx, |app, cx| {
-        let topic = app.session().and_then(|session| session.open_topic);
+        let topic = app.session().and_then(|session| session.open_forum_topic());
         (app.composer.read(cx).value().to_string(), topic)
     });
     assert_eq!(topic, Some(RELEASES_TOPIC));
@@ -275,9 +275,14 @@ fn a_forward_from_a_chat_window_answers_there(cx: &mut TestAppContext) {
 fn a_chat_windows_frame_leaves_the_main_windows_peek(cx: &mut TestAppContext) {
     let h = new_app(cx);
     let chat_window = h.open_in_new_window(OTHER, cx);
-    read(&h, None, cx, |app, _| app.history.forum_chats_peek = true);
+    read(&h, None, cx, |app, _| {
+        app.history.forum_column = crate::ui::history_state::ForumColumnUi::Peek
+    });
     draw(chat_window, cx);
-    assert!(read(&h, None, cx, |app, _| app.history.forum_chats_peek));
+    assert!(read(&h, None, cx, |app, _| app
+        .history
+        .forum_column
+        .peeking()));
 }
 
 #[gpui_kit::test]
@@ -288,18 +293,19 @@ fn a_send_that_waited_keeps_its_one_time_options(cx: &mut TestAppContext) {
         effect: 7,
     };
     let (inside, after) = read(&h, None, cx, |app, _| {
-        let inside = app.with_send_once(once, |app| {
-            let options = app.composer_send_options();
-            (options.disable_notification, options.effect_id)
-        });
-        (inside, app.send_once())
+        let options = app.composer_send_options(once);
+        let later = app.composer_send_options(Default::default());
+        (
+            (options.disable_notification, options.effect_id),
+            (later.disable_notification, later.effect_id),
+        )
     });
     assert_eq!(
         inside,
         (true, 7),
         "the held send goes silent, with its effect"
     );
-    assert_eq!(after, crate::ui::composer_sends::SendOnce::default());
+    assert_eq!(after, (false, 0), "the next send has none of them");
 }
 
 /// Round 13 B, finding 4: a chat window's reply bar, pointing at a message
@@ -360,10 +366,18 @@ fn a_chat_windows_history_tracks_its_own_screen_reader_focus(cx: &mut TestAppCon
     draw(chat_window, cx);
     draw(chat_window, cx);
     assert!(
-        read(&h, Some(OTHER), cx, |app, _| app.message_ui.a11y.focused),
+        read(&h, Some(OTHER), cx, |app, _| app
+            .message_ui
+            .a11y
+            .focus
+            .is_focused()),
         "the window's history took the focus"
     );
-    assert!(!read(&h, None, cx, |app, _| app.message_ui.a11y.focused));
+    assert!(!read(&h, None, cx, |app, _| app
+        .message_ui
+        .a11y
+        .focus
+        .is_focused()));
 }
 
 /// Round 13 B, finding 6: a chat window's title is the main window's title

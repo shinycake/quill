@@ -196,7 +196,7 @@ pub(super) fn wrap(
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let set_id = sticker.set_id;
-    let premium = sticker.premium_animation.filter(|_| !pending);
+    let premium = sticker.premium_animation().filter(|_| !pending);
     if premium.is_none() && (set_id == 0 || pending) {
         return attachment;
     }
@@ -267,8 +267,7 @@ fn effect_for(key: Key, animation: FileId) -> EmojiEffect {
             thumb_file_id: None,
             thumb_width: 0,
             thumb_height: 0,
-            requires_premium: false,
-            premium_animation: None,
+            premium: None,
         },
         incoming: false,
     }

@@ -6,19 +6,25 @@
 //! (tdesktop: switching a downloading dictionary off destroys the loader).
 #![deny(clippy::indexing_slicing)]
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 
 use crate::spell_catalog::DOWNLOAD_HOST;
+
+/// Where the download is, as one atomic so a stop request and the
+/// worker's completion cannot disagree: it only moves forward.
+const RUNNING: u8 = 0;
+/// The UI asked to stop; the worker ends at the next chunk.
+const CANCELLING: u8 = 1;
+/// The download thread has finished, either way.
+const FINISHED: u8 = 2;
 
 /// Shared between the download thread and the UI.
 #[derive(Debug, Default)]
 pub struct Progress {
     /// Bytes received over both files.
     pub received: AtomicU64,
-    /// Set by the UI to stop at the next chunk.
-    pub cancelled: AtomicBool,
-    /// Set when the download thread has finished, either way.
-    pub finished: AtomicBool,
+    /// `RUNNING`, `CANCELLING` or `FINISHED`.
+    stage: AtomicU8,
 }
 
 impl Progress {
@@ -26,20 +32,24 @@ impl Progress {
         self.received.load(Ordering::Relaxed)
     }
 
+    /// Asks the worker to stop; a finished download stays finished.
     pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Relaxed);
+        let _ =
+            self.stage
+                .compare_exchange(RUNNING, CANCELLING, Ordering::AcqRel, Ordering::Acquire);
     }
 
+    /// A stop was asked for and the worker has not finished yet.
     pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Relaxed)
+        self.stage.load(Ordering::Acquire) == CANCELLING
     }
 
     pub fn is_finished(&self) -> bool {
-        self.finished.load(Ordering::Acquire)
+        self.stage.load(Ordering::Acquire) == FINISHED
     }
 
     pub fn finish(&self) {
-        self.finished.store(true, Ordering::Release);
+        self.stage.store(FINISHED, Ordering::Release);
     }
 
     /// Marks the download finished when dropped, so a worker that panics
@@ -68,7 +78,7 @@ pub fn is_allowed_url(url: &str) -> bool {
 /// Why a download ended without installing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DownloadError {
-    /// The user switched the language off; nothing to show.
+    /// The user cancelled (or switched it off); nothing to show.
     Cancelled,
     /// The text the row shows.
     Message(String),
@@ -191,8 +201,11 @@ mod tests {
         assert!(!p.is_cancelled() && !p.is_finished());
         p.received.fetch_add(5, Ordering::Relaxed);
         p.cancel();
+        assert!(p.is_cancelled() && !p.is_finished());
         p.finish();
-        assert!(p.is_cancelled() && p.is_finished());
+        assert!(!p.is_cancelled() && p.is_finished());
+        p.cancel();
+        assert!(p.is_finished(), "a finished download stays finished");
         assert_eq!(p.received(), 5);
     }
 

@@ -47,10 +47,7 @@ fn the_main_windows_title_emoji_leaves_a_chat_windows_panel_alone(cx: &mut TestA
     let _chat_window = open_chat_window(&h, cx);
     in_main(&h, cx, |app, window, cx| {
         app.open_group_edit_box(CHANNEL, window, cx);
-        if let Some(edit) = app.group_edit_box_mut() {
-            edit.title_emoji = true;
-        }
-        app.open_media_panel(PanelTab::Emoji, cx);
+        app.toggle_group_title_emoji(cx);
     });
     assert!(
         scoped(&h, None, cx, |app, _| app.group_title_emoji_active()),

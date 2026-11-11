@@ -10,7 +10,8 @@ pub enum SyntheticKind {
     Text,
     Rtl,
     Emoji,
-    Image { loaded: bool },
+    ImageLoading,
+    ImageLoaded,
 }
 
 #[derive(Clone)]
@@ -69,7 +70,7 @@ impl SyntheticChat {
                 5,
                 tr(keys::Q_MISC_ADA),
                 tr(keys::Q_MISC_PHOTO_PENDING),
-                SyntheticKind::Image { loaded: false },
+                SyntheticKind::ImageLoading,
                 false,
             ),
         ];
@@ -133,9 +134,9 @@ impl SyntheticChat {
         if let Some(row) = self
             .rows
             .iter_mut()
-            .find(|row| matches!(row.kind, SyntheticKind::Image { loaded: false }))
+            .find(|row| matches!(row.kind, SyntheticKind::ImageLoading))
         {
-            row.kind = SyntheticKind::Image { loaded: true };
+            row.kind = SyntheticKind::ImageLoaded;
             row.body = tr(keys::Q_MISC_PHOTO_LOADED_HEIGHT_CHANGED).into();
         }
         let len = self.rows.len();
@@ -440,8 +441,8 @@ fn message_bubble_with_quote(
     look: BubbleLook,
 ) -> AnyElement {
     let image_h = match row.kind {
-        SyntheticKind::Image { loaded: false } => px(40.),
-        SyntheticKind::Image { loaded: true } => px(96.),
+        SyntheticKind::ImageLoading => px(40.),
+        SyntheticKind::ImageLoaded => px(96.),
         _ => px(0.),
     };
     let rtl = matches!(row.kind, SyntheticKind::Rtl | SyntheticKind::Emoji);
@@ -566,13 +567,11 @@ fn message_bubble_with_quote(
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(
-                        if matches!(row.kind, SyntheticKind::Image { loaded: true }) {
-                            tr(keys::Q_MISC_IMAGE_4_3)
-                        } else {
-                            tr(keys::Q_MISC_LOADING_IMAGE)
-                        },
-                    ),
+                    .child(if matches!(row.kind, SyntheticKind::ImageLoaded) {
+                        tr(keys::Q_MISC_IMAGE_4_3)
+                    } else {
+                        tr(keys::Q_MISC_LOADING_IMAGE)
+                    }),
             )
         })
         .when_some(extra, |this, el| this.child(el))

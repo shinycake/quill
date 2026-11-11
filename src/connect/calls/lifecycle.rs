@@ -74,7 +74,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.calls.answered_call = Some(call_id);
+        self.session.calls.progress.answer(call_id);
         if let Some(engine) = self.call_engine.as_deref_mut() {
             // TDLib remains the call-state source of truth; this only marks
             // the already-tracked engine-side call accepted.
@@ -107,7 +107,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(call) => (call.id, call.connected_secs() as i32, call.is_video),
             None => return Err(ConnectSendError::InvalidRequest),
         };
-        if let Some(hang_up) = &self.session.calls.hang_up
+        if let Some(hang_up) = self.session.calls.progress.hang_up()
             && hang_up.call_id == call_id
         {
             return Ok(hang_up.request);
@@ -126,7 +126,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if let Some(call) = self.session.calls.active_call.as_mut() {
             let resume = std::mem::replace(&mut call.state, CallState::HangingUp);
-            self.session.calls.hang_up = Some(crate::state::HangUp::new(extra, call_id, resume));
+            self.session
+                .calls
+                .progress
+                .hang_up_sent(crate::state::HangUp::new(extra, call_id, resume));
         }
         // The engine hangs up once TDLib took the hang-up (its `ok` or
         // the terminal updateCall, through `pump_call_engine`): an error
@@ -143,7 +146,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let (call_running, joined) = (self.call_running(), self.group_call_joined());
         if call_running && self.discard_call().is_ok() {
             // The client goes now: no answer will come back to wait for.
-            let hanging_up = self.session.calls.hang_up.as_ref().map(|h| h.call_id);
+            let hanging_up = self.session.calls.progress.hang_up().map(|h| h.call_id);
             if let (Some(call_id), Some(engine)) = (hanging_up, self.call_engine.as_deref_mut()) {
                 let _ = engine.hangup(call_id);
             }
@@ -168,7 +171,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             )
         });
         let ringing = ringing_incoming_call(&self.session)
-            .is_some_and(|(id, _, _)| calls.answered_call != Some(id));
+            .is_some_and(|(id, _, _)| calls.progress.answered_call() != Some(id));
         running && !ringing
     }
 
@@ -189,7 +192,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let leaving = calls
             .active_group_call
             .as_ref()
-            .is_some_and(|call| calls.left_group_call == Some(call.id));
+            .is_some_and(|call| call.rejoin.is_left());
         hanging_up || leaving
     }
 
@@ -281,7 +284,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.start_engine_for_tracked_call();
             return Err(err);
         }
-        self.session.calls.answered_call = Some(call_id);
+        self.session.calls.progress.answer(call_id);
         if let Some(engine) = self.call_engine.as_deref_mut() {
             let _ = engine.accept_call(call_id);
         }
@@ -395,7 +398,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let call_id = match &self.session.calls.summary {
-            Some(summary) if summary.need_rating && summary.rating.is_open() => summary.call_id,
+            Some(summary) if summary.rating.is_open() => summary.call_id,
             _ => return Err(ConnectSendError::InvalidRequest),
         };
         let extra = self.session.request(RequestPurpose::SendCallRating, None);

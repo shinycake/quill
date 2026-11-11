@@ -144,10 +144,7 @@ impl Session {
                 self.set_chat_message_sender(chat_id.0, message_sender);
                 self.set_chat_translatable(chat_id.0, is_translatable);
                 if reply_markup_message_id.0 > 0 {
-                    self.bots
-                        .reply_keyboards
-                        .markup_message_ids
-                        .insert(chat_id.0, reply_markup_message_id.0);
+                    self.note_reply_markup_message(chat_id, reply_markup_message_id);
                 }
                 self.set_chat_action_bar(chat_id.0, action_bar);
                 self.set_business_bot_bar(chat_id.0, business_bot_bar);
@@ -544,19 +541,19 @@ impl Session {
                     generation,
                 })) = pending.map(|p| p.purpose)
                     && matches!(
-                        &self.chats_state.deep_link,
-                        Some(DeepLinkState::ResolvingInfo { generation: slot }) if *slot == generation
+                        self.chats_state.deep_link_stage(),
+                        Some(DeepLinkState::ResolvingInfo { generation: slot, .. }) if *slot == generation
                     )
                 {
                     use crate::deep_link_types::{LinkRoute, route};
-                    let original = std::mem::take(&mut self.chats_state.deep_link_original);
+                    let original = self.chats_state.deep_link_original().to_string();
                     let wallet_link =
                         crate::ton_wallet::links::wallet_link(&link, self.ton_wallet.can_use);
                     if let Some(crate::ton_wallet::links::WalletLink::Notice(surface)) = wallet_link
                     {
                         self.ton_wallet.show_notice(surface);
                     }
-                    self.chats_state.deep_link = match wallet_link {
+                    let next = match wallet_link {
                         Some(crate::ton_wallet::links::WalletLink::Notice(_)) => None,
                         Some(crate::ton_wallet::links::WalletLink::Unavailable) => Some(
                             DeepLinkState::ShowText(crate::ton_wallet::links::UNAVAILABLE.into()),
@@ -573,6 +570,10 @@ impl Session {
                             LinkRoute::Message(text) => DeepLinkState::ShowText(text),
                         }),
                     };
+                    match next {
+                        Some(stage) => self.chats_state.enter_deep_link_stage(stage),
+                        None => self.chats_state.deep_link = None,
+                    }
                 }
             }
             ChatsPayload::MessageLinkInfo {
@@ -584,14 +585,14 @@ impl Session {
                 if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve { generation })) =
                     pending.map(|p| p.purpose)
                     && matches!(
-                        &self.chats_state.deep_link,
+                        self.chats_state.deep_link_stage(),
                         Some(DeepLinkState::ResolvingChat {
                             action: DeepLinkAction::MessageLink { .. },
                             generation: slot,
                         }) if *slot == generation
                     )
                 {
-                    self.chats_state.deep_link = Some(if chat_id == 0 {
+                    self.chats_state.enter_deep_link_stage(if chat_id == 0 {
                         DeepLinkState::ShowText(
                             "This message is in a chat you can't see. Join it first.".into(),
                         )
@@ -614,14 +615,14 @@ impl Session {
                 if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve { generation })) =
                     pending.map(|p| p.purpose)
                     && matches!(
-                        &self.chats_state.deep_link,
+                        self.chats_state.deep_link_stage(),
                         Some(DeepLinkState::ResolvingChat {
                             action: DeepLinkAction::BoostLink { .. },
                             generation: slot,
                         }) if *slot == generation
                     )
                 {
-                    self.chats_state.deep_link = Some(if chat_id == 0 {
+                    self.chats_state.enter_deep_link_stage(if chat_id == 0 {
                         DeepLinkState::ShowText("This boost link is broken.".into())
                     } else {
                         DeepLinkState::Info {
@@ -646,14 +647,15 @@ impl Session {
                 if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkInfo { generation })) =
                     pending.map(|p| p.purpose)
                     && matches!(
-                        &self.chats_state.deep_link,
+                        self.chats_state.deep_link_stage(),
                         Some(DeepLinkState::ResolvingInfo {
-                            generation: slot
+                            generation: slot,
+                            ..
                         }) if *slot == generation
                     )
                 {
                     let action = crate::connect::parse_deep_link_action(&entities);
-                    self.chats_state.deep_link = Some(DeepLinkState::Info {
+                    self.chats_state.enter_deep_link_stage(DeepLinkState::Info {
                         text,
                         need_update,
                         action,

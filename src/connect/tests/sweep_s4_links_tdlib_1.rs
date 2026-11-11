@@ -48,7 +48,7 @@ fn refused_parameters_leave_no_pending_entry() {
 #[test]
 fn a_gif_search_carries_the_asking_windows_chat() {
     let (_dir, mut driver, sender, _sink, _seq) = toggle_driver();
-    driver.session.open_chat = Some(ChatId(5));
+    driver.session.open = crate::state::OpenView::of(Some(ChatId(5)));
     driver.session.stickers.gifs.search_bot_username = "gif".into();
     driver.session.stickers.gifs.search_bot_user_id = Some(77);
     driver
@@ -102,11 +102,9 @@ fn a_profile_colour_without_the_own_user_is_refused() {
 fn a_mask_set_that_was_not_sent_is_asked_again() {
     let (_dir, mut driver, sender, _sink, _seq) = toggle_driver();
     let masks = &mut driver.session.stickers.masks;
-    masks.strip_wanted = true;
-    masks.installed_loaded = true;
-    masks
-        .installed
-        .push(crate::telegram::envelope::StickerSetInfo {
+    masks.set_strip_wanted(true);
+    masks.installed =
+        crate::state::fetch::Fetch::Ready(vec![crate::telegram::envelope::StickerSetInfo {
             id: 11,
             title: String::new(),
             name: String::new(),
@@ -117,10 +115,10 @@ fn a_mask_set_that_was_not_sent_is_asked_again() {
             covers: Vec::new(),
             cover_files: Vec::new(),
             is_viewed: true,
-        });
+        }]);
     sender.refuse(true);
     let _ = driver.load_editor_masks();
-    assert!(driver.session.stickers.masks.set_requested.is_empty());
+    assert!(driver.session.stickers.masks.sets.is_empty());
     sender.refuse(false);
     driver.load_editor_masks().expect("sent");
     assert!(

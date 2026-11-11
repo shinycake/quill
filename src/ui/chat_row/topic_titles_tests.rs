@@ -58,7 +58,7 @@ fn click(vcx: &mut VisualTestContext, id: (&'static str, u64)) {
 fn opened(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> (Option<ChatId>, Option<i32>) {
     app.update(vcx, |app, _| {
         app.session()
-            .map(|s| (s.open_chat, s.open_topic))
+            .map(|s| (s.open_chat_id(), s.open_forum_topic()))
             .unwrap_or_default()
     })
 }
@@ -144,9 +144,7 @@ fn a_press_on_the_chip_still_starts_the_long_press_peek(cx: &mut TestAppContext)
         gpui_kit::MouseButton::Left,
         gpui_kit::Modifiers::default(),
     );
-    let pressed = app.update(vcx, |app, _| {
-        app.chat_list.preview_press.map(|(chat, _)| chat)
-    });
+    let pressed = app.update(vcx, |app, _| app.chat_list.peek.pressing());
     assert_eq!(pressed, Some(ChatId(71)));
 }
 
@@ -173,7 +171,8 @@ fn selection_mode_toggles_the_row_from_its_topics_line_and_chip(cx: &mut TestApp
     let (selected, now) = app.update(vcx, |app, _| {
         (
             app.chat_list.selected.clone(),
-            app.session().map(|s| (s.open_chat, s.open_topic)),
+            app.session()
+                .map(|s| (s.open_chat_id(), s.open_forum_topic())),
         )
     });
     // Titles toggled the check, the chip toggled it back: neither opened anything.

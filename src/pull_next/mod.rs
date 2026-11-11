@@ -285,6 +285,52 @@ pub struct HintState {
     pub release: f32,
 }
 
+/// The pull in progress (`PullToNextChannel`'s `_pull`, `_reached`, ...).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct Pull {
+    /// How far the edge is stretched.
+    amount: f32,
+    /// The pointer was down at the last overscroll (`_holding`).
+    holding: bool,
+    /// The release was decided (`_committed`).
+    committed: bool,
+    /// The pull is ready (`_reached`).
+    reached: bool,
+    /// The largest stretch since it was reached.
+    peak: f32,
+    /// The UI found a next channel or topic.
+    has_next: bool,
+}
+
+/// Where the controller is. The pull's data lives in the stages that have
+/// a pull.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+enum Stage {
+    /// No pull: the edge may stretch, nothing is shown.
+    #[default]
+    Idle,
+    Pulling(Pull),
+    /// The release opens the next chat: the indicator holds at its full
+    /// height until the chat changes, or `until` (ms) passes, so a jump
+    /// that never lands cannot hold it for good.
+    Jumping {
+        pull: Pull,
+        until: u64,
+    },
+}
+
+/// Whether the expand animation still owes the indicator a frame (its
+/// last one included).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum ExpandRun {
+    #[default]
+    Settled,
+    Running,
+}
+
+/// The longest a jump holds the indicator without the chat changing.
+const JUMP_HOLD_MS: u64 = JUMP_MAX_WAIT_MS + JUMP_PINNED_MAX_WAIT_MS + 1000;
+
 /// The edge and the controller (`ElasticScroll` bottom edge +
 /// `PullToNextChannel`).
 #[derive(Debug, Clone)]
@@ -296,29 +342,17 @@ pub struct PullMachine {
     overscroll: f32,
     spring: Option<(f32, u64)>,
     // PullToNextChannel.
-    pulling: bool,
-    holding: bool,
-    committed: bool,
-    jumping: bool,
-    reached: bool,
-    expand_to: bool,
-    pull: f32,
-    peak_pull: f32,
+    stage: Stage,
     effective: f32,
     expand: Tween,
-    /// The expand animation still owes the indicator a frame (its last
-    /// one included).
-    expand_pending: bool,
+    expand_run: ExpandRun,
     dwell_due: Option<u64>,
-    has_next: bool,
-    // Indicator.
-    shown: bool,
-    ready: bool,
+    // Indicator: shown while `effective > 0`; ready while `release` heads
+    // to 1.
     release: Tween,
     bounce: Tween,
-    // HintOverlay.
-    hint_on: bool,
-    hint_ready: bool,
+    // HintOverlay: on while `panel` heads to 1; ready while `hint_release`
+    // heads to 1.
     panel: Tween,
     hint_release: Tween,
 }
@@ -331,25 +365,13 @@ impl Default for PullMachine {
             accumulated: 0.,
             overscroll: 0.,
             spring: None,
-            pulling: false,
-            holding: false,
-            committed: false,
-            jumping: false,
-            reached: false,
-            expand_to: false,
-            pull: 0.,
-            peak_pull: 0.,
+            stage: Stage::Idle,
             effective: 0.,
             expand: Tween::still(0.),
-            expand_pending: false,
+            expand_run: ExpandRun::Settled,
             dwell_due: None,
-            has_next: false,
-            shown: false,
-            ready: false,
             release: Tween::still(0.),
             bounce: Tween::still(1.),
-            hint_on: false,
-            hint_ready: false,
             panel: Tween::still(0.),
             hint_release: Tween::still(0.),
         }
@@ -377,22 +399,50 @@ impl PullMachine {
     }
 
     pub fn pulling(&self) -> bool {
-        self.pulling
+        matches!(self.stage, Stage::Pulling(_))
     }
 
     pub fn jumping(&self) -> bool {
-        self.jumping
+        matches!(self.stage, Stage::Jumping { .. })
     }
 
     pub fn reached(&self) -> bool {
-        self.reached
+        self.pull().reached
+    }
+
+    /// The pull of a pulling or jumping stage; nothing (all zero) when idle.
+    fn pull(&self) -> Pull {
+        match self.stage {
+            Stage::Idle => Pull::default(),
+            Stage::Pulling(pull) | Stage::Jumping { pull, .. } => pull,
+        }
+    }
+
+    fn pull_mut(&mut self) -> Option<&mut Pull> {
+        match &mut self.stage {
+            Stage::Idle => None,
+            Stage::Pulling(pull) | Stage::Jumping { pull, .. } => Some(pull),
+        }
+    }
+
+    /// The indicator is ready (heading to its full state).
+    fn indicator_ready(&self) -> bool {
+        self.release.to > 0.5
+    }
+
+    fn hint_ready(&self) -> bool {
+        self.hint_release.to > 0.5
+    }
+
+    fn hint_on(&self) -> bool {
+        self.panel.to > 0.5
     }
 
     /// How far the history content is lifted: the stretch plus the content
     /// inset (`setContentBottomInset`), which together are the indicator's
     /// height while it shows.
     pub fn content_shift(&self) -> f32 {
-        if self.pulling || self.jumping {
+        if self.stage != Stage::Idle {
             self.effective
         } else {
             self.overscroll
@@ -472,9 +522,11 @@ impl PullMachine {
             && now >= due
         {
             self.dwell_due = None;
-            if self.pulling && self.pull >= PULL_THRESHOLD {
-                self.reached = true;
-                self.peak_pull = self.pull;
+            if let Stage::Pulling(pull) = &mut self.stage
+                && pull.amount >= PULL_THRESHOLD
+            {
+                pull.reached = true;
+                pull.peak = pull.amount;
                 step.haptic = true;
                 self.start_expand(true, now);
                 self.push_indicator(now);
@@ -496,12 +548,23 @@ impl PullMachine {
             step.merge(self.handle(active, now));
             step.redraw = true;
         }
-        if self.expand_pending {
+        if self.expand_run == ExpandRun::Running {
             // `_expand.start([=] { pushIndicator(); }, …)`.
-            self.expand_pending = self.expand.animating(now);
-            if self.pulling || self.jumping {
+            self.expand_run = if self.expand.animating(now) {
+                ExpandRun::Running
+            } else {
+                ExpandRun::Settled
+            };
+            if self.stage != Stage::Idle {
                 self.push_indicator(now);
             }
+            step.redraw = true;
+        }
+        // A jump that never landed lets go of the indicator.
+        if let Stage::Jumping { until, .. } = self.stage
+            && now >= until
+        {
+            self.reset(true, now);
             step.redraw = true;
         }
         step
@@ -512,7 +575,8 @@ impl PullMachine {
         self.finger_down
             || self.spring.is_some()
             || self.dwell_due.is_some()
-            || self.expand_pending
+            || self.expand_run == ExpandRun::Running
+            || self.jumping()
             || self.release.animating(now)
             || self.bounce.animating(now)
             || self.panel.animating(now)
@@ -521,21 +585,26 @@ impl PullMachine {
 
     /// The UI found (or did not find) a next channel or topic.
     pub fn set_has_next(&mut self, has_next: bool, now: u64) {
-        self.has_next = has_next;
-        if self.pulling {
+        if let Some(pull) = self.pull_mut() {
+            pull.has_next = has_next;
+        }
+        if self.pulling() {
             self.push_indicator(now);
         }
     }
 
     pub fn has_next(&self) -> bool {
-        self.has_next
+        self.pull().has_next
     }
 
     /// The release opens the next chat: the indicator holds at its full
-    /// height until the chat changes (`_jumping`).
-    pub fn begin_jump(&mut self) {
-        self.pulling = false;
-        self.jumping = true;
+    /// height until the chat changes (`_jumping`), or [`JUMP_HOLD_MS`]
+    /// pass.
+    pub fn begin_jump(&mut self, now: u64) {
+        self.stage = Stage::Jumping {
+            pull: self.pull(),
+            until: now.saturating_add(JUMP_HOLD_MS),
+        };
     }
 
     /// `PullToNextChannel::handleOverscroll`.
@@ -545,28 +614,30 @@ impl PullMachine {
             ..Step::default()
         };
         let movement = self.movement();
-        let pull = self.overscroll.max(0.);
-        if !self.pulling {
-            if self.jumping || movement != Movement::Progress || pull <= 0. || !active {
-                return step;
+        let amount = self.overscroll.max(0.);
+        let mut pull = match self.stage {
+            Stage::Jumping { .. } => return step,
+            Stage::Pulling(pull) => pull,
+            Stage::Idle => {
+                if movement != Movement::Progress || amount <= 0. || !active {
+                    return step;
+                }
+                step.started = true;
+                Pull::default()
             }
-            self.pulling = true;
-            self.committed = false;
-            self.has_next = false;
-            step.started = true;
-        }
-        self.pull = pull;
-        self.holding = movement == Movement::Progress;
-        let reached = pull >= PULL_THRESHOLD;
-        if self.reached {
+        };
+        pull.amount = amount;
+        pull.holding = movement == Movement::Progress;
+        let reached = amount >= PULL_THRESHOLD;
+        if pull.reached {
             // Collapse on a peak-relative reverse, not down to the
             // threshold.
-            self.peak_pull = self.peak_pull.max(pull);
+            pull.peak = pull.peak.max(amount);
             let floor = PULL_THRESHOLD * RESET_REACHED_ON;
-            let reset_at = self.peak_pull - (self.peak_pull - floor) / REVERSE_EASE;
-            if pull < reset_at {
-                self.reached = false;
-                self.peak_pull = 0.;
+            let reset_at = pull.peak - (pull.peak - floor) / REVERSE_EASE;
+            if amount < reset_at {
+                pull.reached = false;
+                pull.peak = 0.;
                 self.start_expand(false, now);
             }
         } else if reached {
@@ -575,22 +646,24 @@ impl PullMachine {
             if self.dwell_due.is_none() && movement == Movement::Progress {
                 self.dwell_due = Some(now + ready_dwell_ms());
             }
-        } else if pull < PULL_THRESHOLD * RESET_REACHED_ON {
+        } else if amount < PULL_THRESHOLD * RESET_REACHED_ON {
             self.dwell_due = None;
         }
+        self.stage = Stage::Pulling(pull);
         self.push_indicator(now);
         if movement == Movement::Progress {
             return step;
         }
         self.dwell_due = None;
-        if !self.committed {
-            self.committed = true;
-            if self.reached && active {
+        if !pull.committed {
+            pull.committed = true;
+            self.stage = Stage::Pulling(pull);
+            if pull.reached && active {
                 step.release_ready = true;
                 return step;
             }
         }
-        if pull <= 0. {
+        if amount <= 0. {
             self.reset(true, now);
         }
         step
@@ -600,28 +673,16 @@ impl PullMachine {
     /// `animated`.
     pub fn reset(&mut self, animated: bool, now: u64) {
         self.expand = Tween::still(0.);
-        self.expand_pending = false;
+        self.expand_run = ExpandRun::Settled;
         self.dwell_due = None;
-        self.pulling = false;
-        self.holding = false;
-        self.committed = false;
-        self.jumping = false;
-        self.reached = false;
-        self.peak_pull = 0.;
-        self.pull = 0.;
-        self.expand_to = false;
-        self.has_next = false;
+        self.stage = Stage::Idle;
         self.effective = 0.;
         // Indicator::hideNow.
-        self.shown = false;
-        self.ready = false;
         self.release = Tween::still(0.);
         self.bounce = Tween::still(1.);
         if animated {
             self.toggle_hint(false, now);
         } else {
-            self.hint_on = false;
-            self.hint_ready = false;
             self.panel = Tween::still(0.);
             self.hint_release = Tween::still(0.);
         }
@@ -638,7 +699,6 @@ impl PullMachine {
 
     fn start_expand(&mut self, ready: bool, now: u64) {
         let from = self.expand.value(now);
-        self.expand_to = ready;
         self.expand = Tween::start(
             from,
             if ready { 1. } else { 0. },
@@ -650,18 +710,18 @@ impl PullMachine {
                 Ease::SineInOut
             },
         );
-        self.expand_pending = true;
+        self.expand_run = ExpandRun::Running;
     }
 
     /// `PullToNextChannel::pushIndicator`.
     fn push_indicator(&mut self, now: u64) {
         let expand = self.expand.value(now);
-        self.effective = MAX_HEIGHT.min(self.pull + expand * (EXPAND - PULL_THRESHOLD));
+        let pull = self.pull();
+        self.effective = MAX_HEIGHT.min(pull.amount + expand * (EXPAND - PULL_THRESHOLD));
         // Indicator::setProgress.
-        let ready = self.reached;
-        if self.ready != ready {
+        let ready = pull.reached;
+        if self.indicator_ready() != ready {
             let from = self.release.value(now);
-            self.ready = ready;
             self.release = Tween::start(
                 from,
                 if ready { 1. } else { 0. },
@@ -681,13 +741,11 @@ impl PullMachine {
                 self.bounce = Tween::start(0., 1., now, BOUNCE_MS, Ease::Linear);
             }
         }
-        self.shown = self.effective > 0.;
         // HintOverlay::setData.
-        let visible = self.holding && self.pull > 0.;
-        self.toggle_hint(visible && self.has_next, now);
-        if self.hint_ready != ready {
+        let visible = pull.holding && pull.amount > 0.;
+        self.toggle_hint(visible && pull.has_next, now);
+        if self.hint_ready() != ready {
             let from = self.hint_release.value(now);
-            self.hint_ready = ready;
             self.hint_release = Tween::start(
                 from,
                 if ready { 1. } else { 0. },
@@ -708,11 +766,10 @@ impl PullMachine {
 
     /// `HintOverlay::toggle`.
     fn toggle_hint(&mut self, visible: bool, now: u64) {
-        if self.hint_on == visible {
+        if self.hint_on() == visible {
             return;
         }
         let from = self.panel.value(now);
-        self.hint_on = visible;
         self.panel = Tween::start(
             from,
             if visible { 1. } else { 0. },
@@ -724,12 +781,12 @@ impl PullMachine {
 
     /// The indicator to draw, if any (`Indicator::paintEvent`).
     pub fn indicator(&self, now: u64) -> Option<IndicatorState> {
-        if !self.shown || self.effective <= 1. {
+        if self.effective <= 1. {
             return None;
         }
         Some(IndicatorState {
             offset: self.effective,
-            ready: self.ready,
+            ready: self.indicator_ready(),
             release: self.release.value(now),
             bounce_offset: -bounce_progress(self.bounce.value(now)) * BOUNCE,
         })

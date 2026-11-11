@@ -230,7 +230,7 @@ fn main_window_on_activation(
     }
     let Ok((call, chat_window)) = view.read_with(cx, |app, _| {
         (
-            app.calls.window.or(app.group_call.window),
+            app.calls.window.handle().or(app.group_call.window.handle()),
             app.windows.any_open(),
         )
     }) else {
@@ -344,7 +344,7 @@ impl super::QuillApp {
                 session.auth,
                 quill::telegram::envelope::AuthorizationState::Ready
             )
-        }) || !self.background.clients.is_empty()
+        }) || !self.background.clients().is_empty()
     }
 }
 

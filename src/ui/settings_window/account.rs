@@ -212,7 +212,8 @@ impl QuillApp {
                             IconName::LogOut,
                             tr(keys::Q_PREFS_LOG_OUT),
                             cx.listener(|this, _, _, cx| {
-                                this.settings.log_out_confirm = true;
+                                this.settings
+                                    .set_box(crate::ui::settings_state::SettingsBox::LogOut, true);
                                 this.open_box(crate::ui::shell::DialogKind::LogOut);
                                 cx.notify();
                             }),
@@ -275,7 +276,6 @@ impl QuillApp {
                             tr(keys::Q_PREFS_DELETE_SYNCED_CONTACTS),
                             cx.listener(|this, _, _, cx| {
                                 this.open_group_confirm(
-                                    quill::ids::ChatId(0),
                                     crate::ui::GroupConfirmAction::DeleteSyncedContacts,
                                     cx,
                                 );

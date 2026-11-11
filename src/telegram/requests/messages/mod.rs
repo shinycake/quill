@@ -188,10 +188,13 @@ pub fn format_entity_json(entity: &ComposerEntity) -> Value {
 pub fn message_send_options(options: &SendOptions) -> Value {
     let scheduling_state = match options.scheduling {
         ComposerScheduling::None => Value::Null,
-        ComposerScheduling::SendAtDate(send_date) => json!({
+        ComposerScheduling::SendAtDate {
+            date,
+            repeat_period,
+        } => json!({
             "@type": "messageSchedulingStateSendAtDate",
-            "send_date": send_date as i32,
-            "repeat_period": options.schedule_repeat_period.max(0),
+            "send_date": date as i32,
+            "repeat_period": repeat_period.max(0),
         }),
         ComposerScheduling::SendWhenOnline => {
             json!({"@type": "messageSchedulingStateSendWhenOnline"})
@@ -715,10 +718,10 @@ pub fn forward_messages_to_topic(
     let (chat_id, topic_id) = target;
     // TDLib takes a repeat period only when one message is forwarded.
     let options = &SendOptions {
-        schedule_repeat_period: if message_ids.len() == 1 {
-            options.schedule_repeat_period
+        scheduling: if message_ids.len() == 1 {
+            options.scheduling
         } else {
-            0
+            options.scheduling.repeating(0)
         },
         ..*options
     };
@@ -868,9 +871,9 @@ pub fn edit_message_scheduling_state(
 ) -> String {
     let scheduling_state = match scheduling {
         ComposerScheduling::None => Value::Null,
-        ComposerScheduling::SendAtDate(send_date) => json!({
+        ComposerScheduling::SendAtDate { date, .. } => json!({
             "@type": "messageSchedulingStateSendAtDate",
-            "send_date": send_date as i32,
+            "send_date": date as i32,
             "repeat_period": 0,
         }),
         ComposerScheduling::SendWhenOnline => {

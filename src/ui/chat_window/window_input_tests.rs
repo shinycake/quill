@@ -160,7 +160,7 @@ fn each_saved_view_has_its_own_history_key(cx: &mut TestAppContext) {
             return scopes;
         };
         // The open chat becomes Saved Messages.
-        session.my_user_id = session.open_chat.map(|chat| chat.0);
+        session.my_user_id = session.open_chat_id().map(|chat| chat.0);
         scopes.push(app.saved_view_scope());
         for topic_id in [5, 6] {
             if let Some(session) = app.demo_session.as_mut() {
@@ -180,7 +180,6 @@ fn each_saved_view_has_its_own_history_key(cx: &mut TestAppContext) {
                         emoji: emoji.to_string(),
                     },
                     history: TopicHistory::default(),
-                    loaded: true,
                     page: quill::state::SavedPage::Idle,
                 });
             }

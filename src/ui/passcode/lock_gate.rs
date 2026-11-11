@@ -134,7 +134,7 @@ impl QuillApp {
             app.dismiss_context_menus(cx);
             // A held press on a history row never sees its release behind
             // the lock screen: its drag ends here, and its poll loop with it.
-            app.message_ui.selection_drag = None;
+            app.message_ui.selection_drag.clear();
             // And its inline clips: a locked chat window runs no frame
             // upkeep, so a round video playing there kept its sound.
             app.players.inline_videos.leave_window(app.windows.scope);
@@ -174,7 +174,7 @@ impl QuillApp {
         self.close_cameras_for_lock(cx);
         // A key capture would take the first key of the passcode as a
         // binding: Settings > Shortcuts and the push-to-talk key.
-        self.preferences.keybinding_capture = None;
+        self.preferences.keybinding.end();
         self.group_call.ptt_capture = false;
         // Now Playing names the sender or the song: the OS controls go off.
         self.publish_now_playing();

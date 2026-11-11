@@ -30,7 +30,10 @@ impl QuillApp {
     /// fields from the form's `saved_order_info` (schema:4720) when present.
     pub(super) fn open_payment_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut dialog = PaymentDialog::new(window, cx);
-        if let Some(form) = self.session().and_then(|s| s.payments.form.clone()) {
+        if let Some(form) = self
+            .session()
+            .and_then(|s| s.payments.checkout.form().cloned())
+        {
             dialog.prefill_from_form(&form, window, cx);
         }
         self.payments.dialog = Some(dialog);
@@ -45,7 +48,7 @@ impl QuillApp {
         // A giveaway that was paid is paid: its form closes with the
         // checkout, so Start cannot pay for it a second time.
         let paid_giveaway = self.session().is_some_and(|s| {
-            s.payments.form_paid
+            s.payments.checkout.is_paid()
                 && s.payments
                     .request
                     .as_ref()
@@ -114,13 +117,13 @@ impl QuillApp {
         session: &Session,
         cx: &mut Context<Self>,
     ) -> Div {
-        if dialog.country_box.is_some()
+        if dialog.country_box().is_some()
             && let Some(view) =
                 self.country_box_view(CountryHost::Payment, tr(keys::PAYMENTS_ADDRESS_COUNTRY), cx)
         {
             return body.child(view);
         }
-        if let Some(card_form) = &dialog.card_form {
+        if let Some(card_form) = dialog.card_form() {
             return body.child(self.card_form_view(card_form, cx));
         }
         let total = price_parts_total(&invoice.price_parts);
@@ -367,14 +370,16 @@ impl QuillApp {
                     .order_info
                     .validated_for(&typed_order)
                     .is_some();
-            let creds_ok = match &dialog.credential_choice {
-                PaymentCredentialChoice::Saved(_) => true,
-                PaymentCredentialChoice::NewCard => {
-                    dialog.new_card.is_some() || self.can_enter_new_card()
+            let creds_ok = match &dialog.method {
+                PaymentMethod::Saved { .. } => true,
+                PaymentMethod::NoCard
+                | PaymentMethod::NewCard(_)
+                | PaymentMethod::NeedsPassword(_) => {
+                    dialog.method.card().is_some() || self.can_enter_new_card()
                 }
             };
             // The password prompt is tdesktop's modal box: answer it first.
-            terms_ok && order_ok && creds_ok && !dialog.password_prompt
+            terms_ok && order_ok && creds_ok && !dialog.method.needs_password()
         };
         let pay = Button::new("p1-payment-pay")
             .label(tr_with(
@@ -387,7 +392,7 @@ impl QuillApp {
             .primary();
         body = body.child(if session.payments.checkout_sending() {
             pay.label(tr(keys::Q_MONEY_PROCESSING)).disabled(true)
-        } else if session.payments.form_paid {
+        } else if session.payments.checkout.is_paid() {
             pay.label(tr(keys::PAYMENTS_DATE_LABEL)).disabled(true)
         } else if can_pay {
             pay.on_click(cx.listener(|this, _, window, cx| {
@@ -470,11 +475,11 @@ impl QuillApp {
     pub(super) fn submit_payment(&mut self, cx: &mut Context<Self>) {
         let snapshot = self.session().map(|session| {
             (
-                session.payments.form.clone(),
+                session.payments.checkout.form().cloned(),
                 session.payments.request.clone(),
                 session.payments.order_info.clone(),
                 session.payments.shipping_id.clone(),
-                session.payments.form_paid,
+                session.payments.checkout.is_paid(),
             )
         });
         let dialog = self.payments.dialog.as_ref();
@@ -490,7 +495,7 @@ impl QuillApp {
         let PaymentFormTypeData::Regular(regular) = &form.form_type else {
             return;
         };
-        if dialog.password_prompt {
+        if dialog.method.needs_password() {
             return;
         }
         let invoice = &regular.invoice;
@@ -508,13 +513,15 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        let credentials = match (&dialog.credential_choice, &dialog.new_card) {
-            (PaymentCredentialChoice::Saved(id), _) => input_credentials_saved(id),
-            (PaymentCredentialChoice::NewCard, Some(card)) => input_credentials_new(
-                card.credentials.data(),
-                card.save && self.checkout_can_save_credentials(),
-            ),
-            (PaymentCredentialChoice::NewCard, None) => return,
+        let credentials = match &dialog.method {
+            PaymentMethod::Saved { id, .. } => input_credentials_saved(id),
+            PaymentMethod::NewCard(card) | PaymentMethod::NeedsPassword(card) => {
+                input_credentials_new(
+                    card.credentials.data(),
+                    card.save && self.checkout_can_save_credentials(),
+                )
+            }
+            PaymentMethod::NoCard => return,
         };
         let order_info_id = validated
             .map(|validated| validated.order_info_id.as_str())
@@ -810,7 +817,7 @@ crate::ui::shell::register_dialogs! {
     // management dialog.
     Subscriptions => DialogSpec::new(
         3700,
-        |app| app.session().is_some_and(|s| s.payments.subscriptions_open),
+        |app| app.session().is_some_and(|s| s.payments.subscriptions.is_open()),
         QuillApp::build_subscriptions_dialog,
     )
     .close(|app, _, cx| app.close_subscriptions(cx)),

@@ -73,7 +73,7 @@ fn open_stream(
     frames(&mut main);
     frames(&mut main);
     let window = app
-        .read_with(&main, |app, _| app.group_call.window)
+        .read_with(&main, |app, _| app.group_call.window.handle())
         .expect("the stream window opens");
     let mut call = VisualTestContext::from_window(window, cx);
     frames(&mut call);
@@ -175,7 +175,7 @@ fn the_admin_sees_the_server_hint_and_an_ended_stream_closes(cx: &mut TestAppCon
     });
     frames(&mut main);
     assert!(
-        app.read_with(&main, |app, _| app.group_call.window.is_none()),
+        app.read_with(&main, |app, _| app.group_call.window.handle().is_none()),
         "the window closes with the stream"
     );
     assert_eq!(
@@ -217,7 +217,7 @@ fn leaving_then_reopening_the_stream_joins_it_again(cx: &mut TestAppContext) {
         app.sync_group_call_window(cx);
     });
     frames(main);
-    assert!(app.read_with(main, |app, _| app.group_call.window.is_none()));
+    assert!(app.read_with(main, |app, _| app.group_call.window.handle().is_none()));
     // Right after Leave the call comes back unjoined (updateGroupCall
     // with is_joined false): nothing joins it by itself.
     track_unjoined(&app, main);
@@ -230,7 +230,7 @@ fn leaving_then_reopening_the_stream_joins_it_again(cx: &mut TestAppContext) {
     frames(main);
     assert!(joined(&app, main), "reopening joins again");
     assert!(
-        app.read_with(main, |app, _| app.group_call_screen.stream_join.is_none()),
+        app.read_with(main, |app, _| app.group_call_screen.stream_wish().is_none()),
         "the wish is used once"
     );
     // Leave and reopen once more: it still joins.
@@ -255,7 +255,7 @@ fn an_unjoined_stream_offers_join(cx: &mut TestAppContext) {
     frames(&mut main);
     track_unjoined(&app, &mut main);
     let window = app
-        .read_with(&main, |app, _| app.group_call.window)
+        .read_with(&main, |app, _| app.group_call.window.handle())
         .expect("the unjoined stream's window");
     let mut call = VisualTestContext::from_window(window, cx);
     frames(&mut call);
@@ -449,14 +449,14 @@ fn a_wish_for_a_call_that_another_call_replaced_is_dropped(cx: &mut TestAppConte
         app.note_stream_join_intent(StreamJoinIntent::Call(999));
         app.sync_group_call_window(cx);
     });
-    assert!(app.read_with(main, |app, _| app.group_call_screen.stream_join.is_some()));
+    assert!(app.read_with(main, |app, _| app.group_call_screen.stream_wish().is_some()));
     // Another call takes its place: the wish goes.
     app.update(main, |app, cx| {
         let session = app.demo_session.as_mut().expect("demo");
         session.calls.active_group_call = Some(ActiveGroupCall::fresh(777));
         app.sync_group_call_window(cx);
     });
-    assert!(app.read_with(main, |app, _| app.group_call_screen.stream_join.is_none()));
+    assert!(app.read_with(main, |app, _| app.group_call_screen.stream_wish().is_none()));
 }
 
 #[gpui_kit::test]
@@ -468,7 +468,7 @@ fn a_join_that_never_lands_stops_waiting(cx: &mut TestAppContext) {
     });
     track_unjoined(&app, &mut main);
     let window = app
-        .read_with(&main, |app, _| app.group_call.window)
+        .read_with(&main, |app, _| app.group_call.window.handle())
         .expect("the unjoined stream's window");
     let mut call = VisualTestContext::from_window(window, cx);
     let error = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
@@ -478,13 +478,13 @@ fn a_join_that_never_lands_stops_waiting(cx: &mut TestAppContext) {
     };
     // The timer runs out with the call still unjoined.
     app.update(&mut call, |app, cx| {
-        app.group_call_screen.stream_joining = Some(
+        app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
             crate::ui::group_call_state::StreamJoining::new(CALL, Task::ready(())),
         );
         app.stream_join_ended(CALL, cx);
     });
     assert!(app.read_with(&call, |app, _| {
-        app.group_call_screen.stream_joining.is_none()
+        app.group_call_screen.joining_call().is_none()
     }));
     assert!(error(&app, &mut call).is_some(), "the failure shows");
     // The native connect fails without a join error: the next sync stops
@@ -493,18 +493,52 @@ fn a_join_that_never_lands_stops_waiting(cx: &mut TestAppContext) {
         let session = app.demo_session.as_mut().expect("demo");
         session.calls.group_call_error = None;
         if let Some(active) = session.calls.active_group_call.as_mut() {
-            active.transport_error = Some("connect failed".into());
+            active.transport.fail("connect failed");
         }
-        app.group_call_screen.stream_joining = Some(
+        app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
             crate::ui::group_call_state::StreamJoining::new(CALL, Task::ready(())),
         );
         app.sync_group_call_window(cx);
     });
     frames(&mut call);
     assert!(app.read_with(&call, |app, _| {
-        app.group_call_screen.stream_joining.is_none()
+        app.group_call_screen.joining_call().is_none()
     }));
     assert!(error(&app, &mut call).is_some());
+}
+
+/// Asking for another stream while a join is on its way keeps that join:
+/// the Join button stays hidden and its failure still shows.
+#[gpui_kit::test]
+fn a_new_wish_keeps_the_join_on_its_way(cx: &mut TestAppContext) {
+    let (app, mut main, _call) = open_stream(cx, StreamState::Live);
+    app.update(&mut main, |app, cx| {
+        app.leave_active_group_call(cx);
+        app.sync_group_call_window(cx);
+    });
+    track_unjoined(&app, &mut main);
+    app.update(&mut main, |app, _| {
+        app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
+            crate::ui::group_call_state::StreamJoining::new(CALL, Task::ready(())),
+        );
+        app.note_stream_join_intent(StreamJoinIntent::Call(999));
+    });
+    app.read_with(&main, |app, _| {
+        assert_eq!(app.group_call_screen.joining_call(), Some(CALL));
+        assert!(app.group_call_screen.stream_wish().is_some());
+    });
+    app.update(&mut main, |app, cx| app.stream_join_ended(CALL, cx));
+    app.read_with(&main, |app, _| {
+        assert_eq!(app.group_call_screen.joining_call(), None);
+        assert!(
+            app.group_call_screen.stream_wish().is_some(),
+            "the wish stays"
+        );
+        assert!(
+            app.session()
+                .is_some_and(|s| s.calls.group_call_error.is_some())
+        );
+    });
 }
 
 /// A screen share that failed earlier is not a failed join: the join on
@@ -518,7 +552,7 @@ fn a_failed_share_does_not_fail_the_join(cx: &mut TestAppContext) {
     });
     track_unjoined(&app, &mut main);
     let window = app
-        .read_with(&main, |app, _| app.group_call.window)
+        .read_with(&main, |app, _| app.group_call.window.handle())
         .expect("the unjoined stream's window");
     let mut call = VisualTestContext::from_window(window, cx);
     app.update(&mut call, |app, cx| {
@@ -527,7 +561,7 @@ fn a_failed_share_does_not_fail_the_join(cx: &mut TestAppContext) {
             active.screen_share_error = Some("screen share failed".into());
         }
         // Join was pressed; TDLib has not answered yet.
-        app.group_call_screen.stream_joining = Some(
+        app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
             crate::ui::group_call_state::StreamJoining::new(CALL, Task::ready(())),
         );
         app.sync_group_call_window(cx);
@@ -613,7 +647,7 @@ fn the_live_keys_mute_and_toggle_full_screen(cx: &mut TestAppContext) {
     frames(call);
     assert!(!full(call), "Esc leaves full screen");
     assert!(
-        app.read_with(call, |app, _| app.group_call.window.is_some()),
+        app.read_with(call, |app, _| app.group_call.window.handle().is_some()),
         "and does not close the window"
     );
 }

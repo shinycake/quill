@@ -21,12 +21,26 @@ use quill::main_menu::{Entry, Step, entries, matches_filter, step};
 /// Tiles per grid row.
 const COLUMNS: usize = 3;
 
+/// Closed, or open with the tile Enter opens (moved with the arrow keys;
+/// `None` until an arrow is pressed or the filter has text).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum MenuStage {
+    Closed,
+    Open { highlight: Option<usize> },
+}
+
+impl MenuStage {
+    fn highlight(self) -> Option<usize> {
+        match self {
+            Self::Open { highlight } => highlight,
+            Self::Closed => None,
+        }
+    }
+}
+
 pub(crate) struct MainMenuUi {
-    pub(super) open: bool,
+    pub(super) stage: MenuStage,
     pub(super) filter: Entity<InputState>,
-    /// The tile Enter opens, moved with the arrow keys; `None` until an
-    /// arrow is pressed or the filter has text.
-    pub(super) highlight: Option<usize>,
 }
 
 impl MainMenuUi {
@@ -38,16 +52,17 @@ impl MainMenuUi {
             |this, state, event: &InputEvent, _window, cx| {
                 if matches!(event, InputEvent::Change) {
                     let typed = !state.read(cx).value().trim().is_empty();
-                    this.main_menu.highlight = typed.then_some(0);
+                    if let MenuStage::Open { highlight } = &mut this.main_menu.stage {
+                        *highlight = typed.then_some(0);
+                    }
                     cx.notify();
                 }
             },
         )
         .detach();
         Self {
-            open: false,
+            stage: MenuStage::Closed,
             filter,
-            highlight: None,
         }
     }
 }
@@ -127,11 +142,14 @@ impl QuillApp {
     }
 
     fn set_main_menu_open(&mut self, open: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if self.main_menu.open == open {
+        if matches!(self.main_menu.stage, MenuStage::Open { .. }) == open {
             return;
         }
-        self.main_menu.open = open;
-        self.main_menu.highlight = None;
+        self.main_menu.stage = if open {
+            MenuStage::Open { highlight: None }
+        } else {
+            MenuStage::Closed
+        };
         if open {
             self.main_menu
                 .filter
@@ -157,12 +175,17 @@ impl QuillApp {
         let tiles = self.main_menu_tiles(cx);
         match move_to {
             Some(dir) => {
-                self.main_menu.highlight =
-                    step(self.main_menu.highlight, dir, tiles.len(), COLUMNS);
+                if let MenuStage::Open { highlight } = &mut self.main_menu.stage {
+                    *highlight = step(*highlight, dir, tiles.len(), COLUMNS);
+                }
                 cx.notify();
             }
             None => {
-                let Some(entry) = self.main_menu.highlight.and_then(|i| tiles.get(i).copied())
+                let Some(entry) = self
+                    .main_menu
+                    .stage
+                    .highlight()
+                    .and_then(|i| tiles.get(i).copied())
                 else {
                     return;
                 };
@@ -177,7 +200,7 @@ impl QuillApp {
         let content_view = view.clone();
         let focus = self.main_menu.filter.focus_handle(cx);
         let popover = Popover::new("main-menu-popover")
-            .open(self.main_menu.open)
+            .open(matches!(self.main_menu.stage, MenuStage::Open { .. }))
             .on_open_change(move |open, window, cx| {
                 let open = *open;
                 let _ = view.update(cx, |this, cx| this.set_main_menu_open(open, window, cx));
@@ -204,7 +227,7 @@ impl QuillApp {
 
     fn main_menu_panel(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let tiles = self.main_menu_tiles(cx);
-        let highlight = self.main_menu.highlight;
+        let highlight = self.main_menu.stage.highlight();
         let mut grid = div().grid().grid_cols(COLUMNS as u16).gap_1();
         for (i, entry) in tiles.iter().copied().enumerate() {
             grid = grid.child(self.main_menu_tile(entry, highlight == Some(i), cx));

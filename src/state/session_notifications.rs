@@ -122,7 +122,7 @@ impl Session {
             last_read_inbox_message_id: Some(chat.last_read_inbox_message_id),
             // view-in-place: the main window's chat while it is active; a
             // chat window's is `shown_in_active_window`.
-            open_chat: self.open_chat,
+            open_chat: self.open_chat_id(),
             app_active: self.app_active,
             shown_in_active_window: self.active_window_chats.contains(&message.chat_id),
             view: self.settings.notify_view,
@@ -194,9 +194,7 @@ impl Session {
         sound: Option<notify::NotificationSoundKind>,
         photo: Option<crate::ids::FileId>,
     ) {
-        self.settings
-            .shown_notification_chats
-            .insert(notification.chat_id);
+        self.settings.notified.mark_shown(notification.chat_id);
         notify::coalesce_notification_with_sound(
             &mut self.settings.pending_notifications,
             notification,
@@ -212,11 +210,7 @@ impl Session {
         self.settings
             .pending_notifications
             .retain(|queued| queued.chat_id != chat_id);
-        if self.settings.shown_notification_chats.remove(&chat_id)
-            && !self.settings.pending_notification_clears.contains(&chat_id)
-        {
-            self.settings.pending_notification_clears.push(chat_id);
-        }
+        self.settings.notified.clear(chat_id);
     }
 
     /// A new unread reaction on one of our messages: notify when the
@@ -256,7 +250,7 @@ impl Session {
             chat_muted: self.effective_muted(chat),
             app_active: self.app_active,
             // view-in-place: as for messages above.
-            open_chat: self.open_chat,
+            open_chat: self.open_chat_id(),
             shown_in_active_window: self.active_window_chats.contains(&chat_id),
         });
         if let Some(notification) = notification {

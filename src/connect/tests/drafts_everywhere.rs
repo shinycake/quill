@@ -119,14 +119,7 @@ impl Drop for Fixture {
 }
 
 fn text_draft(text: &str) -> ChatDraft {
-    ChatDraft {
-        text: text.into(),
-        rich: None,
-        item: Default::default(),
-        reply_to_message_id: None,
-        quote: None,
-        suggested_post: None,
-    }
+    ChatDraft::text_only(text)
 }
 
 #[test]
@@ -411,7 +404,7 @@ fn a_comments_thread_drafts_with_message_topic_thread() {
         ),
     );
     f.driver.switch_to_thread_chat().unwrap();
-    assert_eq!(f.driver.session.open_chat, Some(ChatId(14)));
+    assert_eq!(f.driver.session.open_chat_id(), Some(ChatId(14)));
     assert_eq!(
         f.driver.session.open_draft_topic(ChatId(14)),
         DraftTopic::Thread(501)

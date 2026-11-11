@@ -54,15 +54,28 @@ pub(super) fn section_header(title: &'static str) -> impl IntoElement {
         .child(title)
 }
 
+/// Where the scroll to the storage list stands. `placed` is the page's
+/// vertical offset the last scroll left (set a frame after it).
+enum StorageScrollStage {
+    Idle,
+    /// A scroll to the list is due on the next frame.
+    Requested,
+    /// The rows above the list were still loading at the last scroll: it
+    /// goes again once they arrive, unless the user scrolled meanwhile
+    /// (then it is `Idle`).
+    WaitingSettled {
+        placed: Rc<Cell<Option<Pixels>>>,
+    },
+    /// The list was scrolled to with the rows above it settled.
+    Placed {
+        placed: Rc<Cell<Option<Pixels>>>,
+    },
+}
+
 pub(crate) struct StorageScroll {
     pub(in crate::ui) page: ScrollHandle,
     usage: ScrollAnchor,
-    pending: bool,
-    /// The rows above the list were still loading at the last scroll: it
-    /// goes again once they arrive, unless the user scrolled meanwhile.
-    until_settled: bool,
-    /// The page's vertical offset the last scroll left.
-    placed: Rc<Cell<Option<Pixels>>>,
+    stage: StorageScrollStage,
 }
 
 impl StorageScroll {
@@ -72,9 +85,7 @@ impl StorageScroll {
         Self {
             page,
             usage,
-            pending: false,
-            until_settled: false,
-            placed: Rc::default(),
+            stage: StorageScrollStage::Idle,
         }
     }
 }
@@ -82,7 +93,7 @@ impl StorageScroll {
 impl QuillApp {
     pub(crate) fn open_local_storage(&mut self, cx: &mut Context<Self>) {
         self.open_data_storage(cx);
-        self.settings.storage_scroll.pending = true;
+        self.settings.storage_scroll.stage = StorageScrollStage::Requested;
     }
 
     pub(in crate::ui) fn ensure_storage_scroll(
@@ -90,22 +101,39 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let settled = self.session().is_none_or(|session| {
-            session.settings.data_storage.seeded || !session.settings.auto_download_presets_loading
-        });
+        let settled = self
+            .session()
+            .is_none_or(|session| !session.settings.data_storage.seeded.is_in_flight());
         let scroll = &mut self.settings.storage_scroll;
-        let user_moved = scroll
-            .placed
-            .get()
-            .is_some_and(|placed| placed != scroll.page.offset().y);
+        let offset = scroll.page.offset().y;
+        let user_moved = match &scroll.stage {
+            StorageScrollStage::WaitingSettled { placed }
+            | StorageScrollStage::Placed { placed } => {
+                placed.get().is_some_and(|placed| placed != offset)
+            }
+            StorageScrollStage::Idle | StorageScrollStage::Requested => false,
+        };
         if user_moved {
-            scroll.until_settled = false;
+            scroll.stage = StorageScrollStage::Idle;
         }
-        let again = scroll.until_settled && settled;
-        if std::mem::take(&mut scroll.pending) || again {
-            scroll.until_settled = !settled;
+        let due = match &scroll.stage {
+            StorageScrollStage::Requested => true,
+            StorageScrollStage::WaitingSettled { .. } => settled,
+            StorageScrollStage::Idle | StorageScrollStage::Placed { .. } => false,
+        };
+        if due {
+            let placed: Rc<Cell<Option<Pixels>>> = Rc::default();
+            scroll.stage = if settled {
+                StorageScrollStage::Placed {
+                    placed: placed.clone(),
+                }
+            } else {
+                StorageScrollStage::WaitingSettled {
+                    placed: placed.clone(),
+                }
+            };
             scroll.usage.scroll_to(window, cx);
-            let (placed, page) = (scroll.placed.clone(), scroll.page.clone());
+            let page = scroll.page.clone();
             // Runs after the anchor's own next-frame scroll. The new offset
             // paints nothing on its own.
             window.on_next_frame(move |window, _| {
@@ -124,14 +152,14 @@ impl QuillApp {
         self.forget_storage_sliders();
         self.settings.storage_confirm = None;
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.settings.storage_freed = None;
+            live.driver.session.settings.reset_storage_freed();
             let _ = live.driver.maybe_fetch_storage_statistics();
             let _ = live.driver.fetch_auto_download_presets();
             let _ = live.driver.fetch_network_statistics();
         }
         self.privacy.extra.network_reset = Default::default();
         if let Some(demo) = self.demo_session.as_mut() {
-            demo.settings.storage_freed = None;
+            demo.settings.reset_storage_freed();
             if demo.settings.privacy_data.network.data().is_none() {
                 demo.settings.privacy_data.network =
                     quill::state::fetch::Fetch::Ready(super::data_extra::demo_network_usage());
@@ -211,7 +239,7 @@ impl QuillApp {
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             *demo.settings.data_storage.for_network_mut(network) = draft;
-            demo.settings.data_storage.seeded = true;
+            demo.settings.data_storage.seeded = quill::data_settings::Seed::Seeded;
             self.settings.data_storage_editor = StorageEditor::Closed;
         }
         cx.notify();
@@ -231,7 +259,10 @@ impl QuillApp {
     pub(crate) fn arrive_data_storage(&mut self) {
         self.forget_storage_sliders();
         if let Some(session) = self.session_mut() {
-            session.settings.data_storage_error = None;
+            session.settings.data_storage_save.clear_error();
+            if session.settings.storage_clear.failed().is_some() {
+                session.settings.storage_clear = quill::state::StorageClear::Idle;
+            }
         }
     }
 
@@ -240,7 +271,7 @@ impl QuillApp {
     /// (`ensure_storage_sliders`). An account switch leaves no page, so
     /// the page's arrival drops them too.
     pub(crate) fn forget_storage_sliders(&mut self) {
-        let sliders = &mut self.preferences.index_sliders;
+        let sliders = &mut self.index_sliders;
         sliders.remove(StepSlider::StorageSize);
         sliders.remove(StepSlider::StorageKeep);
     }
@@ -254,7 +285,7 @@ impl QuillApp {
         // Failures surface here, never as toasts (the S3 pattern).
         if let Some(err) = session
             .as_ref()
-            .and_then(|s| s.settings.data_storage_error.clone())
+            .and_then(|s| s.settings.data_storage_error().map(str::to_owned))
         {
             body = body.child(
                 div()
@@ -291,8 +322,8 @@ impl QuillApp {
         // The size caps are in the per-network editor.
         let prefs = session.as_ref().map(|s| &s.settings.data_storage);
         let mut downloads: Vec<AnyElement> = Vec::new();
-        if !prefs.is_some_and(|p| p.seeded) {
-            let loading = session.is_some_and(|s| s.settings.auto_download_presets_loading);
+        if !prefs.is_some_and(|p| p.seeded.is_seeded()) {
+            let loading = prefs.is_some_and(|p| p.seeded.is_in_flight());
             downloads.push(
                 self.setting_spot(
                     &[
@@ -370,11 +401,27 @@ impl QuillApp {
         // --- Storage usage ---
         let stats = session
             .as_ref()
-            .and_then(|s| s.settings.storage_stats.clone());
-        let loading = session.is_some_and(|s| s.settings.storage_stats_loading);
+            .and_then(|s| s.settings.storage_stats.data().cloned());
+        let loading = session.is_some_and(|s| s.settings.storage_stats.is_loading());
+        let stats_error = session
+            .and_then(|s| s.settings.storage_stats.error())
+            .map(str::to_owned);
         let mut usage = div().flex().flex_col().gap_2().px_3().py_2();
         let has_stats = stats.is_some();
         usage = match stats {
+            None if stats_error.is_some() => usage
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().danger)
+                        .child(stats_error.unwrap_or_default()),
+                )
+                .child(
+                    Button::new("storage-usage-retry")
+                        .label(tr(keys::Q_MONEY_RETRY))
+                        .small()
+                        .on_click(cx.listener(|this, _, _, cx| this.refresh_storage_usage(cx))),
+                ),
             None => usage.child(
                 div()
                     .text_xs()
@@ -603,10 +650,7 @@ impl QuillApp {
                             .accessibility_label(title.to_string())
                             .on_click(cx.listener(move |this, &on, _, cx| {
                                 // Switching on resumes at the slider's step.
-                                let index = this
-                                    .preferences
-                                    .index_sliders
-                                    .index(StepSlider::DataCap(kind), cx);
+                                let index = this.index_sliders.index(StepSlider::DataCap(kind), cx);
                                 if let Some(draft) = this.settings.data_storage_editor.draft_mut() {
                                     draft.set_cap_enabled(kind, on);
                                     if let Some(index) = index.filter(|_| on) {

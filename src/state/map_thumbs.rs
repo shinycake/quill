@@ -149,7 +149,7 @@ impl Session {
     /// Places in the open chat whose tile was not asked for yet, with the
     /// chat (TDLib wants it for rate limiting).
     pub fn map_thumbs_to_request(&self) -> Vec<(MapKey, ChatId)> {
-        let Some(chat_id) = self.open_chat else {
+        let Some(chat_id) = self.open_chat_id() else {
             return Vec::new();
         };
         let Some(history) = self.histories.get(&chat_id.0) else {
@@ -170,7 +170,7 @@ impl Session {
     /// Tile files of the open chat that still need downloading.
     pub(crate) fn map_thumb_file_ids_to_download(&self) -> Vec<FileId> {
         let Some(history) = self
-            .open_chat
+            .open_chat_id()
             .and_then(|chat_id| self.histories.get(&chat_id.0))
         else {
             return Vec::new();

@@ -2,6 +2,7 @@
 //! paid send, the Messages price and Remove Fee. No Stars ever move: the
 //! demo session has no sender.
 
+use super::paid_messages_state::PriceSource;
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -48,7 +49,7 @@ fn a_paid_chat_asks_once_then_sends_with_the_price(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
         charge_in_chat(app, 25);
-        assert!(app.paid_send_waits(ChatId(11), "hello", cx));
+        assert!(app.paid_send_waits(ChatId(11), "hello", Default::default(), cx));
     });
     app.read_with(vcx, |app, _| {
         let confirm = &app.paid_messages.confirm.as_ref().expect("asks first").ask;
@@ -63,14 +64,14 @@ fn a_paid_chat_asks_once_then_sends_with_the_price(cx: &mut TestAppContext) {
         app.paid_messages.confirm = None;
     });
     app.update_in(vcx, |app, _, cx| {
-        assert!(!app.paid_send_waits(ChatId(11), "again", cx));
+        assert!(!app.paid_send_waits(ChatId(11), "again", Default::default(), cx));
     });
     // A lower price is covered, a higher one asks again.
     app.update_in(vcx, |app, _, cx| {
         charge_in_chat(app, 10);
-        assert!(!app.paid_send_waits(ChatId(11), "x", cx));
+        assert!(!app.paid_send_waits(ChatId(11), "x", Default::default(), cx));
         charge_in_chat(app, 30);
-        assert!(app.paid_send_waits(ChatId(11), "x", cx));
+        assert!(app.paid_send_waits(ChatId(11), "x", Default::default(), cx));
     });
 }
 
@@ -83,18 +84,18 @@ fn dont_ask_again_stays_with_its_confirmation(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
         charge_in_chat(app, 25);
-        assert!(app.paid_send_waits(ChatId(11), "hello", cx));
+        assert!(app.paid_send_waits(ChatId(11), "hello", Default::default(), cx));
         app.paid_messages.confirm_trust = Some((11, 25));
         assert!(app.paid_confirm_trusted());
         app.cancel_paid_confirm(cx);
         assert!(app.paid_messages.confirm_trust.is_none());
-        assert!(app.paid_send_waits(ChatId(11), "hello", cx));
+        assert!(app.paid_send_waits(ChatId(11), "hello", Default::default(), cx));
         assert!(!app.paid_confirm_trusted(), "the next box opens unticked");
         // Ticked for 25, then the price on screen becomes 30.
         app.paid_messages.confirm_trust = Some((11, 25));
         app.paid_messages.confirm = None;
         charge_in_chat(app, 30);
-        assert!(app.paid_send_waits(ChatId(11), "hello", cx));
+        assert!(app.paid_send_waits(ChatId(11), "hello", Default::default(), cx));
         app.paid_messages.confirm_trust = Some((11, 25));
         assert!(
             !app.paid_confirm_trusted(),
@@ -110,7 +111,7 @@ fn free_chats_never_wait(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, _, cx| {
         let session = app.demo_session.as_mut().unwrap();
         session.open_chat(ChatId(11));
-        assert!(!app.paid_send_waits(ChatId(11), "hi", cx));
+        assert!(!app.paid_send_waits(ChatId(11), "hi", Default::default(), cx));
         assert!(app.paid_messages.confirm.is_none());
     });
 }
@@ -243,7 +244,11 @@ fn only_the_owner_of_a_channel_sees_direct_messages(cx: &mut TestAppContext) {
         );
         // Not the owner: no box opens from the row's action.
         assert!(!session.chat_is_owner(ChatId(13)));
-        session.chats.get_mut(&13).unwrap().my_member_status = Some(ChannelMemberStatus::Creator);
+        session
+            .chats
+            .get_mut(&13)
+            .unwrap()
+            .assume_member_status(Some(ChannelMemberStatus::Creator));
         app.open_direct_messages(ChatId(13), cx);
         let boxed = app.paid_messages.direct.as_ref().expect("opens");
         assert!(!boxed.enabled);
@@ -272,11 +277,19 @@ fn the_direct_messages_box_takes_the_price_when_it_arrives(cx: &mut TestAppConte
                 ..quill::state::SupergroupFullInfoData::default()
             },
         );
-        session.chats.get_mut(&13).unwrap().my_member_status = Some(ChannelMemberStatus::Creator);
+        session
+            .chats
+            .get_mut(&13)
+            .unwrap()
+            .assume_member_status(Some(ChannelMemberStatus::Creator));
         app.open_direct_messages(ChatId(13), cx);
         let boxed = app.paid_messages.direct.as_ref().expect("opens");
         assert!(boxed.enabled);
-        assert!(!boxed.seeded, "the price is still on its way");
+        assert_eq!(
+            boxed.source,
+            PriceSource::Default,
+            "the price is still on its way"
+        );
         let session = app.demo_session.as_mut().unwrap();
         session
             .payments
@@ -286,7 +299,7 @@ fn the_direct_messages_box_takes_the_price_when_it_arrives(cx: &mut TestAppConte
         app.seed_direct_messages_price(cx);
         let boxed = app.paid_messages.direct.as_ref().expect("still open");
         assert_eq!(boxed.price.price, 50);
-        assert!(boxed.seeded && !boxed.touched);
+        assert_eq!(boxed.source, PriceSource::Channel);
     });
 }
 
@@ -302,7 +315,11 @@ fn another_targets_save_does_not_close_the_direct_messages_box(cx: &mut TestAppC
     let vcx = &mut vcx;
     app.update_in(vcx, |app, window, cx| {
         let session = app.demo_session.as_mut().unwrap();
-        session.chats.get_mut(&13).unwrap().my_member_status = Some(ChannelMemberStatus::Creator);
+        session
+            .chats
+            .get_mut(&13)
+            .unwrap()
+            .assume_member_status(Some(ChannelMemberStatus::Creator));
         let supergroup = session.chat_supergroup(ChatId(13)).expect("demo channel");
         session.groups.supergroup_full_infos.insert(
             supergroup,

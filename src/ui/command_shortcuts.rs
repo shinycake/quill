@@ -19,6 +19,7 @@ use super::actions::{
     ToggleLinkPreview,
 };
 use super::app::QuillApp;
+use super::composer_sends::SendOnce;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::schedule::ScheduleKind;
@@ -40,7 +41,7 @@ impl QuillApp {
     /// The open chat when the viewer may write there (`canWriteMessage()`).
     pub(super) fn writable_open_chat(&self) -> Option<quill::ids::ChatId> {
         let session = self.session()?;
-        let chat = session.chats.get(&session.open_chat?.0)?;
+        let chat = session.chats.get(&session.open_chat_id()?.0)?;
         (chat.can_post() && !session.is_frozen()).then_some(chat.id)
     }
 
@@ -68,7 +69,7 @@ impl QuillApp {
         {
             return false;
         }
-        self.submit_from_send_button(window, cx);
+        self.submit_from_send_button(SendOnce::default(), window, cx);
         true
     }
 
@@ -86,9 +87,11 @@ impl QuillApp {
         {
             return false;
         }
-        self.composer_ui.send_silent_once = true;
-        self.submit_from_send_button(window, cx);
-        self.composer_ui.send_silent_once = false;
+        let once = SendOnce {
+            silent: true,
+            ..Default::default()
+        };
+        self.submit_from_send_button(once, window, cx);
         true
     }
 
@@ -171,7 +174,7 @@ impl QuillApp {
         if self.shortcut_blocked(window, cx) {
             return false;
         }
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|s| s.open_chat_id()) else {
             return false;
         };
         self.toggle_archive(chat_id, cx);
@@ -188,7 +191,7 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return false;
         };
-        let Some(chat_id) = session.open_chat else {
+        let Some(chat_id) = session.open_chat_id() else {
             return false;
         };
         let Some(ChatKind::Supergroup { supergroup_id, .. }) =

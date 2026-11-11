@@ -18,6 +18,75 @@ pub(super) enum ScrollGoal {
     ThreadRoot,
 }
 
+/// Where the open history is being taken: nothing, a goal the reader asked
+/// for that waits for its rows, or a landing that scrolled to its target
+/// and corrects after each paint. A newer aim replaces the older; the
+/// reader taking over the view ends only a landing.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) enum ScrollAim {
+    #[default]
+    Free,
+    Goal(ScrollGoal),
+    Landing(super::conversation::landing::Landing),
+}
+
+impl ScrollAim {
+    pub(super) fn goal(&self) -> Option<ScrollGoal> {
+        match *self {
+            Self::Goal(goal) => Some(goal),
+            Self::Free | Self::Landing(_) => None,
+        }
+    }
+
+    pub(super) fn landing(&self) -> Option<super::conversation::landing::Landing> {
+        match *self {
+            Self::Landing(landing) => Some(landing),
+            Self::Free | Self::Goal(_) => None,
+        }
+    }
+
+    /// The goal is reached or gone: the aim is free (a landing stays).
+    pub(super) fn take_goal(&mut self) -> Option<ScrollGoal> {
+        let goal = self.goal()?;
+        *self = Self::Free;
+        Some(goal)
+    }
+
+    /// The reader took over the view (a goal waiting for its rows stays).
+    pub(super) fn end_landing(&mut self) {
+        if matches!(self, Self::Landing(_)) {
+            *self = Self::Free;
+        }
+    }
+}
+
+/// Where the forum topic column stands in one window. `Peek` leaves when a
+/// chat is chosen from the list or the open chat stops being a forum;
+/// `Column` and `Hidden` are laid out again every frame
+/// (`forum_column_layout`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ForumColumnUi {
+    /// No topic column is on screen.
+    #[default]
+    Hidden,
+    /// The column is on screen, so the conversation shows a hint instead
+    /// of repeating the topic list.
+    Column,
+    /// On a narrow window the column replaces the chat list; the user
+    /// brought the list back until another chat opens.
+    Peek,
+}
+
+impl ForumColumnUi {
+    pub(crate) fn peeking(self) -> bool {
+        self == Self::Peek
+    }
+
+    pub(crate) fn on_screen(self) -> bool {
+        self == Self::Column
+    }
+}
+
 pub(crate) struct HistoryUi {
     /// kit Phase 3: message-history virtualization — scroller state with
     /// tail-following, owned by the app so prepend/append keep the anchor.
@@ -31,13 +100,10 @@ pub(crate) struct HistoryUi {
     /// list's paint (overdraw rows included); the history's own canvas
     /// turns them into `seen`.
     pub(super) painted_ids: std::rc::Rc<std::cell::RefCell<Vec<(Bounds<Pixels>, Vec<MessageId>)>>>,
-    /// On a narrow window the forum's topic column replaces the chat list;
-    /// this brings the list back until another forum opens. Each window
-    /// lays out its own column.
-    pub(super) forum_chats_peek: bool,
-    /// The forum topic column is on screen in this window this frame, so
-    /// the conversation shows a hint instead of repeating the topic list.
-    pub(super) forum_column_shown: bool,
+    /// The forum topic column in this window: on screen, hidden, or
+    /// pushed aside by a peek at the chat list. Each window lays out its
+    /// own column.
+    pub(super) forum_column: ForumColumnUi,
     /// Messages whose row's bottom edge was inside the viewport at the last
     /// paint (tdesktop `HistoryInner` reads an unread message once its
     /// bottom is shown), not the list's overdraw. Reported as
@@ -53,23 +119,18 @@ pub(crate) struct HistoryUi {
     /// kit Phase 3: per-render shared inputs for history rows (files,
     /// downloads, media roots) so visible-row rendering doesn't re-clone.
     pub(super) shared: HistoryShared,
-    /// kit Phase 3: `(open_chat_id, open_topic)` the scroller state was
-    /// last synced for — a change means reset + scroll to bottom.
-    pub(super) key: Option<(i64, Option<i32>, i64)>,
-    /// Where the reader asked the history to go. The history list owns it:
-    /// it reaches the goal once the rows allow, and a goal due this render
-    /// wins over the view hold (`ScrollGoal`).
-    pub(super) scroll_goal: Option<ScrollGoal>,
+    /// kit Phase 3: the `(open_chat_id, open_topic, thread)` and window the
+    /// scroller state was last synced for — a change means reset + anchor:
+    /// the saved position, else the jump highlight, else the "Unread
+    /// messages" divider, else the bottom.
+    pub(super) anchor: super::history_anchor::WindowAnchor,
+    /// Where the history is being taken: a goal the reader asked for that
+    /// waits for its rows, or the landing that scrolled there and corrects
+    /// after each paint. One value, so a newer aim replaces the older.
+    pub(super) aim: ScrollAim,
     /// kit Phase 3: first/last message ids of the last-synced history, to
     /// tell appends apart from prepends without re-scanning.
     pub(super) ends: Option<(MessageId, MessageId)>,
-    /// `HistoryState::window_epoch` the scroller last anchored for: a
-    /// change (window replaced) re-anchors like opening the chat.
-    pub(super) window_epoch: u64,
-    /// The scroller must anchor once rows exist: the saved position, else
-    /// the jump highlight, else the "Unread messages" divider, else the
-    /// bottom.
-    pub(super) anchor_pending: bool,
     /// Where each chat, topic or thread was left away from the tail.
     pub(super) scroll_memory: quill::state::ScrollMemory,
     /// The window stopped short of the latest message at the last render:
@@ -82,11 +143,9 @@ pub(crate) struct HistoryUi {
     pub(super) chrome_epoch: u64,
     /// `Session::revision_without_file_progress` `chrome_epoch` stands for.
     pub(super) chrome_seen: Option<u64>,
-    /// Rows drawn with stale chrome since the last render.
-    pub(super) chrome_due: std::cell::RefCell<Vec<usize>>,
-    /// A deferred notify for `chrome_due` is on its way (renders that skip
-    /// the kept-rows branch leave the list undrained).
-    pub(super) chrome_notify_pending: std::cell::Cell<bool>,
+    /// Rows drawn with stale chrome since the last render, and whether the
+    /// notify that renders them again is on its way.
+    pub(super) chrome_due: std::cell::RefCell<super::history_anchor::ChromeDue>,
     pub(super) row_stats: RowCacheStats,
     /// Tests: trust `Session::revision` the way a live session does.
     #[cfg(test)]
@@ -96,10 +155,6 @@ pub(crate) struct HistoryUi {
     pub(super) media_signature: (u64, usize),
     /// The channel's ads drawn in the main history (`sponsored_spots`).
     pub(super) sponsored: super::sponsored_spots::SponsoredInHistory,
-    /// The last jump the scroller landed on, as `(jump serial, message)`:
-    /// it lands once per jump, so a second jump to the same message lands
-    /// again, and a highlight that stays set is not scrolled to each frame.
-    pub(super) last_highlight: Option<(u64, MessageId)>,
     /// `(jump serial, start)` of the running jump-highlight fade.
     pub(super) highlight_fade: Option<(u64, std::time::Instant)>,
     /// B11: the reaction that just flew from the message (message, glyph, start).
@@ -117,9 +172,6 @@ pub(crate) struct HistoryUi {
     pub(super) scroll_view_probe: std::rc::Rc<std::cell::Cell<Option<(usize, usize)>>>,
     /// Where the "Unread messages" bar was painted in the last frame.
     pub(super) bar_probe: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
-    /// Where the open history is being brought, checked after each paint
-    /// (`landing`).
-    pub(super) landing: Option<super::conversation::landing::Landing>,
     /// Where the bar sat in its row at the last open (`BarOffsets`).
     pub(super) bar_offsets: super::conversation::landing::BarOffsets,
     /// Rows painted in the last frame with their window bounds, kept until
@@ -156,22 +208,13 @@ pub(crate) struct HistoryUi {
     /// Where the dissolves read the time: the wall clock in the app, a
     /// clock that only moves when told to in tests.
     pub(super) vanish_clock: std::cell::Cell<super::vanish::VanishClock>,
-    /// The open chat whose live-location countdowns are being refreshed
-    /// (`Some` exactly while that task runs; see `live_location_tick`).
-    pub(super) live_location_tick_chat: Option<ChatId>,
-    /// The history's width class at the last paint (tdesktop
-    /// `Adaptive::ChatLayout`, `chat_wide_ui`).
-    pub(super) chat_layout: std::rc::Rc<std::cell::Cell<quill::chat_wide::ChatLayout>>,
-    /// The history's width at the last paint, as bubble layout reads it:
-    /// a narrow history narrows the bubbles (`bubble_width::BubbleRoom`).
-    pub(super) width: std::rc::Rc<std::cell::Cell<quill::bubble_layout::HistoryWidth>>,
-    /// Whether the history has painted and measured `width` itself; until
-    /// it has, `width` is seeded from the pane the history is laid out in
-    /// (`seed_history_width`).
-    pub(super) width_probed: std::rc::Rc<std::cell::Cell<bool>>,
-    /// The history's width at paint, before `HistoryWidth` tops it off: rows
-    /// still move in a wide window that resizes (`InlineVideos::begin_render`).
-    pub(super) pane_width: std::rc::Rc<std::cell::Cell<Pixels>>,
+    /// The open chat whose live-location countdowns are being refreshed,
+    /// with the task that does it: dropping the owner stops the tick, and
+    /// the task clears this itself when it ends (see `live_location_tick`).
+    pub(super) live_location_tick: Option<(ChatId, Task<()>)>,
+    /// The history's width, class and pane: seeded from the pane it is laid
+    /// out in until the paint probe measures it (`chat_wide_ui`).
+    pub(super) measure: std::rc::Rc<std::cell::Cell<super::history_anchor::HistoryMeasure>>,
     /// The pull to the next unread channel (`pull_next_ui`).
     pub(super) pull: super::pull_next_ui::PullUi,
     /// The subsection tab strip over this window's conversation (forum
@@ -202,6 +245,14 @@ impl super::on_screen::Farewell for HistoryUi {
 }
 
 impl HistoryUi {
+    /// The deferred chrome notify landed (or its window is gone): none is on
+    /// its way any more. A borrowed list is left to the next render.
+    pub(super) fn chrome_notify_done(&self) {
+        if let Ok(mut due) = self.chrome_due.try_borrow_mut() {
+            due.notified();
+        }
+    }
+
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
     pub(super) fn painted_row_center(&self, id: MessageId) -> Point<Pixels> {
@@ -216,31 +267,26 @@ impl HistoryUi {
             scroller: cx.new(|cx| MessageScrollerState::new(0, cx)),
             rows: Vec::new(),
             painted_ids: Default::default(),
-            forum_chats_peek: false,
-            forum_column_shown: false,
+            forum_column: ForumColumnUi::Hidden,
             seen: Default::default(),
             on_screen: Default::default(),
             reported_visible: None,
             window_active: false,
             shared: HistoryShared::default(),
-            key: None,
-            scroll_goal: None,
+            anchor: Default::default(),
+            aim: ScrollAim::Free,
             ends: None,
-            window_epoch: 0,
-            anchor_pending: false,
             scroll_memory: Default::default(),
             had_newer: false,
             rows_key: None,
             chrome_epoch: 0,
             chrome_seen: None,
             chrome_due: Default::default(),
-            chrome_notify_pending: Default::default(),
             row_stats: RowCacheStats::default(),
             #[cfg(test)]
             follow_revision_in_tests: false,
             media_signature: (0, 0),
             sponsored: Default::default(),
-            last_highlight: None,
             highlight_fade: None,
             reaction_fly: None,
             scroll_date: Default::default(),
@@ -248,7 +294,6 @@ impl HistoryUi {
             scroll_top_probe: Default::default(),
             scroll_view_probe: Default::default(),
             bar_probe: Default::default(),
-            landing: None,
             bar_offsets: Default::default(),
             hit_rows: Default::default(),
             row_hover: Default::default(),
@@ -263,11 +308,8 @@ impl HistoryUi {
             vanish_now: Default::default(),
             vanish_conflicts: Default::default(),
             vanish_clock: Default::default(),
-            live_location_tick_chat: None,
-            chat_layout: Default::default(),
-            width: Default::default(),
-            width_probed: Default::default(),
-            pane_width: Default::default(),
+            live_location_tick: None,
+            measure: Default::default(),
             pull: Default::default(),
             subsection_tabs: Default::default(),
         }

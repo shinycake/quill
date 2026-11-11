@@ -71,7 +71,7 @@ impl Fixture {
     }
 
     fn shown_events(&self) -> Option<Vec<i64>> {
-        match self.driver.session.groups.event_logs.get(&CHANNEL.0)? {
+        match self.driver.session.groups.event_log_fetch(CHANNEL.0)? {
             ChatEventLogFetch::Loaded(page) => Some(page.events.iter().map(|e| e.id).collect()),
             _ => None,
         }
@@ -236,10 +236,13 @@ fn a_failed_later_page_keeps_the_loaded_calls_and_retries_that_page() {
         r#"{{"@type":"error","@extra":"{}","code":500,"message":"X"}}"#,
         more.0
     ));
-    assert!(f.driver.session.calls.recent_calls_error);
+    assert!(f.driver.session.calls.recent_calls_error());
     assert_eq!(f.shown_calls(), vec![300, 299], "the loaded calls stay");
     let retry = f.driver.fetch_more_call_history().expect("retry the page");
-    assert!(!f.driver.session.calls.recent_calls_error, "loading again");
+    assert!(
+        !f.driver.session.calls.recent_calls_error(),
+        "loading again"
+    );
     f.calls_page(retry, &[260, 259], "later");
     assert_eq!(f.shown_calls(), vec![300, 299, 260, 259]);
 }
@@ -259,4 +262,31 @@ fn clear_all_during_a_page_keeps_the_deleted_calls_away() {
     assert!(f.shown_calls().is_empty());
     f.calls_page(more, &[260, 259], "later");
     assert!(f.shown_calls().is_empty(), "the cleared calls stay away");
+}
+
+#[test]
+fn reopening_or_scrolling_the_calls_tab_during_a_clear_asks_nothing() {
+    let mut f = Fixture::new();
+    let first = f.driver.fetch_call_history().expect("first page");
+    f.calls_page(first, &[300, 299], "next");
+    let clear = f
+        .driver
+        .clear_call_history(false)
+        .expect("send")
+        .expect("clear");
+    assert!(f.driver.fetch_call_history().is_err(), "reopen refused");
+    assert!(
+        f.driver.fetch_more_call_history().is_err(),
+        "scroll refused"
+    );
+    assert_eq!(
+        f.driver.clear_call_history(false).expect("send"),
+        None,
+        "no second delete while the first is out"
+    );
+    f.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, clear.0));
+    assert!(
+        f.driver.fetch_call_history().is_ok(),
+        "reopens after the answer"
+    );
 }

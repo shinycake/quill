@@ -1,5 +1,6 @@
 //! Opening the 1:1 call's window (`QuillApp::sync_call_window` asks for it).
 use crate::ui::app::QuillApp;
+use crate::ui::calls_state::CallWindow;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::Root;
 use gpui_kit::*;
@@ -7,10 +8,10 @@ use quill::lang::{keys, tr};
 
 impl QuillApp {
     pub(in crate::ui) fn open_call_window(&mut self, call_id: i32, cx: &mut Context<Self>) {
-        if self.calls.window_opening {
+        if self.calls.window != CallWindow::Closed {
             return;
         }
-        self.calls.window_opening = true;
+        self.calls.window = CallWindow::Opening;
         self.calls.raised_for = None;
         let owner = cx.entity();
         // screen-scope: the call window is the app's; its failure note goes to whichever account is on screen.
@@ -49,7 +50,7 @@ impl QuillApp {
                     let from = window.window_handle();
                     crate::ui::window_control::when_window_goes(window, cx, move |cx| {
                         let _ = gone.update(cx, |app, cx| {
-                            if app.calls.window == Some(from) {
+                            if app.calls.window == CallWindow::Open(from) {
                                 app.calls.forget_window();
                                 cx.notify();
                             }
@@ -62,10 +63,10 @@ impl QuillApp {
                 },
             );
             owner.update(cx, |app, cx| {
-                app.calls.window_opening = false;
                 match result {
-                    Ok(handle) => app.calls.window = Some(handle.into()),
+                    Ok(handle) => app.calls.window = CallWindow::Open(handle.into()),
                     Err(_) => {
+                        app.calls.window = CallWindow::Closed;
                         // Kept shut for this call: the next sync does not
                         // try (and note) it again, a second call ringing
                         // included; the call bar reopens it.

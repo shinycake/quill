@@ -138,3 +138,27 @@ fn the_tag_says_standard_range_once_the_renderer_left_extended_range(cx: &mut Te
     set_test_renderer_left_edr(false);
     set_test_headroom(None);
 }
+
+#[gpui_kit::test]
+fn a_bigger_decode_keeps_the_frame_and_extended_range_up(cx: &mut TestAppContext) {
+    if !reads_iso_gain_maps() {
+        return;
+    }
+    set_test_headroom(Some(Headroom {
+        current: 4.0,
+        potential: 8.0,
+    }));
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_sunset(&app, vcx);
+    // A zoom starts a bigger decode; the answer has not landed.
+    app.update_in(vcx, |app, _, cx| {
+        assert!(app.viewer.hdr.regrow_for_test());
+        cx.notify();
+    });
+    app.read_with(vcx, |app, _| {
+        assert!(app.viewer.hdr.shows_frame());
+        assert!(app.viewer.hdr.edr_on());
+    });
+    set_test_headroom(None);
+}

@@ -35,7 +35,7 @@ fn a_seek_waits_for_its_message_until_its_deadline(cx: &mut TestAppContext) {
         app.update(cx, |app, cx| {
             let shown = app
                 .session()
-                .and_then(|session| session.open_chat)
+                .and_then(|session| session.open_chat_id())
                 .unwrap_or(ChatId(1));
             app.playback.pending_media_seek = Some((shown, MessageId(2), 5, give_up_at));
             app.tick_media_seek(now, cx);

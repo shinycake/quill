@@ -232,7 +232,7 @@ fn stopping_every_account_never_waits_cancels_restarts_and_keeps_draining(cx: &m
         app.stop_background_accounts(cx);
         assert!(app.background.closing.contains(&account(1)));
         assert!(
-            app.background.polling,
+            app.background.poll.is_some(),
             "a poll of the new generation drains it"
         );
     });
@@ -244,7 +244,7 @@ fn stopping_every_account_never_waits_cancels_restarts_and_keeps_draining(cx: &m
     assert!(fake.finished());
     app.read_with(&vcx, |app, _| {
         assert!(app.background.closing.is_empty());
-        assert!(app.background.clients.is_empty(), "no restart");
+        assert!(app.background.clients().is_empty(), "no restart");
     });
 }
 

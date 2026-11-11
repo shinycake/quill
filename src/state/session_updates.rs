@@ -7,7 +7,7 @@ impl Session {
             self.requests.invalidate_auth();
             // Download requests were dropped and files may be cleared
             // below: every avatar gets one fresh look.
-            self.media.avatar_rescan = true;
+            self.media.avatar_due = AvatarDue::Everything;
         }
         if matches!(
             state,
@@ -31,8 +31,8 @@ impl Session {
                 AuthorizationState::LoggingOut | AuthorizationState::Closed
             )
         {
-            self.chat_list.chats_exhausted = false;
-            self.chat_list.archive_chats_exhausted = false;
+            self.chat_list.main_paging = ListPaging::More;
+            self.chat_list.archive_paging = ListPaging::More;
             self.chat_list.folder_chats_exhausted.clear();
         }
         if matches!(state, AuthorizationState::Closed) {
@@ -44,14 +44,12 @@ impl Session {
             self.media.download_extras.clear();
             self.search.search.close();
             self.search.chat_search.close();
-            self.messages.in_flight_forward = None;
-            self.messages.queued_forward_flights.clear();
             self.chats_state.chat_message_sender.clear();
             self.chats_state.send_as_options.clear();
             self.messages.share_search = ShareSearch::default();
             self.calls.add_people_search = ShareSearch::default();
             self.calls.invite_results = None;
-            self.messages.last_forward = None;
+            self.messages.forwards.clear();
         }
         if matches!(state, AuthorizationState::LoggingOut) {
             self.settle_account_requests();
@@ -59,7 +57,7 @@ impl Session {
             self.calls.invite_results = None;
             self.search.search.close();
             self.search.chat_search.close();
-            self.messages.in_flight_forward = None;
+            self.messages.forwards.forget_flights();
         }
         if matches!(state, AuthorizationState::Closing) {
             self.shutdown = ShutdownPhase::WaitingClosed;
@@ -80,6 +78,14 @@ impl Session {
         }
         if !matches!(state, AuthorizationState::WaitPassword { .. }) {
             self.auth_state.password_recovery = PasswordRecovery::Idle;
+        }
+        if !matches!(
+            state,
+            AuthorizationState::WaitPhoneNumber
+                | AuthorizationState::WaitOtherDeviceConfirmation { .. }
+        ) {
+            // The passkey link lives on the QR screen only.
+            self.settings.passkeys.login.leave_sign_in();
         }
         self.auth = state;
         self.auth_view = view_for(&self.auth);
@@ -228,10 +234,10 @@ impl Session {
                 });
             }
         }
-        if self.outside_open_direct_topic(chat_id, message.extras.direct_messages_topic_id) {
+        if self.outside_open_direct_topic(chat_id, message.extras.direct_messages_topic_id()) {
             return;
         }
-        let topic_id = message.topic_id;
+        let topic_id = message.topic_id();
         let row = history_message(message, pending);
         self.index_poll(&row);
         let history = self.history_entry(chat_id);

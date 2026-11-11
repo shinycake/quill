@@ -85,7 +85,7 @@ impl QuillApp {
     ) {
         let text = self.composer.read(cx).value().to_string();
         let (range, existing) = match self.composer_date_at_caret(cx) {
-            Some((range, time)) if !self.chat_ui.rich_editor_open => (range, Some(time)),
+            Some((range, time)) if !self.chat_ui.rich.editor_open() => (range, Some(time)),
             _ => (self.composer.read(cx).selected_range(), None),
         };
         let Some(selected) = text.get(range.clone()).filter(|s| !s.is_empty()) else {
@@ -144,7 +144,7 @@ impl QuillApp {
             return;
         }
         let url = date_link(time);
-        if self.chat_ui.rich_editor_open {
+        if self.chat_ui.rich.editor_open() {
             let (new_text, selection) = apply_format_markup(&text, range, &FormatAction::Link(url));
             self.composer.update(cx, |input, cx| {
                 input.set_value(&new_text, window, cx);
@@ -177,7 +177,7 @@ impl QuillApp {
         match std::env::var("QUILL_DEMO_COMPOSER_BOX").as_deref() {
             Ok("link") => self.open_composer_link_dialog(window, cx),
             Ok("code") => {
-                self.chat_ui.rich_editor_open = true;
+                self.chat_ui.rich.set_editor(true);
                 self.composer.update(cx, |input, cx| {
                     input.set_value("```rust\nfn main() {}\n```", window, cx);
                     input.set_selected_range(12..12, cx);
@@ -257,7 +257,8 @@ pub(super) fn demo_contacts(
             session.apply(owned);
         }
     }
-    session.users_state.contacts = Some(people.iter().map(|(id, _, _)| *id).collect());
+    session.users_state.contacts =
+        quill::state::fetch::Fetch::Ready(people.iter().map(|(id, _, _)| *id).collect());
 }
 
 #[cfg(test)]

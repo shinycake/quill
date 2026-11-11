@@ -294,8 +294,8 @@ impl QuillApp {
     ) {
         if action == ForumTopicAction::Delete {
             self.open_group_confirm(
-                chat_id,
                 crate::ui::dialogs::group_confirm::GroupConfirmAction::DeleteForumTopic {
+                    chat_id,
                     forum_topic_id: topic_id,
                 },
                 cx,
@@ -774,7 +774,7 @@ impl QuillApp {
                     .tooltip(tr(keys::Q_PEOPLE_TOPIC_INFO))
                     .accessibility_label(tr(keys::Q_PEOPLE_TOPIC_INFO))
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.chat_ui.topic_info_open = !this.chat_ui.topic_info_open;
+                        this.chat_ui.info_card.toggle_topic();
                         cx.notify();
                     })),
             )

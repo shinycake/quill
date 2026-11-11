@@ -33,7 +33,7 @@ const TILE_W: f32 = 132.0;
 impl QuillApp {
     /// Open the dialog for the open chat's user or channel.
     pub(super) fn open_send_gift_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let chat = self.session().and_then(|s| s.open_chat);
+        let chat = self.session().and_then(|s| s.open_chat_id());
         self.open_send_gift_in(chat, window, cx);
     }
 
@@ -216,20 +216,20 @@ impl QuillApp {
                 .title(crate::ui::shell::dialog_title(title));
             let muted = cx.theme().muted_foreground;
             let mut body = div().flex().flex_col().gap_3();
-            if let Some(done) = send.done.as_ref() {
+            if let Some(done) = send.done_line() {
                 body = body.child(
                     div()
                         .text_sm()
                         .text_color(super::chat_theme::success())
-                        .child(done.clone()),
+                        .child(done.to_string()),
                 );
             }
-            if let Some(error) = send.error.as_ref() {
+            if let Some(error) = send.error_line() {
                 body = body.child(
                     div()
                         .text_sm()
                         .text_color(cx.theme().danger)
-                        .child(error.clone()),
+                        .child(error.to_string()),
                 );
             }
             if let Some(selected) = send.selected_gift() {

@@ -1,6 +1,7 @@
 //! Saved Messages sublists and tags (tdesktop `Data::SavedMessages`,
 //! `Data::SavedSublist`, the Saved tags bar).
 use super::*;
+use crate::state::fetch::Fetch;
 use crate::telegram::envelope::{ReactionType, SavedMessagesTag, SavedMessagesTopic};
 
 /// The open sublist: the messages saved from one original chat
@@ -32,8 +33,6 @@ pub struct SavedTagSearch {
     pub topic_id: i64,
     pub tag: ReactionType,
     pub history: TopicHistory,
-    /// The first page was answered (an empty result then says "no messages").
-    pub loaded: bool,
     /// The `searchSavedMessages` page this filter waits for. Only its
     /// answer fills it: a page asked for the previous tag is dropped.
     pub page: SavedPage,
@@ -46,18 +45,11 @@ pub struct SavedMessagesState {
     pub topics: BTreeMap<i64, SavedMessagesTopic>,
     /// `updateSavedMessagesTopicCount`: approximate total.
     pub topic_count: i32,
-    /// `loadSavedMessagesTopics` answered 404: every sublist is loaded.
-    pub topics_exhausted: bool,
-    /// The first `loadSavedMessagesTopics` was sent.
-    pub topics_requested: bool,
-    /// The first sublist page or the tags failed: the pump asks again once
-    /// the connection is back (`updateConnectionState` ready) or Saved
-    /// Messages is opened again (`Session::open_chat`), not on every poll
-    /// pass.
-    pub retry_when_online: bool,
-    /// Tags of all Saved Messages (`saved_messages_topic_id` 0).
-    pub tags: Vec<SavedMessagesTag>,
-    pub tags_loaded: bool,
+    /// How far the sublist list is loaded.
+    pub topics_load: SavedTopicsLoad,
+    /// Tags of all Saved Messages (`saved_messages_topic_id` 0). A failed
+    /// fetch waits for the connection like a failed first sublist page.
+    pub tags: Fetch<Vec<SavedMessagesTag>>,
     /// Tags of one sublist, by sublist id.
     pub topic_tags: HashMap<i64, Vec<SavedMessagesTag>>,
     pub sublist: Option<SavedSublistView>,
@@ -66,7 +58,48 @@ pub struct SavedMessagesState {
     pub note: Option<String>,
 }
 
+/// The sublist list of Saved Messages (`loadSavedMessagesTopics`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SavedTopicsLoad {
+    /// The first page was not asked for yet.
+    #[default]
+    Idle,
+    /// The first page went out; later pages follow the scroll.
+    Started,
+    /// A page failed: the pump asks again once the connection is back
+    /// (`updateConnectionState` ready) or Saved Messages is opened again
+    /// (`Session::open_chat`), not on every poll pass.
+    Retry,
+    /// `loadSavedMessagesTopics` answered 404: every sublist is loaded.
+    Exhausted,
+}
+
 impl SavedMessagesState {
+    /// The tags of all Saved Messages held.
+    pub fn tag_list(&self) -> &[SavedMessagesTag] {
+        self.tags.data().map_or(&[], Vec::as_slice)
+    }
+
+    /// Every sublist is loaded.
+    pub fn topics_exhausted(&self) -> bool {
+        self.topics_load == SavedTopicsLoad::Exhausted
+    }
+
+    /// A failed first page or tags request waits for the connection (or for
+    /// Saved Messages to open again).
+    pub fn waiting_to_retry(&self) -> bool {
+        self.topics_load == SavedTopicsLoad::Retry || self.tags.error().is_some()
+    }
+
+    /// The connection is back or Saved Messages opened again: what failed is
+    /// asked again by the pump.
+    pub fn retry_after_reconnect(&mut self) {
+        if self.topics_load == SavedTopicsLoad::Retry {
+            self.topics_load = SavedTopicsLoad::Idle;
+        }
+        self.tags.clear_error();
+    }
+
     /// Sublists in list order: `order` descending (TDLib already puts the
     /// pinned ones first through `order`).
     pub fn ordered_topics(&self) -> Vec<&SavedMessagesTopic> {

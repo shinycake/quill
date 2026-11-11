@@ -5,7 +5,7 @@ use super::app::QuillApp;
 use super::country_box::CountryHost;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
-use crate::ui::dialogs::poll::QuizLock;
+use crate::ui::dialogs::poll::{PollPage, QuizLock};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -18,7 +18,7 @@ use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::poll::{
-    POLL_OPTIONS_MAX, POLL_OPTIONS_MIN, PollDraft, chat_allows_polls, voter_count_label,
+    POLL_OPTIONS_MAX, POLL_OPTIONS_MIN, PollClose, PollDraft, chat_allows_polls, voter_count_label,
 };
 use quill::state::{PollStatsFetch, PollVotersFetch};
 use quill::telegram::envelope::{MessageContent, MessageSender};
@@ -478,11 +478,14 @@ impl QuillApp {
         // `chatPermissions.can_send_polls` is false (schema 1.8.67 line
         // 1070); this refuses a stale race (permissions changed after
         // the entry rendered).
-        let polls_allowed = self.session().and_then(|s| s.open_chat).is_none_or(|id| {
-            self.session()
-                .and_then(|s| s.chats.get(&id.0))
-                .is_none_or(|chat| chat_allows_polls(chat.permissions.as_ref()))
-        });
+        let polls_allowed = self
+            .session()
+            .and_then(|s| s.open_chat_id())
+            .is_none_or(|id| {
+                self.session()
+                    .and_then(|s| s.chats.get(&id.0))
+                    .is_none_or(|chat| chat_allows_polls(chat.permissions.as_ref()))
+            });
         if !polls_allowed {
             self.set_note(StatusNote::silent(tr(
                 keys::Q_MEDIA_POLLS_ARE_RESTRICTED_IN_THIS,
@@ -495,7 +498,7 @@ impl QuillApp {
         }
         let in_channel = self
             .session()
-            .and_then(|s| s.open_chat.and_then(|id| s.chats.get(&id.0)))
+            .and_then(|s| s.open_chat_id().and_then(|id| s.chats.get(&id.0)))
             .is_some_and(|chat| chat.is_channel());
         self.chat_ui.poll_dialog = Some(PollDialog::new(window, cx, in_channel, lock));
         cx.notify();
@@ -516,7 +519,7 @@ impl QuillApp {
             .is_some_and(|dialog| dialog.is_dirty(cx));
         if dirty {
             if let Some(dialog) = self.chat_ui.poll_dialog.as_mut() {
-                dialog.confirming_discard = true;
+                dialog.page = PollPage::ConfirmDiscard;
             }
             cx.notify();
         } else {
@@ -623,7 +626,8 @@ impl QuillApp {
             None => return,
         };
         // A custom deadline that passed while the box was open.
-        if draft.close_date > 0 && draft.close_date <= quill::local_time::now_unix() {
+        if matches!(draft.deadline, Some(PollClose::Date(date)) if date > 0 && date <= quill::local_time::now_unix())
+        {
             self.set_note(StatusNote::error(tr(keys::POLLS_CREATE_DEADLINE_EXPIRED)));
             cx.notify();
             return;
@@ -654,7 +658,7 @@ impl QuillApp {
             return;
         }
         let plan = self.session().and_then(|session| {
-            let chat_id = session.open_chat?;
+            let chat_id = session.open_chat_id()?;
             let chat = session.chats.get(&chat_id.0)?;
             chat.can_post().then_some(chat_id)
         });
@@ -717,10 +721,10 @@ impl QuillApp {
     #[inline(never)]
     fn poll_dialog_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.chat_ui.poll_dialog.as_ref()?;
-        if dialog.country_box.is_some() {
+        if dialog.country_box().is_some() {
             return self.poll_country_panel(cx);
         }
-        if dialog.deadline_box.is_some() {
+        if dialog.deadline_box().is_some() {
             return self.poll_deadline_panel(cx);
         }
         // The box scrolls as a whole when the window is short.
@@ -834,7 +838,7 @@ impl QuillApp {
     /// deadline pickers bring their own buttons, so they get none.
     pub(super) fn poll_box_footer(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.chat_ui.poll_dialog.as_ref()?;
-        if dialog.country_box.is_some() || dialog.deadline_box.is_some() {
+        if dialog.picker_open() {
             return None;
         }
         let footer = div()

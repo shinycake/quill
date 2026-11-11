@@ -124,8 +124,6 @@ fn driver_edit_scheduled_message_uses_scheduled_list() {
             date: 0,
             is_outgoing: true,
             is_pinned: false,
-            topic_id: None,
-            thread_id: None,
             ephemeral: None,
             media_album_id: 0,
             author_signature: None,
@@ -133,7 +131,6 @@ fn driver_edit_scheduled_message_uses_scheduled_list() {
                 send_date: 999,
                 repeat_period: 0,
             }),
-            can_retry: false,
             send_state: Default::default(),
             content: MessageContent::Text(TextContent::plain("scheduled draft")),
             files: Vec::new(),
@@ -373,8 +370,8 @@ fn driver_forward_messages_shape_and_dest_result() {
     let result = driver
         .session
         .messages
-        .last_forward
-        .as_ref()
+        .forwards
+        .latest_result()
         .expect("forward result");
     assert_eq!(result.dest_title, "Bob");
     assert_eq!(result.forwarded_ids, vec![MessageId(80), MessageId(81)]);
@@ -536,8 +533,6 @@ fn driver_edit_scheduled_message_sends_scheduling_state() {
             date: 0,
             is_outgoing: true,
             is_pinned: false,
-            topic_id: None,
-            thread_id: None,
             ephemeral: None,
             media_album_id: 0,
             author_signature: None,
@@ -545,7 +540,6 @@ fn driver_edit_scheduled_message_sends_scheduling_state() {
                 send_date: 999,
                 repeat_period: 0,
             }),
-            can_retry: false,
             send_state: Default::default(),
             content: MessageContent::Text(TextContent::plain("later")),
             files: Vec::new(),
@@ -566,7 +560,7 @@ fn driver_edit_scheduled_message_sends_scheduling_state() {
         .edit_scheduled_message(
             ChatId(7),
             MessageId(70),
-            ComposerScheduling::SendAtDate(1_800_000_600),
+            ComposerScheduling::at(1_800_000_600),
         )
         .unwrap();
     let json = recorder.snapshot().last().cloned().expect("request");

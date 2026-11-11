@@ -18,6 +18,12 @@ use quill::lang::{keys, tr};
 
 /// State of the contacts tab and the other chat-list additions of the
 /// "chatlist-global" work.
+/// The open "Clear calls" box: whether "Delete for everyone" is ticked.
+#[derive(Clone, Copy, Default)]
+pub(super) struct ClearCallsBox {
+    pub revoke: bool,
+}
+
 pub(super) struct ChatlistGlobal {
     pub contacts_sort: SortMode,
     pub contacts_search: Entity<TextareaState>,
@@ -27,8 +33,8 @@ pub(super) struct ChatlistGlobal {
     /// Slot being scrubbed (pointer held down on the bar).
     pub index_current: Option<usize>,
     /// The "Clear calls" confirm box and its "Delete for everyone" box.
-    pub clear_calls_open: bool,
-    pub clear_calls_revoke: bool,
+    /// `Some` while the box is open; closing drops its checkbox with it.
+    pub clear_calls: Option<ClearCallsBox>,
     /// Right-click menu of a stories-strip tile: chat id and pointer.
     pub story_menu: Option<(i64, Point<Pixels>)>,
 }
@@ -58,8 +64,7 @@ impl ChatlistGlobal {
             contacts_scroll: ScrollHandle::new(),
             index_cursor: None,
             index_current: None,
-            clear_calls_open: false,
-            clear_calls_revoke: false,
+            clear_calls: None,
             story_menu: None,
         }
     }

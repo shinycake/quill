@@ -1,7 +1,6 @@
 //! Connect driver core: construction, the update pump, and lifecycle.
 use super::composer::ai_rich_draft_note;
 use super::*;
-use crate::composer::DraftSaveClock;
 use crate::credentials::TelegramCredentials;
 use crate::ids::{ChatId, ChatMessage, MessageId, RequestId};
 use crate::state::{
@@ -77,7 +76,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let story_page_ok = answered
             .filter(|_| ok)
             .and_then(crate::state::story_list_of);
-        let main_was_exhausted = self.session.chat_list.chats_exhausted;
+        let main_was_exhausted = self.session.chat_list.main_paging.is_exhausted();
         let had_topic_icons = !self.session.threads.forum_topic_icons.is_empty();
         // Parity slice: a folder `loadChats` page completing with ok pages
         // on (until a 404 marks the folder exhausted in the reducer).
@@ -279,7 +278,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .and_then(|pending| {
                     pending
                         .chat_id
-                        .map(|chat_id| (pending.window, chat_id, text.clone()))
+                        .map(|chat_id| (pending.asked_in.chat(), chat_id, text.clone()))
                 }),
             _ => None,
         };
@@ -307,7 +306,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         let note = ai_rich_draft_note(pending.purpose);
                         pending
                             .chat_id
-                            .map(|chat_id| (pending.window, chat_id, rich.clone(), note))
+                            .map(|chat_id| (pending.asked_in.chat(), chat_id, rich.clone(), note))
                     }),
                 _ => None,
             };
@@ -348,19 +347,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         // takes the pending request. The verdict is stashed with the
         // in-flight username text so the edit-profile dialog can ignore
         // stale answers for superseded text.
-        let username_check_answer: Option<(String, UsernameCheckResult)> =
+        let username_check_answer: Option<(RequestId, UsernameCheckResult)> =
             match &owned.envelope.payload {
                 EnvelopePayload::Users(UsersPayload::CheckChatUsernameResult(result)) => owned
                     .envelope
                     .extra
-                    .and_then(|id| {
-                        self.session
-                            .users_state
-                            .username_check_pending
-                            .clone()
-                            .filter(|(pending, _)| *pending == id)
-                    })
-                    .map(|(_, username)| (username, *result)),
+                    .filter(|id| self.session.users_state.username_check.pending() == Some(*id))
+                    .map(|id| (id, *result)),
                 _ => None,
             };
         // MED4: capture the `getWebPageInstantView` answer before `apply`
@@ -413,6 +406,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }),
             _ => None,
         };
+        let support_chat = self.support_chat_answer(&owned.envelope);
         // Slice G2: capture forum/welcome/boost mutations before `apply`
         // takes the pending request. The state drops the stale cache on
         // confirmed success; the post-apply refetch reloads it now that
@@ -553,8 +547,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // M1: stash the `getMessageLink` answer for the UI clipboard drain.
         if let Some((link, is_public)) = message_link_answer {
-            self.session.messages.message_link_result = Some(link);
-            self.session.messages.message_link_public = is_public;
+            self.session.messages.message_link =
+                Some(crate::state::MessageLinkAnswer { link, is_public });
         }
         // Slice msg-richtext-ai-tools: stash AI answers for the composer
         // drain. A late answer for a chat the user has since left is
@@ -567,8 +561,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // A5: stash the `checkChatUsername` verdict for the
         // edit-profile dialog.
-        if let Some((username, result)) = username_check_answer {
-            self.session.users_state.username_check = Some((username, result));
+        if let Some((request, result)) = username_check_answer {
+            self.session
+                .users_state
+                .username_check
+                .answer(request, result);
         }
         // MED4: stash the `getWebPageInstantView` answer (success →
         // reader in the asking window, unless it closed; error → browser).
@@ -639,7 +636,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .messages
                 .pinned_messages
-                .insert(chat_id.0, Vec::new());
+                .entry(chat_id.0)
+                .or_default()
+                .succeed(Vec::new());
         }
         if let Some(chat_id) = pins_changed.filter(|chat| self.session.chat_is_shown(*chat)) {
             let _ = self.fetch_pinned_messages(chat_id);
@@ -667,11 +666,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                 RequestPurpose::AddChatWelcomeMessage
                 | RequestPurpose::Groups(GroupsPurpose::EditChatWelcomeMessage { .. })
                 | RequestPurpose::Groups(GroupsPurpose::DeleteChatWelcomeMessage { .. })
-                    if !self
+                    if self
                         .session
                         .groups
                         .welcome_messages
-                        .contains_key(&chat_id.0) =>
+                        .get(&chat_id.0)
+                        .is_none_or(|pack| pack.can_ask()) =>
                 {
                     let _ = self.load_chat_welcome_messages(chat_id);
                 }
@@ -694,11 +694,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(chat_id) = created_chat {
             let _ = self.select_chat(chat_id);
         }
-        // Settings > Ask a Question (the support account) or a contact
-        // just created by phone: open (or create) the private chat.
-        if let Some(user_id) = self.session.users_state.user_chat_to_open.take() {
-            let _ = self.create_private_chat_for(user_id);
-        }
+        self.open_chats_named_by_answers(support_chat);
         // Slice (communities backend core): resolve a just-created
         // community id into its full-info pack. `let _` on purpose: the
         // community is already in the model; a failed send must not
@@ -725,7 +721,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if became_ready || load_chats_ok {
             self.maybe_load_main_chats()?;
         }
-        let main_ended = !main_was_exhausted && self.session.chat_list.chats_exhausted;
+        let main_ended = !main_was_exhausted && self.session.chat_list.main_paging.is_exhausted();
         if load_archive_ok || load_chats_failed || main_ended {
             self.maybe_load_archive_chats()?;
         }
@@ -794,7 +790,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Corner "@" / heart buttons and jump to date: run in the window
         // that asked, for its chat. A failed jump (closed chat) drops it.
         let unread = self.session.messages.unread_jump.take();
-        for jump in [unread, self.session.search.date_jump.take()]
+        for jump in [unread, self.session.search.take_date_jump()]
             .into_iter()
             .flatten()
         {
@@ -832,12 +828,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.cancel_gif_search_requests();
             self.session.stickers.gifs.search_results.clear();
             self.session.stickers.gifs.search_next_offset.clear();
-            self.session.stickers.gifs.search_loading = self.session.stickers.gifs.search_mode;
+            self.session.stickers.gifs.search_asked();
         }
         if self.chats_path_active()
             && self.session.stickers.gifs.open
-            && self.session.stickers.gifs.search_mode
-            && self.session.stickers.gifs.search_loading
+            && self.session.stickers.gifs.search_loading()
         {
             self.maybe_search_gifs(false)?;
         }
@@ -849,8 +844,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             );
         }
         if installed_stickers_answer
-            && self.session.stickers.stickers.suggest_waiting_for_sets
-            && let Some(emoji) = self.session.stickers.stickers.suggest_for.take()
+            && let crate::state::SuggestFor::WaitingForSets(emoji) =
+                std::mem::take(&mut self.session.stickers.stickers.suggest_for)
         {
             self.update_sticker_suggestions(&emoji)?;
         }
@@ -956,7 +951,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     fn maybe_send_parameters(&mut self) -> Result<(), ConnectSendError> {
-        if self.parameters_sent {
+        if self.parameters_sent() {
             return Ok(());
         }
         if !matches!(self.session.auth, AuthorizationState::WaitTdlibParameters) {
@@ -977,7 +972,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.parameters_sent = true;
         self.send_language_options()
     }
 }

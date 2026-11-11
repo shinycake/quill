@@ -32,7 +32,7 @@ impl QuillApp {
             return Vec::new();
         }
         self.session()
-            .map(|session| session.stickers.gifs.animations.clone())
+            .map(|session| session.stickers.gifs.animations.to_vec())
             .unwrap_or_default()
     }
 
@@ -72,7 +72,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.sticker_box.pick = None;
-        self.sticker_box.pending_still = None;
+        self.sticker_box.pending = crate::ui::sticker_set_box::state::PickWait::None;
         let Some(path) = self.local_media_path(file_id) else {
             if let Some(live) = self.live.as_mut()
                 && live.driver.download_file(file_id, 16).is_err()
@@ -84,13 +84,14 @@ impl QuillApp {
                 cx.notify();
                 return;
             }
-            self.sticker_box.pending_video = Some(PendingVideo {
-                pick,
-                file_id,
-                file: PickedFile::Video,
-                emoji,
-                window: self.windows.scope,
-            });
+            self.sticker_box.pending =
+                crate::ui::sticker_set_box::state::PickWait::Downloading(PendingVideo {
+                    pick,
+                    file_id,
+                    file: PickedFile::Video,
+                    emoji,
+                    window: self.windows.scope,
+                });
             cx.notify();
             return;
         };

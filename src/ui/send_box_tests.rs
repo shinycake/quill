@@ -52,7 +52,11 @@ fn own_paid_channel(app: &mut QuillApp, allowed: bool) {
             ..quill::state::SupergroupFullInfoData::default()
         },
     );
-    session.chats.get_mut(&13).unwrap().my_member_status = Some(ChannelMemberStatus::Creator);
+    session
+        .chats
+        .get_mut(&13)
+        .unwrap()
+        .assume_member_status(Some(ChannelMemberStatus::Creator));
 }
 
 fn tray(app: &mut QuillApp, files: &[(&str, AttachmentKind)]) {
@@ -175,12 +179,12 @@ fn a_soundless_mp4_becomes_a_gif_after_the_background_check(cx: &mut TestAppCont
         app.attach_dropped_files(std::slice::from_ref(&clip), cx);
         // The probe runs in the background: the tray waits for it.
         assert!(app.tray_videos_checking());
-        assert!(!app.pending_attachments()[0].extras.gif);
+        assert!(!app.pending_attachments()[0].extras.is_gif());
     });
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
         assert!(!app.tray_videos_checking());
-        assert!(app.pending_attachments()[0].extras.gif);
+        assert!(app.pending_attachments()[0].extras.is_gif());
     });
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -202,7 +206,8 @@ fn the_same_picture_added_again_still_goes_as_its_jpeg(cx: &mut TestAppContext) 
     app.update_in(vcx, |app, _, cx| {
         assert!(!app.tray_media_checks_pending());
         let mut again = app.pending_attachments()[0].clone();
-        let jpeg = again.extras.photo_jpeg.take().expect("a JPEG");
+        let jpeg = again.extras.photo_jpeg().expect("a JPEG").to_path_buf();
+        again.extras.set_photo(quill::composer::PhotoPrep::AsIs);
         app.update_pending_send(|send| send.attachments.push(again));
         app.check_tray_videos(cx);
         assert_eq!(
@@ -306,7 +311,7 @@ fn photos(count: usize) -> Vec<ComposerAttachment> {
 /// each sent photo came from, and its album.
 fn newest_photos(app: &QuillApp, count: usize) -> Vec<(String, i64)> {
     let session = app.demo_session.as_ref().expect("demo session");
-    let chat = session.open_chat.expect("an open chat");
+    let chat = session.open_chat_id().expect("an open chat");
     let history = session.histories.get(&chat.0).expect("history");
     let newest: Vec<_> = history.ordered().into_iter().rev().take(count).collect();
     newest
@@ -356,7 +361,7 @@ fn removing_cards_before_and_past_the_tenth_sends_the_rest_in_order(cx: &mut Tes
     vcx.run_until_parked();
     app.update_in(&mut vcx, |app, window, cx| {
         app.set_composer_group_media(Some(true));
-        app.submit_composer(String::new(), window, cx);
+        app.submit_composer(String::new(), Default::default(), window, cx);
         assert!(app.pending_attachments().is_empty(), "the tray went");
         let sent = newest_photos(app, 11);
         let names: Vec<&str> = sent.iter().map(|(name, _)| name.as_str()).collect();

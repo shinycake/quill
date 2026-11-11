@@ -58,8 +58,9 @@ fn sticker(file: i32, premium: bool) -> StickerItem {
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,
-        requires_premium: premium,
-        premium_animation: premium.then_some(FileId(900)),
+        premium: premium.then_some(quill::telegram::envelope::PremiumSticker {
+            animation: Some(FileId(900)),
+        }),
     }
 }
 
@@ -125,6 +126,34 @@ fn header(app: &QuillApp) -> Option<String> {
 }
 
 #[gpui_kit::test]
+fn a_reloaded_category_list_keeps_the_chosen_category(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| seed(app, true));
+    open_stickers(&app, vcx);
+    app.update(vcx, |app, cx| {
+        app.choose_sticker_category(Some(EmojiCategorySource::Search(vec!["😀".into()])), cx)
+    });
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert_eq!(header(app).as_deref(), Some("Smile"));
+    });
+    // The list reloads in another order: the chosen one is still Smile.
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.stickers.emoji.sticker_categories.succeed(vec![
+                category("Smile", EmojiCategorySource::Search(vec!["😀".into()])),
+                category("Premium", EmojiCategorySource::Premium),
+            ]);
+        }
+    });
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert_eq!(header(app).as_deref(), Some("Smile"));
+    });
+}
+
+#[gpui_kit::test]
 fn choosing_a_category_lists_its_stickers_and_back_returns(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
@@ -135,10 +164,15 @@ fn choosing_a_category_lists_its_stickers_and_back_returns(cx: &mut TestAppConte
         assert_ne!(header(app).as_deref(), Some("Premium"));
     });
 
-    app.update(vcx, |app, cx| app.choose_sticker_category(Some(0), cx));
+    app.update(vcx, |app, cx| {
+        app.choose_sticker_category(Some(EmojiCategorySource::Premium), cx)
+    });
     frames(vcx);
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.pickers.media_panel.category, Some(0));
+        assert_eq!(
+            app.pickers.media_panel.category,
+            Some(EmojiCategorySource::Premium)
+        );
         assert_eq!(header(app).as_deref(), Some("Premium"));
         assert_eq!(found_cells(app), 2, "the answer fills the grid");
     });
@@ -160,7 +194,7 @@ fn choosing_a_category_lists_its_stickers_and_back_returns(cx: &mut TestAppConte
         app.pickers
             .sticker_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        app.choose_sticker_category(Some(1), cx);
+        app.choose_sticker_category(Some(EmojiCategorySource::Search(vec!["😀".into()])), cx);
     });
     frames(vcx);
     app.read_with(vcx, |app, _| {
@@ -187,7 +221,9 @@ fn a_category_does_not_list_another_windows_search(cx: &mut TestAppContext) {
         session.stickers.stickers.searched = StickerSearch::Typed("cat".into());
     });
     open_stickers(&app, vcx);
-    app.update(vcx, |app, cx| app.choose_sticker_category(Some(0), cx));
+    app.update(vcx, |app, cx| {
+        app.choose_sticker_category(Some(EmojiCategorySource::Premium), cx)
+    });
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert_eq!(header(app).as_deref(), Some("Premium"));
@@ -237,7 +273,9 @@ fn an_animated_sticker_with_no_thumbnail_shows_its_first_frame(cx: &mut TestAppC
         ];
     });
     open_stickers(&app, vcx);
-    app.update(vcx, |app, cx| app.choose_sticker_category(Some(0), cx));
+    app.update(vcx, |app, cx| {
+        app.choose_sticker_category(Some(EmojiCategorySource::Premium), cx)
+    });
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert_eq!(found_cells(app), 2);
@@ -252,7 +290,9 @@ fn premium_stickers_are_hidden_where_premium_cannot_be_bought(cx: &mut TestAppCo
     let vcx = &mut vcx;
     app.update(vcx, |app, _| seed(app, false));
     open_stickers(&app, vcx);
-    app.update(vcx, |app, cx| app.choose_sticker_category(Some(0), cx));
+    app.update(vcx, |app, cx| {
+        app.choose_sticker_category(Some(EmojiCategorySource::Premium), cx)
+    });
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert_eq!(found_cells(app), 2, "a locked sticker is listed");
@@ -290,7 +330,7 @@ fn a_locked_sticker_opens_the_premium_preview_instead_of_sending(cx: &mut TestAp
     app.update(vcx, |app, _| {
         seed(app, false);
         let session = app.demo_session.as_mut().unwrap();
-        session.payments.hub.premium = Some(premium_features());
+        session.payments.hub.premium.succeed(premium_features());
     });
     app.update(vcx, |app, cx| {
         app.send_sticker_pick(FileId(1), "😀".into(), 512, 512, None, cx);
@@ -299,27 +339,19 @@ fn a_locked_sticker_opens_the_premium_preview_instead_of_sending(cx: &mut TestAp
         let hub = &app.session().unwrap().payments.hub;
         // The locked sticker leads the stickers feature's preview.
         assert_eq!(
-            hub.promo_page,
+            hub.promo_page(),
             PromoPage::Preview {
                 feature: PremiumFeature::UniqueStickers.into(),
                 opened: PreviewOpen::Box,
             }
         );
-        assert_eq!(
-            hub.premium_requested.as_ref().map(|s| s.file_id),
-            Some(FileId(1))
-        );
+        assert_eq!(hub.premium_requested().map(|s| s.file_id), Some(FileId(1)));
         assert_ne!(app.connection.status_note(), "Sticker sent");
     });
 
     // With Premium the same sticker is just sent.
     app.update(vcx, |app, cx| {
-        app.demo_session
-            .as_mut()
-            .unwrap()
-            .payments
-            .hub
-            .premium_requested = None;
+        app.demo_session.as_mut().unwrap().payments.hub.premium_box = None;
         app.demo_session.as_mut().unwrap().payments.premium_option = Some(true);
         app.demo_session.as_mut().unwrap().open_chat(ChatId(11));
         app.send_sticker_pick(FileId(1), "😀".into(), 512, 512, None, cx);
@@ -330,7 +362,7 @@ fn a_locked_sticker_opens_the_premium_preview_instead_of_sending(cx: &mut TestAp
                 .unwrap()
                 .payments
                 .hub
-                .premium_requested
+                .premium_requested()
                 .is_none()
         );
         assert_eq!(app.connection.status_note(), "Sticker sent");
@@ -351,7 +383,7 @@ fn a_sent_sticker_flies_from_the_panel_to_its_message_and_lands(cx: &mut TestApp
         session.view_generation = quill::ids::ViewGeneration(7);
     });
     let chat = app
-        .read_with(vcx, |app, _| app.session().and_then(|s| s.open_chat))
+        .read_with(vcx, |app, _| app.session().and_then(|s| s.open_chat_id()))
         .expect("the demo opens a chat");
     open_stickers(&app, vcx);
 
@@ -391,8 +423,7 @@ fn a_sent_sticker_flies_from_the_panel_to_its_message_and_lands(cx: &mut TestApp
             thumb_width: 0,
             thumb_height: 0,
             is_premium: false,
-            requires_premium: false,
-            premium_animation: None,
+            premium: None,
             set_id: 77,
         });
         history.messages.insert(5000, message);

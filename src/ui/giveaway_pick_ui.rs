@@ -387,7 +387,7 @@ impl QuillApp {
                 GiveawayPage::Countries => {
                     let _ = live.driver.retry_countries();
                 }
-                GiveawayPage::Form => {}
+                GiveawayPage::Form | GiveawayPage::Confirming => {}
             }
         }
         if let Some(form) = self.giveaway.form.as_mut() {
@@ -428,16 +428,12 @@ impl QuillApp {
             return;
         };
         if !on_users
-            || (list.error.is_some() && !scrolled)
+            || (list.error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.payments.pick_scroll),
                 list.can_load_more(),
-                list.loading,
+                list.is_loading(),
             )
-            || !self
-                .payments
-                .giveaway_asked
-                .allow(list.user_ids.len(), scrolled)
         {
             return;
         }
@@ -540,9 +536,9 @@ impl QuillApp {
                             })),
                     );
                 }
-                if let Some(error) = list.error.as_ref() {
-                    body = body.child(div().text_sm().child(error.clone()));
-                } else if list.loading {
+                if let Some(error) = list.error() {
+                    body = body.child(div().text_sm().child(error.to_string()));
+                } else if list.is_loading() {
                     body = body.child(
                         div()
                             .text_sm()
@@ -557,7 +553,7 @@ impl QuillApp {
                             .child(tr(keys::Q_MONEY_NO_MEMBERS_FOUND)),
                     );
                 }
-                if list.loading && shown > 0 {
+                if list.is_loading() && shown > 0 {
                     body = body.child(loading_row("giveaway-award-loading", cx));
                 }
             }
@@ -611,7 +607,7 @@ impl QuillApp {
                     }
                 }
             }
-            GiveawayPage::Form => {}
+            GiveawayPage::Form | GiveawayPage::Confirming => {}
         }
         if let Some(note) = form.note.as_ref() {
             body = body.child(

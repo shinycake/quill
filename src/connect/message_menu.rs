@@ -233,7 +233,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let offset = if more {
             match slot.and_then(|slot| slot.ready()) {
                 Some(page)
-                    if !page.next_offset.is_empty() && !audience.more_loading.contains(&filter) =>
+                    if !page.next_offset.is_empty()
+                        && !slot.is_some_and(|slot| slot.is_paging()) =>
                 {
                     page.next_offset.clone()
                 }
@@ -328,7 +329,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 menu.chat_id == chat_id
                     && menu.message_id == message_id
                     && menu.option_id == item.option_id()
-                    && menu.properties.is_some_and(|p| p.can_get_link)
+                    && menu.properties.data().is_some_and(|p| p.can_get_link)
             });
         if !allowed {
             return Ok(None);
@@ -363,7 +364,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 menu.chat_id == chat_id
                     && menu.message_id == message_id
                     && menu.option_id == option_id
-                    && menu.properties.is_some_and(|p| p.can_be_deleted)
+                    && menu.properties.data().is_some_and(|p| p.can_be_deleted)
             });
         if !allowed {
             return Ok(None);
@@ -623,13 +624,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(view) = self.session.stickers.sticker_set_view.as_mut() else {
             return Ok(());
         };
-        let crate::state::StickerSetViewStage::Ready { stickers, .. } = &view.stage else {
+        let crate::state::StickerSetViewStage::Ready {
+            stickers, files, ..
+        } = &mut view.stage
+        else {
             return Ok(());
         };
-        if view.files_requested {
+        if *files == crate::state::SetFiles::Asked {
             return Ok(());
         }
-        view.files_requested = true;
+        *files = crate::state::SetFiles::Asked;
         let files: Vec<crate::ids::FileId> = stickers
             .iter()
             .filter_map(|s| s.display_file_id())
@@ -644,16 +648,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.stickers.stickers.installed_loaded
+        if !self.session.stickers.stickers.installed_loaded()
             && !self
                 .session
                 .requests
                 .has_purpose(RequestPurpose::GetInstalledStickerSets)
         {
-            let extra = self
-                .session
-                .request(RequestPurpose::GetInstalledStickerSets, None);
-            self.send_audience(extra, &get_installed_sticker_sets(extra))?;
+            self.sticker_request(
+                RequestPurpose::GetInstalledStickerSets,
+                get_installed_sticker_sets,
+            )?;
         }
         // "Add to Emoji Set" lists the owned emoji sets, which only the
         // media panel loaded so far.
@@ -663,12 +667,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .requests
                 .has_purpose(RequestPurpose::GetInstalledEmojiSets)
         {
-            let extra = self
-                .session
-                .request(RequestPurpose::GetInstalledEmojiSets, None);
-            self.send_audience(
-                extra,
-                &crate::telegram::requests_emoji::get_installed_emoji_sets(extra),
+            self.emoji_set_request(
+                RequestPurpose::GetInstalledEmojiSets,
+                crate::telegram::requests_emoji::get_installed_emoji_sets,
             )?;
         }
         self.fetch_editor_stickers()

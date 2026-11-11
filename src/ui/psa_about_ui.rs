@@ -33,7 +33,7 @@ impl QuillApp {
         session
             .chat_list
             .psa_about
-            .visible(session.open_chat, std::time::Instant::now())
+            .visible(session.open_chat_id(), std::time::Instant::now())
             .filter(|toast| toast.chat_id == chat_id)?;
         self.psa_about_view_body(chat_id, cx)
     }
@@ -47,7 +47,7 @@ impl QuillApp {
         let session = self.session()?;
         let about = &session.chat_list.psa_about;
         about
-            .visible(session.open_chat, std::time::Instant::now())
+            .visible(session.open_chat_id(), std::time::Instant::now())
             .filter(|toast| toast.chat_id == chat_id)?;
         let promotion = session.chat_list.promoted_chats.get(&chat_id.0)?;
         let text = session.chat_list.psa_labels.about(promotion);

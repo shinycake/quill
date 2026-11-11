@@ -38,8 +38,7 @@ fn sticker(id: i64, premium: bool) -> StickerItem {
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,
-        requires_premium: premium,
-        premium_animation: None,
+        premium: premium.then_some(quill::telegram::envelope::PremiumSticker { animation: None }),
     }
 }
 

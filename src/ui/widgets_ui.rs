@@ -11,7 +11,7 @@ use super::owned_image::OwnedImage;
 use super::status_note::StatusNote;
 use super::widget_runtime::{Launch, Runtime, RuntimeEvent, WIDGETS};
 use super::widgets_state::{
-    Identity, Noted, Poll, PresenceChange, Showing, WidgetEntry, WidgetStorage, prune_hidden,
+    Identity, Live, Noted, Poll, PresenceChange, Showing, WidgetEntry, WidgetStorage, prune_hidden,
     write_pending,
 };
 use gpui_kit::*;
@@ -19,7 +19,7 @@ use quill::ids::ChatId;
 use quill::lang::{keys, tr_with};
 use quill::message_widget::storage;
 use quill::message_widget::{
-    Lifecycle, MAX_CRASHES, PoolEntry, QueryOutcome, WidgetAnswer, WidgetKey, capacity, card_width,
+    Lifecycle, PoolEntry, QueryOutcome, WidgetAnswer, WidgetKey, capacity, card_width,
     initial_height, victim,
 };
 
@@ -107,7 +107,7 @@ impl QuillApp {
             if entry.presence.owner() != Some(window) || !entry.ticks() {
                 continue;
             }
-            if let Some(runtime) = entry.lifecycle.runtime() {
+            if let Some(runtime) = entry.runtime() {
                 runtime.tick(super::widget_runtime::clock_ms());
                 views.extend(entry.presence.views());
             }
@@ -161,13 +161,13 @@ impl QuillApp {
             PresenceChange::Hid => {
                 // Off screen: no release or leave will come.
                 entry.release_pointer();
-                if let Some(runtime) = entry.lifecycle.runtime() {
+                if let Some(runtime) = entry.runtime() {
                     runtime.set_visible(false);
                     runtime.trim();
                 }
             }
             PresenceChange::Width(width) => {
-                if let Some(runtime) = entry.lifecycle.runtime() {
+                if let Some(runtime) = entry.runtime() {
                     runtime.set_width(f64::from(width));
                 }
             }
@@ -263,19 +263,20 @@ impl QuillApp {
                 resume |= entry.ticks();
             }
             if let PresenceChange::Width(width) = change
-                && let Some(runtime) = entry.lifecycle.runtime()
+                && let Some(runtime) = entry.runtime()
             {
                 runtime.set_width(f64::from(width));
             }
-            if let Some(runtime) = entry.lifecycle.runtime() {
+            let owner = entry.presence.owner() == Some(window);
+            if let Some(live) = entry.live_mut() {
                 if came_back {
-                    runtime.set_visible(true);
+                    live.runtime.set_visible(true);
                 }
                 // Each set re-sanitises the widget's CSS: only changes go,
                 // and only from the owner, so two windows never trade it.
-                if entry.presence.owner() == Some(window) && entry.theme.as_ref() != Some(&theme) {
-                    runtime.set_theme(theme.0.clone(), theme.1);
-                    entry.theme = Some(theme.clone());
+                if owner && live.theme != theme {
+                    live.runtime.set_theme(theme.0.clone(), theme.1);
+                    live.theme = theme.clone();
                 }
             }
             if came_back
@@ -285,13 +286,17 @@ impl QuillApp {
                 entry.poll = Poll::Due(at.min(Instant::now()));
             }
             let restart = match &entry.lifecycle {
-                Lifecycle::Idle | Lifecycle::Waiting | Lifecycle::Released => true,
-                Lifecycle::Stopped { .. } => came_back && entry.crashes < MAX_CRASHES,
-                Lifecycle::Loading(_) | Lifecycle::Running(_) | Lifecycle::Failed { .. } => false,
+                // Already waiting for a sandbox, or running, or past saving.
+                Lifecycle::Waiting { .. }
+                | Lifecycle::Loading { .. }
+                | Lifecycle::Running(_)
+                | Lifecycle::Failed { .. } => None,
+                Lifecycle::Stopped { .. } if !came_back => None,
+                other => other.restarts_on_return(),
             };
-            if restart {
+            if let Some(streak) = restart {
                 redraw |= entry.lifecycle.is_stopped();
-                entry.lifecycle = Lifecycle::Waiting;
+                entry.lifecycle = Lifecycle::Waiting { streak };
             }
         }
         if resume {
@@ -319,7 +324,7 @@ impl QuillApp {
             let json =
                 serde_json::json!({"chatData": data.chat_data, "publicData": public}).to_string();
             if entry.data != json {
-                if let Some(runtime) = entry.lifecycle.runtime() {
+                if let Some(runtime) = entry.runtime() {
                     runtime.set_data(json.clone());
                 }
                 entry.data = json;
@@ -334,7 +339,7 @@ impl QuillApp {
             .entries
             .iter()
             .filter(|(_, entry)| {
-                matches!(entry.lifecycle, Lifecycle::Waiting) && entry.presence.is_shown()
+                matches!(entry.lifecycle, Lifecycle::Waiting { .. }) && entry.presence.is_shown()
             })
             .map(|(key, _)| *key)
             .collect();
@@ -438,14 +443,16 @@ impl QuillApp {
                 "chatType": if content.is_copy { "" } else { chat_type.unwrap_or("") },
             },
         });
-        entry.queries.clear();
-        entry.release_pointer();
-        entry.theme = Some((theme, background));
-        entry.lifecycle = Lifecycle::Loading(Runtime::start(Launch {
+        let streak = entry.lifecycle.streak();
+        let runtime = Runtime::start(Launch {
             html: content.html,
             options: options.to_string(),
             background,
-        }));
+        });
+        entry.lifecycle = Lifecycle::Loading {
+            runtime: Live::new(runtime, (theme, background)),
+            streak,
+        };
         self.watch_widget_runtimes(cx);
     }
 
@@ -477,18 +484,18 @@ impl QuillApp {
             let Some(entry) = self.widgets.entries.get_mut(&key) else {
                 continue;
             };
-            let Some(runtime) = entry.lifecycle.runtime() else {
+            let Some(live) = entry.lifecycle.runtime_mut() else {
                 continue;
             };
-            let out = runtime.take();
+            let out = live.runtime.take();
             let mut changed = false;
-            if let Some(frame) = out.frame {
-                entry.frame = Some((OwnedImage::new(frame.image), frame.width, frame.height));
+            if live.wants_frames != out.wants_frames || live.cursor != out.cursor {
+                live.wants_frames = out.wants_frames;
+                live.cursor = out.cursor;
                 changed = true;
             }
-            if entry.wants_frames != out.wants_frames || entry.cursor != out.cursor {
-                entry.wants_frames = out.wants_frames;
-                entry.cursor = out.cursor;
+            if let Some(frame) = out.frame {
+                entry.frame = Some((OwnedImage::new(frame.image), frame.width, frame.height));
                 changed = true;
             }
             // Off screen nothing redraws for it (round 18 C #2, #3): its
@@ -541,7 +548,6 @@ impl QuillApp {
                 if let Some(entry) = self.widgets.entries.get_mut(&key) {
                     entry.lifecycle =
                         std::mem::replace(&mut entry.lifecycle, Lifecycle::Idle).started();
-                    entry.crashes = 0;
                 }
             }
             RuntimeEvent::Height(height) => {
@@ -554,14 +560,8 @@ impl QuillApp {
             }
             RuntimeEvent::Stopped(reason) | RuntimeEvent::Failed(reason) => {
                 if let Some(entry) = self.widgets.entries.get_mut(&key) {
-                    entry.wants_frames = false;
-                    entry.release_pointer();
-                    entry.crashes = entry.crashes.saturating_add(1);
-                    entry.lifecycle = if entry.frame.is_some() {
-                        Lifecycle::Stopped { reason }
-                    } else {
-                        Lifecycle::Failed { reason }
-                    };
+                    // The runtime and what it held go with the old stage.
+                    entry.lifecycle = entry.lifecycle.stopped(reason, entry.frame.is_some());
                 }
             }
             RuntimeEvent::Link {
@@ -599,8 +599,10 @@ impl QuillApp {
                 }
             }
             RuntimeEvent::Gesture { hold } => {
-                if let Some(entry) = self.widgets.entries.get_mut(&key) {
-                    entry.hold = hold;
+                if let Some(entry) = self.widgets.entries.get_mut(&key)
+                    && let Some(live) = entry.live_mut()
+                {
+                    live.pointer.hold = hold;
                 }
             }
             RuntimeEvent::Request { token, data } => {
@@ -608,7 +610,9 @@ impl QuillApp {
                 let Some(entry) = self.widgets.entries.get_mut(&key) else {
                     return;
                 };
-                entry.queries.insert(ours, token);
+                if let Some(live) = entry.live_mut() {
+                    live.queries.insert(ours, token);
+                }
                 let sent = self
                     .live
                     .as_mut()
@@ -718,12 +722,13 @@ impl QuillApp {
         let Some(entry) = self.widgets.entries.get_mut(&key) else {
             return;
         };
-        let Some(theirs) = entry.queries.remove(&token) else {
+        let Some(live) = entry.live_mut() else {
             return;
         };
-        if let Some(runtime) = entry.lifecycle.runtime() {
-            runtime.respond(theirs, outcome);
-        }
+        let Some(theirs) = live.queries.remove(&token) else {
+            return;
+        };
+        live.runtime.respond(theirs, outcome);
     }
 
     /// Polls what is due on screen and sets the timer for the next one.

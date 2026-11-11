@@ -29,13 +29,74 @@ use quill::lang::{keys, tr, tr_with};
 use quill::state::track_name;
 use quill::telegram::envelope::ProfileAudio;
 
-/// The open track menu: its track, where it opened, and whether the
-/// "Save to..." page is showing.
+/// Which page of the track menu shows.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlaylistPage {
+    Main,
+    SaveTo,
+}
+
+/// The open track menu: its track, where it opened, and the page showing.
 #[derive(Clone, Copy)]
 pub(crate) struct PlaylistMenu {
     pub file_id: FileId,
     pub position: Point<Pixels>,
-    pub save_to: bool,
+    pub page: PlaylistPage,
+}
+
+/// The playlist's menu and what it leads to, one at a time: Delete closes
+/// the menu and asks for the removal to be confirmed.
+#[derive(Clone, Copy, Default)]
+pub(crate) enum PlaylistFlow {
+    #[default]
+    Closed,
+    Menu(PlaylistMenu),
+    /// A track of your own playlist waiting for the "remove" confirmation.
+    ConfirmRemove(FileId),
+}
+
+impl PlaylistFlow {
+    pub(crate) fn menu(self) -> Option<PlaylistMenu> {
+        match self {
+            Self::Menu(menu) => Some(menu),
+            Self::Closed | Self::ConfirmRemove(_) => None,
+        }
+    }
+
+    pub(crate) fn menu_mut(&mut self) -> Option<&mut PlaylistMenu> {
+        match self {
+            Self::Menu(menu) => Some(menu),
+            Self::Closed | Self::ConfirmRemove(_) => None,
+        }
+    }
+
+    pub(crate) fn remove(self) -> Option<FileId> {
+        match self {
+            Self::ConfirmRemove(file_id) => Some(file_id),
+            Self::Closed | Self::Menu(_) => None,
+        }
+    }
+
+    /// Close the menu; a removal waiting for its confirmation stays.
+    pub(crate) fn close_menu(&mut self) {
+        if matches!(self, Self::Menu(_)) {
+            *self = Self::Closed;
+        }
+    }
+
+    /// The confirmation is answered or dismissed; an open menu stays.
+    pub(crate) fn clear_remove(&mut self) {
+        if matches!(self, Self::ConfirmRemove(_)) {
+            *self = Self::Closed;
+        }
+    }
+
+    /// Take the track waiting for its removal.
+    pub(crate) fn take_remove(&mut self) -> Option<FileId> {
+        let file_id = self.remove();
+        self.clear_remove();
+        file_id
+    }
 }
 
 /// `lng_selected_remove_saved_music`.
@@ -80,10 +141,11 @@ impl QuillApp {
         position: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        self.playback.playlist_menu = Some(PlaylistMenu {
+        // box-host: this opens the track menu (an overlay), not the Remove box.
+        self.playback.playlist = PlaylistFlow::Menu(PlaylistMenu {
             file_id,
             position,
-            save_to: false,
+            page: PlaylistPage::Main,
         });
         // "Profile" is offered only for a track that is not saved yet.
         if let Some(live) = self.live.as_mut() {
@@ -97,7 +159,7 @@ impl QuillApp {
             .media
             .playlists
             .values()
-            .flat_map(|playlist| &playlist.tracks)
+            .flat_map(|playlist| playlist.tracks())
             .find(|track| track.file_id == file_id)
             .cloned()
     }
@@ -130,7 +192,7 @@ impl QuillApp {
 
     /// "Delete" in the track menu: ask first.
     fn ask_remove_playlist_track(&mut self, file_id: FileId, cx: &mut Context<Self>) {
-        self.playback.playlist_remove = Some(file_id);
+        self.playback.playlist = PlaylistFlow::ConfirmRemove(file_id);
         self.open_box(DialogKind::RemovePlaylistTrack);
         cx.notify();
     }
@@ -139,7 +201,7 @@ impl QuillApp {
     /// tdesktop's box; a request that could not be sent says so instead,
     /// and one TDLib refuses later reports through the session's note.
     fn confirm_remove_playlist_track(&mut self, cx: &mut Context<Self>) {
-        let Some(file_id) = self.playback.playlist_remove.take() else {
+        let Some(file_id) = self.playback.playlist.take_remove() else {
             return;
         };
         let note = match self.live.as_mut() {
@@ -270,8 +332,9 @@ impl QuillApp {
         let PlaylistMenu {
             file_id,
             position,
-            save_to,
+            page,
         } = menu;
+        let save_to = page == PlaylistPage::SaveTo;
         let session = self.session();
         let mine = session
             .and_then(|s| s.my_user_id)
@@ -280,7 +343,7 @@ impl QuillApp {
                 s.media
                     .playlists
                     .get(&me)
-                    .is_some_and(|p| p.tracks.iter().any(|t| t.file_id == file_id))
+                    .is_some_and(|p| p.tracks().iter().any(|t| t.file_id == file_id))
             });
         let local = session
             .and_then(|s| s.media.files.get(&file_id.0))
@@ -300,7 +363,7 @@ impl QuillApp {
                 cx,
             )
         };
-        let close = |this: &mut QuillApp| this.playback.playlist_menu = None;
+        let close = |this: &mut QuillApp| this.playback.playlist.close_menu();
         let mut rows: Vec<AnyElement> = Vec::new();
         if save_to {
             rows.push(
@@ -311,8 +374,8 @@ impl QuillApp {
                     false,
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    if let Some(menu) = this.playback.playlist_menu.as_mut() {
-                        menu.save_to = false;
+                    if let Some(menu) = this.playback.playlist.menu_mut() {
+                        menu.page = PlaylistPage::Main;
                     }
                     cx.notify();
                 }))
@@ -434,8 +497,8 @@ impl QuillApp {
                         false,
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(menu) = this.playback.playlist_menu.as_mut() {
-                            menu.save_to = true;
+                        if let Some(menu) = this.playback.playlist.menu_mut() {
+                            menu.page = PlaylistPage::SaveTo;
                         }
                         cx.notify();
                     }))
@@ -458,7 +521,7 @@ impl QuillApp {
         DismissLayer::new(
             "playlist-menu-overlay",
             cx.listener(|this, _, _, cx| {
-                this.playback.playlist_menu = None;
+                this.playback.playlist.close_menu();
                 cx.notify();
             }),
         )
@@ -478,14 +541,15 @@ impl QuillApp {
             shell,
             DialogKind::RemovePlaylistTrack,
             |this, _, cx| {
-                this.playback.playlist_remove = None;
+                this.playback.playlist.clear_remove();
                 cx.notify();
             },
         );
         app.update(cx, |this, cx| {
             let name = this
                 .playback
-                .playlist_remove
+                .playlist
+                .remove()
                 .and_then(|id| this.playlist_track(id))
                 .map(|track| track_name(&track))
                 .unwrap_or_default();
@@ -510,7 +574,7 @@ impl QuillApp {
                     Button::new("remove-playlist-cancel")
                         .label(tr(keys::CANCEL))
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.playback.playlist_remove = None;
+                            this.playback.playlist.clear_remove();
                             cx.notify();
                             this.close_kit_dialog_if_done(
                                 DialogKind::RemovePlaylistTrack,
@@ -547,11 +611,11 @@ crate::ui::shell::register_dialogs! {
     /// Confirm removing a track from your own Playlist page.
     RemovePlaylistTrack => DialogSpec::new(
         5461,
-        |app| app.playback.playlist_remove.is_some(),
+        |app| app.playback.playlist.remove().is_some(),
         QuillApp::build_remove_playlist_track_dialog,
     )
     .close(|app, _, cx| {
-            app.playback.playlist_remove = None;
+            app.playback.playlist.clear_remove();
             cx.notify();
         }),
 }

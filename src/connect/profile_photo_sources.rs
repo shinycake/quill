@@ -53,21 +53,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let users = &self.session.users_state;
-        if (!users.profile_photo_emoji_icons.is_empty() && !users.profile_photo_emoji_icons_failed)
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetProfilePhotoEmojiIcons)
-        {
+        if !self.session.users_state.profile_photo_emoji_icons.can_ask() {
             return Ok(None);
         }
-        self.session.users_state.profile_photo_emoji_icons_failed = false;
         let extra = self
             .session
             .request(RequestPurpose::GetProfilePhotoEmojiIcons, None);
         let json = get_default_profile_photo_custom_emoji_stickers(extra);
-        self.send_json_request(extra, &json).map(Some)
+        let sent = self.send_json_request(extra, &json).map(Some);
+        if sent.is_ok() {
+            self.session.users_state.profile_photo_emoji_icons.begin();
+        }
+        sent
     }
 
     /// Download the builder's emoji thumbnails that are not local yet.
@@ -76,6 +73,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .users_state
             .profile_photo_emoji_icons
+            .items()
             .iter()
             .filter_map(|sticker| sticker.display_file_id())
             .collect();

@@ -375,7 +375,7 @@ pub fn decide_notify(input: &NotifyInput) -> Option<OsNotification> {
     Some(OsNotification {
         chat_id,
         message_id: Some(message.id),
-        topic_id: message.topic_id,
+        topic_id: message.topic_id(),
         title,
         body,
     })
