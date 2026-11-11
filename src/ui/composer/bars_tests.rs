@@ -1053,9 +1053,7 @@ fn a_forced_reply_waits_while_the_composer_replies(cx: &mut TestAppContext) {
 /// Sweep 10-096: a pick with no connection leaves the typed query in the
 /// field.
 #[gpui_kit::test]
-fn inline_mode_keeps_the_query_without_a_connection(
-    cx: &mut TestAppContext,
-) {
+fn inline_mode_keeps_the_query_without_a_connection(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     open_chat(&app, vcx, GROUP);

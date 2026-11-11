@@ -142,7 +142,8 @@ impl BotsState {
     pub fn inline_bot_asked(&self, request: crate::ids::RequestId) -> Option<&str> {
         self.inline_bots.values().find_map(|entry| match entry {
             InlineBotResolve::Resolving {
-                username, request: r
+                username,
+                request: r,
             } if *r == request => Some(username.as_str()),
             _ => None,
         })

@@ -158,9 +158,7 @@ pub(crate) struct MainWindow {
 /// cell; every borrow is `try_borrow_mut` and a busy cell reads as "no
 /// mark" instead of panicking.
 #[derive(Default)]
-pub(super) struct ClosedKitDialogs(
-    std::cell::RefCell<std::collections::HashSet<WindowId>>,
-);
+pub(super) struct ClosedKitDialogs(std::cell::RefCell<std::collections::HashSet<WindowId>>);
 
 impl ClosedKitDialogs {
     /// `window`'s kit dialog was closed from outside its shell.

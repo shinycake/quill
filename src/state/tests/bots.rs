@@ -202,10 +202,7 @@ fn resolve_inline_bot_private_chat_resolves_with_cached_inline_flag() {
             ..Default::default()
         },
     );
-    let extra = session.request(
-        RequestPurpose::Bots(BotsPurpose::ResolveInlineBot),
-        None,
-    );
+    let extra = session.request(RequestPurpose::Bots(BotsPurpose::ResolveInlineBot), None);
     session.bots.set_inline_bot(InlineBotResolve::Resolving {
         username: "gif".into(),
         request: extra,
@@ -245,10 +242,7 @@ fn resolve_inline_bot_non_bot_username_fails() {
             ..Default::default()
         },
     );
-    let extra = session.request(
-        RequestPurpose::Bots(BotsPurpose::ResolveInlineBot),
-        None,
-    );
+    let extra = session.request(RequestPurpose::Bots(BotsPurpose::ResolveInlineBot), None);
     session.bots.set_inline_bot(InlineBotResolve::Resolving {
         username: "alice".into(),
         request: extra,
@@ -344,10 +338,7 @@ fn resolve_inline_bot_stale_answer_ignored() {
 fn resolve_inline_bot_error_fails_slot() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    let extra = session.request(
-        RequestPurpose::Bots(BotsPurpose::ResolveInlineBot),
-        None,
-    );
+    let extra = session.request(RequestPurpose::Bots(BotsPurpose::ResolveInlineBot), None);
     session.bots.set_inline_bot(InlineBotResolve::Resolving {
         username: "nosuchbot".into(),
         request: extra,

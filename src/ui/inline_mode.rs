@@ -286,24 +286,33 @@ impl QuillApp {
         };
         match hit {
             Some((_, false, _)) => {
-                live.driver.session.bots.set_inline_bot(InlineBotResolve::Failed {
-                    username: username.to_string(),
-                    reason: format!("@{username} is not a bot"),
-                });
+                live.driver
+                    .session
+                    .bots
+                    .set_inline_bot(InlineBotResolve::Failed {
+                        username: username.to_string(),
+                        reason: format!("@{username} is not a bot"),
+                    });
             }
             Some((user_id, true, is_inline)) => {
-                live.driver.session.bots.set_inline_bot(InlineBotResolve::Resolved {
-                    username: username.to_string(),
-                    user_id,
-                    is_inline: Some(is_inline),
-                });
+                live.driver
+                    .session
+                    .bots
+                    .set_inline_bot(InlineBotResolve::Resolved {
+                        username: username.to_string(),
+                        user_id,
+                        is_inline: Some(is_inline),
+                    });
             }
             None => {
                 if live.driver.resolve_inline_bot(username).is_err() {
-                    live.driver.session.bots.set_inline_bot(InlineBotResolve::Failed {
-                        username: username.to_string(),
-                        reason: tr(keys::Q_MEDIA_COULD_NOT_LOOK_UP_THE).to_string(),
-                    });
+                    live.driver
+                        .session
+                        .bots
+                        .set_inline_bot(InlineBotResolve::Failed {
+                            username: username.to_string(),
+                            reason: tr(keys::Q_MEDIA_COULD_NOT_LOOK_UP_THE).to_string(),
+                        });
                 }
             }
         }
