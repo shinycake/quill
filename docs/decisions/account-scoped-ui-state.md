@@ -4482,3 +4482,112 @@ Agent access, windows and platform code. Entries by area:
   11-p8-007, 12-076 and 12-094 call the driver or the lock from the frame and
   are only checked by the lock-surface and window-scope scripts and by eye.
 - **Not done.** Nothing left open.
+
+
+### Sweep fixes (s3-media)
+
+Media and players. Entry ids in brackets; a skipped entry says why.
+
+- **Video editor.** The cover still has its own cutter, `StillCut::{Idle,
+  Cutting { token, next }}`, matched by its own token (`next_editor_serial`),
+  so an encode's serial bump no longer orphans it and `still_busy` /
+  `still_wanted` are gone (14-002). A failed tray or edit-box encode
+  reopens the player through `start_video_editor_player` (14-001); the
+  editor's single stage enum was not built, the player stays an `Option`
+  that the Err arm refills, as the avatar path does.
+- **Edit media.** A cover and the video editor's extras live in
+  `EditMediaReplacement`, so replacing or clearing the replacement starts
+  the next video without them (02-091); a replacement of the same file (the
+  "as a document" box) keeps them. The original video's own cover stays in
+  `MediaEdit::cover`. `EditorPurpose::MessageEdit { chat, message }` and the
+  cover picker carry the edit they were started for and drop the answer when
+  another edit is pending (09-070, 09-071).
+- **Voice and recording.** The voice encoder thread writes why it ended
+  into `Control::ended`, and `VoiceCapture::failure` also reports a finished
+  worker, so the bar ends the recording with the reason (14-069). The chat
+  action, the play-once offer (and its send-time re-check) and the
+  secret-chat layer check use the recording's own chat, not the main
+  window's open chat (12-050, 12-051, 12-052); `sync_voice_recording` and
+  `sync_video_note_recording` take that chat.
+- **Disk pauses.** A healthy reading removes an id from `disk_paused` only
+  after its resume went out, and a failed send leaves the rest for the next
+  reading (02-140; the low-disk and saved-pause loops follow the same
+  order). The saved-pause search is `DiskSearch::{NotAsked, Asked { request,
+  keys }, Done}`: set after the send succeeded, its answer matched by
+  request id, and a failed search goes back to `NotAsked`; so does a lost
+  one, because the search is swept like the other dedupe-guarded lookups
+  and the sweep settles it through the error arm (05-082).
+- **Quick reaction.** `setDefaultReactionType` carries
+  `RequestRollback::DefaultReaction { previous }` (02-142; one line in
+  `session_apply_error.rs`, with a `Hotspot-change` trailer: every new
+  rollback needs an arm there).
+- **Media keys.** An OS media key with no player publishing is dropped
+  (`media_session::enqueue`), so it is not replayed on the next track
+  (03-089).
+- **Shared media.** A Gifts page for another chat writes no `next_offset`
+  (06-003: `accept_profile` says whether it took the page). `PageKey` carries
+  the tab's stamp, so a closed and reopened gallery of the same chat starts
+  at the top (13-075). A ticked row asks for its own properties and every
+  answer lands on the ticked entry by message id (13-050); a row menu
+  captures the account and chat it was built for and drops the click when
+  the gallery shows another (13-049).
+- **Profile photos.** The chat gallery click reports a failed send and gives
+  up when the current photo's request ended without an answer
+  (`chat_photo_request_ended`, 12-040). 02-183 is skipped: `fetch_chat_photos`
+  runs from a click only (never from render) and skips what is in flight, so
+  a re-send after a failure is the retry.
+- **Profile boxes.** Edit contact, birthday, personal channel and photo,
+  and share contact send their request and stay open as
+  `ProfileDialog::Saving { dialog, request, saved }`; the request is watched
+  by id (`SaveWatch`: one slot, since one box is open at a time, so a box
+  replaced without closing leaves nothing behind). The toast is earned by
+  the answer itself (`Session::apply` marks it), not by the request leaving
+  flight: a request dropped unanswered puts the box back with no success
+  toast. A refusal puts the box back and says why, closing it forgets the
+  wait (12-042). The personal-channel entry in the profile
+  menu has no box, so it still toasts on send.
+- **Pickers.** `PickerUi`'s farewell closes the GIF gate and the
+  status-choices resolver on the client being left (11-p1-001). The Masks
+  strip is wanted while some window's editor is in Stickers mode and is
+  released by `sync_editor_masks` every frame, whatever closed the editor
+  (11-p8-016). 11-p8-016 asked for a drop guard; the strip's gate is the
+  session's, which a value dropped in the editor cannot reach.
+- **Players.** A click demand is `DemandStage::{Asked { pass }, Started}`:
+  it leaves `Asked` only when the sound really started (10-137) and expires
+  when its window ends a pass or leaves the list with no row that rendered
+  it (10-136). The HDR viewer's poll and draw read one headroom
+  (`display_headroom`), so a screen that lost EDR does not repaint every
+  second (10-097); a chat window runs the EDR sync too, under its scope guard like the rest
+  of its upkeep (10-098). The HDR
+  JPEG XL decode converts a chunk at a time into the final buffer and caps
+  at 32 Mpx (10-103). A sticker worker that ended fails its clips and gets
+  no new ones (`WorkerLife`, 06-011). The sticker pump redraws only for a
+  clip's first frame (13-015). A bot draft with no text keeps one rows key
+  until its content changes (08-019).
+- **Sticker box.** `Encoding::{Idle, Running { cancel }}` is ended only by
+  the job holding that flag (13-003); a chosen video whose download failed
+  ends the wait with a note, and a download that could not be sent says so.
+  The wait asks with an automatic download, whose end `status` reads as
+  `Idle` (only user downloads fail), so it checks
+  `DownloadIntents::ended_without_file`, which holds for any origin
+  (13-005; no progress bar: tdesktop shows none for this wait).
+- **Spoiler tile.** The media spoiler tile is built on the background
+  executor (`TileState::{Idle, Building, Ready}`) and released only by the
+  idle image trim, not every three seconds. The frame callback claims the
+  build (`claim_build`), not the ask, so a window that closes before its
+  next frame leaves the tile `Idle` for the next window to ask again
+  (13-041).
+- **Statistics export.** A workbook is refused while an async graph of the
+  page was never asked or is loading, and the toast says the statistics are
+  still loading. A graph whose request failed is exported without its
+  sheet, as one the server could not build is: the page only asks a graph
+  once, so waiting on it would block the export for good (13-027).
+- **Playlist.** Remove and reorder report a send that failed; TDLib's later
+  refusal already lands in the session's note (12-002).
+- **Edit media.** A replacement video is probed in the background when it
+  is staged or re-cut (`EditMediaReplacement::probe`, `ReplacementProbe::{
+  NotNeeded, Probing, Ready}`), matched by path. Save says "Preparing the
+  video…" and waits while it is `Probing`; a failed probe drops the
+  replacement with the reason; the driver sends only a `Ready` probe, so
+  no ffprobe subprocess runs on the UI thread (02-144, fixed after being
+  skipped).

@@ -22,6 +22,9 @@ pub(crate) struct PageKey {
     pub anchor_day: Option<i64>,
     /// The search query, hashed (empty for the plain list).
     pub query: u64,
+    /// The tab's stamp: a gallery closed and opened again, or a fetch that
+    /// starts the list over, is a new page even for the same chat.
+    pub generation: u64,
 }
 
 impl PageKey {
@@ -33,6 +36,7 @@ impl PageKey {
             chat: chat.map_or(0, |chat| chat.0),
             anchor_day: state.anchor_day,
             query: query.finish(),
+            generation: state.generation,
         }
     }
 }
@@ -137,6 +141,7 @@ mod tests {
             chat,
             anchor_day: None,
             query: 0,
+            generation: 0,
         }
     }
 
@@ -170,6 +175,28 @@ mod tests {
             "another chat's list is at the top"
         );
         assert!(asked.allow(20, false), "and asks again");
+    }
+
+    /// Closing the gallery and opening the same chat again restamps its
+    /// tabs: the list starts at the top and asks for its paging afresh.
+    #[test]
+    fn a_reopened_gallery_of_the_same_chat_is_a_new_page() {
+        use quill::state::SharedMediaTabState;
+        let ui = SharedMediaGridUi::new();
+        let tab = SharedMediaTab::Files;
+        let mut state = SharedMediaTabState::default();
+        let chat = Some(quill::ids::ChatId(1));
+        let Some((scroll, asked)) = ui.list_scroll(tab, PageKey::of(chat, &state)) else {
+            panic!("the Files tab has a list");
+        };
+        scroll.set_offset(Point::new(px(0.), px(-300.)));
+        assert!(asked.allow(20, false));
+        state.generation += 1;
+        let Some((scroll, asked)) = ui.list_scroll(tab, PageKey::of(chat, &state)) else {
+            panic!("the Files tab has a list");
+        };
+        assert_eq!(scroll.offset().y, px(0.));
+        assert!(asked.allow(20, false), "the paging mark was reset");
     }
 
     /// Deleting the newest file is the same list: it keeps its place. A

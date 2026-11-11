@@ -265,7 +265,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         match self.sender.send_json(&json) {
             Ok(()) => {
                 let _ = self.cancel_outgoing_typing();
-                let _ = self.sync_voice_recording(false, 0);
+                let _ = self.sync_voice_recording(None, false, 0);
                 Ok(extra)
             }
             Err(err) => {
@@ -341,7 +341,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         match self.sender.send_json(&json) {
             Ok(()) => {
                 let _ = self.cancel_outgoing_typing();
-                let _ = self.sync_video_note_recording(false, 0);
+                let _ = self.sync_video_note_recording(None, false, 0);
                 Ok(extra)
             }
             Err(err) => {

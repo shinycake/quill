@@ -197,6 +197,8 @@ struct Control {
     paused: AtomicBool,
     /// The thread has flushed the file since the pause.
     flushed: AtomicBool,
+    /// Why the encoder thread ended before the microphone closed.
+    ended: Mutex<Option<String>>,
 }
 
 /// A running microphone capture: the cpal stream, the encoder thread it
@@ -257,42 +259,48 @@ impl VoiceCapture {
         let worker = {
             let (levels, samples, control) = (levels.clone(), samples.clone(), control.clone());
             crate::thread_guard::spawn_guarded("quill-voice-encoder", move || {
-                let mut sent = 0;
-                let mut paused = false;
-                // Ends when the stream (the only sender) is dropped.
-                loop {
-                    let chunk = match receiver.recv_timeout(Duration::from_millis(30)) {
-                        Ok(chunk) => Some(chunk),
-                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
-                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-                    };
-                    let want = control.paused.load(Ordering::Acquire);
-                    if want != paused {
-                        paused = want;
-                        if paused {
-                            encoder.pause()?;
-                            control.flushed.store(true, Ordering::Release);
-                        } else {
-                            encoder.resume();
-                            control.flushed.store(false, Ordering::Release);
+                let result = (|| -> Result<u64, String> {
+                    let mut sent = 0;
+                    let mut paused = false;
+                    // Ends when the stream (the only sender) is dropped.
+                    loop {
+                        let chunk = match receiver.recv_timeout(Duration::from_millis(30)) {
+                            Ok(chunk) => Some(chunk),
+                            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+                            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                        };
+                        let want = control.paused.load(Ordering::Acquire);
+                        if want != paused {
+                            paused = want;
+                            if paused {
+                                encoder.pause()?;
+                                control.flushed.store(true, Ordering::Release);
+                            } else {
+                                encoder.resume();
+                                control.flushed.store(false, Ordering::Release);
+                            }
+                        }
+                        let Some(chunk) = chunk.filter(|_| !paused) else {
+                            continue;
+                        };
+                        encoder.push(&chunk)?;
+                        samples.store(encoder.samples() as u64, Ordering::Relaxed);
+                        if let Some(fresh) = encoder.levels().get(sent..)
+                            && !fresh.is_empty()
+                            && let Ok(mut shared) = levels.lock()
+                        {
+                            shared.extend_from_slice(fresh);
+                            sent = encoder.levels().len();
                         }
                     }
-                    let Some(chunk) = chunk.filter(|_| !paused) else {
-                        continue;
-                    };
-                    encoder.push(&chunk)?;
-                    samples.store(encoder.samples() as u64, Ordering::Relaxed);
-                    if let Some(fresh) = encoder.levels().get(sent..)
-                        && !fresh.is_empty()
-                        && let Ok(mut shared) = levels.lock()
-                    {
-                        shared.extend_from_slice(fresh);
-                        sent = encoder.levels().len();
-                    }
+                    let total = encoder.samples() as u64;
+                    encoder.finish()?;
+                    Ok(total)
+                })();
+                if let Err(reason) = &result {
+                    *control.ended.lock_or_recover() = Some(reason.clone());
                 }
-                let total = encoder.samples() as u64;
-                encoder.finish()?;
-                Ok(total)
+                result
             })
         };
         let worker = match worker {
@@ -416,6 +424,14 @@ impl VoiceCapture {
         use std::sync::atomic::Ordering;
         let live = self.live.as_ref()?;
         let error = live.mic.error.lock_or_recover().take();
+        let error = error.or_else(|| live.control.ended.lock_or_recover().take());
+        // The encoder only returns once the microphone is closed, so a
+        // finished thread under a live capture panicked or failed.
+        let error = error.or_else(|| {
+            live.worker.is_finished().then(|| {
+                crate::lang::tr(crate::lang::keys::Q_AV_THE_VOICE_ENCODER_STOPPED).to_string()
+            })
+        });
         error.or_else(|| {
             let idle = self.clock.elapsed_at(Instant::now()).as_secs() >= NO_AUDIO_SECS
                 && live.samples.load(Ordering::Relaxed) == 0;

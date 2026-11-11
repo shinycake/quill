@@ -35,6 +35,15 @@ impl QuillApp {
         }
     }
 
+    /// The account and chat the open gallery shows.
+    fn shared_media_gallery_owner(&self) -> Option<quill::ids::AccountChat> {
+        let session = self.session()?;
+        Some(quill::ids::AccountChat::new(
+            session.account.clone(),
+            session.media.shared_media.chat_id?,
+        ))
+    }
+
     /// What TDLib last said `message_id` may do, when it was asked for this
     /// chat's message.
     fn shared_media_actions(&self, message_id: MessageId) -> Option<MessageActions> {
@@ -102,10 +111,20 @@ impl QuillApp {
         message_id: MessageId,
         cx: &mut Context<Self>,
     ) {
-        let entry =
-            SelectedMedia::from_actions(message_id, self.shared_media_actions(message_id).as_ref());
+        let known = self.shared_media_actions(message_id);
+        let entry = SelectedMedia::from_actions(message_id, known.as_ref());
         if let Some(state) = self.shared_media_gallery_mut() {
             state.toggle_selected(entry);
+        }
+        // A row ticked before TDLib answered asks for its own properties; the
+        // answer lands on the ticked entry by message id.
+        if known.is_none()
+            && let Some(chat) = self
+                .session()
+                .and_then(|session| session.media.shared_media.chat_id)
+            && let Some(live) = self.live.as_mut()
+        {
+            let _ = live.driver.refresh_message_menu_actions(chat, message_id);
         }
         cx.notify();
     }
@@ -203,12 +222,20 @@ impl QuillApp {
         let items = media_menu_items(&self.shared_media_menu_facts(item));
         let (message_id, file) = (item.message_id, item.file);
         let owner = cx.entity().downgrade();
+        // The chat the menu was built for: a click acts on it only while
+        // the gallery still shows it.
+        let built_for = self.shared_media_gallery_owner();
         move |mut menu, _, _| {
             for kind in items.iter().copied() {
                 let owner = owner.clone();
+                let built_for = built_for.clone();
                 menu = menu.item(PopupMenuItem::new(menu_label(kind)).on_click(
                     move |_, window, cx| {
                         let _ = owner.update(cx, |this, cx| {
+                            if built_for.is_none() || this.shared_media_gallery_owner() != built_for
+                            {
+                                return;
+                            }
                             this.shared_media_menu_action(kind, message_id, file, window, cx);
                         });
                     },

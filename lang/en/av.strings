@@ -374,3 +374,4 @@
 "qll_av_you_cant_send_messages_in" = "You can't send messages in this voice chat.";
 "qll_av_yourself" = "Yourself";
 "qll_av_message_the_voice_chat" = "Message the voice chat — Enter sends";
+"qll_av_the_voice_encoder_stopped" = "The voice encoder stopped.";

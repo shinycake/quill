@@ -50,6 +50,10 @@ pub enum RequestRollback {
     },
     /// B7: `toggleChatHasProtectedContent`: the previous flag.
     ProtectedContent { chat_id: i64, previous: bool },
+    /// `setDefaultReactionType`: the quick reaction shown before the choice.
+    DefaultReaction {
+        previous: Option<crate::state::ReactionChoice>,
+    },
     /// B7: `setChatAvailableReactions`: the previous setting.
     AvailableReactions {
         chat_id: i64,

@@ -16,6 +16,24 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT_RENDER: AtomicU64 = AtomicU64::new(1);
 
 impl QuillApp {
+    /// The editor's Masks strip is wanted while some window's editor is in
+    /// Stickers mode: whatever closes that editor (Done, Cancel, a window
+    /// or account leaving) releases it, not only the mode button.
+    pub(super) fn sync_editor_masks(&mut self) {
+        let wanted = self
+            .viewer
+            .photo_editor
+            .as_ref()
+            .is_some_and(|editor| editor.mode == super::photo_editor::EditorMode::Stickers)
+            || self.windows.slot_edits_stickers();
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        if !wanted && live.driver.session.stickers.masks.strip_wanted {
+            live.driver.release_editor_masks();
+        }
+    }
+
     /// Render the edit at full resolution into a new PNG and send that
     /// instead of the original. The render and the encode run off the UI
     /// thread; the editor closes at once.
@@ -29,8 +47,8 @@ impl QuillApp {
                 self.render_attachment_edit(item, editor, window, cx)
             }
             EditorPurpose::Profile(target) => self.finish_profile_crop(editor, target, cx),
-            EditorPurpose::MessageEdit => {
-                let edit_of = self.edited_message();
+            EditorPurpose::MessageEdit { chat, message } => {
+                let edit_of = Some((chat, message));
                 let job = editor.into_render_job();
                 let render = cx.background_spawn(async move {
                     super::edit_media_tools::write_edited_png(&job.render())
@@ -151,7 +169,7 @@ impl QuillApp {
     }
 
     /// The message whose media is being edited, if any.
-    fn edited_message(&self) -> Option<(quill::ids::ChatId, quill::ids::MessageId)> {
+    pub(super) fn edited_message(&self) -> Option<(quill::ids::ChatId, quill::ids::MessageId)> {
         let edit = self.chat_ui.pending_edit()?;
         Some((edit.chat_id, edit.message_id))
     }

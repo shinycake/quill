@@ -3,7 +3,7 @@
 use super::*;
 use crate::ids::{ChatId, FileId, MessageId, RequestId};
 use crate::state::{MessagesPurpose, StickersPurpose};
-use crate::state::{ReactionChoice, RequestPurpose};
+use crate::state::{ReactionChoice, RequestPurpose, RequestRollback};
 use crate::telegram::requests::{
     get_installed_sticker_sets, get_message_available_reactions, get_recent_stickers,
     get_sticker_set, reaction_type_custom_emoji, reaction_type_emoji, set_message_reaction,
@@ -239,7 +239,14 @@ impl<S: JsonSender> ConnectDriver<S> {
                 extra, value,
             )) {
             Ok(()) => {
-                self.session.stickers.default_reaction = Some(choice.clone());
+                let previous = self
+                    .session
+                    .stickers
+                    .default_reaction
+                    .replace(choice.clone());
+                if let Some(pending) = self.session.requests.pending_mut(extra) {
+                    pending.rollback = Some(RequestRollback::DefaultReaction { previous });
+                }
                 Ok(extra)
             }
             Err(err) => {

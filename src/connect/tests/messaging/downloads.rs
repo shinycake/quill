@@ -1,6 +1,8 @@
 //! Driver tests: automatic photo and chat-photo downloads.
 use super::*;
 use crate::disk_guard::{DiskState, FLOORS};
+use crate::ids::RequestId;
+use crate::state::DiskSearch;
 
 #[test]
 fn photo_history_auto_downloads_thumb_and_full_photo() {
@@ -886,16 +888,27 @@ fn paused_found(file_id: i32, message: i64) -> crate::telegram::envelope::Parsed
     }
 }
 
+const SEARCH_REQUEST: RequestId = RequestId(5);
+
+fn asked_search(keys: &[(i64, i64)]) -> DiskSearch {
+    DiskSearch::Asked {
+        request: SEARCH_REQUEST,
+        keys: keys.iter().copied().collect(),
+    }
+}
+
 #[test]
 fn a_pause_saved_while_the_saved_pause_search_runs_is_kept() {
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
     let mut session = Session::new(AccountKey::primary(), sink.clone());
     session.settings.data_storage.disk_paused.insert((7, 99));
     session.settings.data_storage.disk_paused.insert((7, 100));
-    session.media.disk_search_keys.insert((7, 99));
-    session.media.disk_search_keys.insert((7, 100));
+    session.media.disk_search = asked_search(&[(7, 99), (7, 100)]);
     session.settings.data_storage.disk_paused.insert((7, 101));
-    session.apply_disk_paused_found(vec![paused_found(77, 99), paused_found(79, 101)]);
+    session.apply_disk_paused_found(
+        SEARCH_REQUEST,
+        vec![paused_found(77, 99), paused_found(79, 101)],
+    );
     assert_eq!(session.media.disk_resume_due, [77]);
     let saved = &session.settings.data_storage.disk_paused;
     assert_eq!(saved.iter().copied().collect::<Vec<_>>(), [(7, 101)]);
@@ -907,9 +920,126 @@ fn a_saved_pause_found_on_a_low_disk_waits_for_a_healthy_one() {
     let mut session = Session::new(AccountKey::primary(), sink);
     session.media.disk_room = Some(1);
     session.settings.data_storage.disk_paused.insert((7, 99));
-    session.media.disk_search_keys.insert((7, 99));
-    session.apply_disk_paused_found(vec![paused_found(77, 99)]);
+    session.media.disk_search = asked_search(&[(7, 99)]);
+    session.apply_disk_paused_found(SEARCH_REQUEST, vec![paused_found(77, 99)]);
     assert!(session.media.disk_resume_due.is_empty());
     assert!(session.media.disk_paused.contains(&77));
     assert!(session.settings.data_storage.disk_paused.contains(&(7, 99)));
+}
+
+#[test]
+fn a_failed_resume_keeps_the_rest_paused_for_the_next_healthy_reading() {
+    use super::super::flood_retry_lost::SwitchSender;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    const MIB: u64 = 1 << 20;
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let down = Arc::new(AtomicBool::new(false));
+    let sender = SwitchSender {
+        inner: recorder.clone(),
+        down: down.clone(),
+    };
+    let session = Session::new(AccountKey::primary(), sink.clone());
+    let mut driver = ConnectDriver::new(session, sender, test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    let ingest = |driver: &mut ConnectDriver<SwitchSender>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &sink).unwrap())
+            .unwrap();
+    };
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+    );
+    for (file, message) in [(51, 99), (52, 100)] {
+        driver
+            .download_user_file(FileId(file), Some((ChatId(7), message)))
+            .unwrap();
+        ingest(&mut driver, &file_update(file, 900 * MIB as i64, 0));
+    }
+    driver
+        .note_disk(DiskState::Low, Some(FLOORS.close + 500 * MIB), &FLOORS)
+        .unwrap();
+    for file in [51, 52] {
+        ingest(&mut driver, &paused_update(file, true));
+    }
+    assert_eq!(driver.session.media.disk_paused.len(), 2);
+
+    // The first resume cannot be sent: both stay the disk's to resume.
+    down.store(true, Ordering::SeqCst);
+    assert!(
+        driver
+            .note_disk(DiskState::Healthy, Some(FLOORS.warn_clear), &FLOORS)
+            .is_err()
+    );
+    assert_eq!(driver.session.media.disk_paused.len(), 2);
+    assert_eq!(driver.session.settings.data_storage.disk_paused.len(), 2);
+
+    // The next healthy reading resumes both.
+    down.store(false, Ordering::SeqCst);
+    let base = recorder.snapshot().len();
+    driver
+        .note_disk(DiskState::Healthy, Some(FLOORS.warn_clear), &FLOORS)
+        .unwrap();
+    let resumed = recorder.snapshot()[base..]
+        .iter()
+        .filter(|json| {
+            let v: Value = serde_json::from_str(json).unwrap();
+            v["@type"] == "toggleDownloadIsPaused" && v["is_paused"] == false
+        })
+        .count();
+    assert_eq!(resumed, 2);
+    assert!(driver.session.media.disk_paused.is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_failed_saved_pause_search_asks_again_and_a_stale_answer_is_ignored() {
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let mut session = Session::new(AccountKey::primary(), sink.clone());
+    session.settings.data_storage.disk_paused.insert((7, 99));
+    let request = session.request(
+        crate::state::RequestPurpose::Media(crate::state::MediaPurpose::SearchDiskPausedDownloads),
+        None,
+    );
+    let asked = DiskSearch::Asked {
+        request,
+        keys: [(7, 99)].into_iter().collect(),
+    };
+    session.media.disk_search = asked.clone();
+    // An answer for another request leaves the search waiting.
+    session.apply_disk_paused_found(RequestId(request.0 + 1), vec![paused_found(77, 99)]);
+    assert_eq!(session.media.disk_search, asked);
+    assert!(session.media.disk_resume_due.is_empty());
+    // Its failure returns it to not asked, so the next reading asks again.
+    let seq = AtomicU64::new(1);
+    let failed = format!(
+        r#"{{"@type":"error","@extra":"{}","code":500,"message":"INTERNAL"}}"#,
+        request.0
+    );
+    session.apply(copy_and_parse(&failed, &seq, &sink).unwrap());
+    assert_eq!(session.media.disk_search, DiskSearch::NotAsked);
+}
+
+#[test]
+fn a_lost_saved_pause_search_asks_again() {
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let mut session = Session::new(AccountKey::primary(), sink);
+    let request = session.request(
+        crate::state::RequestPurpose::Media(crate::state::MediaPurpose::SearchDiskPausedDownloads),
+        None,
+    );
+    session.media.disk_search = asked_search(&[(7, 99)]);
+    if let DiskSearch::Asked { request: asked, .. } = &mut session.media.disk_search {
+        *asked = request;
+    }
+    // The sweep drops a search that TDLib never answered (its TTL), and
+    // that settles it like a failure.
+    let sink_conn = crate::telegram::ConnectionState::Ready;
+    session.connection = sink_conn;
+    let later = std::time::Instant::now() + crate::state::PENDING_REQUEST_TTL * 2;
+    assert!(session.sweep_stale_requests(later, crate::state::PENDING_REQUEST_TTL, |_| false));
+    assert_eq!(session.media.disk_search, DiskSearch::NotAsked);
 }

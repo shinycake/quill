@@ -54,8 +54,13 @@ pub(super) enum EditorMode {
 pub(super) enum EditorPurpose {
     /// A pending composer attachment, as it was when the editor opened.
     Attachment(TrayItem),
-    /// The media of a message being edited (`edit_media_tools.rs`).
-    MessageEdit,
+    /// The media of a message being edited (`edit_media_tools.rs`): the
+    /// message the editor was opened for, so its result lands only while
+    /// that edit is still the pending one.
+    MessageEdit {
+        chat: quill::ids::ChatId,
+        message: quill::ids::MessageId,
+    },
     /// A new sticker or emoji for a set the user owns: the image sits on a
     /// transparent square canvas, the crop is fixed, and the result is
     /// fitted to the set's side (tdesktop's `fixedCrop` editor from
@@ -171,8 +176,12 @@ impl PhotoEditor {
     }
 
     /// An editor on the photo of a message being edited.
-    pub(super) fn for_message_edit(working: RgbaImage) -> Self {
-        Self::new(EditorPurpose::MessageEdit, working)
+    pub(super) fn for_message_edit(
+        chat: quill::ids::ChatId,
+        message: quill::ids::MessageId,
+        working: RgbaImage,
+    ) -> Self {
+        Self::new(EditorPurpose::MessageEdit { chat, message }, working)
     }
 
     /// An editor on a transparent canvas with `working` as its base item
@@ -702,15 +711,14 @@ impl QuillApp {
                 .custom(on_layer(cx))
                 .selected(mode == target)
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    if let Some(live) = this.live.as_mut() {
-                        if target == EditorMode::Stickers {
-                            let _ = live.driver.fetch_editor_stickers();
-                            let _ = live.driver.load_editor_masks();
-                        } else {
-                            live.driver.release_editor_masks();
-                        }
+                    if target == EditorMode::Stickers
+                        && let Some(live) = this.live.as_mut()
+                    {
+                        let _ = live.driver.fetch_editor_stickers();
+                        let _ = live.driver.load_editor_masks();
                     }
                     this.photo_editor_mut(|editor| editor.mode = target, cx);
+                    this.sync_editor_masks();
                 }))
         };
         let tools = match mode {

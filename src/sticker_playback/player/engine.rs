@@ -157,6 +157,9 @@ pub(super) struct State {
     pub(super) stop: bool,
     /// A worker ended: what it owned will never finish.
     worker_gone: bool,
+    /// Whether each draw worker (by index) still runs. A clip assigned to
+    /// one that is gone fails at once, and no new clip goes to it.
+    workers: Vec<WorkerLife>,
     pub(super) budget: usize,
     pub(super) store_bytes: usize,
     pub(super) stats: EngineStats,
@@ -191,14 +194,58 @@ impl Shared {
 /// Starts a named thread running the body.
 pub(super) type Spawn = dyn Fn(String, Box<dyn FnOnce() + Send>) -> std::io::Result<()>;
 
+/// Whether a draw worker's thread is still running.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum WorkerLife {
+    Running,
+    Gone,
+}
+
 /// Held by a worker's thread: it goes on return, on a panic, and with the
-/// closure of a thread that never started.
-struct WorkerEnd(Arc<Shared>);
+/// closure of a thread that never started. `draws` is the index of a draw
+/// worker (an opener has none): the clips assigned to it end as failed.
+struct WorkerEnd(Arc<Shared>, Option<usize>);
 
 impl Drop for WorkerEnd {
     fn drop(&mut self) {
-        lock_or_recover(&self.0.state).worker_gone = true;
+        let failed = {
+            let mut state = lock_or_recover(&self.0.state);
+            state.worker_gone = true;
+            match self.1 {
+                Some(index) => state.worker_ended(index),
+                None => false,
+            }
+        };
         self.0.drained.notify_all();
+        if failed {
+            self.0.wake();
+        }
+    }
+}
+
+impl State {
+    /// Draw worker `index` ended: its clips will never draw again, so they
+    /// fail (their views rest on the still) instead of waiting for it.
+    /// True when a clip changed.
+    fn worker_ended(&mut self, index: usize) -> bool {
+        if let Some(life) = self.workers.get_mut(index) {
+            *life = WorkerLife::Gone;
+        }
+        let mut changed = false;
+        for clip in self.clips.values_mut().filter(|clip| clip.worker == index) {
+            if matches!(clip.state, ClipState::Failed(_)) {
+                continue;
+            }
+            clip.state = ClipState::Failed("the sticker worker ended".to_string());
+            clip.wanted.clear();
+            clip.drawing = None;
+            changed = true;
+        }
+        changed
+    }
+
+    fn worker_runs(&self, index: usize) -> bool {
+        self.workers.get(index) == Some(&WorkerLife::Running)
     }
 }
 
@@ -230,6 +277,7 @@ impl Engine {
                 freed: Vec::new(),
                 stop: false,
                 worker_gone: false,
+                workers: vec![WorkerLife::Running; workers],
                 budget,
                 store_bytes: 0,
                 stats: EngineStats::default(),
@@ -246,7 +294,7 @@ impl Engine {
         let mut openers = 0;
         for index in 0..workers {
             let opener = shared.clone();
-            let end = WorkerEnd(shared.clone());
+            let end = WorkerEnd(shared.clone(), None);
             let spawned = spawn(
                 format!("quill-sticker-open-{index}"),
                 Box::new(move || {
@@ -256,7 +304,7 @@ impl Engine {
             );
             openers += usize::from(spawned.is_ok());
             let worker = shared.clone();
-            let end = WorkerEnd(shared.clone());
+            let end = WorkerEnd(shared.clone(), Some(index));
             let spawned = spawn(
                 format!("quill-sticker-{index}"),
                 Box::new(move || {
@@ -299,14 +347,20 @@ impl Engine {
             clip.used = Instant::now();
             return;
         }
-        let Some(worker) = self.live.iter().copied().min_by_key(|index| {
-            state
-                .clips
-                .values()
-                .filter(|clip| clip.worker == *index)
-                .count()
-        }) else {
-            // No worker started: left unopened, the clip reads as failed
+        let Some(worker) = self
+            .live
+            .iter()
+            .copied()
+            .filter(|index| state.worker_runs(*index))
+            .min_by_key(|index| {
+                state
+                    .clips
+                    .values()
+                    .filter(|clip| clip.worker == *index)
+                    .count()
+            })
+        else {
+            // No worker runs: left unopened, the clip reads as failed
             // and its views rest.
             return;
         };

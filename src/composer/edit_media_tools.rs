@@ -112,10 +112,11 @@ impl ComposerEdit {
     /// The staged cover, only while it still applies (a replacement that
     /// is no longer a video drops it).
     pub fn effective_cover(&self) -> Option<&Path> {
-        self.media_edit
-            .cover
-            .as_deref()
-            .filter(|_| self.allows_replace() && self.cover_applies())
+        let staged = match self.media_edit.replacement.as_ref() {
+            Some(replacement) => replacement.cover.as_deref(),
+            None => self.media_edit.cover.as_deref(),
+        };
+        staged.filter(|_| self.allows_replace() && self.cover_applies())
     }
 
     /// tdesktop's edit-media menu entries for this edit. `cover_peer_ok`
@@ -179,10 +180,13 @@ mod tests {
 
     fn replacement(kind: EditMediaKind) -> EditMediaReplacement {
         EditMediaReplacement {
+            probe: crate::composer::ReplacementProbe::NotNeeded,
             path: PathBuf::from("/tmp/x.png"),
             file_name: "x.png".into(),
             kind,
             spoiler: false,
+            cover: None,
+            video_extras: Default::default(),
         }
     }
 
@@ -268,8 +272,9 @@ mod tests {
     #[test]
     fn replacement_video_offers_cover_and_non_video_drops_it() {
         let mut edit = edit(Some(EditableMedia::Document), false);
-        edit.media_edit.replacement = Some(replacement(EditMediaKind::Video));
-        edit.media_edit.cover = Some(PathBuf::from("/tmp/c.png"));
+        let mut staged = replacement(EditMediaKind::Video);
+        staged.cover = Some(PathBuf::from("/tmp/c.png"));
+        edit.media_edit.replacement = Some(staged);
         assert_eq!(
             edit.edit_media_tools(true),
             [EditMediaTool::EditVideo, EditMediaTool::EditCover]
@@ -277,6 +282,24 @@ mod tests {
         assert!(edit.effective_cover().is_some());
         edit.media_edit.replacement = Some(replacement(EditMediaKind::Document));
         assert!(edit.effective_cover().is_none());
+    }
+
+    #[test]
+    fn a_cover_goes_with_its_replacement_not_the_next_video_or_the_original() {
+        let mut edit = edit(Some(EditableMedia::Video), true);
+        let mut staged = replacement(EditMediaKind::Video);
+        staged.cover = Some(PathBuf::from("/tmp/c.png"));
+        edit.media_edit.replacement = Some(staged);
+        assert!(edit.effective_cover().is_some());
+        // Another replacement video starts without that cover.
+        edit.media_edit.replacement = Some(replacement(EditMediaKind::Video));
+        assert!(edit.effective_cover().is_none());
+        // Clearing the replacement does not bring it back for the original.
+        edit.media_edit.replacement = None;
+        assert!(edit.effective_cover().is_none());
+        // The original video's own cover is its own.
+        edit.media_edit.cover = Some(PathBuf::from("/tmp/o.png"));
+        assert_eq!(edit.effective_cover(), Some(Path::new("/tmp/o.png")));
     }
 
     #[test]

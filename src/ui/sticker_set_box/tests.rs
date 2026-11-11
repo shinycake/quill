@@ -439,7 +439,7 @@ fn a_video_sticker_adapts_through_the_video_editor(cx: &mut TestAppContext) {
     vcx.update(|window, cx| window.click("sticker-create-cancel", cx));
     frames(vcx);
     assert!(app.read_with(vcx, |app, _| app.sticker_box.create.is_none()
-        && app.sticker_box.encoding.is_none()));
+        && !app.sticker_box.encoding.is_running()));
     assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
         == Some(DialogKind::StickerSet)));
 }

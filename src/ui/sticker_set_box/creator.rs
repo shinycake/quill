@@ -332,7 +332,7 @@ impl QuillApp {
             )));
         }
         self.sticker_box.create = None;
-        self.sticker_box.encoding = None;
+        self.sticker_box.encoding = super::state::Encoding::Idle;
         create.uploaded();
         cx.notify();
     }

@@ -464,10 +464,13 @@ fn play_once_voice_note_asks_for_an_immediate_self_destruct() {
 fn edit_message_media_wraps_each_replacement_kind() {
     use crate::composer::{EditMediaKind, EditMediaReplacement};
     let rep = |kind, spoiler| EditMediaReplacement {
+        probe: crate::composer::ReplacementProbe::NotNeeded,
         path: "/tmp/new.bin".into(),
         file_name: "new.bin".into(),
         kind,
         spoiler,
+        cover: None,
+        video_extras: Default::default(),
     };
     let video = VideoSend {
         duration: 3,
@@ -507,10 +510,13 @@ fn edit_message_media_wraps_each_replacement_kind() {
 fn edit_media_caption_position_and_spoiler_only_on_photo_video() {
     use crate::composer::{EditMediaKind, EditMediaReplacement};
     let rep = |kind| EditMediaReplacement {
+        probe: crate::composer::ReplacementProbe::NotNeeded,
         path: "/tmp/x".into(),
         file_name: "x".into(),
         kind,
         spoiler: true,
+        cover: None,
+        video_extras: Default::default(),
     };
     let photo =
         edit_media_content(&rep(EditMediaKind::Photo), "/tmp/x", "c", true, None, false).unwrap();

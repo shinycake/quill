@@ -105,8 +105,8 @@ pub(crate) struct StickerSetBoxUi {
     pub(crate) remove_set_open: bool,
     /// The "New Sticker" / "New Emoji" box.
     pub(crate) create: Option<CreateSticker>,
-    /// The box's "Done" is encoding a video sticker; set to stop it.
-    pub(crate) encoding: Option<Arc<AtomicBool>>,
+    /// The box's "Done" is encoding a video sticker.
+    pub(crate) encoding: Encoding,
     pub(crate) emoji_search: Entity<InputState>,
     /// The existing-sticker chooser.
     pub(crate) pick: Option<PickExisting>,
@@ -114,6 +114,49 @@ pub(crate) struct StickerSetBoxUi {
     pub(crate) pending_video: Option<PendingVideo>,
     /// A chosen still sticker being decoded for the editor.
     pub(crate) pending_still: Option<(PickExisting, FileId)>,
+}
+
+/// The video encode behind "Done": at most one runs, and only the job that
+/// holds the encode's own cancel flag may end it, so an old job finishing
+/// after a cancel and a new "Done" leaves the new one alone.
+#[derive(Default)]
+pub(crate) enum Encoding {
+    #[default]
+    Idle,
+    Running {
+        cancel: Arc<AtomicBool>,
+    },
+}
+
+impl Encoding {
+    pub(crate) fn is_running(&self) -> bool {
+        matches!(self, Self::Running { .. })
+    }
+
+    /// A job starts with its cancel flag.
+    pub(crate) fn start(&mut self, cancel: Arc<AtomicBool>) {
+        *self = Self::Running { cancel };
+    }
+
+    /// The job holding `cancel` finished: whether it is still the running
+    /// one (then the encode is over). A job that was cancelled or replaced
+    /// changes nothing.
+    pub(crate) fn finish(&mut self, cancel: &Arc<AtomicBool>) -> bool {
+        match self {
+            Self::Running { cancel: running } if Arc::ptr_eq(running, cancel) => {
+                *self = Self::Idle;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Stop the running job, if any, between quality steps.
+    pub(crate) fn cancel(&mut self) {
+        if let Self::Running { cancel } = std::mem::take(self) {
+            cancel.store(true, Ordering::Relaxed);
+        }
+    }
 }
 
 impl StickerSetBoxUi {
@@ -127,7 +170,7 @@ impl StickerSetBoxUi {
             delete_set_open: false,
             remove_set_open: false,
             create: None,
-            encoding: None,
+            encoding: Encoding::Idle,
             emoji_search: cx
                 .new(|cx| InputState::new(window, cx).placeholder(tr(keys::Q_MEDIA_SEARCH_EMOJI))),
             pick: None,
@@ -139,9 +182,7 @@ impl StickerSetBoxUi {
     /// Drop the "New Sticker" box's sticker: stop an encode that runs and
     /// remove the editor's files.
     pub(crate) fn discard_create(&mut self) {
-        if let Some(cancel) = self.encoding.take() {
-            cancel.store(true, Ordering::Relaxed);
-        }
+        self.encoding.cancel();
         if let Some(create) = self.create.take() {
             create.discard();
         }
@@ -163,3 +204,29 @@ impl StickerSetBoxUi {
 
 /// Nothing to say: its state is the account's only app-side.
 impl crate::ui::on_screen::Farewell for StickerSetBoxUi {}
+
+#[cfg(test)]
+mod encoding_tests {
+    use super::Encoding;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    /// An old encode that finishes after a cancel and a new "Done" must not
+    /// clear the new encode, or "Done" would run a second one and the
+    /// first would lose its cancel.
+    #[test]
+    fn a_finished_old_encode_leaves_the_newer_one_running() {
+        let mut encoding = Encoding::default();
+        let old = Arc::new(AtomicBool::new(false));
+        encoding.start(old.clone());
+        encoding.cancel();
+        assert!(old.load(Ordering::Relaxed), "the close stopped the old job");
+        assert!(!encoding.is_running());
+        let newer = Arc::new(AtomicBool::new(false));
+        encoding.start(newer.clone());
+        assert!(!encoding.finish(&old), "the old job is not the running one");
+        assert!(encoding.is_running());
+        assert!(encoding.finish(&newer));
+        assert!(!encoding.is_running());
+    }
+}

@@ -92,6 +92,8 @@ impl QuillApp {
             self.windows.scope,
         ) {
             self.edit_contact_note_upkeep(window, cx);
+            // A profile box that sent its request: the answer closes it.
+            self.profile_saving_upkeep(window, cx);
         }
         // A Business screen opened before the account's full info arrived
         // is built from it at the first frame after it lands, in the

@@ -22,13 +22,14 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.sticker_box.encoding.is_some() {
+        if self.sticker_box.encoding.is_running() {
             return false;
         }
         let cancel = Arc::new(AtomicBool::new(false));
-        self.sticker_box.encoding = Some(cancel.clone());
+        self.sticker_box.encoding.start(cancel.clone());
         self.set_note(StatusNote::silent(ENCODING_NOTE));
         let kind = create.kind;
+        let mine = cancel.clone();
         let worker = cx.background_spawn(async move {
             encode_sticker(&job.source, &job.edits, &job.info, kind, &cancel)
         });
@@ -40,9 +41,8 @@ impl QuillApp {
             let _ = this.update_in(cx, |this, window, cx| {
                 // The box moved on (closed, or another sticker): the
                 // result is nobody's.
-                let current = this.sticker_box.create.as_ref() == Some(&create)
-                    && this.sticker_box.encoding.is_some();
-                this.sticker_box.encoding = None;
+                let running = this.sticker_box.encoding.finish(&mine);
+                let current = this.sticker_box.create.as_ref() == Some(&create) && running;
                 match result {
                     Ok(encoded) if current => {
                         let uploaded = CreateSticker {
@@ -95,6 +95,22 @@ impl QuillApp {
             return;
         }
         let Some(path) = self.local_media_path(pending.file_id) else {
+            // The download ended without a file: the wait ends with a note
+            // instead of holding the pick for good.
+            let ended = pending.file_id;
+            let failed = self.session().is_some_and(|session| {
+                session
+                    .media
+                    .downloads
+                    .ended_without_file(ended.0, &session.media.files)
+            });
+            if failed {
+                self.sticker_box.pending_video = None;
+                self.set_note(StatusNote::error(tr(
+                    keys::Q_OPS_COULD_NOT_DOWNLOAD_PLEASE_TRY,
+                )));
+                cx.notify();
+            }
             return;
         };
         let Some(pending) = self.sticker_box.pending_video.take() else {

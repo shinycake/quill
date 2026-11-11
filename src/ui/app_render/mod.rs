@@ -44,7 +44,6 @@ impl QuillApp {
         let display = self.frame.clock_timing.get().map(|timing| timing.display);
         super::sticker_player::note_display(None, display, window, cx);
         super::glyph_sweep::start_frame(window, cx);
-        super::spoiler_fx::release_media_tile(Some(window), cx);
         if let Some(cache) = self.slices.image_cache() {
             cache.update(cx, |cache, cx| cache.trim(window, cx));
         }

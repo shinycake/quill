@@ -153,7 +153,6 @@ MoneyPage::tx_loading+tx_error
 MutedSpeechHint::done
 NewChatView::busy
 NewChatView::busy+failure
-OnDemand::started
 OutputState::opening
 OwnershipState::check_in_flight
 OwnershipState::check_in_flight+check_error
@@ -284,6 +283,5 @@ UsersState::profile_photo_emoji_icons_failed
 UsersState::wearable_gifts_loaded
 Validation::finished
 VideoEditorDialog::busy
-VideoEditorDialog::still_busy
 WebApps::grossing_loading
 WhatsNewUi::opening

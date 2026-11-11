@@ -132,6 +132,45 @@ fn received_gifts_fill_the_gifts_tab_without_touching_the_gifts_dialog() {
 }
 
 #[test]
+fn a_late_gifts_page_for_another_chat_leaves_the_open_gallerys_offset() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    open_user_gallery(&mut session, &seq, &sink);
+    session
+        .media
+        .shared_media
+        .begin_profile_fetch(SharedMediaTab::Gifts);
+    let extra = session.request(
+        RequestPurpose::Media(MediaPurpose::GetProfileGifts { append: false }),
+        Some(ChatId(6)),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"receivedGifts","@extra":"{}","total_count":9,"next_offset":"mine","gifts":[]}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(tab(&session, SharedMediaTab::Gifts).next_offset, "mine");
+    let other = session.request(
+        RequestPurpose::Media(MediaPurpose::GetProfileGifts { append: true }),
+        Some(ChatId(7)),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"receivedGifts","@extra":"{}","total_count":9,"next_offset":"theirs","gifts":[]}}"#,
+            other.0
+        ),
+    );
+    assert_eq!(tab(&session, SharedMediaTab::Gifts).next_offset, "mine");
+}
+
+#[test]
 fn chat_page_stories_fill_the_stories_tab_and_failures_hide_it() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(1);
