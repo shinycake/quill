@@ -193,7 +193,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             let emoji = &mut self.session.stickers.emoji;
             emoji.custom_emoji_lookup_not_sent(extra);
             if emoji.status_open || emoji.chat_status_open {
-                emoji.failed = true;
                 emoji.status_note =
                     Some("Could not update emoji statuses. Retry the action.".into());
             }
@@ -311,11 +310,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.session.stickers.emoji.failed = false;
         let extra = self.session.request(purpose, None);
         if let Err(err) = self.sender.send_json(&build(extra)) {
             self.session.requests.take(extra);
-            self.session.stickers.emoji.failed = true;
+            if let Some(list) = self.session.stickers.emoji.lists.for_purpose(purpose) {
+                list.fail(crate::lang::tr(
+                    crate::lang::keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS,
+                ));
+            }
             if matches!(
                 purpose,
                 RequestPurpose::SetEmojiStatus
@@ -330,6 +332,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                     Some("Could not update emoji statuses. Retry the action.".into());
             }
             return Err(err);
+        }
+        if let Some(list) = self.session.stickers.emoji.lists.for_purpose(purpose) {
+            list.begin();
         }
         Ok(Some(extra))
     }
@@ -385,6 +390,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         .requests
                         .take_purpose(RequestPurpose::GetTrendingEmojiSets),
                 );
+                self.session.stickers.emoji.lists.trending.cancel();
                 self.session.stickers.emoji.trending_offset = 0;
                 self.emoji_set_request(RequestPurpose::GetTrendingEmojiSets, |id| {
                     get_trending_emoji_sets(id, 0, 100)
@@ -402,21 +408,25 @@ impl<S: JsonSender> ConnectDriver<S> {
             EmojiSetTab::Trending => &emoji.trending_sets,
             EmojiSetTab::Search => &emoji.found_sets,
         };
-        let mut files = Vec::new();
-        let mut asked = Vec::new();
-        for set in listed {
-            if emoji.covers_requested.contains(&set.id) {
-                continue;
-            }
-            asked.push(set.id);
-            files.extend(
-                set.covers
+        let wanted: Vec<(i64, Vec<crate::ids::FileId>)> = listed
+            .iter()
+            .filter(|set| !emoji.covers_requested.contains(&set.id))
+            .map(|set| {
+                let files = set
+                    .covers
                     .iter()
-                    .filter_map(|cover| cover.display_file_id()),
-            );
+                    .filter_map(|cover| cover.display_file_id())
+                    .collect();
+                (set.id, files)
+            })
+            .collect();
+        // A set counts as asked once its downloads went out, so a refused
+        // send is tried again on the next draw.
+        for (set_id, files) in wanted {
+            self.ensure_media_files(&files)?;
+            self.session.stickers.emoji.covers_requested.insert(set_id);
         }
-        emoji.covers_requested.extend(asked);
-        self.ensure_media_files(&files)
+        Ok(())
     }
 
     /// B11: the panel's emoji search also asks `getKeywordEmojis`, in the
@@ -546,6 +556,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .requests
                 .take_purpose(RequestPurpose::SearchEmojiSets),
         );
+        self.session.stickers.emoji.lists.search.cancel();
         self.session.stickers.emoji.search_query = query.trim().to_string();
         self.session.stickers.emoji.found_sets.clear();
         let query = self.session.stickers.emoji.search_query.clone();
@@ -597,11 +608,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         // TDLib sends this update while it loads the list a request asked
         // for, so a dropped in-flight request is sent again; a cached list
         // (the composer panel's) is refreshed too.
-        let installed_wanted = self
+        let was_asking = self
             .session
             .requests
             .take_purpose(RequestPurpose::GetInstalledEmojiSets)
-            .is_some()
+            .is_some();
+        self.session.stickers.emoji.lists.installed.cancel();
+        let installed_wanted = was_asking
             || !self.session.stickers.emoji.installed_sets.is_empty()
             || self.session.stickers.emoji.open;
         for purpose in [
@@ -609,6 +622,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::GetTrendingEmojiSets,
         ] {
             drop(self.session.requests.take_purpose(purpose));
+            if let Some(list) = self.session.stickers.emoji.lists.for_purpose(purpose) {
+                list.cancel();
+            }
         }
         if !self.chats_path_active() {
             return Ok(());

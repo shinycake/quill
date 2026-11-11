@@ -352,7 +352,7 @@ impl QuillApp {
         });
         let status = if loading && sets.is_empty() {
             Some(tr(keys::Q_MEDIA_LOADING_EMOJI_PACKS))
-        } else if panel.failed || panel.mutation_failed {
+        } else if panel.lists.of(panel.tab).error().is_some() || panel.mutation_failed {
             Some(tr(keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS))
         } else if sets.is_empty() && !loading {
             Some(tr(keys::Q_MEDIA_NO_EMOJI_PACKS_FOUND))

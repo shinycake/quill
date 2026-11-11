@@ -379,7 +379,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // chat, so every opened chat gets its paired `closeChat` (Telegram
         // X `Tdlib.closeChatImpl`).
         let extra = self.session.request(RequestPurpose::CloseChat, Some(prev));
-        self.sender.send_json(&close_chat(extra, prev))?;
+        self.send_json_request(extra, &close_chat(extra, prev))?;
         Ok(())
     }
 

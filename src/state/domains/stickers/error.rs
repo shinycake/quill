@@ -117,15 +117,10 @@ impl Session {
         if emoji_purpose == Some(RequestPurpose::SetEmojiStatus) {
             self.stickers.emoji.pending_status_emoji = None;
         }
-        if emoji_purpose == Some(RequestPurpose::ChangeEmojiSet)
-            || (emoji_purpose == Some(RequestPurpose::GetInstalledEmojiSets)
-                && self.stickers.emoji.tab == crate::emoji::EmojiSetTab::Installed)
-            || (emoji_purpose == Some(RequestPurpose::GetTrendingEmojiSets)
-                && self.stickers.emoji.tab == crate::emoji::EmojiSetTab::Trending)
-            || (emoji_purpose == Some(RequestPurpose::SearchEmojiSets)
-                && self.stickers.emoji.tab == crate::emoji::EmojiSetTab::Search)
-        {
-            self.stickers.emoji.failed = true;
+        if let Some(list) = emoji_purpose.and_then(|p| self.stickers.emoji.lists.for_purpose(p)) {
+            list.fail(crate::lang::tr(
+                crate::lang::keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS,
+            ));
         }
         if matches!(
             pending.map(|p| p.purpose),
