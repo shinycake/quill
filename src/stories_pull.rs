@@ -57,36 +57,39 @@ fn sine_in_out(t: f32) -> f32 {
 /// The strip sliding into view: the list's scroll top eases from the strip's
 /// height (hidden above) down to 0.
 #[derive(Clone, Copy, Debug)]
-struct Reveal {
+pub struct Reveal {
     started: Instant,
     /// The scroll top last written by the slide, to notice a user scrolling
     /// away.
     written: f32,
 }
 
-/// Whether the strip is expanded, and its slide-in.
+/// Where the strip is: a gap above the list, sliding in, or a row of it.
 #[derive(Debug, Default)]
-pub struct StripPull {
-    expanded: bool,
-    reveal: Option<Reveal>,
+pub enum StripPull {
+    #[default]
+    Collapsed,
+    /// Expanded, and sliding into view.
+    Revealing(Reveal),
+    /// Expanded and in view.
+    Expanded,
 }
 
 impl StripPull {
     /// The strip is a row of the list.
     pub fn expanded(&self) -> bool {
-        self.expanded
+        !matches!(self, Self::Collapsed)
     }
 
     /// The strip is sliding into view.
     pub fn revealing(&self) -> bool {
-        self.reveal.is_some()
+        matches!(self, Self::Revealing(_))
     }
 
     /// Expand and slide the strip in from above the list's top. Returns the
     /// scroll top to start at (the strip hidden above the first row).
     pub fn expand(&mut self, now: Instant) -> f32 {
-        self.expanded = true;
-        self.reveal = Some(Reveal {
+        *self = Self::Revealing(Reveal {
             started: now,
             written: FULL_HEIGHT,
         });
@@ -95,14 +98,12 @@ impl StripPull {
 
     /// Expand without a slide (the strip is already in view).
     pub fn expand_in_place(&mut self) {
-        self.expanded = true;
-        self.reveal = None;
+        *self = Self::Expanded;
     }
 
     /// Drop the strip.
     pub fn collapse(&mut self) {
-        self.expanded = false;
-        self.reveal = None;
+        *self = Self::Collapsed;
     }
 
     /// Advance the slide. `scroll_top` is where the list is now. Returns the
@@ -111,9 +112,11 @@ impl StripPull {
     /// slide (its range is shorter than the strip, or the user scrolled up)
     /// is left where it is: the slide only ever moves the list up.
     pub fn reveal_scroll_top(&mut self, now: Instant, scroll_top: f32) -> Option<f32> {
-        let reveal = self.reveal.as_mut()?;
+        let Self::Revealing(reveal) = self else {
+            return None;
+        };
         if scroll_top > reveal.written + 1.0 {
-            self.reveal = None;
+            *self = Self::Expanded;
             return None;
         }
         let t = now.saturating_duration_since(reveal.started).as_secs_f32()
@@ -125,7 +128,7 @@ impl StripPull {
         };
         reveal.written = top;
         if t >= 1.0 {
-            self.reveal = None;
+            *self = Self::Expanded;
         }
         Some(top)
     }
