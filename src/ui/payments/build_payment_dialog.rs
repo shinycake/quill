@@ -366,6 +366,8 @@ impl QuillApp {
             live.driver.session.payments.subscriptions.open();
             live.driver.maybe_fetch_star_subscriptions()
         });
+        // A reopened list asks its first look again, whatever length it had.
+        self.payments.subs_asked.reset();
         self.open_box(DialogKind::Subscriptions);
         if !matches!(sent, Some(Ok(_))) {
             self.set_note(StatusNote::error(tr(

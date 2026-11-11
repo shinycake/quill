@@ -8043,3 +8043,40 @@ whose variants carry the data, with a way out of every stage.
 - **A refused refetch of a stale proxy list** lands in
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
+
+### Sweep fixes (r2-29)
+
+Round 2, files: `inline_members_state/view`, `inline_playback`,
+`inline_players`, `inline_return`, `inline_video`, `invite_admin_ui`,
+`jump_buttons`, `jump_date`, `language_ui`, `link_inbox`,
+`link_info_boxes`, `marketplace`, `message_effect_badge/play`, `motion`,
+`paid_messages_privacy/state`, `paragraph_cache`, `payments_state`.
+
+| id | result |
+| --- | --- |
+| 10-098 | The members list's next-page stage is the session's `MoreMembers` (`Asking { request, offset }`, `Settled { offset }`, `Failed { offset }`); the UI `Paging` copy and `take_member_more_failures` are gone. A scroll re-arms a failed page (`rearm_failed_member_more`), an open or a stale mark forgets answered ones (`forget_member_more`). |
+| 10-101 | `InlineMembersUi::chat` deleted (never read). |
+| 10-102 | The last good page lives in the session fetch: `SupergroupMembersFetch::Loading { request, last }` keeps the page a membership change dropped. The `RefCell` snapshot and the render-time write are gone; the page is per list key, so it cannot show in another group. |
+| (new) | The administrators fallback is asked while the cache has no entry for it (a failed answer, or a failed send, stays an entry that a reopen or Retry drops): `AdminsFallback` is gone. |
+| 10-106 | `GifPlayback::{Waiting, Playing}` hold the decode (`GifRun`: the `Task` and its cancel token). Leaving the stage (stop, another playback, the screen going away) cancels the decoder and drops the landing; `gif_decodes` and the "taken back" path are gone. A GIF stopped and started again decodes again. |
+| 10-107 | `release_timer` carries its due time; a timer past it is spent even when its own clearing was skipped, so `arm_release` arms again. |
+| 10-104 | `press_bot_start` reports whether the start is on its way; the round trip becomes `Started` only then, and ends on a refused start. |
+| 10-105 | A round trip a chat window kept is taken only by its own account (`take_slot_inline_return` checks it). The in-place copy still ends through `drop_foreign_inline_return`; the main window's copy goes with the `OnScreen` swap. |
+| 10-109 | `corner_mask` retires the evicted mask after the cache borrow ends, and uses `try_borrow_mut`. |
+| 10-110, 10-111 | `GroupSettingsDialog::details_link` is gone: the "who joined" details are open when the session holds that link's members page. Offline (a demo) the page opens on the reason, closed by the same toggle. |
+| 10-112 | `revoked_open` is gone: the revoked list is open when the session holds its fetch. A refused send is the fetch's `Failed`. The box drops the fetch when it closes or moves to another chat; the answer, the error and "Delete all" touch it only while it waits (`land_revoked`). |
+| 10-116, 10-115, 10-122 | `try_borrow_mut` with an early return for the corner stack; `Cell<Option<_>>` for the one-shot dialog bodies. |
+| 10-120 | Retry on the language list calls `request_language_packs`, which begins the stage itself; the UI no longer resets it. |
+| 10-123 | `MainWindowState::LeavingFullScreen { _poll: Task }` holds the poll, so a raise drops it; its last step runs through the app (not the window handle), so a gone window still leaves the stage. |
+| 10-124 | Skipped: the global's handle is the OS window the platform callbacks (no view at hand) act on, set by `attach_main_window`; `QuillApp::main_window.handle` is the window whose frame ran, set each frame. They are two facts that agree in normal use; reading the app's copy from the callbacks would read an entity that may be in the middle of its own update. |
+| 10-125 | The link pump sleeps; `pump_deep_link` pokes it when its slot is free and a link waits in the OS inbox. |
+| 10-121 | A giftcode lookup is refused while a code is being applied; a refused send puts the old box back. The same for the `setlanguage` lookup. |
+| 11-010 | Each cause has its own line: no chat, not connected, request not sent. |
+| 11-027 | The effect-badge registries use `try_borrow` / `try_borrow_mut`, take the map out while a callback runs, and skip a re-entrant paint. |
+| 11-028 | The effect descriptions are asked once when an entry is added. |
+| 11-037 | `MotionState::reveal` is a `Cell<Option<Reveal>>`. |
+| 11-043 | Save price takes the staged price once the change is on its way; a refused save keeps it, and a lapsed Premium says so. |
+| 11-041 | `DirectStage` is gone: saving, refused and done come from the session's `PaidSave` (`TargetSave::Saved` closes the box and is taken by it). |
+| 11-042 | `PaidConfirmStage` holds the confirmation and its "Don't ask me again" tick in one value (`None`, `Composer { confirm, trust }`, `Held { trusted }`). |
+| 11-050 | The paragraph cache uses `try_borrow_mut`; a re-entrant call lays out without the cache. |
+| 11-049 | The four paged dialogs reset their `Asked` when they open. |

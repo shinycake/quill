@@ -47,7 +47,11 @@ thread_local! {
 
 /// The screen was replaced: nothing waits for the old account's effects.
 pub(super) fn forget_waiting() {
-    let _ = WAITING.try_with(|waiting| waiting.borrow_mut().clear());
+    let _ = WAITING.try_with(|waiting| {
+        if let Ok(mut waiting) = waiting.try_borrow_mut() {
+            waiting.clear();
+        }
+    });
 }
 
 /// The sticker the overlay plays for `effect`.
@@ -139,8 +143,17 @@ impl QuillApp {
             .map(|(key, seen)| (key, seen.effect_id, seen.outgoing))
             .collect();
         let now = cx.background_executor().now();
+        // The descriptions are asked for once, when their entries are added
+        // (the driver dedupes and backs off a failing ask); a frame that
+        // only looks at the waiting ones asks for nothing.
+        let new_ids: Vec<i64> = requests
+            .iter()
+            .map(|(_, effect_id, _)| *effect_id)
+            .collect();
         WAITING.with(|waiting| {
-            let mut waiting = waiting.borrow_mut();
+            let Ok(mut waiting) = waiting.try_borrow_mut() else {
+                return;
+            };
             for (key, effect_id, outgoing) in requests {
                 waiting.push(Waiting {
                     key,
@@ -153,19 +166,10 @@ impl QuillApp {
                 shown.contains(&w.key.0) && now.saturating_duration_since(w.since) < WAIT
             });
         });
-        let ids: Vec<i64> = WAITING.with(|waiting| {
-            waiting
-                .borrow()
-                .iter()
-                .filter(|w| w.key.0 == open.0)
-                .map(|w| w.effect_id)
-                .collect()
-        });
-        if ids.is_empty() {
-            return;
-        }
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.load_message_effects(ids);
+        if !new_ids.is_empty()
+            && let Some(live) = self.live.as_mut()
+        {
+            let _ = live.driver.load_message_effects(new_ids);
         }
         let Some(session) = self.session() else {
             return;
@@ -173,8 +177,10 @@ impl QuillApp {
         // Only a badge on screen plays (tdesktop returns for a view that
         // is not visible).
         let ready: Vec<(Key, i64, bool, EffectAnimation)> = WAITING.with(|waiting| {
-            let mut waiting = waiting.borrow_mut();
             let mut ready = Vec::new();
+            let Ok(mut waiting) = waiting.try_borrow_mut() else {
+                return ready;
+            };
             waiting.retain(|w| {
                 if w.key.0 != open.0 || badge::seen(w.key).is_none() {
                     return true;

@@ -759,13 +759,13 @@ impl Session {
                 self.groups.invite_link_counts.remove(&chat_id.0);
             }
             Some((RequestPurpose::DeleteAllRevokedChatInviteLinks, _, Some(chat_id))) => {
-                self.groups.revoked_invite_links.insert(
-                    chat_id.0,
-                    InviteLinkFetch::Loaded(InviteLinkList {
+                // Only a list that is shown empties; a closed one stays closed.
+                if let Some(slot) = self.groups.revoked_invite_links.get_mut(&chat_id.0) {
+                    *slot = InviteLinkFetch::Loaded(InviteLinkList {
                         total_count: 0,
                         links: Vec::new(),
-                    }),
-                );
+                    });
+                }
             }
             _ => {}
         }

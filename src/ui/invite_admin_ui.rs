@@ -12,7 +12,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::local_time::{civil_local, day_label, now_unix};
-use quill::state::{InviteLinkCountsFetch, InviteLinkFetch};
+use quill::state::{InviteLinkCountsFetch, InviteLinkFetch, InviteLinkMembersState, PageStage};
 use quill::telegram::envelope::StarSubscriptionPricing;
 
 /// "250 Stars / month" for a subscription link's pricing.
@@ -87,6 +87,16 @@ impl QuillApp {
             .filter(|d| d.chat_id == chat_id)
     }
 
+    /// Whether the "who joined" details of `invite_link` are open: the
+    /// session holds its members page (the one owner of that fact).
+    fn invite_link_details_open(&self, chat_id: ChatId, invite_link: &str) -> bool {
+        self.invite_settings_of(chat_id).is_some()
+            && self
+                .session()
+                .and_then(|s| s.groups.invite_pages.members(chat_id.0))
+                .is_some_and(|state| state.invite_link == invite_link)
+    }
+
     /// Toggle the "who joined" details of one link.
     pub(super) fn toggle_invite_link_details(
         &mut self,
@@ -94,83 +104,101 @@ impl QuillApp {
         invite_link: &str,
         cx: &mut Context<Self>,
     ) {
-        let Some(open) = self
-            .admin
-            .group_settings_dialog
-            .as_ref()
-            .filter(|d| d.chat_id == chat_id)
-            .map(|d| d.details_link.as_deref() == Some(invite_link))
-        else {
+        if self.invite_settings_of(chat_id).is_none() {
             return;
-        };
-        // The details open once the members request is out: a refused or
-        // failed send leaves them closed instead of loading for good.
-        let shown = if open {
-            if let Some(live) = self.live.as_mut() {
-                live.driver.close_chat_invite_link_members(chat_id);
+        }
+        if self.invite_link_details_open(chat_id, invite_link) {
+            if let Some(session) = self.session_mut() {
+                session.groups.invite_pages.close_members(chat_id.0);
             }
-            None
-        } else {
-            let sent = match self.live.as_mut() {
-                Some(live) => live
-                    .driver
-                    .open_chat_invite_link_members(chat_id, invite_link)
-                    .is_ok_and(|sent| sent.is_some()),
-                None => true,
-            };
-            if !sent {
-                self.set_note(StatusNote::error(tr(
-                    keys::Q_OPS_COULD_NOT_LOAD_INVITE_LINK_MEMBERS,
-                )));
+            cx.notify();
+            return;
+        }
+        // The details open with the members page the request creates: a
+        // refused send leaves no page, so nothing loads for good.
+        match self.live.as_mut() {
+            Some(live) => {
+                if !matches!(
+                    live.driver
+                        .open_chat_invite_link_members(chat_id, invite_link),
+                    Ok(Some(_))
+                ) {
+                    self.set_note(StatusNote::error(tr(
+                        keys::Q_OPS_COULD_NOT_LOAD_INVITE_LINK_MEMBERS,
+                    )));
+                }
             }
-            sent.then(|| invite_link.to_owned())
-        };
-        if let Some(dialog) = self
-            .admin
-            .group_settings_dialog
-            .as_mut()
-            .filter(|d| d.chat_id == chat_id)
-        {
-            dialog.details_link = shown;
+            // Offline (a demo): the details open on the reason, closed by
+            // the same toggle.
+            None => {
+                if let Some(session) = self.session_mut() {
+                    session.groups.invite_pages.set_members(
+                        chat_id.0,
+                        InviteLinkMembersState {
+                            invite_link: invite_link.to_owned(),
+                            total_count: 0,
+                            members: Vec::new(),
+                            stage: PageStage::Failed(
+                                tr(keys::Q_OPS_INVITE_LINKS_NEED_A_LIVE).to_string(),
+                            ),
+                        },
+                    );
+                }
+            }
         }
         cx.notify();
     }
 
-    /// Show or hide the revoked-links list (fetched on first open).
+    /// Whether the revoked-links list of the open box is shown: the
+    /// session holds its fetch (the one owner of that fact; the box
+    /// drops it when it closes).
+    pub(super) fn revoked_links_open(&self, chat_id: ChatId) -> bool {
+        self.invite_settings_of(chat_id).is_some()
+            && self
+                .session()
+                .is_some_and(|s| s.groups.revoked_invite_links.contains_key(&chat_id.0))
+    }
+
+    /// Show or hide the revoked-links list (fetched on first open). Hiding
+    /// forgets the fetch, so the next open asks again.
     pub(super) fn toggle_revoked_links(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        let Some(dialog) = self
-            .admin
-            .group_settings_dialog
-            .as_mut()
-            .filter(|d| d.chat_id == chat_id)
-        else {
+        if self.invite_settings_of(chat_id).is_none() {
             return;
-        };
-        dialog.revoked_open = !dialog.revoked_open;
-        let open = dialog.revoked_open;
-        // The list opens once its request is out (or its answer is on
-        // hand): a refused send leaves it closed, with the reason, instead
-        // of loading for good.
-        if open && let Some(live) = self.live.as_mut() {
-            let sent = live.driver.fetch_revoked_chat_invite_links(chat_id);
-            let answered = live
-                .driver
-                .session
-                .groups
-                .revoked_invite_links
-                .contains_key(&chat_id.0);
-            if sent.is_err() || (matches!(sent, Ok(None)) && !answered) {
-                if let Some(dialog) = self
-                    .admin
-                    .group_settings_dialog
-                    .as_mut()
-                    .filter(|d| d.chat_id == chat_id)
+        }
+        if self.revoked_links_open(chat_id) {
+            if let Some(session) = self.session_mut() {
+                session.groups.revoked_invite_links.remove(&chat_id.0);
+            }
+            cx.notify();
+            return;
+        }
+        // The list opens with the fetch the request creates (a refused
+        // send lands in it as its error).
+        match self.live.as_mut() {
+            Some(live) => {
+                // `Ok(None)`: not ready to ask (no connection to the chat
+                // yet), so nothing opened.
+                if !matches!(
+                    live.driver.fetch_revoked_chat_invite_links(chat_id),
+                    Ok(Some(_))
+                ) && !self.revoked_links_open(chat_id)
                 {
-                    dialog.revoked_open = false;
+                    self.set_note(StatusNote::error(tr(
+                        keys::Q_OPS_COULD_NOT_LOAD_REVOKED_INVITE_LINKS,
+                    )));
                 }
-                self.set_note(StatusNote::error(tr(
-                    keys::Q_OPS_COULD_NOT_LOAD_REVOKED_INVITE_LINKS,
-                )));
+            }
+            // Offline (a demo): the list opens on the reason, closed by the
+            // same toggle.
+            None => {
+                if let Some(session) = self.session_mut() {
+                    session.groups.revoked_invite_links.insert(
+                        chat_id.0,
+                        InviteLinkFetch::Failed(
+                            tr(keys::Q_OPS_INVITE_LINKS_NEED_A_LIVE).to_string(),
+                        ),
+                    );
+                }
             }
         }
         cx.notify();
@@ -254,10 +282,7 @@ impl QuillApp {
         invite_link: &str,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let open = self
-            .invite_settings_of(chat_id)
-            .is_some_and(|d| d.details_link.as_deref() == Some(invite_link));
-        if !open {
+        if !self.invite_link_details_open(chat_id, invite_link) {
             return None;
         }
         let state = self
@@ -273,18 +298,7 @@ impl QuillApp {
             .w_full()
             .gap_1()
             .pl_2();
-        let Some(state) = state else {
-            return Some(
-                block
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(muted)
-                            .child(tr(keys::Q_OPS_LOADING)),
-                    )
-                    .into_any_element(),
-            );
-        };
+        let state = state?;
         block = block.child(self.invite_block_title(
             &if state.total_count == 0 && !state.loading() {
                 tr(keys::GROUP_INVITE_NO_JOINED).to_string()
@@ -411,9 +425,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let muted = cx.theme().muted_foreground;
-        let open = self
-            .invite_settings_of(chat_id)
-            .is_some_and(|d| d.revoked_open);
+        let open = self.revoked_links_open(chat_id);
         let mut block = div().flex().flex_col().w_full().gap_1().pt_1().child(
             div().flex().items_center().w_full().gap_1().child(
                 // A disclosure row: the section title with a chevron

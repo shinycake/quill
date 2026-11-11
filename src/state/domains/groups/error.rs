@@ -332,19 +332,15 @@ impl Session {
                 ));
             }
             Some(RequestPurpose::GetRevokedChatInviteLinks) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && !matches!(
-                        self.groups.revoked_invite_links.get(&chat_id.0),
-                        Some(InviteLinkFetch::Loaded(_))
-                    )
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && let Some(slot) = self.groups.revoked_invite_links.get_mut(&chat_id.0)
+                    && *slot == InviteLinkFetch::Loading(pending.id)
                 {
-                    self.groups.revoked_invite_links.insert(
-                        chat_id.0,
-                        InviteLinkFetch::Failed(call_request_error_line(
-                            err,
-                            "Could not load revoked links",
-                        )),
-                    );
+                    *slot = InviteLinkFetch::Failed(call_request_error_line(
+                        err,
+                        "Could not load revoked links",
+                    ));
                 }
             }
             Some(RequestPurpose::GetChatInviteLinkCounts) => {
@@ -514,16 +510,12 @@ impl Session {
                 filter,
                 ..
             })) => {
-                // A failed page of the list shown can be asked for again.
+                // A failed page of the list shown is asked for again at the next scroll.
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
-                    && self.groups.take_member_more((chat_id.0, filter), pending)
                 {
                     self.groups
-                        .member_asks
-                        .entry((chat_id.0, filter))
-                        .or_default()
-                        .more = MoreMembers::Failed;
+                        .settle_member_more((chat_id.0, filter), pending, false);
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers { filter })) => {

@@ -144,7 +144,10 @@ fn a_new_search_query_supersedes_the_one_in_flight() {
     feed(&mut driver, &members_json(1..4, 3, &ann.as_extra()));
     assert_eq!(
         driver.session.groups.supergroup_members.get(&key),
-        Some(&SupergroupMembersFetch::Loading),
+        Some(&SupergroupMembersFetch::Loading {
+            request: Some(bob),
+            last: None
+        }),
         "the first query's answer does not show under the second"
     );
     feed(&mut driver, &members_json(7..8, 1, &bob.as_extra()));

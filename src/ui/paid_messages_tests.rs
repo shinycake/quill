@@ -2,7 +2,7 @@
 //! paid send, the Messages price and Remove Fee. No Stars ever move: the
 //! demo session has no sender.
 
-use super::paid_messages_state::PriceSource;
+use super::paid_messages_state::{PaidConfirmStage, PriceSource};
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -52,7 +52,12 @@ fn a_paid_chat_asks_once_then_sends_with_the_price(cx: &mut TestAppContext) {
         assert!(app.paid_send_waits(ChatId(11), "hello", Default::default(), cx));
     });
     app.read_with(vcx, |app, _| {
-        let confirm = &app.paid_messages.confirm.as_ref().expect("asks first").ask;
+        let confirm = &app
+            .paid_messages
+            .confirm
+            .composer()
+            .expect("asks first")
+            .ask;
         assert_eq!(confirm.per_message, 25);
         assert_eq!(confirm.total(), 25);
         assert_eq!(confirm.text, "hello");
@@ -61,7 +66,7 @@ fn a_paid_chat_asks_once_then_sends_with_the_price(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, _, _| {
         let session = app.demo_session.as_mut().unwrap();
         session.payments.paid_messages.trust.trust(11, 25);
-        app.paid_messages.confirm = None;
+        app.paid_messages.confirm = PaidConfirmStage::None;
     });
     app.update_in(vcx, |app, _, cx| {
         assert!(!app.paid_send_waits(ChatId(11), "again", Default::default(), cx));
@@ -85,21 +90,28 @@ fn dont_ask_again_stays_with_its_confirmation(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, _, cx| {
         charge_in_chat(app, 25);
         assert!(app.paid_send_waits(ChatId(11), "hello", Default::default(), cx));
-        app.paid_messages.confirm_trust = Some((11, 25));
+        app.set_paid_confirm_trust(true, (11, 25));
         assert!(app.paid_confirm_trusted());
         app.cancel_paid_confirm(cx);
-        assert!(app.paid_messages.confirm_trust.is_none());
+        assert!(matches!(app.paid_messages.confirm, PaidConfirmStage::None));
         assert!(app.paid_send_waits(ChatId(11), "hello", Default::default(), cx));
         assert!(!app.paid_confirm_trusted(), "the next box opens unticked");
-        // Ticked for 25, then the price on screen becomes 30.
-        app.paid_messages.confirm_trust = Some((11, 25));
-        app.paid_messages.confirm = None;
+        // Ticked for 25, then the price on screen becomes 30: the new
+        // confirmation is a new stage, unticked.
+        app.set_paid_confirm_trust(true, (11, 25));
+        app.paid_messages.confirm = PaidConfirmStage::None;
         charge_in_chat(app, 30);
         assert!(app.paid_send_waits(ChatId(11), "hello", Default::default(), cx));
-        app.paid_messages.confirm_trust = Some((11, 25));
         assert!(
             !app.paid_confirm_trusted(),
-            "a tick for 25 is not one for 30"
+            "another confirmation is unticked"
+        );
+        // A tick left on a held send names its price: another price is not
+        // trusted.
+        app.paid_messages.confirm = PaidConfirmStage::Held { trusted: (11, 25) };
+        assert!(
+            !app.paid_confirm_trusted(),
+            "a tick for 25 is not one for 30 (and nothing is held here)"
         );
     });
 }
@@ -112,7 +124,7 @@ fn free_chats_never_wait(cx: &mut TestAppContext) {
         let session = app.demo_session.as_mut().unwrap();
         session.open_chat(ChatId(11));
         assert!(!app.paid_send_waits(ChatId(11), "hi", Default::default(), cx));
-        assert!(app.paid_messages.confirm.is_none());
+        assert!(app.paid_messages.confirm.composer().is_none());
     });
 }
 
@@ -305,10 +317,9 @@ fn the_direct_messages_box_takes_the_price_when_it_arrives(cx: &mut TestAppConte
 
 /// A Remove Fee save for a user that holds the shared save slot says
 /// nothing about this channel's Direct Messages save: the box does not
-/// close as if it went through. Only the channel's own `Idle` answer does.
+/// close as if it went through. Only the channel's own answer does.
 #[gpui_kit::test]
 fn another_targets_save_does_not_close_the_direct_messages_box(cx: &mut TestAppContext) {
-    use crate::ui::paid_messages_state::DirectStage;
     use quill::ids::RequestId;
     use quill::paid_messages::{PaidSave, PaidTarget};
     let (app, mut vcx) = new_app(cx, "ready-chats");
@@ -332,10 +343,6 @@ fn another_targets_save_does_not_close_the_direct_messages_box(cx: &mut TestAppC
             },
         );
         app.open_direct_messages(ChatId(13), cx);
-        let stage = |app: &QuillApp| app.paid_messages.direct.as_ref().map(|b| b.stage);
-        if let Some(boxed) = app.paid_messages.direct.as_mut() {
-            boxed.stage = DirectStage::Saving;
-        }
         // The box's own save is out; another target's, however it ends,
         // never settles it.
         if let Some(session) = app.demo_session.as_mut() {
@@ -352,21 +359,42 @@ fn another_targets_save_does_not_close_the_direct_messages_box(cx: &mut TestAppC
         };
         save(app, &|s| s.begin(PaidTarget::User(5), RequestId(1)));
         app.direct_messages_upkeep(window, cx);
-        assert_eq!(stage(app), Some(DirectStage::Saving), "still waiting");
-        save(app, &|s| s.fail(RequestId(1), "x".into()));
+        assert!(app.paid_messages.direct.is_some(), "still waiting");
+        save(app, &|s| s.settle(RequestId(1)));
         app.direct_messages_upkeep(window, cx);
-        assert_eq!(stage(app), Some(DirectStage::Saving), "a user's refusal");
+        assert!(
+            app.paid_messages.direct.is_some(),
+            "a user's save went through"
+        );
         save(app, &|s| s.begin(PaidTarget::Channel(14), RequestId(2)));
+        save(app, &|s| s.settle(RequestId(2)));
         app.direct_messages_upkeep(window, cx);
-        assert_eq!(stage(app), Some(DirectStage::Saving), "another channel");
+        assert!(app.paid_messages.direct.is_some(), "another channel's save");
         save(app, &|s| s.fail(RequestId(9), "no".into()));
         app.direct_messages_upkeep(window, cx);
-        assert_eq!(stage(app), Some(DirectStage::Editing), "its own refusal");
-        if let Some(boxed) = app.paid_messages.direct.as_mut() {
-            boxed.stage = DirectStage::Saving;
-        }
-        save(app, &|s| s.clear(PaidTarget::Channel(13)));
+        assert!(
+            app.paid_messages.direct.is_some(),
+            "its own refusal stays open"
+        );
+        let refused = app.session().is_some_and(|s| {
+            s.payments
+                .paid_messages
+                .save
+                .error_for(PaidTarget::Channel(13))
+                == Some("no")
+        });
+        assert!(refused, "the refusal is drawn from the session");
+        save(app, &|s| s.begin(PaidTarget::Channel(13), RequestId(10)));
+        save(app, &|s| s.settle(RequestId(10)));
         app.direct_messages_upkeep(window, cx);
         assert!(app.paid_messages.direct.is_none(), "its own answer closes");
+        let idle = app.session().is_some_and(|s| {
+            s.payments
+                .paid_messages
+                .save
+                .of(PaidTarget::Channel(13))
+                .is_none()
+        });
+        assert!(idle, "the box took the outcome");
     });
 }

@@ -132,7 +132,7 @@ impl RevealProbe {
 impl MotionState {
     pub(crate) fn reveal_probe(&self) -> RevealProbe {
         RevealProbe {
-            first_row: self.reveal.borrow().map(|r| r.first_row),
+            first_row: self.reveal.get().map(|r| r.first_row),
             measure: self.reveal_measure.clone(),
             fills: self.list_fills.clone(),
         }

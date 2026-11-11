@@ -325,7 +325,7 @@ impl QuillApp {
                 .track_scroll(&dialog_state.scroll)
                 .on_scroll(cx.listener(|this, _, _, _| this.member_dialog_load_more()));
             match fetch {
-                None | Some(SupergroupMembersFetch::Loading) => {
+                None | Some(SupergroupMembersFetch::Loading { .. }) => {
                     list = list.child(
                         div()
                             .text_sm()

@@ -558,7 +558,7 @@ fn pay_sends_only_in_the_chat_and_account_it_was_asked_in(cx: &mut TestAppContex
         app.select_listed_chat(B, window, cx);
         let before = history_len(app, B);
         app.confirm_paid_send(window, cx);
-        assert!(app.paid_messages.confirm.is_none());
+        assert!(app.paid_messages.confirm.composer().is_none());
         assert_eq!(history_len(app, B), before);
         // Another account with the same chat id open: nothing either.
         app.select_listed_chat(A, window, cx);

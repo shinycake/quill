@@ -406,10 +406,8 @@ impl Session {
                             }
                         }
                         RequestPurpose::GetRevokedChatInviteLinks => {
-                            self.groups.revoked_invite_links.insert(
-                                chat_id.0,
-                                InviteLinkFetch::Loaded(InviteLinkList { total_count, links }),
-                            );
+                            self.groups
+                                .land_revoked(chat_id.0, pending, total_count, links);
                         }
                         _ => {}
                     }
@@ -585,7 +583,7 @@ impl Session {
                 )) = pending.map(|p| p.purpose)
                     && let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
-                    && self.groups.take_member_more((chat_id.0, filter), pending)
+                    && self.groups.more_answered(chat_id.0, filter, pending)
                 {
                     // The info panel's next page joins the cached one. A
                     // page dropped meanwhile by a membership change stays
