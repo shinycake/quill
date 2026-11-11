@@ -110,7 +110,7 @@ impl Session {
                     // it is selected.
                     let emoji = &mut self.stickers.emoji;
                     if emoji.open && emoji.tab == crate::emoji::EmojiSetTab::Trending {
-                        emoji.lists.trending = crate::state::fetch::Fetch::Idle;
+                        emoji.lists.trending.outdate();
                     }
                 }
             }
@@ -140,8 +140,12 @@ impl Session {
                     self.accept_trending_sticker_sets(sets, is_premium);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingEmojiSets) {
                     // Slice S10: emoji `trendingStickerSets` land in the emoji panel (see emoji.rs).
-                    self.stickers.emoji.trending_total = total_count;
-                    self.accept_trending_emoji_sets(sets, is_premium);
+                    self.accept_trending_emoji_sets(
+                        pending.map(|p| p.id),
+                        sets,
+                        total_count,
+                        is_premium,
+                    );
                 }
             }
             // Slice S8: `searchStickers` / `getFavoriteStickers` /
@@ -186,7 +190,7 @@ impl Session {
                         LiveStoryPurpose::GetBursts,
                     )))
                 {
-                    self.set_live_bursts(stickers);
+                    self.set_live_bursts(stickers, pending.map(|p| p.id));
                 }
             }
             StickersPayload::EmojiKeywords { keywords } => {
@@ -204,16 +208,15 @@ impl Session {
             | StickersPayload::AnimatedEmoji { .. }
             | StickersPayload::Emojis { .. }
             | StickersPayload::EmojiCategories { .. }) => {
-                self.dispatch_emoji_payload(pending.map(|p| p.purpose), payload.into());
+                self.dispatch_emoji_payload(
+                    pending.map(|p| p.purpose),
+                    pending.map(|p| p.id),
+                    payload.into(),
+                );
             }
-            StickersPayload::UpdateStickerSet {
-                id,
-                is_custom_emoji,
-            } => {
-                if is_custom_emoji && id > 0 {
-                    self.stickers.emoji.outdated_packs.insert(id);
-                }
-            }
+            // A set changed: the lists that show it are refetched by their
+            // own marks; nothing is kept per set.
+            StickersPayload::UpdateStickerSet { .. } => {}
             StickersPayload::StickerSet {
                 id,
                 stickers,
@@ -271,8 +274,16 @@ impl Session {
                     set_id,
                 })) = pending.map(|p| p.purpose)
                 {
-                    if !title.is_empty() {
-                        self.stickers.emoji_pack_titles.insert(set_id, title);
+                    // Only the ask this title waits for lands; a pack with
+                    // no title is asked again by the next menu.
+                    let titles = &mut self.stickers.emoji_pack_titles;
+                    if matches!(titles.get(&set_id), Some(PackTitle::Asking(asked)) if Some(*asked) == pending.map(|p| p.id))
+                    {
+                        if title.is_empty() {
+                            titles.remove(&set_id);
+                        } else {
+                            titles.insert(set_id, PackTitle::Known(title));
+                        }
                     }
                 } else if let Some(RequestPurpose::Stickers(StickersPurpose::GetMaskSet {
                     set_id,

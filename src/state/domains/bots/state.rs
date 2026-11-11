@@ -14,6 +14,92 @@ pub struct CallbackAnswer {
     pub chat: Option<ChatId>,
 }
 
+/// B1: where a login-URL button press stands, one value for the whole
+/// press. `Asking` holds the request that went out and the button's context
+/// (an error degrades to the raw URL from it); only that request's answer
+/// or error ends it. `Answered` waits for the UI to take it on its next
+/// poll, with the context the consent box and the error fallback read.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum LoginUrlStage {
+    #[default]
+    Idle,
+    Asking {
+        request: RequestId,
+        context: LoginUrlRequest,
+    },
+    Answered {
+        info: LoginUrlInfo,
+        context: LoginUrlRequest,
+    },
+}
+
+impl LoginUrlStage {
+    pub fn is_idle(&self) -> bool {
+        *self == Self::Idle
+    }
+
+    /// `getLoginUrlInfo` / `getLoginUrl` went out as `request`.
+    pub fn asking(request: RequestId, context: LoginUrlRequest) -> Self {
+        Self::Asking { request, context }
+    }
+
+    /// The answer of `request`: taken only by the press that waits for it.
+    pub fn answer(&mut self, request: Option<RequestId>, info: LoginUrlInfo) -> bool {
+        match std::mem::take(self) {
+            Self::Asking {
+                request: asked,
+                context,
+            } if Some(asked) == request => {
+                *self = Self::Answered { info, context };
+                true
+            }
+            other => {
+                *self = other;
+                false
+            }
+        }
+    }
+
+    /// `request` was refused: the button degrades to its raw URL.
+    pub fn fail(&mut self, request: Option<RequestId>) -> bool {
+        match std::mem::take(self) {
+            Self::Asking {
+                request: asked,
+                context,
+            } if Some(asked) == request => {
+                let fallback_url = context.raw_url.clone();
+                *self = Self::Answered {
+                    info: LoginUrlInfo::Failed { fallback_url },
+                    context,
+                };
+                true
+            }
+            other => {
+                *self = other;
+                false
+            }
+        }
+    }
+
+    /// What the UI takes on its poll: the answer and the press it belongs
+    /// to. A press still in flight stays.
+    pub fn take_answer(&mut self) -> Option<(LoginUrlInfo, LoginUrlRequest)> {
+        match std::mem::take(self) {
+            Self::Answered { info, context } => Some((info, context)),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+
+    /// The screen was returned to: an answer nobody took is dropped with
+    /// its context; a press in flight keeps its context for its answer.
+    pub fn forget_answer(&mut self) {
+        let _ = self.take_answer();
+    }
+}
+
 /// Which group a `bot_commands` list belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GroupCommandsKey {
@@ -73,15 +159,12 @@ pub struct BotsState {
     /// Mini apps (docs/decisions/codex-miniapp-webview.md): open answers,
     /// consent answers and the attachment menu bots.
     pub web_apps: WebApps,
-    /// B1: last `loginUrlInfo*` / `httpUrl` answer for a login-URL button
-    /// press. The UI takes it on the next poll: `Open` opens the URL in the
-    /// OS browser, `RequestConfirmation` asks for consent, `Failed` opens
-    /// the button's raw URL in the browser.
-    pub last_login_url_info: Option<LoginUrlInfo>,
-    /// B1: the login button's request context, kept while `getLoginUrlInfo`
-    /// (then `getLoginUrl`) is in flight so an error can degrade to a plain
-    /// URL button press.
-    pub login_url_request: Option<LoginUrlRequest>,
+    /// B1: the login-URL button press: in flight under its request with its
+    /// context (so an error degrades to a plain URL button press), then the
+    /// answer for the UI to take on the next poll: `Open` opens the URL in
+    /// the OS browser, `RequestConfirmation` asks for consent, `Failed`
+    /// opens the button's raw URL in the browser.
+    pub login_url: LoginUrlStage,
     /// B1: force-reply targets set when an incoming message carrying
     /// force-reply markup (`replyMarkupForceReply`, or `force_reply` on an
     /// inline / show-keyboard markup) arrives, one per chat (a newer
@@ -125,8 +208,7 @@ impl BotsState {
             callback_answers: Default::default(),
             callback_presses: Vec::new(),
             web_apps: WebApps::default(),
-            last_login_url_info: None,
-            login_url_request: None,
+            login_url: LoginUrlStage::Idle,
             pending_force_replies: std::collections::HashMap::new(),
             reply_keyboards: ReplyKeyboardState::default(),
             inline_query: None,

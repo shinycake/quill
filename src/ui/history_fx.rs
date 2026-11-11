@@ -370,6 +370,13 @@ impl QuillApp {
         let (older, newer) = preload_due(above, below, viewport);
         if older {
             self.maybe_auto_load_older(cx);
+        } else if let Some(live) = self.live.as_mut()
+            && let Some(chat_id) = live.driver.session.open_chat_id()
+            && let Some(history) = live.driver.session.histories.get_mut(&chat_id.0)
+        {
+            // Scrolled away from the top edge: a failed older page may be
+            // asked for again when the reader comes back to it.
+            history.clear_load_failed();
         }
         if newer {
             self.maybe_auto_load_newer(cx);

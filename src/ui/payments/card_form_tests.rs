@@ -82,8 +82,12 @@ fn open_checkout(
     let mut vcx = VisualTestContext::from_window(handle.into(), cx);
     app.update_in(&mut vcx, |app, window, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.checkout =
-                quill::state::CheckoutForm::Ready(stripe_checkout(can_save, need_password));
+            session.payments.checkout = quill::state::CheckoutForm::ready(
+                stripe_checkout(can_save, need_password),
+                quill::state::PaymentRequest {
+                    invoice: quill::payment_invoice::InputInvoice::Name("demo".into()),
+                },
+            );
         }
         app.payments.card_transport = Some(transport);
         app.open_payment_dialog(window, cx);

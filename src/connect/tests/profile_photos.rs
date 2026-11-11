@@ -174,6 +174,44 @@ fn user_photos_page_by_offset() {
 }
 
 #[test]
+fn a_failed_photo_page_is_asked_again_only_after_a_step() {
+    let mut f = Fixture::new();
+    let extra = f.driver.fetch_user_profile_photos(31).unwrap().unwrap();
+    f.ingest(&format!(
+        r#"{{"@type":"chatPhotos","@extra":"{}","total_count":150,"photos":[{{"@type":"chatPhoto","id":"1","added_date":1,"sizes":[{{"@type":"photoSize","type":"x","photo":{},"width":640,"height":640,"progressive_sizes":[]}}]}}]}}"#,
+        extra.0,
+        file_json(5)
+    ));
+    let page = f
+        .driver
+        .fetch_more_photos(PhotoOwner::User(31))
+        .unwrap()
+        .unwrap();
+    f.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":500,"message":"boom"}}"#,
+        page.0
+    ));
+    // Every poll cycle asks; a failed page is not sent again.
+    for _ in 0..3 {
+        assert!(
+            f.driver
+                .fetch_more_photos(PhotoOwner::User(31))
+                .unwrap()
+                .is_none()
+        );
+    }
+    assert_eq!(f.sent_of("getUserProfilePhotos").len(), 2);
+    f.driver.retry_photo_page(PhotoOwner::User(31));
+    assert!(
+        f.driver
+            .fetch_more_photos(PhotoOwner::User(31))
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(f.sent_of("getUserProfilePhotos").len(), 3);
+}
+
+#[test]
 fn set_main_and_delete_send_the_chat_requests() {
     let mut f = Fixture::new();
     f.seed_group(MEMBER);

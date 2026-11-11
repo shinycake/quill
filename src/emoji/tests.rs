@@ -278,6 +278,10 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
 
     // getAnimatedEmoji's animatedEmoji lands under GetAnimatedEmoji.
     let extra = with_purpose.request(RequestPurpose::GetAnimatedEmoji, None);
+    with_purpose.stickers.emoji.animated = crate::emoji::AnimatedSuggestion::Asking {
+        emoji: "🔥".into(),
+        request: extra,
+    };
     apply_json(
         &mut with_purpose,
         &seq,
@@ -291,8 +295,8 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         with_purpose
             .stickers
             .emoji
-            .animated_emoji
-            .as_ref()
+            .animated
+            .sticker()
             .expect("animated")
             .emoji,
         "🔥"
@@ -416,6 +420,8 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
     assert_eq!(with_purpose.stickers.emoji.archived_sets.len(), 2);
 
     let extra = with_purpose.request(RequestPurpose::GetTrendingEmojiSets, None);
+    with_purpose.stickers.emoji.lists.trending.begin(0);
+    with_purpose.stickers.emoji.lists.trending.sent(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -426,8 +432,8 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.emoji.trending_sets.len(), 1);
-    assert!(with_purpose.stickers.emoji.trending_is_premium);
+    assert_eq!(with_purpose.stickers.emoji.lists.trending.sets().len(), 1);
+    assert!(with_purpose.stickers.emoji.lists.trending.is_premium());
     assert!(with_purpose.stickers.stickers.trending.is_empty());
 
     // A clearRecentEmojiStatuses `ok` drops the recent statuses.

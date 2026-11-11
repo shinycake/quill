@@ -162,17 +162,62 @@ pub fn progress_text(ready: u64, total: u64) -> String {
     format!("{} / {} MB", tenths(ready.min(total)), tenths(total))
 }
 
+/// Whether the "Updated to Quill X" banner is still drawn.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ChangelogBanner {
+    #[default]
+    Shown,
+    Dismissed,
+}
+
+/// The tasks one update stage runs (the check, the download and its redraw
+/// timer, the restart watch). The stage owns them: replacing the stage drops
+/// the last clone, which cancels them. Equal to every other `Job`, so states
+/// compare by what they say, not by what runs.
+#[derive(Clone, Default)]
+pub struct Job(Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>);
+
+impl Job {
+    pub fn hold<T: Send + Sync + 'static>(tasks: T) -> Self {
+        Self(Some(std::sync::Arc::new(tasks)))
+    }
+}
+
+impl std::fmt::Debug for Job {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.0.is_some() {
+            "Job(running)"
+        } else {
+            "Job(none)"
+        })
+    }
+}
+
+impl PartialEq for Job {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for Job {}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum UpdateState {
     #[default]
     Idle,
-    Checking,
+    /// A release check is running; the stage holds its task.
+    Checking(Job),
     Available(ReleaseInfo),
-    Downloading(ReleaseInfo, DownloadProgress),
-    Installing(ReleaseInfo),
+    Downloading(ReleaseInfo, DownloadProgress, Job),
+    /// The helper took over and Quill is quitting; the job is the watch that
+    /// ends the stage in `InstallFailed` when the quit never lands.
+    Installing(ReleaseInfo, Job),
     DownloadFailed(ReleaseInfo, &'static str),
     InstallFailed(ReleaseInfo, &'static str),
-    Installed(ReleaseInfo),
+    /// Updated since the last run; the changelog waits for the user. The
+    /// banner above the window can be dismissed on its own
+    /// (`ChangelogBanner`); the Settings button acknowledges the changelog.
+    Installed(ReleaseInfo, ChangelogBanner),
     /// Downloaded and verified in the background ("Install updates
     /// automatically"); the path is the install plan, applied the next time
     /// Quill starts or when the user presses "Restart to update".
@@ -186,18 +231,18 @@ impl UpdateState {
     pub fn label(&self) -> String {
         match self {
             Self::Idle => format!("Quill {}", crate::version::APP),
-            Self::Checking => "Checking for updates…".into(),
+            Self::Checking(_) => "Checking for updates…".into(),
             Self::Available(release) => format!("Quill {} is available", release.version),
-            Self::Downloading(release, progress) => crate::lang::tr_with(
+            Self::Downloading(release, progress, _) => crate::lang::tr_with(
                 crate::lang::keys::Q_OPS_DOWNLOADING_UPDATE,
                 &[(
                     "progress",
                     progress_text(progress.bytes(), release_size(release)).as_str(),
                 )],
             ),
-            Self::Installing(_) => "Installing update and restarting…".into(),
+            Self::Installing(..) => "Installing update and restarting…".into(),
             Self::DownloadFailed(_, message) | Self::InstallFailed(_, message) => (*message).into(),
-            Self::Installed(release) => format!("Updated to Quill {}", release.version),
+            Self::Installed(release, _) => format!("Updated to Quill {}", release.version),
             Self::Staged(release, _) => crate::lang::tr_with(
                 crate::lang::keys::Q_OPS_UPDATE_READY_RESTART,
                 &[("release_version", release.version.as_str())],

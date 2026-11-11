@@ -30,7 +30,6 @@ pub(super) struct GroupCall {
     camera_id: Option<String>,
     camera: Option<Native<qc_video_capture>>,
     speaker: Option<String>,
-    playback_muted: bool,
     sound: Option<DeviceThread>,
     /// The participant videos last asked for, kept so a connect or a
     /// new stream quality asks again without waiting for the driver.
@@ -313,7 +312,6 @@ impl TgcallsEngine {
                 camera_id: None,
                 camera: None,
                 speaker: None,
-                playback_muted: false,
                 sound: None,
                 video_sources: Vec::new(),
                 requested_video: None,
@@ -416,11 +414,8 @@ impl TgcallsEngine {
         };
         let label = format!("group {group_call_id}");
         call.sound = None;
-        call.sound = Some(
-            call.context
-                .sound
-                .open(label, name, volume, call.playback_muted, hold),
-        );
+        let muted = call.context.sound.muted();
+        call.sound = Some(call.context.sound.open(label, name, volume, muted, hold));
         Ok(())
     }
 
@@ -611,7 +606,6 @@ impl TgcallsEngine {
         let call = self.group_mut(group_call_id)?;
         let reopen = call.speaker.as_deref() != speaker && call.connected();
         call.speaker = speaker.map(str::to_owned);
-        call.playback_muted = muted;
         call.context.sound.set_muted(muted);
         if reopen {
             self.open_group_sound(group_call_id)?;

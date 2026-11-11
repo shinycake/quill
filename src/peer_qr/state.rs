@@ -163,56 +163,68 @@ pub struct PeerQrBox {
     /// Tells this box's free-code answers from an earlier box's.
     pub id: u64,
     pub subject: QrSubject,
-    pub color: SwatchKey,
-    pub emoji: Vec<ThemeEmoji>,
-    /// The gift shown instead of the color and emoji.
-    pub gift: Option<Box<ThemeGift>>,
+    /// What the card shows: a color with emoji, or a gift (one value, so
+    /// a gift never has emoji and the colors panel never ringed a gift's).
+    pub shown: ThemeChoice,
     pub panel: Option<QrPanel>,
     pub free: FreeState,
     /// The peer's saved theme as last heard; `None` until it is known.
     pub served: Option<ThemeChoice>,
-    /// Something was picked in this box (tdesktop `chosen`): the box
-    /// stops following the saved theme and saves the pick.
-    pub chosen: bool,
-    /// The save of the pick: out, or idle with the pick that failed.
-    pub save: SaveStage,
-    /// The serial of the last save sent; every save takes the next.
+    /// Whether the box follows the saved theme or shows a pick, and the
+    /// save of the pick ([`ThemeStage`]).
+    pub theme: ThemeStage,
+    /// The serial of the last save sent; every save takes the next (an id
+    /// generator: the stage holds the serial that is current).
     pub save_serial: u64,
 }
 
-/// The `setProfileShareTheme` of the box. An answer applies only while
-/// its serial is the one out; the answer, a newer save and the box
-/// closing each leave `Out`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SaveStage {
-    /// No save is out. `failed` is the pick whose save last failed: it is
-    /// not sent again until the pick changes.
-    Idle { failed: Option<ThemeChoice> },
+/// The theme of the box, one stage at a time. `Following` leaves on the
+/// first pick; `Picked` leaves when a save goes out (`Saving`) or the right
+/// to save is lost (`Following`, showing the saved theme again); `Saving`
+/// leaves on its own answer, a newer save, or the lost right. An answer
+/// applies only while its serial is the one out.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ThemeStage {
+    /// Nothing was picked: the box shows the saved theme and follows it
+    /// when it changes (tdesktop `chosen` false).
+    #[default]
+    Following,
+    /// Something was picked (tdesktop `chosen`): the box stops following
+    /// the saved theme and saves the pick. `failed` is the pick whose save
+    /// last failed: it is not sent again until the pick changes.
+    Picked { failed: Option<ThemeChoice> },
     /// The save of `choice` is out as `serial`.
-    Out { serial: u64, choice: ThemeChoice },
+    Saving { serial: u64, choice: ThemeChoice },
 }
 
-impl Default for SaveStage {
-    fn default() -> Self {
-        Self::Idle { failed: None }
-    }
-}
-
-impl SaveStage {
+impl ThemeStage {
     /// The choice being saved, if a save is out.
-    pub fn out(&self) -> Option<&ThemeChoice> {
+    fn out(&self) -> Option<&ThemeChoice> {
         match self {
-            Self::Out { choice, .. } => Some(choice),
-            Self::Idle { .. } => None,
+            Self::Saving { choice, .. } => Some(choice),
+            Self::Following | Self::Picked { .. } => None,
         }
     }
 
     fn failed(&self) -> Option<&ThemeChoice> {
         match self {
-            Self::Idle { failed } => failed.as_ref(),
-            Self::Out { .. } => None,
+            Self::Picked { failed } => failed.as_ref(),
+            Self::Following | Self::Saving { .. } => None,
         }
     }
+}
+
+/// Add the emoji, or remove it when already picked; past [`MAX_EMOJI`] the
+/// oldest goes.
+fn toggle_emoji(picks: &mut Vec<ThemeEmoji>, emoji: ThemeEmoji) {
+    if let Some(at) = picks.iter().position(|picked| *picked == emoji) {
+        picks.remove(at);
+        return;
+    }
+    if picks.len() >= MAX_EMOJI {
+        picks.remove(0);
+    }
+    picks.push(emoji);
 }
 
 impl PeerQrBox {
@@ -220,16 +232,18 @@ impl PeerQrBox {
         Self {
             id,
             subject,
-            color: SwatchKey::Default,
-            emoji: Vec::new(),
-            gift: None,
+            shown: ThemeChoice::default(),
             panel: None,
             free: FreeState::default(),
             served: None,
-            chosen: false,
-            save: SaveStage::default(),
+            theme: ThemeStage::default(),
             save_serial: 0,
         }
+    }
+
+    /// The choice whose save is out, if one is.
+    pub fn saving(&self) -> Option<&ThemeChoice> {
+        self.theme.out()
     }
 
     /// Colors and emoji are for a peer's own code only.
@@ -256,8 +270,10 @@ impl PeerQrBox {
             }
             QrAction::PickColor(key) => {
                 if styling {
-                    self.color = key;
-                    self.gift = None;
+                    self.shown = ThemeChoice::Emoji {
+                        color: key,
+                        emoji: self.emoji().to_vec(),
+                    };
                     self.picked();
                 }
             }
@@ -265,17 +281,18 @@ impl PeerQrBox {
                 if styling && !emoji.is_empty() {
                     // A gift has no emoji: the picks go on the default
                     // backdrop (tdesktop `BackdropHalf`).
-                    if self.gift.take().is_some() {
-                        self.color = SwatchKey::Default;
-                    }
-                    self.toggle_emoji(ThemeEmoji::Plain(emoji));
+                    let mut picks = self.emoji().to_vec();
+                    toggle_emoji(&mut picks, ThemeEmoji::Plain(emoji));
+                    self.shown = ThemeChoice::Emoji {
+                        color: self.color(),
+                        emoji: picks,
+                    };
                     self.picked();
                 }
             }
             QrAction::PickGift(gift) => {
                 if styling {
-                    self.emoji.clear();
-                    self.gift = Some(gift);
+                    self.shown = ThemeChoice::Gift(gift);
                     self.picked();
                 }
             }
@@ -311,27 +328,36 @@ impl PeerQrBox {
 
     /// What the box shows now.
     pub fn choice(&self) -> ThemeChoice {
-        match &self.gift {
-            Some(gift) => ThemeChoice::Gift(gift.clone()),
-            None => ThemeChoice::Emoji {
-                color: self.color,
-                emoji: self.emoji.clone(),
-            },
+        self.shown.clone()
+    }
+
+    /// The backdrop color picked; the default one while a gift shows (a
+    /// gift has its own backdrop).
+    pub fn color(&self) -> SwatchKey {
+        match &self.shown {
+            ThemeChoice::Emoji { color, .. } => *color,
+            ThemeChoice::Gift(_) => SwatchKey::Default,
+        }
+    }
+
+    /// The emoji picked; none while a gift shows.
+    pub fn emoji(&self) -> &[ThemeEmoji] {
+        match &self.shown {
+            ThemeChoice::Emoji { emoji, .. } => emoji,
+            ThemeChoice::Gift(_) => &[],
+        }
+    }
+
+    /// The gift shown instead of the color and emoji.
+    pub fn gift(&self) -> Option<&ThemeGift> {
+        match &self.shown {
+            ThemeChoice::Gift(gift) => Some(gift),
+            ThemeChoice::Emoji { .. } => None,
         }
     }
 
     fn show(&mut self, choice: ThemeChoice) {
-        match choice {
-            ThemeChoice::Emoji { color, emoji } => {
-                self.color = color;
-                self.emoji = emoji;
-                self.gift = None;
-            }
-            ThemeChoice::Gift(gift) => {
-                self.emoji.clear();
-                self.gift = Some(gift);
-            }
-        }
+        self.shown = choice;
     }
 
     /// The saved theme changed: shown unless something was picked
@@ -341,7 +367,7 @@ impl PeerQrBox {
             return;
         }
         self.served = Some(choice.clone());
-        if !self.chosen {
+        if self.theme == ThemeStage::Following {
             self.show(choice);
         }
     }
@@ -349,23 +375,22 @@ impl PeerQrBox {
     /// Something was picked. A pick away from the one that failed to
     /// save lets that one be sent again later.
     fn picked(&mut self) {
-        self.chosen = true;
         let choice = self.choice();
-        if self
-            .save
-            .failed()
-            .is_some_and(|failed| !failed.same_key(&choice))
-        {
-            self.save = SaveStage::Idle { failed: None };
-        }
+        self.theme = match std::mem::take(&mut self.theme) {
+            ThemeStage::Following => ThemeStage::Picked { failed: None },
+            ThemeStage::Picked { failed } => ThemeStage::Picked {
+                failed: failed.filter(|failed| failed.same_key(&choice)),
+            },
+            saving @ ThemeStage::Saving { .. } => saving,
+        };
     }
 
     /// The theme may no longer be changed: the panel closes unsaved and
     /// the box shows the saved theme again (tdesktop `RevertToServed`).
     fn lose_rights(&mut self) {
         self.panel = None;
-        if self.chosen {
-            self.chosen = false;
+        if self.theme != ThemeStage::Following {
+            self.theme = ThemeStage::Following;
             let served = self.served.clone().unwrap_or_default();
             self.show(served);
         }
@@ -377,11 +402,11 @@ impl PeerQrBox {
     /// while the saved theme is not known. A gift with no received id
     /// cannot be sent.
     fn save(&mut self, env: QrEnv) -> Vec<QrEffect> {
-        if !self.chosen || !env.can_save || !self.styled() {
+        if self.theme == ThemeStage::Following || !env.can_save || !self.styled() {
             return Vec::new();
         }
         let choice = self.choice();
-        let baseline = self.save.out().or(self.served.as_ref());
+        let baseline = self.theme.out().or(self.served.as_ref());
         let unchanged = match baseline {
             Some(baseline) => baseline.same_key(&choice),
             // The saved theme is not known yet: a pick back to the
@@ -389,14 +414,14 @@ impl PeerQrBox {
             None => choice.same_key(&ThemeChoice::default()),
         };
         let failed_before = self
-            .save
+            .theme
             .failed()
             .is_some_and(|failed| failed.same_key(&choice));
         if unchanged || failed_before || choice.input_json().is_none() {
             return Vec::new();
         }
         self.save_serial += 1;
-        self.save = SaveStage::Out {
+        self.theme = ThemeStage::Saving {
             serial: self.save_serial,
             choice: choice.clone(),
         };
@@ -419,10 +444,10 @@ impl PeerQrBox {
         if ticket.box_id != self.id {
             return Vec::new();
         }
-        let sent = match std::mem::take(&mut self.save) {
-            SaveStage::Out { serial, choice } if serial == ticket.serial => Some(choice),
+        let sent = match std::mem::take(&mut self.theme) {
+            ThemeStage::Saving { serial, choice } if serial == ticket.serial => Some(choice),
             other => {
-                self.save = other;
+                self.theme = other;
                 None
             }
         };
@@ -433,12 +458,13 @@ impl PeerQrBox {
             Ok(saved) => {
                 if sent.is_some() {
                     self.served = Some(saved);
+                    self.theme = ThemeStage::Picked { failed: None };
                 }
                 Vec::new()
             }
             Err(reason) => {
                 if sent.is_some() {
-                    self.save = SaveStage::Idle { failed: sent };
+                    self.theme = ThemeStage::Picked { failed: sent };
                 }
                 if reason.is_empty() {
                     Vec::new()
@@ -449,17 +475,6 @@ impl PeerQrBox {
         }
     }
 
-    fn toggle_emoji(&mut self, emoji: ThemeEmoji) {
-        if let Some(at) = self.emoji.iter().position(|picked| *picked == emoji) {
-            self.emoji.remove(at);
-            return;
-        }
-        if self.emoji.len() >= MAX_EMOJI {
-            self.emoji.remove(0);
-        }
-        self.emoji.push(emoji);
-    }
-
     fn request(&mut self, what: FreeRequest, env: QrEnv) -> Vec<QrEffect> {
         if self.free.requesting().is_some()
             || env.price <= 0
@@ -467,18 +482,12 @@ impl PeerQrBox {
         {
             return Vec::new();
         }
-        self.free.serial += 1;
-        self.free.ui = FreeUi::Requesting { request: what };
+        let serial = self.free.begin_request(what);
         vec![QrEffect::RequestFreeCode(FreeTicket {
             request: what,
             box_id: self.id,
-            serial: self.free.serial,
+            serial,
         })]
-    }
-
-    /// tdesktop `dropPending`.
-    fn drop_pending(&mut self) {
-        self.free.ui = FreeUi::Idle;
     }
 
     fn pill_clicked(&mut self, env: QrEnv) -> Vec<QrEffect> {
@@ -517,16 +526,9 @@ impl PeerQrBox {
     /// error is only toasted; an empty or expired code is unavailable, and
     /// after a reset the fee is back.
     fn free_answer(&mut self, ticket: FreeTicket, result: FreeResult, env: QrEnv) -> Vec<QrEffect> {
-        if ticket.box_id != self.id
-            || ticket.serial != self.free.serial
-            || self.free.ui
-                != (FreeUi::Requesting {
-                    request: ticket.request,
-                })
-        {
+        if ticket.box_id != self.id || !self.free.settle_request(&ticket) {
             return Vec::new();
         }
-        self.free.ui = FreeUi::Idle;
         let request = ticket.request;
         if request.permanent() && env.temporary_only {
             return Vec::new();
@@ -539,13 +541,12 @@ impl PeerQrBox {
         let temporary = !request.permanent();
         if code.link.url.is_empty() || (temporary && code.link.expires_at <= env.now) {
             if request.revoke() {
-                self.drop_pending();
                 self.free.mode = FreeMode::Fee;
             }
             return vec![QrEffect::Toast(QrToast::Unavailable)];
         }
         if temporary {
-            let left = code.link.expires_at - env.now;
+            let left = code.link.expires_at.saturating_sub(env.now);
             self.free.mode = FreeMode::Temporary { code };
             return vec![QrEffect::Toast(QrToast::CodeExpires(left))];
         }
@@ -572,9 +573,7 @@ impl PeerQrBox {
     /// permanent code and a permanent request.
     fn sync(&mut self, env: QrEnv) {
         if env.price <= 0 {
-            if self.free.ui != FreeUi::Idle {
-                self.drop_pending();
-            }
+            self.free.drop_request();
             self.free.mode = FreeMode::Fee;
             return;
         }
@@ -582,7 +581,7 @@ impl PeerQrBox {
             return;
         }
         if self.free.requesting().is_some_and(FreeRequest::permanent) {
-            self.drop_pending();
+            self.free.drop_request();
         }
         if matches!(self.free.mode, FreeMode::Permanent { .. }) {
             self.free.mode = FreeMode::Fee;
@@ -618,7 +617,7 @@ impl PeerQrBox {
         let Some(shown) = shown.filter(|shown| !shown.link.is_empty()) else {
             return Err(Some(QrToast::Unavailable));
         };
-        if shown.expires_at != 0 && shown.expires_at - now <= SHARE_CUTOFF_SECS {
+        if shown.expires_at != 0 && shown.expires_at.saturating_sub(now) <= SHARE_CUTOFF_SECS {
             return Err(Some(QrToast::Expiring {
                 free_code: shown.free_code,
             }));
@@ -630,7 +629,7 @@ impl PeerQrBox {
     /// the emoji. A color whose backdrop is not offered shows the default
     /// one.
     pub fn appearance(&self, swatches: &[Swatch]) -> Appearance {
-        if let Some(gift) = &self.gift {
+        if let Some(gift) = self.gift() {
             return Appearance {
                 center: gift.center,
                 edge: gift.edge,
@@ -640,13 +639,13 @@ impl PeerQrBox {
         }
         let swatch = swatches
             .iter()
-            .find(|swatch| swatch.key == self.color)
+            .find(|swatch| swatch.key == self.color())
             .copied()
             .unwrap_or(Swatch::DEFAULT);
         Appearance {
             center: swatch.center,
             edge: swatch.edge,
-            emoji: self.emoji.clone(),
+            emoji: self.emoji().to_vec(),
             gift: None,
         }
     }

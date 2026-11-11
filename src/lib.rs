@@ -204,6 +204,7 @@ pub mod promotion;
 pub mod proxy;
 pub mod proxy_carrier;
 pub mod proxy_extras;
+pub mod proxy_ops;
 pub mod proxy_sync;
 pub mod proxy_web;
 pub mod psa_about;
@@ -296,6 +297,7 @@ pub mod translate;
 pub mod tray;
 #[cfg(all(target_os = "macos", feature = "ui"))]
 pub mod tray_mac;
+pub mod tray_reveal;
 #[cfg(all(target_os = "linux", feature = "ui"))]
 pub mod tray_sni;
 pub mod update_install;

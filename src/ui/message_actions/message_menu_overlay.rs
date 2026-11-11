@@ -783,7 +783,8 @@ impl QuillApp {
         let pack_name = match packs[..] {
             [only] => self
                 .session()
-                .and_then(|s| s.stickers.emoji_pack_titles.get(&only).cloned()),
+                .and_then(|s| s.stickers.emoji_pack_titles.get(&only))
+                .and_then(|title| title.known().map(str::to_owned)),
             _ => None,
         };
         if let Some((before, bold, after)) =

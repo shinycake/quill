@@ -3,6 +3,7 @@
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use gpui_kit::*;
+use quill::ids::RequestId;
 use quill::lang::{keys, tr};
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
@@ -71,7 +72,8 @@ impl Drop for DeviceQrScanner {
 /// Where linking another device stands: one value, so a scanner, the link it
 /// read and the notice cannot disagree. Every stage has a way out: the
 /// camera's answer, the consent, the cancel, the account's answer, or the
-/// page being left (`clear_device_qr`).
+/// owner going away (`clear_device_qr`). Leaving the Devices page keeps a
+/// link that is out (`leave_device_link`): its answer is matched by request.
 pub(super) enum DeviceLink {
     /// Nothing runs; the notice is the last attempt's outcome, if any.
     Idle { notice: Option<&'static str> },
@@ -79,8 +81,8 @@ pub(super) enum DeviceLink {
     Scanning(DeviceQrScanner),
     /// A scanned or pasted link waits for the user's explicit consent.
     Confirm(Zeroizing<String>),
-    /// The link went to Telegram; its answer ends this stage.
-    Linking,
+    /// The link went to Telegram as this request; its answer ends this stage.
+    Linking(RequestId),
 }
 
 impl Default for DeviceLink {
@@ -94,7 +96,7 @@ impl DeviceLink {
     pub(super) fn notice(&self) -> Option<&'static str> {
         match self {
             Self::Idle { notice } => *notice,
-            Self::Linking => Some(tr(keys::Q_MISC_WAITING_FOR_TELEGRAM_TO_LINK)),
+            Self::Linking(_) => Some(tr(keys::Q_MISC_WAITING_FOR_TELEGRAM_TO_LINK)),
             Self::Scanning(_) | Self::Confirm(_) => None,
         }
     }
@@ -138,36 +140,40 @@ impl QuillApp {
         cx.notify();
     }
     pub(super) fn poll_device_qr(&mut self, cx: &mut Context<Self>) {
-        if self.settings.page != Some(quill::settings_catalog::Page::Devices)
-            || !self.live.as_ref().is_some_and(|live| {
-                matches!(
-                    live.driver.session.auth,
-                    quill::telegram::envelope::AuthorizationState::Ready
-                )
-            })
-        {
+        if !self.live.as_ref().is_some_and(|live| {
+            matches!(
+                live.driver.session.auth,
+                quill::telegram::envelope::AuthorizationState::Ready
+            )
+        }) {
             self.clear_device_qr();
             return;
         }
-        if let Some(linked) = self
-            .live
-            .as_mut()
-            .and_then(|live| live.driver.session.settings.device_login.take_result())
+        if let DeviceLink::Linking(asked) = self.privacy.device_link
+            && let Some(linked) = self.live.as_mut().and_then(|live| {
+                live.driver
+                    .session
+                    .settings
+                    .device_login
+                    .take_result_for(asked)
+            })
         {
-            // The answer is for the link this stage sent; one that arrives
-            // with nothing asking is dropped.
-            if matches!(self.privacy.device_link, DeviceLink::Linking) {
-                self.privacy.device_link = DeviceLink::failed(match linked {
-                    quill::auth::DeviceLoginResult::Linked => tr(keys::Q_MISC_DEVICE_LINKED),
-                    quill::auth::DeviceLoginResult::PasswordRequired => {
-                        tr(keys::Q_MISC_QR_CODE_ACCEPTED_ENTER_YOUR)
-                    }
-                    quill::auth::DeviceLoginResult::Failed => {
-                        tr(keys::Q_MISC_THE_DEVICE_COULDNT_BE_LINKED)
-                    }
-                });
-                cx.notify();
+            self.privacy.device_link = DeviceLink::failed(match linked {
+                quill::auth::DeviceLoginResult::Linked => tr(keys::Q_MISC_DEVICE_LINKED),
+                quill::auth::DeviceLoginResult::PasswordRequired => {
+                    tr(keys::Q_MISC_QR_CODE_ACCEPTED_ENTER_YOUR)
+                }
+                quill::auth::DeviceLoginResult::Failed => {
+                    tr(keys::Q_MISC_THE_DEVICE_COULDNT_BE_LINKED)
+                }
+            });
+            cx.notify();
+        }
+        if self.settings.page != Some(quill::settings_catalog::Page::Devices) {
+            if self.privacy.device_link.is_scanning() || self.privacy.device_link.is_confirming() {
+                self.privacy.device_link = DeviceLink::default();
             }
+            return;
         }
         let DeviceLink::Scanning(scanner) = &mut self.privacy.device_link else {
             return;
@@ -224,20 +230,25 @@ impl QuillApp {
             .live
             .as_mut()
             .map(|live| live.driver.confirm_device_login(&link));
-        self.privacy.device_link = if matches!(result, Some(Ok(_))) {
-            DeviceLink::Linking
+        self.privacy.device_link = if let Some(Ok(id)) = result {
+            DeviceLink::Linking(id)
         } else {
             DeviceLink::failed(tr(keys::Q_MISC_THE_DEVICE_COULDNT_BE_LINKED))
         };
         cx.notify();
     }
-    /// The link flow ends (the page was left, the app locked, the account
-    /// changed): the answer of a link attempt that is still out goes with
-    /// it, so the next visit does not show it as news.
+    /// The link flow ends with its account (a switch, or no client): a
+    /// link attempt that is still out goes with it, and its answer is
+    /// matched to no asker.
     pub(super) fn clear_device_qr(&mut self) {
         self.privacy.device_link = DeviceLink::default();
-        if let Some(live) = self.live.as_mut() {
-            live.driver.session.settings.device_login = Default::default();
+    }
+
+    /// The Devices page was left, or the app locked: a scan or a consent
+    /// ends, a link that is out stays, so its answer still reaches the user.
+    pub(super) fn leave_device_link(&mut self) {
+        if !matches!(self.privacy.device_link, DeviceLink::Linking(_)) {
+            self.privacy.device_link = DeviceLink::default();
         }
     }
 }
@@ -250,7 +261,7 @@ mod tests {
     fn linking_is_busy_so_no_new_link_replaces_the_pending_answer() {
         assert!(!DeviceLink::default().is_busy());
         assert!(!DeviceLink::failed("x").is_busy());
-        assert!(DeviceLink::Linking.is_busy());
+        assert!(DeviceLink::Linking(RequestId(1)).is_busy());
         assert!(DeviceLink::Confirm(Zeroizing::new(String::new())).is_busy());
     }
 }

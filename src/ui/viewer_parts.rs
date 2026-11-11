@@ -10,8 +10,6 @@ use gpui_kit::*;
 use quill::ids::MessageId;
 use quill::media_viewer::ViewerOrientation;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
 
 /// The clip of the item the viewer shows.
 #[derive(Default)]
@@ -133,25 +131,20 @@ impl ViewerClip {
 /// pixels, made for the orientation of the stage that holds it.
 pub(super) type Rotated = (PathBuf, super::owned_image::OwnedImage);
 
-/// The next rotate/flip decode token.
-fn next_token() -> u64 {
-    static TOKENS: AtomicU64 = AtomicU64::new(0);
-    TOKENS.fetch_add(1, Ordering::Relaxed) + 1
-}
-
 /// The turn and flips of the viewer item, and the decode of the next one:
 /// the orientation shown (with nothing decoded, as a video's turn is), a
 /// decode of `target` running (the previous picture stays until it
 /// lands), or the decoded picture. The shown orientation lives in every
 /// stage, so it and its pixels are never compared by hand. Replaced whole
-/// when the viewer moves on, so a late decode finds no matching token.
+/// when the viewer moves on: the stage owns the decode's task, so a newer
+/// turn, a step or a close drops it and the replaced decode stops.
 pub(super) enum Reorient {
     Idle(ViewerOrientation),
     Decoding {
         orientation: ViewerOrientation,
         target: ViewerOrientation,
-        token: u64,
         shown: Option<Rotated>,
+        _task: Task<()>,
     },
     Ready {
         orientation: ViewerOrientation,
@@ -194,22 +187,20 @@ impl Reorient {
         }
     }
 
-    /// Start decoding `target`; returns the token its answer must carry.
-    pub(super) fn begin(&mut self, target: ViewerOrientation) -> u64 {
-        let token = next_token();
+    /// Start decoding `target` in `task`, which the stage now owns.
+    pub(super) fn begin(&mut self, target: ViewerOrientation, task: Task<()>) {
         let orientation = self.orientation();
         let shown = std::mem::take(self).into_shown();
         *self = Self::Decoding {
             orientation,
             target,
-            token,
             shown,
+            _task: task,
         };
-        token
     }
 
-    pub(super) fn is_decoding(&self, token: u64) -> bool {
-        matches!(self, Self::Decoding { token: now, .. } if *now == token)
+    pub(super) fn is_decoding(&self) -> bool {
+        matches!(self, Self::Decoding { .. })
     }
 
     /// Drop a running decode, keeping the picture it would replace.
@@ -294,7 +285,7 @@ impl Pointer {
 
 /// The toolbar, arrows and caption: up (maybe with the idle timer
 /// waiting), or faded out. `flips` counts the shows and hides and keys the
-/// 150 ms fade.
+/// fade.
 pub(super) enum ControlsVisibility {
     Shown {
         flips: u64,
@@ -302,8 +293,15 @@ pub(super) enum ControlsVisibility {
     },
     Hidden {
         flips: u64,
-        at: Instant,
+        fade: FadeOut,
     },
+}
+
+/// A hide's fade: the timer that ends it (showing the controls drops it),
+/// then gone, when the controls take no pointer input.
+pub(super) enum FadeOut {
+    Fading { _end: Task<()> },
+    Gone,
 }
 
 impl Default for ControlsVisibility {
@@ -326,11 +324,21 @@ impl ControlsVisibility {
         }
     }
 
-    /// When they faded out, if they are hidden.
-    pub(super) fn hidden_at(&self) -> Option<Instant> {
-        match self {
-            Self::Hidden { at, .. } => Some(*at),
-            Self::Shown { .. } => None,
+    /// They are hidden and the fade-out has ended.
+    pub(super) fn is_gone(&self) -> bool {
+        matches!(
+            self,
+            Self::Hidden {
+                fade: FadeOut::Gone,
+                ..
+            }
+        )
+    }
+
+    /// The fade-out timer ran out.
+    pub(super) fn fade_ended(&mut self) {
+        if let Self::Hidden { fade, .. } = self {
+            *fade = FadeOut::Gone;
         }
     }
 
@@ -348,10 +356,14 @@ impl ControlsVisibility {
         }
     }
 
-    /// Fade them out (this drops the idle timer).
-    pub(super) fn hide(&mut self, now: Instant) {
+    /// Fade them out; `end` runs [`Self::fade_ended`] when the fade is
+    /// over (this drops the idle timer).
+    pub(super) fn hide(&mut self, end: Task<()>) {
         let flips = self.flips().wrapping_add(1);
-        *self = Self::Hidden { flips, at: now };
+        *self = Self::Hidden {
+            flips,
+            fade: FadeOut::Fading { _end: end },
+        };
     }
 
     pub(super) fn has_timer(&self) -> bool {
@@ -466,5 +478,28 @@ impl PhotoEditorSlot {
             }
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod controls_tests {
+    use super::ControlsVisibility;
+    use gpui_kit::Task;
+
+    #[test]
+    fn a_fade_ends_in_gone_and_showing_the_controls_undoes_it() {
+        let mut controls = ControlsVisibility::default();
+        assert!(!controls.is_hidden() && !controls.is_gone());
+        controls.hide(Task::ready(()));
+        assert!(controls.is_hidden());
+        assert!(!controls.is_gone(), "still fading");
+        controls.fade_ended();
+        assert!(controls.is_gone());
+        assert!(controls.show());
+        assert!(!controls.is_hidden() && !controls.is_gone());
+        let flips = controls.flips();
+        controls.fade_ended();
+        assert_eq!(controls.flips(), flips, "a late fade end does nothing");
+        assert!(!controls.is_gone());
     }
 }

@@ -64,7 +64,7 @@ fn card_shown(vcx: &mut VisualTestContext) -> bool {
 fn gift_for(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<String> {
     app.read_with(vcx, |app, _| {
         let send = &app.session()?.payments.gifts_manage.send;
-        send.open
+        send.is_open()
             .then(|| send.recipient.as_ref().map(|r| r.name.clone()))
             .flatten()
     })

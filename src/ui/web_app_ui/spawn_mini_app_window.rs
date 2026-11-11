@@ -11,9 +11,7 @@ impl QuillApp {
         // before the lock) is refused: the helper window would show it,
         // usable, over the lock. TDLib closes the launch.
         if self.refused_while_locked() {
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.close_web_app(launch.launch_id);
-            }
+            self.close_refused_launch(launch.launch_id);
             return;
         }
         let Some(path) = helper_path() else {
@@ -21,6 +19,7 @@ impl QuillApp {
                 StatusNote::silent(tr(keys::Q_MEDIA_THE_MINI_APP_WINDOW_QUILL_2)),
                 cx,
             );
+            self.close_refused_launch(launch.launch_id);
             return;
         };
         let account = self.web_app_account();
@@ -53,11 +52,13 @@ impl QuillApp {
                     StatusNote::error(tr(keys::Q_MEDIA_THE_MINI_APP_WINDOW_COULDNT)),
                     cx,
                 );
+                self.close_refused_launch(launch.launch_id);
                 return;
             }
         };
         let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
             let _ = child.kill();
+            self.close_refused_launch(launch.launch_id);
             return;
         };
         let (sender, events) = mpsc::channel();
@@ -130,15 +131,34 @@ impl QuillApp {
         self.ensure_mini_app_poll(cx);
     }
 
+    /// A launch that never got a window (locked, no helper, the helper did
+    /// not start): TDLib hears `closeWebApp`, so the bot keeps no live
+    /// session on the server.
+    fn close_refused_launch(&mut self, launch_id: i64) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.close_web_app(launch_id);
+        }
+    }
+
     /// Close the window (and tell TDLib) without waiting for the helper.
     pub(in crate::ui) fn close_mini_app_window(&mut self, cx: &mut Context<Self>) {
         let Some(window) = self.mini_apps.window.take() else {
             return;
         };
         let launch_id = window.launch.launch_id;
+        let phone = window.phone.waiting_on();
         drop(window);
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.close_web_app(launch_id);
+            // The phone flow went with the window: nobody takes its answer.
+            if let Some(request) = phone {
+                live.driver.session.acks.forget(request);
+            }
+            live.driver
+                .session
+                .bots
+                .web_apps
+                .forget_custom_requests_of(launch_id);
         }
         cx.notify();
     }
@@ -155,9 +175,18 @@ impl QuillApp {
         }
         let window = self.mini_apps.window.take()?;
         let launch_id = window.launch.launch_id;
+        let phone = window.phone.waiting_on();
         let gone = window.close_with_notice();
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.close_web_app(launch_id);
+            if let Some(request) = phone {
+                live.driver.session.acks.forget(request);
+            }
+            live.driver
+                .session
+                .bots
+                .web_apps
+                .forget_custom_requests_of(launch_id);
         }
         gone
     }
@@ -270,7 +299,14 @@ impl QuillApp {
             self.finish_write_access(answer, cx);
         }
         for reply in custom_replies {
-            if let Some(window) = self.mini_apps.window.as_mut() {
+            // An answer for another launch than the window open (the app
+            // was closed and another opened) is nobody's.
+            if let Some(window) = self
+                .mini_apps
+                .window
+                .as_mut()
+                .filter(|window| window.launch.launch_id == reply.launch_id)
+            {
                 let reply = match reply.result {
                     Ok(json) => BridgeReply::custom_method_result(
                         &reply.req_id,
@@ -725,9 +761,15 @@ impl QuillApp {
                 method,
                 params,
             } => {
+                let launch_id = self
+                    .mini_apps
+                    .window
+                    .as_ref()
+                    .map_or(0, |window| window.launch.launch_id);
                 let sent = self.live.as_mut().map(|live| {
                     live.driver.send_web_app_custom_request(
                         bot_id,
+                        launch_id,
                         &req_id,
                         &method,
                         &params.to_string(),

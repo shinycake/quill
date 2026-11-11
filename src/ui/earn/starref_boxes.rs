@@ -124,7 +124,7 @@ impl QuillApp {
         let Some(earn) = self.earn_state() else {
             return;
         };
-        let confirm = earn.setup.as_ref().is_some_and(|s| s.confirm.is_some());
+        let confirm = earn.setup.as_ref().is_some_and(|s| s.confirm().is_some());
         let (programs, join, link, revoke, withdraw) = (
             earn.programs_box.is_some(),
             earn.join_box.is_some(),
@@ -154,7 +154,7 @@ impl QuillApp {
 
     fn close_setup_confirm(&mut self, cx: &mut Context<Self>) {
         if let Some(setup) = self.earn_mut().and_then(|e| e.setup.as_mut()) {
-            setup.confirm = None;
+            setup.close_confirm();
         }
         cx.notify();
     }
@@ -174,7 +174,7 @@ impl QuillApp {
             let Some(setup) = this.earn_state().and_then(|e| e.setup.clone()) else {
                 return dialog.on_close(on_close);
             };
-            let Some(confirm) = setup.confirm else {
+            let Some(confirm) = setup.confirm() else {
                 return dialog.on_close(on_close);
             };
             let exists = setup.exists();
@@ -877,7 +877,7 @@ crate::ui::shell::register_dialogs! {
     /// The setup page's "Warning" boxes.
     EarnSetupConfirm => DialogSpec::new(
         7615,
-        |app| app.earn_state().and_then(|e| e.setup.as_ref()).is_some_and(|s| s.confirm.is_some()),
+        |app| app.earn_state().and_then(|e| e.setup.as_ref()).is_some_and(|s| s.confirm().is_some()),
         QuillApp::build_earn_setup_confirm_dialog,
     )
     .close(|app, _, cx| app.close_setup_confirm(cx)),

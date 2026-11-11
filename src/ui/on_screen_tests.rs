@@ -138,8 +138,10 @@ fn a_switch_replaces_every_surface_and_nothing_comes_back(cx: &mut TestAppContex
         app.spawn_screen(cx, async move |this, cx| {
             let _ = wait.await;
             seen.set(Some(
-                this.update(cx, |app, _| app.stories.composer.open = true)
-                    .is_ok(),
+                this.update(cx, |app, _| {
+                    *app.stories.composer = quill::story_composer::StoryComposer::open()
+                })
+                .is_ok(),
             ));
         })
         .detach();
@@ -163,7 +165,7 @@ fn a_switch_replaces_every_surface_and_nothing_comes_back(cx: &mut TestAppContex
         Some(false),
         "the task's update came back Gone"
     );
-    app.read_with(&vcx, |app, _| assert!(!app.stories.composer.open));
+    app.read_with(&vcx, |app, _| assert!(!app.stories.composer.is_open()));
 
     // Back to the first account: a third screen, with nothing restored.
     switch(&app, &mut vcx, &AccountKey::primary().0);

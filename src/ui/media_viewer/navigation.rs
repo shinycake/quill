@@ -193,7 +193,16 @@ impl QuillApp {
                 cx.notify();
             }
         }
-        if self.viewer.state.wants_older()
+        let askable = self.session().is_some_and(|session| {
+            session
+                .media
+                .shared_media
+                .tabs
+                .get(tab.index())
+                .is_some_and(|state| state.can_load_more())
+        });
+        if askable
+            && self.viewer.state.wants_older()
             && let Some(live) = self.live.as_mut()
         {
             let _ = live.driver.fetch_more_shared_media(tab);
@@ -211,6 +220,14 @@ impl QuillApp {
         self.viewer_leave_video_fullscreen();
         // MED1: orientation and playback error are per-item state.
         let mut orientation = ViewerOrientation::default();
+        self.viewer.hdr.reset();
+        self.viewer.clip.clear_error();
+        self.viewer.extra.share_at = None;
+        if let Some(owner) = self.viewer.state.source().profile_owner()
+            && let Some(live) = self.live.as_mut()
+        {
+            live.driver.retry_photo_page(owner);
+        }
         if let Some(item) = self.viewer.state.current()
             && let Some(turns) = self
                 .viewer
@@ -221,9 +238,6 @@ impl QuillApp {
             orientation.turns = *turns;
         }
         self.viewer.reorient.reset(orientation);
-        self.viewer.hdr.reset();
-        self.viewer.clip.clear_error();
-        self.viewer.extra.share_at = None;
         self.apply_viewer_quality_pref();
         self.viewer.extra.loop_pause = LoopPause::Free;
         self.stop_viewer_video();
@@ -275,7 +289,7 @@ impl QuillApp {
         // A timestamp link's start belongs to this open: a clip that never
         // played here must not start there the next time it opens.
         self.viewer.pending_seek = None;
-        self.viewer.extra.saved_toast = None;
+        self.viewer.extra.saved_toast = Default::default();
         // Reopening the same item starts with its caption collapsed.
         self.viewer.extra.caption = Default::default();
         self.viewer.state.close();

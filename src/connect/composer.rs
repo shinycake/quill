@@ -218,7 +218,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.draft_for(chat_id, topic).is_none() {
             return Ok(None);
         }
-        self.pending_draft.take();
+        self.cancel_pending_draft_of(chat_id);
         self.send_draft(chat_id, topic, None, None, None).map(Some)
     }
 
@@ -231,7 +231,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         topic: DraftTopic,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.cancel_pending_draft();
+        self.cancel_pending_draft_of(chat_id);
         if !self.session.accepts_composer_draft(chat_id, topic) {
             self.session.store_composer_draft(chat_id, topic, None);
             return Ok(None);
