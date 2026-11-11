@@ -281,3 +281,24 @@ fn counts_follow_every_mutation() {
     assert_eq!(counts(&d), (0, 0, 0));
     assert_eq!(d.user_ids().count(), 0);
 }
+
+#[test]
+fn an_ended_automatic_download_reads_as_ended_without_a_file() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let ended = |s: &Session, id| s.media.downloads.ended_without_file(id, &s.media.files);
+    assert!(!ended(&session, 70));
+    session.begin_download(FileId(70));
+    assert!(!ended(&session, 70));
+    session.media.downloads.end(70);
+    // `status` only fails user downloads; the wait on an automatic one
+    // needs this to leave.
+    assert_eq!(status(&session, 70), DownloadStatus::Idle);
+    assert!(ended(&session, 70));
+    // A retry clears the end; a finished file is not an end.
+    session.begin_download(FileId(70));
+    assert!(!ended(&session, 70));
+    session.media.downloads.end(70);
+    apply_json(&mut session, &seq, &sink, &update_file(70, false, true, 100));
+    assert!(!ended(&session, 70));
+}

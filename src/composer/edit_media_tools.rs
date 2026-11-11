@@ -180,6 +180,7 @@ mod tests {
 
     fn replacement(kind: EditMediaKind) -> EditMediaReplacement {
         EditMediaReplacement {
+            probe: crate::composer::ReplacementProbe::NotNeeded,
             path: PathBuf::from("/tmp/x.png"),
             file_name: "x.png".into(),
             kind,

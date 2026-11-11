@@ -175,12 +175,23 @@ fn export_builds_the_page_workbook(cx: &mut TestAppContext) {
         seed_message_statistics(session, CHANNEL, CHANNEL);
         // The reactions graph is still loading: no workbook that lacks it.
         assert!(crate::ui::statistics_export::page_workbook(session, CHANNEL).is_none());
+        // A failed request is never re-asked by the page, so it must not
+        // hold the export back: the workbook comes without that sheet.
+        let key = quill::state::GraphKey {
+            chat_id: CHANNEL,
+            token: "message-reactions".into(),
+            x: 0,
+        };
+        session
+            .groups
+            .stats
+            .graphs
+            .insert(key.clone(), quill::state::GraphFetch::Failed("boom".into()));
+        let (sheets, _) =
+            crate::ui::statistics_export::page_workbook(session, CHANNEL).expect("failed graph");
+        assert!(!sheets.iter().any(|s| s.name == "Reactions"));
         session.groups.stats.graphs.insert(
-            quill::state::GraphKey {
-                chat_id: CHANNEL,
-                token: "message-reactions".into(),
-                x: 0,
-            },
+            key,
             quill::state::GraphFetch::Loaded(quill::telegram::envelope::StatisticalGraph::Error {
                 error_message: String::new(),
             }),

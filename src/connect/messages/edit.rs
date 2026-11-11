@@ -82,8 +82,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .send_path_str()
                 .ok_or(ConnectSendError::InvalidRequest)?;
             let video = if rep.kind == EditMediaKind::Video {
-                let probe = crate::video::probe_local_video(&rep.path)
-                    .map_err(|_| ConnectSendError::InvalidRequest)?;
+                // Probed in the background when the file was staged; a
+                // file that is not probed yet is not sent.
+                let crate::composer::ReplacementProbe::Ready(probe) = rep.probe else {
+                    return Err(ConnectSendError::InvalidRequest);
+                };
                 Some(VideoSend {
                     duration: probe.duration,
                     width: probe.width,

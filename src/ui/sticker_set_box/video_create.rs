@@ -102,8 +102,7 @@ impl QuillApp {
                 session
                     .media
                     .downloads
-                    .status(ended.0, &session.media.files)
-                    == quill::state::DownloadStatus::Failed
+                    .ended_without_file(ended.0, &session.media.files)
             });
             if failed {
                 self.sticker_box.pending_video = None;

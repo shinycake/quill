@@ -73,10 +73,67 @@ impl QuillApp {
                 {
                     replacement.cover = old.cover.clone();
                     replacement.video_extras = old.video_extras.clone();
+                    if old.kind == replacement.kind {
+                        replacement.probe = old.probe;
+                    }
                 }
                 edit.media_edit.replacement = Some(replacement);
+                self.probe_edit_replacement(cx);
             }
             Err(note) => self.set_note(StatusNote::error(note)),
+        }
+        cx.notify();
+    }
+
+    /// Probe the staged replacement video in the background when it is
+    /// `Probing`. The answer is applied only to the same file still
+    /// staged; a failed probe drops the replacement with the reason, so
+    /// Save never waits for good.
+    pub(in crate::ui) fn probe_edit_replacement(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = self
+            .chat_ui
+            .pending_edit()
+            .and_then(|edit| edit.media_edit.replacement.as_ref())
+            .filter(|rep| rep.probe == quill::composer::ReplacementProbe::Probing)
+            .map(|rep| rep.path.clone())
+        else {
+            return;
+        };
+        let probe = cx.background_executor().spawn({
+            let path = path.clone();
+            async move { quill::video::probe_local_video(&path) }
+        });
+        self.spawn_scoped(cx, async move |this, cx| {
+            let result = probe.await;
+            let _ = this.update(cx, |this, cx| this.finish_edit_replacement_probe(&path, result, cx));
+        })
+        .detach();
+    }
+
+    pub(in crate::ui) fn finish_edit_replacement_probe(
+        &mut self,
+        path: &std::path::Path,
+        result: Result<quill::video::VideoProbe, String>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(edit) = self.chat_ui.pending_edit_mut() else {
+            return;
+        };
+        let Some(replacement) = edit
+            .media_edit
+            .replacement
+            .as_mut()
+            .filter(|rep| rep.path == path && rep.probe == quill::composer::ReplacementProbe::Probing)
+        else {
+            return;
+        };
+        match result {
+            Ok(probe) => replacement.probe = quill::composer::ReplacementProbe::Ready(probe),
+            Err(reason) => {
+                edit.media_edit.replacement = None;
+                self.composer_ui.edit_replace_as_file = false;
+                self.set_note(StatusNote::error(reason));
+            }
         }
         cx.notify();
     }
@@ -250,6 +307,18 @@ impl QuillApp {
             .is_some_and(|session| session.edit_target_gone(&edit))
         {
             self.clear_edit(window, cx);
+            return;
+        }
+        // The replacement video is still being probed: Save goes when the
+        // probe answers (or the replacement is dropped).
+        if edit
+            .media_edit
+            .replacement
+            .as_ref()
+            .is_some_and(|rep| rep.probe == quill::composer::ReplacementProbe::Probing)
+        {
+            self.set_note(StatusNote::silent(tr(keys::Q_CHAT_PREPARING_THE_VIDEO)));
+            cx.notify();
             return;
         }
         // A media message still being sent keeps the new caption until

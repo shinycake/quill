@@ -77,6 +77,29 @@ pub enum EditMediaKind {
     Audio,
 }
 
+/// What `ffprobe` said about a replacement video. The probe runs in the
+/// background when the file is staged (`probe_edit_replacement`), and Save
+/// waits for it: `Probing` leaves when the answer arrives (`Ready`) or the
+/// probe fails (the replacement is dropped with the reason), and the edit
+/// ending drops it with the replacement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplacementProbe {
+    NotNeeded,
+    Probing,
+    Ready(crate::video::VideoProbe),
+}
+
+impl ReplacementProbe {
+    /// The stage of a file of `kind` that was just staged or replaced.
+    pub fn for_kind(kind: EditMediaKind) -> Self {
+        if kind == EditMediaKind::Video {
+            Self::Probing
+        } else {
+            Self::NotNeeded
+        }
+    }
+}
+
 /// `editMessageMedia` payload source: a picked or pasted file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditMediaReplacement {
@@ -91,6 +114,8 @@ pub struct EditMediaReplacement {
     /// What the video editor did to this replacement video: the file it
     /// started from, the edits and the cover frame (`start_timestamp`).
     pub video_extras: AttachmentExtras,
+    /// The video's probe, for a replacement of kind `Video`.
+    pub probe: ReplacementProbe,
 }
 
 impl EditMediaReplacement {
@@ -235,6 +260,7 @@ impl ComposerEdit {
             path,
             file_name,
             kind,
+            probe: ReplacementProbe::for_kind(kind),
             spoiler: false,
             cover: None,
             video_extras: AttachmentExtras::default(),

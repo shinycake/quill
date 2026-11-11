@@ -449,6 +449,15 @@ impl DownloadIntents {
         }
     }
 
+    /// The last request for the file ended without completing and nothing
+    /// is transferring it again, whatever asked (an automatic download's
+    /// end reads as `Idle` in `status`, which only fails user downloads).
+    pub fn ended_without_file(&self, file_id: i32, files: &FileMap) -> bool {
+        let local = files.get(&file_id).map(|f| &f.local);
+        let running = local.is_some_and(|l| l.is_downloading_active || l.is_downloading_completed);
+        !running && self.get(file_id).is_some_and(|i| i.phase == Phase::Ended)
+    }
+
     /// A transfer is under way (paused ones count: the row keeps its
     /// progress).
     pub fn is_downloading(&self, file_id: i32, files: &FileMap) -> bool {

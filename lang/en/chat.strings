@@ -594,3 +594,4 @@
 "lng_context_hide_psa" = "Hide this announcement";
 "qll_chat_could_not_hide_the_announcement" = "Could not hide the announcement";
 "qll_chat_sticker_suggestions_close" = "Close sticker suggestions";
+"qll_chat_preparing_the_video" = "Preparing the video…";

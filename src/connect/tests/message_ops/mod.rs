@@ -364,6 +364,7 @@ fn driver_edit_snapshot_with_replacement_sends_edit_message_media() {
             media: Some(EditableMedia::Photo),
             in_album: false,
             replacement: Some(EditMediaReplacement {
+                probe: crate::composer::ReplacementProbe::NotNeeded,
                 path: picked.clone(),
                 file_name: "replacement.png".into(),
                 kind: EditMediaKind::Photo,

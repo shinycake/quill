@@ -604,9 +604,11 @@ impl QuillApp {
                     replacement.file_name = mp4_name(&replacement.file_name);
                 }
                 replacement.path = output;
+                replacement.probe = quill::composer::ReplacementProbe::for_kind(replacement.kind);
                 extras.gif = false;
                 extras.sound_removed = false;
                 replacement.video_extras = extras;
+                self.probe_edit_replacement(cx);
                 tr(keys::Q_AV_VIDEO_EDITS_SAVED)
             }
             Some(EditorTarget::Set { .. } | EditorTarget::Avatar) | None => return,
