@@ -105,7 +105,15 @@ impl QuillApp {
                 && self.share.forward.draft().is_some_and(|draft| {
                     draft.from_chat_id == chat_id && draft.contains(message_id)
                 });
-        self.viewer.extra.share_at = picking.then_some((chat_id, message_id, secs));
+        if picking {
+            self.share
+                .forward
+                .set_share_at(super::super::forward_stage::ShareAt {
+                    chat_id,
+                    message_id,
+                    secs,
+                });
+        }
     }
 
     /// The picker's "Copy link" for the message the viewer was shared at a
@@ -117,12 +125,7 @@ impl QuillApp {
         message_id: MessageId,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some((_, _, secs)) = self
-            .viewer
-            .extra
-            .share_at
-            .take_if(|(chat, message, _)| *chat == chat_id && *message == message_id)
-        else {
+        let Some(secs) = self.share.forward.take_share_at(chat_id, message_id) else {
             return false;
         };
         self.screen.connection.set_note_for(

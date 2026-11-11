@@ -93,8 +93,6 @@ pub(super) struct ViewerExtra {
     /// newer save restarts the hide timer).
     pub saved_toast: Option<quill::viewer_extras::SavedToast>,
     pub saved_toast_gen: u64,
-    /// "Share at": the message and second the forward picker was opened at.
-    pub share_at: Option<(ChatId, MessageId, i32)>,
     /// Turns of videos rotated in this run, by `(chat, message)`.
     pub rotations: HashMap<(i64, i64), u8>,
     /// The width the last frame laid the thumbnail strip out in, which

@@ -24,9 +24,29 @@ fn closing_the_forward_picker_drops_share_at(cx: &mut gpui_kit::TestAppContext) 
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update_in(vcx, |app, window, cx| {
-        app.viewer.extra.share_at = Some((ChatId(11), MessageId(101), 83));
+        let draft = quill::composer::ForwardDraft::from_message(
+            ChatId(11),
+            Default::default(),
+            MessageId(101),
+            false,
+        )
+        .expect("a draft");
+        app.share.forward = crate::ui::forward_stage::ForwardStage::Selecting(draft);
+        app.open_forward_picker(window, cx);
+        app.share
+            .forward
+            .set_share_at(crate::ui::forward_stage::ShareAt {
+                chat_id: ChatId(11),
+                message_id: MessageId(101),
+                secs: 83,
+            });
         app.close_forward_picker(window, cx);
-        assert_eq!(app.viewer.extra.share_at, None);
+        // Opening the box over the same message again holds no position.
+        app.open_forward_picker(window, cx);
+        assert_eq!(
+            app.share.forward.take_share_at(ChatId(11), MessageId(101)),
+            None
+        );
     });
 }
 

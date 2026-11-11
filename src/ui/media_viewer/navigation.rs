@@ -213,7 +213,6 @@ impl QuillApp {
         self.viewer.reorient.reset();
         self.viewer.hdr.reset();
         self.viewer.clip.clear_error();
-        self.viewer.extra.share_at = None;
         if let Some(item) = self.viewer.state.current()
             && let Some(turns) = self
                 .viewer
