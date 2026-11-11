@@ -139,10 +139,9 @@ impl Session {
             if let Some(pending) = pending
                 && let (Some(chat_id), Some(message_id)) =
                     (pending.chat_id, pending.around_message_id)
+                && let Some(scores) = self.bots.game_scores.get_mut(&(chat_id.0, message_id.0))
             {
-                if let Some(scores) = self.bots.game_scores.get_mut(&(chat_id.0, message_id.0)) {
-                    scores.fail("couldn't load the scores");
-                }
+                scores.fail("couldn't load the scores");
             }
             self.note_callback_answer(
                 pending.and_then(|p| p.chat_id),
