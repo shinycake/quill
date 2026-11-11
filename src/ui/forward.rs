@@ -176,15 +176,23 @@ impl QuillApp {
         cx.notify();
     }
 
-    pub(super) fn clear_forward(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Leave selection mode (or drop the draft) with nothing said: the
+    /// selection ended by Cancel, Escape, or by being used (Report, Save
+    /// as HTML), as tdesktop's `clearSelected`.
+    pub(super) fn end_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let _ = cancel_forward_draft(self.share.forward.take_draft());
         self.chat_ui.focus.clear_row();
         self.share.selection.clear();
         self.share
             .search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.set_note(StatusNote::silent(tr(keys::Q_MISC_FORWARD_CANCELLED)));
         cx.notify();
+    }
+
+    /// A forward that was waiting for a chat is cancelled: said so.
+    pub(super) fn clear_forward(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.end_selection(window, cx);
+        self.set_note(StatusNote::silent(tr(keys::Q_MISC_FORWARD_CANCELLED)));
     }
 
     /// Chat or conversation switch: a forward draft stays only for the

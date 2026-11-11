@@ -342,25 +342,30 @@ impl QuillApp {
             self.open_premium_at(feature, cx);
             return false;
         }
-        // The reaction flies up from the message when it is added.
+        // The reaction flies up from the message when it is added, once the
+        // change went out.
         let adding = self
             .session()
             .and_then(|s| s.histories.get(&chat_id.0))
             .and_then(|h| h.messages.get(&message_id.0))
             .is_some_and(|m| !m.chosen_reaction(&choice));
-        if adding && let ReactionChoice::Emoji(emoji) = &choice {
-            self.history.reaction_fly = Some(super::history_fx::ReactionFly {
+        let fly = match &choice {
+            ReactionChoice::Emoji(emoji) if adding => Some(super::history_fx::ReactionFly {
                 chat_id: chat_id.0,
                 message_id: message_id.0,
                 glyph: emoji_presentation(emoji).into(),
                 started: std::time::Instant::now(),
-            });
-        }
+            }),
+            _ => None,
+        };
         if let Some(live) = self.live.as_mut() {
             let sent = live
                 .driver
                 .toggle_reaction_choice(chat_id, message_id, &choice)
                 .is_ok();
+            if sent && fly.is_some() {
+                self.history.reaction_fly = fly;
+            }
             self.screen.connection.set_note_for(
                 &self.screen.windows,
                 if sent {
@@ -371,6 +376,9 @@ impl QuillApp {
             );
             cx.notify();
             return sent;
+        }
+        if fly.is_some() {
+            self.history.reaction_fly = fly;
         }
         match choice {
             ReactionChoice::Emoji(emoji) => {

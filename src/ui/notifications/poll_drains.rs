@@ -85,6 +85,10 @@ impl QuillApp {
             self.set_note(StatusNote::error(err));
             progressed = true;
         }
+        // The same for a color change after the box closed.
+        if self.dialogs.peer_color_dialog.is_none() && self.take_peer_color_error() {
+            progressed = true;
+        }
         // Message widgets: their bots' answers and public data polls.
         let answers = self
             .live

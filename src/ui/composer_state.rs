@@ -90,8 +90,6 @@ pub(crate) struct ComposerUi {
     /// What the compose field's placeholder was last built from
     /// (`sync_composer_placeholder`): the facts and the language.
     pub(super) placeholder_shown: Option<(quill::composer::PlaceholderFacts, usize)>,
-    /// Cross-fade timeline of the round Send / Record / Save button.
-    pub(super) send_morph: std::cell::Cell<Option<quill::send_button::SendMorph>>,
     /// Phase S2: the inline-bot warning has been confirmed once this
     /// session (TGX `TUTORIAL_INLINE_SEARCH_SECRECY`, which persists;
     /// Quill keeps it per session — documented divergence).
@@ -134,7 +132,6 @@ impl ComposerUi {
             remote_draft_seen: 0,
             shown_draft: None,
             placeholder_shown: None,
-            send_morph: Default::default(),
             inline_bot_alert_shown: false,
             drop_paths: Vec::new(),
             drop_state: None,

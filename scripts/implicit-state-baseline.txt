@@ -145,7 +145,6 @@ PasswordBox::sending+error
 PaymentsState::form_loading
 PaymentsState::form_loading+receipt_error
 PaymentsState::verification_started
-PeerColorDialog::sent
 PendingBotMessage::stop_failed
 PhotoSources::busy
 PlayHead::started

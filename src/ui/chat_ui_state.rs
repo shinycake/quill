@@ -171,6 +171,18 @@ pub(crate) struct ChatUi {
     /// "Save as HTML" with "Ask where to save" on: the folder picker of
     /// this chat's selection, while it is open.
     pub(super) html_save: super::selection_html::HtmlSave,
+    /// What the selected topic tab was last scrolled into view for. Per
+    /// chat and topic: another chat's strip with the same index, count and
+    /// width starts at the old scroll offset until it is revealed.
+    pub(super) tabs_revealed: std::cell::Cell<Option<super::folder_tabs_fit::RevealKey>>,
+    /// The 1 s tick task of this chat's self-destruct countdown badges
+    /// (phase B3). Held by the chat's value, so the chat changing drops it
+    /// and a return to the chat starts one task, not two.
+    pub(super) self_destruct_tick: Option<(ChatId, gpui_kit::Task<()>)>,
+    /// Cross-fade timeline of the round Send / Record / Save button. A
+    /// chat starts with none, so its button begins settled instead of
+    /// fading from the chat before.
+    pub(super) send_morph: std::cell::Cell<Option<quill::send_button::SendMorph>>,
     /// Phase S2: pending inline-bot warning for a `SwitchInline` press (or
     /// a typed trigger) in this secret chat (TGX `SecretChatContextBotAlert`);
     /// the stashed query is inserted on Confirm. It lives with the chat
@@ -494,6 +506,9 @@ impl QuillApp {
     /// starts with sound when the chat shows again nor holds the slot.
     fn replace_chat_ui(&mut self, next: ChatUi) {
         let old = std::mem::replace(&mut *self.screen.chat_ui, next);
+        // The send menu (and its effect card) was opened over the old
+        // value's composer; its popup and subscriptions go with it.
+        self.composer_ui.send_menu.open = None;
         if let Some(request) = old.edit_sending()
             && let Some(live) = self.live.as_mut()
         {

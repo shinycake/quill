@@ -429,6 +429,9 @@ impl QuillApp {
         // the deferred replacement runs (`screen_leaves_later`).
         let note = self.connection.note().text().to_string();
         self.screen = OnScreen::new(epoch, &self.chat_prefs, status, note, window, cx);
+        // The side column slides out drawing the panels it last had, which
+        // name the old account's users and chats.
+        self.frame.panels = super::panel_reveal::PanelReveal::new(std::time::Instant::now());
         cx.notify();
     }
 
@@ -564,7 +567,10 @@ impl QuillApp {
         } else {
             let _ = main.update(cx, |_, window, cx| window.close_all_dialogs(cx));
         }
-        self.main_window.dialogs_closed = true;
+        self.main_window
+            .dialogs_closed
+            .borrow_mut()
+            .insert(main.window_id());
     }
 }
 
