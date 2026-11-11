@@ -575,6 +575,12 @@ impl ActiveGroupCall {
         self.transport_error.is_some() || self.rejoin == GroupCallRejoin::GaveUp
     }
 
+    /// The window offers Rejoin: the connection was lost, or the join
+    /// itself failed (a failed camera on a connected call is not one).
+    pub fn offers_rejoin(&self) -> bool {
+        self.reconnecting() || (self.join_failed() && !self.transport_ready)
+    }
+
     /// Blank tracked call for a newly seen call id. Participant state
     /// repopulates from updates.
     pub fn fresh(id: i32) -> Self {

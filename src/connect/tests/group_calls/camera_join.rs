@@ -52,3 +52,15 @@ fn a_busy_camera_at_join_still_connects_with_audio_and_reports_the_camera() {
     assert_eq!(call.transport_error, None);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_failed_join_offers_rejoin_but_a_failed_camera_does_not() {
+    let mut call = crate::state::ActiveGroupCall::fresh(555);
+    assert!(!call.offers_rejoin());
+    // The join failed: nothing connected, an error stands.
+    call.transport_error = Some("join failed".into());
+    assert!(call.offers_rejoin());
+    // Connected with audio and a camera error: no Rejoin.
+    call.transport_ready = true;
+    assert!(!call.offers_rejoin());
+}
