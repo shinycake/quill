@@ -3,7 +3,7 @@
 //! link box and a link's QR code. Rules and requests:
 //! `quill::business_chat_links`.
 
-use super::{LinkEditDraft, View};
+use super::{LinkEditDraft, LinkSave, View};
 use crate::ui::app::QuillApp;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -13,7 +13,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::business_chat_links::{ChatLink, plain_links};
 use quill::lang::{keys, tr};
-use quill::state::ChatLinkSave;
+use quill::state::ChatLinkAnswer;
 
 const ABOUT: &str = "Give your customers short links that start a chat with you – and suggest \
 the first message from them to you.";
@@ -43,20 +43,19 @@ impl QuillApp {
         })
     }
 
-    /// Whether a create or edit is waiting for TDLib's answer.
+    /// Whether the link box's create or edit is waiting for TDLib's answer.
     pub(super) fn business_link_saving(&self) -> bool {
-        self.session().is_some_and(|s| {
-            matches!(
-                s.settings.business_extra.chat_link_save,
-                ChatLinkSave::Saving(_)
-            )
-        })
+        self.dialogs
+            .business_dialog
+            .as_ref()
+            .and_then(|d| d.screen.link_edit())
+            .is_some_and(|e| matches!(e.save, LinkSave::Saving(_)))
     }
 
     /// The link box's follow-up to its save, in the frame upkeep: once TDLib
-    /// accepts the link the box goes back to the list with "Chat link
-    /// saved."; a refusal leaves the box and its draft open under the
-    /// error line.
+    /// accepts the link (the answer to the request the box sent) it goes
+    /// back to the list with "Chat link saved."; a refusal leaves the box
+    /// and its draft open under the error line, ready to send again.
     pub(super) fn business_link_save_upkeep(
         &mut self,
         window: &mut Window,
@@ -65,24 +64,31 @@ impl QuillApp {
         if self.business_view() != Some(View::LinkEdit) {
             return;
         }
-        let saved = self
-            .session()
-            .is_some_and(|s| s.settings.business_extra.chat_link_save == ChatLinkSave::Saved);
-        if !saved {
+        let Some(LinkSave::Saving(asked)) = self
+            .dialogs
+            .business_dialog
+            .as_ref()
+            .and_then(|d| d.screen.link_edit())
+            .map(|e| e.save)
+        else {
             return;
+        };
+        let answer = self
+            .session()
+            .map(|s| s.settings.business_extra.chat_link_answer);
+        match answer {
+            Some(ChatLinkAnswer::Refused(id)) if id == asked => {
+                if let Some(edit) = self.business_mut().and_then(|d| d.screen.link_edit_mut()) {
+                    edit.save = LinkSave::Editing;
+                }
+                cx.notify();
+                return;
+            }
+            Some(ChatLinkAnswer::Saved(id)) if id == asked => {}
+            _ => return,
         }
-        self.reset_link_save();
         self.business_go(View::ChatLinks, window, cx);
         self.business_note(tr(keys::CHAT_LINK_SAVED), cx);
-    }
-
-    /// The link box opened, or its answer was taken: a save left over from
-    /// an earlier box no longer drives it (its answer still updates the
-    /// list).
-    pub(super) fn reset_link_save(&mut self) {
-        if let Some(session) = self.session_mut() {
-            session.settings.business_extra.chat_link_save = ChatLinkSave::Idle;
-        }
     }
 
     fn business_links_max(&self) -> usize {
@@ -128,11 +134,11 @@ impl QuillApp {
             text.update(cx, |input, cx| input.set_value(markup, window, cx));
             name.update(cx, |input, cx| input.set_value(title, window, cx));
         }
-        self.reset_link_save();
         self.business_go(View::LinkEdit, window, cx);
         if let Some(d) = self.business_mut() {
             d.screen.open_link_edit(LinkEditDraft {
                 link: link.map(|l| l.link),
+                save: LinkSave::Editing,
                 text,
                 name,
             });
@@ -168,11 +174,14 @@ impl QuillApp {
             (Some(live), Some(link)) => live.driver.edit_chat_link(link, &markup, &title),
             (Some(live), None) => live.driver.create_chat_link(&markup, &title),
         };
-        if sent.is_err() {
+        let Ok(request) = sent else {
             self.business_error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_LINK), cx);
             return;
-        }
+        };
         if let Some(d) = self.business_mut() {
+            if let Some(edit) = d.screen.link_edit_mut() {
+                edit.save = LinkSave::Saving(request);
+            }
             d.clear_error();
         }
         cx.notify();

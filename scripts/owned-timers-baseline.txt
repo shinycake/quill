@@ -5,7 +5,6 @@ detached:QuillApp::agent_driver_start 1
 detached:QuillApp::arm_viewer_swipe_timeout 1
 detached:QuillApp::begin_chat_preview_press 1
 detached:QuillApp::bot_username_changed 1
-detached:QuillApp::business_bot_watch 1
 detached:QuillApp::close_earn_layer 1
 detached:QuillApp::close_profile_modal 1
 detached:QuillApp::copy_folder_link 1
@@ -54,7 +53,6 @@ poll:QuillApp::after_closing 1
 poll:QuillApp::arm_stream_hide_timer 1
 poll:QuillApp::arm_viewer_swipe_timeout 1
 poll:QuillApp::autoscroll_press 1
-poll:QuillApp::business_bot_watch 1
 poll:QuillApp::download_emoji_set 1
 poll:QuillApp::download_update 1
 poll:QuillApp::ensure_call_tick 1

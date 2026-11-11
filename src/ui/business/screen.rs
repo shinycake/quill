@@ -411,6 +411,13 @@ impl Screen {
         }
     }
 
+    pub(crate) fn link_edit_mut(&mut self) -> Option<&mut LinkEditDraft> {
+        match self {
+            Self::ChatLinks { edit, .. } => edit.as_mut(),
+            _ => None,
+        }
+    }
+
     pub(crate) fn link_edit(&self) -> Option<&LinkEditDraft> {
         match self {
             Self::ChatLinks { edit, .. } => edit.as_ref(),
