@@ -118,7 +118,8 @@ pub(crate) fn save_about() -> &'static str {
 
 #[derive(Clone)]
 pub(crate) struct PlaylistDrag {
-    pub index: usize,
+    /// The dragged track, by file: the list may change under the drag.
+    pub file_id: FileId,
     pub title: String,
 }
 
@@ -164,13 +165,24 @@ impl QuillApp {
             .cloned()
     }
 
-    /// Drop a dragged track on another row of your own playlist.
+    /// Drop the dragged track `dragged` on the row of track `onto` of your
+    /// own playlist. Both rows are found by file now, so a list that changed
+    /// while the track was held (another device) moves the track dragged.
     pub(super) fn reorder_playlist_track(
         &mut self,
-        from: usize,
-        to: usize,
+        dragged: FileId,
+        onto: FileId,
         cx: &mut Context<Self>,
     ) {
+        let positions = self.session().and_then(|session| {
+            Some((
+                session.my_playlist_position(dragged)?,
+                session.my_playlist_position(onto)?,
+            ))
+        });
+        let Some((from, to)) = positions else {
+            return;
+        };
         match self.live.as_mut() {
             Some(live) => {
                 // A refused send puts the list back; a failure TDLib answers

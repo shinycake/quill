@@ -19,17 +19,25 @@ use quill::local_path::sandboxed_display_path;
 use quill::pull_next::{
     self as metrics, HintState, IndicatorLayout, IndicatorState, Mode, Phase, PullMachine, Step,
 };
-use std::cell::Cell;
 use std::time::{Duration, Instant};
 
 /// tdesktop `SlideAnimation` with `FromBottom`: `st::slideDuration * 2`,
 /// `anim::easeOutQuint`.
 const SLIDE_MS: f32 = 480.;
 
-thread_local! {
-    /// The chat the main window slides in from the bottom, and since when.
-    static SLIDE: Cell<Option<(ChatId, Option<i32>, Instant)>> = const { Cell::new(None) };
+/// The chat the window slides in from the bottom after a pull opened it,
+/// and since when. It lives with the history view that pulled, so it dies
+/// with its screen and window.
+#[derive(Clone, Copy)]
+struct Slide {
+    chat: ChatId,
+    topic: Option<i32>,
+    start: Instant,
 }
+
+/// The window the gesture happened in and its chat-window scope: the jump
+/// runs there.
+type PullWindow = (AnyWindowHandle, Option<ChatId>);
 
 /// What the pull in the shown history leads to (`setHistory` /
 /// `setTopic`).
@@ -49,9 +57,8 @@ pub(crate) struct PullUi {
     /// Where the pull leads and, once released, the jump to it. Leaving
     /// the pulled history replaces it, which drops the jump's task.
     route: Route,
-    /// The window the gesture happened in and its chat-window scope: the
-    /// jump runs there.
-    window: Option<(AnyWindowHandle, Option<ChatId>)>,
+    /// The chat that slid in after a jump, until the slide is over.
+    slide: Option<Slide>,
 }
 
 /// The chat or topic a pull leads to.
@@ -67,8 +74,9 @@ enum Route {
     /// Nothing found (no pull yet, or nothing unread to go to).
     #[default]
     Unfound,
-    /// The unread chat or topic the pull leads to.
-    Found(Next),
+    /// The unread chat or topic the pull leads to, and the window of the
+    /// gesture that found it (where its release opens it).
+    Found { next: Next, window: PullWindow },
     /// The jump to it runs; dropping this stops it.
     Jumping { next: Next, _task: Task<()> },
 }
@@ -77,7 +85,7 @@ impl Route {
     fn next(&self) -> Option<Next> {
         match self {
             Self::Unfound => None,
-            Self::Found(next) | Self::Jumping { next, .. } => Some(*next),
+            Self::Found { next, .. } | Self::Jumping { next, .. } => Some(*next),
         }
     }
 
@@ -85,6 +93,14 @@ impl Route {
         match self.next()? {
             Next::Chat(chat) => Some(chat),
             Next::Topic(_) => None,
+        }
+    }
+
+    /// The window the found pull was made in.
+    fn window(&self) -> Option<PullWindow> {
+        match self {
+            Self::Found { window, .. } => Some(*window),
+            Self::Unfound | Self::Jumping { .. } => None,
         }
     }
 
@@ -97,6 +113,20 @@ impl Route {
 }
 
 impl PullUi {
+    /// The release opens `next`: the machine holds the indicator full and
+    /// the route owns the task that opens it, together.
+    fn begin_jump(&mut self, next: Next, task: Task<()>, now: u64) {
+        self.machine.begin_jump(now);
+        self.route = Route::Jumping { next, _task: task };
+    }
+
+    /// The pulled history changed or the jump is over: the machine and the
+    /// route start over together (dropping a jump's task).
+    fn restart(&mut self, now: u64) {
+        self.machine.reset_all(now);
+        self.route = Route::Unfound;
+    }
+
     fn now(&mut self) -> u64 {
         self.epoch
             .get_or_insert_with(Instant::now)
@@ -223,8 +253,7 @@ impl QuillApp {
             let now = self.history.pull.now();
             let pull = &mut self.history.pull;
             pull.target = target;
-            pull.machine.reset_all(now);
-            pull.route = Route::Unfound;
+            pull.restart(now);
         }
     }
 
@@ -263,14 +292,14 @@ impl QuillApp {
         let delta_down = if dx.abs() >= dy.abs() { 0. } else { -dy };
         let at_bottom = self.pull_at_bottom(target, cx);
         let active = self.pull_can_start(target, cx);
-        self.history.pull.window = Some((window.window_handle(), self.windows.scope));
+        let gesture_window = (window.window_handle(), self.windows.scope);
         let now = self.history.pull.now();
         let step = self
             .history
             .pull
             .machine
             .wheel(phase, delta_down, at_bottom, active, now);
-        self.pull_step(step, target, cx);
+        self.pull_step(step, target, Some(gesture_window), cx);
         if step.redraw || self.history.pull.machine.animating(now) {
             self.notify_conversation(cx);
             cx.notify();
@@ -278,11 +307,18 @@ impl QuillApp {
         step.consumed
     }
 
-    /// Act on what the machine asks for.
-    fn pull_step(&mut self, step: Step, target: Target, cx: &mut Context<Self>) {
+    /// Act on what the machine asks for. `window` is the gesture's window
+    /// when a wheel event drove the step.
+    fn pull_step(
+        &mut self,
+        step: Step,
+        target: Target,
+        window: Option<PullWindow>,
+        cx: &mut Context<Self>,
+    ) {
         let now = self.history.pull.now();
         if step.started {
-            self.pull_find_next(target, now);
+            self.pull_find_next(target, window, now);
         }
         if step.haptic {
             haptic();
@@ -293,7 +329,7 @@ impl QuillApp {
     }
 
     /// A pull began: find where it leads and preload it.
-    fn pull_find_next(&mut self, target: Target, now: u64) {
+    fn pull_find_next(&mut self, target: Target, window: Option<PullWindow>, now: u64) {
         let Some(session) = self.session() else {
             return;
         };
@@ -304,8 +340,13 @@ impl QuillApp {
                     target.chat,
                     self.folders.tab,
                 );
-                self.history.pull.route =
-                    next.map_or(Route::Unfound, |chat| Route::Found(Next::Chat(chat)));
+                self.history.pull.route = match (next, window) {
+                    (Some(chat), Some(window)) => Route::Found {
+                        next: Next::Chat(chat),
+                        window,
+                    },
+                    _ => Route::Unfound,
+                };
                 if let Some(next) = next
                     && let Some(live) = self.live.as_mut()
                 {
@@ -317,8 +358,13 @@ impl QuillApp {
                 let next = target.topic.and_then(|current| {
                     quill::pull_next::find_next_unread_topic(session, target.chat, current)
                 });
-                self.history.pull.route =
-                    next.map_or(Route::Unfound, |topic| Route::Found(Next::Topic(topic)));
+                self.history.pull.route = match (next, window) {
+                    (Some(topic), Some(window)) => Route::Found {
+                        next: Next::Topic(topic),
+                        window,
+                    },
+                    _ => Route::Unfound,
+                };
                 self.history.pull.machine.set_has_next(next.is_some(), now);
             }
         }
@@ -337,12 +383,13 @@ impl QuillApp {
                     .session()
                     .and_then(|s| s.chats.get(&next.0))
                     .is_some_and(|chat| chat.unread_count > 0);
-                if !unread || !active || self.history.pull.window.is_none() {
+                let Some(window) = self.history.pull.route.window() else {
+                    return;
+                };
+                if !unread || !active {
                     return;
                 }
-                let now = self.history.pull.now();
-                self.history.pull.machine.begin_jump(now);
-                self.pull_jump_when_ready(next, cx);
+                self.pull_jump_when_ready(next, window, cx);
             }
             Mode::Topic => {
                 let Some(next) = self.history.pull.route.next_topic() else {
@@ -353,35 +400,41 @@ impl QuillApp {
                         .iter()
                         .any(|topic| topic.forum_topic_id == next && topic.unread_count > 0)
                 });
-                let Some((handle, scope)) = self.history.pull.window else {
+                let Some((handle, scope)) = self.history.pull.route.window() else {
                     return;
                 };
                 if !unread || !active || target.topic == Some(next) {
                     return;
                 }
-                let now = self.history.pull.now();
-                self.history.pull.machine.begin_jump(now);
                 let chat = target.chat;
                 // `crl::on_main`: on the next turn, checked again.
                 let task = self.spawn_screen(cx, async move |this, cx| {
-                    let _ = cx.update_window(handle, |_, _, cx| {
+                    let on_turn = cx.update_window(handle, |_, _, cx| {
                         let _ = this.update(cx, |this, cx| {
                             this.in_window_scope(scope, cx, |this, cx| {
                                 if this.history.pull.target.map(|t| t.chat) == Some(chat)
                                     && this.history.pull.machine.jumping()
                                 {
-                                    SLIDE.set(Some((chat, Some(next), Instant::now())));
+                                    this.history.pull.slide = Some(Slide {
+                                        chat,
+                                        topic: Some(next),
+                                        start: Instant::now(),
+                                    });
                                     this.select_topic_ui(next, cx);
                                 }
                                 this.pull_jump_ended(cx);
                             })
                         });
                     });
+                    // The window closed: the jump still ends.
+                    if on_turn.is_err() {
+                        end_jump_without_window(&this, scope, cx);
+                    }
                 });
-                self.history.pull.route = Route::Jumping {
-                    next: Next::Topic(next),
-                    _task: task,
-                };
+                let now = self.history.pull.now();
+                self.history
+                    .pull
+                    .begin_jump(Next::Topic(next), task, now);
             }
         }
     }
@@ -389,10 +442,12 @@ impl QuillApp {
     /// `jumpWhenReady`: wait for the next channel's history (up to 1.5 s)
     /// and its pinned bar (up to 0.6 s), checking every 100 ms, then open
     /// it.
-    fn pull_jump_when_ready(&mut self, next: ChatId, cx: &mut Context<Self>) {
-        let Some((handle, scope)) = self.history.pull.window else {
-            return;
-        };
+    fn pull_jump_when_ready(
+        &mut self,
+        next: ChatId,
+        (handle, scope): PullWindow,
+        cx: &mut Context<Self>,
+    ) {
         let started = Instant::now();
         // `next` is a chat of the account the pull started on.
         let task = self.spawn_screen(cx, async move |this, cx| {
@@ -412,11 +467,16 @@ impl QuillApp {
                         None => (true, true),
                     })
                 }) else {
-                    let _ = cx.update_window(handle, |_, _, cx| {
-                        let _ = this.update(cx, |this, cx| {
-                            this.in_window_scope(scope, cx, |this, cx| this.pull_jump_ended(cx))
-                        });
-                    });
+                    if cx
+                        .update_window(handle, |_, _, cx| {
+                            let _ = this.update(cx, |this, cx| {
+                                this.in_window_scope(scope, cx, |this, cx| this.pull_jump_ended(cx))
+                            });
+                        })
+                        .is_err()
+                    {
+                        end_jump_without_window(&this, scope, cx);
+                    }
                     return;
                 };
                 let pinned = pinned || waited >= metrics::JUMP_PINNED_MAX_WAIT_MS;
@@ -427,20 +487,24 @@ impl QuillApp {
                     .timer(Duration::from_millis(metrics::JUMP_POLL_MS))
                     .await;
             }
-            let _ = cx.update_window(handle, |_, window, cx| {
+            let opened = cx.update_window(handle, |_, window, cx| {
                 let _ = this.update(cx, |this, cx| {
                     this.in_window_scope(scope, cx, |this, cx| {
                         if this.history.pull.machine.jumping() && !this.refused_while_locked() {
-                            SLIDE.set(Some((next, None, Instant::now())));
+                            this.history.pull.slide = Some(Slide {
+                                chat: next,
+                                topic: None,
+                                start: Instant::now(),
+                            });
                             let open = super::chat_window::ChatOpen::new(next);
                             if !this.select_chat_request(open, window, cx) {
                                 // The next channel showed in a window of
                                 // its own: this history stays, and its
                                 // pull starts over instead of staying in
                                 // the jump.
-                                SLIDE.set(None);
+                                this.history.pull.slide = None;
                                 let now = this.history.pull.now();
-                                this.history.pull.machine.reset_all(now);
+                                this.history.pull.restart(now);
                                 cx.notify();
                             }
                         }
@@ -450,11 +514,15 @@ impl QuillApp {
                     })
                 });
             });
+            // The window closed meanwhile: the jump still ends.
+            if opened.is_err() {
+                end_jump_without_window(&this, scope, cx);
+            }
         });
-        self.history.pull.route = Route::Jumping {
-            next: Next::Chat(next),
-            _task: task,
-        };
+        let now = self.history.pull.now();
+        self.history
+            .pull
+            .begin_jump(Next::Chat(next), task, now);
     }
 
     /// A jump's task is over: once the history follows the chat or topic
@@ -465,10 +533,9 @@ impl QuillApp {
     fn pull_jump_ended(&mut self, cx: &mut Context<Self>) {
         self.pull_sync();
         if self.history.pull.machine.jumping() {
-            SLIDE.set(None);
+            self.history.pull.slide = None;
             let now = self.history.pull.now();
-            self.history.pull.machine.reset_all(now);
-            self.history.pull.route = Route::Unfound;
+            self.history.pull.restart(now);
             cx.notify();
         }
     }
@@ -489,7 +556,7 @@ impl QuillApp {
         if self.history.pull.machine.animating(now) {
             let active = self.pull_active(target, cx);
             let step = self.history.pull.machine.frame(active, now);
-            self.pull_step(step, target, cx);
+            self.pull_step(step, target, None, cx);
             // The note over the composer is drawn by the app, not this
             // slice: the whole window redraws while the pull moves.
             self.request_animation_tick_for(None, 60, cx);
@@ -789,15 +856,15 @@ impl QuillApp {
     /// pull opened it: how far down it still is, as a fraction of its
     /// height (`SlideAnimation`, `FromBottom`). The chat it left cannot be
     /// drawn sliding out: GPUI keeps no picture of it.
-    pub(super) fn pull_slide_offset(&self, cx: &mut Context<Self>) -> f32 {
-        let Some((chat, topic, start)) = SLIDE.get() else {
+    pub(super) fn pull_slide_offset(&mut self, cx: &mut Context<Self>) -> f32 {
+        let Some(Slide { chat, topic, start }) = self.history.pull.slide else {
             return 0.;
         };
         let shown = self.open_chat_id() == Some(chat)
             && self.session().and_then(|s| s.open_forum_topic()) == topic;
         let t = start.elapsed().as_secs_f32() * 1000. / SLIDE_MS;
         if !shown || t >= 1. {
-            SLIDE.set(None);
+            self.history.pull.slide = None;
             return 0.;
         }
         self.request_app_tick(60, cx);
@@ -821,6 +888,18 @@ impl QuillApp {
             cx,
         )
     }
+}
+
+/// A jump's window is gone (closed), so its task cannot reach it: the app
+/// still ends the jump, or the machine would hold the indicator full.
+fn end_jump_without_window(
+    app: &super::chat_window::ScopedApp,
+    scope: Option<ChatId>,
+    cx: &mut AsyncApp,
+) {
+    let _ = app.update(cx, |this, cx| {
+        this.in_window_scope(scope, cx, |this, cx| this.pull_jump_ended(cx))
+    });
 }
 
 fn size_px(w: f32, h: f32) -> gpui_kit::Size<Pixels> {

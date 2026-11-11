@@ -352,7 +352,6 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return Err(tr(keys::Q_PEOPLE_PROFILE_EDITS_NEED_A_SIGNED).to_string());
         };
-        live.driver.session.users_state.profile_edit_error = None;
         let sent = match input {
             ChatPhotoInput::Static { path } => live.driver.set_profile_photo(path),
             ChatPhotoInput::Animation {
@@ -365,8 +364,9 @@ impl QuillApp {
                 live.driver.set_profile_photo_sticker(*sticker, colors)
             }
         };
+        let sent = sent.map_err(|err| user_error_for(keys::Q_NOTES_FAILED_SET_PHOTO, &err));
+        self.begin_profile_op(sent.as_ref().ok().copied());
         sent.map(|_| ())
-            .map_err(|err| user_error_for(keys::Q_NOTES_FAILED_SET_PHOTO, &err))
     }
 
     /// The panel for the open source, or `None` for the normal body.

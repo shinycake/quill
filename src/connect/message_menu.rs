@@ -190,15 +190,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             )?;
             self.session.audience_reactions_loading(chat_id, message_id);
         }
-        // A right-clicked reaction chip asked for its own tab.
-        if let Some((wanted_chat, wanted_message, reaction)) =
-            self.session.messages.wanted_reactor_tab.take()
-            && wanted_chat == chat_id
-            && wanted_message == message_id
-            && can_react_list
-        {
-            self.fetch_reactors_tab(chat_id, message_id, Some(&reaction), false)?;
-        }
         Ok(())
     }
 

@@ -395,10 +395,6 @@ fn failed_color_requests_surface_the_error_and_icons_flag() {
         matches!(session.acks.take(extra), Some(crate::state::Answer::Failed(_))),
         "the box that sent it gets its own refusal"
     );
-    assert!(
-        session.users_state.profile_edit_error.is_none(),
-        "a color failure is not a profile-edit failure"
-    );
 
     let extra = session.request(RequestPurpose::GetBackgroundEmojiIcons, None);
     apply_json(

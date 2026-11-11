@@ -245,7 +245,6 @@ fn a_clicked_mp4_gif_loops_on_the_inline_player(cx: &mut TestAppContext) {
         assert!(!videos.is_sounding(MP4_GIF));
         // The MP4 never reaches the GIF decoder.
         assert!(app.playback.animation.playing().is_none());
-        assert!(app.playback.gif_decodes.is_empty());
         videos.player(MP4_GIF)
     });
     let player = player.expect("an inline player for the MP4 GIF");
@@ -287,7 +286,6 @@ fn a_video_labelled_image_gif_plays_on_the_inline_player(cx: &mut TestAppContext
         let videos = &app.players.inline_videos;
         assert!(app.playback.animation.playing().is_none());
         assert!(app.playback.animation.clip().is_none());
-        assert!(app.playback.gif_decodes.is_empty());
         assert_eq!(videos.demand(LABELLED_GIF), Some(Demand::Loop));
         assert!(videos.player(LABELLED_GIF).is_some());
     });
@@ -379,55 +377,47 @@ fn one_press_on_a_voice_note_plays_it_once_downloaded(cx: &mut TestAppContext) {
     });
 }
 
-/// Stopped and played again while its decode still runs: the GIF plays
-/// from the first picture the decode already sent, instead of waiting for
-/// the whole file.
+/// Stopped and played again while its decode still runs: the stage holds
+/// the new decode, the old one is cancelled, and a late answer from the old
+/// one changes nothing (sweep 12-A004).
 #[gpui_kit::test]
-fn a_gif_played_again_while_it_decodes_starts_at_once(cx: &mut TestAppContext) {
-    use crate::ui::gif_clip::GifClip;
-    use crate::ui::playback_state::{ChatMessage, GifDecode};
-    use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
+fn a_gif_played_again_while_it_decodes_keeps_only_the_new_decode(cx: &mut TestAppContext) {
+    use crate::ui::playback_state::{ChatMessage, GifDecode, GifPlayback, PlayingGif};
+    use std::sync::atomic::Ordering;
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     let message = MessageId(LABELLED_GIF.1);
     let chat = ChatId(LABELLED_GIF.0);
-    app.update_in(vcx, |app, _, cx| {
-        let clip = GifClip::decoding_with_one_picture();
-        app.playback.gif_decodes.insert(
-            ChatMessage::new(chat, message),
-            GifDecode {
-                cancel: Arc::new(AtomicBool::new(false)),
-                first: Some(clip.clone()),
-            },
-        );
-        let playing = crate::ui::playback_state::PlayingGif {
+    app.update_in(vcx, |app, _, _| {
+        let playing = PlayingGif {
             window: None,
             message: ChatMessage::new(chat, message),
         };
-        app.playback.animation = crate::ui::playback_state::GifPlayback::Waiting(playing);
-        app.playback
-            .animation
-            .begin_clip(clip.clone(), std::time::Instant::now());
+        let first = GifDecode::start();
+        let first_flag = first.flag();
+        app.playback.animation = GifPlayback::waiting(playing, first);
+        assert!(app.playback.animation.is_decode(&first_flag));
+        app.playback.animation.begin_clip(
+            crate::ui::gif_clip::GifClip::decoding_with_one_picture(),
+            std::time::Instant::now(),
+        );
+        assert!(app.playback.animation.clip().is_some());
+        assert!(
+            app.playback.animation.is_decode(&first_flag),
+            "the first picture keeps the decode that is still running"
+        );
         app.stop_animation_playback();
         assert!(app.playback.animation.clip().is_none());
-        app.playback.animation = crate::ui::playback_state::GifPlayback::Waiting(playing);
-        app.spawn_gif_decode(
-            chat,
-            message,
-            FileId(LABELLED_GIF_FILE),
-            "/nonexistent/played-again.gif".into(),
-            cx,
-        );
-        let playing = app.playback.animation.clip();
-        assert!(playing.is_some_and(|playing| Arc::ptr_eq(playing, &clip)));
-        let decode = app
-            .playback
-            .gif_decodes
-            .get(&ChatMessage::new(chat, message));
         assert!(
-            decode.is_some_and(|decode| !decode.cancel.load(std::sync::atomic::Ordering::Relaxed))
+            first_flag.load(Ordering::Relaxed),
+            "the stop cancels the decode that was running"
         );
+        let second = GifDecode::start();
+        let second_flag = second.flag();
+        app.playback.animation = GifPlayback::waiting(playing, second);
+        assert!(!app.playback.animation.is_decode(&first_flag));
+        assert!(app.playback.animation.is_decode(&second_flag));
+        assert!(!second_flag.load(Ordering::Relaxed));
     });
 }
 

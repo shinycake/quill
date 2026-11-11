@@ -45,6 +45,41 @@ pub(super) fn apply_ready_reactions(
 }
 
 impl QuillApp {
+    /// Poll-loop half of a chip's menu: once the message's audience has
+    /// begun, the tab the chip asked for loads its first page. The wanted
+    /// reaction lives in the open menu, so a menu closed before the
+    /// properties arrived never asks for it.
+    pub(in crate::ui) fn drain_wanted_reactor_tab(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(open) = self.screen.message_ui.menu.open() else {
+            return false;
+        };
+        if open.first_tab.is_none() {
+            return false;
+        }
+        let (chat, message) = (open.at.chat_id, open.at.message_id);
+        let begun = self
+            .session()
+            .and_then(|s| s.messages.message_audience.as_ref())
+            .is_some_and(|audience| {
+                audience.chat_id == chat
+                    && audience.message_id == message
+                    && !matches!(audience.reactions, quill::state::Audience::NotAsked)
+            });
+        if !begun {
+            return false;
+        }
+        let Some(reaction) = self.screen.message_ui.menu.take_first_tab() else {
+            return false;
+        };
+        if let Some(live) = self.live.as_mut() {
+            let _ = live
+                .driver
+                .fetch_reactors_tab(chat, message, Some(&reaction), false);
+        }
+        cx.notify();
+        true
+    }
+
     /// Open the message menu and ask which reactions the message may get.
     pub(super) fn open_message_menu(
         &mut self,
@@ -52,11 +87,6 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // A reactor tab asked for by an earlier menu whose properties never
-        // allowed it is not this menu's (a chip's menu sets it after this).
-        if let Some(live) = self.live.as_mut() {
-            live.driver.session.messages.wanted_reactor_tab = None;
-        }
         let link = self.take_right_clicked_link(menu.position);
         let item = self.take_right_clicked_item(menu.position);
         // Over a poll option the menu shows the option's page.
@@ -92,6 +122,7 @@ impl QuillApp {
                 item,
                 page,
                 reactions_expanded: false,
+                first_tab: None,
             });
         if let Some(live) = self.live.as_mut() {
             let _ = live

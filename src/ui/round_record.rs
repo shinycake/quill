@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::owned_image::OwnedImage;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{ActiveTheme, Sizable};
 use gpui_kit::*;
@@ -18,13 +19,13 @@ const CIRCLE: f32 = 300.;
 const EXTENT: f32 = 16.;
 const RING: f32 = 3.;
 
-/// The newest preview image, and the ones it replaced that still sit in
-/// the sprite atlas until the next paint drops them.
+/// The newest preview image of one recording. It belongs to the recording
+/// (`Capture`): the images it replaces, and this one when the recording
+/// ends, leave the sprite atlas as the [`OwnedImage`] lets go of them.
 #[derive(Default)]
 pub(super) struct RoundPreview {
     seq: u64,
-    image: Option<Arc<RenderImage>>,
-    stale: Vec<Arc<RenderImage>>,
+    image: Option<OwnedImage>,
 }
 
 fn starting_camera_circle(cx: &mut Context<QuillApp>) -> AnyElement {
@@ -59,13 +60,17 @@ fn starting_camera_circle(cx: &mut Context<QuillApp>) -> AnyElement {
 }
 
 impl RoundPreview {
-    /// The recording ended: the next one starts on its own camera's
-    /// frames, not on this one's last image (which leaves the atlas at
-    /// the next paint).
-    pub(super) fn end(&mut self) {
-        self.seq = 0;
-        if let Some(old) = self.image.take() {
-            self.stale.push(old);
+    /// Take the camera's newest frame when it is newer than the one shown.
+    fn take_latest(&mut self, frames: &quill::video::PreviewFrame) {
+        if let Ok(latest) = frames.lock()
+            && latest.0 != self.seq
+            && let Some(buffer) =
+                image::RgbaImage::from_raw(ROUND_PREVIEW_SIDE, ROUND_PREVIEW_SIDE, latest.1.clone())
+        {
+            self.seq = latest.0;
+            self.image = Some(OwnedImage::new(Arc::new(RenderImage::new(
+                SmallVec::from_buf([image::Frame::new(buffer)]),
+            ))));
         }
     }
 }
@@ -74,38 +79,20 @@ impl QuillApp {
     /// The recording circle, while a video message records, in the window
     /// it belongs to (`chat_window::recording`): another window shows its
     /// own chat, with no camera over it.
-    pub(super) fn round_record_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn round_record_overlay(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let here = Some(self.windows.scope);
-        let Some(capture) = self
-            .recording
-            .video()
-            .filter(|_| self.recording.origin() == here)
-        else {
+        if self.recording.origin() != here || self.recording.video().is_none() {
             return (self.recording.opening_video() && self.recording.opening_origin() == here)
                 .then(|| starting_camera_circle(cx));
-        };
+        }
         self.request_animation_tick(30, cx);
-        let progress = capture.progress();
-        let frames = capture.preview();
-        let (image, stale) = {
-            let mut preview = self.recording.round_preview.borrow_mut();
-            if let Ok(latest) = frames.lock()
-                && latest.0 != preview.seq
-                && let Some(buffer) = image::RgbaImage::from_raw(
-                    ROUND_PREVIEW_SIDE,
-                    ROUND_PREVIEW_SIDE,
-                    latest.1.clone(),
-                )
-            {
-                preview.seq = latest.0;
-                let fresh = Arc::new(RenderImage::new(SmallVec::from_buf([image::Frame::new(
-                    buffer,
-                )])));
-                if let Some(old) = preview.image.replace(fresh) {
-                    preview.stale.push(old);
-                }
-            }
-            (preview.image.clone(), std::mem::take(&mut preview.stale))
+        let (progress, image) = {
+            let (capture, preview) = self.recording.video_with_preview_mut()?;
+            preview.take_latest(&capture.preview());
+            (
+                capture.progress(),
+                preview.image.as_deref().cloned(),
+            )
         };
         let ring = cx.theme().primary;
         let placeholder = cx.theme().muted;
@@ -119,9 +106,6 @@ impl QuillApp {
                     canvas(
                         |_, _, _| {},
                         move |bounds, _, window, _| {
-                            for old in stale {
-                                let _ = window.drop_image(old);
-                            }
                             let center = bounds.center();
                             let radius = px(CIRCLE / 2.);
                             let circle =

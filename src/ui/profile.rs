@@ -18,7 +18,7 @@ use quill::lang::{keys, tr};
 use quill::state::{RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::UsernameCheckResult;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -116,10 +116,9 @@ impl QuillApp {
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    let body = Rc::new(Cell::new(Some(body.into_any_element())));
                     move |content, _, _| {
                         let body = body
-                            .borrow_mut()
                             .take()
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
@@ -157,7 +156,6 @@ impl QuillApp {
             })
             .unwrap_or_default();
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.users_state.profile_edit_error = None;
             live.driver.session.users_state.username_check = Default::default();
         }
         self.dialogs.edit_profile_dialog = Some(EditProfileDialog::new(
@@ -173,8 +171,55 @@ impl QuillApp {
     }
 
     pub(super) fn close_edit_profile_dialog(&mut self, cx: &mut Context<Self>) {
-        self.dialogs.edit_profile_dialog = None;
+        let waiting = self
+            .dialogs
+            .edit_profile_dialog
+            .take()
+            .and_then(|dialog| dialog.op.in_flight());
+        if let (Some(id), Some(live)) = (waiting, self.live.as_mut()) {
+            live.driver.session.acks.forget(id);
+        }
         cx.notify();
+    }
+
+    /// A username or photo operation of the box went out as `request` (`None`:
+    /// it did not). It replaces the one before: that one's answer is no
+    /// longer waited for and its refusal no longer shown.
+    pub(super) fn begin_profile_op(&mut self, request: Option<quill::ids::RequestId>) {
+        let old = match self.screen.dialogs.edit_profile_dialog.as_mut() {
+            Some(dialog) => std::mem::replace(
+                &mut dialog.op,
+                request.map_or(SectionOp::Idle, SectionOp::Sending),
+            )
+            .in_flight(),
+            None => None,
+        };
+        let has_dialog = self.screen.dialogs.edit_profile_dialog.is_some();
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        if let Some(id) = old {
+            live.driver.session.acks.forget(id);
+        }
+        if let Some(id) = request.filter(|_| has_dialog) {
+            live.driver.session.acks.expect(id);
+        }
+    }
+
+    /// Poll-loop half: the box's section operation leaves `Sending` on its
+    /// own answer.
+    pub(in crate::ui) fn settle_profile_op(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(live) = self.live.as_mut() else {
+            return false;
+        };
+        let Some(dialog) = self.screen.dialogs.edit_profile_dialog.as_mut() else {
+            return false;
+        };
+        if !dialog.op.settle(&mut live.driver.session.acks) {
+            return false;
+        }
+        cx.notify();
+        true
     }
 
     /// A5: `checkChatUsername` for the typed username (the private chat
@@ -199,8 +244,9 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        live.driver.session.users_state.profile_edit_error = None;
-        if let Err(err) = live.driver.check_username(&username) {
+        let sent = live.driver.check_username(&username);
+        self.begin_profile_op(sent.as_ref().ok().copied());
+        if let Err(err) = sent {
             self.set_note(StatusNote::error(user_error_for(
                 keys::Q_NOTES_FAILED_USERNAME_CHECK,
                 &err,
@@ -241,8 +287,9 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        live.driver.session.users_state.profile_edit_error = None;
-        match live.driver.set_username(&username) {
+        let sent = live.driver.set_username(&username);
+        self.begin_profile_op(sent.as_ref().ok().copied());
+        match sent {
             Ok(_) => self.set_note(StatusNote::silent(tr(
                 keys::Q_PEOPLE_USERNAME_UPDATE_REQUESTED,
             ))),
@@ -288,8 +335,9 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        live.driver.session.users_state.profile_edit_error = None;
-        if let Err(err) = live.driver.reorder_active_usernames(&new_order) {
+        let sent = live.driver.reorder_active_usernames(&new_order);
+        self.begin_profile_op(sent.as_ref().ok().copied());
+        if let Err(err) = sent {
             self.set_note(StatusNote::error(user_error_for(
                 keys::Q_NOTES_FAILED_REORDER_USERNAMES,
                 &err,
@@ -312,8 +360,9 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        live.driver.session.users_state.profile_edit_error = None;
-        match live.driver.toggle_username_is_active(username, is_active) {
+        let sent = live.driver.toggle_username_is_active(username, is_active);
+        self.begin_profile_op(sent.as_ref().ok().copied());
+        match sent {
             Ok(_) => self.set_note(StatusNote::silent(tr(
                 keys::Q_PEOPLE_USERNAME_UPDATE_REQUESTED,
             ))),
@@ -347,8 +396,9 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        live.driver.session.users_state.profile_edit_error = None;
-        match live.driver.delete_profile_photo(photo_id) {
+        let sent = live.driver.delete_profile_photo(photo_id);
+        self.begin_profile_op(sent.as_ref().ok().copied());
+        match sent {
             Ok(_) => self.set_note(StatusNote::silent(tr(
                 keys::Q_PEOPLE_PHOTO_REMOVAL_REQUESTED,
             ))),
@@ -393,9 +443,9 @@ impl QuillApp {
             && self
                 .session()
                 .is_some_and(|s| s.users_state.username_check.is_checking(&username_text));
-        let error = self
-            .session()
-            .and_then(|s| s.users_state.profile_edit_error.clone());
+        let error = dialog.op.error().map(|reason| {
+            quill::lang::tr_with(keys::Q_PEOPLE_COULDNT_SAVE_REASON, &[("reason", reason)])
+        });
         let bio_left = dialog
             .current_fields(cx)
             .bio_remaining(self.profile_bio_limit());
@@ -542,7 +592,8 @@ impl QuillApp {
         // kit Phase 2 (redo): plain form content — the kit `Dialog`
         // provides the title, padding, and chrome via `.title()`.
         let mut panel = div().id("edit-profile-panel").flex().flex_col().gap_3();
-        // The reason the last Save was refused, when the session kept none.
+        // The reason the last Save was refused, when no section operation
+        // failed.
         let refused = match &dialog.save {
             quill::state::Submit::Failed(reason) => Some(quill::lang::tr_with(
                 keys::Q_PEOPLE_COULDNT_SAVE_REASON,

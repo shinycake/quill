@@ -19,22 +19,6 @@ impl Session {
             return;
         }
         match pending.map(|p| p.purpose) {
-            // A5: profile-edit failures surface in the
-            // edit-profile dialog. The message is classified by
-            // `error_reason`, never the raw TDLib text.
-            Some(
-                RequestPurpose::SetName
-                | RequestPurpose::SetBio
-                | RequestPurpose::SetUsername
-                | RequestPurpose::CheckUsername
-                | RequestPurpose::ReorderActiveUsernames
-                | RequestPurpose::ToggleUsernameIsActive
-                | RequestPurpose::SetProfilePhoto
-                | RequestPurpose::DeleteProfilePhoto,
-            ) => {
-                self.users_state.profile_edit_error =
-                    Some(format!("Profile update failed: {}", error_reason(err)));
-            }
             Some(RequestPurpose::GetUserFullInfo) => {
                 let user = pending.and_then(|p| {
                     p.user_id.or_else(|| {

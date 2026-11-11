@@ -328,7 +328,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.settings.privacy_data.check_password_suggested = false;
+        // The card goes only once the request left: a refused send keeps
+        // it (and a check in flight), so the caller can say so.
+        let data = &mut self.session.settings.privacy_data;
+        data.check_password_suggested = false;
+        data.password_check = crate::state::PasswordCheck::Idle;
         Ok(extra)
     }
 }

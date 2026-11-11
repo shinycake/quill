@@ -29,6 +29,17 @@ impl Session {
     }
 
     /// The current user's own playlist, when it is loaded.
+    /// Where track `file_id` sits in your own playlist now.
+    pub fn my_playlist_position(&self, file_id: FileId) -> Option<usize> {
+        let me = self.my_user_id?;
+        self.media
+            .playlists
+            .get(&me)?
+            .tracks()
+            .iter()
+            .position(|track| track.file_id == file_id)
+    }
+
     fn my_playlist_mut(&mut self) -> Option<&mut Playlist> {
         let me = self.my_user_id?;
         self.media.playlists.get_mut(&me)

@@ -9,8 +9,7 @@ use crate::telegram::requests::{
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// A5: `setName` (schema 1.8.67, line 14823). Best-effort: the name
-    /// refreshes via `updateUser`; failures surface in
-    /// `Session::profile_edit_error`.
+    /// refreshes via `updateUser`; a failure lands in the box's `Submit`.
     pub fn set_name(
         &mut self,
         first_name: &str,

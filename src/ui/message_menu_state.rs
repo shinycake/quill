@@ -50,6 +50,11 @@ pub(super) struct OpenMenu {
     pub(super) page: MessageMenuPage,
     /// The reaction strip is expanded to every reaction.
     pub(super) reactions_expanded: bool,
+    /// A right-clicked reaction chip asked for its own "who reacted" tab:
+    /// it loads once the message's audience has begun
+    /// (`drain_wanted_reactor_tab`), and goes with the menu if that never
+    /// happens.
+    pub(super) first_tab: Option<ReactionType>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -93,6 +98,7 @@ impl MessageMenu {
             item: ReplyItem::Message,
             page: MessageMenuPage::Main,
             reactions_expanded: false,
+            first_tab: None,
         });
     }
 
@@ -111,6 +117,11 @@ impl MessageMenu {
         if let Some(open) = self.open_mut() {
             open.page = page;
         }
+    }
+
+    /// Hand over the reaction whose tab a chip asked for, once.
+    pub(super) fn take_first_tab(&mut self) -> Option<ReactionType> {
+        self.open_mut()?.first_tab.take()
     }
 
     /// The "who reacted" tab on the audience page.

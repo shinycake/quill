@@ -33,30 +33,21 @@ const RISE: f32 = 14.;
 enum ModalFade {
     /// Shown (or fading in).
     Open(Glide),
-    /// Fading out; the panel closes when the fade ends.
-    Closing(Glide),
+    /// Fading out; the panel closes when the fade ends. The timer is held
+    /// here: the modal replaced (reopened) or dismissed drops it, so an old
+    /// timer never ends a newer fade.
+    Closing { glide: Glide, _timer: Task<()> },
 }
 
 impl ModalFade {
     fn glide(&self) -> &Glide {
         match self {
-            Self::Open(glide) | Self::Closing(glide) => glide,
+            Self::Open(glide) | Self::Closing { glide, .. } => glide,
         }
     }
 
     fn is_closing(&self) -> bool {
-        matches!(self, Self::Closing(_))
-    }
-
-    /// The close: the glide runs to hidden. A modal already closing stays.
-    fn close(self, animate: bool, now: Instant) -> Self {
-        match self {
-            Self::Open(mut glide) => {
-                glide.go(0., CLOSE_FADE, animate, now);
-                Self::Closing(glide)
-            }
-            closing @ Self::Closing(_) => closing,
-        }
+        matches!(self, Self::Closing { .. })
     }
 }
 
@@ -129,32 +120,38 @@ impl QuillApp {
             return;
         }
         let now = Instant::now();
-        modal.fade = std::mem::replace(
+        let ModalFade::Open(mut glide) = std::mem::replace(
             &mut modal.fade,
             ModalFade::Open(Glide::settled(0., now, ease_out_circ)),
-        )
-        .close(animate, now);
-        if !animate || !modal.fade.glide().animating(now) {
+        ) else {
+            return;
+        };
+        glide.go(0., CLOSE_FADE, animate, now);
+        if !animate || !glide.animating(now) {
             let previous = modal.previous;
             self.dialogs.profile_modal = None;
             self.restore_info_panel(previous, cx);
             return;
         }
-        let target = modal.target;
-        self.spawn_screen(cx, async move |this, cx| {
+        let timer = self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(CLOSE_FADE).await;
             this.update(cx, |this, cx| {
                 if let Some(modal) = this
                     .dialogs
                     .profile_modal
-                    .take_if(|modal| modal.fade.is_closing() && modal.target == target)
+                    .take_if(|modal| modal.fade.is_closing())
                 {
                     this.restore_info_panel(modal.previous, cx);
                 }
             })
             .ok();
-        })
-        .detach();
+        });
+        if let Some(modal) = self.dialogs.profile_modal.as_mut() {
+            modal.fade = ModalFade::Closing {
+                glide,
+                _timer: timer,
+            };
+        }
         cx.notify();
     }
 

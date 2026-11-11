@@ -135,7 +135,7 @@ fn a_slider_of_the_previous_track_does_not_seek_the_new_one(cx: &mut TestAppCont
             &song,
             cx,
         );
-        app.playback.seek_slider.clone().expect("its slider")
+        app.playback.active.slider().cloned().expect("its slider")
     };
     let old = app.update(&mut vcx, |app, cx| begin(app, DEMO_SONG, cx));
     let current = app.update(&mut vcx, |app, cx| {
@@ -145,7 +145,10 @@ fn a_slider_of_the_previous_track_does_not_seek_the_new_one(cx: &mut TestAppCont
         cx.emit(SliderEvent::Change(SliderValue::Single(100.0)));
     });
     app.read_with(&vcx, |app, _| {
-        assert_eq!(app.playback.scrub, crate::ui::playback_state::Scrub::Idle);
+        assert_eq!(
+            app.playback.active.scrub(),
+            crate::ui::playback_state::Scrub::Idle
+        );
     });
     old.update(&mut vcx, |_, cx| {
         cx.emit(SliderEvent::Release(SliderValue::Single(100.0)));
@@ -167,7 +170,7 @@ fn a_slider_of_the_previous_track_does_not_seek_the_new_one(cx: &mut TestAppCont
     });
     app.read_with(&vcx, |app, _| {
         assert_eq!(
-            app.playback.scrub,
+            app.playback.active.scrub(),
             crate::ui::playback_state::Scrub::Dragging(100.0)
         );
     });

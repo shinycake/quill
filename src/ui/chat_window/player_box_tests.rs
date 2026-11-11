@@ -41,8 +41,9 @@ fn the_bar_title_jumps_in_the_tracks_own_window(cx: &mut TestAppContext) {
     let h = new_app(cx);
     let _chat_window = h.open_in_new_window(OTHER, cx);
     in_window(&h, h.main, None, cx, |app, window, cx| {
-        app.playback.active = crate::ui::playback_state::ActiveTrack::Voice(OTHER_LAST);
-        app.playback.player.chat = Some(OTHER);
+        app.playback.active = crate::ui::playback_state::ActiveTrack::for_test(
+            cx, true, OTHER, OTHER_LAST, 10.0,
+        );
         app.jump_to_playing(window, cx);
     });
     assert_eq!(
@@ -88,7 +89,10 @@ fn a_main_window_chat_change_leaves_a_chat_windows_gif(cx: &mut TestAppContext) 
         message: ChatMessage::new(OTHER, MessageId(7)),
     };
     in_window(&h, chat_window, Some(OTHER), cx, |app, _, _| {
-        app.playback.animation = crate::ui::playback_state::GifPlayback::Waiting(gif);
+        app.playback.animation = crate::ui::playback_state::GifPlayback::waiting(
+            gif,
+            crate::ui::playback_state::GifDecode::start(),
+        );
         app.playback
             .autoplayed_gifs
             .insert(ChatMessage::new(OTHER, MessageId(7)));
@@ -110,10 +114,13 @@ fn a_main_window_chat_change_leaves_a_chat_windows_gif(cx: &mut TestAppContext) 
     });
     // The main window's own GIF stops with its chat.
     in_window(&h, h.main, None, cx, |app, window, cx| {
-        app.playback.animation = crate::ui::playback_state::GifPlayback::Waiting(PlayingGif {
-            window: None,
-            message: ChatMessage::new(ChatId(13), MessageId(5)),
-        });
+        app.playback.animation = crate::ui::playback_state::GifPlayback::waiting(
+            PlayingGif {
+                window: None,
+                message: ChatMessage::new(ChatId(13), MessageId(5)),
+            },
+            crate::ui::playback_state::GifDecode::start(),
+        );
         app.select_listed_chat(OPEN, window, cx);
         assert_eq!(app.playback.animation.playing(), None);
     });
@@ -307,8 +314,9 @@ fn attached_stickers_close_the_box_in_the_other_window(cx: &mut TestAppContext) 
 fn deleting_the_tracks_chat_stops_the_player_and_releases_its_history(cx: &mut TestAppContext) {
     let h = new_app(cx);
     in_window(&h, h.main, None, cx, |app, _, cx| {
-        app.playback.active = crate::ui::playback_state::ActiveTrack::Voice(OTHER_LAST);
-        app.playback.player.chat = Some(OTHER);
+        app.playback.active = crate::ui::playback_state::ActiveTrack::for_test(
+            cx, true, OTHER, OTHER_LAST, 10.0,
+        );
         app.sync_history_holds();
         assert!(app.session().is_some_and(|s| s.chat_history_in_use(OTHER)));
         app.check_playing_track(cx);
@@ -320,7 +328,7 @@ fn deleting_the_tracks_chat_stops_the_player_and_releases_its_history(cx: &mut T
         app.demo_session.as_mut().unwrap().chats.remove(&OTHER.0);
         app.check_playing_track(cx);
         assert_eq!(app.playback.active.voice(), None, "the player stopped");
-        assert_eq!(app.playback.player.chat, None, "its claim went");
+        assert_eq!(app.playback.active.chat(), None, "its claim went");
         app.sync_history_holds();
         assert!(!app.session().is_some_and(|s| s.chat_history_in_use(OTHER)));
     });
@@ -333,7 +341,7 @@ fn the_next_song_downloading_keeps_its_chats_history(cx: &mut TestAppContext) {
     use crate::ui::play_intent::{PlayIntent, PlayTarget};
     let h = new_app(cx);
     in_window(&h, h.main, None, cx, |app, _, _| {
-        app.playback.player.chat = None;
+        assert_eq!(app.playback.active.chat(), None, "no track is active");
         app.playback.intent = Some(PlayIntent {
             file: quill::ids::FileId(9001),
             target: PlayTarget::Audio {

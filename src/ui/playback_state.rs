@@ -27,49 +27,136 @@ pub(crate) struct SeekHover {
 
 pub(crate) use quill::ids::ChatMessage;
 
-/// The active track: none, a voice note or a music file.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// The active track: none, a voice note or a music file with everything
+/// that exists only while it is active. One value, so stopping the track
+/// drops its slider, scrub, hover and bar state with it.
+#[derive(Default)]
 pub(super) enum ActiveTrack {
     #[default]
     None,
-    Voice(MessageId),
-    Audio(MessageId),
+    Voice(Track),
+    Audio(Track),
+}
+
+/// What belongs to the active track.
+pub(super) struct Track {
+    pub(super) message: MessageId,
+    /// Chat the track belongs to (may differ from the open chat): the
+    /// bar's, and the claim that keeps its history whole.
+    pub(super) chat: ChatId,
+    /// Length of the loaded track (TDLib's rounded duration).
+    pub(super) length: f64,
+    pub(super) meta: super::player_bar::TrackMeta,
+    /// Interactive seek slider bound to the active row (Phase 4.6).
+    pub(super) slider: Entity<SliderState>,
+    /// The bar's own progress slider (the row has another one), one for
+    /// each window that draws the bar (`None`: the main window). A slider
+    /// keeps the geometry of its last paint and maps a press through it,
+    /// so one slider drawn in two windows sought with the other window's
+    /// layout (docs/decisions/lock-field-per-window.md, "Rejected").
+    pub(super) bars: HashMap<Option<ChatId>, Entity<SliderState>>,
+    /// The seek slider drag (Change without Release yet).
+    pub(super) scrub: Scrub,
+    /// Where the pointer rests over a seek control of the track.
+    pub(super) hover: Option<SeekHover>,
+}
+
+impl Track {
+    pub(super) fn new(
+        message: MessageId,
+        chat: ChatId,
+        length: f64,
+        meta: super::player_bar::TrackMeta,
+        slider: Entity<SliderState>,
+    ) -> Self {
+        Self {
+            message,
+            chat,
+            length,
+            meta,
+            slider,
+            bars: HashMap::new(),
+            scrub: Scrub::Idle,
+            hover: None,
+        }
+    }
 }
 
 impl ActiveTrack {
-    pub(super) fn voice(self) -> Option<MessageId> {
-        match self {
-            Self::Voice(id) => Some(id),
-            _ => None,
+    /// Tests: a voice note or music track of `chat`, with a fresh slider.
+    #[cfg(test)]
+    pub(super) fn for_test(
+        cx: &mut impl AppContext,
+        voice: bool,
+        chat: ChatId,
+        message: MessageId,
+        length: f64,
+    ) -> Self {
+        let slider = cx.new(|_| SliderState::new());
+        let meta = super::player_bar::TrackMeta {
+            title: String::new().into(),
+            subtitle: String::new(),
+        };
+        let track = Track::new(message, chat, length, meta, slider);
+        if voice {
+            Self::Voice(track)
+        } else {
+            Self::Audio(track)
         }
     }
 
-    pub(super) fn audio(self) -> Option<MessageId> {
-        match self {
-            Self::Audio(id) => Some(id),
-            _ => None,
-        }
-    }
-
-    pub(super) fn id(self) -> Option<MessageId> {
+    pub(super) fn track(&self) -> Option<&Track> {
         match self {
             Self::None => None,
-            Self::Voice(id) | Self::Audio(id) => Some(id),
+            Self::Voice(track) | Self::Audio(track) => Some(track),
         }
     }
 
-    /// The voice note ends; its id.
-    pub(super) fn take_voice(&mut self) -> Option<MessageId> {
-        let id = self.voice()?;
-        *self = Self::None;
-        Some(id)
+    pub(super) fn track_mut(&mut self) -> Option<&mut Track> {
+        match self {
+            Self::None => None,
+            Self::Voice(track) | Self::Audio(track) => Some(track),
+        }
     }
 
-    /// The music file ends; its id.
-    pub(super) fn take_audio(&mut self) -> Option<MessageId> {
-        let id = self.audio()?;
-        *self = Self::None;
-        Some(id)
+    pub(super) fn voice(&self) -> Option<MessageId> {
+        match self {
+            Self::Voice(track) => Some(track.message),
+            _ => None,
+        }
+    }
+
+    pub(super) fn audio(&self) -> Option<MessageId> {
+        match self {
+            Self::Audio(track) => Some(track.message),
+            _ => None,
+        }
+    }
+
+    pub(super) fn id(&self) -> Option<MessageId> {
+        self.track().map(|track| track.message)
+    }
+
+    /// The chat of the active track.
+    pub(super) fn chat(&self) -> Option<ChatId> {
+        self.track().map(|track| track.chat)
+    }
+
+    /// Length of the active track; `None` when no row is active.
+    pub(super) fn length(&self) -> Option<f64> {
+        self.track().map(|track| track.length)
+    }
+
+    pub(super) fn scrub(&self) -> Scrub {
+        self.track().map_or(Scrub::Idle, |track| track.scrub)
+    }
+
+    pub(super) fn hover(&self) -> Option<SeekHover> {
+        self.track().and_then(|track| track.hover)
+    }
+
+    pub(super) fn slider(&self) -> Option<&Entity<SliderState>> {
+        self.track().map(|track| &track.slider)
     }
 }
 
@@ -139,36 +226,25 @@ pub(super) struct TrackShown {
 pub(crate) struct PlaybackUi {
     pub(super) player: super::player_bar::PlayerBarState,
     /// History row whose voice note or music file (`messageAudio`) is the
-    /// active track; they share the one engine.
+    /// active track, with its length, sliders, drag and hover; they share
+    /// the one engine, and whether it plays, and where, comes from `audio`.
     pub(super) active: ActiveTrack,
     /// What a press asked to play once its file is downloaded (`play_intent`).
     pub(super) intent: Option<super::play_intent::PlayIntent>,
     /// The right-click menu of a Playlist page track, or the "remove"
     /// confirmation of one of your own tracks.
     pub(super) playlist: super::playlist_manage::PlaylistFlow,
-    /// Length of the loaded track (TDLib's rounded duration). Plain data:
-    /// whether a track is active comes from `playing_voice`/`playing_audio`
-    /// (see `track_duration`) and whether it plays, and where, from `audio`.
-    pub(super) track_length: Option<f64>,
-    /// Interactive seek slider bound to the active row (Phase 4.6).
-    pub(super) seek_slider: Option<Entity<SliderState>>,
-    /// The seek slider drag (Change without Release yet).
-    pub(super) scrub: Scrub,
-    /// Where the pointer rests over a seek control of the active track.
-    pub(super) seek_hover: Option<SeekHover>,
     /// The playback progress tick task, while one runs.
     pub(super) tick: PlaybackTick,
     /// Last known position per chat message, so rows keep their seek bar fill (and
     /// resume from it) after pause/stop.
     pub(super) positions: HashMap<ChatMessage, f64>,
     /// History row whose `image/gif` file is looping (`inline_playback`),
-    /// with the window and chat it plays in, and its pictures once decoded.
+    /// with the window and chat it plays in, its decode and its pictures.
     pub(super) animation: GifPlayback,
     /// GIFs that autoplayed once, by chat: leaving a chat resets only
     /// its own, so another window's GIF does not start over.
     pub(super) autoplayed_gifs: std::collections::HashSet<ChatMessage>,
-    /// The GIF decodes running, by chat message (one per GIF at a time).
-    pub(super) gif_decodes: HashMap<ChatMessage, GifDecode>,
     /// A linked `?t=` media timestamp waiting for its message to load
     /// (chat, message, seconds, when to give up).
     pub(super) pending_media_seek: Option<(ChatId, quill::ids::MessageId, i32, std::time::Instant)>,
@@ -184,29 +260,72 @@ pub(crate) struct PlayingGif {
     pub(super) message: ChatMessage,
 }
 
+/// A GIF decode running off the UI thread, held by the stage that waits for
+/// it. Dropping it (a stop, another playback, a closed window or chat)
+/// tells the decode to end before its next frame.
+pub(crate) struct GifDecode {
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl GifDecode {
+    pub(super) fn start() -> Self {
+        Self {
+            cancel: std::sync::Arc::default(),
+        }
+    }
+
+    /// The flag the decoder polls.
+    pub(super) fn flag(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        self.cancel.clone()
+    }
+
+    /// `flag` is this decode's: an answer from an earlier decode of the
+    /// same GIF is not.
+    pub(super) fn is(&self, flag: &std::sync::Arc<std::sync::atomic::AtomicBool>) -> bool {
+        std::sync::Arc::ptr_eq(&self.cancel, flag)
+    }
+}
+
+impl Drop for GifDecode {
+    fn drop(&mut self) {
+        self.cancel
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 /// The looping GIF of the history, one value. It leaves for `Idle` on
 /// `stop_animation_playback` (a stop, another playback, a closed window or
-/// chat), which drops the clip with it.
-#[derive(Clone, Default)]
+/// chat), which drops the clip and cancels the decode with it.
+#[derive(Default)]
 pub(crate) enum GifPlayback {
     #[default]
     Idle,
     /// Chosen; the first picture is still being decoded.
-    Waiting(PlayingGif),
+    Waiting {
+        playing: PlayingGif,
+        decode: GifDecode,
+    },
     /// Playing: the held pictures (`gif_clip`), shared with the history row
-    /// (and its animation layer) that draws them.
+    /// (and its animation layer) that draws them. The rest of the GIF may
+    /// still be decoding.
     Playing {
         playing: PlayingGif,
         clip: std::sync::Arc<super::gif_clip::GifClip>,
         started: Instant,
+        decode: GifDecode,
     },
 }
 
 impl GifPlayback {
+    /// A chosen GIF waiting for the decode `decode`.
+    pub(super) fn waiting(playing: PlayingGif, decode: GifDecode) -> Self {
+        Self::Waiting { playing, decode }
+    }
+
     pub(super) fn playing(&self) -> Option<PlayingGif> {
         match self {
             Self::Idle => None,
-            Self::Waiting(playing) | Self::Playing { playing, .. } => Some(*playing),
+            Self::Waiting { playing, .. } | Self::Playing { playing, .. } => Some(*playing),
         }
     }
 
@@ -217,17 +336,29 @@ impl GifPlayback {
         }
     }
 
+    /// The decode that answers to `flag` is the one this stage holds.
+    pub(super) fn is_decode(
+        &self,
+        flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> bool {
+        match self {
+            Self::Idle => false,
+            Self::Waiting { decode, .. } | Self::Playing { decode, .. } => decode.is(flag),
+        }
+    }
+
     /// The first picture is in: the chosen GIF plays from `started`.
     pub(super) fn begin_clip(
         &mut self,
         clip: std::sync::Arc<super::gif_clip::GifClip>,
         started: Instant,
     ) {
-        if let Self::Waiting(playing) = *self {
+        if let Self::Waiting { playing, decode } = std::mem::take(self) {
             *self = Self::Playing {
                 playing,
                 clip,
                 started,
+                decode,
             };
         }
     }
@@ -246,8 +377,7 @@ impl PlaybackUi {
 
     /// Length of the active track; `None` when no row is active.
     pub(super) fn track_duration(&self) -> Option<f64> {
-        self.active.id()?;
-        self.track_length
+        self.active.length()
     }
 
     pub(super) fn new() -> Self {
@@ -256,27 +386,13 @@ impl PlaybackUi {
             active: ActiveTrack::None,
             intent: None,
             playlist: Default::default(),
-            track_length: None,
-            seek_slider: None,
-            scrub: Scrub::Idle,
-            seek_hover: None,
             tick: PlaybackTick::Idle,
             positions: HashMap::new(),
             animation: GifPlayback::Idle,
             autoplayed_gifs: Default::default(),
-            gif_decodes: HashMap::new(),
             pending_media_seek: None,
         }
     }
-}
-
-/// A GIF decode running for a message.
-pub(crate) struct GifDecode {
-    /// Set when playback stops; the decode then ends before its next frame.
-    pub(super) cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// The clip, once its first picture is in: a replay while the rest
-    /// still decodes plays it at once.
-    pub(super) first: Option<std::sync::Arc<super::gif_clip::GifClip>>,
 }
 
 impl PlaybackUi {
@@ -359,12 +475,18 @@ impl super::on_screen::Farewell for PlaybackUi {
 
 #[cfg(test)]
 mod tests {
-    use super::ActiveTrack;
-    use super::PlaybackUi;
+    use super::{ActiveTrack, PlaybackUi};
     use crate::ui::audio::engine::test_support::{RATE, device, pull, track};
     use crate::ui::audio::{AudioEngine, EngineState, SharedOutput, Simulation};
-    use quill::ids::MessageId;
+    use gpui_kit::TestAppContext;
+    use quill::ids::{ChatId, MessageId};
     use std::path::Path;
+
+    /// A music track `id` of `length` seconds, as `begin_track_playback`
+    /// makes it.
+    fn music(cx: &mut TestAppContext, id: i64, length: f64) -> ActiveTrack {
+        ActiveTrack::for_test(cx, false, ChatId(1), MessageId(id), length)
+    }
 
     fn ui_without_output() -> (PlaybackUi, AudioEngine) {
         (
@@ -377,11 +499,10 @@ mod tests {
         (PlaybackUi::new(), AudioEngine::new(output.clone()))
     }
 
-    #[test]
-    fn a_failed_start_never_shows_playing() {
+    #[gpui_kit::test]
+    fn a_failed_start_never_shows_playing(cx: &mut TestAppContext) {
         let (mut ui, mut audio) = ui_without_output();
-        ui.active = ActiveTrack::Audio(MessageId(1));
-        ui.track_length = Some(30.0);
+        ui.active = music(cx, 1, 30.0);
         let started = audio
             .start(Path::new("missing.ogg"), 4.0, 1.0, 1.0, 30.0)
             .is_ok();
@@ -392,12 +513,11 @@ mod tests {
     }
 
     /// tdesktop shows Pause and the position asked for from the press on.
-    #[test]
-    fn a_track_still_building_shows_pause_at_its_offset() {
+    #[gpui_kit::test]
+    fn a_track_still_building_shows_pause_at_its_offset(cx: &mut TestAppContext) {
         let (output, _device) = device();
         let (mut ui, mut audio) = ui_on(&output);
-        ui.active = ActiveTrack::Audio(MessageId(1));
-        ui.track_length = Some(4.0);
+        ui.active = music(cx, 1, 4.0);
         let path = track("ui-loading.wav", 4);
         audio.start(&path, 2.0, 1.0, 1.0, 4.0).unwrap();
         assert_eq!(ui.engine_state(&audio), EngineState::Loading);
@@ -407,14 +527,13 @@ mod tests {
 
     /// tdesktop's audio row reads no waiting state: a start shows Pause
     /// alone however long the file takes to open.
-    #[test]
-    fn a_long_start_shows_pause_alone_and_draws_nothing_new() {
+    #[gpui_kit::test]
+    fn a_long_start_shows_pause_alone_and_draws_nothing_new(cx: &mut TestAppContext) {
         let (output, _device) = device();
         let (mut ui, mut audio) = ui_on(&output);
         let clock;
         (audio, clock) = audio.with_manual_clock();
-        ui.active = ActiveTrack::Audio(MessageId(1));
-        ui.track_length = Some(4.0);
+        ui.active = music(cx, 1, 4.0);
         let path = track("ui-long-start.wav", 4);
         audio.start(&path, 2.0, 1.0, 1.0, 4.0).unwrap();
         let pressed = ui.track_shown(&audio, (false, false));
@@ -423,13 +542,12 @@ mod tests {
         assert_eq!(ui.track_shown(&audio, (false, false)), pressed);
     }
 
-    #[test]
-    fn a_failed_resume_keeps_the_button_on_play() {
+    #[gpui_kit::test]
+    fn a_failed_resume_keeps_the_button_on_play(cx: &mut TestAppContext) {
         let (output, _device) = device();
         let (mut ui, mut audio) = ui_on(&output);
         let path = track("ui-resume.wav", 4);
-        ui.active = ActiveTrack::Audio(MessageId(1));
-        ui.track_length = Some(4.0);
+        ui.active = music(cx, 1, 4.0);
         audio.start(&path, 0.0, 1.0, 1.0, 4.0).unwrap();
         audio.await_landing();
         assert!(ui.is_playing(&audio));
@@ -443,13 +561,12 @@ mod tests {
         assert_eq!(ui.engine_state(&audio), EngineState::Paused);
     }
 
-    #[test]
-    fn the_bar_follows_consumed_frames_not_the_wall_clock() {
+    #[gpui_kit::test]
+    fn the_bar_follows_consumed_frames_not_the_wall_clock(cx: &mut TestAppContext) {
         let (output, mut source) = device();
         let (mut ui, mut audio) = ui_on(&output);
         let path = track("ui-position.wav", 4);
-        ui.active = ActiveTrack::Audio(MessageId(1));
-        ui.track_length = Some(4.0);
+        ui.active = music(cx, 1, 4.0);
         audio.start(&path, 0.0, 1.0, 1.0, 4.0).unwrap();
         audio.await_landing();
         std::thread::sleep(std::time::Duration::from_millis(250));
@@ -459,11 +576,10 @@ mod tests {
         assert!((1.8..=2.3).contains(&secs), "got {secs}");
     }
 
-    #[test]
-    fn a_track_that_ended_resets_the_button() {
+    #[gpui_kit::test]
+    fn a_track_that_ended_resets_the_button(cx: &mut TestAppContext) {
         let (mut ui, mut audio) = ui_without_output();
-        ui.active = ActiveTrack::Audio(MessageId(1));
-        ui.track_length = Some(5.0);
+        ui.active = music(cx, 1, 5.0);
         audio.set_simulation(Some(Simulation {
             fail: false,
             stall: false,
@@ -474,18 +590,21 @@ mod tests {
         assert_eq!(ui.active_position_secs(&audio), Some(5.0));
     }
 
-    #[test]
-    fn a_stale_length_never_makes_a_track_active() {
+    #[gpui_kit::test]
+    fn the_length_belongs_to_the_active_track(cx: &mut TestAppContext) {
         let (mut ui, audio) = ui_without_output();
-        ui.track_length = Some(30.0);
         assert_eq!(ui.track_duration(), None);
         assert_eq!(ui.active_position_secs(&audio), None);
-        ui.active = ActiveTrack::Voice(MessageId(2));
+        ui.active = ActiveTrack::for_test(cx, true, ChatId(1), MessageId(2), 30.0);
         assert_eq!(ui.track_duration(), Some(30.0));
+        // The track's length, slider and drag leave with the track.
+        ui.active = ActiveTrack::None;
+        assert_eq!(ui.track_duration(), None);
+        assert!(ui.active.slider().is_none());
     }
 
-    #[test]
-    fn no_track_means_no_position() {
+    #[gpui_kit::test]
+    fn no_track_means_no_position(_cx: &mut TestAppContext) {
         let (ui, audio) = ui_without_output();
         assert_eq!(ui.active_position_secs(&audio), None);
         assert!(!ui.is_playing(&audio));

@@ -347,9 +347,8 @@ impl QuillApp {
         self.message_ui.menu.show_page(MessageMenuPage::Audience {
             tab: several.then(|| reaction.clone()),
         });
-        if several && let Some(live) = self.live.as_mut() {
-            live.driver.session.messages.wanted_reactor_tab =
-                Some((menu.chat_id, menu.message_id, reaction));
+        if several && let Some(open) = self.message_ui.menu.open_mut() {
+            open.first_tab = Some(reaction);
         }
         cx.notify();
     }

@@ -173,10 +173,13 @@ fn a_gif_plays_in_its_window_and_stops_when_the_window_closes(cx: &mut TestAppCo
     open_chat_window(&app, main, cx);
     let message = MessageId(40);
     let (here, in_main) = app.update(cx, |app, cx| {
-        app.playback.animation = crate::ui::playback_state::GifPlayback::Waiting(PlayingGif {
-            window: Some(OTHER),
-            message: ChatMessage::new(OTHER, message),
-        });
+        app.playback.animation = crate::ui::playback_state::GifPlayback::waiting(
+            PlayingGif {
+                window: Some(OTHER),
+                message: ChatMessage::new(OTHER, message),
+            },
+            crate::ui::playback_state::GifDecode::start(),
+        );
         let here = app.in_window_scope(Some(OTHER), cx, |app, _| app.gif_playing(OTHER, message));
         (here, app.gif_playing(OTHER, message))
     });

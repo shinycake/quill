@@ -428,6 +428,11 @@ fn password_check_distinguishes_wrong_from_right_and_dismisses() {
     assert_eq!(hide["@type"], "hideSuggestedAction");
     assert_eq!(hide["action"]["@type"], "suggestedActionCheckPassword");
     assert!(!f.1.session.settings.privacy_data.check_password_suggested);
+    assert_eq!(
+        f.1.session.settings.privacy_data.password_check,
+        PasswordCheck::Idle,
+        "the driver resets the card once the request left"
+    );
     // The server may also withdraw it from another device.
     ingest(
         &mut f,

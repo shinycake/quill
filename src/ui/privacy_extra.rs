@@ -915,11 +915,16 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Dismiss the suggestion (`hideSuggestedAction`) and reset the card.
+    /// Dismiss the suggestion (`hideSuggestedAction`). The driver resets the
+    /// card once the request is sent; a refused send keeps the card and says
+    /// so.
     fn dismiss_password_check(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.hide_check_password_suggestion();
-            live.driver.session.settings.privacy_data.password_check = PasswordCheck::Idle;
+            if live.driver.hide_check_password_suggestion().is_err() {
+                self.set_note(StatusNote::error(tr(
+                    keys::Q_MISC_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
+                )));
+            }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.privacy_data.check_password_suggested = false;
             demo.settings.privacy_data.password_check = PasswordCheck::Idle;
