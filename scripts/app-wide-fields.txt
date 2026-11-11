@@ -118,6 +118,7 @@ calls.remote_player | the call window's remote video; the call ends with the cli
 calls.local_player | the call window's own camera; dropped the same way
 calls.notify_clicks | Accept/Decline from OS call notifications; each pick names its account
 calls.tick | the call window's clock tick runs
+calls.tick.Running._task | the call clock task: it runs across account switches (background rings need it) and ends itself when nothing is wanted
 calls.panel_view | the call window's view
 calls.window | the call window, opened and closed by the sync with the session on screen
 calls.sounds * | the call sound output and the loop playing; what a call has already played is the screen's (`call_screen.sound_marks`)
