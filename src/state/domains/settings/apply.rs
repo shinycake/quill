@@ -229,7 +229,9 @@ impl Session {
                     Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp { .. }))
                 ) {
                     let has_password = state.has_password;
-                    self.auth_state.password_state = Some(state);
+                    self.auth_state
+                        .password_state
+                        .answered(pending.map(|p| p.id), state);
                     self.auth_state.settle_password_op(pending.map(|p| p.id));
                     self.route_gift_export_on_password(has_password);
                     self.route_gram_withdrawal_on_password(has_password);

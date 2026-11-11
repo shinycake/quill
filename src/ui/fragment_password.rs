@@ -64,7 +64,7 @@ impl PasswordBox<'_> {
             on_forgot,
         } = self;
         let muted = cx.theme().muted_foreground;
-        let state = session.auth_state.password_state.as_ref();
+        let state = session.auth_state.password_state.get();
         let hint = state
             .map(|state| state.password_hint.clone())
             .filter(|hint| !hint.is_empty());
@@ -280,7 +280,7 @@ impl QuillApp {
     pub(super) fn recover_cloud_password(&mut self, cx: &mut Context<Self>) {
         let has_email = self
             .session()
-            .and_then(|s| s.auth_state.password_state.as_ref())
+            .and_then(|s| s.auth_state.password_state.get())
             .is_some_and(|state| state.has_recovery_email_address);
         self.open_twofa(cx);
         self.goto_twofa_view(crate::ui::dialogs::callback_password::TwofaView::Recover);

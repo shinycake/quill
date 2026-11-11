@@ -259,7 +259,7 @@ fn the_password_check_on_the_page_and_in_the_2fa_box_has_a_field_each(cx: &mut T
                 .chat_list
                 .suggestions
                 .add_action(quill::chatlist_suggestions::ACTION_PASSWORD);
-            session.auth_state.password_state = Some(PasswordState {
+            session.auth_state.password_state = quill::state::PasswordCache::Fresh(PasswordState {
                 has_password: true,
                 password_hint: String::new(),
                 has_recovery_email_address: false,
@@ -307,7 +307,7 @@ fn aborting_the_recovery_email_asks_inside_the_2fa_box(cx: &mut TestAppContext) 
         app.show_settings_page(Page::Privacy, cx);
         app.open_twofa(cx);
         if let Some(session) = app.demo_session.as_mut() {
-            session.auth_state.password_state = Some(PasswordState {
+            session.auth_state.password_state = quill::state::PasswordCache::Fresh(PasswordState {
                 has_password: true,
                 password_hint: String::new(),
                 has_recovery_email_address: false,

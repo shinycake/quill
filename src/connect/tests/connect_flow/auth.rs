@@ -414,7 +414,7 @@ fn driver_two_step_password_ops_gate_dedupe_and_shape() {
                 .unwrap(),
             )
             .unwrap();
-    assert!(driver.session.auth_state.password_state.is_some());
+    assert!(driver.session.auth_state.password_state.get().is_some());
     assert!(!driver.session.auth_state.password_state_loading());
 
     // Enable: empty old password, email in the same call.
@@ -453,7 +453,7 @@ fn driver_two_step_password_ops_gate_dedupe_and_shape() {
             .session
             .auth_state
             .password_state
-            .as_ref()
+            .get()
             .is_some_and(|s| s.has_password)
     );
 
@@ -489,7 +489,7 @@ fn driver_two_step_password_ops_gate_dedupe_and_shape() {
             .session
             .auth_state
             .password_state
-            .as_ref()
+            .get()
             .and_then(|s| s.pending_email_pattern.clone())
             .as_deref(),
         Some("n***@example.com")

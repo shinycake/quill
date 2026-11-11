@@ -216,11 +216,10 @@ impl Session {
         // Batch 4: a `confirmSession` / `terminateSession` for the
         // new-login alert succeeded.
         if let Some(RequestPurpose::Settings(SettingsPurpose::ReviewUnconfirmedSession {
-            session_id,
             ..
         })) = pending.map(|p| p.purpose)
         {
-            self.finish_login_review(session_id, None);
+            self.finish_login_review(pending.map(|p| p.id), None);
         }
         // Batch 4: terms accepted.
         if matches!(

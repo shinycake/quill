@@ -157,7 +157,7 @@ impl QuillApp {
     /// answers, above the chat list (tdesktop's top-bar suggestion).
     pub(crate) fn unconfirmed_login_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let notices = &self.session()?.settings.notices;
-        if notices.unconfirmed_count == 0 || notices.unconfirmed_entries.is_empty() {
+        if notices.unconfirmed_entries().is_empty() {
             return None;
         }
         self.unconfirmed_login_banner_body(cx)
@@ -171,10 +171,10 @@ impl QuillApp {
     fn unconfirmed_login_banner_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         let notices = &session.settings.notices;
-        if notices.unconfirmed_count == 0 || notices.unconfirmed_entries.is_empty() {
+        if notices.unconfirmed_entries().is_empty() {
             return None;
         }
-        let message = unconfirmed_login_message(&notices.unconfirmed_entries);
+        let message = unconfirmed_login_message(notices.unconfirmed_entries());
         let busy = notices.review.busy();
         let error = notices.review.error().map(str::to_string);
         Some(
@@ -238,8 +238,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.review_unconfirmed_sessions(confirmed);
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.settings.notices.unconfirmed_count = 0;
-            demo.settings.notices.unconfirmed_entries.clear();
+            demo.settings.notices.unconfirmed = None;
             if !confirmed {
                 self.auth_ui.login_prevented =
                     Some(vec![tr(keys::Q_OPS_BERLIN_GERMANY_PIXEL_9).into()]);

@@ -40,7 +40,7 @@ impl QuillApp {
             let session = this.session();
             let state = session
                 .as_ref()
-                .and_then(|s| s.auth_state.password_state.clone());
+                .and_then(|s| s.auth_state.password_state.get().cloned());
             let loading = session.is_some_and(|s| s.auth_state.password_state_loading());
             let error = session
                 .as_ref()
@@ -615,9 +615,9 @@ impl QuillApp {
         if view == TwofaView::Status {
             self.clear_twofa_flow();
         } else if let Some(session) = self.live.as_mut().map(|l| &mut l.driver.session) {
-            session.auth_state.twofa_flow.notice = None;
+            session.auth_state.twofa_flow.clear_notice();
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.auth_state.twofa_flow.notice = None;
+            session.auth_state.twofa_flow.clear_notice();
         }
     }
 

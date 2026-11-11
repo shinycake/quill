@@ -631,8 +631,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         // cached password state out of date.
         // The mark stays until the refetch is sent; a refused send keeps it
         // for the next ingest.
-        if self.session.auth_state.twofa_flow.refetch && self.refresh_password_state().is_ok() {
-            self.session.auth_state.twofa_flow.refetch = false;
+        if self.session.auth_state.password_state.is_outdated()
+            && let Ok(request) = self.refresh_password_state()
+        {
+            self.session.auth_state.password_state.refetching(request);
         }
         if let Some(chat_id) = unpinned_all {
             self.session

@@ -284,12 +284,7 @@ impl Session {
         // Only a state that is not being reloaded counts; the reload sent
         // with the probe routes when it lands.
         let has_password = (!self.auth_state.password_state_loading())
-            .then(|| {
-                self.auth_state
-                    .password_state
-                    .as_ref()
-                    .map(|s| s.has_password)
-            })
+            .then(|| self.auth_state.password_state.get().map(|s| s.has_password))
             .flatten();
         if let Some(picker) = self.payments.gifts_manage.transfer_mut() {
             picker.probe_failed(outcome, has_password);

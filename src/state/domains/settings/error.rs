@@ -49,11 +49,10 @@ impl Session {
             // presence check sends it again.
             Some(RequestPurpose::SetOnline) => {}
             Some(RequestPurpose::Settings(SettingsPurpose::ReviewUnconfirmedSession {
-                session_id,
                 ..
             })) => {
                 self.finish_login_review(
-                    session_id,
+                    pending.map(|p| p.id),
                     Some(sessions_error_line("review the new login", err)),
                 );
             }
