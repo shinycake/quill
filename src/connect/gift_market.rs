@@ -258,11 +258,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if was.gift_id() == gift_id {
             return Ok(());
         }
-        // A follow that never opened has nothing to close.
+        // A follow that never opened has nothing to close. A close that did
+        // not go out leaves the follow as it was (the server still sends
+        // that auction's updates), and the next call closes it again: the
+        // send is refused locally until the connection is ready, so nothing
+        // goes out meanwhile.
         if let AuctionFollow::Following { gift_id: old, .. } = was {
-            let _ = self.send_market(GiftMarketPurpose::CloseAuction, |extra| {
+            self.send_market(GiftMarketPurpose::CloseAuction, |extra| {
                 rq::follow_gift_auction(extra, old, false)
-            });
+            })?;
         }
         self.session.payments.gift_market.follow = AuctionFollow::None;
         let Some(new) = gift_id else {
@@ -422,13 +426,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             craft.candidates_load == PageLoad::Idle,
             craft.market.load == PageLoad::Idle,
         );
-        if own {
-            self.craft_candidates_page(false)?;
-        }
-        if market {
-            self.search_resale_page(true, false)?;
-        }
-        Ok(())
+        // The two lists are independent: a refused first send fails its own
+        // list (its error and Retry show) and the other is still asked.
+        let own = if own {
+            self.craft_candidates_page(false).map(|_| ())
+        } else {
+            Ok(())
+        };
+        let market = if market {
+            self.search_resale_page(true, false).map(|_| ())
+        } else {
+            Ok(())
+        };
+        own.and(market)
     }
 
     /// "Retry" of a failed "on sale" list in Select Gifts: the first page

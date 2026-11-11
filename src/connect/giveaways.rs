@@ -56,15 +56,26 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra,
             &get_premium_giveaway_payment_options(extra, boosted_chat_id),
         );
-        if premium.is_err() {
-            self.session.payments.giveaway.options.premium = crate::state::fetch::Fetch::Idle;
+        if let Err(err) = &premium {
+            // The form draws the error with a Retry, not an empty section.
+            self.session
+                .payments
+                .giveaway
+                .options
+                .premium
+                .fail(err.stage_line());
         }
         let extra = self
             .session
             .request(RequestPurpose::GetStarGiveawayOptions, None);
         let stars = self.send_json_request(extra, &get_star_giveaway_payment_options(extra));
-        if stars.is_err() {
-            self.session.payments.giveaway.options.stars = crate::state::fetch::Fetch::Idle;
+        if let Err(err) = &stars {
+            self.session
+                .payments
+                .giveaway
+                .options
+                .stars
+                .fail(err.stage_line());
         }
         premium.and(stars).map(|_| ())
     }

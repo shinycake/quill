@@ -13,13 +13,29 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || code.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // An apply in flight owns the box until it answers: a new check
+        // would drop its request, and Premium applied would never show.
+        if self
+            .session
+            .payments
+            .gift_code
+            .as_ref()
+            .is_some_and(|lookup| matches!(lookup.stage, GiftCodeStage::Applying { .. }))
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let extra = self
             .session
             .request(RequestPurpose::CheckPremiumGiftCode, None);
-        self.session.payments.gift_code = Some(GiftCodeLookup::checking(code.to_string(), extra));
+        let previous = self
+            .session
+            .payments
+            .gift_code
+            .replace(GiftCodeLookup::checking(code.to_string(), extra));
         let result = self.send_json_request(extra, &check_premium_gift_code(extra, code));
         if result.is_err() {
-            self.session.payments.gift_code = None;
+            // The new check never left: the box keeps what it showed.
+            self.session.payments.gift_code = previous;
         }
         result
     }

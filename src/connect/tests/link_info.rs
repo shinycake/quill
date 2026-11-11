@@ -277,3 +277,33 @@ fn a_language_link_box_takes_only_its_own_answer() {
     assert!(lookup.loading() && lookup.error().is_none());
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// A second gift code link while an apply is out is refused (the apply's
+/// answer would find no box), and a refused check keeps the box as it was.
+#[test]
+fn a_gift_code_check_never_replaces_an_apply_or_a_box_it_could_not_send() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let check = driver.request_gift_code_info("A").unwrap();
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type":"premiumGiftCodeInfo","@extra":check.as_extra(),"month_count":3,"day_count":90}),
+    );
+    let apply = driver.apply_gift_code().unwrap();
+    assert!(driver.request_gift_code_info("B").is_err());
+    let lookup = driver.session.payments.gift_code.as_ref().unwrap();
+    assert_eq!(lookup.code, "A", "the apply keeps its box");
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type":"ok","@extra":apply.as_extra()}),
+    );
+    assert!(driver.session.payments.gift_code.as_ref().unwrap().applied());
+    std::fs::remove_dir_all(dir).unwrap();
+}

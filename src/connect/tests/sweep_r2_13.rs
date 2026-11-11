@@ -181,3 +181,97 @@ fn a_refused_topic_refetch_leaves_the_mention_badge_cleared_by_the_read_ok() {
     t.answer("readAllForumTopicMentions", json!({"@type": "ok"}));
     assert_eq!(count(&t), Some(0));
 }
+
+/// 02-064: the "your gifts" send is refused; the "on sale" list is still
+/// asked, and the refused list shows its error.
+#[test]
+fn a_refused_craft_candidates_send_does_not_strand_the_market_list() {
+    use super::gift_market::received;
+    let mut t = Flaky::new();
+    t.sender.refuse(&["getGiftsForCrafting"]);
+    let primary = crate::gift_market::CraftGift::parse_received(&received(1)).unwrap();
+    t.driver.open_gift_craft(primary).unwrap();
+    assert_eq!(t.sender.count("searchGiftsForResale"), 1);
+    let craft = t.driver.session.payments.gift_market.craft.as_ref().unwrap();
+    assert!(craft.candidates_load.error().is_some());
+    assert!(craft.market.load.error().is_none());
+}
+
+/// 02-065: a close that could not be sent keeps the follow, so the next
+/// call closes it before the next auction opens.
+#[test]
+fn a_refused_auction_close_keeps_following_until_it_goes_out() {
+    use crate::gift_market::AuctionFollow;
+    let mut t = Flaky::new();
+    t.driver.follow_gift_auction(Some(5)).unwrap();
+    t.sender.refuse(&["closeGiftAuction"]);
+    assert!(t.driver.follow_gift_auction(Some(6)).is_err());
+    let follow = t.driver.session.payments.gift_market.follow;
+    assert!(follow.is_following(5), "{follow:?}");
+    assert_eq!(t.sender.count("openGiftAuction"), 1, "6 is not opened yet");
+    t.sender.refuse(&[]);
+    t.driver.follow_gift_auction(Some(6)).unwrap();
+    assert_eq!(t.sender.count("closeGiftAuction"), 1);
+    assert!(matches!(
+        t.driver.session.payments.gift_market.follow,
+        AuctionFollow::Following { gift_id: 6, .. }
+    ));
+}
+
+/// 02-062: a refused prices send is a failure the form draws (and retries),
+/// not an empty section.
+#[test]
+fn a_refused_giveaway_prices_send_fails_the_list() {
+    let mut t = Flaky::new();
+    t.sender
+        .refuse(&["getPremiumGiveawayPaymentOptions", "getStarGiveawayPaymentOptions"]);
+    assert!(t.driver.request_giveaway_options(-100).is_err());
+    let options = &t.driver.session.payments.giveaway.options;
+    assert!(options.premium.error().is_some());
+    assert!(options.stars.error().is_some());
+    t.sender.refuse(&[]);
+    t.driver.request_giveaway_options(-100).unwrap();
+    assert!(t.driver.session.payments.giveaway.options.loading());
+}
+
+/// 02-080: the pack option went out and a later send of the switch is
+/// refused: TDLib is pointed back at the pack the interface shows.
+#[test]
+fn a_refused_language_switch_points_tdlib_back_at_the_shown_pack() {
+    let mut t = Flaky::new();
+    t.sender.refuse(&["getLanguagePackStrings"]);
+    let info = crate::telegram::envelope::LanguagePackInfoData {
+        id: "de".into(),
+        base_language_pack_id: String::new(),
+        name: "German".into(),
+        native_name: "Deutsch".into(),
+        plural_code: "de".into(),
+        is_official: true,
+        is_rtl: false,
+        is_beta: false,
+        is_installed: true,
+        total_string_count: 0,
+        translated_string_count: 0,
+    };
+    assert!(t.driver.switch_language(info).is_err());
+    let options: Vec<_> = t
+        .sender
+        .all("setOption")
+        .into_iter()
+        .filter(|v| v["name"] == "language_pack_id")
+        .map(|v| v["value"]["value"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(options, ["de", "en"], "the new pack, then back to the shown one");
+}
+
+/// 02-073: a gift code check that could not be sent keeps the box showing
+/// the code it had.
+#[test]
+fn a_refused_gift_code_check_keeps_the_box() {
+    let mut t = Flaky::new();
+    t.driver.request_gift_code_info("A").unwrap();
+    t.sender.refuse(&["checkPremiumGiftCode"]);
+    assert!(t.driver.request_gift_code_info("B").is_err());
+    let lookup = t.driver.session.payments.gift_code.as_ref().unwrap();
+    assert_eq!(lookup.code, "A");
+}

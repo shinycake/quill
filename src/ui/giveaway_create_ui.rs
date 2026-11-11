@@ -253,6 +253,34 @@ impl QuillApp {
         })
     }
 
+    /// The prices line when there are none: the failure, with a Retry that
+    /// asks both lists again, or "not available".
+    fn giveaway_options_error(
+        &self,
+        section: Div,
+        error: String,
+        failed: bool,
+        draft: &GiveawayDraft,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let section = section.child(about_line(error));
+        if !failed {
+            return section;
+        }
+        let chat = draft.boosted_chat_id;
+        section.child(
+            Button::new("giveaway-options-retry")
+                .label(tr(keys::Q_CHAT_RETRY))
+                .small()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if let Some(live) = this.live.as_mut() {
+                        let _ = live.driver.request_giveaway_options(chat);
+                    }
+                    cx.notify();
+                })),
+        )
+    }
+
     fn giveaway_prize_section(
         &self,
         draft: &GiveawayDraft,
@@ -314,7 +342,8 @@ impl QuillApp {
                     .unwrap_or_else(|| {
                         tr(keys::Q_MONEY_PREMIUM_GIVEAWAYS_ARE_NOT_AVAILABLE).to_string()
                     });
-                return section.child(about_line(error));
+                let failed = options.premium.error().is_some();
+                return self.giveaway_options_error(section, error, failed, draft, cx);
             }
             if draft.is_specific_users() {
                 return self.giveaway_gift_code_months(section, draft, options, cx);
@@ -365,7 +394,8 @@ impl QuillApp {
                 .error()
                 .map(str::to_string)
                 .unwrap_or_else(|| tr(keys::Q_MONEY_STARS_GIVEAWAYS_ARE_NOT_AVAILABLE).to_string());
-            return section.child(about_line(error));
+            let failed = options.stars.error().is_some();
+            return self.giveaway_options_error(section, error, failed, draft, cx);
         }
         section = section.child(section_title(tr(keys::GIVEAWAY_CREDITS_OPTIONS_TITLE)));
         let mut rows = div().flex().flex_col().gap_1();
