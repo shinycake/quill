@@ -258,11 +258,12 @@ pub struct SettingsState {
     /// Phase 8.1: notifications decided by the reducer, drained by the UI for
     /// OS dispatch. Same-chat bursts coalesce into one entry ("N new messages").
     pub pending_notifications: Vec<QueuedNotification>,
-    /// A notification-worthy message arrived: the UI bounces the Dock icon /
-    /// flashes the taskbar (when the user wants it and the OS is not in
-    /// Do Not Disturb). Set independently of the "Desktop notifications"
-    /// switch, like tdesktop's alert.
-    pub pending_attention: bool,
+    /// The chats whose notification-worthy messages arrived since the last
+    /// drain: the UI bounces the Dock icon / flashes the taskbar once for a
+    /// non-empty list (when the user wants it and the OS is not in Do Not
+    /// Disturb). Queued independently of the "Desktop notifications"
+    /// switch, like tdesktop's alert; one entry per chat.
+    pub attention_chats: Vec<ChatId>,
     /// TDLib option `disable_contact_registered_notifications`: the inverse
     /// of tdesktop's "Contact joined Telegram" event switch.
     pub disable_contact_registered_notifications: bool,
@@ -443,11 +444,6 @@ pub struct SettingsState {
     /// `parity:proxy-settings`: TDLib's proxy list, ping results and the
     /// auto-switch / IPv6 preferences.
     pub proxy: crate::proxy::ProxyState,
-    /// The latest `pingProxy` sent for each ping slot (a list entry, or
-    /// the link box's). Only its answer fills the slot: an older ping of
-    /// another server (the previous link, the entry before an edit) is
-    /// dropped.
-    pub(crate) proxy_ping_requests: HashMap<i32, RequestId>,
     /// The running or just-finished account export ("Export Telegram
     /// data"); the UI shows its progress and clears it.
     pub account_export: Option<crate::export::AccountExport>,
@@ -554,7 +550,7 @@ impl SettingsState {
             inapp_sounds_enabled: true,
             desktop_notifications: true,
             pending_notifications: Vec::new(),
-            pending_attention: false,
+            attention_chats: Vec::new(),
             disable_contact_registered_notifications: false,
             notified: ShownNotifications::default(),
             default_auto_delete: Fetch::Idle,
@@ -598,7 +594,6 @@ impl SettingsState {
             language_prefs: LanguagePrefs::default(),
             device_prefs: Default::default(),
             proxy: Default::default(),
-            proxy_ping_requests: HashMap::new(),
             account_export: None,
             chat_export: None,
             rich_html_exports: Vec::new(),

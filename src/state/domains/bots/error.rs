@@ -71,26 +71,29 @@ impl Session {
                 bot_user_id,
                 first_page,
             })) => {
-                let failed_first_page = first_page
-                    && matches!(
-                        &self.bots.inline_query,
-                        Some(slot)
-                            if slot.chat_id == chat_id
-                                && slot.bot_user_id == bot_user_id
-                    );
-                if !first_page
-                    && let Some(slot) = self.bots.inline_query.as_mut()
+                // Only the request the slot waits for fails it: an older
+                // query's error leaves the newer one's stage alone.
+                let asked = pending.map(|p| p.id);
+                if let Some(slot) = self.bots.inline_query.as_mut()
                     && slot.chat_id == chat_id
                     && slot.bot_user_id == bot_user_id
-                    && let InlineQueryFetch::Loaded { next_offset, .. } = &slot.fetch
                 {
-                    slot.more_failed = Some(next_offset.clone());
-                }
-                if failed_first_page && let Some(slot) = self.bots.inline_query.as_mut() {
-                    slot.fetch = InlineQueryFetch::Failed(call_request_error_line(
-                        err,
-                        "Could not load inline results",
-                    ));
+                    match &mut slot.fetch {
+                        InlineQueryFetch::Loading(id) if first_page && Some(*id) == asked => {
+                            slot.fetch = InlineQueryFetch::Failed(call_request_error_line(
+                                err,
+                                "Could not load inline results",
+                            ));
+                        }
+                        InlineQueryFetch::Loaded { more, .. } if !first_page => {
+                            if let InlineMore::Asking(id) = *more
+                                && Some(id) == asked
+                            {
+                                *more = InlineMore::Failed;
+                            }
+                        }
+                        _ => {}
+                    }
                 }
             }
             // Bots slice: a failed `@botname` lookup lands in the

@@ -522,8 +522,9 @@ pub fn proxy_link_from_text(text: &str) -> Option<Result<ProxyDraft, ProxyIssue>
 /// Availability of one proxy (`pingProxy`, tdesktop's row status).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PingStatus {
-    /// Ping request in flight ("checking…").
-    Checking,
+    /// This ping request is in flight ("checking…"); only its answer or
+    /// error settles the slot.
+    Checking(RequestId),
     /// Answered after this many milliseconds.
     Available(u32),
     /// The ping failed ("not available").
@@ -534,7 +535,7 @@ impl PingStatus {
     /// Row status text, tdesktop's `lng_proxy_*` wording.
     pub fn label(self) -> String {
         match self {
-            PingStatus::Checking => "checking…".into(),
+            PingStatus::Checking(_) => "checking…".into(),
             PingStatus::Available(ms) => format!("available (ping: {ms} ms)"),
             PingStatus::Unavailable => "not available".into(),
         }
@@ -876,7 +877,7 @@ impl ProxyState {
             return RotationAction::None;
         }
         // The probe asked for is still out: wait for its answer.
-        if probing.is_some_and(|id| matches!(self.pings.get(&id), Some(PingStatus::Checking))) {
+        if probing.is_some_and(|id| matches!(self.pings.get(&id), Some(PingStatus::Checking(_)))) {
             return RotationAction::None;
         }
         let entries = self.entries();
@@ -1088,7 +1089,7 @@ mod tests {
         assert_eq!(s.rotation_step(9_999, false), RotationAction::None);
         // Timeout reached: probe the proxy after the current one.
         assert_eq!(s.rotation_step(10_000, false), RotationAction::Ping(2));
-        s.pings.insert(2, PingStatus::Checking);
+        s.pings.insert(2, PingStatus::Checking(RequestId(6)));
         assert_eq!(s.rotation_step(10_500, false), RotationAction::None);
         s.pings.insert(2, PingStatus::Unavailable);
         assert_eq!(s.rotation_step(11_000, false), RotationAction::Ping(3));
@@ -1134,7 +1135,7 @@ mod tests {
         assert_eq!(s.rotation_step(10_000, false), RotationAction::Ping(2));
         assert_eq!(s.rotation, Rotation::Probing { since_ms: 0, id: 2 });
         // Its own probe does hold it.
-        s.pings.insert(2, PingStatus::Checking);
+        s.pings.insert(2, PingStatus::Checking(RequestId(6)));
         assert_eq!(s.rotation_step(10_500, false), RotationAction::None);
     }
 

@@ -476,7 +476,10 @@ impl Session {
         // same moment (parity slice: notification sounds).
         let decision = self.notification_decision(&message);
         if decision.is_some() && self.settings.badge_prefs.flash_bounce {
-            self.settings.pending_attention = true;
+            let chat_id = message.chat_id;
+            if !self.settings.attention_chats.contains(&chat_id) {
+                self.settings.attention_chats.push(chat_id);
+            }
         }
         let notification = decision.filter(|_| self.settings.desktop_notifications);
         let sound = notification.as_ref().and_then(|_| {

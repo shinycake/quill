@@ -515,12 +515,27 @@ pub struct MemberAsk {
 /// lands in `Failed`, a failed "load more" keeps the loaded page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PollVotersFetch {
-    Loading,
+    /// The first page is out as this request; only its answer or error
+    /// leaves the stage (an update of the poll drops the entry, and the
+    /// late answer with it).
+    Loading(RequestId),
     Loaded {
         voters: Vec<MessageSender>,
         total_count: i32,
+        more: VotersMore,
     },
     Failed(String),
+}
+
+/// The next page of a loaded voters list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VotersMore {
+    /// The next page can be asked.
+    Ready,
+    /// The next page is out as this request; an answer to any other, or
+    /// after the list was dropped, is dropped. Its error leaves the loaded
+    /// page retryable.
+    Asking(RequestId),
 }
 
 /// Bots slice: fetch state for the single active inline query
@@ -529,14 +544,31 @@ pub enum PollVotersFetch {
 /// page-next keeps the loaded page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum InlineQueryFetch {
-    Loading,
+    /// The first page is out as this request; only its answer or error
+    /// leaves the stage.
+    Loading(RequestId),
     Loaded {
         inline_query_id: i64,
         button: Option<InlineQueryResultsButton>,
         results: Vec<InlineQueryResultSummary>,
         next_offset: String,
+        /// The page after `next_offset`.
+        more: InlineMore,
     },
     Failed(String),
+}
+
+/// The next page of loaded inline results. A failed page is not asked
+/// again until the next query replaces the slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InlineMore {
+    /// The next page can be asked.
+    Ready,
+    /// The next page is out as this request; an answer to any other
+    /// (an older query's page) is dropped.
+    Asking(RequestId),
+    /// The page at `next_offset` failed.
+    Failed,
 }
 
 /// Bots slice: the single active inline-query slot — which (chat, bot)
@@ -548,9 +580,6 @@ pub struct InlineQuerySlot {
     pub bot_user_id: i64,
     pub query: String,
     pub fetch: InlineQueryFetch,
-    /// The `next_offset` a "load more" request failed on: that page is not
-    /// asked again until the next query replaces the slot.
-    pub more_failed: Option<String>,
 }
 
 /// Bots slice: `@botname` → bot user id resolution for inline mode.

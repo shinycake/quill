@@ -234,7 +234,7 @@ impl QuillApp {
                 .map_or(LinkCheck::Review, |s| s.settings.proxy.link_check);
             let warn = stage == LinkCheck::Warn;
             let ping = match stage {
-                LinkCheck::Checking(_) => Some(PingStatus::Checking),
+                LinkCheck::Checking(id) => Some(PingStatus::Checking(id)),
                 LinkCheck::Done(status) => Some(status),
                 LinkCheck::Review | LinkCheck::Warn => None,
             };
@@ -276,7 +276,7 @@ impl QuillApp {
             let status = match ping {
                 Some(status) => {
                     let (text, color) = match status {
-                        PingStatus::Checking => {
+                        PingStatus::Checking(_) => {
                             (tr(keys::PROXY_BOX_TABLE_CHECKING).to_string(), text_muted())
                         }
                         PingStatus::Available(ms) => (

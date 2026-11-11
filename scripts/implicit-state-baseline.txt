@@ -1,7 +1,6 @@
 
 # Implicit-state debt (scripts/check-implicit-state.py). Only remove lines.
 
-ActiveGroupCall::loaded_all_participants
 AppearancePrefs::ignore_battery_saving
 
 
@@ -71,13 +70,9 @@ ReceivedGift::is_saved
 RowForum::loaded
 RowMenuFacts::is_saved_messages
 RowState::pending
-SettingsState::pending_attention
 
-SettingsState::pending_attention
 
-SettingsState::pending_attention
 
-SettingsState::pending_attention
 
 
 

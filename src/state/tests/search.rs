@@ -6,13 +6,6 @@ use super::*;
 fn inline_query_first_page_loads_slot() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.bots.inline_query = Some(InlineQuerySlot {
-        chat_id: ChatId(1),
-        bot_user_id: 77,
-        query: "@gif cats".to_string(),
-        more_failed: None,
-        fetch: InlineQueryFetch::Loading,
-    });
     let extra = session.request(
         RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
             chat_id: ChatId(1),
@@ -21,6 +14,12 @@ fn inline_query_first_page_loads_slot() {
         }),
         Some(ChatId(1)),
     );
+    session.bots.inline_query = Some(InlineQuerySlot {
+        chat_id: ChatId(1),
+        bot_user_id: 77,
+        query: "@gif cats".to_string(),
+        fetch: InlineQueryFetch::Loading(extra),
+    });
     apply_json(
         &mut session,
         &seq,
@@ -37,6 +36,7 @@ fn inline_query_first_page_loads_slot() {
                 button,
                 results,
                 next_offset,
+                ..
             } => {
                 assert_eq!(*inline_query_id, 9001);
                 assert_eq!(*button, None);
@@ -57,11 +57,18 @@ fn inline_query_first_page_loads_slot() {
 fn inline_query_pagination_appends() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
+    let extra = session.request(
+        RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
+            chat_id: ChatId(1),
+            bot_user_id: 77,
+            first_page: false,
+        }),
+        Some(ChatId(1)),
+    );
     session.bots.inline_query = Some(InlineQuerySlot {
         chat_id: ChatId(1),
         bot_user_id: 77,
         query: "@gif cats".to_string(),
-        more_failed: None,
         fetch: InlineQueryFetch::Loaded {
             inline_query_id: 9001,
             button: None,
@@ -73,16 +80,9 @@ fn inline_query_pagination_appends() {
                 ..Default::default()
             }],
             next_offset: "25".to_string(),
+            more: InlineMore::Asking(extra),
         },
     });
-    let extra = session.request(
-        RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
-            chat_id: ChatId(1),
-            bot_user_id: 77,
-            first_page: false,
-        }),
-        Some(ChatId(1)),
-    );
     apply_json(
         &mut session,
         &seq,
@@ -116,13 +116,6 @@ fn inline_query_pagination_appends() {
 fn inline_query_first_page_error_fails_slot() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.bots.inline_query = Some(InlineQuerySlot {
-        chat_id: ChatId(1),
-        bot_user_id: 77,
-        query: "@gif cats".to_string(),
-        more_failed: None,
-        fetch: InlineQueryFetch::Loading,
-    });
     let extra = session.request(
         RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
             chat_id: ChatId(1),
@@ -131,6 +124,12 @@ fn inline_query_first_page_error_fails_slot() {
         }),
         Some(ChatId(1)),
     );
+    session.bots.inline_query = Some(InlineQuerySlot {
+        chat_id: ChatId(1),
+        bot_user_id: 77,
+        query: "@gif cats".to_string(),
+        fetch: InlineQueryFetch::Loading(extra),
+    });
     apply_json(
         &mut session,
         &seq,
@@ -155,11 +154,18 @@ fn inline_query_first_page_error_fails_slot() {
 fn inline_query_pagination_error_keeps_loaded_page() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
+    let extra = session.request(
+        RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
+            chat_id: ChatId(1),
+            bot_user_id: 77,
+            first_page: false,
+        }),
+        Some(ChatId(1)),
+    );
     session.bots.inline_query = Some(InlineQuerySlot {
         chat_id: ChatId(1),
         bot_user_id: 77,
         query: "@gif cats".to_string(),
-        more_failed: None,
         fetch: InlineQueryFetch::Loaded {
             inline_query_id: 9001,
             button: None,
@@ -171,16 +177,9 @@ fn inline_query_pagination_error_keeps_loaded_page() {
                 ..Default::default()
             }],
             next_offset: "25".to_string(),
+            more: InlineMore::Asking(extra),
         },
     });
-    let extra = session.request(
-        RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
-            chat_id: ChatId(1),
-            bot_user_id: 77,
-            first_page: false,
-        }),
-        Some(ChatId(1)),
-    );
     apply_json(
         &mut session,
         &seq,
@@ -788,7 +787,6 @@ fn loaded_inline_slot(session: &mut Session, results: Vec<InlineQueryResultSumma
         chat_id: ChatId(1),
         bot_user_id: 77,
         query: "cats".to_string(),
-        more_failed: None,
         fetch: InlineQueryFetch::Loaded {
             inline_query_id: 9001,
             button: Some(InlineQueryResultsButton {
@@ -799,6 +797,7 @@ fn loaded_inline_slot(session: &mut Session, results: Vec<InlineQueryResultSumma
             }),
             results,
             next_offset: "25".to_string(),
+            more: InlineMore::Ready,
         },
     });
 }
@@ -813,6 +812,13 @@ fn inline_next_page(session: &mut Session, sink: &Arc<MemorySink>, json_results:
         }),
         Some(ChatId(1)),
     );
+    if let Some(InlineQuerySlot {
+        fetch: InlineQueryFetch::Loaded { more, .. },
+        ..
+    }) = session.bots.inline_query.as_mut()
+    {
+        *more = InlineMore::Asking(extra);
+    }
     apply_json(
         session,
         &seq,
@@ -898,7 +904,6 @@ fn inline_result_images_are_queued_for_download() {
         chat_id: ChatId(1),
         bot_user_id: 77,
         query: "cats".to_string(),
-        more_failed: None,
         fetch: InlineQueryFetch::Loaded {
             inline_query_id: 1,
             button: None,
@@ -918,6 +923,7 @@ fn inline_result_images_are_queued_for_download() {
                 },
             ],
             next_offset: String::new(),
+            more: InlineMore::Ready,
         },
     });
     assert_eq!(
@@ -981,4 +987,183 @@ fn the_demo_local_filter_settles_its_status() {
     assert_eq!(session.search.search.status(), SearchStatus::Idle);
     session.close_search();
     assert_eq!(session.search.search.status(), SearchStatus::Closed);
+}
+
+fn inline_request(session: &mut Session, first_page: bool) -> RequestId {
+    session.request(
+        RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
+            chat_id: ChatId(1),
+            bot_user_id: 77,
+            first_page,
+        }),
+        Some(ChatId(1)),
+    )
+}
+
+fn inline_page_json(extra: RequestId, id: &str) -> String {
+    format!(
+        r#"{{"@type":"inlineQueryResults","@extra":"{}","inline_query_id":"9","button":null,"results":[{{"@type":"inlineQueryResultArticle","id":"{id}","title":"T"}}],"next_offset":"25"}}"#,
+        extra.0
+    )
+}
+
+/// r2-18 05-072: the first page lands only through the request the slot
+/// waits for. The answer and the error of an older query leave a newer
+/// query's `Loading` alone, in either order.
+#[test]
+fn a_late_first_page_of_an_older_query_does_not_fill_the_new_slot() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let old = inline_request(&mut session, true);
+    let new = inline_request(&mut session, true);
+    session.bots.inline_query = Some(InlineQuerySlot {
+        chat_id: ChatId(1),
+        bot_user_id: 77,
+        query: "dogs".to_string(),
+        fetch: InlineQueryFetch::Loading(new),
+    });
+    apply_json(&mut session, &seq, &sink, &inline_page_json(old, "old"));
+    assert_eq!(
+        session.bots.inline_query.as_ref().map(|slot| &slot.fetch),
+        Some(&InlineQueryFetch::Loading(new))
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"INTERNAL"}}"#,
+            old.0
+        ),
+    );
+    assert_eq!(
+        session.bots.inline_query.as_ref().map(|slot| &slot.fetch),
+        Some(&InlineQueryFetch::Loading(new))
+    );
+    apply_json(&mut session, &seq, &sink, &inline_page_json(new, "new"));
+    assert!(matches!(
+        session.bots.inline_query.as_ref().map(|slot| &slot.fetch),
+        Some(InlineQueryFetch::Loaded { results, .. }) if results.len() == 1 && results[0].id == "new"
+    ));
+}
+
+/// r2-18 05-072: a next page asked for the previous query does not append
+/// to the list of the query that replaced it.
+#[test]
+fn a_late_next_page_of_an_older_query_is_dropped() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    loaded_inline_slot(&mut session, Vec::new());
+    let stale_more = inline_request(&mut session, false);
+    let fresh = inline_request(&mut session, true);
+    session.bots.inline_query = Some(InlineQuerySlot {
+        chat_id: ChatId(1),
+        bot_user_id: 77,
+        query: "dogs".to_string(),
+        fetch: InlineQueryFetch::Loading(fresh),
+    });
+    apply_json(&mut session, &seq, &sink, &inline_page_json(fresh, "dog"));
+    apply_json(&mut session, &seq, &sink, &inline_page_json(stale_more, "cat"));
+    let Some(InlineQuerySlot {
+        fetch: InlineQueryFetch::Loaded { results, more, .. },
+        ..
+    }) = &session.bots.inline_query
+    else {
+        panic!("slot not loaded");
+    };
+    assert_eq!(results.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), vec!["dog"]);
+    assert_eq!(*more, InlineMore::Ready);
+}
+
+fn voters_request(session: &mut Session, offset: i32) -> RequestId {
+    session.request(
+        RequestPurpose::Messages(MessagesPurpose::GetPollVoters {
+            chat_id: ChatId(1),
+            message_id: MessageId(5),
+            option_id: 0,
+            offset,
+        }),
+        Some(ChatId(1)),
+    )
+}
+
+fn voters_json(extra: RequestId, ids: &[i64]) -> String {
+    let senders: Vec<String> = ids
+        .iter()
+        .map(|id| format!(r#"{{"voter_id":{{"@type":"messageSenderUser","user_id":{id}}}}}"#))
+        .collect();
+    format!(
+        r#"{{"@type":"pollVoters","@extra":"{}","total_count":{},"voters":[{}]}}"#,
+        extra.0,
+        ids.len(),
+        senders.join(",")
+    )
+}
+
+/// r2-18 05-073: a voters page that was out when an update of the poll
+/// dropped the cached pages does not become the whole list.
+#[test]
+fn a_late_voters_page_after_an_update_does_not_become_the_list() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let key = (1, 5, 0);
+    let first = voters_request(&mut session, 0);
+    session
+        .messages
+        .poll_voters
+        .insert(key, PollVotersFetch::Loading(first));
+    apply_json(&mut session, &seq, &sink, &voters_json(first, &[1, 2]));
+    let more = voters_request(&mut session, 2);
+    let Some(PollVotersFetch::Loaded { more: slot, .. }) =
+        session.messages.poll_voters.get_mut(&key)
+    else {
+        panic!("first page not loaded");
+    };
+    *slot = VotersMore::Asking(more);
+    // `updatePoll` drops the cached pages.
+    session.messages.poll_voters.clear();
+    apply_json(&mut session, &seq, &sink, &voters_json(more, &[3]));
+    assert!(session.messages.poll_voters.is_empty());
+}
+
+/// r2-18 05-073: the first page lands by its request, and a page-next
+/// error keeps the loaded list retryable.
+#[test]
+fn voters_pages_land_by_request_and_a_next_page_error_stays_retryable() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let key = (1, 5, 0);
+    let first = voters_request(&mut session, 0);
+    let other = voters_request(&mut session, 0);
+    session
+        .messages
+        .poll_voters
+        .insert(key, PollVotersFetch::Loading(first));
+    apply_json(&mut session, &seq, &sink, &voters_json(other, &[9]));
+    assert_eq!(
+        session.messages.poll_voters.get(&key),
+        Some(&PollVotersFetch::Loading(first)),
+        "another request's page is dropped"
+    );
+    apply_json(&mut session, &seq, &sink, &voters_json(first, &[1, 2]));
+    let more = voters_request(&mut session, 2);
+    let Some(PollVotersFetch::Loaded { more: slot, .. }) =
+        session.messages.poll_voters.get_mut(&key)
+    else {
+        panic!("first page not loaded");
+    };
+    *slot = VotersMore::Asking(more);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"INTERNAL"}}"#,
+            more.0
+        ),
+    );
+    assert!(matches!(
+        session.messages.poll_voters.get(&key),
+        Some(PollVotersFetch::Loaded { voters, more: VotersMore::Ready, .. }) if voters.len() == 2
+    ));
 }

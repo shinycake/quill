@@ -3,7 +3,7 @@ use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::{BotsPurpose, CallbackButtonKey, CallbackPress, UsersPurpose};
 use crate::state::{
-    InlineBotResolve, InlineQueryFetch, InlineQuerySlot, LoginUrlRequest, RequestPurpose,
+    InlineBotResolve, InlineMore, InlineQueryFetch, InlineQuerySlot, LoginUrlRequest, RequestPurpose,
 };
 use crate::telegram::envelope::ChatKind;
 use crate::telegram::requests::{
@@ -637,15 +637,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let first_page = offset.is_empty();
-        if first_page {
-            self.session.bots.inline_query = Some(InlineQuerySlot {
-                chat_id,
-                bot_user_id,
-                query: query.to_string(),
-                fetch: InlineQueryFetch::Loading,
-                more_failed: None,
-            });
-        }
         let extra = self.session.request(
             RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
                 chat_id,
@@ -654,13 +645,36 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             Some(chat_id),
         );
+        if first_page {
+            self.session.bots.inline_query = Some(InlineQuerySlot {
+                chat_id,
+                bot_user_id,
+                query: query.to_string(),
+                fetch: InlineQueryFetch::Loading(extra),
+            });
+        } else if let Some(InlineQuerySlot {
+            fetch: InlineQueryFetch::Loaded { more, .. },
+            ..
+        }) = self.session.bots.inline_query.as_mut()
+        {
+            *more = InlineMore::Asking(extra);
+        }
         let json = get_inline_query_results(extra, bot_user_id, chat_id, query, offset);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                if first_page {
-                    self.session.bots.inline_query = None;
+                match self.session.bots.inline_query.as_mut() {
+                    Some(slot) if first_page => {
+                        if slot.fetch == InlineQueryFetch::Loading(extra) {
+                            self.session.bots.inline_query = None;
+                        }
+                    }
+                    Some(InlineQuerySlot {
+                        fetch: InlineQueryFetch::Loaded { more, .. },
+                        ..
+                    }) if *more == InlineMore::Asking(extra) => *more = InlineMore::Ready,
+                    _ => {}
                 }
                 Err(err)
             }

@@ -545,6 +545,7 @@ impl QuillApp {
             results,
             button,
             next_offset,
+            more,
             ..
         } = &slot.fetch
         else {
@@ -553,7 +554,7 @@ impl QuillApp {
         let (bot_user_id, offset) = (slot.bot_user_id, next_offset.clone());
         // A failed page waits for the next query instead of being asked again
         // on every poll batch.
-        if slot.more_failed.as_ref() == Some(&offset) {
+        if *more == quill::state::InlineMore::Failed {
             return;
         }
         let loading = session

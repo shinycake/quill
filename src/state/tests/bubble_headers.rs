@@ -168,7 +168,10 @@ fn reply_outside_the_window_is_fetched_and_filled_in() {
     session
         .messages
         .reply_targets
-        .insert((GROUP, 500), ReplyTarget::Loading(RequestId(1)));
+        .insert((GROUP, 500), ReplyTarget::Loading {
+                request: RequestId(1),
+                attempts: 0,
+            });
     assert!(session.reply_fetch_candidates().is_empty());
     apply_json(
         &mut session,
@@ -503,6 +506,44 @@ fn a_failed_replied_message_fetch_that_may_pass_is_asked_again_after_a_wait() {
     session.reject_replied_message(ChatId(GROUP), MessageId(501), 404, now);
     assert_eq!(
         session.messages.reply_targets.get(&(GROUP, 501)),
+        Some(&ReplyTarget::Missing)
+    );
+}
+
+/// r2-18 05-079: an error that may pass is asked again, but not for ever:
+/// after `MAX_REPLY_ATTEMPTS` asks the target is taken for gone, and a
+/// ask that never left keeps its count.
+#[test]
+fn a_replied_message_fetch_that_keeps_failing_gives_up() {
+    use crate::state::session_reply::MAX_REPLY_ATTEMPTS;
+    use std::time::Instant;
+    let mut session = Session::new(AccountKey::primary(), Arc::new(MemorySink::new()));
+    let now = Instant::now();
+    let key = (GROUP, 500);
+    for ask in 1..MAX_REPLY_ATTEMPTS {
+        session.begin_reply_fetch(ChatId(GROUP), MessageId(500));
+        session.reject_replied_message(ChatId(GROUP), MessageId(500), 500, now);
+        assert!(
+            matches!(
+                session.messages.reply_targets.get(&key),
+                Some(ReplyTarget::Retry { attempts, .. }) if *attempts == ask
+            ),
+            "ask {ask} may be retried"
+        );
+    }
+    let unsent = session.begin_reply_fetch(ChatId(GROUP), MessageId(500));
+    session.cancel_reply_fetch(unsent);
+    assert!(
+        matches!(
+            session.messages.reply_targets.get(&key),
+            Some(ReplyTarget::Retry { attempts, .. }) if *attempts == MAX_REPLY_ATTEMPTS - 1
+        ),
+        "a refused send keeps the count"
+    );
+    session.begin_reply_fetch(ChatId(GROUP), MessageId(500));
+    session.reject_replied_message(ChatId(GROUP), MessageId(500), 500, now);
+    assert_eq!(
+        session.messages.reply_targets.get(&key),
         Some(&ReplyTarget::Missing)
     );
 }

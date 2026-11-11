@@ -101,24 +101,16 @@ impl Session {
     }
 
     /// Whether `pending` is the ping its slot waits for: the latest one
-    /// sent for the slot, which still shows Checking (a slot cleared since,
-    /// for a new link or an edit, waits for nothing). Settles the slot's
-    /// request either way when it is the latest.
+    /// sent for the slot, which still shows `Checking` with its id (a slot
+    /// cleared since, for a new link or an edit, waits for nothing).
     fn take_awaited_ping(&mut self, pending: Option<&PendingRequest>) -> Option<i32> {
         let pending = pending?;
         let RequestPurpose::Settings(SettingsPurpose::PingProxy { proxy_id }) = pending.purpose
         else {
             return None;
         };
-        if self.settings.proxy_ping_requests.get(&proxy_id) != Some(&pending.id) {
-            return None;
-        }
-        self.settings.proxy_ping_requests.remove(&proxy_id);
-        matches!(
-            self.settings.proxy.pings.get(&proxy_id),
-            Some(PingStatus::Checking)
-        )
-        .then_some(proxy_id)
+        (self.settings.proxy.pings.get(&proxy_id) == Some(&PingStatus::Checking(pending.id)))
+            .then_some(proxy_id)
     }
 
     /// The link box's check answered: only the request its `Checking`

@@ -235,21 +235,29 @@ impl Session {
                 option_id,
                 offset,
             })) => {
-                if offset == 0
-                    || !matches!(
-                        self.messages
-                            .poll_voters
-                            .get(&(chat_id.0, message_id.0, option_id)),
-                        Some(PollVotersFetch::Loaded { .. })
-                    )
-                {
-                    self.messages.poll_voters.insert(
-                        (chat_id.0, message_id.0, option_id),
-                        PollVotersFetch::Failed(call_request_error_line(
-                            err,
-                            "Could not load voters",
-                        )),
-                    );
+                // Only the request the entry waits for fails it: a later
+                // page's error leaves the loaded page retryable, and an
+                // entry an update dropped has nothing to fail.
+                let asked = pending.map(|p| p.id);
+                let key = (chat_id.0, message_id.0, option_id);
+                match self.messages.poll_voters.get_mut(&key) {
+                    Some(PollVotersFetch::Loading(id)) if offset == 0 && Some(*id) == asked => {
+                        self.messages.poll_voters.insert(
+                            key,
+                            PollVotersFetch::Failed(call_request_error_line(
+                                err,
+                                "Could not load voters",
+                            )),
+                        );
+                    }
+                    Some(PollVotersFetch::Loaded { more, .. }) if offset > 0 => {
+                        if let VotersMore::Asking(id) = *more
+                            && Some(id) == asked
+                        {
+                            *more = VotersMore::Ready;
+                        }
+                    }
+                    _ => {}
                 }
             }
             // A failed translation shows "Translate failed." where the text

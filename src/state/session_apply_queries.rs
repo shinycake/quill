@@ -23,19 +23,24 @@ impl Session {
             first_page,
         })) = pending.map(|p| p.purpose)
         {
-            let slot_ok = match (first_page, self.bots.inline_query.as_ref()) {
-                (true, Some(slot)) => {
-                    slot.chat_id == chat_id
-                        && slot.bot_user_id == bot_user_id
-                        && matches!(slot.fetch, InlineQueryFetch::Loading)
-                }
-                (false, Some(slot)) => {
-                    slot.chat_id == chat_id
-                        && slot.bot_user_id == bot_user_id
-                        && matches!(slot.fetch, InlineQueryFetch::Loaded { .. })
-                }
-                _ => false,
-            };
+            // Only the page this slot waits for: the first page by its
+            // `Loading` request, a later one by the `more` request.
+            let asked = pending.map(|p| p.id);
+            let slot_ok = self.bots.inline_query.as_ref().is_some_and(|slot| {
+                slot.chat_id == chat_id
+                    && slot.bot_user_id == bot_user_id
+                    && match (&slot.fetch, first_page) {
+                        (InlineQueryFetch::Loading(id), true) => Some(*id) == asked,
+                        (
+                            InlineQueryFetch::Loaded {
+                                more: InlineMore::Asking(id),
+                                ..
+                            },
+                            false,
+                        ) => Some(*id) == asked,
+                        _ => false,
+                    }
+            });
             if slot_ok {
                 // The grid shows these images; the download pass finds
                 // them through the stored results.
@@ -69,6 +74,7 @@ impl Session {
                             button: page.button.or_else(|| old_button.clone()),
                             results,
                             next_offset,
+                            more: InlineMore::Ready,
                         }
                     }
                     _ => InlineQueryFetch::Loaded {
@@ -80,6 +86,7 @@ impl Session {
                             page.next_offset
                         },
                         results: page.results,
+                        more: InlineMore::Ready,
                     },
                 };
                 if let Some(slot) = self.bots.inline_query.as_mut() {
@@ -123,21 +130,29 @@ impl Session {
         {
             let key = (chat_id.0, message_id.0, option_id);
             let page_len = voters.len();
-            let merged = if offset == 0 {
-                voters
-            } else {
-                match self.messages.poll_voters.get(&key) {
-                    Some(PollVotersFetch::Loaded { voters: old, .. }) => {
-                        let mut merged = old.clone();
-                        for voter in voters {
-                            if !merged.contains(&voter) {
-                                merged.push(voter);
-                            }
+            // Only the page the entry waits for: the first page by its
+            // `Loading` request, a later one by the `more` request, and
+            // none once an update of the poll dropped the entry.
+            let asked = pending.map(|p| p.id);
+            let merged = match (offset, self.messages.poll_voters.get(&key)) {
+                (0, Some(PollVotersFetch::Loading(id))) if Some(*id) == asked => voters,
+                (
+                    1..,
+                    Some(PollVotersFetch::Loaded {
+                        voters: old,
+                        more: VotersMore::Asking(id),
+                        ..
+                    }),
+                ) if Some(*id) == asked => {
+                    let mut merged = old.clone();
+                    for voter in voters {
+                        if !merged.contains(&voter) {
+                            merged.push(voter);
                         }
-                        merged
                     }
-                    _ => voters,
+                    merged
                 }
+                _ => return,
             };
             // B4: a short page is the honest exhaustion signal —
             // `total_count` is approximate per the schema, so on a
@@ -154,6 +169,7 @@ impl Session {
                 PollVotersFetch::Loaded {
                     voters: merged,
                     total_count,
+                    more: VotersMore::Ready,
                 },
             );
         }
