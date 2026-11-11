@@ -270,8 +270,11 @@ fn a_chat_windows_video_chat_start_goes_on_in_its_own_frames(cx: &mut TestAppCon
             step: CreateStep::Waiting(request),
             join_as: None,
         });
-        app.windows
-            .open_box_in(DialogKind::GroupCallStart, Some(OTHER));
+        app.windows.open_box_in(
+            DialogKind::GroupCallStart,
+            Some(OTHER),
+            crate::ui::chat_window::AskWaits::Demo,
+        );
         let session = app.demo_session.as_mut().expect("a demo session");
         session.calls.create_join_as = Some(CreateJoinAs {
             chat_id: OTHER.0,
@@ -354,4 +357,21 @@ fn an_account_notice_is_freed_by_its_windows_close_not_dismissed(cx: &mut TestAp
             "free: it shows in the last-press window"
         );
     });
+}
+
+/// Sweep 13-009: an ask ends when the requests it was made with settle, not
+/// when no request at all is in flight; a demo's ask never settles by itself.
+#[test]
+fn an_ask_settles_with_its_own_requests_only() {
+    use super::AskWaits;
+    use quill::ids::RequestId;
+    let (first, second, later) = (RequestId(1), RequestId(2), RequestId(9));
+    let waits = AskWaits::Requests(vec![first, second]);
+    assert!(!waits.settled(|id| id == first), "one of its own is out");
+    assert!(
+        waits.settled(|id| id == later),
+        "a request made after the ask does not hold it"
+    );
+    assert!(AskWaits::Requests(Vec::new()).settled(|_| true));
+    assert!(!AskWaits::Demo.settled(|_| false));
 }

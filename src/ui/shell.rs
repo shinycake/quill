@@ -462,22 +462,18 @@ impl QuillShell {
                 }
             }
         });
-        // An ask is waiting for the answer that sets its flag. With no
-        // request in flight and the flag still clear, that answer is not
-        // coming (it failed, was cancelled, or opened nothing): the ask
-        // ends here, so a later open of the kind is not pinned to it.
+        // An ask is waiting for the answer that sets its flag. Once the
+        // requests it was made with have settled and the flag is still
+        // clear, that answer is not coming (it failed, was cancelled, or
+        // opened nothing): the ask ends here, so a later open of the kind
+        // is not pinned to it. A demo stages its answers by hand.
         app.update(cx, |app, _| {
-            // Only a live client has requests to wait on; a demo stages its
-            // answers by hand.
-            if app
-                .live
-                .as_ref()
-                .is_some_and(|live| live.driver.session.requests.is_empty())
-            {
-                for kind in app.windows.asked_dialogs() {
-                    if !Self::flag_open(app, kind) {
-                        app.windows.dialog_ask_expired(kind);
-                    }
+            for (kind, waits) in app.windows.asked_dialogs() {
+                let settled = app.live.as_ref().is_some_and(|live| {
+                    waits.settled(|id| live.driver.session.requests.get(id).is_some())
+                });
+                if settled && !Self::flag_open(app, kind) {
+                    app.windows.dialog_ask_expired(kind);
                 }
             }
         });

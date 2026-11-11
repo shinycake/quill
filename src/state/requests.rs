@@ -767,6 +767,13 @@ impl RequestRegistry {
         self.pending.len()
     }
 
+    /// The ids in flight now, oldest first.
+    pub fn pending_ids(&self) -> Vec<RequestId> {
+        let mut ids: Vec<RequestId> = self.pending.values().map(|p| p.id).collect();
+        ids.sort_by_key(|id| id.0);
+        ids
+    }
+
     pub fn is_empty(&self) -> bool {
         self.pending.is_empty()
     }
