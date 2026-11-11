@@ -24,7 +24,7 @@ use crate::diagnostics::{Diagnostic, DiagnosticSink};
 use crate::telegram::client::{OwnedEnvelope, ReceiveBridge, copy_and_parse};
 use crate::telegram::ffi::{MAX_NATIVE_LOG_VERBOSITY, TdJson, TdJsonError};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
@@ -98,10 +98,17 @@ pub const LAUNCH_CHATS_EXTRA: &str = "quill-launch-chats";
 /// first frame before the chats could draw. A TDLib still opening its
 /// database is further off, and the window does not wait for it.
 pub struct LaunchChats {
+    /// The client whose page the first frame waits for: the on-screen
+    /// account's, claimed when it asks for the page. Another account's
+    /// states move nothing. `NO_OWNER` before the claim.
+    owner: AtomicI64,
     stage: AtomicU8,
     lock: Mutex<()>,
     came: Condvar,
 }
+
+/// No client has claimed the launch page.
+const NO_OWNER: i64 = -1;
 
 /// TDLib is opening its database.
 const STARTING: u8 = 0;
@@ -127,10 +134,17 @@ pub static LAUNCH_CHATS: LaunchChats = LaunchChats::new();
 impl LaunchChats {
     pub const fn new() -> Self {
         Self {
+            owner: AtomicI64::new(NO_OWNER),
             stage: AtomicU8::new(STARTING),
             lock: Mutex::new(()),
             came: Condvar::new(),
         }
+    }
+
+    /// `client_id` asks for the launch page: only its envelopes move the
+    /// wait from now on.
+    pub fn claim(&self, client_id: i32) {
+        self.owner.store(i64::from(client_id), Ordering::SeqCst);
     }
 
     fn stage(&self) -> u8 {
@@ -174,7 +188,8 @@ impl LaunchChats {
     /// authorization state that means no chats are coming.
     fn observe(&self, json: &str, owned: &OwnedEnvelope) {
         use crate::telegram::envelope::{AuthPayload, AuthorizationState, EnvelopePayload};
-        if self.is_in() {
+        if self.is_in() || owned.client_id.map(i64::from) != Some(self.owner.load(Ordering::SeqCst))
+        {
             return;
         }
         let no_chats = match &owned.envelope.payload {

@@ -6,6 +6,18 @@ use crate::telegram::envelope::*;
 use crate::telegram::requests::ArchiveChatListSettings;
 pub(crate) use parse::parse_chat_list_payload;
 
+/// The last message `updateChatLastMessage` reports.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, PartialEq)]
+pub enum LastMessageUpdate {
+    /// The chat has no last message (`null`).
+    Cleared,
+    /// A message arrived whose JSON did not parse: the row keeps its old
+    /// preview, since "cannot read it" is not "has none".
+    Unreadable,
+    Message(ParsedMessage),
+}
+
 /// Payloads for the chat list: loading, folders, archive and pins; wrapped as
 /// [`EnvelopePayload::ChatList`].
 // Sized like the flat enum before the domain split; boxing the big
@@ -16,7 +28,7 @@ pub enum ChatListPayload {
     UpdateChatPosition(ChatPositionUpdate),
     UpdateChatLastMessage {
         chat_id: ChatId,
-        last_message: Option<ParsedMessage>,
+        last_message: LastMessageUpdate,
         positions: Vec<ChatPositionUpdate>,
     },
     UpdateChatAddedToList {

@@ -623,11 +623,14 @@ impl Session {
             )
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
-            let albums = self.stories.albums.entry(chat_id.0).or_default();
-            if let Some(existing) = albums.iter_mut().find(|a| a.id == album.id) {
-                *existing = album.clone();
-            } else {
-                albums.push(album.clone());
+            // Merge into a list that was fetched: a list started here from
+            // one album would read as the chat's whole list.
+            if let Some(albums) = self.stories.albums.get_mut(&chat_id.0) {
+                if let Some(existing) = albums.iter_mut().find(|a| a.id == album.id) {
+                    *existing = album.clone();
+                } else {
+                    albums.push(album.clone());
+                }
             }
             if !matches!(purpose, RequestPurpose::SetStoryAlbumName) {
                 self.stories.album_stories.remove(&(chat_id.0, album.id));

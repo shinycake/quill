@@ -592,7 +592,7 @@ impl QuillApp {
                         .get(&(ProfileChatsKind::SuitableDiscussionChats, 0))
                         .cloned()
                     {
-                        None | Some(ProfileChatsFetch::Loading) => {
+                        None | Some(ProfileChatsFetch::Loading(_)) => {
                             body = body.child(
                                 div()
                                     .px_2()

@@ -171,3 +171,14 @@ fn a_personal_photo_is_the_one_matched() {
     );
     assert_eq!(session.userpic_video(USER), UserpicVideo::Clip(FileId(89)));
 }
+
+#[test]
+fn a_userpic_ask_that_was_not_sent_is_asked_again() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    update_user(&mut session, &seq, &sink, &profile_photo(901, true));
+    assert!(session.take_userpic_full_info_ask(USER));
+    session.release_userpic_full_info_ask(USER);
+    assert!(session.take_userpic_full_info_ask(USER));
+    assert!(!session.take_userpic_full_info_ask(USER));
+}

@@ -122,7 +122,7 @@ impl QuillApp {
                 .collect();
         let empty_search = rows.is_empty() && !query.trim().is_empty();
         let more = (!paging.exhausted).then(|| {
-            if paging.loading_more {
+            if paging.next_page.asking() {
                 div()
                     .px_2()
                     .py_1p5()

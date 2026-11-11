@@ -526,7 +526,9 @@ fn cl1_pin_error_rolls_back_and_surfaces() {
         .pending_mut(extra)
         .expect("pending")
         .rollback = Some(RequestRollback::ChatPin {
+        chat_id: 11,
         previous: false,
+        shown: true,
         archived: false,
     });
     session.chats.get_mut(&11).expect("chat").is_pinned = true;
@@ -567,7 +569,11 @@ fn cl1_marked_as_unread_update_and_rollback() {
         .requests
         .pending_mut(extra)
         .expect("pending")
-        .rollback = Some(RequestRollback::ChatMarkedAsUnread { previous: true });
+        .rollback = Some(RequestRollback::ChatMarkedAsUnread {
+        chat_id: 12,
+        previous: true,
+        shown: false,
+    });
     session
         .chats
         .get_mut(&12)

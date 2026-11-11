@@ -153,10 +153,10 @@ fn last_message_positions_are_typed() {
             positions,
         }) => {
             assert_eq!(chat_id.0, 3);
-            assert_eq!(
-                last_message.unwrap().content,
-                MessageContent::Text("preview".into())
-            );
+            let LastMessageUpdate::Message(message) = last_message else {
+                panic!("expected a message")
+            };
+            assert_eq!(message.content, MessageContent::Text("preview".into()));
             assert_eq!(positions.len(), 1);
             assert_eq!(positions[0].order, 5);
             assert!(positions[0].is_pinned);
@@ -568,4 +568,36 @@ fn message_is_pinned_and_update_are_typed() {
     );
     assert!(schema.lines().any(|l| l.starts_with("pinChatMessage ")));
     assert!(schema.lines().any(|l| l.starts_with("unpinChatMessage ")));
+}
+
+/// Sweep 06-048: a last message that does not parse is not "no last
+/// message".
+#[test]
+fn an_unreadable_last_message_is_not_a_cleared_one() {
+    let parse = |json: &str| match parse_envelope(json).unwrap().payload {
+        EnvelopePayload::ChatList(ChatListPayload::UpdateChatLastMessage {
+            last_message, ..
+        }) => last_message,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(
+        parse(r#"{"@type":"updateChatLastMessage","chat_id":3,"last_message":null,"positions":[]}"#),
+        LastMessageUpdate::Cleared
+    );
+    assert_eq!(
+        parse(
+            r#"{"@type":"updateChatLastMessage","chat_id":3,"last_message":{"is_outgoing":false},"positions":[]}"#
+        ),
+        LastMessageUpdate::Unreadable
+    );
+}
+
+/// Sweep 06-051: a `messageEffect` Quill cannot read fails the request
+/// (a synthetic error) instead of reaching the log-only Unknown arm.
+#[test]
+fn an_unreadable_message_effect_answer_becomes_an_error() {
+    let json = r#"{"@type":"messageEffect","@extra":"41","id":0,"type":{"@type":"messageEffectTypeFutureThing"}}"#;
+    assert!(parse_envelope(json).is_err());
+    let env = crate::telegram::client::recover_failed_response(json).expect("recovered");
+    assert!(matches!(env.payload, EnvelopePayload::Error(_)));
 }

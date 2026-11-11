@@ -66,4 +66,14 @@ impl Session {
             .userpic_full_info_asked
             .insert((user_id, photo_id))
     }
+
+    /// The ask went nowhere (the send failed): forget it so the next draw
+    /// asks again. An error answer keeps it, or a refusing server would be
+    /// asked on every frame.
+    pub fn release_userpic_full_info_ask(&mut self, user_id: i64) {
+        let photo_id = self.users.get(&user_id).map_or(0, |user| user.photo_id);
+        self.users_state
+            .userpic_full_info_asked
+            .remove(&(user_id, photo_id));
+    }
 }

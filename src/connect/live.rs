@@ -183,6 +183,7 @@ impl LiveConnect {
     fn load_chats_when_ready(&self) {
         let api = self._live.api.clone();
         let client_id = self._live.client_id;
+        crate::telegram::hub::LAUNCH_CHATS.claim(client_id);
         let request = crate::telegram::requests::load_chats_untracked(MAIN_CHAT_LOAD_LIMIT);
         self._live.hub.routes().on_ready(
             client_id,

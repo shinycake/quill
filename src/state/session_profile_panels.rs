@@ -112,6 +112,26 @@ impl Session {
             return;
         };
         let mut ids: Vec<i64> = chat_ids.iter().map(|id| id.0).collect();
+        let is_next_page = key.0 == ProfileChatsKind::GroupsInCommon
+            && self
+                .users_state
+                .common_groups_paging
+                .get(&key.1)
+                .is_some_and(|paging| paging.next_page.answers(pending.id));
+        // Only the request the list waits for lands: the first page, or the
+        // follow-up page. A late answer to a fetch that was dropped is not
+        // taken for either.
+        let waits = is_next_page
+            || match self.users_state.profile_chat_lists.get(&key) {
+                Some(ProfileChatsFetch::Loading(id)) => *id == pending.id,
+                // The driver always records the fetch before it sends; an
+                // answer with no record is a fixture's.
+                None => true,
+                Some(ProfileChatsFetch::Loaded(_) | ProfileChatsFetch::Failed(_)) => false,
+            };
+        if !waits {
+            return;
+        }
         if key.0 == ProfileChatsKind::GroupsInCommon {
             let paging = self
                 .users_state
@@ -119,8 +139,9 @@ impl Session {
                 .entry(key.1)
                 .or_default();
             paging.exhausted = ids.len() < GROUPS_IN_COMMON_PAGE;
+            paging.next_page = PhotoPage::Idle;
             // A follow-up page extends the list; the first page replaces it.
-            if std::mem::take(&mut paging.loading_more)
+            if is_next_page
                 && let Some(ProfileChatsFetch::Loaded(shown)) =
                     self.users_state.profile_chat_lists.get(&key)
             {
@@ -155,14 +176,21 @@ impl Session {
             // again. (TDLib's "Wrong offset_chat_id" would only repeat.)
             if key.0 == ProfileChatsKind::GroupsInCommon
                 && let Some(paging) = self.users_state.common_groups_paging.get_mut(&key.1)
-                && std::mem::take(&mut paging.loading_more)
+                && paging.next_page.answers(pending.id)
             {
+                paging.next_page = PhotoPage::Idle;
                 paging.exhausted = true;
                 return;
             }
-            self.users_state
-                .profile_chat_lists
-                .insert(key, ProfileChatsFetch::Failed(reason));
+            if match self.users_state.profile_chat_lists.get(&key) {
+                Some(ProfileChatsFetch::Loading(id)) => *id == pending.id,
+                None => true,
+                Some(ProfileChatsFetch::Loaded(_) | ProfileChatsFetch::Failed(_)) => false,
+            } {
+                self.users_state
+                    .profile_chat_lists
+                    .insert(key, ProfileChatsFetch::Failed(reason));
+            }
         } else if pending.purpose == RequestPurpose::GetUserProfilePhotos
             && let Some(user_id) = pending.user_id
         {

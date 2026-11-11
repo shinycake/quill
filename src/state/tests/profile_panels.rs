@@ -368,23 +368,27 @@ fn groups_in_common_page_in_and_stop_on_a_short_page() {
     let seq = AtomicU64::new(0);
     let purpose = RequestPurpose::GetProfileChats(ProfileChatsKind::GroupsInCommon);
     let first = session.request_for_user(purpose, 31);
+    session.users_state.profile_chat_lists.insert(
+        (ProfileChatsKind::GroupsInCommon, 31),
+        ProfileChatsFetch::Loading(first),
+    );
     apply_json(&mut session, &seq, &sink, &chats_json(first, 1..41));
     let list = ProfileChatsKind::GroupsInCommon;
     assert_eq!(session.profile_chat_list(list, 31).len(), 40);
     assert!(!session.common_groups_paging(31).exhausted);
 
+    let more = session.request_for_user(purpose, 31);
     session
         .users_state
         .common_groups_paging
         .entry(31)
         .or_default()
-        .loading_more = true;
-    let more = session.request_for_user(purpose, 31);
+        .next_page = crate::state::PhotoPage::Asking(more);
     apply_json(&mut session, &seq, &sink, &chats_json(more, 38..46));
     // Overlap is dropped; the short page ends the list.
     assert_eq!(session.profile_chat_list(list, 31).len(), 45);
     let paging = session.common_groups_paging(31);
-    assert!(paging.exhausted && !paging.loading_more);
+    assert!(paging.exhausted && !paging.next_page.asking());
 }
 
 #[test]
@@ -393,14 +397,18 @@ fn a_failed_follow_up_page_keeps_the_listed_groups() {
     let seq = AtomicU64::new(0);
     let purpose = RequestPurpose::GetProfileChats(ProfileChatsKind::GroupsInCommon);
     let first = session.request_for_user(purpose, 31);
+    session.users_state.profile_chat_lists.insert(
+        (ProfileChatsKind::GroupsInCommon, 31),
+        ProfileChatsFetch::Loading(first),
+    );
     apply_json(&mut session, &seq, &sink, &chats_json(first, 1..41));
+    let more = session.request_for_user(purpose, 31);
     session
         .users_state
         .common_groups_paging
         .entry(31)
         .or_default()
-        .loading_more = true;
-    let more = session.request_for_user(purpose, 31);
+        .next_page = crate::state::PhotoPage::Asking(more);
     apply_json(
         &mut session,
         &seq,
@@ -417,7 +425,7 @@ fn a_failed_follow_up_page_keeps_the_listed_groups() {
         40
     );
     let paging = session.common_groups_paging(31);
-    assert!(!paging.loading_more);
+    assert!(!paging.next_page.asking());
     // The list ends here, as in tdesktop, so Load more cannot repeat.
     assert!(paging.exhausted);
 }
@@ -575,4 +583,42 @@ fn the_business_wait_ends_with_the_own_full_info_error_or_answer() {
     // read as ready.
     session.users_state.user_full_infos.remove(&31);
     assert!(!matches!(session.business_own_info(), Fetch::Ready(())));
+}
+
+#[test]
+fn a_late_follow_up_page_of_a_dropped_fetch_does_not_replace_the_list() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let purpose = RequestPurpose::GetProfileChats(ProfileChatsKind::GroupsInCommon);
+    let key = (ProfileChatsKind::GroupsInCommon, 31);
+    let first = session.request_for_user(purpose, 31);
+    session
+        .users_state
+        .profile_chat_lists
+        .insert(key, ProfileChatsFetch::Loading(first));
+    apply_json(&mut session, &seq, &sink, &chats_json(first, 1..41));
+    let late = session.request_for_user(purpose, 31);
+    session
+        .users_state
+        .common_groups_paging
+        .entry(31)
+        .or_default()
+        .next_page = crate::state::PhotoPage::Asking(late);
+    // The profile is fetched again: the paging is dropped, a new first page
+    // is asked, and it lands before the old page 2.
+    session.users_state.common_groups_paging.remove(&31);
+    let again = session.request_for_user(purpose, 31);
+    session
+        .users_state
+        .profile_chat_lists
+        .insert(key, ProfileChatsFetch::Loading(again));
+    apply_json(&mut session, &seq, &sink, &chats_json(late, 41..45));
+    assert_eq!(
+        session.users_state.profile_chat_lists.get(&key),
+        Some(&ProfileChatsFetch::Loading(again))
+    );
+    apply_json(&mut session, &seq, &sink, &chats_json(again, 1..41));
+    apply_json(&mut session, &seq, &sink, &chats_json(late, 41..45));
+    assert_eq!(session.profile_chat_list(key.0, 31).len(), 40);
+    assert!(!session.common_groups_paging(31).exhausted);
 }

@@ -157,7 +157,9 @@ pub(crate) fn parse_stickers_payload(
                     files,
                 }))
             }
-            None => return Ok(None),
+            // An effect Quill cannot read is a failed answer, so the
+            // request's id fails instead of staying asked for good.
+            None => Err(ParseError::MissingField),
         },
         "updateAvailableMessageEffects" => {
             let (reaction_ids, sticker_ids) =

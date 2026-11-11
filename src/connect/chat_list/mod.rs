@@ -193,11 +193,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if let Some(chat) = self.session.chats.get_mut(&chat_id.0) {
             let rollback = RequestRollback::ChatPin {
+                chat_id: chat_id.0,
                 previous: if archived {
                     chat.archive_is_pinned
                 } else {
                     chat.is_pinned
                 },
+                shown: pin,
                 archived,
             };
             if archived {
@@ -245,7 +247,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if let Some(chat) = self.session.chats.get_mut(&chat_id.0) {
             let rollback = RequestRollback::ChatMarkedAsUnread {
+                chat_id: chat_id.0,
                 previous: chat.is_marked_as_unread,
+                shown: marked,
             };
             chat.is_marked_as_unread = marked;
             if let Some(pending) = self.session.requests.pending_mut(extra) {

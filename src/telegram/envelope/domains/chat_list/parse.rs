@@ -20,8 +20,11 @@ pub(crate) fn parse_chat_list_payload(
                 ChatListPayload::UpdateChatLastMessage {
                     chat_id,
                     last_message: match value.get("last_message") {
-                        None | Some(Value::Null) => None,
-                        Some(message) => parse_message(message).ok(),
+                        None | Some(Value::Null) => LastMessageUpdate::Cleared,
+                        Some(message) => match parse_message(message) {
+                            Ok(message) => LastMessageUpdate::Message(message),
+                            Err(_) => LastMessageUpdate::Unreadable,
+                        },
                     },
                     positions: parse_position_list(chat_id, value.get("positions")),
                 },

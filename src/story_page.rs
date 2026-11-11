@@ -257,6 +257,21 @@ mod tests {
         // the `storyAlbum` answer, Failed on a TDLib error.
         let (mut session, sink) = session();
         let seq = AtomicU64::new(1);
+        // An album answer for a chat whose albums were never fetched does
+        // not start a one-album list (sweep 05-198).
+        let first = session.request(RequestPurpose::CreateStoryAlbum, Some(ChatId(11)));
+        session.begin_story_page_op(story_page_op_label(RequestPurpose::CreateStoryAlbum), first);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"storyAlbum","@extra":"{}","id":8,"name":"Early"}}"#,
+                first.0
+            ),
+        );
+        assert!(!session.stories.albums.contains_key(&11));
+        session.stories.albums.insert(11, Vec::new());
         let extra = session.request(RequestPurpose::CreateStoryAlbum, Some(ChatId(11)));
         session.begin_story_page_op(story_page_op_label(RequestPurpose::CreateStoryAlbum), extra);
         assert!(matches!(

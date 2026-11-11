@@ -146,6 +146,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request_for_user(RequestPurpose::GetUserFullInfo, user_id);
         if let Err(err) = self.sender.send_json(&get_user_full_info(extra, user_id)) {
             self.session.requests.take(extra);
+            self.session.release_userpic_full_info_ask(user_id);
             return Err(err);
         }
         Ok(Some(extra))

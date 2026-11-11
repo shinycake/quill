@@ -66,135 +66,6 @@ impl Session {
                     chat.can_send_basic_messages = previous_can_send;
                 }
             }
-            Some(RequestRollback::JoinByRequest {
-                supergroup_id,
-                previous,
-            }) => match previous {
-                Some(flag) => {
-                    self.groups
-                        .supergroup_join_by_request
-                        .insert(supergroup_id, flag);
-                }
-                None => {
-                    self.groups
-                        .supergroup_join_by_request
-                        .remove(&supergroup_id);
-                }
-            },
-            Some(RequestRollback::SupergroupUsername {
-                supergroup_id,
-                previous,
-            }) => match previous {
-                Some(username) => {
-                    self.groups
-                        .supergroup_usernames
-                        .insert(supergroup_id, username);
-                }
-                None => {
-                    self.groups.supergroup_usernames.remove(&supergroup_id);
-                }
-            },
-            // Slice G2: restore the pre-toggle sign/show flags.
-            Some(RequestRollback::SignMessages {
-                supergroup_id,
-                previous_sign,
-                previous_show,
-            }) => {
-                match previous_sign {
-                    Some(flag) => {
-                        self.groups
-                            .supergroup_sign_messages
-                            .insert(supergroup_id, flag);
-                    }
-                    None => {
-                        self.groups.supergroup_sign_messages.remove(&supergroup_id);
-                    }
-                }
-                match previous_show {
-                    Some(flag) => {
-                        self.groups
-                            .supergroup_show_message_sender
-                            .insert(supergroup_id, flag);
-                    }
-                    None => {
-                        self.groups
-                            .supergroup_show_message_sender
-                            .remove(&supergroup_id);
-                    }
-                }
-            }
-            Some(RequestRollback::ChatIsTranslatable { chat_id, previous }) => {
-                self.set_chat_translatable(chat_id, previous);
-            }
-            Some(RequestRollback::AutoTranslate {
-                supergroup_id,
-                previous,
-            }) => self.set_supergroup_auto_translate(supergroup_id, previous),
-            // Slice G2: restore the pre-toggle anti-spam flag.
-            Some(RequestRollback::AntiSpam {
-                supergroup_id,
-                previous,
-            }) => match previous {
-                Some(flag) => {
-                    self.groups
-                        .supergroup_anti_spam_enabled
-                        .insert(supergroup_id, flag);
-                }
-                None => {
-                    self.groups
-                        .supergroup_anti_spam_enabled
-                        .remove(&supergroup_id);
-                }
-            },
-            // B7: restore the group admin toggles the server refused.
-            Some(RequestRollback::GroupToggle {
-                supergroup_id,
-                toggle,
-                previous,
-            }) => self.restore_group_toggle(supergroup_id, toggle, previous),
-            Some(RequestRollback::ProtectedContent {
-                chat_id,
-                previous,
-                previous_disabled_at,
-            }) => {
-                self.set_chat_protected(chat_id, previous);
-                self.groups
-                    .private_sharing
-                    .restore_disabled(ChatId(chat_id), previous_disabled_at);
-            }
-            Some(RequestRollback::DefaultReaction { previous }) => {
-                self.stickers.default_reaction = previous;
-            }
-            Some(RequestRollback::AvailableReactions { chat_id, previous }) => match previous {
-                Some(setting) => {
-                    self.chats_state
-                        .chat_available_reactions
-                        .insert(chat_id, setting);
-                }
-                None => {
-                    self.chats_state.chat_available_reactions.remove(&chat_id);
-                }
-            },
-            // Slice CL1: restore the pre-toggle pinned /
-            // marked-as-unread flags the server refused.
-            Some(RequestRollback::ChatPin { previous, archived }) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && let Some(chat) = self.chats.get_mut(&chat_id.0)
-                {
-                    if archived {
-                        chat.archive_is_pinned = previous;
-                    } else {
-                        chat.is_pinned = previous;
-                    }
-                }
-            }
-            Some(RequestRollback::ChatMarkedAsUnread { previous }) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && let Some(chat) = self.chats.get_mut(&chat_id.0)
-                {
-                    chat.is_marked_as_unread = previous;
-                }
-            }
             // Slice CL2: restore the pre-reorder `order` values
             // the server refused, then rebuild the list order.
             Some(RequestRollback::ChatPinOrder { previous, archived }) => {
@@ -215,7 +86,19 @@ impl Session {
                 self.chat_list.archive_chat_list_settings = previous;
             }
             Some(
-                rollback @ (RequestRollback::ForumTopicMute { .. }
+                rollback @ (RequestRollback::JoinByRequest { .. }
+                | RequestRollback::SupergroupUsername { .. }
+                | RequestRollback::DefaultReaction { .. }
+                | RequestRollback::AvailableReactions { .. }
+                | RequestRollback::SignMessages { .. }
+                | RequestRollback::ChatIsTranslatable { .. }
+                | RequestRollback::AutoTranslate { .. }
+                | RequestRollback::AntiSpam { .. }
+                | RequestRollback::GroupToggle { .. }
+                | RequestRollback::ProtectedContent { .. }
+                | RequestRollback::ChatPin { .. }
+                | RequestRollback::ChatMarkedAsUnread { .. }
+                | RequestRollback::ForumTopicMute { .. }
                 | RequestRollback::PollVote { .. }
                 | RequestRollback::BusinessBotBar { .. }
                 | RequestRollback::ChatLinkDelete { .. }

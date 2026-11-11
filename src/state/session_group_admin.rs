@@ -344,6 +344,30 @@ impl Session {
         }
     }
 
+    /// What `set_group_toggle` would return now: the toggle's current value.
+    pub(crate) fn group_toggle_value(
+        &self,
+        supergroup_id: i64,
+        toggle: GroupToggle,
+    ) -> Option<bool> {
+        let admin = || {
+            self.groups
+                .supergroup_full_infos
+                .get(&supergroup_id)
+                .map(|info| &info.admin)
+        };
+        match toggle {
+            GroupToggle::JoinToSend => self
+                .groups
+                .supergroup_join_to_send
+                .get(&supergroup_id)
+                .copied(),
+            GroupToggle::HistoryVisible => admin().map(|a| a.is_all_history_available),
+            GroupToggle::HiddenMembers => admin().map(|a| a.has_hidden_members),
+            GroupToggle::SponsoredMessages => admin().map(|a| a.can_have_sponsored_messages),
+        }
+    }
+
     /// Undo `set_group_toggle` after the server refused the change.
     pub(crate) fn restore_group_toggle(
         &mut self,

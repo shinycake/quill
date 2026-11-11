@@ -567,7 +567,7 @@ impl QuillApp {
                         .child(tr(keys::Q_PEOPLE_SHOW_A_CHANNEL_ON_YOUR)),
                 );
                 match fetch {
-                    None | Some(ProfileChatsFetch::Loading) => {
+                    None | Some(ProfileChatsFetch::Loading(_)) => {
                         body = body.child(
                             div()
                                 .text_sm()

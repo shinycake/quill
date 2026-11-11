@@ -21,11 +21,13 @@ pub enum RequestRollback {
     JoinByRequest {
         supergroup_id: i64,
         previous: Option<bool>,
+        shown: bool,
     },
     /// `setSupergroupUsername`: the previous username (`None` = none set).
     SupergroupUsername {
         supergroup_id: i64,
         previous: Option<String>,
+        shown: String,
     },
     /// Slice G2: `toggleSupergroupSignMessages`: the previous
     /// `sign_messages` / `show_message_sender` flags (`None` = unknown).
@@ -33,17 +35,28 @@ pub enum RequestRollback {
         supergroup_id: i64,
         previous_sign: Option<bool>,
         previous_show: Option<bool>,
+        shown_sign: bool,
+        shown_show: bool,
     },
     /// `toggleChatIsTranslatable`: the previous `chat.is_translatable`.
-    ChatIsTranslatable { chat_id: i64, previous: bool },
+    ChatIsTranslatable {
+        chat_id: i64,
+        previous: bool,
+        shown: bool,
+    },
     /// `toggleSupergroupHasAutomaticTranslation`: the previous flag.
-    AutoTranslate { supergroup_id: i64, previous: bool },
+    AutoTranslate {
+        supergroup_id: i64,
+        previous: bool,
+        shown: bool,
+    },
     /// Slice G2: `toggleSupergroupHasAggressiveAntiSpamEnabled`: the
     /// previous `has_aggressive_anti_spam_enabled` flag (`None` =
     /// unknown).
     AntiSpam {
         supergroup_id: i64,
         previous: Option<bool>,
+        shown: bool,
     },
     /// B7: a supergroup toggle (join-to-send, history for new members,
     /// hidden members): the previous value (`None` = unknown).
@@ -51,6 +64,7 @@ pub enum RequestRollback {
         supergroup_id: i64,
         toggle: GroupToggle,
         previous: Option<bool>,
+        shown: bool,
     },
     /// B7: `toggleChatHasProtectedContent`: the previous flag.
     /// `previous_disabled_at` is the "you disabled sharing" record the
@@ -58,11 +72,13 @@ pub enum RequestRollback {
     ProtectedContent {
         chat_id: i64,
         previous: bool,
+        shown: bool,
         previous_disabled_at: Option<i64>,
     },
     /// `setDefaultReactionType`: the quick reaction shown before the choice.
     DefaultReaction {
         previous: Option<crate::state::ReactionChoice>,
+        shown: crate::state::ReactionChoice,
     },
     /// `deleteBusinessChatLink`: the row dropped at once and where it was.
     ChatLinkDelete {
@@ -81,14 +97,24 @@ pub enum RequestRollback {
     AvailableReactions {
         chat_id: i64,
         previous: Option<crate::telegram::envelope::ChatAvailableReactions>,
+        shown: crate::telegram::envelope::ChatAvailableReactions,
     },
     /// Slice CL1: `toggleChatIsPinned` — the previous pinned flag and
     /// which list it belonged to (`archived` = archive list). The
     /// authoritative state arrives via `updateChatPosition`.
-    ChatPin { previous: bool, archived: bool },
+    ChatPin {
+        chat_id: i64,
+        previous: bool,
+        shown: bool,
+        archived: bool,
+    },
     /// Slice CL1: `toggleChatIsMarkedAsUnread` — the previous
     /// marked-as-unread flag.
-    ChatMarkedAsUnread { previous: bool },
+    ChatMarkedAsUnread {
+        chat_id: i64,
+        previous: bool,
+        shown: bool,
+    },
     /// Slice CL2: `setPinnedChats` — the previous `(chat_id, order)`
     /// pairs of the pinned chats in the list (`archived` = archive
     /// list). The reorder swaps `order` values among the pinned chats
@@ -219,7 +245,181 @@ impl Session {
                     list.insert(index.min(list.len()), row);
                 }
             }
+            RequestRollback::JoinByRequest {
+                supergroup_id,
+                previous,
+                shown,
+            } => {
+                let flags = &mut self.groups.supergroup_join_by_request;
+                if flags.get(&supergroup_id) == Some(&shown) {
+                    restore_flag(flags, supergroup_id, previous);
+                }
+            }
+            RequestRollback::SignMessages {
+                supergroup_id,
+                previous_sign,
+                previous_show,
+                shown_sign,
+                shown_show,
+            } => {
+                if self.groups.supergroup_sign_messages.get(&supergroup_id) == Some(&shown_sign)
+                    && self.groups.supergroup_show_message_sender.get(&supergroup_id)
+                        == Some(&shown_show)
+                {
+                    restore_flag(
+                        &mut self.groups.supergroup_sign_messages,
+                        supergroup_id,
+                        previous_sign,
+                    );
+                    restore_flag(
+                        &mut self.groups.supergroup_show_message_sender,
+                        supergroup_id,
+                        previous_show,
+                    );
+                }
+            }
+            RequestRollback::AntiSpam {
+                supergroup_id,
+                previous,
+                shown,
+            } => {
+                let flags = &mut self.groups.supergroup_anti_spam_enabled;
+                if flags.get(&supergroup_id) == Some(&shown) {
+                    restore_flag(flags, supergroup_id, previous);
+                }
+            }
+            RequestRollback::ChatIsTranslatable {
+                chat_id,
+                previous,
+                shown,
+            } => {
+                if self.chat_is_translatable(ChatId(chat_id)) == shown {
+                    self.set_chat_translatable(chat_id, previous);
+                }
+            }
+            RequestRollback::AutoTranslate {
+                supergroup_id,
+                previous,
+                shown,
+            } => {
+                let current = self
+                    .messages
+                    .translate
+                    .auto_translate_supergroups
+                    .contains(&supergroup_id);
+                if current == shown {
+                    self.set_supergroup_auto_translate(supergroup_id, previous);
+                }
+            }
+            RequestRollback::GroupToggle {
+                supergroup_id,
+                toggle,
+                previous,
+                shown,
+            } => {
+                if self.group_toggle_value(supergroup_id, toggle) == Some(shown) {
+                    self.restore_group_toggle(supergroup_id, toggle, previous);
+                }
+            }
+            RequestRollback::ProtectedContent {
+                chat_id,
+                previous,
+                shown,
+                previous_disabled_at,
+            } => {
+                if self.chat_has_protected_content(ChatId(chat_id)) == shown {
+                    self.set_chat_protected(chat_id, previous);
+                    self.groups
+                        .private_sharing
+                        .restore_disabled(ChatId(chat_id), previous_disabled_at);
+                }
+            }
+            RequestRollback::ChatPin {
+                chat_id,
+                previous,
+                shown,
+                archived,
+            } => {
+                if let Some(chat) = self.chats.get_mut(&chat_id) {
+                    let flag = if archived {
+                        &mut chat.archive_is_pinned
+                    } else {
+                        &mut chat.is_pinned
+                    };
+                    if *flag == shown {
+                        *flag = previous;
+                    }
+                }
+            }
+            RequestRollback::ChatMarkedAsUnread {
+                chat_id,
+                previous,
+                shown,
+            } => {
+                if let Some(chat) = self.chats.get_mut(&chat_id)
+                    && chat.is_marked_as_unread == shown
+                {
+                    chat.is_marked_as_unread = previous;
+                }
+            }
+            RequestRollback::SupergroupUsername {
+                supergroup_id,
+                previous,
+                shown,
+            } => {
+                if self.groups.supergroup_usernames.get(&supergroup_id) == Some(&shown) {
+                    match previous {
+                        Some(username) => {
+                            self.groups
+                                .supergroup_usernames
+                                .insert(supergroup_id, username);
+                        }
+                        None => {
+                            self.groups.supergroup_usernames.remove(&supergroup_id);
+                        }
+                    }
+                }
+            }
+            RequestRollback::DefaultReaction { previous, shown } => {
+                if self.stickers.default_reaction.as_ref() == Some(&shown) {
+                    self.stickers.default_reaction = previous;
+                }
+            }
+            RequestRollback::AvailableReactions {
+                chat_id,
+                previous,
+                shown,
+            } => {
+                let held = &mut self.chats_state.chat_available_reactions;
+                if held.get(&chat_id) == Some(&shown) {
+                    match previous {
+                        Some(setting) => {
+                            held.insert(chat_id, setting);
+                        }
+                        None => {
+                            held.remove(&chat_id);
+                        }
+                    }
+                }
+            }
             _ => {}
+        }
+    }
+}
+
+/// Put a remembered flag back: its old value, or no value when it was
+/// unknown.
+fn restore_flag(
+    flags: &mut std::collections::HashMap<i64, bool>,
+    key: i64,
+    previous: Option<bool>,
+) {
+    match previous {
+        Some(flag) => {
+            flags.insert(key, flag);
+        }
+        None => {
+            flags.remove(&key);
         }
     }
 }

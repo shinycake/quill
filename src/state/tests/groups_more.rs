@@ -746,6 +746,8 @@ fn g2_sign_toggle_error_rolls_back() {
         supergroup_id: 25,
         previous_sign: Some(false),
         previous_show: Some(false),
+        shown_sign: true,
+        shown_show: true,
     });
     session.groups.supergroup_sign_messages.insert(25, true);
     session
@@ -792,6 +794,7 @@ fn g2_anti_spam_toggle_error_rolls_back() {
         .rollback = Some(RequestRollback::AntiSpam {
         supergroup_id: 25,
         previous: Some(false),
+        shown: true,
     });
     session.groups.supergroup_anti_spam_enabled.insert(25, true);
     apply_json(
@@ -1045,4 +1048,37 @@ fn a_refusal_the_edit_box_has_no_field_for_still_fails_its_save() {
     assert!(session.requests.failure(link).is_some());
     let error = session.groups.info_edit_errors.get(&13).expect("an error");
     assert_eq!(error.field, GroupInfoField::Username);
+}
+
+#[test]
+fn a_refused_toggle_keeps_a_value_an_update_changed_meanwhile() {
+    // Sweep 05-201: the rollback restores only while the flags still show
+    // what the request showed; a newer update is the truth.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request(
+        RequestPurpose::ToggleSupergroupAggressiveAntiSpam,
+        Some(ChatId(13)),
+    );
+    session
+        .requests
+        .pending_mut(extra)
+        .expect("pending")
+        .rollback = Some(RequestRollback::AntiSpam {
+        supergroup_id: 25,
+        previous: Some(false),
+        shown: true,
+    });
+    // Another admin's change arrived: the flag is no longer what we showed.
+    session.groups.supergroup_anti_spam_enabled.remove(&25);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_ADMIN_REQUIRED"}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(session.groups.supergroup_anti_spam_enabled.get(&25), None);
 }
