@@ -317,6 +317,46 @@ fn the_custom_emoji_card_shows_where_the_emoji_was_tapped(cx: &mut TestAppContex
     });
 }
 
+/// 09-019: tapping the emoji again while its card shows starts the timer
+/// over; the first tap's timer does not close the card early.
+#[gpui_kit::test]
+fn tapping_the_same_custom_emoji_again_restarts_the_card_timer(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    h.app.update(cx, |app, cx| {
+        app.note_custom_emoji_tap(77);
+        if let Some(session) = app.demo_session.as_mut() {
+            session.stickers.custom_emoji_preview = Some(quill::state::CustomEmojiPreview {
+                emoji_id: 77,
+                set_id: 5,
+                title: "Pack".into(),
+            });
+        }
+        assert!(app.custom_emoji_card(cx).is_some());
+    });
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(5));
+    cx.run_until_parked();
+    h.app.update(cx, |app, cx| {
+        app.note_custom_emoji_tap(77);
+        assert!(app.custom_emoji_card(cx).is_some(), "shown again");
+    });
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(2));
+    cx.run_until_parked();
+    h.app.update(cx, |app, cx| {
+        assert!(
+            app.custom_emoji_card(cx).is_some(),
+            "the first tap's timer ended, the second's has not"
+        );
+    });
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(5));
+    cx.run_until_parked();
+    h.app.update(cx, |app, cx| {
+        assert!(app.custom_emoji_card(cx).is_none(), "its own timer ended");
+    });
+}
+
 /// Finding 11: an auto-delete picker open in a chat window stays when the
 /// main window enters another chat; leaving its own chat closes it.
 #[gpui_kit::test]

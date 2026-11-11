@@ -254,11 +254,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::GetChatPostedToChatPageStories;
-        if self
-            .session
-            .requests
-            .has_stamped_purpose_for_chat(purpose, chat_id, generation)
-        {
+        // Only a request of the same stamp stands for this one: the
+        // gallery's after a reopen is not answered by the old gallery's.
+        if self.session.requests.pending.values().any(|p| {
+            p.purpose == purpose && p.chat_id == Some(chat_id) && p.search_generation == generation
+        }) {
             return Ok(None);
         }
         let extra = match generation {

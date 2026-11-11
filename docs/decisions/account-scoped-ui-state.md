@@ -5464,3 +5464,57 @@ land and the typed form was gone.
 - **Skipped.** 13-069: `AgentUi::pick_account` already resets the activity
   filter wherever `picked` changes, with a test
   (`picking_another_account_resets_the_activity_filter`).
+
+### Sweep fixes (s4-media-1)
+
+- **Emoji effects.** A lone emoji read while the effects pack loads is
+  marked watched when it waits, so a failed pack load (or the queue pushing
+  it out) puts it back as unwatched and a later read plays it (03-035). A
+  tap that arrived more than the start wait before a window took it is
+  dropped: `EmojiInteractions` stamps each effect with its arrival and
+  `take_fresh` hands over the recent ones, so taps made while the app was
+  locked do not play at the unlock (09-X038). The "watching" action carries
+  the effect that started, not the first effect of its chat (09-084). The
+  anchors, badges and effects noted by bare chat id go with the account on
+  screen (`MessageUi`'s `Farewell`, 09-085).
+- **Emoji sets.** Each unpack of a pack has its own temp and move-aside
+  folders and swaps under one lock, so two installs of one set do not wipe
+  each other (03-044). The installed set list for the `:` suggestions is
+  asked from `EmojiSets::installed` (`Fetch<()>`): from idle or after a
+  failure, and set to loading only when the request went out. The UI flag
+  `EmojiBarUi::sets_asked` is gone (09-080, 09-X037).
+- **Gallery profile tabs.** Stories and Gifts requests carry the tab's stamp
+  (`begin_profile_fetch` restamps, `begin_profile_more` keeps it); an answer
+  for another stamp, from before the gallery was closed and reopened, is
+  dropped whole, and a request is only "already in flight" for its own stamp
+  (06-004).
+- **Reactions.** A refused reaction puts the old chips back only while the
+  message still shows what the request made; with another change on top it
+  takes back just its own reaction (05-191).
+- **Media playback.** The shuffle's played list drops tracks that left the
+  playlist (04-022). A swipe steps from the same armed value the arrow shows
+  (03-097). A seek slider event is applied only for the slider of the active
+  track (08-041). A frame ThorVG cannot draw fails its clip, so views rest
+  and the frame is not asked again every tick (06-012). The idle watch
+  thread starts through `spawn_guarded` and clears its flag when it panics
+  (07-048).
+- **Panels and windows.** The reaction and status selectors enter their mode
+  through one function that also puts the panel on the emoji tab and syncs
+  the GIF gate (11-p1-002). Closing a word's bar (typing on, blocking, the
+  setting) resets the `EmojiBarUi` it shares with the suggestions, like the
+  other ways of closing (09-081). Tapping a custom emoji again restarts its
+  card timer (each tap has a count the timer compares, 09-019). The album
+  pin label is kept per history revision instead of cloning the history on
+  every chrome redraw (11-p1-007). The viewer's farewell switches the
+  window's extended range off (10-099). A failed image decode is tried again
+  after 30 s (10-112). A sweep that met a window mid-draw wakes itself once
+  more (10-113). The demos report a failed check instead of panicking
+  (09-029); a test no longer sleeps (07-050).
+- **Skipped.** 02-141: the scan runs once per user click, not per frame, and
+  an index would be state kept in step with every edit and delete. 03-039:
+  the switch is already one `SetStage::Switching`; a replaced switch's task
+  is dropped, so its continuation (which saves) never runs, and the load it
+  ran is a read. 05-095: a cancel with no request of ours is only sent for
+  a transfer the file map shows active, and TDLib's idle update for that
+  transfer is the one that settles it (a paused one is not cancelled this
+  way).
