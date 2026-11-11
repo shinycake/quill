@@ -81,7 +81,7 @@ impl QuillApp {
         self.settings.open = true;
         self.settings.sub = None;
         if let Some(page) = page {
-            self.switch_settings_page(page);
+            self.switch_settings_page(page, cx);
         }
         // The next pass sends the grams balance probe, which waits for Settings.
         quill::wake::UPDATES.poke();
@@ -101,25 +101,25 @@ impl QuillApp {
 
     pub(super) fn show_settings_page(&mut self, page: Page, cx: &mut Context<Self>) {
         self.settings.sub = None;
-        self.switch_settings_page(page);
+        self.switch_settings_page(page, cx);
         cx.notify();
     }
 
     /// The one way a page changes: the old page lets go of its drafts and
     /// pickers, the new one asks for what it shows.
-    fn switch_settings_page(&mut self, page: Page) {
+    fn switch_settings_page(&mut self, page: Page, cx: &mut Context<Self>) {
         if self.settings.page == Some(page) {
             return;
         }
         self.leave_settings_page(self.shown_settings_page());
         self.settings.page_scroll.set_offset(point(px(0.), px(0.)));
         self.settings.page = Some(page);
-        self.arrive_settings_page(page);
+        self.arrive_settings_page(page, cx);
     }
 
     /// What a page asks for each time it is entered. A search result for the
     /// page already shown runs this too, after the page let go of its drafts.
-    pub(super) fn arrive_settings_page(&mut self, page: Page) {
+    pub(super) fn arrive_settings_page(&mut self, page: Page, cx: &mut Context<Self>) {
         match page {
             Page::Notifications => self.fetch_notification_settings(),
             // tdesktop asks for the passkeys whenever the screen opens.
@@ -136,7 +136,10 @@ impl QuillApp {
             Page::Language => self.leave_language_settings(),
             Page::System => quill::link_handler::read_now(),
             Page::Calls => self.fetch_call_settings(),
-            Page::Appearance => self.retry_failed_wallpapers(),
+            Page::Appearance => {
+                self.retry_failed_wallpapers();
+                self.ask_for_wallpapers(cx);
+            }
             _ => {}
         }
     }
@@ -177,6 +180,8 @@ impl QuillApp {
             // The test lives with its section, as in tdesktop. So does an
             // armed "Press a key": left armed, it ate the next key typed
             // anywhere and bound push-to-talk to it.
+            Page::Appearance => self.leave_wallpaper_gallery(),
+            Page::System => self.preferences.link_handler_recheck = Default::default(),
             Page::Calls => {
                 self.call_boxes.mic_test = Default::default();
                 self.group_call.ptt_capture = false;
@@ -266,7 +271,7 @@ impl QuillApp {
             // Escape and Find are app-wide bindings: answered here first,
             // so they act on Settings rather than on the chats behind it.
             .on_action(cx.listener(|this, _: &CancelSearch, window, cx| {
-                if this.preferences.keybinding.capture.waiting().is_some() {
+                if this.preferences.keybinding.waiting().is_some() {
                     return;
                 }
                 if this.search_field_focused(window, cx) {

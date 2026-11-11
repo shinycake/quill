@@ -7,10 +7,10 @@
 
 use super::editor::EditorSource;
 use super::{CustomTheme, QuillApp};
+use crate::ui::appearance::AccentSelect;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::StyledExt;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::color_picker::ColorSelect;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::theme::ActiveTheme;
 use gpui_kit::prelude::FluentBuilder;
@@ -240,19 +240,15 @@ impl QuillApp {
                     .child(div().size_full().rounded_full().bg(rgb(color))),
             );
         }
-        row = row.child(
-            ColorSelect::new(&self.preferences.accent_picker)
-                .featured_colors(
-                    theme
-                        .accent_choices()
-                        .iter()
-                        .map(|&c| Hsla::from(rgb(c)))
-                        .collect(),
-                )
-                .placeholder(tr(keys::Q_MISC_CUSTOM))
-                .accessibility_label(tr(keys::Q_MISC_CUSTOM_ACCENT_COLOR))
-                .w(px(150.)),
-        );
+        row = row.child(AccentSelect::new(
+            &self.preferences.accent_picker,
+            self.appearance.accent_for(theme),
+            theme
+                .accent_choices()
+                .iter()
+                .map(|&c| Hsla::from(rgb(c)))
+                .collect(),
+        ));
         let mut body = div().flex().flex_col().gap_2().child(row);
         if self.preferences.system_accent.color().is_some() {
             body = body.child(

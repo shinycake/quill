@@ -444,11 +444,11 @@ fn leaving_the_calls_page_disarms_the_push_to_talk_capture(cx: &mut TestAppConte
     app.update(vcx, |app, cx| {
         app.open_settings(Some(Page::Calls), cx);
         app.group_call.ptt_capture = true;
-        app.switch_settings_page(Page::Privacy);
+        app.switch_settings_page(Page::Privacy, cx);
     });
     assert!(!armed(&app, vcx), "another page");
-    app.update(vcx, |app, _| {
-        app.switch_settings_page(Page::Calls);
+    app.update(vcx, |app, cx| {
+        app.switch_settings_page(Page::Calls, cx);
         app.group_call.ptt_capture = true;
         app.close_settings();
     });

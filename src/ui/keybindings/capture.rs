@@ -70,7 +70,7 @@ impl Keymap {
 /// Everything the Shortcuts page keeps besides its focus handle.
 #[derive(Debug, Default)]
 pub(in crate::ui) struct KeybindingUi {
-    pub(in crate::ui) capture: Capture,
+    capture: Capture,
     pub(in crate::ui) refusals: Refusals,
     pub(in crate::ui) keymap: Keymap,
 }
@@ -84,6 +84,31 @@ impl KeybindingUi {
             self.end();
         }
         shown && self.capture.waiting().is_some()
+    }
+
+    /// The action waiting for a keystroke.
+    pub(in crate::ui) fn waiting(&self) -> Option<&str> {
+        self.capture.waiting()
+    }
+
+    /// The waiting row is done (a saved chord, Escape, Cancel): its
+    /// message, if any, stays.
+    pub(in crate::ui) fn stop_capture(&mut self) {
+        self.capture = Capture::Idle;
+    }
+
+    /// Row `id` goes back to its default: no capture, and its own message
+    /// goes.
+    pub(in crate::ui) fn reset_row(&mut self, id: &str) {
+        self.capture = Capture::Idle;
+        self.refusals.clear_of(id);
+    }
+
+    /// The chord typed for row `id` was refused: the capture ends and the
+    /// row shows `message`.
+    pub(in crate::ui) fn refuse_chord(&mut self, id: String, message: String) {
+        self.capture = Capture::Idle;
+        self.refusals.refuse(id, message);
     }
 
     /// The page is left or locked: the capture and every message go.
@@ -113,10 +138,10 @@ mod tests {
     fn capture_only_consumes_keys_while_shortcuts_are_shown_and_armed() {
         let mut ui = KeybindingUi::default();
         assert!(!ui.capture_active(true));
-        ui.capture = Capture::Waiting("focus-composer".into());
+        ui.start_capture("focus-composer".into());
         assert!(ui.capture_active(true));
         assert!(!ui.capture_active(false));
-        assert_eq!(ui.capture, Capture::Idle);
+        assert_eq!(ui.waiting(), None);
     }
 
     #[test]
@@ -128,7 +153,7 @@ mod tests {
         assert_eq!(ui.refusals.of("other"), None);
         assert!(!ui.capture_active(true));
         assert!(!ui.capture_active(false));
-        assert_eq!(ui.capture, Capture::Idle);
+        assert_eq!(ui.waiting(), None);
         assert_eq!(ui.refusals.of("focus-composer"), None);
     }
 
@@ -147,13 +172,33 @@ mod tests {
     #[test]
     fn account_change_ends_the_capture_and_makes_the_keymap_stale_for_the_new_account() {
         let mut ui = KeybindingUi {
-            capture: Capture::Waiting("focus-composer".into()),
             keymap: Keymap::Applied(quill::ids::AccountKey("a".into())),
             ..KeybindingUi::default()
         };
+        ui.start_capture("focus-composer".into());
         ui.invalidate_account();
         assert!(!ui.keymap.carries(&quill::ids::AccountKey("b".into())));
         assert!(ui.keymap.carries(&quill::ids::AccountKey("a".into())));
-        assert_eq!(ui.capture, Capture::Idle);
+        assert_eq!(ui.waiting(), None);
+    }
+
+    #[test]
+    fn each_way_out_of_a_capture_decides_its_own_message_once() {
+        let mut ui = KeybindingUi::default();
+        ui.refusals.refuse("a".into(), "Conflict".into());
+        ui.start_capture("b".into());
+        ui.stop_capture();
+        assert_eq!(
+            (ui.waiting(), ui.refusals.of("a")),
+            (None, Some("Conflict"))
+        );
+        ui.start_capture("b".into());
+        ui.refuse_chord("b".into(), "Taken".into());
+        assert_eq!(ui.waiting(), None);
+        assert_eq!(ui.refusals.of("b"), Some("Taken"));
+        ui.start_capture("a".into());
+        ui.reset_row("b");
+        assert_eq!(ui.waiting(), None);
+        assert_eq!(ui.refusals.of("b"), None);
     }
 }

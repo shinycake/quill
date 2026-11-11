@@ -295,6 +295,7 @@ impl super::app::QuillApp {
             },
         }
         self.reload_account_keybindings(cx);
+        self.reload_account_wallpapers(cx);
         if self.live.is_some() {
             self.spawn_poll_loop(cx);
             // `parity:notify-all-accounts`: the other accounts

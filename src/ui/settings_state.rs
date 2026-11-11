@@ -195,6 +195,9 @@ pub(crate) struct PreferencesUi {
     /// The wait for the link handler's background read to land; dropping
     /// it ends the wait.
     pub(super) link_handler_watch: Option<Task<()>>,
+    /// "Make Quill the default": the re-reads that follow while the
+    /// system confirmation is awaited (`LinkHandlerRecheck`).
+    pub(super) link_handler_recheck: super::appearance::LinkHandlerRecheck,
     /// Settings → Appearance: the searchable font family list.
     pub(super) font_picker: super::appearance_power::FontPicker,
     /// Settings → Appearance: the custom accent color field (kit
@@ -232,6 +235,7 @@ impl PreferencesUi {
             system_accent: SystemAccent::Unread,
             system_accent_poll: None,
             link_handler_watch: None,
+            link_handler_recheck: Default::default(),
             font_picker,
             accent_picker,
             translate: super::translate_ui::TranslateUi::load(),

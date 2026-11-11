@@ -626,7 +626,7 @@ impl QuillApp {
         let (Some(parts), Some(composer)) = (&slices.conversation, &slices.composer) else {
             return column;
         };
-        slices.conversation_shown.set(true);
+        slices.mark_conversation_shown();
         let window = self.windows.scope;
         super::image_budget::slice_shown(parts.slice.entity_id(), window);
         super::image_budget::slice_shown(composer.entity_id(), window);
@@ -786,7 +786,7 @@ impl QuillApp {
                 self.sidebar(&auth, false, false, false, false, window, cx)
             }
             SliceKind::Conversation => {
-                self.slices.window.conversation_rendered.set(true);
+                self.slices.window.mark_conversation_rendered();
                 // Position ticks notify only the slices, so the knob and the
                 // a11y value follow playback from here, not the root render.
                 self.sync_seek_slider(window, cx);

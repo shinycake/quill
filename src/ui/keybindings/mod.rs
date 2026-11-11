@@ -744,7 +744,7 @@ pub fn apply_custom_bindings(cx: &mut App, customs: &[CustomKeybinding]) {
 }
 
 mod capture;
-pub(super) use capture::{Capture, KeybindingUi, Keymap};
+pub(super) use capture::{KeybindingUi, Keymap};
 mod shortcut_rows;
 pub use shortcut_rows::*;
 

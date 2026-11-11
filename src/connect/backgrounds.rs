@@ -19,9 +19,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         for_dark_theme: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
         if self
             .session
             .requests
@@ -35,6 +32,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.chats_state.installed_backgrounds.is_idle() {
             return Ok(None);
         }
+        // A request that cannot leave is a failed list, drawn with its Retry:
+        // going back to Idle would ask again from the next draw.
+        if !self.chats_path_active() {
+            self.session
+                .chats_state
+                .installed_backgrounds
+                .fail("not sent");
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let extra = self
             .session
             .request(RequestPurpose::GetInstalledBackgrounds, None);
@@ -44,10 +50,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&get_installed_backgrounds(extra, for_dark_theme))
         {
             self.session.requests.take(extra);
-            self.session.chats_state.installed_backgrounds.cancel();
+            self.session
+                .chats_state
+                .installed_backgrounds
+                .fail("not sent");
             return Err(err);
         }
-        self.session.chats_state.installed_backgrounds.begin();
         Ok(Some(extra))
     }
 

@@ -191,7 +191,8 @@ impl QuillApp {
         });
         self.open_box(DialogKind::ChatLook);
         self.retry_failed_wallpapers();
-        self.ensure_wallpapers_loaded(cx);
+        self.ask_for_wallpapers(cx);
+        self.download_wallpaper_files();
         let boosted = self.is_boosted_look(chat_id);
         if let Some(live) = self.live.as_mut() {
             live.driver.download_chat_look_files(chat_id, true);

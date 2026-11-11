@@ -96,7 +96,7 @@ impl QuillApp {
                     ],
                 )),
             Page::Appearance => {
-                self.ensure_wallpapers_loaded(cx);
+                self.download_wallpaper_files();
                 if self.preferences.system_accent == SystemAccent::Unread {
                     self.refresh_system_accent(cx);
                 }

@@ -212,7 +212,7 @@ impl QuillApp {
         // visit asks again, though the page itself does not change.
         if self.settings.page == Some(target.page()) {
             self.leave_settings_page(target.page());
-            self.arrive_settings_page(target.page());
+            self.arrive_settings_page(target.page(), cx);
         }
         self.show_settings_page(target.page(), cx);
         if let Target::Entry(entry) = target {
@@ -286,7 +286,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> bool {
         if window.has_active_dialog(cx)
-            || self.preferences.keybinding.capture.waiting().is_some()
+            || self.preferences.keybinding.waiting().is_some()
             || self.topmost_esc_layer().is_some()
         {
             return false;
