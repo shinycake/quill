@@ -235,21 +235,28 @@ impl Session {
                 option_id,
                 offset,
             })) => {
-                if offset == 0
-                    || !matches!(
-                        self.messages
-                            .poll_voters
-                            .get(&(chat_id.0, message_id.0, option_id)),
-                        Some(PollVotersFetch::Loaded { .. })
-                    )
-                {
-                    self.messages.poll_voters.insert(
-                        (chat_id.0, message_id.0, option_id),
-                        PollVotersFetch::Failed(call_request_error_line(
-                            err,
-                            "Could not load voters",
-                        )),
-                    );
+                let key = (chat_id.0, message_id.0, option_id);
+                let waiting = pending.is_some_and(|p| {
+                    self.messages
+                        .poll_voters
+                        .get(&key)
+                        .is_some_and(|fetch| fetch.waits_for(p.id, offset == 0))
+                });
+                if waiting {
+                    if offset == 0 {
+                        self.messages.poll_voters.insert(
+                            key,
+                            PollVotersFetch::Failed(call_request_error_line(
+                                err,
+                                "Could not load voters",
+                            )),
+                        );
+                    } else if let Some(PollVotersFetch::Loaded { more, .. }) =
+                        self.messages.poll_voters.get_mut(&key)
+                    {
+                        // A failed next page keeps the loaded one, retryable.
+                        *more = PollVotersMore::Idle;
+                    }
                 }
             }
             // A failed translation shows "Translate failed." where the text

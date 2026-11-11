@@ -515,12 +515,36 @@ pub struct MemberAsk {
 /// lands in `Failed`, a failed "load more" keeps the loaded page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PollVotersFetch {
-    Loading,
+    /// The first page is asked for under this request.
+    Loading(RequestId),
     Loaded {
         voters: Vec<MessageSender>,
         total_count: i32,
+        /// The next page, while one is on its way.
+        more: PollVotersMore,
     },
     Failed(String),
+}
+
+/// A "load more" page of a loaded voters list: its answer or error is the
+/// way out, matched by the request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PollVotersMore {
+    #[default]
+    Idle,
+    Loading(RequestId),
+}
+
+impl PollVotersFetch {
+    /// Whether `request` is the page this fetch waits for (the first page
+    /// while loading, the next page of a loaded list).
+    pub fn waits_for(&self, request: RequestId, first_page: bool) -> bool {
+        match self {
+            Self::Loading(asked) => first_page && *asked == request,
+            Self::Loaded { more, .. } => !first_page && *more == PollVotersMore::Loading(request),
+            Self::Failed(_) => false,
+        }
+    }
 }
 
 /// Bots slice: fetch state for the single active inline query

@@ -3,11 +3,11 @@
 //! current user's temporary contact link and the answers the open box
 //! has not taken yet.
 
-use crate::ids::RequestId;
 use super::free::{FreeCode, FreeResult, FreeTicket};
 use super::link::{UserLinkData, UserLinkFetch};
 use super::state::SaveTicket;
 use super::theme::{Backdrops, ShareTheme, ThemeChoice, ThemeGifts, ThemeOwner};
+use crate::ids::RequestId;
 use std::collections::HashMap;
 
 /// A `getUserLink` answer before it is made absolute.

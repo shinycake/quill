@@ -122,6 +122,19 @@ impl Session {
         })) = pending.map(|p| p.purpose)
         {
             let key = (chat_id.0, message_id.0, option_id);
+            // Only the page the stage waits for lands: an older reload's or
+            // a dropped dialog's answer changes nothing.
+            let Some(request) = pending.map(|p| p.id) else {
+                return;
+            };
+            if !self
+                .messages
+                .poll_voters
+                .get(&key)
+                .is_some_and(|fetch| fetch.waits_for(request, offset == 0))
+            {
+                return;
+            }
             let page_len = voters.len();
             let merged = if offset == 0 {
                 voters
@@ -154,6 +167,7 @@ impl Session {
                 PollVotersFetch::Loaded {
                     voters: merged,
                     total_count,
+                    more: PollVotersMore::Idle,
                 },
             );
         }

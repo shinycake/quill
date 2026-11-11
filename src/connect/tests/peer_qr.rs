@@ -279,8 +279,7 @@ fn a_contact_link_answer_of_an_older_request_is_ignored() {
     let mut f = fixture();
     f.1.fetch_own_user_link(None).unwrap();
     let request = last_request(&f);
-    let UserLinkFetch::Loading(asked) = f.1.session.users_state.peer_qr.contact_link.clone()
-    else {
+    let UserLinkFetch::Loading(asked) = f.1.session.users_state.peer_qr.contact_link.clone() else {
         panic!("asking moves the link to loading");
     };
     let qr = &mut f.1.session.users_state.peer_qr;

@@ -98,6 +98,7 @@ mod peer_qr;
 mod permissions_box;
 mod poll_option_menu;
 mod poll_rapid_taps;
+mod poll_voters_stage;
 mod polls_checklists;
 mod premium_limits;
 mod premium_purchase;
