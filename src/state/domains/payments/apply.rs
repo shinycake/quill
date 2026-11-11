@@ -201,24 +201,10 @@ impl Session {
                 // replaces.
                 if let Some(p) = pending
                     && let RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions {
-                        append,
+                        ..
                     }) = p.purpose
-                    && self.payments.star_subscriptions_request == Some(p.id)
                 {
-                    self.payments.star_subscriptions_request = None;
-                    self.payments.star_subscriptions_error = None;
-                    // Only a first page answers a refetch.
-                    if !append {
-                        self.payments.star_subscriptions_stale = false;
-                    }
-                    self.payments.star_subscriptions_offset = subs.next_offset.clone();
-                    if append && let Some(existing) = self.payments.star_subscriptions.as_mut() {
-                        existing.star_amount = subs.star_amount;
-                        existing.required_star_count = subs.required_star_count;
-                        existing.subscriptions.extend(subs.subscriptions);
-                    } else {
-                        self.payments.star_subscriptions = Some(subs);
-                    }
+                    self.payments.star_subs.list.answer(p.id, subs);
                 }
             }
             PaymentsPayload::StarTransactions(page) if self.is_earn_request(pending) => {
@@ -258,12 +244,12 @@ impl Session {
                         .flat_map(|gift| gift.gift.files.iter().cloned())
                         .collect();
                     self.remember_files(&files);
-                    self.users_state.wearable_gifts = page
-                        .gifts
-                        .into_iter()
-                        .filter(|gift| gift.gift.colors.is_some())
-                        .collect();
-                    self.users_state.wearable_gifts_loaded = true;
+                    self.users_state.wearable_gifts.succeed(
+                        page.gifts
+                            .into_iter()
+                            .filter(|gift| gift.gift.colors.is_some())
+                            .collect(),
+                    );
                 } else if let Some(p) = pending
                     && let RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append }) =
                         p.purpose
@@ -323,7 +309,7 @@ impl Session {
             PaymentsPayload::GiftMarket(payload) => self.apply_gift_market(payload, pending),
             PaymentsPayload::UpdateOwnedStarCount(amount) => {
                 // The subscriptions list carries its own copy of the balance.
-                if let Some(subs) = self.payments.star_subscriptions.as_mut() {
+                if let Some(subs) = self.payments.star_subs.list.data_mut() {
                     subs.star_amount = amount.stars;
                 }
                 self.payments.hub.balance = Some(amount);

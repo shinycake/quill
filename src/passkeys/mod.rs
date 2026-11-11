@@ -109,7 +109,7 @@ impl Passkey {
 
 /// In-flight passkey requests; wrapped as
 /// `SettingsPurpose::Passkeys`. The passkey being removed is
-/// [`PasskeysState::removing`].
+/// [`PasskeysState::remove`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PasskeysPurpose {
     /// `getLoginPasskeys`; the answer is `passkeys`. Carries the
@@ -238,19 +238,40 @@ pub enum PasskeyAdd {
     Added,
 }
 
+/// Where the passkey list is. `Asked` and `Known` carry when the request
+/// went out, for the 5 s throttle; a removal leaves both for `Stale`, and
+/// the driver asks again.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ListStage {
+    #[default]
+    Never,
+    /// `getLoginPasskeys` went out (or failed); the list is not known.
+    Asked { at: Instant },
+    /// An answer arrived (tdesktop `listKnown`).
+    Known { at: Instant },
+    /// A removal succeeded: the driver asks for the list again.
+    Stale,
+}
+
+/// `removeLoginPasskey`: idle, or in flight for one passkey. Only the answer
+/// of that request leaves `Removing`; its error leaves it too.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum PasskeyRemove {
+    #[default]
+    Idle,
+    Removing { id: String, request: RequestId },
+}
+
 /// The account's passkeys as last fetched (tdesktop `Data::Passkeys`).
 #[derive(Debug, Clone, Default)]
 pub struct PasskeysState {
     /// The passkeys of the last answer, in the server's order.
     pub list: Vec<Passkey>,
-    /// An answer arrived since the last change (tdesktop `listKnown`).
-    pub known: bool,
-    /// When the last list request went out.
-    pub requested_at: Option<Instant>,
-    /// A removal succeeded: the driver asks for the list again.
-    pub stale: bool,
-    /// The passkey a `removeLoginPasskey` is in flight for.
-    pub removing: Option<String>,
+    /// Where the list is: never asked, asked, answered, or stale after a
+    /// removal (tdesktop `listKnown` and `requestList`'s throttle).
+    pub stage: ListStage,
+    /// `removeLoginPasskey`, one at a time.
+    pub remove: PasskeyRemove,
     /// Why the last fetch or removal failed; cleared on the next try.
     pub error: Option<String>,
     /// The server lets the app show passkeys (`settings_display_passkeys`
@@ -270,10 +291,25 @@ impl PasskeysState {
     /// Whether a look at the list should fetch it again (tdesktop
     /// `requestList`: never asked, or asked more than 5 s ago).
     pub fn wants_fetch(&self, now: Instant) -> bool {
-        self.stale
-            || self
-                .requested_at
-                .is_none_or(|at| now.saturating_duration_since(at) > LIST_FRESH_FOR)
+        match self.stage {
+            ListStage::Never | ListStage::Stale => true,
+            ListStage::Asked { at } | ListStage::Known { at } => {
+                now.saturating_duration_since(at) > LIST_FRESH_FOR
+            }
+        }
+    }
+
+    /// An answer arrived since the last change (tdesktop `listKnown`).
+    pub fn known(&self) -> bool {
+        matches!(self.stage, ListStage::Known { .. })
+    }
+
+    /// The passkey a removal is in flight for.
+    pub fn removing(&self) -> Option<&str> {
+        match &self.remove {
+            PasskeyRemove::Idle => None,
+            PasskeyRemove::Removing { id, .. } => Some(id),
+        }
     }
 
     /// The list answer arrived. One asked before the last removal
@@ -283,20 +319,21 @@ impl PasskeysState {
         if generation != self.generation {
             return;
         }
-        self.list = list;
-        self.known = true;
-        self.stale = false;
+        // An answer of the current generation answers the last ask; a list
+        // with no ask behind it (stale, never asked) is not taken.
+        if let ListStage::Asked { at } | ListStage::Known { at } = self.stage {
+            self.list = list;
+            self.stage = ListStage::Known { at };
+        }
     }
 
     /// `removeLoginPasskey` succeeded: drop the passkey and ask again
     /// (tdesktop forgets the list and reloads it).
     pub fn finish_remove(&mut self, passkey_id: &str) {
         self.list.retain(|p| p.id != passkey_id);
-        self.removing = None;
+        self.remove = PasskeyRemove::Idle;
         self.error = None;
-        self.known = false;
-        self.stale = true;
-        self.requested_at = None;
+        self.stage = ListStage::Stale;
         self.generation = self.generation.wrapping_add(1);
     }
 
@@ -327,7 +364,7 @@ impl PasskeysState {
 
     /// The value on the right of the row.
     pub fn row_label(&self) -> RowLabel {
-        if !self.known {
+        if !self.known() {
             return RowLabel::Loading;
         }
         match self.list.as_slice() {
@@ -340,7 +377,7 @@ impl PasskeysState {
     /// Where a click on the row goes (tdesktop: nothing while loading,
     /// the "Protect your account" box without passkeys, else the list).
     pub fn row_target(&self) -> Option<RowTarget> {
-        if !self.known {
+        if !self.known() {
             None
         } else if self.list.is_empty() {
             Some(RowTarget::About)

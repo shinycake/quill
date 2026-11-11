@@ -283,9 +283,7 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::EditStarSubscription | RequestPurpose::ReuseStarSubscription)
         ) {
-            self.payments.star_subscriptions_stale = true;
-            self.payments.star_subscriptions_mutating = false;
-            self.payments.star_subscriptions_error = None;
+            self.payments.star_subs.outdate();
         }
         // `toggleGiftIsSaved` / `sellGift` succeeded: refetch the list from
         // the server (the connect driver does it on the same ingest) and,

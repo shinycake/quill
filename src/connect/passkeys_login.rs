@@ -6,6 +6,7 @@ use super::*;
 use crate::ids::RequestId;
 use crate::passkeys::PasskeysPurpose;
 use crate::passkeys::login::{
+    LoginStage,
     HANDLE_INVALID, check_authentication_passkey, get_authentication_passkey_parameters,
     user_handle_valid,
 };
@@ -43,18 +44,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         let state = &self.session.settings.passkeys;
         if !self.passkey_login_state()
             || !state.login_link_shown()
-            || state.login.checking
+            || state.login.checking()
             || self.session.requests.has_auth_submit()
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if let Some(pending) = &state.login.pending
-            && pending.fresh(Instant::now())
-        {
-            let options = pending.options.clone();
-            let login = &mut self.session.settings.passkeys.login;
-            login.ceremony = Some(options);
-            login.error = None;
+        if let Some(pending) = state.login.fresh_options(Instant::now()) {
+            let pending = pending.clone();
+            self.session.settings.passkeys.login.stage = LoginStage::Starting(pending);
             return Ok(None);
         }
         if self.passkey_login_in_flight(PasskeysPurpose::LoginParameters) {
@@ -63,9 +60,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(purpose(PasskeysPurpose::LoginParameters), None);
-        let login = &mut self.session.settings.passkeys.login;
-        login.pending = None;
-        login.error = None;
+        self.session.settings.passkeys.login.stage = LoginStage::Idle;
         self.send_json_request(extra, &get_authentication_passkey_parameters(extra))
             .map(Some)
     }
@@ -73,7 +68,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Whether the link waits for the server's options or answer.
     pub fn passkey_login_pending(&self) -> bool {
         self.passkey_login_in_flight(PasskeysPurpose::LoginParameters)
-            || self.session.settings.passkeys.login.checking
+            || self.session.settings.passkeys.login.checking()
     }
 
     /// The ceremony signed in: `checkAuthenticationPasskey` (tdesktop
@@ -84,7 +79,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         assertion: &Assertion,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.passkey_login_state() || self.session.settings.passkeys.login.checking {
+        if !self.passkey_login_state() || self.session.settings.passkeys.login.checking() {
             return Err(ConnectSendError::InvalidRequest);
         }
         if !user_handle_valid(&assertion.user_handle) {
@@ -98,12 +93,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(purpose(PasskeysPurpose::CheckLogin), None);
-        let login = &mut self.session.settings.passkeys.login;
-        login.checking = true;
-        login.error = None;
+        self.session.settings.passkeys.login.stage = LoginStage::Checking;
         let sent = self.send_json_request(extra, &check_authentication_passkey(extra, assertion));
         if sent.is_err() {
-            self.session.settings.passkeys.login.checking = false;
+            self.session.settings.passkeys.login.stage = LoginStage::Idle;
         }
         sent.map(Some)
     }
@@ -113,16 +106,16 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// tdesktop's `AppConfig` refreshes before login too and shows the
     /// link once the value arrives).
     pub(crate) fn maybe_request_login_config(&mut self) {
-        if !self.passkey_login_state() || self.session.settings.passkeys.login.config_requested {
+        if !self.passkey_login_state() || !self.session.settings.passkeys.login.config.is_idle() {
             return;
         }
         let extra = self
             .session
             .request(purpose(PasskeysPurpose::LoginConfig), None);
-        self.session.settings.passkeys.login.config_requested = true;
+        self.session.settings.passkeys.login.config.begin();
         let json = crate::telegram::requests::get_application_config(extra);
         if self.send_json_request(extra, &json).is_err() {
-            self.session.settings.passkeys.login.config_requested = false;
+            self.session.settings.passkeys.login.config = Default::default();
         }
     }
 }

@@ -97,8 +97,6 @@ LinuxState::failed
 LiveInput::failed
 LocalFileState::is_downloading_active
 LocalFileState::is_downloading_completed
-LoginState::config_requested
-LoginState::config_requested+error
 Lookup::fade_started
 Lookup::pending
 ManagerView::failed
@@ -210,11 +208,6 @@ TopicHistory::newer_failed
 TransportMachine::loop_sent
 UiClip::failed
 UpdatePill::downloading
-UsersState::background_emoji_icons_failed
-UsersState::background_emoji_icons_failed+profile_edit_error
-UsersState::chat_photo_emoji_icons_failed
-UsersState::profile_photo_emoji_icons_failed
-UsersState::wearable_gifts_loaded
 Validation::finished
 VideoEditorDialog::busy
 WebApps::grossing_loading

@@ -138,7 +138,7 @@ impl QuillApp {
     fn dismiss_delete_passkey(&mut self, cx: &mut Context<Self>) {
         self.privacy.passkeys.confirm = None;
         if let Some(session) = self.live_or_demo_session_mut()
-            && session.settings.passkeys.removing.is_none()
+            && session.settings.passkeys.removing().is_none()
         {
             session.settings.passkeys.error = None;
         }
@@ -303,7 +303,7 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let muted = cx.theme().muted_foreground;
             let state = this.passkeys_state().cloned().unwrap_or_default();
-            let busy = state.removing.is_some();
+            let busy = state.removing().is_some();
             let mut body = div()
                 .flex()
                 .flex_col()
@@ -395,7 +395,7 @@ impl QuillApp {
                 .as_deref()
                 .and_then(|id| state.find(id))
                 .cloned();
-            let busy = state.removing.is_some();
+            let busy = state.removing().is_some();
             let mut body = div().flex().flex_col().gap_3();
             if let Some(passkey) = &passkey {
                 let emoji = this.passkey_emoji(passkey.software_icon_custom_emoji_id, 18., cx);

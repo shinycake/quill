@@ -2,6 +2,7 @@
 //! removed live).
 use super::super::*;
 use super::*;
+use crate::passkeys::ListStage;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::AccountKey;
 use crate::platform::MemorySecretStore;
@@ -75,7 +76,7 @@ fn lists_the_passkeys_once_while_fresh() {
     assert!(p.0.request_passkeys().unwrap().is_none());
     answer(&mut p, "getLoginPasskeys", two_passkeys());
     let state = &p.0.session.settings.passkeys;
-    assert!(state.known);
+    assert!(state.known());
     assert_eq!(state.list.len(), 2);
     assert_eq!(state.row_label().text(), "2");
     // Fresh for 5 seconds: no new request.
@@ -114,8 +115,8 @@ fn a_removal_waits_for_the_server_then_refetches() {
     answer(&mut p, "removeLoginPasskey", json!({"@type": "ok"}));
     let state = &p.0.session.settings.passkeys;
     assert!(state.find("k2").is_none());
-    assert!(state.removing.is_none());
-    assert!(!state.known);
+    assert!(state.removing().is_none());
+    assert!(!state.known());
     // The same ingest asked for the list again.
     assert_eq!(count(&p.1, "getLoginPasskeys"), 2);
     answer(
@@ -126,7 +127,7 @@ fn a_removal_waits_for_the_server_then_refetches() {
              "addition_date": 1_790_000_000}]}),
     );
     let state = &p.0.session.settings.passkeys;
-    assert!(state.known);
+    assert!(state.known());
     assert_eq!(state.row_label().text(), "iCloud Keychain");
 }
 
@@ -150,7 +151,7 @@ fn failures_are_shown_and_keep_the_list() {
     );
     let state = &p.0.session.settings.passkeys;
     assert_eq!(state.list.len(), 2);
-    assert!(state.removing.is_none());
+    assert!(state.removing().is_none());
     assert_eq!(
         state.error.as_deref(),
         Some("Could not delete the passkey: Telegram refused the request")
@@ -166,7 +167,7 @@ fn failures_are_shown_and_keep_the_list() {
         json!({"@type": "error", "code": 500, "message": "INTERNAL"}),
     );
     let state = &p.0.session.settings.passkeys;
-    assert!(!state.known);
+    assert!(!state.known());
     assert_eq!(state.row_label().text(), "Loading...");
     assert_eq!(
         state.error.as_deref(),
@@ -383,8 +384,7 @@ fn a_failed_refetch_send_keeps_the_list_stale() {
     sender.down.store(true, Ordering::SeqCst);
     assert!(driver.request_passkeys().is_err());
     let state = &driver.session.settings.passkeys;
-    assert!(state.stale);
-    assert!(state.requested_at.is_none());
+    assert_eq!(state.stage, ListStage::Stale);
     sender.down.store(false, Ordering::SeqCst);
     assert!(driver.request_passkeys().unwrap().is_some());
 }
@@ -395,7 +395,7 @@ fn a_failed_refetch_send_keeps_the_list_stale() {
 fn a_list_in_flight_during_a_removal_is_asked_again() {
     let mut p = parts();
     listed(&mut p);
-    p.0.session.settings.passkeys.requested_at = None;
+    p.0.session.settings.passkeys.stage = ListStage::Never;
     p.0.request_passkeys().unwrap();
     let old = sent_request(&p.1, "getLoginPasskeys");
     p.0.remove_passkey("k2").unwrap();
@@ -405,7 +405,11 @@ fn a_list_in_flight_during_a_removal_is_asked_again() {
     body["@extra"] = old["@extra"].clone();
     feed(&mut p, body);
     assert!(p.0.session.settings.passkeys.find("k2").is_none());
-    assert!(p.0.session.settings.passkeys.stale);
+    // The dropped answer left the list stale, so it was asked again.
+    assert!(matches!(
+        p.0.session.settings.passkeys.stage,
+        ListStage::Asked { .. }
+    ));
     assert_eq!(count(&p.1, "getLoginPasskeys"), 3);
 }
 

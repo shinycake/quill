@@ -86,22 +86,34 @@ impl PendingLogin {
     }
 }
 
+/// Signing in with a passkey, one stage at a time (tdesktop
+/// `_passkeyLoginData`, `_passkeyLoginTime`). The error, a dropped request
+/// and the options timing out each leave a stage.
+#[derive(Debug, Clone, Default)]
+pub enum LoginStage {
+    #[default]
+    Idle,
+    /// Options ready for a ceremony the UI has not started yet; the UI
+    /// takes them.
+    Starting(PendingLogin),
+    /// The ceremony runs or ended; the options are kept for their timeout
+    /// and reused on the next try.
+    Cached(PendingLogin),
+    /// `checkAuthenticationPasskey` is on its way.
+    Checking,
+    /// The server's error type of the last failed step, shown under the
+    /// link as tdesktop's `showError(error)` does.
+    Failed(String),
+}
+
 /// The sign-in half of the passkey state, kept while signed out.
 #[derive(Debug, Clone, Default)]
 pub struct LoginState {
-    /// `getApplicationConfig` was asked for on the sign-in screens (tdesktop
-    /// refreshes the app config before login too).
-    pub config_requested: bool,
-    /// The options of the last `getAuthenticationPasskeyParameters`.
-    pub pending: Option<PendingLogin>,
-    /// Options ready for a ceremony the UI has not started yet; the UI
-    /// takes them.
-    pub ceremony: Option<RequestOptions>,
-    /// `checkAuthenticationPasskey` is on its way.
-    pub checking: bool,
-    /// The server's error type of the last failed step, shown under the
-    /// link as tdesktop's `showError(error)` does.
-    pub error: Option<String>,
+    /// `getApplicationConfig` on the sign-in screens (tdesktop refreshes
+    /// the app config before login too). Asked once: a failure is not
+    /// asked again from every ingest.
+    pub config: crate::state::fetch::Fetch<()>,
+    pub stage: LoginStage,
 }
 
 impl LoginState {
@@ -111,20 +123,69 @@ impl LoginState {
         let Some(options) = RequestOptions::parse(json) else {
             return false;
         };
-        self.pending = Some(PendingLogin {
-            options: options.clone(),
+        self.stage = LoginStage::Starting(PendingLogin {
+            options,
             fetched_at: now,
         });
-        self.ceremony = Some(options);
         true
     }
 
     /// A step failed: tdesktop forgets the options and shows the error.
     pub fn fail(&mut self, error: String) {
-        self.pending = None;
-        self.ceremony = None;
-        self.checking = false;
-        self.error = Some(error);
+        self.stage = LoginStage::Failed(error);
+    }
+
+    /// The options of the last try, while they are within their timeout.
+    pub fn fresh_options(&self, now: Instant) -> Option<&PendingLogin> {
+        match &self.stage {
+            LoginStage::Starting(p) | LoginStage::Cached(p) if p.fresh(now) => Some(p),
+            _ => None,
+        }
+    }
+
+    /// The UI starts the ceremony: it takes the ready options and the
+    /// stage keeps them for reuse.
+    pub fn take_ceremony(&mut self) -> Option<RequestOptions> {
+        match std::mem::take(&mut self.stage) {
+            LoginStage::Starting(pending) => {
+                let options = pending.options.clone();
+                self.stage = LoginStage::Cached(pending);
+                Some(options)
+            }
+            other => {
+                self.stage = other;
+                None
+            }
+        }
+    }
+
+    /// Options are ready and no ceremony took them yet.
+    pub fn ceremony_ready(&self) -> bool {
+        matches!(self.stage, LoginStage::Starting(_))
+    }
+
+    pub fn checking(&self) -> bool {
+        matches!(self.stage, LoginStage::Checking)
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        match &self.stage {
+            LoginStage::Failed(error) => Some(error),
+            _ => None,
+        }
+    }
+
+    /// The ceremony ended without a result (the box was closed): drop
+    /// options nobody started.
+    pub fn drop_unstarted(&mut self) {
+        if let LoginStage::Starting(pending) = std::mem::take(&mut self.stage) {
+            self.stage = LoginStage::Cached(pending);
+        }
+    }
+
+    /// `checkAuthenticationPasskey` answered: nothing is kept.
+    pub fn finish_check(&mut self) {
+        self.stage = LoginStage::Idle;
     }
 }
 

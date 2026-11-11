@@ -62,7 +62,7 @@ fn another_supergroup_moving_leaves_the_status_alone() {
 fn the_owned_star_count_also_updates_the_subscriptions_snapshot() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.payments.star_subscriptions = Some(crate::telegram::envelope::StarSubscriptionsData {
+    session.payments.star_subs.list = crate::state::paged::Paged::Ready(crate::telegram::envelope::StarSubscriptionsData {
         star_amount: 10,
         subscriptions: Vec::new(),
         required_star_count: 0,
@@ -76,7 +76,7 @@ fn the_owned_star_count_also_updates_the_subscriptions_snapshot() {
     );
     assert_eq!(session.payments.hub.balance.map(|b| b.stars), Some(42));
     assert_eq!(
-        session.payments.star_subscriptions.map(|s| s.star_amount),
+        session.payments.star_subs.list.data().map(|s| s.star_amount),
         Some(42)
     );
 }

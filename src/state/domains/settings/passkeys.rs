@@ -2,7 +2,7 @@
 //! the creation options, the added passkey and failures. Nothing is
 //! optimistic: a passkey leaves the list only after the server confirmed
 //! the removal, and joins it only with the server's `passkey`.
-use crate::passkeys::{PasskeysPayload, PasskeysPurpose};
+use crate::passkeys::{PasskeyRemove, PasskeysPayload, PasskeysPurpose};
 use crate::state::*;
 use std::time::Instant;
 
@@ -77,15 +77,17 @@ impl Session {
                 // The authorization state moves on by itself (to Ready, or
                 // to the password screen after SESSION_PASSWORD_NEEDED).
                 let login = &mut self.settings.passkeys.login;
-                login.checking = false;
-                login.pending = None;
-                login.error = None;
+                login.finish_check();
                 return;
             }
             _ => return,
         }
         let passkeys = &mut self.settings.passkeys;
-        if let Some(id) = passkeys.removing.take() {
+        // Only the answer of the removal in flight finishes it.
+        if let PasskeyRemove::Removing { id, request } = &passkeys.remove
+            && Some(*request) == pending.map(|p| p.id)
+        {
+            let id = id.clone();
             passkeys.finish_remove(&id);
         }
     }
@@ -103,13 +105,15 @@ impl Session {
                 // Retrying is the user's next look, not every ingest. A look
                 // older than a removal says nothing about the list now.
                 if generation == passkeys.generation {
-                    passkeys.stale = false;
                     passkeys.error = Some(sessions_error_line("load the passkeys", err));
                 }
                 true
             }
             Some(PasskeysPurpose::Remove) => {
-                passkeys.removing = None;
+                if matches!(&passkeys.remove, PasskeyRemove::Removing { request, .. } if Some(*request) == id)
+                {
+                    passkeys.remove = PasskeyRemove::Idle;
+                }
                 passkeys.error = Some(sessions_error_line("delete the passkey", err));
                 true
             }
@@ -126,7 +130,15 @@ impl Session {
                 }
                 true
             }
-            Some(PasskeysPurpose::LoginConfig) => true,
+            Some(PasskeysPurpose::LoginConfig) => {
+                // Not asked again from every ingest: tdesktop retries with
+                // its own app-config refresh, not from the sign-in screen.
+                passkeys
+                    .login
+                    .config
+                    .fail(sessions_error_line("load the app config", err));
+                true
+            }
             Some(PasskeysPurpose::LoginParameters | PasskeysPurpose::CheckLogin) => {
                 // tdesktop `FinishPasskeyLogin`'s fail: forget the options
                 // and show the server's error type.

@@ -67,16 +67,16 @@ fn options_are_kept_until_their_timeout_and_a_failure_forgets_them() {
     let now = Instant::now();
     let mut login = LoginState::default();
     assert!(login.accept_parameters(json, now));
-    let options = login.ceremony.take().unwrap();
+    let options = login.take_ceremony().unwrap();
     assert_eq!(options.rp_id, "telegram.org");
     assert_eq!(options.challenge, vec![1, 2, 3]);
-    let pending = login.pending.clone().unwrap();
+    let pending = login.fresh_options(now).unwrap().clone();
     assert!(pending.fresh(now + Duration::from_millis(999)));
     assert!(!pending.fresh(now + Duration::from_millis(1000)));
-    login.checking = true;
+    login.stage = LoginStage::Checking;
     login.fail("PASSKEY_CREDENTIAL_NOT_FOUND".into());
-    assert!(login.pending.is_none() && login.ceremony.is_none() && !login.checking);
-    assert_eq!(login.error.as_deref(), Some("PASSKEY_CREDENTIAL_NOT_FOUND"));
+    assert!(login.fresh_options(now).is_none() && !login.ceremony_ready() && !login.checking());
+    assert_eq!(login.error(), Some("PASSKEY_CREDENTIAL_NOT_FOUND"));
     assert!(!login.accept_parameters(r#"{"publicKey":{}}"#, now));
-    assert!(login.ceremony.is_none());
+    assert!(!login.ceremony_ready());
 }

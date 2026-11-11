@@ -50,7 +50,7 @@ fn colors_need_premium_and_icons_load_once() {
         &mut driver,
         json!({"@type":"stickers","@extra":request.as_extra(),"stickers":[sticker(41, 301), sticker(42, 302)]}),
     );
-    let icons = &driver.session.users_state.background_emoji_icons;
+    let icons = driver.session.users_state.background_emoji_icons.items();
     assert_eq!(icons.len(), 2);
     assert_eq!(icons[0].custom_emoji_id, Some(41));
     assert!(driver.load_background_emoji_icons().unwrap().is_none());
@@ -96,10 +96,10 @@ fn wearable_gifts_load_and_wearing_one_sends_its_colors() {
             gift("b", json!(null)),
         ]}),
     );
-    let gifts = &driver.session.users_state.wearable_gifts;
+    let gifts = driver.session.users_state.wearable_gifts.items();
     assert_eq!(gifts.len(), 1);
     assert_eq!(gifts[0].gift.colors.as_ref().map(|c| c.id), Some(901));
-    assert!(driver.session.users_state.wearable_gifts_loaded);
+    assert!(driver.session.users_state.wearable_gifts.data().is_some());
 
     assert!(driver.set_upgraded_gift_colors(0).is_err());
     driver.set_upgraded_gift_colors(901).unwrap();

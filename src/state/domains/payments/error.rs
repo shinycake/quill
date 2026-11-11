@@ -173,7 +173,9 @@ impl Session {
                 }
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GetWearableGifts)) => {
-                self.users_state.wearable_gifts_loaded = true;
+                self.users_state
+                    .wearable_gifts
+                    .fail(error_reason(err));
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { .. })) => {
                 // Only the newest page's error counts (an older page's is
@@ -211,18 +213,13 @@ impl Session {
             Some(RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { .. })) => {
                 // Only the page in flight fails the list; an error does not
                 // leave the list stale to be asked every frame.
-                if extra.is_some() && self.payments.star_subscriptions_request == extra {
-                    self.payments.star_subscriptions_request = None;
-                    self.payments.star_subscriptions_stale = false;
-                    self.payments.star_subscriptions_error = Some(format!(
-                        "Couldn't load subscriptions: {}",
-                        error_reason(err)
-                    ));
-                }
+                self.payments.star_subs.list.fail(
+                    extra,
+                    format!("Couldn't load subscriptions: {}", error_reason(err)),
+                );
             }
             Some(RequestPurpose::EditStarSubscription | RequestPurpose::ReuseStarSubscription) => {
-                self.payments.star_subscriptions_mutating = false;
-                self.payments.star_subscriptions_error = Some(format!(
+                self.payments.star_subs.edit_failed(format!(
                     "Couldn't update the subscription: {}",
                     error_reason(err)
                 ));

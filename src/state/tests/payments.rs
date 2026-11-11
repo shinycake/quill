@@ -191,22 +191,23 @@ fn star_subscriptions_apply_only_to_own_request() {
         )
     };
     apply_json(&mut session, &seq, &sink, &subs_json("999"));
-    assert!(session.payments.star_subscriptions.is_none());
+    assert!(session.payments.star_subs.list.data().is_none());
     let extra = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
         None,
     );
-    session.payments.star_subscriptions_request = Some(extra);
+    session.payments.star_subs.list.begin(extra, false);
     apply_json(&mut session, &seq, &sink, &subs_json(&extra.0.to_string()));
     let subs = session
         .payments
-        .star_subscriptions
-        .as_ref()
+        .star_subs
+        .list
+        .data()
         .expect("list applies");
     assert_eq!(subs.subscriptions.len(), 1);
     assert_eq!(subs.subscriptions[0].id, "sub1");
     assert_eq!(subs.star_amount, 500);
-    assert!(!session.payments.star_subscriptions_loading());
+    assert!(!session.payments.star_subs.list.loading());
 }
 
 #[test]
@@ -225,19 +226,19 @@ fn star_subscriptions_append_page_merges() {
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
         None,
     );
-    session.payments.star_subscriptions_request = Some(extra);
+    session.payments.star_subs.list.begin(extra, false);
     apply_json(
         &mut session,
         &seq,
         &sink,
         &subs_json(&extra.0.to_string(), "sub1", "50"),
     );
-    assert_eq!(session.payments.star_subscriptions_offset, "50");
+    assert_eq!(session.payments.star_subs.list.next_offset(), "50");
     let extra = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: true }),
         None,
     );
-    session.payments.star_subscriptions_request = Some(extra);
+    session.payments.star_subs.list.begin(extra, true);
     apply_json(
         &mut session,
         &seq,
@@ -246,13 +247,14 @@ fn star_subscriptions_append_page_merges() {
     );
     let subs = session
         .payments
-        .star_subscriptions
-        .as_ref()
+        .star_subs
+        .list
+        .data()
         .expect("list applies");
     assert_eq!(subs.subscriptions.len(), 2);
     assert_eq!(subs.subscriptions[0].id, "sub1");
     assert_eq!(subs.subscriptions[1].id, "sub2");
-    assert_eq!(session.payments.star_subscriptions_offset, "");
+    assert_eq!(session.payments.star_subs.list.next_offset(), "");
 }
 
 #[test]
@@ -263,16 +265,16 @@ fn star_subscription_mutation_ok_marks_stale() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::EditStarSubscription, None);
-    session.payments.star_subscriptions_mutating = true;
+    session.payments.star_subs.begin_edit();
     apply_json(
         &mut session,
         &seq,
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(session.payments.star_subscriptions_stale);
-    assert!(!session.payments.star_subscriptions_mutating);
-    assert!(session.payments.star_subscriptions_error.is_none());
+    assert!(!session.payments.star_subs.mutating());
+    assert!(session.payments.star_subs.error().is_none());
+    assert!(session.payments.star_subs.list.wants_first_page());
 }
 
 #[test]
@@ -285,7 +287,7 @@ fn star_subscriptions_error_surfaces() {
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
         None,
     );
-    session.payments.star_subscriptions_request = Some(extra);
+    session.payments.star_subs.list.begin(extra, false);
     apply_json(
         &mut session,
         &seq,
@@ -295,13 +297,13 @@ fn star_subscriptions_error_surfaces() {
             extra.0
         ),
     );
-    assert!(!session.payments.star_subscriptions_loading());
+    assert!(!session.payments.star_subs.list.loading());
     // `error_reason` never echoes the native TDLib message (it can
     // contain secrets) — the classified reason surfaces instead.
     let err = session
         .payments
-        .star_subscriptions_error
-        .as_ref()
+        .star_subs
+        .error()
         .expect("error surfaces");
     assert_eq!(err, "Couldn't load subscriptions: invalid request");
 }

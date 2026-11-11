@@ -136,13 +136,13 @@ mod with_webauthn {
             json!({"@type": "text", "text": OPTIONS}),
         );
         let login = &mut p.driver.session.settings.passkeys.login;
-        let options = login.ceremony.take().expect("the ceremony starts");
+        let options = login.take_ceremony().expect("the ceremony starts");
         assert_eq!(options.rp_id, "telegram.org");
         assert_eq!(options.challenge, vec![1, 2, 3]);
         assert!(!p.driver.passkey_login_pending());
         // Cancelled and tried again within the timeout: the same options.
         assert!(p.driver.begin_login().unwrap().is_none());
-        assert!(p.driver.session.settings.passkeys.login.ceremony.is_some());
+        assert!(p.driver.session.settings.passkeys.login.ceremony_ready());
         assert_eq!(count(&p.recorder, "getAuthenticationPasskeyParameters"), 1);
     }
 
@@ -169,7 +169,7 @@ mod with_webauthn {
         assert!(p.driver.finish_login(&assertion(b"2:777")).is_err());
         answer(&mut p, "checkAuthenticationPasskey", json!({"@type": "ok"}));
         let login = &p.driver.session.settings.passkeys.login;
-        assert!(!login.checking && login.error.is_none() && login.pending.is_none());
+        assert!(!login.checking() && login.error().is_none() && login.fresh_options(std::time::Instant::now()).is_none());
         // A password-protected account: TDLib moves to the password screen.
         auth(
             &mut p,
@@ -199,12 +199,12 @@ mod with_webauthn {
             json!({"@type": "error", "code": 400, "message": "PASSKEY_CREDENTIAL_NOT_FOUND"}),
         );
         let login = &p.driver.session.settings.passkeys.login;
-        assert_eq!(login.error.as_deref(), Some("PASSKEY_CREDENTIAL_NOT_FOUND"));
-        assert!(login.pending.is_none() && !login.checking);
+        assert_eq!(login.error(), Some("PASSKEY_CREDENTIAL_NOT_FOUND"));
+        assert!(login.fresh_options(std::time::Instant::now()).is_none() && !login.checking());
         // The next click asks for new options and clears the error.
         assert!(p.driver.begin_login().unwrap().is_some());
         assert_eq!(count(&p.recorder, "getAuthenticationPasskeyParameters"), 2);
-        assert!(p.driver.session.settings.passkeys.login.error.is_none());
+        assert!(p.driver.session.settings.passkeys.login.error().is_none());
     }
 
     #[test]
@@ -219,8 +219,8 @@ mod with_webauthn {
         assert_eq!(p.driver.finish_login(&assertion(b"777")).unwrap(), None);
         assert_eq!(count(&p.recorder, "checkAuthenticationPasskey"), 0);
         let login = &p.driver.session.settings.passkeys.login;
-        assert_eq!(login.error.as_deref(), Some("PASSKEY_HANDLE_INVALID"));
-        assert!(login.pending.is_none());
+        assert_eq!(login.error(), Some("PASSKEY_HANDLE_INVALID"));
+        assert!(login.fresh_options(std::time::Instant::now()).is_none());
     }
 
     #[test]
@@ -233,9 +233,9 @@ mod with_webauthn {
             json!({"@type": "text", "text": "{}"}),
         );
         let login = &p.driver.session.settings.passkeys.login;
-        assert!(login.ceremony.is_none());
+        assert!(!login.ceremony_ready());
         assert_eq!(
-            login.error.as_deref(),
+            login.error(),
             Some(crate::passkeys::login::UNREADABLE_OPTIONS)
         );
         p.driver.begin_login().unwrap();
@@ -245,7 +245,7 @@ mod with_webauthn {
             json!({"@type": "error", "code": 429, "message": "FLOOD_WAIT_30"}),
         );
         let login = &p.driver.session.settings.passkeys.login;
-        assert_eq!(login.error.as_deref(), Some("FLOOD_WAIT_30"));
+        assert_eq!(login.error(), Some("FLOOD_WAIT_30"));
     }
 
     #[test]

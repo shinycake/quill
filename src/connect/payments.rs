@@ -181,10 +181,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if (self.session.payments.star_subscriptions.is_some()
-            && !self.session.payments.star_subscriptions_stale)
-            || self.session.payments.star_subscriptions_loading()
-        {
+        if !self.session.payments.star_subs.list.wants_first_page() {
             return Ok(None);
         }
         self.fetch_star_subscriptions_page(false).map(Some)
@@ -197,9 +194,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.payments.star_subscriptions_offset.is_empty()
-            || self.session.payments.star_subscriptions_loading()
-        {
+        let subs = &self.session.payments.star_subs.list;
+        if subs.next_offset().is_empty() || subs.loading() {
             return Ok(None);
         }
         self.fetch_star_subscriptions_page(true).map(Some)
@@ -210,7 +206,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         append: bool,
     ) -> Result<RequestId, ConnectSendError> {
         let offset = if append {
-            self.session.payments.star_subscriptions_offset.clone()
+            self.session.payments.star_subs.list.next_offset().to_string()
         } else {
             String::new()
         };
@@ -220,15 +216,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         let json = get_star_subscriptions(extra, false, &offset);
         let payments = &mut self.session.payments;
-        payments.star_subscriptions_request = Some(extra);
-        payments.star_subscriptions_error = None;
+        payments.star_subs.list.begin(extra, append);
         if let Err(err) = self.send_json_request(extra, &json) {
-            let payments = &mut self.session.payments;
-            payments.star_subscriptions_request = None;
             // A page that never left shows its error; it is not asked again
             // by itself.
-            payments.star_subscriptions_error = Some(
-                crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_THE_SUBSCRIPTIONS).into(),
+            self.session.payments.star_subs.list.send_failed(
+                crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_THE_SUBSCRIPTIONS),
             );
             return Err(err);
         }
@@ -242,17 +235,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn refresh_star_subscriptions_if_stale(
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        let payments = &self.session.payments;
-        // A page in flight settles first: the list stays stale until a first
-        // page answers (or fails), so a refetch never races an appended one.
-        if !payments.star_subscriptions_stale || payments.star_subscriptions_loading() {
+        // Only a list a mutation outdated is refetched here; an answer made
+        // a page in flight stale by dropping its request, so nothing races.
+        if !self.session.payments.star_subs.list.is_outdated() {
             return Ok(None);
         }
-        let sent = self.fetch_star_subscriptions_page(false);
-        if sent.is_err() {
-            self.session.payments.star_subscriptions_stale = false;
-        }
-        sent.map(Some)
+        self.fetch_star_subscriptions_page(false).map(Some)
     }
 
     /// Slice `parity:bots-payment-recurring`: `editStarSubscription`
@@ -264,17 +252,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         subscription_id: &str,
         is_canceled: bool,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.payments.star_subscriptions_mutating {
+        if !self.chats_path_active() || self.session.payments.star_subs.mutating() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
             .request(RequestPurpose::EditStarSubscription, None);
-        self.session.payments.star_subscriptions_mutating = true;
-        self.session.payments.star_subscriptions_error = None;
+        self.session.payments.star_subs.begin_edit();
         let json = edit_star_subscription(extra, subscription_id, is_canceled);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.payments.star_subscriptions_mutating = false;
+            self.session.payments.star_subs.edit_unsent();
             return Err(err);
         }
         Ok(extra)
@@ -288,17 +275,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         subscription_id: &str,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.payments.star_subscriptions_mutating {
+        if !self.chats_path_active() || self.session.payments.star_subs.mutating() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
             .request(RequestPurpose::ReuseStarSubscription, None);
-        self.session.payments.star_subscriptions_mutating = true;
-        self.session.payments.star_subscriptions_error = None;
+        self.session.payments.star_subs.begin_edit();
         let json = reuse_star_subscription(extra, subscription_id);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.payments.star_subscriptions_mutating = false;
+            self.session.payments.star_subs.edit_unsent();
             return Err(err);
         }
         Ok(extra)

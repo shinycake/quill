@@ -20,6 +20,13 @@ pub enum Fetch<T> {
     Failed { error: String, stale: Option<T> },
 }
 
+impl<T> Fetch<Vec<T>> {
+    /// The newest list held; empty when there is none.
+    pub fn items(&self) -> &[T] {
+        self.data().map_or(&[], Vec::as_slice)
+    }
+}
+
 impl<T> Fetch<T> {
     pub fn is_idle(&self) -> bool {
         matches!(self, Self::Idle)

@@ -16,6 +16,7 @@ fn known(list: Vec<Passkey>) -> PasskeysState {
         display_allowed: true,
         ..Default::default()
     };
+    state.stage = ListStage::Asked { at: Instant::now() };
     state.accept_list(list, 0);
     state
 }
@@ -173,9 +174,10 @@ fn a_list_asked_before_a_removal_does_not_bring_the_passkey_back() {
     state.finish_remove("a");
     state.accept_list(vec![key("a", "x"), key("b", "y")], asked);
     assert_eq!(state.list.len(), 1);
-    assert!(state.stale);
+    assert_eq!(state.stage, ListStage::Stale);
+    state.stage = ListStage::Asked { at: Instant::now() };
     state.accept_list(vec![key("b", "y")], state.generation);
-    assert!(!state.stale && state.known);
+    assert!(state.known());
 }
 
 #[test]
@@ -210,24 +212,26 @@ fn a_fetched_list_stays_fresh_for_five_seconds() {
     let now = Instant::now();
     let mut state = PasskeysState::default();
     assert!(state.wants_fetch(now));
-    state.requested_at = Some(now);
+    state.stage = ListStage::Asked { at: now };
     assert!(!state.wants_fetch(now + Duration::from_secs(5)));
     assert!(state.wants_fetch(now + Duration::from_secs(6)));
-    state.stale = true;
+    state.stage = ListStage::Stale;
     assert!(state.wants_fetch(now));
 }
 
 #[test]
 fn a_removal_forgets_the_passkey_and_asks_again() {
     let mut state = known(vec![key("a", "x"), key("b", "y")]);
-    state.removing = Some("a".into());
-    state.requested_at = Some(Instant::now());
+    state.remove = PasskeyRemove::Removing {
+        id: "a".into(),
+        request: RequestId(3),
+    };
     state.finish_remove("a");
     assert_eq!(state.list.len(), 1);
     assert!(state.find("a").is_none());
-    assert!(!state.known);
-    assert!(state.stale);
-    assert!(state.removing.is_none());
+    assert!(!state.known());
+    assert_eq!(state.stage, ListStage::Stale);
+    assert!(state.removing().is_none());
     assert!(state.wants_fetch(Instant::now()));
 }
 

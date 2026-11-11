@@ -784,7 +784,7 @@ mod paid_gate {
 }
 
 #[test]
-fn a_stale_subscriptions_refetch_waits_for_an_appended_page_and_is_kept_when_refused() {
+fn an_outdated_subscriptions_list_refetches_once_and_a_refusal_is_not_asked_again() {
     let mut t = Flaky::new();
     let subs = |next: &str| {
         json!({"@type": "starSubscriptions", "star_count": 5, "subscriptions": [],
@@ -793,34 +793,39 @@ fn a_stale_subscriptions_refetch_waits_for_an_appended_page_and_is_kept_when_ref
     t.driver.maybe_fetch_star_subscriptions().unwrap();
     t.answer("getStarSubscriptions", subs("more"));
     t.driver.fetch_more_star_subscriptions().unwrap();
-    t.driver.session.payments.star_subscriptions_stale = true;
-    // The appended page is out: no first-page request beside it.
+    // A mutation lands while the appended page is out: the page asked
+    // before the change is dropped with its request, and the first page is
+    // asked for again at once.
+    t.driver.session.payments.star_subs.outdate();
     assert!(
         t.driver
             .refresh_star_subscriptions_if_stale()
             .unwrap()
-            .is_none()
+            .is_some()
     );
-    assert_eq!(t.sender.count("getStarSubscriptions"), 2);
-    t.answer("getStarSubscriptions", subs(""));
-    // The appended page did not refresh the list: it is still stale, and
-    // the refetch the driver runs after the answer is on its way.
     assert_eq!(t.sender.count("getStarSubscriptions"), 3);
     assert_eq!(
         t.sender.last("getStarSubscriptions").unwrap()["offset"],
         "",
         "a first page"
     );
-    assert!(t.driver.session.payments.star_subscriptions_stale);
-    // The refetch is cleared by its own answer.
+    // Its own answer settles the list.
     t.answer("getStarSubscriptions", subs(""));
-    assert!(!t.driver.session.payments.star_subscriptions_stale);
+    assert!(matches!(
+        t.driver.session.payments.star_subs.list,
+        crate::state::paged::Paged::Ready(_)
+    ));
     // A refetch that is refused shows its error and is not asked every frame.
-    t.driver.session.payments.star_subscriptions_stale = true;
+    t.driver.session.payments.star_subs.outdate();
     t.sender.refuse(&["getStarSubscriptions"]);
     assert!(t.driver.refresh_star_subscriptions_if_stale().is_err());
-    let payments = &t.driver.session.payments;
-    assert!(!payments.star_subscriptions_stale);
-    assert!(payments.star_subscriptions_error.is_some());
-    assert!(!payments.star_subscriptions_loading());
+    let subs = &t.driver.session.payments.star_subs;
+    assert!(subs.error().is_some());
+    assert!(!subs.list.loading());
+    assert!(
+        t.driver
+            .refresh_star_subscriptions_if_stale()
+            .unwrap()
+            .is_none()
+    );
 }

@@ -263,7 +263,7 @@ impl QuillApp {
                 let state = &mut live.driver.session.settings.passkeys;
                 (
                     state.take_starting(),
-                    state.login.ceremony.take(),
+                    state.login.take_ceremony(),
                     state.take_added(),
                 )
             }
@@ -484,7 +484,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let state = &mut live.driver.session.settings.passkeys;
             state.cancel_register();
-            state.login.ceremony = None;
+            state.login.drop_unstarted();
         }
     }
 

@@ -96,7 +96,7 @@ impl QuillApp {
         let busy = self.passkey_login_busy();
         let error = self
             .session()
-            .and_then(|s| s.settings.passkeys.login.error.clone())
+            .and_then(|s| s.settings.passkeys.login.error().map(str::to_string))
             .or_else(|| self.privacy.passkeys.demo_login_error.clone());
         let mut column = div().flex().flex_col().items_center().gap_1().child(
             Button::new("passkey-login")

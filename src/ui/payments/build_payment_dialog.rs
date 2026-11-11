@@ -260,7 +260,7 @@ impl QuillApp {
                 return dialog.on_close(on_close);
             };
             let mut body = div().flex().flex_col().gap_3();
-            if let Some(subs) = session.payments.star_subscriptions.as_ref() {
+            if let Some(subs) = session.payments.star_subs.list.data() {
                 body = body.child(
                     div()
                         .flex()
@@ -285,8 +285,8 @@ impl QuillApp {
                     );
                 }
             }
-            if session.payments.star_subscriptions_loading()
-                && session.payments.star_subscriptions.is_none()
+            if session.payments.star_subs.list.loading()
+                && session.payments.star_subs.list.data().is_none()
             {
                 body = body.child(
                     div()
@@ -295,11 +295,11 @@ impl QuillApp {
                         .child(tr(keys::Q_MONEY_LOADING_SUBSCRIPTIONS)),
                 );
             }
-            if let Some(err) = session.payments.star_subscriptions_error.as_ref() {
-                body = body.child(div().text_sm().child(err.clone()));
+            if let Some(err) = session.payments.star_subs.error() {
+                body = body.child(div().text_sm().child(err.to_string()));
             }
-            if let Some(subs) = session.payments.star_subscriptions.as_ref() {
-                if subs.subscriptions.is_empty() && !session.payments.star_subscriptions_loading() {
+            if let Some(subs) = session.payments.star_subs.list.data() {
+                if subs.subscriptions.is_empty() && !session.payments.star_subs.list.loading() {
                     body = body.child(
                         div()
                             .text_sm()
@@ -307,7 +307,7 @@ impl QuillApp {
                             .child(tr(keys::Q_MONEY_NO_ACTIVE_SUBSCRIPTIONS)),
                     );
                 }
-                let mutating = session.payments.star_subscriptions_mutating;
+                let mutating = session.payments.star_subs.mutating();
                 let confirming = session.payments.subscription_cancel_confirm.clone();
                 let chat_titles: std::collections::HashMap<i64, String> = session
                     .chats
@@ -323,7 +323,7 @@ impl QuillApp {
                         cx,
                     ));
                 }
-                if !subs.next_offset.is_empty() && session.payments.star_subscriptions_loading() {
+                if !subs.next_offset.is_empty() && session.payments.star_subs.list.loading() {
                     body = body.child(loading_row("subs-loading", cx));
                 }
             }
@@ -388,16 +388,17 @@ impl QuillApp {
             return;
         };
         if !payments.subscriptions_open
-            || (payments.star_subscriptions_error.is_some() && !scrolled)
+            || (payments.star_subs.error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.payments.subs_scroll),
-                !payments.star_subscriptions_offset.is_empty(),
-                payments.star_subscriptions_loading(),
+                !payments.star_subs.list.next_offset().is_empty(),
+                payments.star_subs.list.loading(),
             )
             || !self.payments.subs_asked.allow(
                 payments
-                    .star_subscriptions
-                    .as_ref()
+                    .star_subs
+                    .list
+                    .data()
                     .map_or(0, |subs| subs.subscriptions.len()),
                 scrolled,
             )

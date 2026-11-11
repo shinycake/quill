@@ -167,28 +167,9 @@ pub struct PaymentsState {
     pub poll_countries_max: Option<usize>,
     /// `poll_open_period_max`: the furthest a poll may close, in seconds.
     pub poll_open_period_max: Option<i64>,
-    /// Slice `parity:bots-payment-recurring`: the fetched
-    /// `starSubscriptions`, shown in the Subscriptions dialog.
-    pub star_subscriptions: Option<StarSubscriptionsData>,
-    /// Slice `parity:bots-payment-recurring`: `getStarSubscriptions` is in
-    /// flight (dialog shows a spinner).
-    /// The `getStarSubscriptions` page in flight: only its answer or error
-    /// lands (a stale refetch and an appended page never mix).
-    pub star_subscriptions_request: Option<RequestId>,
-    /// Slice `parity:bots-payment-recurring`: latest subscriptions error,
-    /// shown in the dialog (never a secret — ids are opaque TDLib strings).
-    pub star_subscriptions_error: Option<String>,
-    /// Slice `parity:bots-payment-recurring`: pagination offset for the
-    /// next `getStarSubscriptions` page (empty = no more pages).
-    pub star_subscriptions_offset: String,
-    /// Slice `parity:bots-payment-recurring`: a cancel/rejoin mutation
-    /// landed — the list refetches on the next pump (the
-    /// `sessions_stale` pattern; never optimistic).
-    pub star_subscriptions_stale: bool,
-    /// Slice `parity:bots-payment-recurring`: an `editStarSubscription` /
-    /// `reuseStarSubscription` is in flight — the dialog disables its
-    /// action buttons until the `ok` (or error) lands.
-    pub star_subscriptions_mutating: bool,
+    /// Slice `parity:bots-payment-recurring`: the Subscriptions dialog's
+    /// list (`starSubscriptions`) and its one cancel/rejoin mutation.
+    pub star_subs: StarSubscriptions,
     /// Slice `parity:bots-payment-recurring`: the Subscriptions dialog is
     /// on screen.
     pub subscriptions_open: bool,
@@ -237,11 +218,6 @@ pub struct PaymentInFlight {
 }
 
 impl PaymentsState {
-    /// A subscriptions page is in flight.
-    pub fn star_subscriptions_loading(&self) -> bool {
-        self.star_subscriptions_request.is_some()
-    }
-
     /// The checkout on screen is being paid: its invoice has a
     /// `sendPaymentForm` in flight.
     pub fn checkout_sending(&self) -> bool {
@@ -345,12 +321,7 @@ impl PaymentsState {
             gift_text_length_max: None,
             poll_countries_max: None,
             poll_open_period_max: None,
-            star_subscriptions: None,
-            star_subscriptions_request: None,
-            star_subscriptions_error: None,
-            star_subscriptions_offset: String::new(),
-            star_subscriptions_stale: false,
-            star_subscriptions_mutating: false,
+            star_subs: StarSubscriptions::default(),
             subscriptions_open: false,
             hub: crate::premium_hub::PremiumHub::default(),
             gifts_manage: Default::default(),

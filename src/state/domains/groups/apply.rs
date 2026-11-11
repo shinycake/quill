@@ -229,6 +229,13 @@ impl Session {
                 reaction_limits,
             } => {
                 self.settings.passkeys.display_allowed = passkeys.display;
+                if pending.map(|p| p.purpose)
+                    == Some(RequestPurpose::Settings(SettingsPurpose::Passkeys(
+                        crate::passkeys::PasskeysPurpose::LoginConfig,
+                    )))
+                {
+                    self.settings.passkeys.login.config.succeed(());
+                }
                 if passkeys.max.is_some() {
                     self.settings.passkeys.max_passkeys = passkeys.max;
                 }

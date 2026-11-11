@@ -4,6 +4,7 @@
 use super::*;
 use crate::ids::RequestId;
 use crate::passkeys::{
+    ListStage, PasskeyRemove,
     PasskeyAdd, PasskeysPurpose, add_login_passkey, get_login_passkeys, get_passkey_parameters,
     remove_login_passkey,
 };
@@ -44,10 +45,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(purpose(PasskeysPurpose::List(generation)), None);
         let sent = self.send_json_request(extra, &get_login_passkeys(extra))?;
         // Only a look that went out counts: a failed send leaves the list
-        // stale and the throttle open for the next try, and the answer
-        // (not the send) clears the stale mark.
+        // stale and the throttle open for the next try.
         let state = &mut self.session.settings.passkeys;
-        state.requested_at = Some(Instant::now());
+        state.stage = ListStage::Asked { at: Instant::now() };
         state.error = None;
         Ok(Some(sent))
     }
@@ -57,17 +57,22 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// for again.
     pub fn remove_passkey(&mut self, passkey_id: &str) -> Result<RequestId, ConnectSendError> {
         let state = &self.session.settings.passkeys;
-        if !self.chats_path_active() || state.removing.is_some() || state.find(passkey_id).is_none()
+        if !self.chats_path_active()
+            || state.removing().is_some()
+            || state.find(passkey_id).is_none()
         {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(purpose(PasskeysPurpose::Remove), None);
         let state = &mut self.session.settings.passkeys;
-        state.removing = Some(passkey_id.to_string());
+        state.remove = PasskeyRemove::Removing {
+            id: passkey_id.to_string(),
+            request: extra,
+        };
         state.error = None;
         let sent = self.send_json_request(extra, &remove_login_passkey(extra, passkey_id));
         if sent.is_err() {
-            self.session.settings.passkeys.removing = None;
+            self.session.settings.passkeys.remove = PasskeyRemove::Idle;
         }
         sent
     }
@@ -149,7 +154,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// it stale, and ask for the software icons nobody has resolved yet.
     pub(crate) fn after_passkeys_ingest(&mut self) {
         self.maybe_request_login_config();
-        if self.session.settings.passkeys.stale {
+        if self.session.settings.passkeys.stage == ListStage::Stale {
             let _ = self.request_passkeys();
         }
         let _ = self.maybe_resolve_passkey_icons();
