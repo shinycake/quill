@@ -712,7 +712,8 @@ mod tests {
 }
 
 /// Whether the tile is neither built nor being built (tests).
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 fn tile_is_idle() -> bool {
     TILE.with(|tile| matches!(&*tile.borrow(), TileState::Idle))
 }
