@@ -437,3 +437,34 @@ fn signal_bars_follow_the_engine_event() {
     assert_eq!(bars(&driver), Some(3));
     std::fs::remove_dir_all(dir).ok();
 }
+
+/// A speaking send the sender refuses is not recorded as told: the next
+/// poll sends it again, and TDLib hears you speak.
+#[test]
+fn a_refused_speaking_send_is_offered_again_on_the_next_poll() {
+    use std::time::{Duration, Instant};
+    let (dir, mut driver, sender, _sink, _seq) = super::support::toggle_driver();
+    let level = Arc::new(TestLevel(Mutex::new(None)));
+    driver
+        .call_audio
+        .inject(Box::new(SharedLevel(level.clone())));
+    driver.session.calls.active_group_call = Some(joined_unmuted_call(4242));
+    let t0 = Instant::now();
+    let at = |ms: u64| t0 + Duration::from_millis(ms);
+    let speaking_sent = || {
+        sender
+            .snapshot()
+            .iter()
+            .filter(|s| s.contains("setGroupCallParticipantIsSpeaking"))
+            .count()
+    };
+    sender.refuse(true);
+    *level.0.lock().unwrap() = Some(1.3);
+    driver.pump_call_audio(at(92)).unwrap_err();
+    assert_eq!(speaking_sent(), 0);
+    sender.refuse(false);
+    *level.0.lock().unwrap() = Some(1.3);
+    driver.pump_call_audio(at(184)).unwrap();
+    assert_eq!(speaking_sent(), 1, "the edge goes out once the sender takes it");
+    std::fs::remove_dir_all(dir).ok();
+}

@@ -77,7 +77,6 @@ pub struct CallAudio {
     injected: Option<Box<dyn LevelSource>>,
     tracker: SpeakingTracker,
     clock: Instant,
-    speaking: bool,
 }
 
 impl Default for CallAudio {
@@ -88,7 +87,6 @@ impl Default for CallAudio {
             injected: None,
             tracker: SpeakingTracker::default(),
             clock: Instant::now(),
-            speaking: false,
         }
     }
 }
@@ -111,7 +109,7 @@ impl CallAudio {
         let Tap::Open { read_at, .. } = &self.tap else {
             return None;
         };
-        if !measuring && !self.speaking {
+        if !measuring && !self.tracker.speaking() {
             return None;
         }
         let since = read_at.map_or(READ_EVERY, |at| now.saturating_duration_since(at));
@@ -120,7 +118,7 @@ impl CallAudio {
 
     /// The latest level and whether you count as speaking.
     pub fn self_level(&self) -> (f32, bool) {
-        (self.tracker.level(), self.speaking)
+        (self.tracker.level(), self.tracker.speaking())
     }
 
     pub fn is_open(&self) -> bool {
@@ -402,7 +400,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// state run out. Returns whether your speaking state changed.
     pub(crate) fn pump_call_audio(&mut self, now: Instant) -> Result<bool, ConnectSendError> {
         self.drain_remote_audio_state();
-        let was_speaking = self.call_audio.speaking;
+        let was_speaking = self.call_audio.tracker.speaking();
         let wanted = self
             .session
             .calls
@@ -410,9 +408,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .and_then(tap_wanted);
         let Some((group_call_id, audio_source)) = wanted else {
-            let closing_speaking = self.call_audio.is_open() || self.call_audio.speaking;
+            let closing_speaking = self.call_audio.is_open() || was_speaking;
             self.call_audio.close();
-            self.call_audio.speaking = false;
             if self.call_audio.tracker.reset() && closing_speaking {
                 // You stopped being able to speak while marked speaking.
                 let group_call_id = self.session.calls.active_group_call.as_ref().map(|c| c.id);
@@ -442,7 +439,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             // cannot be speaking without it: as when the tap is not wanted,
             // the mark and the tracker reset and TDLib is told.
             self.call_audio.fail(err);
-            self.call_audio.speaking = false;
             if self.call_audio.tracker.reset() && was_speaking && audio_source != 0 {
                 self.send_speaking(group_call_id, audio_source, false)?;
             }
@@ -456,11 +452,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             // capture stopped): the kept-for time still runs out.
             None => self.call_audio.tracker.idle(now_ms),
         };
-        self.call_audio.speaking = update.speaking;
         if let Some(is_speaking) = update.send
             && audio_source != 0
         {
             self.send_speaking(group_call_id, audio_source, is_speaking)?;
+            if self.chats_path_active() {
+                self.call_audio.tracker.sent(now_ms, is_speaking);
+            }
         }
         Ok(was_speaking != update.speaking)
     }

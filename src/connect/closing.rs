@@ -24,6 +24,7 @@
 
 use super::*;
 use crate::ids::AccountKey;
+use crate::state::ShutdownPhase;
 use crate::telegram::client::{OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::AuthorizationState;
 use std::time::{Duration, Instant};
@@ -88,18 +89,20 @@ pub(crate) fn begin_close<S: JsonSender>(driver: &mut ConnectDriver<S>) {
         let _ = driver.set_online(false);
     }
     if driver.hang_up_pending() {
-        driver.close_held_until = Some(deadline_after(HANG_UP_HOLD));
+        driver.session.shutdown = ShutdownPhase::HoldingClose {
+            until: deadline_after(HANG_UP_HOLD),
+        };
     } else {
         let _ = driver.request_close();
     }
 }
 
 pub(crate) fn release_close<S: JsonSender>(driver: &mut ConnectDriver<S>, now: Instant) {
-    let Some(until) = driver.close_held_until else {
+    let ShutdownPhase::HoldingClose { until } = driver.session.shutdown else {
         return;
     };
     if now >= until || !driver.hang_up_pending() {
-        driver.close_held_until = None;
+        driver.session.shutdown = ShutdownPhase::Running;
         let _ = driver.request_close();
     }
 }

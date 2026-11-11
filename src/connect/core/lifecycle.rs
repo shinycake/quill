@@ -42,7 +42,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             sender,
             batch: Default::default(),
             call_engine: None,
-            close_held_until: None,
             signaling_outbox: Arc::new(Mutex::new(VecDeque::new())),
             transport_outbox: Arc::new(Mutex::new(VecDeque::new())),
             video_state_outbox: Arc::new(Mutex::new(VecDeque::new())),
