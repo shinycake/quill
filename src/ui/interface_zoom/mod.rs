@@ -193,24 +193,44 @@ impl WindowZoom {
             self.refire.set(Refire::RunAgain);
             return;
         }
-        let Some(mut callback) = self.resize.borrow_mut().take() else {
+        let Some(callback) = self.resize.borrow_mut().take() else {
             return;
+        };
+        // Back to idle with the callback in place even if it panics, so the
+        // next zoom change runs it again.
+        let mut run = RunningResize {
+            state: self,
+            callback: Some(callback),
         };
         for _ in 0..=MAX_REFIRES {
             self.refire.set(Refire::Running);
             let zoom = self.zoom.get();
-            callback(
-                size_in(self.raw_size.get(), zoom),
-                self.raw_scale.get() * zoom,
-            );
+            if let Some(callback) = run.callback.as_mut() {
+                callback(
+                    size_in(self.raw_size.get(), zoom),
+                    self.raw_scale.get() * zoom,
+                );
+            }
             if self.refire.get() != Refire::RunAgain {
                 break;
             }
         }
-        self.refire.set(Refire::Idle);
-        let mut slot = self.resize.borrow_mut();
+    }
+}
+
+/// The resize callback while [`WindowZoom::fire_resize`] runs it; dropping
+/// it (also on a panic) ends the run.
+struct RunningResize<'a> {
+    state: &'a WindowZoom,
+    callback: Option<ResizeCallback>,
+}
+
+impl Drop for RunningResize<'_> {
+    fn drop(&mut self) {
+        self.state.refire.set(Refire::Idle);
+        let mut slot = self.state.resize.borrow_mut();
         if slot.is_none() {
-            *slot = Some(callback);
+            *slot = self.callback.take();
         }
     }
 }
@@ -998,6 +1018,25 @@ mod tests {
         assert_eq!(seen[1], (Size::new(px(500.), px(300.)), 2.));
         assert_eq!(state.refire.get(), Refire::Idle);
         assert!(state.resize.borrow().is_some(), "the callback is back");
+    }
+
+    #[test]
+    fn a_resize_callback_that_panics_leaves_the_next_zoom_change_able_to_run_it() {
+        let state = WindowZoom::register(1., Size::new(px(1000.), px(600.)), 1., None);
+        let runs = Rc::new(Cell::new(0));
+        let count = runs.clone();
+        *state.resize.borrow_mut() = Some(Box::new(move |_, _| {
+            count.set(count.get() + 1);
+            if count.get() == 1 {
+                panic!("a handler that fails once");
+            }
+        }));
+        let first = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| state.fire_resize()));
+        assert!(first.is_err());
+        assert_eq!(state.refire.get(), Refire::Idle);
+        assert!(state.resize.borrow().is_some(), "the callback is back");
+        state.fire_resize();
+        assert_eq!(runs.get(), 2, "the next change ran it again");
     }
 
     #[test]

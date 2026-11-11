@@ -39,6 +39,15 @@ impl Session {
         err: &TdError,
         purpose: Option<RequestPurpose>,
     ) -> bool {
+        if purpose == Some(RequestPurpose::RemoveSavedNotificationSound) {
+            // The sound is still saved: say so, and read the list again so
+            // the row shows what the server has.
+            self.chats_state
+                .chat_action_error
+                .push(crate::lang::tr(crate::lang::keys::Q_TONE_DELETE_FAILED).to_string());
+            self.mark_saved_sounds_stale();
+            return true;
+        }
         if purpose != Some(RequestPurpose::UploadSavedNotificationSound) {
             return false;
         }

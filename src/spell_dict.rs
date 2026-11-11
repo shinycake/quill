@@ -348,7 +348,12 @@ impl SpellBackend for HunspellBackend {
                 return Some(true);
             }
         }
-        if any_entry && !any_loaded {
+        if !any_entry {
+            // No dictionary covers the word's script: nothing can call it
+            // wrong.
+            return Some(true);
+        }
+        if !any_loaded {
             return None;
         }
         Some(false)

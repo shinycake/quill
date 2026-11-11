@@ -284,7 +284,8 @@ impl QuillApp {
                 return;
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.settings.privacy_data.network_usage = Some(NetworkUsage::default());
+            demo.settings.privacy_data.network =
+                quill::state::fetch::Fetch::Ready(NetworkUsage::default());
         }
         self.privacy.extra.network_reset = NetworkReset::Idle;
     }

@@ -180,3 +180,23 @@ fn deleting_a_saved_sound_sends_its_id_and_refetches() {
     assert!(driver.session.settings.saved_sounds_stale);
     assert!(driver.remove_notification_tone(0).is_err());
 }
+
+#[test]
+fn a_refused_delete_says_so_and_reads_the_list_again() {
+    let (mut driver, recorder, sink, seq) = driver();
+    driver.remove_notification_tone(900).unwrap();
+    assert!(!driver.session.settings.saved_sounds_stale);
+    answer(
+        &mut driver,
+        &recorder,
+        &seq,
+        &sink,
+        "removeSavedNotificationSound",
+        r#"{"@type":"error","code":400,"message":"NOTIFICATION_SOUND_NOT_FOUND"}"#,
+    );
+    assert!(driver.session.settings.saved_sounds_stale);
+    assert_eq!(
+        driver.session.chats_state.chat_action_error.last(),
+        Some(crate::lang::tr(crate::lang::keys::Q_TONE_DELETE_FAILED))
+    );
+}

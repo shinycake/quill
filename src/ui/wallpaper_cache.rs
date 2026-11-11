@@ -555,7 +555,7 @@ fn lookup(
             let rendered = render_guarded(|| {
                 INLINE_SOURCES.with(|s| s.borrow_mut().render(wallpaper, width, height))
             });
-            let retry_at = retry_time(rendered.as_ref());
+            let retry_at = retry_time(wallpaper, rendered.as_ref(), Instant::now());
             let composite = rendered.and_then(|r| to_composite(r, width, height));
             cache.insert_until(key, composite.clone(), window, retry_at);
             return ready(&mut cache, composite, true);
@@ -563,7 +563,7 @@ fn lookup(
         let mut board = shared.board.lock_or_recover();
         if let Some((_, result)) = board.done.remove(&key) {
             drop(board);
-            let retry_at = retry_time(result.as_ref());
+            let retry_at = retry_time(wallpaper, result.as_ref(), Instant::now());
             let composite = result.and_then(|r| to_composite(r, width, height));
             cache.insert_until(key, composite.clone(), window, retry_at);
             return ready(&mut cache, composite, true);
@@ -601,11 +601,19 @@ fn lookup(
     })
 }
 
-/// When a picture made without its pattern is made again.
-fn retry_time(rendered: Option<&Rendered>) -> Option<Instant> {
-    rendered
-        .is_some_and(|r| !r.complete)
-        .then(|| Instant::now() + RETRY_AFTER)
+/// When a picture that is not whole is made again: a fill shown without its
+/// pattern, or nothing at all for a wallpaper that reads a file (a photo
+/// TDLib was rewriting, a pattern that did not rasterise). A wallpaper of
+/// colours alone has no file to wait for.
+fn retry_time(wallpaper: &Wallpaper, rendered: Option<&Rendered>, now: Instant) -> Option<Instant> {
+    let incomplete = match rendered {
+        Some(r) => !r.complete,
+        None => matches!(
+            wallpaper,
+            Wallpaper::Pattern { .. } | Wallpaper::Image { .. }
+        ),
+    };
+    incomplete.then(|| now + RETRY_AFTER)
 }
 
 fn to_composite(rendered: Rendered, width: u32, height: u32) -> Option<Composite> {
@@ -693,7 +701,9 @@ pub(super) fn wallpaper_layer(
 
 #[cfg(test)]
 mod tests {
-    use super::{Board, Cache, Composite, Job, RETRY_AFTER, Shown, image_key, render_guarded};
+    use super::{
+        Board, Cache, Composite, Job, RETRY_AFTER, Shown, image_key, render_guarded, retry_time,
+    };
     use crate::ui::image_budget::begin_frame;
     use crate::ui::wallpaper::Wallpaper;
     use gpui_kit::{RenderImage, WindowId};
@@ -757,6 +767,24 @@ mod tests {
                 .get_at(2, window(MAIN), start + RETRY_AFTER * 100)
                 .is_some()
         );
+    }
+
+    #[test]
+    fn a_wallpaper_whose_file_gave_nothing_is_tried_again_after_the_wait() {
+        let now = Instant::now();
+        let photo = Wallpaper::Image {
+            path: "/nonexistent/quill-photo.jpg".into(),
+            blurred: false,
+            tiled: false,
+        };
+        assert_eq!(retry_time(&photo, None, now), Some(now + RETRY_AFTER));
+        // The same photo, once drawn, is whole for good, and a wallpaper of
+        // colours alone has no file to wait for.
+        assert_eq!(retry_time(&Wallpaper::Solid(0x336699), None, now), None);
+        let mut cache = Cache::default();
+        cache.insert_until(1, None, window(MAIN), retry_time(&photo, None, now));
+        assert!(cache.get_at(1, window(MAIN), now).is_some());
+        assert!(cache.get_at(1, window(MAIN), now + RETRY_AFTER).is_none());
     }
 
     #[test]

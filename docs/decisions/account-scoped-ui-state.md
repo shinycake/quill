@@ -5473,7 +5473,10 @@ land and the typed form was gone.
   session field `background_set_for_dark` is gone (02-086). An installed
   wallpaper whose pattern file cannot be read is not remembered as unreadable;
   the fill-only picture is cached until a retry time, not under the final key
-  for good (`Rendered::complete`, `Entry::retry_at`) (14-026). The preview
+  for good (`Rendered::complete`, `Entry::retry_at`). A photo or pattern mask
+  that gave nothing at all has the same retry time (`retry_time` takes the
+  wallpaper: a file-backed one is tried again, colours alone are not), so a
+  photo TDLib was rewriting does not leave the chat bare (14-026). The preview
   slot is hashed with its window id like the history's, so two preview areas
   of different windows stop replacing each other's render job (14-024). A
   gradient bubble uses the history area only when its own window reported it
@@ -5502,7 +5505,9 @@ land and the typed form was gone.
   (11-p5-018). The upload's picker target is part of `ToneUpload` in the
   session, so an account switch cannot part them (`ToneTarget`, shared with
   the UI's `SoundPickerTarget`) (11-p5-019). A failed delete of a saved sound
-  says so (11-p5-020).
+  says so, at send time and when TDLib refuses it (the error arm adds the
+  note and marks the saved sounds stale so the list is read again)
+  (11-p5-020).
 - **Appearance and spelling.** A refused delete leaves the custom theme
   applied (07-040); a renamed one repoints both slots (07-041). One task waits
   for the Linux accent read (07-049). A zoom change inside the resize callback
@@ -5511,7 +5516,9 @@ land and the typed form was gone.
   says to wait (13-061); a user cancel is `DownloadError::Cancelled` (05-005);
   a refused remove leaves the language chosen (05-006). A dictionary that
   failed to load is tried again after 30 s, and the checker does not remember
-  the word it could not judge (05-013). A replaced engine's warm-up thread
+  the word it could not judge (05-013); a word of a script no dictionary
+  covers is still taken as correct. The resize callback's run ends (back to
+  idle, callback restored) even if it panics (10-141). A replaced engine's warm-up thread
   stops (05-014). A verdict asked for before a cache clear is not stored after
   it (05-008). Check spelling on checks every window's draft (13-058).
 - **Settings window.** The activity page size lives in `AgentPageUi`, starts
