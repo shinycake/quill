@@ -28,7 +28,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// qualifies too (`Session::gifts_deletable`).
     fn gifts_owner_if_deletable(&self) -> Result<MessageSender, ConnectSendError> {
         let hub = &self.session.payments.hub;
-        if !self.chats_path_active() || hub.gifts_op.is_mutating() || !self.session.gifts_deletable() {
+        if !self.chats_path_active()
+            || hub.gifts_op.is_mutating()
+            || !self.session.gifts_deletable()
+        {
             return Err(ConnectSendError::InvalidRequest);
         }
         hub.gifts_owner.ok_or(ConnectSendError::InvalidRequest)

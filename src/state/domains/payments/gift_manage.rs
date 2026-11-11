@@ -58,10 +58,7 @@ impl Session {
                 self.payments
                     .gifts_manage
                     .close_flow_answered_by(PaymentsPurpose::ChangeGiftCollection);
-                self.payments
-                    .hub
-                    .gifts_op
-                    .changed(pending.map(|p| p.id));
+                self.payments.hub.gifts_op.changed(pending.map(|p| p.id));
                 self.payments.hub.gifts_error = None;
             }
             (GiftManagePayload::Upgraded(summary), PaymentsPurpose::UpgradeGift) => {

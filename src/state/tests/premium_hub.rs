@@ -207,5 +207,8 @@ fn a_late_answer_of_an_older_gift_change_leaves_the_newer_one_locked() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, old.0),
     );
-    assert!(session.payments.hub.gifts_op.is_mutating(), "the sale is still out");
+    assert!(
+        session.payments.hub.gifts_op.is_mutating(),
+        "the sale is still out"
+    );
 }

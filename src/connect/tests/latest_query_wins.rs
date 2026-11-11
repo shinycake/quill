@@ -275,12 +275,18 @@ fn reopening_or_scrolling_the_calls_tab_during_a_clear_asks_nothing() {
         .expect("send")
         .expect("clear");
     assert!(f.driver.fetch_call_history().is_err(), "reopen refused");
-    assert!(f.driver.fetch_more_call_history().is_err(), "scroll refused");
+    assert!(
+        f.driver.fetch_more_call_history().is_err(),
+        "scroll refused"
+    );
     assert_eq!(
         f.driver.clear_call_history(false).expect("send"),
         None,
         "no second delete while the first is out"
     );
     f.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, clear.0));
-    assert!(f.driver.fetch_call_history().is_ok(), "reopens after the answer");
+    assert!(
+        f.driver.fetch_call_history().is_ok(),
+        "reopens after the answer"
+    );
 }

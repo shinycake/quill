@@ -537,11 +537,7 @@ fn forgot_password_requests_a_code_then_recovers_with_a_new_password() {
         ),
     );
     assert_eq!(
-        f.1.session
-            .auth_state
-            .twofa_flow
-            .code_wait
-            .recovery(),
+        f.1.session.auth_state.twofa_flow.code_wait.recovery(),
         Some("i***@example.com")
     );
     assert!(!f.1.session.auth_state.password_state_loading());
@@ -712,11 +708,7 @@ fn login_email_change_is_code_confirmed() {
         ),
     );
     assert_eq!(
-        f.1.session
-            .auth_state
-            .twofa_flow
-            .code_wait
-            .login_email(),
+        f.1.session.auth_state.twofa_flow.code_wait.login_email(),
         Some("m***@example.com")
     );
     f.1.resend_login_email_code().unwrap();

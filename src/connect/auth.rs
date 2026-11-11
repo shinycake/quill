@@ -528,7 +528,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sent = self.password_op_send(PasswordOp::SetLoginEmail, |extra| {
             set_login_email_address(extra, email.trim())
         })?;
-        self.session.auth_state.twofa_flow.code_wait.end_login_email();
+        self.session
+            .auth_state
+            .twofa_flow
+            .code_wait
+            .end_login_email();
         Ok(sent)
     }
 

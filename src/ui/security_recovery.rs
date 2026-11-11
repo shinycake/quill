@@ -241,9 +241,13 @@ impl QuillApp {
         let state = session
             .as_ref()
             .and_then(|s| s.auth_state.password_state.clone());
-        let code_sent_to = session
-            .as_ref()
-            .and_then(|s| s.auth_state.twofa_flow.code_wait.recovery().map(str::to_string));
+        let code_sent_to = session.as_ref().and_then(|s| {
+            s.auth_state
+                .twofa_flow
+                .code_wait
+                .recovery()
+                .map(str::to_string)
+        });
         let loading = session
             .as_ref()
             .is_some_and(|s| s.auth_state.password_state_loading());
@@ -546,9 +550,13 @@ impl QuillApp {
     /// Login email: new address, then the code sent to it.
     pub(super) fn twofa_login_email_body(&self, cx: &mut Context<Self>, body: Div) -> Div {
         let session = self.session();
-        let code_sent_to = session
-            .as_ref()
-            .and_then(|s| s.auth_state.twofa_flow.code_wait.login_email().map(str::to_string));
+        let code_sent_to = session.as_ref().and_then(|s| {
+            s.auth_state
+                .twofa_flow
+                .code_wait
+                .login_email()
+                .map(str::to_string)
+        });
         let loading = session
             .as_ref()
             .is_some_and(|s| s.auth_state.password_state_loading());
