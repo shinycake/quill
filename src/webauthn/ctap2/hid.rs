@@ -18,6 +18,27 @@ pub const FIDO_USAGE_PAGE: u32 = 0xF1D0;
 /// Usage `CTAPHID` on that page.
 pub const FIDO_USAGE_CTAPHID: u32 = 0x01;
 
+/// What a look for security keys found.
+pub enum Found {
+    /// The keys that opened (maybe none).
+    Keys(Vec<Box<dyn HidDevice>>),
+    /// No key opened, and this one is there but the OS refused access (the
+    /// `/dev/hidraw*` node; Linux without the udev rule).
+    Denied(String),
+}
+
+/// [`open_all`], saying when a key is there that Quill may not open.
+pub fn find() -> Found {
+    #[cfg(target_os = "linux")]
+    {
+        platform::find()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Found::Keys(open_all())
+    }
+}
+
 /// Open every FIDO device present. Devices that fail to open (busy, no
 /// permission) are skipped and logged.
 pub fn open_all() -> Vec<Box<dyn HidDevice>> {

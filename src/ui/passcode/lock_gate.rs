@@ -54,6 +54,9 @@ impl QuillApp {
     /// held for the unlock are taken again.
     pub(in crate::ui) fn set_locked(&mut self, locked: bool, cx: &mut Context<Self>) {
         self.account.passcode.set_lock_flag(locked);
+        // The GIF gate follows what is drawn: shut under the lock, open
+        // again for a panel left on its GIFs tab.
+        self.sync_gif_downloads();
         quill::wake::PASSCODE.poke();
         quill::wake::CHROME.poke();
         if !locked {

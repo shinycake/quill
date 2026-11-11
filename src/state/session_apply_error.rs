@@ -294,6 +294,13 @@ impl Session {
                 class: err.class,
                 flood_wait_secs: err.flood_wait_secs,
             });
+            if pending.purpose == RequestPurpose::RequestAuthenticationPasswordRecovery
+                && extra.is_some_and(|extra| {
+                    self.auth_state.password_recovery == PasswordRecovery::Requested(extra)
+                })
+            {
+                self.auth_state.password_recovery = PasswordRecovery::Idle;
+            }
         }
     }
 }

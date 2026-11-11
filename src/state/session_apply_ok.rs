@@ -222,6 +222,7 @@ impl Session {
             self.settings.data_storage.seeded = true;
             self.settings.data_storage_error = None;
             self.settings.data_storage_dirty = true;
+            self.settings.auto_download_answer = extra.map(AutoDownloadAnswer::Saved);
         }
         // Batch 4: a `confirmSession` / `terminateSession` for the
         // new-login alert succeeded.
@@ -840,6 +841,14 @@ impl Session {
         }
         if pending.is_some_and(|p| is_auth_submit(p.purpose)) {
             self.auth_state.last_auth_error = None;
+        }
+        if pending
+            .is_some_and(|p| p.purpose == RequestPurpose::RequestAuthenticationPasswordRecovery)
+            && extra.is_some_and(|extra| {
+                self.auth_state.password_recovery == PasswordRecovery::Requested(extra)
+            })
+        {
+            self.auth_state.password_recovery = PasswordRecovery::CodeSent;
         }
     }
 }

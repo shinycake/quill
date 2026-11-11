@@ -519,6 +519,9 @@ pub struct PendingRequest {
     /// lands in a view applies to that window's
     /// (`Session::apply_payload_in_asking_view`).
     pub window: Option<ChatId>,
+    /// Which opening of that window it was (`WindowViews::opening_of`):
+    /// a window closed and opened again for the same chat is a new one.
+    pub window_opening: u64,
     /// When the request was registered. The periodic sweep
     /// ([`RequestRegistry::sweep_stale`]) drops dedupe-guard entries whose
     /// answer never came, so a lost response cannot block a chat forever.
@@ -533,6 +536,8 @@ pub struct RequestRegistry {
     /// main window's). `Session::enter_view` keeps it; every request
     /// registered meanwhile carries it (`PendingRequest::window`).
     pub(crate) window: Option<ChatId>,
+    /// The opening of `window` ([`PendingRequest::window_opening`]).
+    pub(crate) window_opening: u64,
     /// In-flight `DownloadFile` requests per file id, so the
     /// already-downloading check does not scan `pending`.
     downloads: HashMap<i32, u32>,
@@ -583,6 +588,7 @@ impl RequestRegistry {
             invite_link: None,
             rollback: None,
             window: self.window,
+            window_opening: self.window_opening,
             created_at: Instant::now(),
         }
     }

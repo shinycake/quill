@@ -848,6 +848,7 @@
 "qll_ops_rescheduling" = "Rescheduling…";
 "qll_ops_reset" = "Reset";
 "qll_ops_reset_statistics" = "Reset statistics";
+"qll_ops_reset_statistics_failed" = "Couldn't reset the statistics.";
 "qll_ops_reset_the_statistics_the_counters" = "Reset the statistics? The counters start from zero.";
 "qll_ops_reset_to_default" = "Reset to Default";
 "qll_ops_restrict_user" = "Restrict user";

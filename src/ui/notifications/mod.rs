@@ -474,10 +474,6 @@ impl QuillApp {
         // view. The quit path (`close`) also ends in Closed but never
         // passes through LoggingOut, so it never restarts.
         let logged_out = logout_restart_trigger(saw_logging_out, &new_auth);
-        // Slice A10: recovery-code entry only makes sense in WaitPassword.
-        if !matches!(new_auth, AuthorizationState::WaitPassword { .. }) {
-            self.auth_ui.recovery_mode = false;
-        }
         if send_failed {
             self.set_note(StatusNote::error(tr(
                 keys::Q_PREFS_FAILED_TO_SEND_TDLIB_REQUEST,

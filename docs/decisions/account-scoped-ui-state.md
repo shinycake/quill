@@ -5774,3 +5774,71 @@ chat-list sweep, and 09-X059 duplicates 09-101.
   settle), 09-X056 (`folder_limit_hit` carries the asking request).
 - **Not verified on screen.** The headless demo has no live driver, so the
   delete-box Loading text and the Retry row were checked by tests only.
+
+### Sweep fixes (s4-accounts-2)
+
+Twenty-six S4 entries; the code was read first and each is fixed, a
+duplicate, or skipped with its reason.
+
+- **Window answers.** `WindowViews` numbers every opening of a chat window
+  (`opening_of`, never reused); a request carries the opening of the window
+  whose view was in place (`PendingRequest::window_opening`), and
+  `apply_payload_in_asking_view` applies it to a view only while that
+  opening is the window's. A window closed and opened again for the same chat
+  takes none of the old window's answers (06-006).
+- **Forum topics.** The order of a new topic and of a topic that moves to the
+  top is a saturating add (05-285; the `getForumTopic` refetch the entry asks
+  for already runs from `possible_topic_refresh`). `replace_forum_topic`
+  checks that the list is loaded before it merges drafts (05-286).
+- **2FA password recovery.** `AuthState::password_recovery` is one enum
+  (`Idle`, `Requested(RequestId)`, `CodeSent`) moved by the answer to the
+  request that asked: the code step draws only after `ok`, a refused request
+  goes back to `Idle` with the auth error on the password step, and auth
+  leaving the password step resets it. `AuthUi::recovery_mode` is gone
+  (08-043).
+- **Already fixed.** 08-045 and 09-X014: the terms prompt is
+  `Option<TermsPrompt { terms_id, stage }>`, replaced whole for another
+  version and dropped when the terms go (f51f1abc, with a test).
+- **Account box.** Log out from it goes through `close_account_lifecycle`,
+  so the typed password and reason are emptied (07-018).
+- **Data and Storage.** The per-network editor is one `StorageEditor`
+  (`Closed`, `Open`, `Saving { request }`): Save keeps the draft until the
+  session's `AutoDownloadAnswer` for that request id says `Saved` (closes) or
+  `Refused` (reopens with the draft); the answer is drained by the poll
+  (09-042). "Reset statistics" is `NetworkReset { Idle, Confirming }`, dropped
+  by `leave_data_storage` (09-040), and kept with a page error when the send
+  failed (09-041). "Clear selected" forgets the ticks only when the clear went
+  out (09-044).
+- **Video chats.** The Schedule box keeps the refused time with its message
+  and draws it only while that time is the picked one (09-X026). Before
+  leaving the call you are in, `check_create_video_chat` runs every refusal
+  `createVideoChat` has except the call itself, so a request the driver would
+  refuse (a start time too close, a closed connection) no longer ends the
+  original call; the same for "Stream with..." (09-045).
+- **Lock screen.** `LockNotice { None, Wrong, Flood { until } }` replaces
+  `lock_error` plus `flood_until`: typing clears a wrong-passcode line, never
+  the flood wait that disables Unlock (11-p7-006). The GIF gate is shut while
+  locked and `set_locked` re-syncs it both ways (11-p1-003). Log out from the
+  lock screen sets `PasscodeJob::Cancelled`; the passcode check and the system
+  unlock drop their late answer and clear the master key (11-p7-008). The
+  auto-lock time and system unlock change the screen only after the write
+  succeeded, and say why otherwise (11-p7-009).
+- **QR box.** A failed code draws nothing instead of the previous link's
+  (11-p8-011). Copy or Share finishing in a box whose code or colors changed
+  says so (`QrToast::Changed`, a new string) instead of doing nothing
+  (11-p8-013). The share chooser is remembered as `QrShare::Chooser { window }`;
+  another window's pick or cancel leaves the box alone (11-p8-010). The
+  screen's `Farewell` removes a card file still waiting for its chat
+  (11-p8-009).
+- **Security.** The two-step dialog falls back to its status screen from the
+  poll's drain (`drain_twofa_step`), not while it draws (13-171). The
+  sessions layer is open only while `details_session()` resolves (12-097).
+- **Security keys.** A login round gives the PIN only to the key that asked for
+  it (14-080). On Linux a key that exists but cannot be opened ends the
+  ceremony at once with `AccessDenied` and its own message (14-079;
+  `hid::Found`).
+- **Skipped.** 09-X025: the Waiting step has nothing to show; its answer is
+  applied by the window that hosts the box, and a minimized window draws
+  nothing either way. The answer's two effects (the box, an error toast) need
+  that window, and it recovers when the window comes back, as the Asker seam
+  intends.

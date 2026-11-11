@@ -19,15 +19,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.create_video_chat_request(chat_id, title, start_date, false)
     }
 
-    /// `createVideoChat`, shared by an ordinary start and "Stream with..."
-    /// (`is_rtmp_stream`).
-    pub(super) fn create_video_chat_request(
-        &mut self,
+    /// Everything `createVideoChat` needs but the call you are in: the UI
+    /// asks before it leaves that call, so a request the driver would
+    /// refuse costs the user nothing. Returns the cleaned title and the
+    /// start date to send.
+    pub fn check_create_video_chat(
+        &self,
         chat_id: i64,
         title: String,
         start_date: i64,
-        is_rtmp_stream: bool,
-    ) -> Result<RequestId, ConnectSendError> {
+    ) -> Result<(String, i64), ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -38,19 +39,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             )
         });
         if !is_group_or_channel {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        // A 1:1 call being hung up no longer counts: the UI ends it right
-        // before creating (tdesktop `createGroupCall` →
-        // `destroyCurrentCall`).
-        use crate::telegram::envelope::CallState;
-        let in_call = self.session.calls.active_call.as_ref().is_some_and(|call| {
-            !matches!(
-                call.state,
-                CallState::HangingUp | CallState::Discarded { .. } | CallState::Error { .. }
-            )
-        });
-        if self.session.calls.active_group_call.is_some() || in_call {
             return Err(ConnectSendError::InvalidRequest);
         }
         let title = title.trim().to_string();
@@ -68,8 +56,34 @@ impl<S: JsonSender> ConnectDriver<S> {
             if !(now + 10..=now + 8 * 86400).contains(&start_date) {
                 return Err(ConnectSendError::InvalidRequest);
             }
-            start_date.min(i32::MAX as i64) as i32
+            start_date.min(i32::MAX as i64)
         };
+        Ok((title, start_date))
+    }
+
+    /// `createVideoChat`, shared by an ordinary start and "Stream with..."
+    /// (`is_rtmp_stream`).
+    pub(super) fn create_video_chat_request(
+        &mut self,
+        chat_id: i64,
+        title: String,
+        start_date: i64,
+        is_rtmp_stream: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        let (title, start_date) = self.check_create_video_chat(chat_id, title, start_date)?;
+        // A 1:1 call being hung up no longer counts: the UI ends it right
+        // before creating (tdesktop `createGroupCall` →
+        // `destroyCurrentCall`).
+        use crate::telegram::envelope::CallState;
+        let in_call = self.session.calls.active_call.as_ref().is_some_and(|call| {
+            !matches!(
+                call.state,
+                CallState::HangingUp | CallState::Discarded { .. } | CallState::Error { .. }
+            )
+        });
+        if self.session.calls.active_group_call.is_some() || in_call {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let extra = self.session.request(
             RequestPurpose::Calls(CallsPurpose::CreateVideoChat { chat_id }),
             None,
@@ -78,7 +92,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra,
             chat_id,
             &title,
-            start_date,
+            i32::try_from(start_date).unwrap_or(i32::MAX),
             is_rtmp_stream,
         )) {
             self.session.requests.take(extra);

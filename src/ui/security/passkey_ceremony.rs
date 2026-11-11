@@ -94,6 +94,7 @@ impl std::fmt::Debug for CeremonyUi {
 fn register_error(error: &CeremonyError) -> Key {
     match error {
         CeremonyError::NoDevice => keys::PASSKEY_ERROR_NO_DEVICE,
+        CeremonyError::AccessDenied => keys::Q_PASSKEY_ERROR_ACCESS_DENIED,
         CeremonyError::PinBlocked => keys::PASSKEY_PIN_BLOCKED,
         CeremonyError::Phone => keys::PASSKEY_CABLE_ERROR,
         CeremonyError::Cancelled | CeremonyError::NoCredentials | CeremonyError::Other(_) => {
@@ -106,6 +107,7 @@ fn register_error(error: &CeremonyError) -> Key {
 fn login_error(error: &CeremonyError) -> Key {
     match error {
         CeremonyError::NoDevice => keys::PASSKEY_ERROR_NO_DEVICE,
+        CeremonyError::AccessDenied => keys::Q_PASSKEY_ERROR_ACCESS_DENIED,
         CeremonyError::NoCredentials => keys::PASSKEY_ERROR_NO_CREDENTIALS,
         CeremonyError::PinBlocked => keys::PASSKEY_PIN_BLOCKED,
         CeremonyError::Phone => keys::PASSKEY_CABLE_ERROR,

@@ -659,10 +659,19 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Whether the two-step dialog should fall back to the status
-    /// screen: a finished step reports there.
-    pub(super) fn twofa_step_finished(&self) -> bool {
-        self.session()
-            .is_some_and(|s| s.auth_state.twofa_flow.notice.is_some())
+    /// A recovery / reset / login-email step that finished reports on the
+    /// status screen. Run where the answer is drained, never while the
+    /// dialog draws. Returns whether the view moved.
+    pub(super) fn drain_twofa_step(&mut self) -> bool {
+        let finished = self
+            .session()
+            .is_some_and(|s| s.auth_state.twofa_flow.notice.is_some());
+        if !finished || !matches!(self.twofa.view, TwofaView::Recover | TwofaView::LoginEmail) {
+            return false;
+        }
+        self.twofa.view = TwofaView::Status;
+        self.twofa.confirm = None;
+        self.twofa.notice = None;
+        true
     }
 }

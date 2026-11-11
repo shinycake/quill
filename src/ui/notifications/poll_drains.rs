@@ -17,7 +17,7 @@ impl QuillApp {
     /// Drain what the last ingest left for the UI. Returns whether anything
     /// was drained (the poll redraws at once).
     pub(super) fn poll_drains(&mut self, cx: &mut Context<Self>) -> bool {
-        let mut progressed = false;
+        let mut progressed = self.drain_storage_editor() | self.drain_twofa_step();
         if let Some(result) = self
             .live
             .as_mut()
