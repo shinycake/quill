@@ -181,7 +181,7 @@ impl Session {
                 if let Some(p) = pending
                     && let RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { append }) =
                         p.purpose
-                    && self.payments.hub.tx.waits_for(p.id)
+                    && self.payments.hub.stars.page.waits_for(p.id)
                 {
                     self.payments.hub.apply_transactions(page, append);
                 }
@@ -220,7 +220,7 @@ impl Session {
                 } else if let Some(p) = pending
                     && let RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append }) =
                         p.purpose
-                    && self.payments.hub.gifts_page.waits_for(p.id)
+                    && self.payments.hub.received.page.waits_for(p.id)
                 {
                     let files: Vec<ParsedFile> = page
                         .gifts
@@ -232,18 +232,30 @@ impl Session {
                 }
             }
             PaymentsPayload::PremiumFeatures(info) => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPremiumFeatures) {
-                    self.payments.hub.premium.succeed(info);
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::GetPremiumFeatures
+                {
+                    self.payments.hub.premium.answered(Some(pending.id), info);
                 }
             }
             PaymentsPayload::PremiumState(info) => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPremiumState) {
-                    self.payments.hub.premium_state = Some(info);
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::GetPremiumState
+                {
+                    self.payments
+                        .hub
+                        .premium_state
+                        .answered(Some(pending.id), info);
                 }
             }
             PaymentsPayload::BusinessFeatures(features) => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBusinessFeatures) {
-                    self.payments.hub.business_features.succeed(features);
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::GetBusinessFeatures
+                {
+                    self.payments
+                        .hub
+                        .business_features
+                        .answered(Some(pending.id), features);
                 }
             }
             PaymentsPayload::GiveawayInfo(info) => self.apply_giveaway_info(info, pending),

@@ -82,10 +82,16 @@ impl Session {
                     self.settings.proxy.prefer_ipv6 = *on;
                 }
                 if name == "is_premium" {
+                    let was = self.my_is_premium();
                     self.payments.premium_option = match &value {
                         OptionValue::Boolean(on) => Some(*on),
                         _ => Some(false),
                     };
+                    // The plans and the state text are for the status they
+                    // were asked under: the next opening asks again.
+                    if self.my_is_premium() != was {
+                        self.payments.hub.premium_state.outdate();
+                    }
                 }
                 if name == "is_premium_available"
                     && let OptionValue::Boolean(on) = &value

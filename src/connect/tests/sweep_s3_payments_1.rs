@@ -476,7 +476,7 @@ fn a_buy_in_flight_is_not_replaced_by_another_resale_box() {
         is_channel: false,
     };
     let mut buy = crate::gift_market::ResaleBuy::new(listing, recipient, false);
-    buy.phase = crate::gift_market::BuyPhase::Sending { request: 7 };
+    buy.begin_send(7);
     market.buy = Some(buy);
     assert!(t.driver.open_gift_resale(5, "Pepe").is_err());
     assert!(t.driver.start_gift_resale_buy("x", None, false).is_err());
@@ -588,14 +588,14 @@ fn a_star_history_or_gifts_first_page_that_cannot_be_sent_shows_its_error() {
             .set_star_transactions_filter(crate::premium_hub::TxFilter::Outgoing)
             .is_err()
     );
-    assert!(t.driver.session.payments.hub.tx.error().is_some());
+    assert!(t.driver.session.payments.hub.stars.page.error().is_some());
     assert!(
         t.driver
             .open_received_gifts(crate::telegram::envelope::MessageSender::User { user_id: ME })
             .is_err()
     );
     let hub = &t.driver.session.payments.hub;
-    assert!(hub.gifts_page.error().is_some() && !hub.gifts_page.is_loading());
+    assert!(hub.received.page.error().is_some() && !hub.received.page.is_loading());
 }
 
 #[test]
@@ -603,7 +603,7 @@ fn an_invalidated_gift_list_is_refetched_and_the_page_it_abandons_is_dropped() {
     let mut t = Flaky::new();
     let owner = crate::telegram::envelope::MessageSender::User { user_id: ME };
     t.driver.open_received_gifts(owner).unwrap();
-    t.driver.session.payments.hub.gifts_op = crate::state::fetch::ListOp::Stale;
+    t.driver.session.payments.hub.received.op = crate::state::fetch::ListOp::Stale;
     // The first page is still out: no second first-page request.
     assert!(
         t.driver
@@ -612,28 +612,37 @@ fn an_invalidated_gift_list_is_refetched_and_the_page_it_abandons_is_dropped() {
             .is_none()
     );
     assert_eq!(t.sender.count("getReceivedGifts"), 1);
-    assert!(t.driver.session.payments.hub.gifts_op.is_stale());
+    assert!(t.driver.session.payments.hub.received.op.is_stale());
     t.answer(
         "getReceivedGifts",
         json!({"@type": "receivedGifts", "total_count": 0, "gifts": [], "next_offset": ""}),
     );
-    assert!(!t.driver.session.payments.hub.gifts_op.is_stale());
+    assert!(!t.driver.session.payments.hub.received.op.is_stale());
     // A refetch whose send is refused is not retried every frame.
-    t.driver.session.payments.hub.gifts_op = crate::state::fetch::ListOp::Stale;
+    t.driver.session.payments.hub.received.op = crate::state::fetch::ListOp::Stale;
     t.sender.refuse(&["getReceivedGifts"]);
     assert!(t.driver.refresh_received_gifts_if_stale().is_err());
-    assert!(!t.driver.session.payments.hub.gifts_op.is_stale());
-    assert!(t.driver.session.payments.hub.gifts_page.error().is_some());
+    assert!(!t.driver.session.payments.hub.received.op.is_stale());
+    assert!(
+        t.driver
+            .session
+            .payments
+            .hub
+            .received
+            .page
+            .error()
+            .is_some()
+    );
 }
 
 #[test]
 fn reopening_the_gifts_box_keeps_the_lock_of_a_mutation_in_flight() {
     let mut t = Flaky::new();
     let owner = crate::telegram::envelope::MessageSender::User { user_id: ME };
-    t.driver.session.payments.hub.gifts_op =
+    t.driver.session.payments.hub.received.op =
         crate::state::fetch::ListOp::Mutating(crate::ids::RequestId(900));
     t.driver.open_received_gifts(owner).unwrap();
-    assert!(t.driver.session.payments.hub.gifts_op.is_mutating());
+    assert!(t.driver.session.payments.hub.received.op.is_mutating());
 }
 
 #[test]
@@ -839,8 +848,8 @@ fn a_gift_mutation_does_not_make_a_failed_first_page_owed_again() {
     assert!(t.driver.open_received_gifts(owner).is_err());
     // The user toggles or sells a gift: the mutation starts and ends.
     let hub = &mut t.driver.session.payments.hub;
-    hub.gifts_op.begin(crate::ids::RequestId(900));
-    hub.gifts_op.failed(Some(crate::ids::RequestId(900)));
+    hub.received.op.begin(crate::ids::RequestId(900));
+    hub.received.op.failed(Some(crate::ids::RequestId(900)));
     // The tick's refresh sends nothing: the failed page is not an
     // invalidated list.
     for _ in 0..2 {
@@ -851,7 +860,16 @@ fn a_gift_mutation_does_not_make_a_failed_first_page_owed_again() {
                 .is_none()
         );
     }
-    assert!(t.driver.session.payments.hub.gifts_page.error().is_some());
+    assert!(
+        t.driver
+            .session
+            .payments
+            .hub
+            .received
+            .page
+            .error()
+            .is_some()
+    );
 }
 
 #[test]

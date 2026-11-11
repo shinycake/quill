@@ -275,17 +275,17 @@ impl Session {
         // after a conversion, the Stars balance.
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { .. })) => {
-                self.payments.hub.gifts_op.changed(pending.map(|p| p.id));
-                self.payments.hub.gift_notice = None;
+                self.payments.hub.received.op.changed(pending.map(|p| p.id));
+                self.payments.hub.received.notice = None;
             }
             Some(RequestPurpose::SellGift) => {
-                self.payments.hub.gifts_op.changed(pending.map(|p| p.id));
-                self.payments.hub.gift_notice = None;
+                self.payments.hub.received.op.changed(pending.map(|p| p.id));
+                self.payments.hub.received.notice = None;
                 // The panel and the box close only when they are still the
                 // sold gift's: the user may have opened another meanwhile.
                 let sold = pending.and_then(|p| p.subject_id.as_deref());
-                self.payments.hub.gift_view.close_if_selected(sold);
-                self.payments.hub.tx.invalidate();
+                self.payments.hub.received.view.close_if_selected(sold);
+                self.payments.hub.stars.page.invalidate();
             }
             _ => {}
         }

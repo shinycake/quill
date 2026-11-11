@@ -43,7 +43,7 @@ impl QuillApp {
     ) {
         let picker = self
             .session()
-            .and_then(|s| s.payments.hub.gifts.iter().find(|g| g.id == id))
+            .and_then(|s| s.payments.hub.received.rows.iter().find(|g| g.id == id))
             .map(TransferPicker::for_gift);
         let Some(picker) = picker else {
             return;
@@ -117,7 +117,7 @@ impl QuillApp {
         let now = now_unix();
         let state = self.session().and_then(|s| {
             let id = &s.payments.gifts_manage.transfer()?.id;
-            let gift = s.payments.hub.gifts.iter().find(|g| g.id == *id)?;
+            let gift = s.payments.hub.received.rows.iter().find(|g| g.id == *id)?;
             Some(gift.export_state(now))
         });
         let to_wallet = self.session().is_some_and(|s| s.ton_wallet.can_use);
@@ -392,7 +392,7 @@ crate::ui::shell::register_dialogs! {
         3870,
         |app| {
             app.session().is_some_and(|s| {
-                s.payments.hub.gifts_open && s.payments.gifts_manage.transfer().is_some()
+                s.payments.hub.received.is_open() && s.payments.gifts_manage.transfer().is_some()
             })
         },
         QuillApp::build_gift_transfer_dialog,

@@ -348,7 +348,7 @@ fn picks_preview_and_save_once_the_panel_closes() {
         env(true),
     );
     assert_eq!(qr.served, Some(picked));
-    assert!(qr.save.out().is_none());
+    assert!(qr.saving().is_none());
     assert!(qr.apply(QrAction::Closing, env(true)).is_empty());
 }
 

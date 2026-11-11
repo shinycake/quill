@@ -29,7 +29,6 @@ DestRow::saved
 DragSelect::pending
 Drawn::leaving
 FastShareFacts::sent
-FieldResult::finished
 FooterMeta::pending
 
 GiveawaySummary::finished
@@ -61,13 +60,11 @@ PasswordBox::sending+error
 PlaybackHealth::output_failed
 
 
-ReceivedGift::is_saved
 RowForum::loaded
 RowMenuFacts::is_saved_messages
 RowState::pending
 
 
-ReceivedGift::is_saved
 RowForum::loaded
 RowMenuFacts::is_saved_messages
 RowState::pending
@@ -91,5 +88,4 @@ Tempo::inner_done
 TopPerson::saved_messages
 
 
-Validation::finished
 

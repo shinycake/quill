@@ -16,7 +16,8 @@ fn known(list: Vec<Passkey>) -> PasskeysState {
         display_allowed: true,
         ..Default::default()
     };
-    state.accept_list(list, 0);
+    state.list_asked(RequestId(0), Instant::now());
+    state.accept_list(RequestId(0), list);
     state
 }
 
@@ -160,21 +161,34 @@ fn options_that_arrive_after_the_box_closed_start_nothing() {
 fn a_failed_or_unreadable_add_leaves_the_sending_stage() {
     let mut state = known(vec![]);
     state.add = PasskeyAdd::Sending(RequestId(5));
-    assert!(!state.fail_register(Some(RequestId(4))));
-    assert!(state.add_busy());
-    assert!(state.fail_register(Some(RequestId(5))));
+    assert!(!state.fail_register(Some(RequestId(4)), "late".into()));
+    assert!(state.add_busy() && state.add_error().is_none());
+    assert!(state.fail_register(Some(RequestId(5)), "refused".into()));
     assert!(!state.add_busy());
+    // The error is the stage's: the box closing leaves it.
+    assert_eq!(state.add_error(), Some("refused"));
+    state.cancel_register();
+    assert_eq!(state.add_error(), None);
 }
 
 #[test]
 fn a_list_asked_before_a_removal_does_not_bring_the_passkey_back() {
     let mut state = known(vec![key("a", "x"), key("b", "y")]);
-    let asked = state.generation;
+    let asked = RequestId(5);
+    state.list_asked(asked, Instant::now());
     state.finish_remove("a");
-    state.accept_list(vec![key("a", "x"), key("b", "y")], asked);
+    state.accept_list(asked, vec![key("a", "x"), key("b", "y")]);
     assert_eq!(state.passkeys().len(), 1);
     assert!(state.is_stale());
-    state.accept_list(vec![key("b", "y")], state.generation);
+    // The look after the removal is the one whose answer counts, and the
+    // older one failing late changes nothing.
+    let after = RequestId(6);
+    state.list_asked(after, Instant::now());
+    state.list_failed(asked, "late".into());
+    assert!(state.list_error().is_none());
+    state.accept_list(asked, vec![key("a", "x")]);
+    assert_eq!(state.passkeys().len(), 1);
+    state.accept_list(after, vec![key("b", "y")]);
     assert!(!state.is_stale() && state.is_known());
 }
 
@@ -210,7 +224,7 @@ fn a_fetched_list_stays_fresh_for_five_seconds() {
     let now = Instant::now();
     let mut state = PasskeysState::default();
     assert!(state.wants_fetch(now));
-    state.list_asked(now);
+    state.list_asked(RequestId(1), now);
     assert!(!state.wants_fetch(now + Duration::from_secs(5)));
     assert!(state.wants_fetch(now + Duration::from_secs(6)));
     state.list = PasskeyList::Stale(Vec::new());
@@ -220,16 +234,14 @@ fn a_fetched_list_stays_fresh_for_five_seconds() {
 #[test]
 fn a_removal_forgets_the_passkey_and_asks_again() {
     let mut state = known(vec![key("a", "x"), key("b", "y")]);
-    state.removing = Some(Removal {
-        passkey_id: "a".into(),
-        request: RequestId(2),
-    });
+    state.remove_started("a".into(), RequestId(2));
+    assert!(state.is_removing());
     state.finish_remove("a");
     assert_eq!(state.passkeys().len(), 1);
     assert!(state.find("a").is_none());
     assert!(!state.is_known());
     assert!(state.is_stale());
-    assert!(state.removing.is_none());
+    assert!(!state.is_removing());
     assert!(state.wants_fetch(Instant::now()));
 }
 
@@ -290,18 +302,40 @@ fn reads_the_display_switch_from_the_app_config() {
 fn a_list_asked_again_or_failed_keeps_the_row_usable() {
     let mut state = known(vec![key("a", "x")]);
     let now = Instant::now();
-    state.list_asked(now);
+    state.list_asked(RequestId(1), now);
     assert!(state.is_known(), "the answered list stands under a re-ask");
     assert_eq!(state.row_target(), Some(RowTarget::List));
-    state.list_failed(state.generation, "offline".into());
+    state.list_failed(RequestId(1), "offline".into());
+    assert_eq!(state.list_error(), Some("offline"));
     assert!(state.is_known(), "and under its failure");
     assert_eq!(state.row_target(), Some(RowTarget::List));
     // A list that never had an answer stays loading until one comes.
     let mut fresh = PasskeysState::default();
-    fresh.list_asked(now);
+    fresh.list_asked(RequestId(2), now);
     assert!(!fresh.is_known() && fresh.row_target().is_none());
     // A removal forgets the answer (tdesktop forgets the list).
     state.finish_remove("a");
-    state.list_asked(now);
+    state.list_asked(RequestId(3), now);
     assert!(!state.is_known());
+}
+
+#[test]
+fn a_removal_failure_belongs_to_the_removal_that_failed() {
+    let mut state = known(vec![key("a", "x")]);
+    state.remove_started("a".into(), RequestId(2));
+    // Another request's error or answer leaves the removal out.
+    state.removal_failed(Some(RequestId(9)), "other".into());
+    state.removal_answered(Some(RequestId(9)));
+    assert!(state.is_removing() && state.find("a").is_some());
+    state.removal_failed(Some(RequestId(2)), "refused".into());
+    assert!(!state.is_removing());
+    assert_eq!(state.remove_error(), Some("refused"));
+    // Its line is not the add box's or the list's own.
+    assert!(state.add_error().is_none() && state.list_error().is_none());
+    assert_eq!(state.error(), Some("refused"));
+    state.dismiss_remove_error();
+    assert!(state.error().is_none());
+    state.remove_started("a".into(), RequestId(3));
+    state.removal_answered(Some(RequestId(3)));
+    assert!(state.find("a").is_none() && state.is_stale());
 }

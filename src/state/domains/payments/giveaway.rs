@@ -187,7 +187,7 @@ impl Session {
     /// yourself.
     pub(crate) fn apply_award_members(
         &mut self,
-        generation: u64,
+        request: crate::ids::RequestId,
         members: &[crate::telegram::envelope::ParsedChatMember],
         total_count: i32,
     ) {
@@ -201,7 +201,7 @@ impl Session {
             .filter(|id| Some(*id) != self.my_user_id && !self.bots.bot_user_ids.contains(id))
             .collect();
         self.payments.giveaway.award_members.accept(
-            generation,
+            request,
             ids,
             i32::try_from(members.len()).unwrap_or(i32::MAX),
             total_count,

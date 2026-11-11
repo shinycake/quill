@@ -295,7 +295,12 @@ fn the_gifts_panel_pages_through_your_upgraded_gifts() {
     assert_eq!(gifts.list.len(), 1, "burned gifts are left out");
     assert_eq!(gifts.list[0].id, 101);
     assert_eq!(gifts.list[0].received_id, "r1");
-    assert_eq!(gifts.stage, GiftsStage::Listed(GiftsRest::More));
+    assert_eq!(
+        gifts.stage,
+        GiftsStage::Listed(GiftsRest::More {
+            offset: "page2".into()
+        })
+    );
     rig.driver
         .fetch_share_theme_gifts(QrPeer::User(ME), true, NOW)
         .unwrap();

@@ -20,19 +20,31 @@ const PATH: &str = "/org/mpris/MediaPlayer2";
 const NAME: &str = "org.mpris.MediaPlayer2.quill";
 const PLAYER: &str = "org.mpris.MediaPlayer2.Player";
 
-/// What the interfaces answer from; written by the worker.
+/// What the interfaces answer from; written by the worker: the track that
+/// plays (none: stopped) with the moment its position was reported.
 #[derive(Default)]
 struct Shared {
-    info: Option<NowPlaying>,
-    at: Option<Instant>,
+    now: Option<Playing>,
+}
+
+struct Playing {
+    info: NowPlaying,
+    at: Instant,
 }
 
 impl Shared {
+    fn info(&self) -> Option<&NowPlaying> {
+        self.now.as_ref().map(|now| &now.info)
+    }
+
     fn position_us(&self) -> i64 {
-        let Some(info) = &self.info else { return 0 };
-        let moved = match (info.playing, self.at) {
-            (true, Some(at)) => at.elapsed().as_secs_f64() * info.rate,
-            _ => 0.0,
+        let Some(Playing { info, at }) = &self.now else {
+            return 0;
+        };
+        let moved = if info.playing {
+            at.elapsed().as_secs_f64() * info.rate
+        } else {
+            0.0
         };
         ((info.position_secs + moved).max(0.0) * 1e6) as i64
     }
@@ -134,7 +146,9 @@ impl Player {
 
     fn seek(&self, offset_us: i64) {
         let at_us = lock(&self.shared).position_us();
-        push_command(Command::SeekTo(((at_us + offset_us).max(0)) as f64 / 1e6));
+        push_command(Command::SeekTo(
+            at_us.saturating_add(offset_us).max(0) as f64 / 1e6,
+        ));
     }
 
     fn set_position(&self, _track_id: ObjectPath<'_>, position_us: i64) {
@@ -143,7 +157,7 @@ impl Player {
 
     #[zbus(property)]
     fn playback_status(&self) -> String {
-        match &lock(&self.shared).info {
+        match lock(&self.shared).info() {
             Some(info) if info.playing => "Playing",
             Some(_) => "Paused",
             None => "Stopped",
@@ -153,7 +167,7 @@ impl Player {
 
     #[zbus(property)]
     fn rate(&self) -> f64 {
-        lock(&self.shared).info.as_ref().map_or(1.0, |i| i.rate)
+        lock(&self.shared).info().map_or(1.0, |i| i.rate)
     }
 
     #[zbus(property)]
@@ -173,11 +187,7 @@ impl Player {
 
     #[zbus(property)]
     fn metadata(&self) -> HashMap<String, OwnedValue> {
-        lock(&self.shared)
-            .info
-            .as_ref()
-            .map(metadata)
-            .unwrap_or_default()
+        lock(&self.shared).info().map(metadata).unwrap_or_default()
     }
 
     #[zbus(property(emits_changed_signal = "false"))]
@@ -187,30 +197,27 @@ impl Player {
 
     #[zbus(property)]
     fn can_go_next(&self) -> bool {
-        lock(&self.shared).info.as_ref().is_some_and(|i| i.can_next)
+        lock(&self.shared).info().is_some_and(|i| i.can_next)
     }
 
     #[zbus(property)]
     fn can_go_previous(&self) -> bool {
-        lock(&self.shared)
-            .info
-            .as_ref()
-            .is_some_and(|i| i.can_previous)
+        lock(&self.shared).info().is_some_and(|i| i.can_previous)
     }
 
     #[zbus(property)]
     fn can_play(&self) -> bool {
-        lock(&self.shared).info.is_some()
+        lock(&self.shared).info().is_some()
     }
 
     #[zbus(property)]
     fn can_pause(&self) -> bool {
-        lock(&self.shared).info.is_some()
+        lock(&self.shared).info().is_some()
     }
 
     #[zbus(property)]
     fn can_seek(&self) -> bool {
-        lock(&self.shared).info.is_some()
+        lock(&self.shared).info().is_some()
     }
 
     #[zbus(property)]
@@ -257,20 +264,18 @@ fn run(rx: std::sync::mpsc::Receiver<Option<NowPlaying>>) {
         let info = rx.try_iter().last().unwrap_or(info);
         let (before, seek) = {
             let mut state = lock(&shared);
-            let before = state.info.clone();
-            let seek = match (&before, &info) {
+            let before = state.info().cloned();
+            let seek = match (&state.now, &info) {
                 (Some(old), Some(new)) => {
-                    old.title == new.title
-                        && super::position_jumped(
-                            old,
-                            state.at.map_or_else(Default::default, |at| at.elapsed()),
-                            new,
-                        )
+                    old.info.title == new.title
+                        && super::position_jumped(&old.info, old.at.elapsed(), new)
                 }
                 _ => false,
             };
-            state.info = info.clone();
-            state.at = Some(Instant::now());
+            state.now = info.clone().map(|info| Playing {
+                info,
+                at: Instant::now(),
+            });
             (before, seek)
         };
         let mut changed: HashMap<&str, Value<'_>> = HashMap::new();

@@ -57,7 +57,7 @@ fn ticket(qr: &PeerQrBox, request: FreeRequest) -> FreeTicket {
     FreeTicket {
         request,
         box_id: qr.id,
-        serial: qr.free.serial,
+        serial: qr.free.last_serial,
     }
 }
 

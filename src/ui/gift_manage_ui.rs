@@ -65,7 +65,8 @@ impl QuillApp {
                 (Some(GiftFlow::Resale { id }), Some(s)) => s
                     .payments
                     .hub
-                    .gifts
+                    .received
+                    .rows
                     .iter()
                     .find(|g| g.id == *id)
                     .filter(|g| g.manage.listed && !g.manage.resale_gram_only)
@@ -215,7 +216,7 @@ impl QuillApp {
         // to delete, and a stale id is never sent.
         let listed = self
             .session()
-            .is_some_and(|s| s.payments.hub.gifts.iter().any(|g| g.id == id));
+            .is_some_and(|s| s.payments.hub.received.rows.iter().any(|g| g.id == id));
         if !listed {
             return;
         }
@@ -252,7 +253,7 @@ pub(super) fn gift_collection_tabs(
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let manage = &session.payments.gifts_manage;
-    let busy = session.payments.hub.gifts_op.is_mutating();
+    let busy = session.payments.hub.received.op.is_mutating();
     if manage.collections.is_empty() && !mine {
         return div().into_any_element();
     }
