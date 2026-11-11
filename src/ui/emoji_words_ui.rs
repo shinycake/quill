@@ -132,7 +132,7 @@ impl EmojiWordsUi {
     pub(super) fn unhover(&mut self, suggest: &mut super::composer_suggest::SuggestUi) {
         self.bar = WordBar::Closed;
         self.strip_bounds.set(None);
-        if suggest.active.is_none() {
+        if !suggest.is_showing() {
             suggest.bar.reset();
         }
     }
@@ -380,7 +380,7 @@ impl QuillApp {
             BarAim::Word(word) => self.show_word_bar(Some(word), cx),
             BarAim::Close => {
                 self.show_word_bar(None, cx);
-                if self.composer_ui.suggest.active.is_none() {
+                if !self.composer_ui.suggest.is_showing() {
                     self.composer_ui.suggest.bar.reset();
                 }
             }

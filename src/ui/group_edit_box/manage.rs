@@ -194,7 +194,7 @@ impl QuillApp {
                 tr(keys::MANAGE_PEER_RECENT_ACTIONS),
                 None,
                 cx.listener(move |this, _, window, cx| {
-                    this.ensure_event_log_search(window, cx);
+                    this.ensure_event_log_search(chat_id, window, cx);
                     this.open_group_settings_view(chat_id, GroupSettingsView::RecentActions, cx);
                 }),
                 cx,

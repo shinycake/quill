@@ -12,8 +12,8 @@ impl QuillApp {
     /// filter and a community narrow what the session lists). Empty on the
     /// Archived category, which shows the archive alone.
     pub(in crate::ui) fn listed_main_chats(&self) -> Vec<&ChatSummary> {
-        let folder = self.folders.tab;
-        let filter = self.chat_list.filter;
+        let folder = self.chat_list.view.folder();
+        let filter = self.chat_list.view.filter();
         // Borrowed, never cloned: the list can hold thousands of chats and
         // this runs every render.
         let mut chats: Vec<&ChatSummary> = self
@@ -47,8 +47,8 @@ impl QuillApp {
     /// The archived chats the list shows: on the Archived category, and
     /// the unread ones on the Unread category, outside folders.
     pub(super) fn listed_archived_chats(&self) -> Vec<&ChatSummary> {
-        let filter = self.chat_list.filter;
-        if self.folders.tab.is_some()
+        let filter = self.chat_list.view.filter();
+        if self.chat_list.view.folder().is_some()
             || !matches!(filter, ChatListFilter::Archived | ChatListFilter::Unread)
         {
             return Vec::new();
@@ -70,18 +70,18 @@ impl QuillApp {
     /// A pinned drag belongs to the view too: it reorders the list on
     /// screen, so another view ends it unsaved (round 18 B #4).
     pub(in crate::ui) fn set_chat_list_view(&mut self, filter: ChatListFilter, tab: Option<i32>) {
-        if self.chat_list.filter != filter || self.folders.tab != tab {
-            self.chat_list.selected.clear();
-            self.chat_list.pin.end_drag();
-        }
+        let left = self
+            .chat_list
+            .view
+            .folder()
+            .filter(|_| self.chat_list.view.folder() != tab);
+        self.chat_list.show_view(filter, tab);
         // A folder nobody views stops waiting out a failed page.
-        if let Some(left) = self.folders.tab.filter(|_| self.folders.tab != tab)
+        if let Some(left) = left
             && let Some(session) = self.session_mut()
         {
             session.chat_list.folder_left(left);
         }
-        self.chat_list.filter = filter;
-        self.folders.tab = tab;
     }
 
     /// The view shows the pinned list `archived` names, in its own order,
@@ -89,9 +89,10 @@ impl QuillApp {
     /// folder tab, or the archive (TGX `ChatsAdapter`).
     pub(in crate::ui) fn pinned_list_shown(&self, archived: bool) -> bool {
         if archived {
-            self.chat_list.filter == ChatListFilter::Archived
+            self.chat_list.view.filter() == ChatListFilter::Archived
         } else {
-            self.chat_list.filter == ChatListFilter::All && self.folders.tab.is_none()
+            self.chat_list.view.filter() == ChatListFilter::All
+                && self.chat_list.view.folder().is_none()
         }
     }
 

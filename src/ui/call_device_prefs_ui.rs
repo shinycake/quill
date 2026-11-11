@@ -21,26 +21,8 @@ impl QuillApp {
             .and_then(|settings| settings.sessions.data().map(Vec::as_slice))
             .and_then(current_session_accepts_calls);
         let mutating = settings.is_some_and(|settings| settings.sessions_op.is_mutating());
-        // The list arrives once; ask for it when this section first shows.
-        let needs_fetch =
-            self.live.is_some() && settings.is_some_and(|settings| settings.sessions.is_idle());
-        if needs_fetch {
-            // `maybe_fetch_active_sessions` is guarded, so a render that
-            // queues this twice sends one request.
-            self.spawn_screen(cx, async move |this, cx| {
-                let _ = this.update(cx, |this, cx| {
-                    // Redraw only when a request went out (the list is
-                    // loading now): a fetch that cannot start changes
-                    // nothing, and a redraw would queue this again.
-                    if let Some(live) = this.live.as_mut()
-                        && let Ok(Some(_)) = live.driver.maybe_fetch_active_sessions()
-                    {
-                        cx.notify();
-                    }
-                });
-            })
-            .detach();
-        }
+        // The sessions list is asked for when the Calls page opens
+        // (`fetch_call_settings`), not from this render.
         let target = system_sound_target();
         if current.is_none() && target.is_none() {
             return None;

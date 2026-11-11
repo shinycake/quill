@@ -99,12 +99,7 @@ impl QuillApp {
         match sent {
             Some(Ok(request)) => {
                 if let Some(preview) = self.ai_compose.preview.as_mut() {
-                    let stage =
-                        std::mem::replace(&mut preview.stage, PreviewStage::LookingUp { token: 0 });
-                    preview.stage = match stage {
-                        PreviewStage::Shown(style) => PreviewStage::Adding { style, request },
-                        other => other,
-                    };
+                    preview.begin_adding(request);
                 }
             }
             Some(Err(_)) => self.push_ai_toast(text_toast(""), window, cx),

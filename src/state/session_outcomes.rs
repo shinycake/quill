@@ -23,8 +23,8 @@ impl Session {
         // A mini app's one-shot answers that landed while away have no
         // flow or window left to take them.
         let apps = &mut self.bots.web_apps;
-        apps.found = None;
-        apps.attachment_menu_bot = None;
+        apps.found.clear();
+        apps.attachment_menu_bot.clear();
         apps.attachment_menu_toggled.clear();
         apps.write_access = None;
         apps.emoji_access = None;
@@ -46,6 +46,9 @@ impl Session {
         messages.send_permission_error.clear();
         messages.flood_notice.clear();
         self.groups.community_error = None;
+        // The contacts line ("Contacts imported.") of a mutation that
+        // answered while the account was away is not news on return.
+        self.users_state.contacts_notice = None;
         self.groups.invite_link_error = None;
         self.chats_state.chat_action_error.clear();
         self.chats_state.report_chat_outcome = None;

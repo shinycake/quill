@@ -162,10 +162,6 @@ pub(super) struct MiniAppWindow {
     popups: HashMap<String, PopupPurpose>,
     popup_seq: u64,
     write_access: launch_flow::WriteAccess,
-    /// The custom-method calls this window sent and the app's `req_id` for
-    /// each: an answer of a request not here is another window's (or a
-    /// closed one's) and is dropped.
-    custom_calls: HashMap<quill::ids::RequestId, String>,
     privacy_policy_url: Option<String>,
     in_attachment_menu: bool,
     emoji: emoji_status::EmojiStatusFlow,
@@ -278,8 +274,9 @@ pub(super) struct MiniApps {
     /// What only a render can do, in the order it was asked: two asked
     /// before the next render both run.
     render_actions: Vec<RenderAction>,
-    /// Bots whose "Emoji Status" switch has been on screen this run, so it
-    /// stays when the person turns it off (`bot_permissions`).
+    /// Bots whose "Emoji Status" switch the person turned off on the open
+    /// profile, so it stays to turn on again (`bot_permissions`); cleared
+    /// when the profile panel changes or closes.
     pub(super) emoji_access_shown: std::collections::HashSet<quill::ids::OfAccount<i64>>,
     /// The `sendWebAppData` requests this account's apps sent and whose
     /// outcome is still to be reported: an outcome of any other request is
@@ -565,18 +562,16 @@ impl QuillApp {
                     .map(|live| live.driver.search_web_app(bot_id, short_name));
                 if let Some(Ok(request)) = sent {
                     let window = self.asking_window_or_last_press();
-                    self.mini_apps.flow.search(
+                    self.mini_apps.flow.search(Awaited {
                         request,
-                        Awaited {
-                            then: PendingOpen::Link {
-                                chat_id: Some(chat_id),
-                                bot_id,
-                                short_name: short_name.clone(),
-                                start_parameter: start_parameter.clone(),
-                            },
-                            window,
+                        then: PendingOpen::Link {
+                            chat_id: Some(chat_id),
+                            bot_id,
+                            short_name: short_name.clone(),
+                            start_parameter: start_parameter.clone(),
                         },
-                    );
+                        window,
+                    });
                     self.open_box(DialogKind::WebAppConfirm);
                     self.ensure_mini_app_poll(cx);
                 } else {
@@ -610,16 +605,14 @@ impl QuillApp {
                     .map(|live| live.driver.fetch_attachment_menu_bot(bot_id));
                 if let Some(Ok(request)) = sent {
                     let window = self.asking_window_or_last_press();
-                    self.mini_apps.flow.fetch_attach_bot(
+                    self.mini_apps.flow.fetch_attach_bot(Awaited {
                         request,
-                        Awaited {
-                            then: PendingOpen::Attach {
-                                chat_id: target,
-                                bot_id,
-                            },
-                            window,
+                        then: PendingOpen::Attach {
+                            chat_id: target,
+                            bot_id,
                         },
-                    );
+                        window,
+                    });
                     self.open_box(DialogKind::WebAppConfirm);
                     self.ensure_mini_app_poll(cx);
                 } else {
@@ -794,7 +787,11 @@ impl QuillApp {
                 });
                 if let Some(Ok(request)) = sent {
                     let window = self.asking_window_or_last_press();
-                    self.mini_apps.flow.add(request, Awaited { then, window });
+                    self.mini_apps.flow.add(Awaited {
+                        request,
+                        then,
+                        window,
+                    });
                     self.ensure_mini_app_poll(cx);
                 } else {
                     self.set_status_note(
@@ -986,6 +983,7 @@ mod helper_pipe;
 mod inline_results_button;
 mod invoice;
 mod launch_flow;
+mod mini_app_poll;
 mod phone;
 mod spawn_mini_app_window;
 

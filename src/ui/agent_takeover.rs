@@ -19,6 +19,7 @@
 
 use super::agent_labels::agent_label;
 use super::agent_takeover_glow::{GLOW_FPS, SWEEP_FPS, glow_element, glow_frame, sweep_allowed};
+use super::agent_takeover_state::Wake;
 use super::app::QuillApp;
 use super::shell::QuillShell;
 use gpui_kit::assets::IconName;
@@ -162,23 +163,29 @@ impl QuillApp {
 
     /// One timer for the next phase change nothing animates towards
     /// (driving ends after the hold, the fade ends).
-    fn wake_takeover_at(&self, at: u64, now: u64, cx: &mut Context<Self>) {
-        let pending = self.takeover.wake_at.get();
-        if pending > now && pending <= at {
+    pub(super) fn wake_takeover_at(&self, at: u64, now: u64, cx: &mut Context<Self>) {
+        let wake = self.takeover.wake.take();
+        if let Wake::At { at: pending, .. } = &wake
+            && *pending > now
+            && *pending <= at
+        {
+            self.takeover.wake.set(wake);
             return;
         }
-        self.takeover.wake_at.set(at);
         let delay = Duration::from_millis(at.saturating_sub(now).saturating_add(5));
-        QuillApp::spawn_app(cx, async move |app, cx| {
+        let task = QuillApp::spawn_app(cx, async move |app, cx| {
             cx.background_executor().timer(delay).await;
             let _ = app.update(cx, |app, cx| {
-                if app.takeover.wake_at.get() == at {
-                    app.takeover.wake_at.set(0);
+                // This timer is done; a later one has replaced the stage.
+                match app.takeover.wake.take() {
+                    Wake::At { at: pending, .. } if pending == at => {}
+                    later => app.takeover.wake.set(later),
                 }
                 cx.notify();
             });
-        })
-        .detach();
+        });
+        // The older timer, if any, drops here.
+        self.takeover.wake.set(Wake::At { at, _task: task });
     }
 
     /// The pill at the top centre: who drives and Stop; paused, what the

@@ -22,19 +22,37 @@ pub const TILE_HEIGHT: f32 = 78.;
 /// `st::slideDuration`, the expand and collapse animation.
 pub const EXPAND_MS: u64 = 240;
 
+/// What a tile is: the Saved Messages tile (never muted, no online dot), or
+/// a chat with its own flags.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TopPersonKind {
+    SavedMessages,
+    Chat { muted: bool, online: bool },
+}
+
 /// One person in the strip, as `TopPeersEntry` carries it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TopPerson {
     pub chat_id: ChatId,
     pub name: String,
-    pub saved_messages: bool,
+    pub kind: TopPersonKind,
     pub unread_count: i32,
     pub marked_unread: bool,
-    pub muted: bool,
-    pub online: bool,
 }
 
 impl TopPerson {
+    pub fn is_saved_messages(&self) -> bool {
+        self.kind == TopPersonKind::SavedMessages
+    }
+
+    pub fn muted(&self) -> bool {
+        matches!(self.kind, TopPersonKind::Chat { muted: true, .. })
+    }
+
+    pub fn online(&self) -> bool {
+        matches!(self.kind, TopPersonKind::Chat { online: true, .. })
+    }
+
     /// The unread badge: the count, or a bare dot for a chat marked as
     /// unread.
     pub fn unread(&self) -> Option<(i32, bool)> {
@@ -60,20 +78,26 @@ pub fn top_people(session: &Session) -> Vec<TopPerson> {
         .iter()
         .filter_map(|id| {
             let chat = session.chats.get(&id.0)?;
-            let saved = session.is_saved_messages(*id);
-            let name = if saved {
-                tr(keys::SAVED_MESSAGES).to_string()
+            let (name, kind) = if session.is_saved_messages(*id) {
+                (
+                    tr(keys::SAVED_MESSAGES).to_string(),
+                    TopPersonKind::SavedMessages,
+                )
             } else {
-                short_name(session, &chat.kind, &chat.title)
+                (
+                    short_name(session, &chat.kind, &chat.title),
+                    TopPersonKind::Chat {
+                        muted: chat.is_muted(),
+                        online: session.chat_peer_online(chat),
+                    },
+                )
             };
             Some(TopPerson {
                 chat_id: *id,
                 name,
-                saved_messages: saved,
+                kind,
                 unread_count: chat.unread_count,
                 marked_unread: chat.is_marked_as_unread,
-                muted: !saved && chat.is_muted(),
-                online: !saved && session.chat_peer_online(chat),
             })
         })
         .collect()

@@ -99,11 +99,14 @@ pub const NFT_PAGE: i32 = 20;
 /// A user's public wallet address, fetched when their profile opens.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProfileAddress {
-    Loading,
+    /// The lookup is out under `request`; only its answer or error lands.
+    Loading { request: crate::ids::RequestId },
     /// The user has a wallet at this address.
     Found(String),
-    /// The user has no wallet, or the lookup failed.
-    None,
+    /// TDLib answered without an address for the user: no wallet.
+    NoWallet,
+    /// The lookup failed; the next time the profile opens asks again.
+    Failed,
 }
 
 /// The rows of a paged list and where its next page starts.
@@ -289,7 +292,6 @@ pub enum MoneyDetail {
 /// The Money page (iOS `WalletScreen`, read-only).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MoneyPage {
-    pub open: bool,
     pub tab: MoneyTab,
     pub history: Paged<WalletTx>,
     pub nfts: Paged<WalletNft>,
@@ -359,7 +361,8 @@ pub struct TonWalletState {
     /// The fiat currency the user picked; `None` until the account's prefs
     /// are read ([`fiat::DEFAULT_CURRENCY`] is used meanwhile).
     pub currency: Option<String>,
-    pub money: MoneyPage,
+    /// The Money page while it is open; `None` when closed.
+    pub money: Option<MoneyPage>,
     /// Public addresses of profiles opened this session.
     pub profile_addresses: HashMap<i64, ProfileAddress>,
     /// The surface whose notice is open, if any.
@@ -367,6 +370,23 @@ pub struct TonWalletState {
 }
 
 impl TonWalletState {
+    /// The app config asked for the explorer came back as `request`.
+    pub fn explorer_answered(&mut self, request: Option<crate::ids::RequestId>) {
+        self.explorer.answered(request, ());
+    }
+
+    /// Whether the Money page is open.
+    pub fn money_open(&self) -> bool {
+        self.money.is_some()
+    }
+
+    /// The Money page, or the empty page while it is closed.
+    pub fn money_page(&self) -> &MoneyPage {
+        static CLOSED: std::sync::LazyLock<MoneyPage> =
+            std::sync::LazyLock::new(MoneyPage::default);
+        self.money.as_ref().unwrap_or(&CLOSED)
+    }
+
     /// Where "View in Explorer" opens `address`.
     pub fn explorer_url_for(&self, address: &str) -> String {
         explorer_url(self.explorer_url.as_deref(), address)
@@ -400,16 +420,23 @@ impl TonWalletState {
         }
     }
 
-    /// Apply the `can_use_ton_wallet` option. Turning it off drops what was
-    /// loaded and closes the Money page.
+    /// Apply the `can_use_ton_wallet` option. Turning it off drops
+    /// everything the wallet loaded (and any answer still in flight, which
+    /// no fetch waits for any more), closes the Money page and its notice.
+    /// What the app config gave (the explorer, the Gram's price) and the
+    /// currency the user picked stay.
     pub fn set_can_use(&mut self, on: bool) {
-        self.can_use = on;
-        if !on {
-            self.own = None;
-            self.state_fetch = Fetch::Idle;
-            self.money = MoneyPage::default();
-            self.profile_addresses.clear();
+        if on {
+            self.can_use = true;
+            return;
         }
+        *self = Self {
+            explorer_url: self.explorer_url.take(),
+            explorer: std::mem::take(&mut self.explorer),
+            ton_usd_rate: self.ton_usd_rate,
+            currency: self.currency.take(),
+            ..Self::default()
+        };
     }
 }
 

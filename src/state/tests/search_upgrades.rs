@@ -234,8 +234,8 @@ fn top_people_lists_known_chats_by_first_name_and_hides_when_disabled() {
     assert_eq!(names, vec!["Ada", "Grace"]);
     assert_eq!(people.first().and_then(|p| p.unread()), Some((4, false)));
     assert_eq!(people.get(1).and_then(|p| p.unread()), Some((0, true)));
-    assert!(people.first().is_some_and(|p| p.online));
-    assert!(people.iter().all(|p| !p.muted));
+    assert!(people.first().is_some_and(|p| p.online()));
+    assert!(people.iter().all(|p| !p.muted()));
     session.search.search.top_chats_disabled = true;
     assert!(crate::top_people::top_people(&session).is_empty());
 }

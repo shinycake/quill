@@ -171,15 +171,30 @@ pub fn start() {
     static STARTED: std::sync::Once = std::sync::Once::new();
     STARTED.call_once(|| {
         let _ = crate::thread_guard::spawn_guarded("quill-battery-signal", || {
+            let _ended = ListenerEnd;
             for source in &SOURCES {
                 if listen(source).is_ok() {
                     break;
                 }
             }
-            *OPEN.lock_or_recover() = None;
-            record(None);
         });
     });
+}
+
+/// The listener's end, normal or by a panic that `spawn_guarded` catches:
+/// the connection is forgotten and the state returns to not listening, so
+/// the watcher falls back to polling.
+struct ListenerEnd;
+
+impl Drop for ListenerEnd {
+    fn drop(&mut self) {
+        end_listening();
+    }
+}
+
+fn end_listening() {
+    *OPEN.lock_or_recover() = None;
+    record(None);
 }
 
 /// A connection whose calls give up after `limit`: [`refresh`] runs on the
@@ -233,7 +248,7 @@ fn listen(source: &'static Source) -> zbus::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{OPEN, SOURCES, connect, latest, record, refresh, signal_answer};
+    use super::{ListenerEnd, OPEN, SOURCES, connect, latest, record, refresh, signal_answer};
     use crate::locks::LockExt as _;
     use std::collections::HashMap;
     use std::io::{BufRead as _, BufReader};
@@ -473,6 +488,19 @@ mod tests {
         drop(answer);
         let _ = daemon.kill();
         let _ = daemon.wait();
+    }
+
+    #[test]
+    fn a_listener_that_panics_returns_the_state_to_not_listening() {
+        let _serial = SERIAL.lock_or_recover();
+        record(Some(Some(true)));
+        let ended = std::panic::catch_unwind(|| {
+            let _ended = ListenerEnd;
+            panic!("the bus library panicked");
+        });
+        assert!(ended.is_err());
+        assert_eq!(latest(), None, "the watcher polls again");
+        assert!(OPEN.lock_or_recover().is_none());
     }
 
     #[test]

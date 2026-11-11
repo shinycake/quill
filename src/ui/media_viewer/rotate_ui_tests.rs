@@ -53,9 +53,9 @@ fn closing_the_viewer_lets_go_of_a_turned_photo(cx: &mut TestAppContext) {
             turns: 1,
             ..Default::default()
         };
-        let generation = app.viewer.reorient.begin(target);
+        app.viewer.reorient.begin(target, gpui_kit::Task::ready(()));
         let path = PathBuf::from("turned.jpg");
-        app.finish_viewer_reorient(generation, path, target, Some(turned), cx);
+        app.finish_viewer_reorient(path, target, Some(turned), cx);
     });
     settle(vcx);
     assert!(weak.upgrade().is_some(), "the open viewer keeps it");
@@ -63,4 +63,46 @@ fn closing_the_viewer_lets_go_of_a_turned_photo(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, _, cx| app.close_media_viewer(cx));
     settle(vcx);
     assert!(weak.upgrade().is_none(), "nothing keeps it once closed");
+}
+
+#[gpui_kit::test]
+fn a_decode_the_viewer_moved_on_from_changes_nothing(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    add_photo(&app, vcx, 8902);
+    open(&app, vcx, 8902);
+    let turned = Arc::new(RenderImage::new(SmallVec::from_buf([image::Frame::new(
+        image::RgbaImage::new(4, 2),
+    )])));
+    app.update_in(vcx, |app, _, cx| {
+        let target = ViewerOrientation {
+            turns: 1,
+            ..Default::default()
+        };
+        app.viewer.reorient.begin(target, gpui_kit::Task::ready(()));
+        // A step or close resets the stage, which drops the decode.
+        app.viewer.reorient.reset();
+        app.finish_viewer_reorient(PathBuf::from("late.jpg"), target, Some(turned), cx);
+        assert!(
+            app.viewer.orientation.is_identity(),
+            "the late result is dropped"
+        );
+        assert!(app.viewer.reorient.shown().is_none());
+    });
+}
+
+#[gpui_kit::test]
+fn a_newer_saved_toast_replaces_the_stage_and_close_ends_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    add_photo(&app, vcx, 8903);
+    open(&app, vcx, 8903);
+    app.update_in(vcx, |app, _, cx| {
+        app.show_saved_toast(PathBuf::from("/tmp/a.jpg"), false, cx);
+        app.show_saved_toast(PathBuf::from("/tmp/b.jpg"), false, cx);
+        let toast = app.viewer.extra.saved_toast.toast().map(|t| t.dest.clone());
+        assert_eq!(toast, Some(PathBuf::from("/tmp/b.jpg")));
+        app.close_media_viewer(cx);
+        assert!(app.viewer.extra.saved_toast.toast().is_none());
+    });
 }

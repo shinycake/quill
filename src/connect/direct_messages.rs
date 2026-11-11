@@ -135,7 +135,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             topic.unread_count > 0,
             topic.last_message_id,
         );
+        // The two halves are independent: a refused one does not stop the
+        // other. The call fails only when nothing went out, so a half that
+        // landed is not reported as a failure (the other half stays visible
+        // and can be asked again).
         let mut sent = None;
+        let mut refused = None;
         if marked == read {
             let purpose =
                 RequestPurpose::Threads(ThreadsPurpose::SetDirectMessagesChatTopicMarkedAsUnread {
@@ -144,7 +149,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             let extra = self.session.request(purpose, Some(chat_id));
             let json =
                 set_direct_messages_chat_topic_is_marked_as_unread(extra, chat_id, topic_id, !read);
-            sent = Some(self.send_json_request(extra, &json)?);
+            match self.send_json_request(extra, &json) {
+                Ok(id) => sent = Some(id),
+                Err(err) => refused = Some(err),
+            }
         }
         if read && unread && last != 0 {
             let purpose =
@@ -157,9 +165,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                 "messageSourceDirectMessagesChatTopicHistory",
                 true,
             );
-            sent = Some(self.send_json_request(extra, &json)?);
+            match self.send_json_request(extra, &json) {
+                Ok(id) => sent = Some(id),
+                Err(err) => refused = Some(err),
+            }
         }
-        Ok(sent)
+        match (sent, refused) {
+            (None, Some(err)) => Err(err),
+            (sent, _) => Ok(sent),
+        }
     }
 
     /// "Delete chat": every message of the conversation
@@ -192,17 +206,37 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::Groups(GroupsPurpose::GetDirectMessagesMember { user_id });
-        if self
+        // Known, or asked and not answered yet: nothing to ask. A failed
+        // check is asked again.
+        let status = self
             .session
-            .direct_member_banned(channel, user_id)
-            .is_some()
-            || self.session.requests.has_purpose_for_chat(purpose, channel)
-        {
+            .threads
+            .direct
+            .kicked
+            .entry((channel.0, user_id))
+            .or_default();
+        if status.data().is_some() || status.is_loading() {
             return Ok(None);
         }
+        status.begin();
         let extra = self.session.request(purpose, Some(channel));
+        if let Some(status) = self
+            .session
+            .threads
+            .direct
+            .kicked
+            .get_mut(&(channel.0, user_id))
+        {
+            status.sent(extra);
+        }
         let json = get_chat_member(extra, channel, user_id);
-        self.send_json_request(extra, &json).map(Some)
+        match self.send_json_request(extra, &json) {
+            Ok(request) => Ok(Some(request)),
+            Err(err) => {
+                self.session.fail_direct_member(channel, user_id, extra);
+                Err(err)
+            }
+        }
     }
 
     /// "Ban user from channel" / "Unban user in channel": the conversation's

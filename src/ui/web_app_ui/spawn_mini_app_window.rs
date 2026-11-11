@@ -11,9 +11,7 @@ impl QuillApp {
         // before the lock) is refused: the helper window would show it,
         // usable, over the lock. TDLib closes the launch.
         if self.refused_while_locked() {
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.close_web_app(launch.launch_id);
-            }
+            self.close_refused_launch(launch.launch_id);
             return;
         }
         let Some(path) = helper_path() else {
@@ -21,6 +19,7 @@ impl QuillApp {
                 StatusNote::silent(tr(keys::Q_MEDIA_THE_MINI_APP_WINDOW_QUILL_2)),
                 cx,
             );
+            self.close_refused_launch(launch.launch_id);
             return;
         };
         let account = self.web_app_account();
@@ -53,11 +52,13 @@ impl QuillApp {
                     StatusNote::error(tr(keys::Q_MEDIA_THE_MINI_APP_WINDOW_COULDNT)),
                     cx,
                 );
+                self.close_refused_launch(launch.launch_id);
                 return;
             }
         };
         let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
             let _ = child.kill();
+            self.close_refused_launch(launch.launch_id);
             return;
         };
         let (sender, events) = mpsc::channel();
@@ -82,13 +83,15 @@ impl QuillApp {
                 let Ok(line) = String::from_utf8(line) else {
                     continue;
                 };
-                if let Ok(event) = decode::<HelperEvent>(&line)
-                    && sender.send(event).is_err()
-                {
-                    break;
+                if let Ok(event) = decode::<HelperEvent>(&line) {
+                    if sender.send(event).is_err() {
+                        break;
+                    }
+                    quill::wake::MINI_APPS.poke();
                 }
             }
             let _ = sender.send(HelperEvent::Closed);
+            quill::wake::MINI_APPS.poke();
         })
         .ok();
         let in_attachment_menu = self.session().is_some_and(|session| {
@@ -112,7 +115,7 @@ impl QuillApp {
         self.mini_apps.window = Some(MiniAppWindow {
             child: Some(child),
             writer: HelperWriter::spawn(stdin),
-            helper: launch_flow::HelperState::Starting,
+            helper: launch_flow::HelperState::starting(std::time::Instant::now()),
             events,
             launch,
             theme: theme_params(cx),
@@ -121,7 +124,6 @@ impl QuillApp {
             popups: HashMap::new(),
             popup_seq: 0,
             write_access: launch_flow::WriteAccess::Idle,
-            custom_calls: HashMap::new(),
             privacy_policy_url,
             in_attachment_menu,
             emoji: Default::default(),
@@ -131,15 +133,34 @@ impl QuillApp {
         self.ensure_mini_app_poll(cx);
     }
 
+    /// A launch that never got a window (locked, no helper, the helper did
+    /// not start): TDLib hears `closeWebApp`, so the bot keeps no live
+    /// session on the server.
+    fn close_refused_launch(&mut self, launch_id: i64) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.close_web_app(launch_id);
+        }
+    }
+
     /// Close the window (and tell TDLib) without waiting for the helper.
     pub(in crate::ui) fn close_mini_app_window(&mut self, cx: &mut Context<Self>) {
         let Some(window) = self.mini_apps.window.take() else {
             return;
         };
         let launch_id = window.launch.launch_id;
+        let phone = window.phone.waiting_on();
         drop(window);
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.close_web_app(launch_id);
+            // The phone flow went with the window: nobody takes its answer.
+            if let Some(request) = phone {
+                live.driver.session.acks.forget(request);
+            }
+            live.driver
+                .session
+                .bots
+                .web_apps
+                .forget_custom_requests_of(launch_id);
         }
         cx.notify();
     }
@@ -156,66 +177,20 @@ impl QuillApp {
         }
         let window = self.mini_apps.window.take()?;
         let launch_id = window.launch.launch_id;
+        let phone = window.phone.waiting_on();
         let gone = window.close_with_notice();
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.close_web_app(launch_id);
+            if let Some(request) = phone {
+                live.driver.session.acks.forget(request);
+            }
+            live.driver
+                .session
+                .bots
+                .web_apps
+                .forget_custom_requests_of(launch_id);
         }
         gone
-    }
-
-    /// Poll the helper and the session's mini-app answers while something
-    /// is going on; stops by itself when nothing is left.
-    pub(in crate::ui) fn ensure_mini_app_poll(&mut self, cx: &mut Context<Self>) {
-        if let Some(window) = self.asking_window() {
-            self.mini_apps.from_window = window;
-        }
-        if self.mini_apps.poll.is_some() {
-            return;
-        }
-        self.mini_apps.generation += 1;
-        let generation = self.mini_apps.generation;
-        // window-scope: the mini app is the screen's; a step aimed at a chat names its chat.
-        let task = self.spawn_screen(cx, async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(30))
-                    .await;
-                let keep = this
-                    .update(cx, |this, cx| {
-                        this.mini_apps.generation == generation
-                            && this.as_asked_by(this.mini_apps.from_window, |this| {
-                                this.poll_mini_apps(cx)
-                            })
-                    })
-                    .unwrap_or(false);
-                if !keep {
-                    let _ = this.update(cx, |this, _| {
-                        if this.mini_apps.generation == generation {
-                            this.mini_apps.poll = None;
-                        }
-                    });
-                    break;
-                }
-            }
-        });
-        self.mini_apps.poll = Some(task);
-    }
-
-    /// One poll step; `true` while there is still something to wait for.
-    pub(super) fn poll_mini_apps(&mut self, cx: &mut Context<Self>) -> bool {
-        self.poll_mini_app_session(cx);
-        let events: Vec<HelperEvent> = match self.mini_apps.window.as_ref() {
-            Some(window) => window.events.try_iter().collect(),
-            None => Vec::new(),
-        };
-        for event in events {
-            self.handle_helper_event(event, cx);
-        }
-        self.mini_apps.window.is_some()
-            || self.mini_apps.flow.is_waiting()
-            || self.session().is_some_and(|session| {
-                session.bots.web_apps.opening.is_some() || session.web_app_answer_due()
-            })
     }
 
     /// The session's one-shot answers.
@@ -230,9 +205,9 @@ impl QuillApp {
         let open_result = apps.open_result.take();
         let write_access = apps.write_access.take();
         let custom_replies = std::mem::take(&mut apps.custom_replies);
-        let attach_bot = apps.attachment_menu_bot.take();
+        let attach_bots = std::mem::take(&mut apps.attachment_menu_bot);
         let toggled = std::mem::take(&mut apps.attachment_menu_toggled);
-        let found = apps.found.take();
+        let found = std::mem::take(&mut apps.found);
         let data_sent = std::mem::take(&mut apps.data_sent);
 
         if let Some(result) = open_result {
@@ -271,25 +246,32 @@ impl QuillApp {
             self.finish_write_access(answer, cx);
         }
         for reply in custom_replies {
-            if let Some(window) = self.mini_apps.window.as_mut()
-                && let Some(req_id) = window.custom_calls.remove(&reply.request)
+            // An answer for another launch than the window open (the app
+            // was closed and another opened) is nobody's.
+            if let Some(window) = self
+                .mini_apps
+                .window
+                .as_mut()
+                .filter(|window| window.launch.launch_id == reply.launch_id)
             {
                 let reply = match reply.result {
                     Ok(json) => BridgeReply::custom_method_result(
-                        &req_id,
+                        &reply.req_id,
                         serde_json::from_str(&json).unwrap_or(serde_json::Value::Null),
                     ),
-                    Err(error) => BridgeReply::custom_method_error(&req_id, &error),
+                    Err(error) => BridgeReply::custom_method_error(&reply.req_id, &error),
                 };
                 window.emit(reply);
             }
         }
-        // An answer for another bot than the flow waiting (a link clicked
-        // before the first one answered) is dropped: it never drives this
-        // launch, and the flow keeps waiting for its own.
-        if let Some(quill::state::AttachBotAnswer { request, result }) = attach_bot
-            && let Some(Awaited { then, window }) = self.mini_apps.flow.take_attach_bot_for(request)
-        {
+        // An answer to another request than the flow waits on (a link
+        // clicked before the first one answered) is dropped: it never
+        // drives this launch, and the flow keeps waiting for its own.
+        for (asked, result) in attach_bots {
+            let Some(Awaited { then, window, .. }) = self.mini_apps.flow.take_attach_bot_for(asked)
+            else {
+                continue;
+            };
             self.as_asked_by(window, |this| match result {
                 Ok(bot) if bot.is_added => this.start_web_app(then, cx),
                 Ok(bot) => {
@@ -304,11 +286,10 @@ impl QuillApp {
                 Err(message) => this.set_status_note(StatusNote::error(&message), cx),
             });
         }
-        // Each answer is for its own bot: the flow waiting for another
-        // bot's toggle goes on waiting (its launch is not started by an
-        // answer that is not its own).
+        // Each answer is for its own request: the flow waiting for another
+        // toggle goes on waiting (its launch is not started by an answer
+        // that is not its own).
         for toggle in toggled {
-            let toggled_request = toggle.request;
             match toggle.result {
                 Ok(added) => {
                     self.set_status_note(
@@ -319,24 +300,24 @@ impl QuillApp {
                         },
                         cx,
                     );
-                    // Only the answer for the bot being added goes on to
-                    // its launch: another app's menu change is not it.
-                    if let Some(Awaited { then, window }) =
-                        self.mini_apps.flow.take_add_for(toggled_request)
+                    // Only the answer of the add the flow sent goes on to its
+                    // launch: another menu change is not it.
+                    if let Some(Awaited { then, window, .. }) =
+                        self.mini_apps.flow.take_add_for(toggle.request)
                     {
                         self.as_asked_by(window, |this| this.request_web_app(then, false, cx));
                     }
                 }
                 Err(message) => {
-                    self.mini_apps.flow.take_add_for(toggled_request);
+                    self.mini_apps.flow.take_add_for(toggle.request);
                     self.set_status_note(StatusNote::error(&message), cx);
                 }
             }
         }
-        if let Some((asked, result)) = found
-            && let Some(Awaited { then, window }) = self.mini_apps.flow.take_search_for(asked)
-        {
-            self.as_asked_by(window, |this| this.found_web_app_answer(then, result, cx));
+        for (asked, result) in found {
+            if let Some(Awaited { then, window, .. }) = self.mini_apps.flow.take_search_for(asked) {
+                self.as_asked_by(window, |this| this.found_web_app_answer(then, result, cx));
+            }
         }
         for sent in data_sent {
             let sends = &mut self.mini_apps.data_sends;
@@ -735,16 +716,25 @@ impl QuillApp {
                 method,
                 params,
             } => {
+                let launch_id = self
+                    .mini_apps
+                    .window
+                    .as_ref()
+                    .map_or(0, |window| window.launch.launch_id);
                 let sent = self.live.as_mut().map(|live| {
-                    live.driver
-                        .send_web_app_custom_request(bot_id, &method, &params.to_string())
+                    live.driver.send_web_app_custom_request(
+                        bot_id,
+                        launch_id,
+                        &req_id,
+                        &method,
+                        &params.to_string(),
+                    )
                 });
-                self.with_window(|window| match sent {
-                    Some(Ok(request)) => {
-                        window.custom_calls.insert(request, req_id);
-                    }
-                    _ => window.emit(BridgeReply::custom_method_error(&req_id, "UNKNOWN_ERROR")),
-                });
+                if !matches!(sent, Some(Ok(_))) {
+                    self.with_window(|window| {
+                        window.emit(BridgeReply::custom_method_error(&req_id, "UNKNOWN_ERROR"));
+                    });
+                }
             }
             WebAppEvent::Unsupported { reply, .. } => {
                 if let Some(reply) = reply {

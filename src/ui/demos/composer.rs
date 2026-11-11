@@ -372,11 +372,13 @@ fn apply_composer_bars(
             None,
         );
     }
-    session.bots.inline_bot_resolve = Some(quill::state::InlineBotResolve::Resolved {
-        username: "gifbot".into(),
-        user_id: 61,
-        is_inline: Some(true),
-    });
+    session
+        .bots
+        .set_inline_bot(quill::state::InlineBotResolve::Resolved {
+            username: "gifbot".into(),
+            user_id: 61,
+            is_inline: Some(true),
+        });
     session.payments.paid_messages.record_answer(
         51,
         quill::paid_messages::CanSend::HasPaidMessages { stars: 25 },

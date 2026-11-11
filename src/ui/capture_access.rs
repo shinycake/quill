@@ -166,26 +166,23 @@ impl QuillApp {
                 Access::Undetermined => {
                     // The system prompt is up for an earlier press: this one
                     // would only queue a second start behind it.
-                    if self.recording.permission != PermissionAsk::Idle {
+                    if !self.recording.permission.is_idle() {
                         return;
                     }
                     let call = self.active_call_id();
-                    let ask = PermissionAsk::Asking {
-                        id: self.next_permission_ask(),
-                        call,
-                    };
-                    self.recording.permission = ask;
+                    let id = self.next_permission_ask();
                     self.set_note(StatusNote::silent(tr(if device {
                         keys::Q_LEFTOVERS_ALLOW_CAMERA
                     } else {
                         keys::Q_LEFTOVERS_ALLOW_MICROPHONE
                     })));
-                    cx.notify();
                     let (sender, answer) = std::sync::mpsc::channel();
                     request(device, sender);
-                    // The recording starts in the window that asked, or
-                    // not at all once that window closed.
-                    self.spawn_scoped(cx, async move |this, cx| {
+                    // The wait belongs to the account on screen, so the stage
+                    // ends whichever window asked; the recording starts in
+                    // the window that asked, or not at all once it closed.
+                    let asker = self.scoped_app(cx);
+                    let task = self.spawn_screen(cx, async move |this, cx| {
                         let granted = loop {
                             match answer.try_recv() {
                                 Ok(granted) => break granted,
@@ -197,11 +194,18 @@ impl QuillApp {
                                 Err(_) => break false,
                             }
                         };
-                        let _ = this.update(cx, |this, cx| {
-                            if this.recording.permission != ask {
-                                return;
+                        let ended = this.update(cx, |this, cx| {
+                            let mine = this.recording.permission.is_asking(id);
+                            if mine {
+                                this.recording.permission = PermissionAsk::Idle;
+                                cx.notify();
                             }
-                            this.recording.permission = PermissionAsk::Idle;
+                            mine
+                        });
+                        if !ended.is_ok_and(|mine| mine) {
+                            return;
+                        }
+                        let _ = asker.update(cx, |this, cx| {
                             // The call the press was for ended or changed
                             // while the prompt was up: nothing to start.
                             if call.is_some() && this.active_call_id() != call {
@@ -214,8 +218,9 @@ impl QuillApp {
                                 cx.notify();
                             }
                         });
-                    })
-                    .detach();
+                    });
+                    self.recording.permission = PermissionAsk::Asking { id, _task: task };
+                    cx.notify();
                     return;
                 }
             }

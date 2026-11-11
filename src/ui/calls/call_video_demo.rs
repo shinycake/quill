@@ -112,7 +112,7 @@ pub(in crate::ui) fn seed_video_call(
         user_id: PEER,
         is_outgoing: true,
         is_video: std::env::var_os("QUILL_DEMO_VOICE").is_none(),
-        state: CallState::Ready,
+        state: CallState::Ready(Default::default()),
         started_at: ready_at,
         ready: Some(quill::state::CallReady {
             params: Some(ReadyParams {
@@ -136,6 +136,7 @@ pub(in crate::ui) fn seed_video_call(
         remote_audio_muted: false,
         remote_battery_low: std::env::var_os("QUILL_DEMO_BATTERY").is_some(),
         signal_bars: Some(3),
+        media_note: None,
     });
 }
 

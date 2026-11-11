@@ -246,7 +246,8 @@ fn voice_playback_keeps_the_rows_and_follows_the_position(cx: &mut TestAppContex
     };
     for secs in [1.0, 2.5] {
         app.update(vcx, |app, cx| {
-            app.playback.scrub = crate::ui::playback_state::Scrub::Dragging(secs);
+            app.playback.active.track_mut().expect("a track").scrub =
+                crate::ui::playback_state::Scrub::Dragging(secs);
             cx.notify();
         });
         frames(vcx);
@@ -264,7 +265,7 @@ fn the_seek_slider_follows_a_position_tick_that_notifies_only_slices(cx: &mut Te
     let value = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
         app.read_with(vcx, |app, cx| {
             app.playback
-                .seek_slider
+                .seek_slider()
                 .as_ref()
                 .map(|slider| slider.read(cx).value())
         })
@@ -546,3 +547,9 @@ mod paragraph_cache_scroll;
 
 #[path = "file_album_tests.rs"]
 mod file_album;
+
+#[path = "album_row_tests.rs"]
+mod album_row;
+
+#[path = "service_reactions_tests.rs"]
+mod service_reactions;

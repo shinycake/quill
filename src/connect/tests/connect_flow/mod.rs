@@ -5,7 +5,7 @@ use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
 use crate::ids::{AccountKey, ChatId, RequestId};
 use crate::platform::MemorySecretStore;
-use crate::state::{InlineQueryFetch, RequestPurpose, Session};
+use crate::state::{ChatEventLogFetch, InlineQueryFetch, RequestPurpose, Session};
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::AuthorizationState;
 use crate::telegram::envelope::ChannelMemberStatus;
@@ -176,7 +176,10 @@ fn driver_inline_query_first_page_sends_dedupes_and_rolls_back() {
             assert_eq!(slot.chat_id, ChatId(1));
             assert_eq!(slot.bot_user_id, 77);
             assert_eq!(slot.query, "@gif cats");
-            assert_eq!(slot.fetch, InlineQueryFetch::Loading(extra));
+            assert!(matches!(
+                slot.fetch,
+                InlineQueryFetch::Loading { request } if request == extra
+            ));
         }
         None => panic!("inline query slot missing"),
     }
@@ -209,7 +212,7 @@ fn driver_inline_query_first_page_sends_dedupes_and_rolls_back() {
             .inline_query
             .as_ref()
             .map(|slot| &slot.fetch),
-        Some(InlineQueryFetch::Loading(id)) if *id == extra
+        Some(InlineQueryFetch::Loading { request }) if *request == extra
     ));
     assert_eq!(inline_query_sends().len(), 1);
     let _ = std::fs::remove_dir_all(&dir);
@@ -327,6 +330,12 @@ fn driver_fetch_chat_event_log_sends_dedupes_and_gates() {
         driver.fetch_chat_event_log(ChatId(13)),
         Err(ConnectSendError::InvalidRequest)
     );
+    // Sweep 09-095: the refused first page is a failed stage the page draws
+    // with Retry, not a spinner nothing ends.
+    assert!(matches!(
+        driver.session.groups.event_log_fetch(13),
+        Some(ChatEventLogFetch::Failed(_))
+    ));
 
     driver
             .ingest(

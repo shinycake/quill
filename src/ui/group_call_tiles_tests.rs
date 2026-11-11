@@ -174,6 +174,7 @@ fn a_replaced_call_window_hiding_leaves_the_large_tile(cx: &mut TestAppContext) 
         app.group_call.window = crate::ui::group_call_state::CallWindow::Open {
             handle: replacement,
             visible: true,
+            layout: crate::ui::group_call_state::CallLayout::Voice,
         }
     });
 
@@ -235,9 +236,7 @@ fn crowd(app: &Entity<QuillApp>, count: i64, vcx: &mut VisualTestContext) {
                     user_id: 5_000 + person,
                 },
                 audio_source_id: 5_000 + person as i32,
-                video_enabled: false,
                 video_info: None,
-                screen_sharing_enabled: false,
                 screen_sharing_video_info: None,
                 ..listener.clone()
             });

@@ -16,6 +16,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// lands the id list; user objects arrive via `updateUser`.
     pub fn fetch_contacts(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            // Nothing can go out: a list nothing asked for lands in the
+            // failed stage (with its Retry), not a "Loading contacts..."
+            // nothing will end.
+            let contacts = &mut self.session.users_state.contacts;
+            if contacts.can_ask() {
+                contacts.fail_dropping_data("could not send the request");
+            }
             return Err(ConnectSendError::InvalidRequest);
         }
         if !self.session.users_state.contacts.can_ask()

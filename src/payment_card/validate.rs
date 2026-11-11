@@ -47,6 +47,8 @@ impl CardBrand {
     }
 }
 
+/// What a check says about the text, without the "can take more input"
+/// part: the coarse view of a [`Validation`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationState {
     Invalid,
@@ -54,24 +56,44 @@ pub enum ValidationState {
     Valid,
 }
 
-/// A check's answer. `finished` means the field cannot take more input,
-/// so focus moves on.
+/// A check's answer, one value: `Finished` is a valid text that cannot take
+/// more input, so focus moves on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Validation {
-    pub state: ValidationState,
-    pub finished: bool,
+pub enum Validation {
+    Invalid,
+    Incomplete,
+    /// Valid, and more input could still follow.
+    Valid,
+    /// Valid and complete.
+    Finished,
 }
 
 impl Validation {
-    const INVALID: Self = Self::new(ValidationState::Invalid, false);
-    const INCOMPLETE: Self = Self::new(ValidationState::Incomplete, false);
+    /// A valid text, finished or not.
+    const fn valid(finished: bool) -> Self {
+        if finished {
+            Self::Finished
+        } else {
+            Self::Valid
+        }
+    }
 
-    const fn new(state: ValidationState, finished: bool) -> Self {
-        Self { state, finished }
+    /// The answer without whether the field is finished.
+    pub const fn state(self) -> ValidationState {
+        match self {
+            Self::Invalid => ValidationState::Invalid,
+            Self::Incomplete => ValidationState::Incomplete,
+            Self::Valid | Self::Finished => ValidationState::Valid,
+        }
     }
 
     pub fn is_valid(self) -> bool {
-        self.state == ValidationState::Valid
+        self.state() == ValidationState::Valid
+    }
+
+    /// The field cannot take more input.
+    pub fn is_finished(self) -> bool {
+        self == Self::Finished
     }
 }
 
@@ -229,18 +251,18 @@ pub fn is_valid_luhn(digits: &str) -> bool {
 pub fn validate_card(number: &str) -> Validation {
     let digits = remove_whitespace(number);
     if !is_numeric(&digits) {
-        return Validation::INVALID;
+        return Validation::Invalid;
     }
     if digits.is_empty() {
-        return Validation::INCOMPLETE;
+        return Validation::Incomplete;
     }
     let len = digits.chars().count();
     if len > MAX_LENGTH || (len >= MIN_LENGTH && !is_valid_luhn(&digits)) {
-        Validation::INVALID
+        Validation::Invalid
     } else if len < MIN_LENGTH {
-        Validation::INCOMPLETE
+        Validation::Incomplete
     } else {
-        Validation::new(ValidationState::Valid, len == MAX_LENGTH)
+        Validation::valid(len == MAX_LENGTH)
     }
 }
 
@@ -249,10 +271,10 @@ pub fn validate_expiry(date: &str, today: YearMonth) -> Validation {
     let date = remove_whitespace(date);
     let typed = || date.chars().filter(|c| *c != '/');
     if !typed().all(|c| c.is_ascii_digit()) {
-        return Validation::INVALID;
+        return Validation::Invalid;
     }
     if typed().nth(1).is_none() {
-        return Validation::INCOMPLETE;
+        return Validation::Incomplete;
     }
     // Months 2-9 typed as one digit take a leading zero.
     let lead = typed().next().is_some_and(|first| first > '1');
@@ -261,19 +283,19 @@ pub fn validate_expiry(date: &str, today: YearMonth) -> Validation {
     normalized.extend(typed());
     let month = prefix_number(&normalized, 2);
     if !(1..=12).contains(&month) {
-        return Validation::INVALID;
+        return Validation::Invalid;
     }
     match normalized.chars().count() {
-        0..=3 => return Validation::INCOMPLETE,
+        0..=3 => return Validation::Incomplete,
         4 => {}
-        _ => return Validation::INVALID,
+        _ => return Validation::Invalid,
     }
     let year = 2000 + prefix_number(normalized.get(2..).unwrap_or(""), 2);
     let (today_year, today_month) = (u64::from(today.year), u64::from(today.month));
     if year < today_year || (year == today_year && month < today_month) {
-        return Validation::INVALID;
+        return Validation::Invalid;
     }
-    Validation::new(ValidationState::Valid, true)
+    Validation::Finished
 }
 
 /// `ValidateParsedExpireDate`: the month and four-digit year the form
@@ -284,7 +306,7 @@ pub fn validate_parsed_expiry(month: u32, year: u32, today: YearMonth) -> Valida
     }
     let mut date = Zeroizing::new(String::with_capacity(8));
     let _ = write!(date, "{month:02}{:02}", year % 100);
-    validate_expiry(&date, today).state
+    validate_expiry(&date, today).state()
 }
 
 fn max_cvc_length(brand: CardBrand) -> usize {
@@ -297,17 +319,17 @@ fn max_cvc_length(brand: CardBrand) -> usize {
 /// `ValidateCvc`: three digits, four for Amex and unknown networks.
 pub fn validate_cvc(number: &str, cvc: &str) -> Validation {
     if !is_numeric(cvc) {
-        return Validation::INVALID;
+        return Validation::Invalid;
     }
     let len = cvc.chars().count();
     if len < MIN_CVC_LENGTH {
-        return Validation::INCOMPLETE;
+        return Validation::Incomplete;
     }
     let max = max_cvc_length(brand_for_number(number));
     if len > max {
-        return Validation::INVALID;
+        return Validation::Invalid;
     }
-    Validation::new(ValidationState::Valid, len == max)
+    Validation::valid(len == max)
 }
 
 /// `CardNumberFormat`: digit group sizes for the number field.

@@ -175,6 +175,18 @@ impl Session {
         }
     }
 
+    /// The statistics request could not be sent: the story's insights stand
+    /// at `Failed`, so its panel draws the error with Retry (never a
+    /// "Loading" nothing will answer).
+    pub fn story_statistics_not_sent(&mut self, chat_id: i64, story_id: i32, message: String) {
+        self.stories.insights = Some(StoryInsightsState {
+            chat_id,
+            story_id,
+            statistics: StoryStatsFetch::Failed(message),
+            ..Default::default()
+        });
+    }
+
     pub fn clear_story_insights(&mut self) {
         self.stories.insights = None;
     }

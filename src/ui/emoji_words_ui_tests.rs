@@ -244,11 +244,11 @@ fn escape_closes_the_colon_strip_before_a_hovered_word(cx: &mut TestAppContext) 
     app.update(vcx, |app, _| app.hover_highlight(0));
     vcx.simulate_input(":heart");
     frame(vcx);
-    let open = app.read_with(vcx, |app, _| app.composer_ui.suggest.active.is_some());
+    let open = app.read_with(vcx, |app, _| app.composer_ui.suggest.is_showing());
     assert!(open, "the `:` strip is showing");
     vcx.simulate_keystrokes("escape");
     frame(vcx);
-    let open = app.read_with(vcx, |app, _| app.composer_ui.suggest.active.is_some());
+    let open = app.read_with(vcx, |app, _| app.composer_ui.suggest.is_showing());
     assert!(!open);
     assert!(lit(&app, vcx).contains(&"pizza".to_string()));
 }
@@ -474,4 +474,19 @@ fn a_word_bar_closed_by_the_composer_does_not_leave_the_grid_open(cx: &mut TestA
     app.read_with(vcx, |app, _| {
         assert!(!app.composer_ui.suggest.bar.expanded, "turned off");
     });
+}
+
+/// Sending the text closes a hovered word's bar.
+#[gpui_kit::test]
+fn sending_closes_a_hovered_words_bar(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.simulate_input("we got pizza and cake for the party later tonight with friends ");
+    frame(vcx);
+    app.update(vcx, |app, _| app.hover_highlight(0));
+    assert_eq!(hovered_word(&app, vcx).as_deref(), Some("pizza"));
+    vcx.update(|window, cx| window.press("enter", cx));
+    frame(vcx);
+    assert_eq!(text(&app, vcx), "");
+    assert_eq!(hovered_word(&app, vcx), None);
 }

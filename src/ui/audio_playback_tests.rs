@@ -135,7 +135,7 @@ fn a_slider_of_the_previous_track_does_not_seek_the_new_one(cx: &mut TestAppCont
             &song,
             cx,
         );
-        app.playback.seek_slider.clone().expect("its slider")
+        app.playback.seek_slider().cloned().expect("its slider")
     };
     let old = app.update(&mut vcx, |app, cx| begin(app, DEMO_SONG, cx));
     let current = app.update(&mut vcx, |app, cx| {
@@ -145,7 +145,7 @@ fn a_slider_of_the_previous_track_does_not_seek_the_new_one(cx: &mut TestAppCont
         cx.emit(SliderEvent::Change(SliderValue::Single(100.0)));
     });
     app.read_with(&vcx, |app, _| {
-        assert_eq!(app.playback.scrub, crate::ui::playback_state::Scrub::Idle);
+        assert_eq!(app.playback.scrub(), crate::ui::playback_state::Scrub::Idle);
     });
     old.update(&mut vcx, |_, cx| {
         cx.emit(SliderEvent::Release(SliderValue::Single(100.0)));
@@ -167,8 +167,39 @@ fn a_slider_of_the_previous_track_does_not_seek_the_new_one(cx: &mut TestAppCont
     });
     app.read_with(&vcx, |app, _| {
         assert_eq!(
-            app.playback.scrub,
+            app.playback.scrub(),
             crate::ui::playback_state::Scrub::Dragging(100.0)
         );
+    });
+}
+
+/// Stopping the voice note while a music file is the active track leaves
+/// the music file, its length and its seek slider alone.
+#[gpui_kit::test]
+fn stopping_the_voice_note_leaves_an_active_music_file(cx: &mut TestAppContext) {
+    use crate::ui::playback::PlaybackKind;
+    let (app, mut vcx) = open_app(cx);
+    let song = track("ui-stop-voice.wav", 4);
+    app.update(&mut vcx, |app, cx| {
+        app.begin_track_playback(
+            PlaybackKind::Audio,
+            DEMO_CHAT,
+            DEMO_SONG,
+            DEMO_SONG_SECS,
+            0.0,
+            &song,
+            cx,
+        );
+        app.stop_voice_playback();
+        assert_eq!(app.playback.active.audio(), Some(DEMO_SONG));
+        assert_eq!(app.playback.track_duration(), Some(DEMO_SONG_SECS));
+        assert!(app.playback.seek_slider().is_some());
+        assert_eq!(app.playback.active.chat(), Some(DEMO_CHAT));
+        // Stopping it ends everything that was about the track.
+        app.stop_audio_playback();
+        assert_eq!(app.playback.active.id(), None);
+        assert_eq!(app.playback.track_duration(), None);
+        assert!(app.playback.seek_slider().is_none());
+        assert_eq!(app.playback.active.chat(), None);
     });
 }

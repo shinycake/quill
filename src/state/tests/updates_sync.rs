@@ -258,7 +258,7 @@ fn age_verification_parameters_drive_the_prompt() {
         &mut session,
         r#"{"@type":"updateAgeVerificationParameters","parameters":{"@type":"ageVerificationParameters","min_age":18,"verification_bot_username":"@VerifyAgeBot","country":"GB"}}"#,
     );
-    let params = session.sync.age_verification.clone().unwrap();
+    let params = session.sync.age_verification.clone().unwrap().params;
     assert_eq!(
         age_verification_about(&params),
         "To view this content you need to confirm you are 18 or older."
@@ -272,4 +272,35 @@ fn age_verification_parameters_drive_the_prompt() {
         r#"{"@type":"updateAgeVerificationParameters"}"#,
     );
     assert!(session.sync.age_verification.is_none());
+}
+
+#[test]
+fn the_age_check_ends_with_the_request() {
+    let (mut session, _sink) = session();
+    let ask = r#"{"@type":"updateAgeVerificationParameters","parameters":{"@type":"ageVerificationParameters","min_age":18,"verification_bot_username":"@VerifyAgeBot","country":"GB"}}"#;
+    apply(&mut session, ask);
+    assert!(!session.sync.age_check_started());
+    session.sync.start_age_check();
+    apply(&mut session, ask);
+    assert!(
+        session.sync.age_check_started(),
+        "a repeat keeps the progress"
+    );
+    apply(
+        &mut session,
+        r#"{"@type":"updateAgeVerificationParameters"}"#,
+    );
+    assert!(!session.sync.age_check_started());
+    apply(&mut session, ask);
+    assert!(
+        !session.sync.age_check_started(),
+        "a new request starts the check over"
+    );
+    // A start made for one request does not count for a different one.
+    session.sync.start_age_check();
+    apply(
+        &mut session,
+        r#"{"@type":"updateAgeVerificationParameters","parameters":{"@type":"ageVerificationParameters","min_age":18,"verification_bot_username":"@VerifyAgeBot","country":"AU"}}"#,
+    );
+    assert!(!session.sync.age_check_started());
 }

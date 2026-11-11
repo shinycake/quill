@@ -712,6 +712,9 @@ fn a_failed_burst_request_is_not_asked_again_by_the_call_updates_of_the_same_sto
         h.driver.session.stories.live_bursts,
         crate::state::LiveBursts::Failed
     );
+    // Not asked again by the next ingest, only by the next Join.
+    h.ingest(&LIVE_CALL.replace("JOINED", "true"));
+    assert_eq!(h.sent("getCustomEmojiReactionAnimations"), 1);
     rejoin(&mut h);
     rejoin(&mut h);
     assert_eq!(h.sent("getCustomEmojiReactionAnimations"), 1);
@@ -722,6 +725,21 @@ fn a_failed_burst_request_is_not_asked_again_by_the_call_updates_of_the_same_sto
         h.driver.session.stories.live_bursts,
         crate::state::LiveBursts::Unasked
     );
+}
+
+#[test]
+fn a_refused_burst_send_is_asked_with_the_other_extras_already_begun() {
+    let mut h = watching();
+    h.recorder.refuse(Some("getCustomEmojiReactionAnimations"));
+    joined_answer(&mut h);
+    assert_eq!(
+        h.driver.session.stories.live_bursts,
+        crate::state::LiveBursts::Failed
+    );
+    assert_eq!(h.sent("getLiveStoryTopDonors"), 1);
+    h.recorder.refuse(None);
+    rejoin(&mut h);
+    assert_eq!(h.sent("getCustomEmojiReactionAnimations"), 1);
 }
 
 /// Stars tapped on a live story commit from the poll, for an account in

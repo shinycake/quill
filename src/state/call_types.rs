@@ -57,6 +57,9 @@ pub struct ActiveCall {
     /// The connection quality, 0 to 4 bars (tdesktop `Calls::SignalBars`),
     /// from the engine; `None` until it reports.
     pub signal_bars: Option<u8>,
+    /// Why your microphone, level tap or shared screen stopped, for the
+    /// call window. It lives and dies with the call.
+    pub media_note: Option<String>,
 }
 
 /// What `callStateReady` brought, and when.
@@ -268,17 +271,20 @@ impl ActiveCall {
         is_outgoing: bool,
         is_video: bool,
         state: CallState,
-        ready: Option<ReadyParams>,
     ) -> Self {
+        let ready = match &state {
+            CallState::Ready(params) => Some(CallReady {
+                params: Some(params.clone()),
+                since: Instant::now(),
+            }),
+            _ => None,
+        };
         Self {
             id,
             user_id,
             is_outgoing,
             is_video,
-            ready: matches!(state, CallState::Ready).then(|| CallReady {
-                params: ready,
-                since: Instant::now(),
-            }),
+            ready,
             state,
             started_at: Instant::now(),
             transport: CallTransport::default(),
@@ -295,6 +301,7 @@ impl ActiveCall {
             remote_audio_muted: false,
             remote_battery_low: false,
             signal_bars: None,
+            media_note: None,
         }
     }
 
@@ -416,10 +423,6 @@ pub struct ActiveGroupCall {
     /// Screen-share presentation: the `startGroupCallScreenSharing`
     /// handshake, then the connected presentation.
     pub screen_share: GroupScreenShare,
-    /// Your shared window is hidden, so the share is paused (the driver
-    /// sent `toggleGroupCallScreenSharingIsPaused`). Your own tile shows
-    /// the paused state at once, before the participant update.
-    pub screen_share_paused: bool,
     /// The last screen share's failure (its offer, start, connect or
     /// stop). Kept apart from `transport_error`: a failed share leaves
     /// the call itself working.
@@ -688,7 +691,6 @@ impl ActiveGroupCall {
             verification: None,
             transport: GroupTransport::NoTransport,
             screen_share: GroupScreenShare::Off,
-            screen_share_paused: false,
             screen_share_error: None,
             share_links: Default::default(),
             is_rtmp_stream: false,

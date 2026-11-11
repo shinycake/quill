@@ -23,7 +23,6 @@ src/ui/sticker_player/display.rs DISPLAYS | keyed by window scope
 src/ui/emoji_effect.rs ANCHORS,ACTIVE | keyed by chat and message; a chat shows in one window
 src/ui/emoji_effect.rs NEXT_HEAD | an id counter
 src/ui/communities/requests.rs NEXT | an id counter: undo ids are unique across windows
-src/ui/custom_emoji_card.rs NEXT | an id counter: tap ids are unique across windows
 src/ui/widgets_state.rs LAST_QUERY | an id counter: widget query tokens unique across account switches
 src/ui/vanish.rs PAINTED | keyed by chat and message; a chat shows in one window
 src/ui/pull_next_ui.rs SLIDE | names its chat; a chat shows in one window
@@ -95,5 +94,3 @@ src/ui/text_reveal.rs CURRENT | set and restored around one text block's build
 src/ui/bot_stream.rs PINNED | the stream demo's recording clock (demo-capture only)
 src/ui/dialogs/poll.rs NEXT | a counter that only has to give each option slot a number no other slot has
 src/ui/notifications/linux_dbus.rs NOTIFIER | the process's one D-Bus session connection, not a window's
-src/ui/dialogs/contacts.rs NEXT | the import-contacts box and read counter: it only hands out unique tokens, and every window may share it
-src/ui/viewer_parts.rs TOKENS | a counter that tells one photo turn's decode from the next; a token only has to differ

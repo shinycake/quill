@@ -57,7 +57,7 @@ impl Session {
             self.note_premium_limit(err, pending);
         }
         self.record_group_info_edit_error(err, pending);
-        self.note_community_full_info_failed(pending);
+        self.note_community_full_info_failed(err, pending);
         self.apply_group_type_error(err, pending);
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::CanTransferOwnership) => {
@@ -337,19 +337,15 @@ impl Session {
                 ));
             }
             Some(RequestPurpose::GetRevokedChatInviteLinks) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && !matches!(
-                        self.groups.revoked_invite_links.get(&chat_id.0),
-                        Some(InviteLinkFetch::Loaded(_))
-                    )
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && let Some(slot) = self.groups.revoked_invite_links.get_mut(&chat_id.0)
+                    && *slot == InviteLinkFetch::Loading(pending.id)
                 {
-                    self.groups.revoked_invite_links.insert(
-                        chat_id.0,
-                        InviteLinkFetch::Failed(call_request_error_line(
-                            err,
-                            "Could not load revoked links",
-                        )),
-                    );
+                    *slot = InviteLinkFetch::Failed(call_request_error_line(
+                        err,
+                        "Could not load revoked links",
+                    ));
                 }
             }
             Some(RequestPurpose::GetChatInviteLinkCounts) => {
@@ -519,16 +515,12 @@ impl Session {
                 filter,
                 ..
             })) => {
-                // A failed page of the list shown can be asked for again.
+                // A failed page of the list shown is asked for again at the next scroll.
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
-                    && self.groups.take_member_more((chat_id.0, filter), pending)
                 {
                     self.groups
-                        .member_asks
-                        .entry((chat_id.0, filter))
-                        .or_default()
-                        .more = MoreMembers::Failed;
+                        .settle_member_more((chat_id.0, filter), pending, false);
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers { filter })) => {
@@ -563,19 +555,34 @@ impl Session {
                 if let Some(chat_id) = pending
                     .filter(|pending| self.take_event_log_wait(pending))
                     .and_then(|p| p.chat_id)
-                    && (from_event_id == 0
+                {
+                    if from_event_id == 0
                         || !matches!(
                             self.groups.event_log_fetch(chat_id.0),
                             Some(ChatEventLogFetch::Loaded(_))
-                        ))
+                        )
+                    {
+                        self.groups.set_event_log_fetch(
+                            chat_id.0,
+                            ChatEventLogFetch::Failed(call_request_error_line(
+                                err,
+                                "Could not load recent actions",
+                            )),
+                        );
+                    } else {
+                        // An older page: the loaded log stays, with Retry.
+                        self.fail_older_events(
+                            chat_id.0,
+                            call_request_error_line(err, "Could not load earlier actions"),
+                        );
+                    }
+                }
+            }
+            Some(RequestPurpose::Groups(GroupsPurpose::GetDirectMessagesMember { user_id })) => {
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
                 {
-                    self.groups.set_event_log_fetch(
-                        chat_id.0,
-                        ChatEventLogFetch::Failed(call_request_error_line(
-                            err,
-                            "Could not load recent actions",
-                        )),
-                    );
+                    self.fail_direct_member(chat_id, user_id, pending.id);
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::GetAdminRights { user_id })) => {
@@ -606,19 +613,20 @@ impl Session {
                 ));
         }
         // A failed slots read or `boostChat` returns the boost box to its
-        // counters with the reason (tdesktop shows the error as a toast).
+        // counters with the reason (tdesktop shows the error as a toast),
+        // when it is the request the box works on.
         if matches!(
             pending.map(|p| p.purpose),
             Some(RequestPurpose::GetBoostSlotsForBoost | RequestPurpose::BoostChat)
         ) && let Some(chat_id) = pending.and_then(|p| p.chat_id)
-            && let Some(state) = self
-                .groups
-                .boost_box
-                .as_mut()
-                .filter(|state| state.chat_id == chat_id.0)
+            && let Some(state) = self.groups.boost_box.as_mut().filter(|state| {
+                state.chat_id == chat_id.0 && pending.is_some_and(|p| state.waits_for(p.id))
+            })
         {
-            state.phase = crate::boost_box::BoostPhase::Main;
-            state.note = Some(call_request_error_line(err, "Could not boost"));
+            state.phase = crate::boost_box::BoostPhase::main_with(call_request_error_line(
+                err,
+                "Could not boost",
+            ));
         }
     }
 }

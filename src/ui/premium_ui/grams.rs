@@ -153,6 +153,8 @@ impl QuillApp {
             // box-host: GramsWithdraw shows only once a withdrawal is set, which start_grams_withdraw names
             grams.open = true;
         }
+        // A reopened list asks its first look again, whatever length it had.
+        self.payments.grams_asked.reset();
         self.open_box(DialogKind::Grams);
         cx.notify();
     }

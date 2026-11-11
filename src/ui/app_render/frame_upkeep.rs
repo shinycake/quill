@@ -43,10 +43,6 @@ impl QuillApp {
         // main-only: they are pages of the session's info panel, which only
         // the main window's right column draws (chat windows have none).
         self.earn_frame_upkeep(window, cx);
-        // main-only: the composer button's blink follows the main window's
-        // field; the box, the shortcut, the style notices and their emoji
-        // are their window's (`ai_compose_window_upkeep`).
-        self.ai_compose_frame_upkeep(cx);
         // main-only: stories open in the main window.
         self.resolve_pending_story_open(window, cx);
         // main-only: mini apps open over the main window.

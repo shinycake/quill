@@ -182,10 +182,13 @@ impl QuillApp {
 
     /// The Retry of a list that failed to load.
     fn retry_language_packs(&mut self, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            live.driver.session.settings.language.packs.clear_error();
+        // The request begins the stage itself (Failed -> Loading); a send
+        // that fails lands in Failed again, drawn with this Retry.
+        if let Some(live) = self.live.as_mut()
+            && live.driver.session.settings.language.packs.can_ask()
+        {
+            let _ = live.driver.request_language_packs();
         }
-        self.ask_language_packs();
         cx.notify();
     }
 

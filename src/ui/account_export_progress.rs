@@ -102,6 +102,12 @@ impl QuillApp {
                     &[("failed_chats", &summary.failed_chats.to_string())],
                 ));
             }
+            if summary.partial_chats > 0 {
+                notes.push(tr_with(
+                    keys::Q_OPS_CHATS_STOPPED_EARLY,
+                    &[("partial_chats", &summary.partial_chats.to_string())],
+                ));
+            }
             if summary.contacts_partial {
                 notes.push(tr(keys::Q_OPS_SAVED_PHONE_CONTACTS_WERENT_AVAILABLE).into());
             }

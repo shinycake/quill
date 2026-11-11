@@ -548,13 +548,12 @@ impl QuillApp {
     /// ringing / connected clock fresh and the ringtones looping. Mirrors
     /// the Phase A1 slow-mode tick (at most one task; exits when unwanted).
     pub(super) fn ensure_call_tick(&mut self, cx: &mut Context<Self>) {
-        if !self.call_tick_wanted() || self.calls.tick == CallTick::Running {
+        if !self.call_tick_wanted() || self.calls.tick.is_running() {
             return;
         }
-        self.calls.tick = CallTick::Running;
         // window-scope: the clock redraws every window's conversation (`notify_conversations`).
         // screen-scope: the call tick reads the current screen and the background accounts' rings on every beat, and must keep running across a switch.
-        cx.spawn(async move |this, cx| {
+        let tick = cx.spawn(async move |this, cx| {
             loop {
                 // Frames wake their own pictures (`call_video`).
                 cx.background_executor().timer(Duration::from_secs(1)).await;
@@ -579,8 +578,8 @@ impl QuillApp {
             let _ = this.update(cx, |this, _| {
                 this.calls.tick = CallTick::Idle;
             });
-        })
-        .detach();
+        });
+        self.calls.tick = CallTick::Running { _task: tick };
     }
 
     /// Phase C2e: the local camera actually contributes a feed — the
@@ -720,6 +719,7 @@ impl QuillApp {
                     remote_audio_muted: false,
                     remote_battery_low: false,
                     signal_bars: None,
+                    media_note: None,
                 });
             }
             self.set_note(StatusNote::silent(tr(

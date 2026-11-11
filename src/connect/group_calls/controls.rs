@@ -53,7 +53,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             if let Some(call) = self.session.calls.active_group_call.as_mut() {
                 call.screen_share.stop();
-                call.screen_share_paused = false;
             }
             return Ok(extra);
         }

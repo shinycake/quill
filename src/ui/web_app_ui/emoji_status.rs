@@ -45,6 +45,14 @@ enum AccessStage {
 }
 
 impl EmojiStatusFlow {
+    /// A suggested emoji is being looked up: nothing pokes when the lookup
+    /// lands, so the poll looks again on a short tick.
+    pub(super) fn is_active(&self) -> bool {
+        self.set
+            .as_ref()
+            .is_some_and(|request| matches!(request.stage, SetStage::Resolving { .. }))
+    }
+
     #[cfg(test)]
     #[cfg(all(feature = "demo-capture", unix))]
     fn set_is_idle(&self) -> bool {

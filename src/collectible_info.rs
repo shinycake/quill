@@ -63,6 +63,19 @@ pub fn parse_collectible_info(value: &Value) -> CollectibleInfo {
     }
 }
 
+/// The tapped item, before any request exists for it. The sender turns it
+/// into a [`CollectibleLookup`] under its own request, so a lookup with no
+/// request to answer it cannot be stored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LookupSpec {
+    pub kind: CollectibleKind,
+    /// The username without "@", or the phone number as "+digits".
+    pub entity: String,
+    pub owner_name: String,
+    pub owner_chat: Option<ChatId>,
+    pub copy_text: String,
+}
+
 /// The tapped item and the progress of its lookup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CollectibleLookup {
@@ -82,10 +95,6 @@ pub struct CollectibleLookup {
 /// takes the earlier one's result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LookupStage {
-    /// Built, not sent yet. `request_collectible_info` replaces it with
-    /// `Loading` before the lookup is stored, and drops the lookup when the
-    /// send fails.
-    Unsent,
     /// `getCollectibleItemInfo` is out under this request.
     Loading(RequestId),
     Ready(CollectibleInfo),
@@ -93,7 +102,7 @@ pub enum LookupStage {
     Failed(String),
 }
 
-impl CollectibleLookup {
+impl LookupSpec {
     pub fn new(
         entity: &str,
         owner_name: &str,
@@ -106,10 +115,24 @@ impl CollectibleLookup {
             owner_name: owner_name.to_string(),
             owner_chat,
             copy_text,
-            stage: LookupStage::Unsent,
         }
     }
 
+    /// The lookup of this item at `stage` (`Loading` under the request the
+    /// sender made for it).
+    pub fn into_lookup(self, stage: LookupStage) -> CollectibleLookup {
+        CollectibleLookup {
+            kind: self.kind,
+            entity: self.entity,
+            owner_name: self.owner_name,
+            owner_chat: self.owner_chat,
+            copy_text: self.copy_text,
+            stage,
+        }
+    }
+}
+
+impl CollectibleLookup {
     pub fn info(&self) -> Option<&CollectibleInfo> {
         match &self.stage {
             LookupStage::Ready(info) => Some(info),
@@ -125,7 +148,7 @@ impl CollectibleLookup {
     }
 
     pub fn is_loading(&self) -> bool {
-        matches!(self.stage, LookupStage::Unsent | LookupStage::Loading(_))
+        matches!(self.stage, LookupStage::Loading(_))
     }
 
     /// The answer of `request`: taken only while that request is the one

@@ -85,7 +85,6 @@ fn open_window(
         popups: Default::default(),
         popup_seq: 0,
         write_access: crate::ui::web_app_ui::launch_flow::WriteAccess::Idle,
-        custom_calls: Default::default(),
         privacy_policy_url: None,
         in_attachment_menu: false,
         emoji: Default::default(),

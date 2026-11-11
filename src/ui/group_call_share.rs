@@ -126,15 +126,11 @@ impl QuillApp {
             None => self.demo_session.is_some(),
         };
         if asked {
-            let call = self
-                .session()
-                .and_then(|s| s.calls.active_group_call.as_ref())
-                .map(|call| call.id);
-            self.group_call_boxes.call_box = CallBox::Share {
-                call,
+            // A call that is gone has no links to share: nothing opens.
+            self.open_call_box(CallBox::Share {
                 speaker: true,
                 copied: false,
-            };
+            });
         } else {
             self.set_note(StatusNote::error(tr(
                 keys::Q_AV_COULDNT_GET_THE_INVITE_LINK,
@@ -144,14 +140,14 @@ impl QuillApp {
     }
 
     pub(super) fn close_group_call_share_links(&mut self, cx: &mut Context<Self>) {
-        self.group_call_boxes.close_call_box();
+        self.close_call_box();
         cx.notify();
     }
 
     fn group_call_share_link(&self) -> Option<String> {
         let call = self.session()?.calls.active_group_call.as_ref()?;
         call.share_links
-            .current(self.group_call_boxes.share_speaker())
+            .current(self.share_speaker())
             .map(str::to_string)
     }
 
@@ -159,7 +155,7 @@ impl QuillApp {
     pub(super) fn copy_group_call_share_link(&mut self, cx: &mut Context<Self>) {
         if let Some(link) = self.group_call_share_link() {
             cx.write_to_clipboard(ClipboardItem::new_string(link));
-            self.group_call_boxes.mark_share_copied();
+            self.mark_share_copied();
         }
         cx.notify();
     }
@@ -182,7 +178,7 @@ impl QuillApp {
                 DeepLinkAction::ShareDraft { text },
             )),
         });
-        self.group_call_boxes.close_call_box();
+        self.close_call_box();
         self.raise_main_window_later(cx);
         cx.notify();
     }
@@ -193,14 +189,11 @@ impl QuillApp {
         call: &ActiveGroupCall,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if !self.group_call_boxes.share_open()
-            || !call.share_links.ready()
-            || self.account.passcode.is_locked()
-        {
+        if !self.share_open() || !call.share_links.ready() || self.account.passcode.is_locked() {
             return None;
         }
         let links = &call.share_links;
-        let speaker_checked = self.group_call_boxes.share_speaker();
+        let speaker_checked = self.share_speaker();
         let link = links
             .current(speaker_checked)
             .unwrap_or_default()
@@ -291,12 +284,12 @@ impl QuillApp {
                         .label(tr(keys::GROUP_CALL_SHARE_SPEAKER))
                         .checked(speaker_checked)
                         .on_click(cx.listener(|this, &on, _, cx| {
-                            this.group_call_boxes.set_share_speaker(on);
+                            this.set_share_speaker(on);
                             cx.notify();
                         })),
                 )
             })
-            .when(self.group_call_boxes.share_copied(), |card| {
+            .when(self.share_copied(), |card| {
                 card.child(
                     div()
                         .id("group-call-share-copied")

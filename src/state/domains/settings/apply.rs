@@ -122,10 +122,8 @@ impl Session {
                     ..
                 })) = pending.map(|p| p.purpose)
                 {
-                    if let Some(join_as) = self.calls.create_join_as.as_mut()
-                        && Some(join_as.request) == extra
-                    {
-                        join_as.answer = Some(Ok(senders));
+                    if let Some(join_as) = self.calls.create_join_as.as_mut() {
+                        join_as.accept(extra, senders);
                     }
                 } else if let Some(RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
                     offset,
@@ -142,7 +140,7 @@ impl Session {
                 }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::UploadSavedNotificationSound)
                 {
-                    self.finish_tone_upload(sounds);
+                    self.finish_tone_upload(pending.map(|p| p.id), sounds);
                 // Parity slice: `getSavedNotificationSounds` answer.
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetSavedNotificationSounds)
@@ -193,15 +191,16 @@ impl Session {
                 // per-network settings (matched by `@extra`), and only
                 // when nothing was loaded from disk. The driver persists
                 // the seed on the next ingest (`data_storage_dirty`).
-                if pending.map(|p| p.purpose)
-                    == Some(RequestPurpose::GetAutoDownloadSettingsPresets)
-                    && !self.settings.data_storage.seeded.is_seeded()
+                if self
+                    .settings
+                    .data_storage
+                    .seeded
+                    .waits_for(pending.map(|p| p.id))
                 {
                     self.settings
                         .data_storage
                         .seed_from_presets(low, medium, high);
                     self.settings.data_storage_dirty = true;
-                    self.settings.auto_download_presets.succeed(());
                 }
             }
             SettingsPayload::UpdateUnconfirmedSession { session, count } => {
@@ -243,8 +242,13 @@ impl Session {
                 }
             }
             SettingsPayload::DeviceLoginResult { result } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::ConfirmDeviceLogin) {
-                    self.settings.device_login = DeviceLogin::Done(result);
+                if let Some(asked) =
+                    pending.filter(|p| p.purpose == RequestPurpose::ConfirmDeviceLogin)
+                {
+                    self.settings.device_login = DeviceLogin::Done {
+                        request: asked.id,
+                        result,
+                    };
                     if result != crate::auth::DeviceLoginResult::Failed {
                         self.settings.sessions_op.changed(pending.map(|p| p.id));
                         self.settings.sessions.clear_error();
@@ -322,7 +326,7 @@ impl Session {
                     self.settings.connected_websites.succeed(websites);
                 }
             }
-            SettingsPayload::ScopeNotificationSettings { settings, .. } => {
+            SettingsPayload::ScopeNotificationSettings { settings } => {
                 // Parity slice: `getScopeNotificationSettings` answer; the
                 // scope is correlated via the pending request (the response
                 // carries no scope field).

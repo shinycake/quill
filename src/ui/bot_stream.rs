@@ -12,7 +12,7 @@ use super::app::QuillApp;
 use super::text_reveal::{RevealGeometry, RevealPaint, RevealSink, TextReveal};
 use appear::Appearing;
 use gpui_kit::*;
-use quill::ids::{ChatId, MessageId};
+use quill::ids::{ChatId, ChatMessage, MessageId};
 use quill::lang::{keys, tr};
 use quill::state::{HistoryMessage, unix_ms_now};
 use quill::telegram::envelope::{
@@ -31,7 +31,10 @@ pub(super) enum StreamReveal {
     Streaming(Reveal),
     /// The draft's final message took its place and is finishing the
     /// reveal (`HistoryStreamedDrafts::adoptIncoming`).
-    Finishing { message: MessageId, reveal: Reveal },
+    Finishing {
+        message: ChatMessage,
+        reveal: Reveal,
+    },
 }
 
 /// One streamed reply appearing.
@@ -119,7 +122,7 @@ impl StreamReveal {
             ) if reveal.chat == chat && common_prefix(&reveal.text, text) > 0 => {
                 reveal.take_text(text, true);
                 Self::Finishing {
-                    message: id,
+                    message: ChatMessage::new(chat, id),
                     reveal,
                 }
             }
@@ -135,7 +138,9 @@ impl StreamReveal {
             {
                 Some(reveal)
             }
-            (Self::Finishing { message, reveal }, Row::Message { id, .. }) if *message == id => {
+            (Self::Finishing { message, reveal }, Row::Message { chat, id, .. })
+                if *message == ChatMessage::new(chat, id) =>
+            {
                 Some(reveal)
             }
             _ => None,
@@ -357,7 +362,7 @@ impl QuillApp {
 #[cfg(test)]
 mod tests {
     use super::{Row, StreamReveal, common_prefix, stream_rich};
-    use quill::ids::{ChatId, MessageId};
+    use quill::ids::{ChatId, ChatMessage, MessageId};
     use quill::rich::QuoteRichText;
     use quill::telegram::envelope::RichMessageContent;
 
@@ -412,8 +417,32 @@ mod tests {
         assert!(matches!(
             &state,
             StreamReveal::Finishing { message, reveal }
-                if *message == MessageId(310) && reveal.text == "Hello there"
+                if *message == ChatMessage::new(CHAT, MessageId(310))
+                    && reveal.text == "Hello there"
         ));
+        assert!(
+            state
+                .drawing(message(310, "Hello there", true, false))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn a_finishing_reveal_is_not_drawn_for_the_same_id_in_another_chat() {
+        let mut state = StreamReveal::Idle.follow(draft(7, "Hello")).follow(message(
+            310,
+            "Hello there",
+            true,
+            false,
+        ));
+        let other_chat = Row::Message {
+            chat: ChatId(CHAT.0 + 1),
+            id: MessageId(310),
+            text: "Hello there",
+            newest: true,
+            draft_live: false,
+        };
+        assert!(state.drawing(other_chat).is_none());
         assert!(
             state
                 .drawing(message(310, "Hello there", true, false))

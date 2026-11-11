@@ -246,6 +246,16 @@ fn direct_messages_group_is_clamped_to_the_server_limit() {
     );
     f.1.set_direct_messages_group(ChatId(-1001), true, 5000)
         .unwrap();
+    // A second press while the first save is out sends nothing and answers
+    // with the save that is out.
+    let out = f.1.set_direct_messages_group(ChatId(-1001), false, 40);
+    assert_eq!(requests(&f, "setChatDirectMessagesGroup").len(), 1);
+    let first = requests(&f, "setChatDirectMessagesGroup").remove(0);
+    assert_eq!(out.ok().map(|id| id.0.to_string()), Some(extra_of(&first)));
+    ingest(
+        &mut f,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra_of(&first)),
+    );
     f.1.set_direct_messages_group(ChatId(-1001), false, 40)
         .unwrap();
     let sent = requests(&f, "setChatDirectMessagesGroup");

@@ -9,7 +9,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::{
-    InlineKeyboardButtonType, InlineQueryResultSummary, InlineQueryResultsButton, ReplyMarkup,
+    InlineKeyboardButtonType, InlineQueryResultSummary, InlineQueryResultsButton,
+    InlineQueryResultsButtonKind, InlineResultKind, ReplyMarkup,
 };
 
 /// Width of the results panel in pixels (tdesktop: `emojiPanWidth` 345).
@@ -78,17 +79,17 @@ pub struct MosaicItem {
 /// Classifies a result. `None` skips it, like tdesktop does for a layout
 /// that reports zero width (a GIF or photo without a size).
 pub fn mosaic_item(result: usize, summary: &InlineQueryResultSummary) -> Option<MosaicItem> {
-    let (kind, max_width, height) = match summary.kind.as_str() {
-        "photo" | "animation" => {
+    let (kind, max_width, height) = match summary.kind {
+        InlineResultKind::Photo | InlineResultKind::Animation => {
             let media = summary.media?;
-            let animation = summary.kind == "animation";
+            let animation = summary.kind == InlineResultKind::Animation;
             if animation && (media.width <= 0 || media.height <= 0) {
                 return None;
             }
             return Some(media_item(result, media.width, media.height));
         }
-        "sticker" => (CellKind::Sticker, STICKER_SIZE, STICKER_SIZE),
-        "audio" | "voice_note" | "document" => {
+        InlineResultKind::Sticker => (CellKind::Sticker, STICKER_SIZE, STICKER_SIZE),
+        InlineResultKind::Audio | InlineResultKind::VoiceNote | InlineResultKind::Document => {
             (CellKind::File, list_width(), FILE_THUMB + LIST_ROW_EXTRA)
         }
         _ => (CellKind::Rich, list_width(), LIST_THUMB + LIST_ROW_EXTRA),
@@ -332,13 +333,13 @@ pub fn button_action(button: &InlineQueryResultsButton) -> Option<ButtonAction> 
     if button.text.trim().is_empty() {
         return None;
     }
-    match button.kind.as_str() {
-        "start_bot" => Some(ButtonAction::StartBot {
-            parameter: button.parameter.clone(),
+    match &button.kind {
+        InlineQueryResultsButtonKind::StartBot { parameter } => Some(ButtonAction::StartBot {
+            parameter: parameter.clone(),
         }),
-        "web_app" if !button.url.is_empty() => Some(ButtonAction::WebApp {
-            url: button.url.clone(),
-        }),
+        InlineQueryResultsButtonKind::WebApp { url } if !url.is_empty() => {
+            Some(ButtonAction::WebApp { url: url.clone() })
+        }
         _ => None,
     }
 }
@@ -547,9 +548,13 @@ mod tests {
         let button =
             |text: &str, kind: &str, parameter: &str, url: &str| InlineQueryResultsButton {
                 text: text.into(),
-                kind: kind.into(),
-                parameter: parameter.into(),
-                url: url.into(),
+                kind: match kind {
+                    "start_bot" => InlineQueryResultsButtonKind::StartBot {
+                        parameter: parameter.into(),
+                    },
+                    "web_app" => InlineQueryResultsButtonKind::WebApp { url: url.into() },
+                    _ => InlineQueryResultsButtonKind::Unknown,
+                },
             };
         assert_eq!(
             button_action(&button("Connect", "start_bot", "auth", "")),

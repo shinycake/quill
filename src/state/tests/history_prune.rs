@@ -1002,3 +1002,26 @@ fn a_failed_translation_is_asked_again_by_the_pump_a_bounded_number_of_times() {
         );
     }
 }
+
+/// r2-18 06-004: choosing "Hide ads" while a report is out leaves the
+/// report flow alone, so its answer still lands.
+#[test]
+fn hiding_ads_does_not_drop_a_report_in_flight() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    switch(&mut session, 1);
+    sponsored_answer(&mut session, &seq, &sink, 1);
+    assert!(session.begin_sponsored_report(ChatId(1), 9001).is_some());
+    let report = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(ChatId(1)));
+    session.note_sponsored_report_request(report);
+    assert!(session.begin_sponsored_hide(ChatId(1), 9001).is_some());
+    assert_eq!(
+        session
+            .messages
+            .sponsored_report
+            .target()
+            .and_then(|target| target.request),
+        Some(report),
+        "the report still waits for its answer"
+    );
+}

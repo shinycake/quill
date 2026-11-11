@@ -158,8 +158,25 @@ impl<S: JsonSender> ConnectDriver<S> {
             changed |= self
                 .session
                 .sweep_stale_requests(now, PENDING_REQUEST_TTL, |id| waiting.contains(&id));
+            self.forget_flood_attempts_of_gone_requests();
         }
         changed
+    }
+
+    /// A re-sent read that was swept or taken without any answer leaves its
+    /// attempt count and retained JSON behind: drop those of requests the
+    /// registry no longer holds.
+    fn forget_flood_attempts_of_gone_requests(&mut self) {
+        let gone: Vec<u64> = self
+            .flood_attempts
+            .keys()
+            .copied()
+            .filter(|id| self.session.requests.get(RequestId(*id)).is_none())
+            .collect();
+        for id in gone {
+            self.flood_attempts.remove(&id);
+            self.sender.forget_retained(RequestId(id));
+        }
     }
 
     /// How long until the earliest time-driven work here and in the session
@@ -186,6 +203,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Your own level's next read while the tap is open.
         let level = self.call_audio_deadline(now);
         let microphone = self.call_capture.until_reopen(now);
+        let tap_retry = self.call_audio_reopen_deadline(now);
+        let screen_wait = self.call_screen.wait_deadline(now);
         let paid = self
             .session
             .payments
@@ -207,7 +226,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             .and_then(|secs| u64::try_from(secs).ok())
             .map(Duration::from_secs);
         [
-            retry, emoji_hold, bot, levels, hint, level, microphone, paid, live_stars, ring,
+            retry,
+            emoji_hold,
+            bot,
+            levels,
+            hint,
+            level,
+            microphone,
+            tap_retry,
+            screen_wait,
+            paid,
+            live_stars,
+            ring,
         ]
         .into_iter()
         .flatten()

@@ -36,29 +36,32 @@ fn resolve_inline_bot_sends_search_public_chat_with_generation() {
         )
         .unwrap();
 
-    let gen1 = driver.session.bots.inline_bot_resolve_seq + 1;
-    driver
+    let first = driver
         .resolve_inline_bot("gif")
         .expect("resolve")
         .expect("request id");
     assert_eq!(
-        driver.session.bots.inline_bot_resolve,
-        Some(InlineBotResolve::Resolving {
+        driver.session.bots.inline_bot("gif"),
+        Some(&InlineBotResolve::Resolving {
             username: "gif".into(),
-            generation: gen1,
+            request: first,
         })
     );
-    driver
+    let second = driver
         .resolve_inline_bot("gifs")
         .expect("resolve")
         .expect("request id");
-    let gen2 = gen1 + 1;
     assert_eq!(
-        driver.session.bots.inline_bot_resolve,
-        Some(InlineBotResolve::Resolving {
+        driver.session.bots.inline_bot("gifs"),
+        Some(&InlineBotResolve::Resolving {
             username: "gifs".into(),
-            generation: gen2,
+            request: second,
         })
+    );
+    assert_eq!(
+        driver.session.bots.inline_bot_asked(first),
+        Some("gif"),
+        "the first lookup still waits for its own answer"
     );
     let sends: Vec<Value> = recorder
         .snapshot()

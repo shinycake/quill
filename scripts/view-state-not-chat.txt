@@ -21,7 +21,6 @@ ComposerUi.draft_load.Restoring.slot | the slot that asked for its draft to be r
 ComposerUi.slow_mode_tick | the running 1 s tick task and its chat; it exits by itself when the chat changes and a newer chat's tick drops it, so resetting it would start a second task
 
 ComposerUi.slow_mode_tick.Ticking.chat | names the chat of the running 1 s tick task, which owns it and exits by itself when the chat changes; the next gated frame replaces it
-MessageUi.swipe_reply_start | one press gesture, carries its chat; the release checks it
 HistoryUi.painted_ids | rebuilt by every paint of the history list
 HistoryUi.seen | carries its chat; read once at the next render
 HistoryUi.on_screen | rebuilt by every paint of the history list

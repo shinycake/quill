@@ -122,7 +122,7 @@ jobs:
         include:
           - { name: debian, image: "debian:stable-slim", setup: "apt-get update && apt-get install -y --no-install-recommends curl ca-certificates", libs: "apt-get install -y --no-install-recommends libgtk-3-0t64 libxkbcommon-x11-0 libvulkan1 libfontconfig1 libasound2t64" }
           - { name: fedora, image: "fedora:latest", setup: "dnf install -y --setopt=install_weak_deps=False curl gzip tar shadow-utils util-linux", libs: "dnf install -y --setopt=install_weak_deps=False gtk3 libxkbcommon-x11 vulkan-loader fontconfig alsa-lib" }
-          - { name: arch, image: "archlinux:latest", setup: "pacman -Sy --noconfirm curl", libs: "pacman -S --noconfirm gtk3 libxkbcommon-x11 vulkan-icd-loader fontconfig alsa-lib" }
+          - { name: arch, image: "archlinux:latest", setup: "pacman -Syu --noconfirm curl", libs: "pacman -S --noconfirm gtk3 libxkbcommon-x11 vulkan-icd-loader fontconfig alsa-lib" }
     container: ${{ matrix.image }}
     defaults:
       run:

@@ -7,7 +7,7 @@ use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::story_composer::StoryComposer;
-use quill::story_viewer::{StoryPlayback, StoryViewer};
+use quill::story_viewer::StoryPlayback;
 
 /// The facts the custom-emoji warm-up of the story viewer depends on.
 pub(super) type EmojiWarm = (Option<(quill::ids::ChatId, i32)>, Vec<i64>, usize, u32);
@@ -274,7 +274,7 @@ pub(crate) struct StoryUi {
     /// Stories strip tiles and sideways scroll (`quill::stories_strip`).
     pub(super) strip: super::stories_strip_ui::StoryStripState,
     /// Phase 9.1: fullscreen story viewer (active-story tray → overlay).
-    pub(super) viewer: StoryViewer,
+    pub(super) viewer: super::story_viewer::StoryOpen,
     /// Phase 9.6: playback clock + segmented progress bar for the viewer;
     /// `tick` is the at-most-one 100ms tick task.
     pub(super) playback: StoryPlayback,
@@ -481,7 +481,7 @@ impl StoryUi {
             muted: false,
             more_search: story_more_search,
             stealth_box: None,
-            viewer: StoryViewer::closed(),
+            viewer: super::story_viewer::StoryOpen::closed(),
             playback: StoryPlayback::default(),
             tick: StoryTick::Off,
             emoji_warm: None,

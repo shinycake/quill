@@ -137,6 +137,10 @@ pub(crate) struct HistoryUi {
     /// rows appended since are a newer page, not live messages.
     pub(super) had_newer: bool,
     /// What `history_rows` were last built from (`None`: not built yet).
+    /// Cleared only by [`HistoryUi::invalidate_rows`]. `ends`, `had_newer`,
+    /// the chrome marks and `media_signature` describe the rows that are
+    /// still there, which the next build is compared against (the splice
+    /// keeps the reader's anchor); they are not reset with the key.
     pub(super) rows_key: Option<super::conversation::HistoryRowsKey>,
     /// Generation of the rows' chrome (`HistoryRow::chrome_stamp`): rows
     /// stamped with an older one are derived again when drawn.
@@ -157,8 +161,10 @@ pub(crate) struct HistoryUi {
     pub(super) sponsored: super::sponsored_spots::SponsoredInHistory,
     /// `(jump serial, start)` of the running jump-highlight fade.
     pub(super) highlight_fade: Option<(u64, std::time::Instant)>,
-    /// B11: the reaction that just flew from the message (message, glyph, start).
-    pub(super) reaction_fly: Option<super::history_fx::ReactionFly>,
+    /// B11: the reaction that just flew from the message (message, glyph,
+    /// start). The first frame after the fly's run takes it out
+    /// (`reaction_fly_for`), so none outlives its animation.
+    pub(super) reaction_fly: std::cell::Cell<Option<super::history_fx::ReactionFly>>,
     /// Floating date pill state (shown while scrolling the history).
     pub(super) scroll_date: super::history_fx::ScrollDate,
     /// Rows painted this frame: `(row, bounds, starts its day)`.
@@ -262,6 +268,13 @@ impl HistoryUi {
         row.expect("the row is painted").1.center()
     }
 
+    /// The rows must be built again on the next render (a setting that
+    /// changes how they look, a resize): the one place that clears
+    /// `rows_key`.
+    pub(in crate::ui) fn invalidate_rows(&mut self) {
+        self.rows_key = None;
+    }
+
     pub(super) fn new(cx: &mut App) -> Self {
         Self {
             scroller: cx.new(|cx| MessageScrollerState::new(0, cx)),
@@ -288,7 +301,7 @@ impl HistoryUi {
             media_signature: (0, 0),
             sponsored: Default::default(),
             highlight_fade: None,
-            reaction_fly: None,
+            reaction_fly: Default::default(),
             scroll_date: Default::default(),
             scroll_probe: Default::default(),
             scroll_top_probe: Default::default(),

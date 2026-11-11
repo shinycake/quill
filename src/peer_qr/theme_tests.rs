@@ -348,7 +348,7 @@ fn picks_preview_and_save_once_the_panel_closes() {
         env(true),
     );
     assert_eq!(qr.served, Some(picked));
-    assert!(qr.save.out().is_none());
+    assert!(qr.saving().is_none());
     assert!(qr.apply(QrAction::Closing, env(true)).is_empty());
 }
 
@@ -394,7 +394,7 @@ fn a_pick_is_not_overwritten_by_a_later_served_theme() {
         }),
         env(true),
     );
-    assert_eq!(qr.color, SwatchKey::Backdrop(7));
+    assert_eq!(qr.color(), SwatchKey::Backdrop(7));
 }
 
 #[test]
@@ -410,7 +410,7 @@ fn a_gift_replaces_the_emoji_and_an_emoji_replaces_the_gift() {
         vec![QrEffect::LoadGifts { more: true }]
     );
     qr.apply(QrAction::PickGift(Box::new(gift(9, "r9"))), env(true));
-    assert!(qr.emoji.is_empty());
+    assert!(qr.emoji().is_empty());
     let appearance = qr.appearance(&[]);
     assert_eq!(appearance.gift, Some(9));
     assert_eq!(appearance.center, Rgb::hex(0x5A_8CF0));
@@ -425,8 +425,8 @@ fn a_gift_replaces_the_emoji_and_an_emoji_replaces_the_gift() {
     );
     qr.apply(QrAction::OpenPanel(QrPanel::Emoji), env(true));
     qr.apply(QrAction::ToggleEmoji("🐶".into()), env(true));
-    assert!(qr.gift.is_none());
-    assert_eq!(qr.color, SwatchKey::Default);
+    assert!(qr.gift().is_none());
+    assert_eq!(qr.color(), SwatchKey::Default);
 }
 
 #[test]
@@ -449,7 +449,7 @@ fn a_failed_save_is_toasted_and_the_pick_stays() {
             "Too many attempts.".into()
         ))]
     );
-    assert_eq!(qr.color, SwatchKey::Backdrop(3));
+    assert_eq!(qr.color(), SwatchKey::Backdrop(3));
     let silent = qr.apply(
         QrAction::SaveAnswer {
             ticket,

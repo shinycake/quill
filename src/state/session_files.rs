@@ -407,9 +407,8 @@ impl Session {
                 // A dice's roll and landing: their thumbnails are the
                 // stills shown until the animations decode.
                 MessageContent::Dice(dice) => {
-                    for file_id in [&dice.initial, &dice.landing]
-                        .into_iter()
-                        .flatten()
+                    for file_id in dice
+                        .stickers()
                         .flat_map(|stickers| stickers.layers())
                         .filter_map(|sticker| sticker.display_file_id())
                     {
@@ -484,8 +483,8 @@ impl Session {
             }
         }
         // The received-gifts dialog shows each gift's sticker.
-        if self.payments.hub.gifts_open {
-            for gift in &self.payments.hub.gifts {
+        if self.payments.hub.received.is_open() {
+            for gift in &self.payments.hub.received.rows {
                 if let Some(file_id) = gift
                     .gift
                     .sticker

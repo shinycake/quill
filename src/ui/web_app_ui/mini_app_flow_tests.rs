@@ -74,7 +74,6 @@ fn open_window(app: &mut QuillApp, cx: &mut gpui_kit::App) -> mpsc::Receiver<Hos
         popups: Default::default(),
         popup_seq: 0,
         write_access: crate::ui::web_app_ui::launch_flow::WriteAccess::Idle,
-        custom_calls: Default::default(),
         privacy_policy_url: None,
         in_attachment_menu: false,
         emoji: Default::default(),
@@ -247,17 +246,19 @@ fn a_paid_checkout_reports_paid_and_closes(cx: &mut TestAppContext) {
         // The checkout shows the watched invoice: a payment of another
         // invoice would not be reported here.
         let payments = &mut app.demo_session.as_mut().unwrap().payments;
-        payments.request = Some(quill::state::PaymentRequest {
-            invoice: quill::payment_invoice::InputInvoice::Name("abc".into()),
-        });
-        payments.checkout =
-            quill::state::CheckoutForm::Paid(quill::telegram::envelope::PaymentFormData {
+        let checkout = quill::state::Checkout::new(
+            quill::telegram::envelope::PaymentFormData {
                 id: 1,
                 form_type: quill::telegram::envelope::PaymentFormTypeData::Stars { star_count: 50 },
                 seller_bot_user_id: 900,
                 product_title: "Pack".into(),
                 product_description: String::new(),
-            });
+            },
+            quill::state::PaymentRequest {
+                invoice: quill::payment_invoice::InputInvoice::Name("abc".into()),
+            },
+        );
+        payments.checkout = quill::state::CheckoutForm::Paid(checkout);
         app.poll_invoice(cx);
         let (event, data) = reply(&received);
         assert_eq!(event, "invoice_closed");
@@ -279,10 +280,11 @@ fn an_account_switch_closes_the_mini_app_and_what_waits(cx: &mut TestAppContext)
             bot_id: BOT,
         };
         let awaited = Awaited {
+            request: quill::ids::RequestId(3),
             then: waiting,
             window: None,
         };
-        app.mini_apps.flow.add(quill::ids::RequestId(3), awaited);
+        app.mini_apps.flow.add(awaited);
         app.ensure_mini_app_poll(cx);
 
         app.switch_account(&quill::ids::AccountKey("other".into()), "", window, cx);

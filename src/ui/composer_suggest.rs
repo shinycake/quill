@@ -45,23 +45,74 @@ pub(super) struct SuggestItem {
     pub custom: Option<StickerItem>,
 }
 
-/// The popup currently offered for the text at the caret.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ActiveSuggest {
-    pub query: SuggestQuery,
-    pub items: Vec<SuggestItem>,
+/// The popup currently offered for the text at the caret, borrowed from
+/// the live stage.
+pub(super) struct ActiveSuggest<'a> {
+    pub query: &'a SuggestQuery,
+    pub items: &'a [SuggestItem],
+    /// The highlighted row; an exact-word strip starts with none, so
+    /// Enter still sends (tdesktop `consumesEnter`).
+    pub selected: Option<usize>,
+}
+
+/// What a live query's rows were built from: the keyword answers'
+/// generation and the installed emoji sets with contents.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct BuiltFrom {
+    generation: u64,
+    custom: usize,
+}
+
+/// The rows of a live query, when it has any, and the highlighted one.
+pub(super) struct Rows {
+    items: Vec<SuggestItem>,
+    selected: Option<usize>,
+}
+
+/// Where the query at the caret is. Each stage is left when the field no
+/// longer holds its query (a key, a send, a clear, a draft or chat switch,
+/// an edit starting: [`QuillApp::refresh_suggest_menu`] checks the field
+/// every frame), on Esc, and on blur. The rows and their highlight live in
+/// the `Live` stage, so they cannot outlive the query they were built for.
+#[derive(Default)]
+pub(super) enum SuggestStage {
+    /// No query at the caret.
+    #[default]
+    Idle,
+    /// A lone word waiting out [`SHOW_EXACT_DELAY`] (tdesktop
+    /// `kShowExactDelay`). Leaving the stage drops the timer with it.
+    Waiting {
+        query: SuggestQuery,
+        _timer: Task<()>,
+    },
+    /// The query's rows show once known.
+    Live {
+        query: SuggestQuery,
+        built: BuiltFrom,
+        rows: Option<Rows>,
+    },
+}
+
+impl SuggestStage {
+    pub(super) fn query(&self) -> Option<&SuggestQuery> {
+        match self {
+            Self::Idle => None,
+            Self::Waiting { query, .. } | Self::Live { query, .. } => Some(query),
+        }
+    }
+
+    fn live(&self) -> Option<&SuggestQuery> {
+        match self {
+            Self::Live { query, .. } => Some(query),
+            Self::Idle | Self::Waiting { .. } => None,
+        }
+    }
 }
 
 /// Popup state kept on [`QuillApp`].
 #[derive(Default)]
 pub(super) struct SuggestUi {
-    /// The query at the caret, shown or not (its emoji may still be on
-    /// the way, or a lone word may be waiting out [`SHOW_EXACT_DELAY`]).
-    pub query: Option<SuggestQuery>,
-    pub active: Option<ActiveSuggest>,
-    /// The highlighted row; an exact-word strip starts with none, so
-    /// Enter still sends (tdesktop `consumesEnter`).
-    pub selected: Option<usize>,
+    pub stage: SuggestStage,
     /// `(kind, trigger offset, query)` the user closed with Esc; stays
     /// closed until the query changes.
     pub dismissed: Option<(SuggestKind, usize, String)>,
@@ -69,14 +120,34 @@ pub(super) struct SuggestUi {
     /// stay closed until the text changes (tdesktop hides its autocomplete
     /// on Esc until the next field change).
     pub stickers_dismissed: Option<(Option<ChatId>, String)>,
-    /// The keyword answers' generation `active` was built from.
-    built_generation: u64,
-    /// The lone word whose delay ran out.
-    word_ready: Option<SuggestQuery>,
-    word_timer: Option<Task<()>>,
-    /// Installed emoji sets with contents when `active` was built.
-    built_custom: usize,
     pub bar: EmojiBarUi,
+}
+
+impl SuggestUi {
+    /// The rows showing now, with the query they are for.
+    pub(super) fn active(&self) -> Option<ActiveSuggest<'_>> {
+        match &self.stage {
+            SuggestStage::Live {
+                query,
+                rows: Some(rows),
+                ..
+            } => Some(ActiveSuggest {
+                query,
+                items: &rows.items,
+                selected: rows.selected,
+            }),
+            _ => None,
+        }
+    }
+
+    pub(super) fn is_showing(&self) -> bool {
+        self.active().is_some()
+    }
+
+    /// The highlighted row, if rows show.
+    pub(super) fn selected(&self) -> Option<usize> {
+        self.active().and_then(|active| active.selected)
+    }
 }
 
 /// The text the keyword packs are searched with, and whether only whole
@@ -203,51 +274,72 @@ pub(super) fn apply_suggestion(
 }
 
 impl QuillApp {
+    /// The query the field holds at the caret now, before Esc and
+    /// the typed-or-kept rule: none while the caret spans a selection, an
+    /// `@` mention is being typed or a message is being edited.
+    fn field_suggest_query(&self, cx: &App) -> Option<SuggestQuery> {
+        let input = self.composer.read(cx);
+        let range = input.selected_range();
+        if !range.is_empty() || self.chat_ui.is_editing() || self.mention_trigger(cx).is_some() {
+            return None;
+        }
+        detect(&input.value(), range.start, self.chat_prefs.suggest_emoji)
+    }
+
     /// Re-detect the trigger at the caret and refresh the rows. Runs on
     /// every composer input event (`typed`) and after programmatic edits,
     /// which only keep a popup already open (tdesktop shows suggestions
     /// for text changed by a key press).
     pub(super) fn sync_suggest_menu(&mut self, typed: bool, cx: &mut Context<Self>) {
-        let text = self.composer.read(cx).value();
-        let range = self.composer.read(cx).selected_range();
-        let mention = self.mention_trigger(cx).is_some();
         let ui = &self.composer_ui.suggest;
-        let query = (range.is_empty() && !mention && !self.chat_ui.is_editing())
-            .then(|| detect(&text, range.start, self.chat_prefs.suggest_emoji))
-            .flatten()
+        let query = self
+            .field_suggest_query(cx)
             .filter(|q| ui.dismissed.as_ref() != Some(&(q.kind, q.range.start, q.query.clone())))
-            .filter(|q| typed || ui.query.as_ref() == Some(q));
-        if self.composer_ui.suggest.query != query {
-            let shown = self.composer_ui.suggest.active.is_some();
-            let ui = &mut self.composer_ui.suggest;
-            ui.selected = None;
-            ui.word_timer = None;
-            if ui.word_ready.as_ref() != query.as_ref() {
-                ui.word_ready = None;
-            }
-            if let Some(q) = query.as_ref().filter(|q| q.kind == SuggestKind::EmojiWord) {
-                if shown {
-                    ui.word_ready = Some(q.clone());
-                } else {
+            .filter(|q| typed || ui.stage.query() == Some(q));
+        if self.composer_ui.suggest.stage.query() != query.as_ref() {
+            let shown = self.composer_ui.suggest.is_showing();
+            self.composer_ui.suggest.stage = match query {
+                None => SuggestStage::Idle,
+                // A word typed on over an open strip keeps it open.
+                Some(q) if q.kind == SuggestKind::EmojiWord && !shown => {
                     let waiting = q.clone();
                     let timer = self.spawn_scoped(cx, async move |this, cx| {
                         cx.background_executor().timer(SHOW_EXACT_DELAY).await;
-                        let _ = this.update(cx, |this, cx| {
-                            let ui = &mut this.composer_ui.suggest;
-                            if ui.query.as_ref() == Some(&waiting) {
-                                ui.word_ready = Some(waiting);
-                                this.ask_suggest_keywords();
-                                this.rebuild_suggest_menu(cx);
-                            }
-                        });
+                        let _ = this.update(cx, |this, cx| this.word_delay_ran_out(&waiting, cx));
                     });
-                    self.composer_ui.suggest.word_timer = Some(timer);
+                    SuggestStage::Waiting {
+                        query: q,
+                        _timer: timer,
+                    }
                 }
-            }
-            let ui = &mut self.composer_ui.suggest;
-            ui.query = query;
+                Some(q) => SuggestStage::Live {
+                    query: q,
+                    built: BuiltFrom::default(),
+                    rows: None,
+                },
+            };
             self.ask_suggest_keywords();
         }
+        self.rebuild_suggest_menu(cx);
+    }
+
+    /// The lone word's delay ran out: it shows if the field still holds
+    /// it (the timer goes with its stage, so a stale one never lands).
+    fn word_delay_ran_out(&mut self, waiting: &SuggestQuery, cx: &mut Context<Self>) {
+        let stage = &self.composer_ui.suggest.stage;
+        if !matches!(stage, SuggestStage::Waiting { query, .. } if query == waiting) {
+            return;
+        }
+        self.composer_ui.suggest.stage = if self.field_suggest_query(cx).as_ref() == Some(waiting) {
+            SuggestStage::Live {
+                query: waiting.clone(),
+                built: BuiltFrom::default(),
+                rows: None,
+            }
+        } else {
+            SuggestStage::Idle
+        };
+        self.ask_suggest_keywords();
         self.rebuild_suggest_menu(cx);
     }
 
@@ -255,13 +347,9 @@ impl QuillApp {
     /// are known or on the way. A lone word asks only once its delay ran
     /// out, so typing a short message does not search every prefix.
     fn ask_suggest_keywords(&mut self) {
-        let ui = &self.composer_ui.suggest;
-        let Some(query) = ui.query.as_ref() else {
+        let Some(query) = self.composer_ui.suggest.stage.live() else {
             return;
         };
-        if query.kind == SuggestKind::EmojiWord && ui.word_ready.as_ref() != Some(query) {
-            return;
-        }
         let Some((normalized, exact)) = keyword_query(query) else {
             return;
         };
@@ -273,14 +361,23 @@ impl QuillApp {
         }
     }
 
-    /// The keyword answers changed since the popup was built: rebuild it.
-    /// Called every frame; an integer compare while nothing is pending.
+    /// Called every frame. A query the field no longer holds goes (the
+    /// field changes without an input event on a send, a draft or chat
+    /// switch, an edit starting); a kept one whose keyword answers changed
+    /// since the popup was built is rebuilt. Nothing runs while idle.
     pub(super) fn refresh_suggest_menu(&mut self, cx: &mut Context<Self>) {
+        let Some(query) = self.composer_ui.suggest.stage.query() else {
+            return;
+        };
+        if self.field_suggest_query(cx).as_ref() != Some(query) {
+            self.sync_suggest_menu(false, cx);
+            return;
+        }
         let generation = self.keyword_generation();
         let ui = &self.composer_ui.suggest;
-        if ui.query.is_some()
-            && (generation != ui.built_generation
-                || (ui.active.is_some() && self.custom_sets_loaded() != ui.built_custom))
+        if let SuggestStage::Live { built, rows, .. } = &ui.stage
+            && (generation != built.generation
+                || (rows.is_some() && self.custom_sets_loaded() != built.custom))
         {
             // A slot freed: a query the in-flight cap turned away goes now.
             self.ask_suggest_keywords();
@@ -293,7 +390,8 @@ impl QuillApp {
             .map_or(0, |s| s.stickers.emoji.keyword_lookups.generation)
     }
 
-    /// `active` from the query at the caret and what is known about it.
+    /// The live stage's rows, from the query at the caret and what is
+    /// known about it.
     fn rebuild_suggest_menu(&mut self, cx: &mut Context<Self>) {
         let generation = self.keyword_generation();
         // The account's one list, shared by every window's composer.
@@ -304,60 +402,60 @@ impl QuillApp {
             .as_ref()
             .and_then(|account| self.screen.recent_hashtags.of(account))
             .unwrap_or(&empty);
-        let ui = &self.composer_ui.suggest;
-        let active = ui
-            .query
-            .as_ref()
-            .filter(|q| q.kind != SuggestKind::EmojiWord || ui.word_ready.as_ref() == Some(q))
-            .and_then(|query| {
-                let session = self.session();
-                let keywords = keyword_query(query).and_then(|(normalized, _)| {
-                    session.and_then(|s| s.stickers.emoji.keyword_lookups.answer(&normalized))
-                });
-                let recent = session
-                    .map(|s| s.settings.media_prefs.recent_emoji.as_slice())
-                    .unwrap_or_default();
-                let items = suggest_items(query, hashtags, keywords, recent);
-                (!items.is_empty()).then(|| ActiveSuggest {
-                    query: query.clone(),
-                    items,
-                })
-            });
-        let active = active.map(|mut active| {
-            if active.query.kind != SuggestKind::Hashtag {
-                active.items = self.with_custom_emoji(std::mem::take(&mut active.items));
+        let Some(query) = self.composer_ui.suggest.stage.live() else {
+            return;
+        };
+        let session = self.session();
+        let keywords = keyword_query(query).and_then(|(normalized, _)| {
+            session.and_then(|s| s.stickers.emoji.keyword_lookups.answer(&normalized))
+        });
+        let recent = session
+            .map(|s| s.settings.media_prefs.recent_emoji.as_slice())
+            .unwrap_or_default();
+        let items = suggest_items(query, hashtags, keywords, recent);
+        let query = query.clone();
+        let items = (!items.is_empty()).then(|| {
+            if query.kind == SuggestKind::Hashtag {
+                items
+            } else {
+                self.with_custom_emoji(items)
             }
-            active
         });
         let built_custom = self.custom_sets_loaded();
         let ui = &mut self.composer_ui.suggest;
-        ui.built_generation = generation;
-        ui.built_custom = built_custom;
+        let SuggestStage::Live { built, rows, .. } = &mut ui.stage else {
+            return;
+        };
+        *built = BuiltFrom {
+            generation,
+            custom: built_custom,
+        };
         // `:` and `#` queries highlight their first row
         // (`selectFirstResult`); a lone word starts with none.
-        let first = active
-            .as_ref()
-            .is_some_and(|a| a.query.kind != SuggestKind::EmojiWord);
+        let first = items.is_some() && query.kind != SuggestKind::EmojiWord;
         // A new list for the same query keeps the highlighted emoji, not
         // its index, so Enter inserts what the user picked.
-        let kept = ui
-            .selected
-            .and_then(|at| ui.active.as_ref()?.items.get(at))
-            .and_then(|old| active.as_ref()?.items.iter().position(|i| i == old));
-        ui.selected = match (&active, kept) {
+        let kept = rows
+            .as_ref()
+            .and_then(|rows| rows.items.get(rows.selected?))
+            .and_then(|old| items.as_ref()?.iter().position(|item| item == old));
+        let selected = match (&items, kept) {
             (None, _) => None,
             (Some(_), Some(at)) => Some(at),
             (Some(_), None) => first.then_some(0),
         };
-        if ui.active != active {
-            // A new query starts at the strip's start; more emoji for the
-            // same one (an answer, a set loaded) keep the view.
-            if ui.active.as_ref().map(|a| &a.query) != active.as_ref().map(|a| &a.query) {
-                ui.bar.reset();
-            }
-            ui.active = active;
-            cx.notify();
+        let same = rows.as_ref().map(|rows| (&rows.items, rows.selected))
+            == items.as_ref().map(|items| (items, selected));
+        if same {
+            return;
         }
+        // Rows that appear or go start the strip at its start; more emoji
+        // for the same query (an answer, a set loaded) keep the view.
+        if rows.is_none() || items.is_none() {
+            ui.bar.reset();
+        }
+        *rows = items.map(|items| Rows { items, selected });
+        cx.notify();
     }
 
     /// "Replace emoji automatically": after a keystroke, swap a finished
@@ -423,25 +521,22 @@ impl QuillApp {
     pub(super) fn close_suggest_menu(&mut self, remember: bool, cx: &mut Context<Self>) -> bool {
         // Esc over a highlighted word's strip closes it, unless the `:`
         // strip is open: that one is what the user is typing into.
-        if remember && self.composer_ui.suggest.active.is_none() && self.dismiss_emoji_word(cx) {
+        if remember && !self.composer_ui.suggest.is_showing() && self.dismiss_emoji_word(cx) {
             return true;
         }
         let ui = &mut self.composer_ui.suggest;
-        ui.word_timer = None;
-        let Some(active) = ui.active.take() else {
-            ui.query = None;
+        let SuggestStage::Live {
+            query,
+            rows: Some(_),
+            ..
+        } = std::mem::take(&mut ui.stage)
+        else {
             return false;
         };
         ui.bar.reset();
         if remember {
-            ui.dismissed = Some((
-                active.query.kind,
-                active.query.range.start,
-                active.query.query,
-            ));
+            ui.dismissed = Some((query.kind, query.range.start, query.query));
         }
-        ui.query = None;
-        ui.selected = None;
         cx.notify();
         true
     }
@@ -455,32 +550,37 @@ impl QuillApp {
         horizontal: bool,
         cx: &mut Context<Self>,
     ) -> bool {
-        let ui = &mut self.composer_ui.suggest;
-        let Some(active) = ui.active.as_ref() else {
+        let SuggestUi { stage, bar, .. } = &mut self.composer_ui.suggest;
+        let SuggestStage::Live {
+            query,
+            rows: Some(rows),
+            ..
+        } = stage
+        else {
             return false;
         };
-        let rows = active.items.len();
-        let next = if active.query.kind == SuggestKind::Hashtag {
+        let count = rows.items.len();
+        let next = if query.kind == SuggestKind::Hashtag {
             if horizontal {
                 return false;
             }
-            let at = ui.selected.unwrap_or(0) as i64 + i64::from(delta);
-            Some(at.rem_euclid(rows as i64) as usize)
+            let at = rows.selected.unwrap_or(0) as i64 + i64::from(delta);
+            Some(at.rem_euclid(count as i64) as usize)
         } else {
             // The open grid: Up and Down move a row.
-            let delta = if ui.bar.expanded && !horizontal {
-                delta * ui.bar.grid_columns() as i32
+            let delta = if bar.expanded && !horizontal {
+                delta * bar.grid_columns() as i32
             } else {
                 delta
             };
-            match step_selection(ui.selected, delta, rows) {
+            match step_selection(rows.selected, delta, count) {
                 Some(next) => next,
                 None => return false,
             }
         };
-        ui.selected = next;
+        rows.selected = next;
         if let Some(at) = next {
-            ui.bar.handle().scroll_to_item(at);
+            bar.handle().scroll_to_item(at);
         }
         cx.notify();
         true
@@ -494,11 +594,11 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(active) = self.composer_ui.suggest.active.as_ref() else {
+        let Some(active) = self.composer_ui.suggest.active() else {
             return false;
         };
-        let index = match self.composer_ui.suggest.selected {
-            // `active` is never built without items.
+        let index = match active.selected {
+            // Rows are never kept without items.
             Some(at) => at.min(active.items.len().saturating_sub(1)),
             None if tab => 0,
             None => return false,
@@ -514,32 +614,34 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let ui = &mut self.composer_ui.suggest;
-        ui.query = None;
-        ui.word_timer = None;
-        let Some(active) = ui.active.take() else {
+        let SuggestStage::Live {
+            query,
+            rows: Some(rows),
+            ..
+        } = std::mem::take(&mut ui.stage)
+        else {
             return;
         };
-        ui.selected = None;
         ui.bar.reset();
-        let Some(item) = active.items.get(index) else {
+        let Some(item) = rows.items.get(index) else {
             return;
         };
         let text = self.composer.read(cx).value().to_string();
-        let Some((new_text, caret)) = apply_suggestion(&text, &active.query, item) else {
+        let Some((new_text, caret)) = apply_suggestion(&text, &query, item) else {
             cx.notify();
             return;
         };
         // A range edit keeps the formatting around it (codex:composer-input).
         let insert = new_text
-            .get(active.query.range.start..caret)
+            .get(query.range.start..caret)
             .unwrap_or_default()
             .to_string();
         match item.custom.as_ref().and_then(|s| s.custom_emoji_id) {
             Some(id) => {
                 let content = self.custom_emoji_content(&item.insert, id);
-                self.replace_composer_content(active.query.range.clone(), content, window, cx);
+                self.replace_composer_content(query.range.clone(), content, window, cx);
             }
-            None => self.replace_composer_text(active.query.range.clone(), &insert, window, cx),
+            None => self.replace_composer_text(query.range.clone(), &insert, window, cx),
         }
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
@@ -551,7 +653,7 @@ impl QuillApp {
     /// The popup above the composer: a list of hashtags, or a strip of
     /// emoji tiles with the highlighted one's name.
     pub(super) fn suggest_menu_dropdown(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.composer_ui.suggest.active.as_ref()?;
+        self.composer_ui.suggest.active()?;
         self.suggest_menu_dropdown_body(cx)
     }
 
@@ -561,8 +663,8 @@ impl QuillApp {
     /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn suggest_menu_dropdown_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let active = self.composer_ui.suggest.active.as_ref()?;
-        let selected = self.composer_ui.suggest.selected;
+        let active = self.composer_ui.suggest.active()?;
+        let selected = active.selected;
         let panel = div()
             .id("suggest-menu")
             .role(gpui_kit::Role::ListBox)

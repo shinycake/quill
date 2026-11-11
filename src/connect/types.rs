@@ -300,7 +300,6 @@ pub struct ConnectDriver<S: JsonSender> {
     /// Poll-batch state (`begin_batch` / `end_batch`).
     pub(crate) batch: super::core::batch::BatchState,
     pub(crate) call_engine: Option<Box<dyn CallEngine>>,
-    pub(crate) close_held_until: Option<std::time::Instant>,
     pub(crate) signaling_outbox: SignalingOutbox,
     pub(crate) transport_outbox: TransportOutbox,
     /// Phase C2e: engine-emitted peer camera states (worker thread ->
@@ -362,9 +361,9 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) call_sound_watch: Option<(i32, crate::calls::stream_audio::watch::PlaybackWatch)>,
     pub(crate) credentials: TelegramCredentials,
     pub(crate) paths: AccountPaths,
-    /// The Telegram user this client was last checked against the account
-    /// folder's owner (`account_data::claim`).
-    pub(crate) claimed_owner: Option<i64>,
+    /// Where this client is with the account folder's owner
+    /// (`account_data::claim`).
+    pub(crate) owner_claim: OwnerClaim,
     pub(crate) database_key: DatabaseKey,
     /// Last `chatActionTyping` we sent (Unigram `_lastTypingTime`).
     pub(crate) outgoing_typing: Option<OutgoingTyping>,
@@ -382,7 +381,8 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) custom_emoji_hold: Option<std::time::Instant>,
     /// R5: when the stale-request sweep last scanned the registry.
     pub(crate) last_request_sweep: Option<std::time::Instant>,
-    pub(crate) system_proxy_asked: Option<std::time::Instant>,
+    /// Whether this client follows the OS proxy (`system_proxy`).
+    pub(crate) system_proxy: crate::system_proxy::Follow,
     pub(crate) network_seen: Option<super::ticks::Reach>,
     /// Where this client's web proxy carriers run (`connect::proxy_carrier`);
     /// `None` refuses them.
@@ -458,4 +458,18 @@ pub enum DraftSaveOutcome {
 pub(crate) enum ToggleSessionKind {
     SecretChats,
     Calls,
+}
+
+/// The account folder's owner file, from this client's side: one value, so
+/// a failed save is retried on the next ingest.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum OwnerClaim {
+    /// Nobody checked yet (the user id is not known).
+    #[default]
+    Unclaimed,
+    /// The folder's owner is this user and the file says so.
+    Saved(i64),
+    /// The folder was checked for this user but the owner file could not be
+    /// written: only the write is retried.
+    Unsaved(i64),
 }

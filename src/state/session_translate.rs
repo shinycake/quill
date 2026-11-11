@@ -242,6 +242,22 @@ impl Session {
             .get(&(chat_id.0, message_id.0, to_language.to_string()))
     }
 
+    /// The chat is opened again: translations of its messages that failed
+    /// are asked for again (an answer that failed earlier, offline or on
+    /// a refused send, is not final). True when any was dropped.
+    pub fn retry_failed_translations(&mut self, chat_id: ChatId) -> bool {
+        let translate = &mut self.messages.translate;
+        let before = translate.messages.len();
+        translate.messages.retain(|(chat, _, _), translation| {
+            *chat != chat_id.0 || !matches!(translation, Translation::Failed { .. })
+        });
+        let dropped = translate.messages.len() != before;
+        if dropped {
+            translate.revision += 1;
+        }
+        dropped
+    }
+
     /// The translation of a selection job.
     pub fn text_translation(&self, job: u64) -> Option<&Translation> {
         self.messages.translate.texts.get(&job)

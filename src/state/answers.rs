@@ -39,6 +39,12 @@ impl<T> Answers<T> {
         self.items.clear();
     }
 
+    /// Every answer, taken (nothing open claims them: the caller reports
+    /// the failures).
+    pub fn take_all(&mut self) -> Vec<(RequestId, Result<T, String>)> {
+        std::mem::take(&mut self.items)
+    }
+
     /// The answers to `waiting`, taken. Every other answer is dropped:
     /// nothing open waits for it.
     pub fn take_for(&mut self, waiting: &[RequestId]) -> Vec<(RequestId, Result<T, String>)> {

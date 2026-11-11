@@ -12,6 +12,13 @@ use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::folder_archive::ArchiveError;
 use quill::lang::{keys, tr};
 
+fn building(slot: &crate::ui::composer_sends::SendSlot) -> ArchiveJob {
+    ArchiveJob::Building {
+        slot: slot.clone(),
+        _task: gpui_kit::Task::ready(()),
+    }
+}
+
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, Entity<QuillShell>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
@@ -40,10 +47,10 @@ fn an_archive_for_another_chat_leaves_neither_its_error_nor_its_note(cx: &mut Te
     app.update_in(vcx, |app, _, cx| {
         let mut slot = app.send_slot().expect("a chat is open");
         slot.draft.chat_id += 1;
-        app.composer_ui.archive = ArchiveJob::Building(slot.clone());
+        app.composer_ui.archive = building(&slot);
         app.set_note(StatusNote::silent(tr(keys::Q_MISC_PREPARING_THE_ARCHIVE)));
         app.archive_ready(slot, Err(ArchiveError::TooLarge), cx);
-        assert_eq!(app.composer_ui.archive, ArchiveJob::Idle);
+        assert!(matches!(app.composer_ui.archive, ArchiveJob::Idle));
         assert!(app.connection.note().is_empty(), "no error for this chat");
     });
 }
@@ -56,9 +63,41 @@ fn an_archive_failing_in_the_open_chat_says_so(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     app.update_in(vcx, |app, _, cx| {
         let slot = app.send_slot().expect("a chat is open");
-        app.composer_ui.archive = ArchiveJob::Building(slot.clone());
+        app.composer_ui.archive = building(&slot);
         app.archive_ready(slot, Err(ArchiveError::TooLarge), cx);
-        assert_eq!(app.composer_ui.archive, ArchiveJob::Idle);
+        assert!(matches!(app.composer_ui.archive, ArchiveJob::Idle));
         assert!(!app.connection.note().is_empty());
+    });
+}
+
+/// 09-067: an archive of another chat still being zipped does not swallow
+/// the drop in the open chat: it is replaced, and says so with its note.
+#[gpui_kit::test]
+fn a_folder_dropped_in_another_chat_replaces_the_archive_of_the_first(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.run_until_parked();
+    let folder = quill::scratch::process_dir("quill-archive-drop").join("folder");
+    let _ = std::fs::create_dir_all(&folder);
+    let _ = std::fs::write(folder.join("a.txt"), "a");
+    app.update_in(vcx, |app, _, cx| {
+        let mut other = app.send_slot().expect("a chat is open");
+        other.draft.chat_id += 1;
+        app.composer_ui.archive = building(&other);
+        app.apply_zone_drop(
+            quill::drop_modes::DropAction::Archive,
+            std::slice::from_ref(&folder),
+            &[],
+            cx,
+        );
+        let open = app.send_slot().expect("a chat is open");
+        assert!(
+            matches!(&app.composer_ui.archive, ArchiveJob::Building { slot, .. } if *slot == open),
+            "the zip is for the open chat now"
+        );
+        assert_eq!(
+            app.connection.note().text(),
+            tr(keys::Q_MISC_PREPARING_THE_ARCHIVE)
+        );
     });
 }

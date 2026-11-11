@@ -20,7 +20,7 @@ use gpui_kit::component::tag::Tag;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::agent::activity::{self, Action};
+use quill::agent::activity::{self, Action, Outcome};
 use quill::ids::AccountKey;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
@@ -71,8 +71,7 @@ impl QuillApp {
     /// messages still exist, or the reaction is still the user's. Only for
     /// the open account: Undo acts through its session.
     fn agent_undo_for(&self, action: &Action) -> Option<Undo> {
-        if !action.ok || action.declined || action.undone || !self.agent_settings_on_open_account()
-        {
+        if action.outcome != Outcome::Done || !self.agent_settings_on_open_account() {
             return None;
         }
         let session = self.session()?;
@@ -325,7 +324,7 @@ impl QuillApp {
         let muted = cx.theme().muted_foreground;
         let danger = cx.theme().danger;
         let stamp = chat_list_stamp(&civil_local(action.time), now);
-        let what = if action.declined {
+        let what = if action.outcome == Outcome::Declined {
             tr(keys::Q_AGENT_ACTIVITY_DECLINED).to_string()
         } else {
             action.summary.clone()
@@ -374,7 +373,7 @@ impl QuillApp {
                                     .text_color(muted)
                                     .child(action.chat_title.clone()),
                             )
-                            .when(!action.ok && !action.declined, |this| {
+                            .when(action.outcome == Outcome::Failed, |this| {
                                 this.child(
                                     div()
                                         .id(SharedString::from(format!(
@@ -404,7 +403,7 @@ impl QuillApp {
                             .child(div().flex_none().child(stamp)),
                     ),
             )
-            .when(action.undone, |this| {
+            .when(action.outcome == Outcome::Undone, |this| {
                 this.child(
                     div().flex_none().child(
                         Tag::secondary()

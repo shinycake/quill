@@ -65,7 +65,10 @@ impl Session {
                     // B14: `getCloseFriends` answer.
                     self.stories.close_friends = CloseFriendsList::Ready(user_ids);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetRecentInlineBots) {
-                    self.bots.reply_keyboards.recent_inline_bots = Some(user_ids);
+                    self.bots
+                        .reply_keyboards
+                        .recent_inline_bots
+                        .answered(pending.map(|p| p.id), user_ids);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBotSimilarBots)
                     && let Some(pending) = pending
                     && let Some(bot_user_id) = pending.user_id
@@ -74,9 +77,9 @@ impl Session {
                     // objects arrive via `updateUser`; ids alone drive the
                     // list (Telegram X `SharedChatsController` similarly
                     // resolves users from its cache).
-                    self.bots
-                        .similar_bots
-                        .insert(bot_user_id, SimilarBotsFetch::Loaded(user_ids));
+                    if let Some(fetch) = self.bots.similar_bots.get_mut(&bot_user_id) {
+                        fetch.answered(Some(pending.id), user_ids);
+                    }
                 }
             }
             // Phase B1: secret chat lifecycle (schema 1.8.67, lines
@@ -128,6 +131,7 @@ impl Session {
                     self.accept_message_author(chat_id, message_id, user_id);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetMe) {
                     self.my_user_id = Some(user_id);
+                    self.users_state.my_id_probe.answered(extra, ());
                 } else if matches!(
                     pending.map(|p| p.purpose),
                     Some(RequestPurpose::Bots(BotsPurpose::CreateBot { .. }))

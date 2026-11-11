@@ -583,7 +583,7 @@ fn focus(vcx: &mut VisualTestContext, window: AnyWindowHandle) {
 fn gate(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
     app.update(vcx, |app, cx| {
         let active = app.frame.window_active.get();
-        let global = cx.try_global::<AppGate>().map(|gate| gate.active);
+        let global = cx.try_global::<AppGate>().map(|gate| gate.active.get());
         assert_eq!(global, Some(active), "the clips' gate is the app's");
         active
     })
@@ -721,7 +721,7 @@ fn the_gate_goes_off_as_the_active_chat_window_closes_over_a_minimized_main_wind
     // platform would draw it after the update, so the gate is read in it.
     app.update(vcx, |app, cx| {
         app.chat_window_closed(CHAT, None, cx);
-        let global = cx.try_global::<AppGate>().map(|gate| gate.active);
+        let global = cx.try_global::<AppGate>().map(|gate| gate.active.get());
         assert!(
             !app.frame.window_active.get() && global == Some(false),
             "the gate is off once the window closes: {global:?}"

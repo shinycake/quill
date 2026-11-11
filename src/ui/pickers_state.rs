@@ -23,14 +23,11 @@ pub(crate) struct PickerUi {
     /// The reaction selector's own search (cleared on each open).
     pub(super) reaction_search_input: Entity<TextareaState>,
     /// The GIFs tab's search: typing searches once it pauses
-    /// (`gif_search_typed`); `gif_keystroke` counts the edits so only the
-    /// last one searches.
+    /// (`gif_search_typed`).
     pub(super) gif_search_input: Entity<InputState>,
-    pub(super) gif_keystroke: u64,
-    /// What this window's GIF tab shows (`gifs_ui`).
-    pub(super) gif_wanted: super::gifs_ui::GifWanted,
-    /// What this window last asked the session for (`gif_tab_upkeep`).
-    pub(super) gif_asked: super::gifs_ui::GifAsked,
+    /// What this window's GIF tab shows, whether it asked the session for
+    /// that, and the typing pause (`gifs_ui`).
+    pub(super) gif_tab: super::gifs_ui::GifTab,
     pub(super) gif_scroll: ScrollHandle,
     pub(super) sticker_search_input: Entity<TextareaState>,
 }
@@ -94,9 +91,7 @@ impl PickerUi {
             emoji_search_input,
             reaction_search_input,
             gif_search_input,
-            gif_keystroke: 0,
-            gif_wanted: Default::default(),
-            gif_asked: Default::default(),
+            gif_tab: Default::default(),
             gif_scroll: ScrollHandle::new(),
             sticker_search_input,
         }

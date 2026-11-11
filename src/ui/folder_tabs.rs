@@ -308,7 +308,7 @@ impl QuillApp {
     fn select_folder_slot(&mut self, kind: FolderSlotKind, cx: &mut Context<Self>) {
         match kind {
             FolderSlotKind::Unread => {
-                self.set_chat_list_view(ChatListFilter::Unread, self.folders.tab);
+                self.set_chat_list_view(ChatListFilter::Unread, self.chat_list.view.folder());
                 cx.notify();
             }
             FolderSlotKind::Archived => {
@@ -338,7 +338,11 @@ impl QuillApp {
     /// (docs/decisions/main-thread-stack.md).
     pub(super) fn folder_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let slots = self.folder_slots();
-        let selected = selected_slot(&slots, self.chat_list.filter, self.folders.tab);
+        let selected = selected_slot(
+            &slots,
+            self.chat_list.view.filter(),
+            self.chat_list.view.folder(),
+        );
         let scroll = self.folders.tabs_scroll.clone();
         let key = RevealKey {
             selected,
@@ -436,7 +440,11 @@ impl QuillApp {
             .appearance
             .folder_tabs_mode
             .resolved(self.appearance.folder_tabs_view);
-        let selected = selected_slot(&slots, self.chat_list.filter, self.folders.tab);
+        let selected = selected_slot(
+            &slots,
+            self.chat_list.view.filter(),
+            self.chat_list.view.folder(),
+        );
         let width = self.folder_rail_width();
         let premium = self.session().is_some_and(|s| s.my_is_premium());
         let weak = cx.weak_entity();

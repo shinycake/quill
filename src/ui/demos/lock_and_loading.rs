@@ -25,8 +25,7 @@ impl QuillApp {
                 12,
                 true,
                 false,
-                CallState::Ready,
-                None,
+                CallState::Ready(Default::default()),
             ));
             session.calls.second_call = SecondCall::Prompt {
                 call_id: 6,

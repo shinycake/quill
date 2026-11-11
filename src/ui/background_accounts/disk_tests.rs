@@ -148,7 +148,7 @@ fn a_connection_prepared_before_the_disk_filled_opens_nothing(cx: &mut TestAppCo
     });
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
-        assert!(app.auth_demo.stage == ConnectStage::Connecting);
+        assert!(matches!(app.auth_demo.stage, ConnectStage::Idle));
         assert!(app.live.is_none());
         assert!(app.disk.is_full());
     });
@@ -180,6 +180,73 @@ fn an_account_that_could_not_start_is_started_again_by_the_next_pass(cx: &mut Te
         assert!(
             app.background.client(&account(1)).is_none(),
             "the dead entry no longer blocks it"
+        );
+    });
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A failed client is started again by the poll once its delay is over,
+/// without a connect, switch or unlock.
+#[gpui_kit::test]
+fn a_failed_background_start_waits_for_its_delay_then_is_due(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    vcx.run_until_parked();
+    let root = temp_root();
+    isolate(&app, &mut vcx, &root, &[account(1)]);
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.credentials = Some(credentials());
+        app.finish_background_start(account(1), Err(ConnectBlocker::StoreError), cx);
+        let now = std::time::Instant::now();
+        let wait = app
+            .background
+            .next_restart(now)
+            .expect("a failed client waits for a restart");
+        assert!(wait > std::time::Duration::ZERO && wait <= std::time::Duration::from_secs(5));
+        assert_eq!(
+            app.background
+                .next_restart(now + std::time::Duration::from_secs(5)),
+            Some(std::time::Duration::ZERO),
+            "due once the delay is over"
+        );
+    });
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A client that is due while nothing may start it (here its old client is
+/// still closing) does not stay due: the poll looks again after the first
+/// delay instead of running the start pass every 40 ms.
+#[gpui_kit::test]
+fn a_due_client_that_cannot_start_waits_again_instead_of_staying_due(cx: &mut TestAppContext) {
+    use std::time::{Duration, Instant};
+    let (app, mut vcx) = new_app(cx);
+    vcx.run_until_parked();
+    let root = temp_root();
+    isolate(&app, &mut vcx, &root, &[account(1)]);
+    let fake = Fake::default();
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.credentials = Some(credentials());
+        app.finish_background_start(account(1), Err(ConnectBlocker::StoreError), cx);
+        app.background.closing.push(account(1), fake.boxed(), false);
+        let due = Instant::now() + Duration::from_secs(5);
+        assert_eq!(app.background.next_restart(due), Some(Duration::ZERO));
+        app.restart_due(due, cx);
+        assert!(
+            app.background
+                .client(&account(1))
+                .is_some_and(|client| client.retryable()),
+            "nothing starts while its database is still closing"
+        );
+        assert!(!app.background.prepare.wanted(&account(1)));
+        assert_eq!(
+            app.background.next_restart(due),
+            Some(Duration::from_secs(5)),
+            "it waits again"
+        );
+        app.restart_due(due + Duration::from_secs(1), cx);
+        assert_eq!(
+            app.background.next_restart(due + Duration::from_secs(1)),
+            Some(Duration::from_secs(4)),
+            "a pass before the delay is over changes nothing"
         );
     });
     let _ = std::fs::remove_dir_all(&root);

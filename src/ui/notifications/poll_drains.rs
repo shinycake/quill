@@ -262,10 +262,10 @@ impl QuillApp {
         if let Some((info, request)) = login_url {
             // Its consent box and its link belong to the window showing
             // the button's chat, not to the main window this poll runs in.
-            let asker = request
-                .as_ref()
-                .and_then(|request| self.window_showing(request.chat_id));
-            self.as_asked_by(asker, |this| this.present_login_url_info(info, request, cx));
+            let asker = self.window_showing(request.chat_id);
+            self.as_asked_by(asker, |this| {
+                this.present_login_url_info(info, Some(request), cx)
+            });
             progressed = true;
         }
         // Slice P1: a `paymentResult` verification URL — the provider's

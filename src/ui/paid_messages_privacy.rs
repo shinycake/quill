@@ -446,24 +446,40 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Save: charge the staged price from now on.
+    /// Save: charge the staged price from now on. The staged price is
+    /// taken once the change is on its way; a refusal keeps it to retry.
     pub(super) fn save_charge_price(&mut self, cx: &mut Context<Self>) {
-        let Some(draft) = self.paid_messages.charge.take() else {
+        let Some(price) = self.paid_messages.charge.as_ref().map(|draft| draft.price) else {
             return;
         };
         if !self.can_restrict_new_chats() {
+            self.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_CHARGING_FOR_MESSAGES_NEEDS_TELEGRAM,
+            )));
+            cx.notify();
             return;
         }
-        self.apply_new_chat_settings(MessagesPolicy::Charge(draft.price).to_settings(), cx);
+        if self.apply_new_chat_settings(MessagesPolicy::Charge(price).to_settings(), cx) {
+            self.paid_messages.charge = None;
+            cx.notify();
+        }
     }
 
-    fn apply_new_chat_settings(&mut self, settings: NewChatPrivacy, cx: &mut Context<Self>) {
+    /// Whether the change went out (or was applied to a demo session).
+    fn apply_new_chat_settings(
+        &mut self,
+        settings: NewChatPrivacy,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let mut applied = false;
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_new_chat_settings(settings) {
                 self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_PRIVACY_UPDATE,
                     &err,
                 )));
+            } else {
+                applied = true;
             }
         } else if let Some(demo) = self.demo_session.as_mut()
             && demo
@@ -474,7 +490,9 @@ impl QuillApp {
                 .is_some_and(|state| state.value().is_some())
         {
             demo.set_new_chat_privacy_local(settings);
+            applied = true;
         }
         cx.notify();
+        applied
     }
 }

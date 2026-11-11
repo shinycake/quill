@@ -490,7 +490,7 @@ fn driver_two_step_password_ops_gate_dedupe_and_shape() {
             .auth_state
             .password_state
             .get()
-            .and_then(|s| s.pending_email_pattern.clone())
+            .and_then(|s| s.pending_email.as_ref().map(|p| p.pattern.clone()))
             .as_deref(),
         Some("n***@example.com")
     );

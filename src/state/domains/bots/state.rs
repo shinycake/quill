@@ -1,6 +1,7 @@
 //! Bots: info, commands, games, inline queries, callback answers, login URLs, mini apps, reply keyboards: the `bots` domain's share of `Session`.
 //! Added to by features in this domain only; `Session::new` builds it
 //! with `new`.
+use crate::state::fetch::Fetch;
 use crate::state::*;
 use crate::telegram::envelope::GroupBotCommands;
 
@@ -12,6 +13,92 @@ use crate::telegram::envelope::GroupBotCommands;
 pub struct CallbackAnswer {
     pub answer: CallbackQueryAnswer,
     pub chat: Option<ChatId>,
+}
+
+/// B1: where a login-URL button press stands, one value for the whole
+/// press. `Asking` holds the request that went out and the button's context
+/// (an error degrades to the raw URL from it); only that request's answer
+/// or error ends it. `Answered` waits for the UI to take it on its next
+/// poll, with the context the consent box and the error fallback read.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum LoginUrlStage {
+    #[default]
+    Idle,
+    Asking {
+        request: RequestId,
+        context: LoginUrlRequest,
+    },
+    Answered {
+        info: LoginUrlInfo,
+        context: LoginUrlRequest,
+    },
+}
+
+impl LoginUrlStage {
+    pub fn is_idle(&self) -> bool {
+        *self == Self::Idle
+    }
+
+    /// `getLoginUrlInfo` / `getLoginUrl` went out as `request`.
+    pub fn asking(request: RequestId, context: LoginUrlRequest) -> Self {
+        Self::Asking { request, context }
+    }
+
+    /// The answer of `request`: taken only by the press that waits for it.
+    pub fn answer(&mut self, request: Option<RequestId>, info: LoginUrlInfo) -> bool {
+        match std::mem::take(self) {
+            Self::Asking {
+                request: asked,
+                context,
+            } if Some(asked) == request => {
+                *self = Self::Answered { info, context };
+                true
+            }
+            other => {
+                *self = other;
+                false
+            }
+        }
+    }
+
+    /// `request` was refused: the button degrades to its raw URL.
+    pub fn fail(&mut self, request: Option<RequestId>) -> bool {
+        match std::mem::take(self) {
+            Self::Asking {
+                request: asked,
+                context,
+            } if Some(asked) == request => {
+                let fallback_url = context.raw_url.clone();
+                *self = Self::Answered {
+                    info: LoginUrlInfo::Failed { fallback_url },
+                    context,
+                };
+                true
+            }
+            other => {
+                *self = other;
+                false
+            }
+        }
+    }
+
+    /// What the UI takes on its poll: the answer and the press it belongs
+    /// to. A press still in flight stays.
+    pub fn take_answer(&mut self) -> Option<(LoginUrlInfo, LoginUrlRequest)> {
+        match std::mem::take(self) {
+            Self::Answered { info, context } => Some((info, context)),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+
+    /// The screen was returned to: an answer nobody took is dropped with
+    /// its context; a press in flight keeps its context for its answer.
+    pub fn forget_answer(&mut self) {
+        let _ = self.take_answer();
+    }
 }
 
 /// Which group a `bot_commands` list belongs to.
@@ -55,7 +142,9 @@ pub struct BotsState {
     /// Slice B2: `getBotSimilarBots` results (schema 1.8.67, line 11640)
     /// for the similar-bots section of the bot profile, keyed by bot
     /// user id. The `users` ids resolve to names via `Session::users`.
-    pub similar_bots: HashMap<i64, SimilarBotsFetch>,
+    /// `Loading` holds the request, so only its answer or refusal ends it;
+    /// `Failed` keeps the reason and a press asks again.
+    pub similar_bots: HashMap<i64, Fetch<Vec<i64>>>,
     /// Slice bots-games: high-score panels, keyed by
     /// `(chat_id, message_id)`. Present = panel open; the value is its
     /// fetch: `Loading` shows a loading row, `Ready` the rows. A refused
@@ -73,10 +162,11 @@ pub struct BotsState {
     /// Mini apps (docs/decisions/codex-miniapp-webview.md): open answers,
     /// consent answers and the attachment menu bots.
     pub web_apps: WebApps,
-    /// B1: the login-URL button press in flight, then its answer
-    /// (`loginUrlInfo*` / `httpUrl`) until the UI takes it on the next
-    /// poll: `Open` opens the URL in the OS browser, `RequestConfirmation`
-    /// asks for consent, `Failed` opens the button's raw URL.
+    /// B1: the login-URL button press: in flight under its request with its
+    /// context (so an error degrades to a plain URL button press), then the
+    /// answer for the UI to take on the next poll: `Open` opens the URL in
+    /// the OS browser, `RequestConfirmation` asks for consent, `Failed`
+    /// opens the button's raw URL in the browser.
     pub login_url: LoginUrlStage,
     /// B1: force-reply targets set when an incoming message carrying
     /// force-reply markup (`replyMarkupForceReply`, or `force_reply` on an
@@ -90,14 +180,12 @@ pub struct BotsState {
     /// Bots slice: the single active `getInlineQueryResults` fetch (the
     /// composer has one active inline query, so a slot — not a map).
     pub inline_query: Option<InlineQuerySlot>,
-    /// Bots slice: `@botname` → bot user id resolution for inline mode.
-    /// Set by the driver before `searchPublicChat`; the answer (or error)
-    /// resolves it. The composer has one active trigger, so a single
-    /// slot — not a map.
-    pub inline_bot_resolve: Option<InlineBotResolve>,
-    /// Bots slice: generation counter for `ResolveInlineBot` request
-    /// correlation (bumped per resolve; see the purpose docs).
-    pub inline_bot_resolve_seq: u64,
+    /// Bots slice: `@botname` → bot user id resolution for inline mode, by
+    /// lowercase username. Every window reads its own trigger's entry, so
+    /// one window's lookup never replaces another's. Set by the driver
+    /// before `searchPublicChat`; the answer (or error) lands on the entry
+    /// whose `Resolving` holds that request.
+    pub inline_bots: HashMap<String, InlineBotResolve>,
     /// Editing an owned bot and creating a managed one.
     pub owned: OwnedBotsState,
     /// Message widgets: TDLib's answers to their queries and public data
@@ -105,7 +193,42 @@ pub struct BotsState {
     pub widget_answers: Vec<crate::message_widget::WidgetAnswer>,
 }
 
+/// Usernames kept in [`BotsState::inline_bots`]; older settled ones go first.
+const INLINE_BOTS_KEPT: usize = 16;
+
 impl BotsState {
+    /// What is known of the inline bot `@username`.
+    pub fn inline_bot(&self, username: &str) -> Option<&InlineBotResolve> {
+        self.inline_bots.get(&username.to_ascii_lowercase())
+    }
+
+    /// Records `resolve` for its username, replacing that username's entry.
+    pub fn set_inline_bot(&mut self, resolve: InlineBotResolve) {
+        let key = resolve.username().to_ascii_lowercase();
+        if self.inline_bots.len() >= INLINE_BOTS_KEPT && !self.inline_bots.contains_key(&key) {
+            let old = self
+                .inline_bots
+                .iter()
+                .find(|(_, entry)| !matches!(entry, InlineBotResolve::Resolving { .. }))
+                .map(|(name, _)| name.clone());
+            if let Some(old) = old {
+                self.inline_bots.remove(&old);
+            }
+        }
+        self.inline_bots.insert(key, resolve);
+    }
+
+    /// The entry waiting for `request`'s answer, if it still waits.
+    pub fn inline_bot_asked(&self, request: crate::ids::RequestId) -> Option<&str> {
+        self.inline_bots.values().find_map(|entry| match entry {
+            InlineBotResolve::Resolving {
+                username,
+                request: r,
+            } if *r == request => Some(username.as_str()),
+            _ => None,
+        })
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             bot_user_ids: HashSet::new(),
@@ -125,8 +248,7 @@ impl BotsState {
             pending_force_replies: std::collections::HashMap::new(),
             reply_keyboards: ReplyKeyboardState::default(),
             inline_query: None,
-            inline_bot_resolve: None,
-            inline_bot_resolve_seq: 0,
+            inline_bots: HashMap::new(),
             owned: OwnedBotsState::default(),
             widget_answers: Vec::new(),
         }

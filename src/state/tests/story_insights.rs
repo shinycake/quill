@@ -237,3 +237,16 @@ fn search_error_lands_in_the_panel() {
     let search = session.stories.search.as_ref().unwrap();
     assert!(search.page.error().is_some());
 }
+
+#[test]
+fn a_statistics_send_that_failed_leaves_the_panel_a_failure_to_retry() {
+    let (mut session, _sink) = session();
+    session.begin_story_insights(11, 5);
+    session.story_statistics_not_sent(11, 5, "no connection".into());
+    let state = session.stories.insights.as_ref().expect("insights kept");
+    assert_eq!((state.chat_id, state.story_id), (11, 5));
+    assert_eq!(
+        state.statistics,
+        StoryStatsFetch::Failed("no connection".into())
+    );
+}

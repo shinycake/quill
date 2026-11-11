@@ -104,3 +104,40 @@ fn rows_say_online_bot_members_and_nothing_for_saved_messages() {
     assert!(members.contains("12"), "{members}");
     assert!(!online);
 }
+
+/// r2-18 06-007: the sender list lands only through the request the fetch
+/// waits for, in either order of two in-flight asks, and an answer after the
+/// lists were dropped does not bring one back.
+#[test]
+fn the_sender_list_lands_by_request() {
+    let senders = |ids: &[i64]| -> String {
+        let rows: Vec<String> = ids
+            .iter()
+            .map(|id| format!(r#"{{"@type":"chatMessageSender","sender":{{"@type":"messageSenderUser","user_id":{id}}},"needs_premium":false}}"#))
+            .collect();
+        rows.join(",")
+    };
+    let answer = |extra: RequestId, ids: &[i64]| {
+        format!(
+            r#"{{"@type":"chatMessageSenders","@extra":"{}","senders":[{}]}}"#,
+            extra.0,
+            senders(ids)
+        )
+    };
+    let chat = ChatId(-100);
+    let mut session = session();
+    let old = session.request(RequestPurpose::GetChatAvailableMessageSenders, Some(chat));
+    session.message_senders_loading(chat, old);
+    let new = session.request(RequestPurpose::GetChatAvailableMessageSenders, Some(chat));
+    session.message_senders_loading(chat, new);
+    apply(&mut session, &answer(old, &[1]));
+    assert!(session.available_message_senders(chat).is_empty());
+    assert!(session.message_senders_fetch(chat).is_loading());
+    apply(&mut session, &answer(new, &[2, 3]));
+    assert_eq!(session.available_message_senders(chat).len(), 2);
+    // The lists are dropped (an account change): a late answer stays out.
+    let late = session.request(RequestPurpose::GetChatAvailableMessageSenders, Some(chat));
+    session.chats_state.send_as_options.clear();
+    apply(&mut session, &answer(late, &[4]));
+    assert!(session.chats_state.send_as_options.is_empty());
+}

@@ -98,7 +98,7 @@ impl QuillApp {
             Some(AccountNotice::Terms)
         } else if !session.settings.notices.service.is_empty() {
             Some(AccountNotice::Service)
-        } else if self.auth_ui.login_prevented.is_some() {
+        } else if matches!(self.account_boxes.notice, OpenNotice::LoginPrevented(_)) {
             Some(AccountNotice::LoginPrevented)
         } else if self.account_boxes.notice == OpenNotice::Frozen && session.sync.freeze.is_some() {
             Some(AccountNotice::Frozen)
@@ -148,7 +148,9 @@ impl QuillApp {
                 )));
             }
             // box-host: opened by an answer; review_new_login named the window
-            Some(LoginReview::Prevented { places }) => self.auth_ui.login_prevented = Some(places),
+            Some(LoginReview::Prevented { places }) => {
+                self.account_boxes.notice = OpenNotice::LoginPrevented(places);
+            }
             None => {}
         }
     }
@@ -240,8 +242,8 @@ impl QuillApp {
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.notices.unconfirmed = None;
             if !confirmed {
-                self.auth_ui.login_prevented =
-                    Some(vec![tr(keys::Q_OPS_BERLIN_GERMANY_PIXEL_9).into()]);
+                self.account_boxes.notice =
+                    OpenNotice::LoginPrevented(vec![tr(keys::Q_OPS_BERLIN_GERMANY_PIXEL_9).into()]);
             }
         }
         cx.notify();
@@ -268,8 +270,9 @@ impl QuillApp {
                     demo.dismiss_service_notice();
                 }
             }
-            Some(AccountNotice::LoginPrevented) => self.auth_ui.login_prevented = None,
-            Some(AccountNotice::Frozen | AccountNotice::AgeVerify) => {
+            Some(
+                AccountNotice::LoginPrevented | AccountNotice::Frozen | AccountNotice::AgeVerify,
+            ) => {
                 self.account_boxes.notice.close();
             }
             _ => {}
@@ -625,7 +628,10 @@ impl QuillApp {
         &self,
         cx: &mut Context<Self>,
     ) -> (SharedString, AnyElement, AnyElement, bool) {
-        let places = self.auth_ui.login_prevented.clone().unwrap_or_default();
+        let places = match &self.account_boxes.notice {
+            OpenNotice::LoginPrevented(places) => places.clone(),
+            _ => Vec::new(),
+        };
         let title = if places.len() == 1 {
             tr(keys::Q_OPS_NEW_LOGIN_PREVENTED)
         } else {
@@ -648,7 +654,7 @@ impl QuillApp {
                 .label(tr(keys::BOX_OK))
                 .primary()
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.auth_ui.login_prevented = None;
+                    this.account_boxes.notice.close();
                     cx.notify();
                 })),
         );

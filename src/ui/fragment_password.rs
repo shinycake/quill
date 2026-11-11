@@ -199,6 +199,7 @@ pub(super) fn export_error_text(error: &ExportError) -> SharedString {
         ExportError::WrongPassword => tr(keys::CLOUD_PASSWORD_WRONG).into(),
         ExportError::Flood => tr(keys::FLOOD_ERROR).into(),
         ExportError::ServerError => tr(keys::Q_MONEY_SERVER_ERROR).into(),
+        ExportError::NotSent => tr(keys::Q_MONEY_COULDNT_OPEN_FRAGMENT).into(),
         ExportError::Other(reason) if reason.is_empty() => {
             tr(keys::Q_MONEY_COULDNT_OPEN_FRAGMENT).into()
         }

@@ -28,21 +28,21 @@ impl QuillApp {
                     is_shareable: false,
                     has_my_invite_links: false,
                 }];
-                self.folders.tab = Some(9);
+                self.set_chat_list_view(ChatListFilter::All, Some(9));
             }
             "unread" => {
                 for chat in session.chats.values_mut() {
                     chat.unread_count = 0;
                     chat.is_marked_as_unread = false;
                 }
-                self.chat_list.filter = ChatListFilter::Unread;
+                self.set_chat_list_view(ChatListFilter::Unread, None);
             }
             "archive" => {
                 session.archive_order.clear();
-                self.chat_list.filter = ChatListFilter::Archived;
+                self.set_chat_list_view(ChatListFilter::Archived, None);
             }
             "community" => {
-                self.chat_list.filter = ChatListFilter::Community(77);
+                self.set_chat_list_view(ChatListFilter::Community(77), None);
             }
             _ => {
                 session.main_order.clear();
