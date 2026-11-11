@@ -111,6 +111,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 HISTORY_AROUND_LIMIT,
             )) {
                 self.session.requests.take(extra);
+                self.first_page_not_sent(chat_id, &err);
                 return Err(err);
             }
             return Ok(Some(extra));
@@ -135,9 +136,23 @@ impl<S: JsonSender> ConnectDriver<S> {
             HISTORY_PAGE_SIZE,
         )) {
             self.session.requests.take(extra);
+            self.first_page_not_sent(chat_id, &err);
             return Err(err);
         }
         Ok(Some(extra))
+    }
+
+    /// A first page that could not even be sent ends the empty history in
+    /// its failed stage (the Retry row), so no render has to ask again.
+    fn first_page_not_sent(&mut self, chat_id: ChatId, err: &ConnectSendError) {
+        let empty = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .is_none_or(|h| h.messages.is_empty());
+        if empty && matches!(err, ConnectSendError::Native) {
+            self.session.fail_history_load(chat_id);
+        }
     }
 
     /// Load the page after the window's newest message while the window
