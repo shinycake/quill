@@ -358,10 +358,17 @@ fn a_press_while_the_box_works_sends_nothing_more() {
     assert!(rig.driver.request_chat_boost(ChatId(13)).unwrap().is_some());
     assert_eq!(rig.driver.request_chat_boost(ChatId(13)).unwrap(), None);
     assert_eq!(rig.sent_all("getAvailableChatBoostSlots").len(), 1);
-    // No box, no press.
+    // A press with no box makes the box that holds its wait.
     rig.driver.close_boost_box();
-    assert_eq!(rig.driver.request_chat_boost(ChatId(13)).unwrap(), None);
-    assert_eq!(rig.sent_all("getAvailableChatBoostSlots").len(), 1);
+    assert!(rig.driver.request_chat_boost(ChatId(13)).unwrap().is_none());
+    assert!(
+        rig.driver
+            .session
+            .groups
+            .boost_box
+            .as_ref()
+            .is_some_and(|state| state.awaiting_slots())
+    );
 }
 
 #[test]

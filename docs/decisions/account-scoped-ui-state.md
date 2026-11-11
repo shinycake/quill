@@ -6834,6 +6834,9 @@ fields are dropped (`Relay::started`, `StyleExamples::loading`,
 | 01-076, 01-081 | `P2pStage { Waiting { pending_signaling }, Live { handle } }`; the hung-up stage is the call leaving the table. |
 | 01-077 | `CallMediaConfig::video` is `VideoSource { Off, Camera(device), Screen }`, so the camera and a screen share cannot both be set. The native camera and screen handles stay on the call (resources, not choices). |
 
+One shared-file change: `session_apply_error.rs` restores the archive settings
+through `Fetch::data_mut` (the rollback has to follow the field's new type).
+
 Not compiled here: the Windows, macOS and Linux-only capture files
 (`screen_win`, `screen_mac`, `ble_macos`) were changed by reading, and the
 tgcalls tests need the native library, which this machine did not run.

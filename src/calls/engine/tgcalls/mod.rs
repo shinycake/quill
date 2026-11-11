@@ -86,8 +86,12 @@ impl<T> Native<T> {
 enum P2pStage {
     /// Before `connect`, or after a retry retired the instance: TDLib
     /// signaling that arrived meanwhile waits here, in order.
-    Waiting { pending_signaling: Vec<Vec<u8>> },
-    Live { handle: Native<qc_p2p> },
+    Waiting {
+        pending_signaling: Vec<Vec<u8>>,
+    },
+    Live {
+        handle: Native<qc_p2p>,
+    },
 }
 
 /// One 1:1 call, by TDLib call id.

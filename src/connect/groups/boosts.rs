@@ -64,18 +64,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !matches!(
-            self.session.chats.get(&chat_id.0).map(|chat| &chat.kind),
-            Some(ChatKind::Supergroup { .. })
-        ) {
+        let Some(ChatKind::Supergroup { is_channel, .. }) =
+            self.session.chats.get(&chat_id.0).map(|chat| &chat.kind)
+        else {
             return Ok(None);
-        }
-        // The press belongs to the open box of this chat, which holds what
-        // it waits for; a press while the box already works does nothing.
+        };
+        let group = !*is_channel;
+        // The press belongs to the box of this chat, which holds what it
+        // waits for (a press with no box for the chat makes one); a press
+        // while the box already works does nothing.
         match self.boost_box_for(chat_id) {
             Some(state) if matches!(state.phase, BoostPhase::Working(_)) => return Ok(None),
             Some(_) => {}
-            None => return Ok(None),
+            None => {
+                self.session.groups.boost_box =
+                    Some(crate::boost_box::BoostBoxState::new(chat_id.0, group));
+            }
         }
         // A slots read from a press whose box closed is still out: this
         // press takes it over, and its answer continues this boost.

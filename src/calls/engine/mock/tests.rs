@@ -265,7 +265,11 @@ fn retained_call_media_preserves_screen_share_across_reconnect() {
     sharing.video = VideoSource::Screen;
     let reconnected = retained_call_media(&params, Some(&sharing));
     assert!(reconnected.video.screen());
-    assert_eq!(reconnected.video.camera(), None, "the share replaces the camera");
+    assert_eq!(
+        reconnected.video.camera(),
+        None,
+        "the share replaces the camera"
+    );
     // Stopping share before the drop must not stick the flag on
     // either.
     let mut stopped = sharing;
