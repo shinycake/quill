@@ -305,25 +305,21 @@ mod tests {
         for action in actions {
             f.add_action(action);
         }
-        SuggestionFacts {
-            actions: f.actions,
-            phone: f.phone,
-            close_birthdays: birthdays
-                .iter()
-                .map(|&(user_id, month, day)| CloseBirthday {
-                    user_id,
-                    day,
-                    month,
-                    year: None,
-                })
-                .collect(),
-            birthday_card: if hidden {
-                BirthdayCard::Hidden
-            } else {
-                BirthdayCard::Shown
-            },
-            ..Default::default()
-        }
+        f.close_birthdays = birthdays
+            .iter()
+            .map(|&(user_id, month, day)| CloseBirthday {
+                user_id,
+                day,
+                month,
+                year: None,
+            })
+            .collect();
+        f.birthday_card = if hidden {
+            BirthdayCard::Hidden
+        } else {
+            BirthdayCard::Shown
+        };
+        f
     }
 
     #[test]
