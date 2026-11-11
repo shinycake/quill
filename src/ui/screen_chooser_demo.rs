@@ -9,7 +9,7 @@
 
 use super::app::QuillApp;
 use super::calls::demo_feed::{DemoFeed, demo_feed};
-use super::screen_share_state::ScreenFor;
+use super::screen_share_state::{DemoShare, ScreenFor};
 use super::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::calls::capture::screen::{
@@ -260,9 +260,11 @@ impl QuillApp {
                 ScreenAccess::Granted
             },
         }));
-        self.screen_share.demo_active = Some(SourceId(SHARED.into()));
+        self.screen_share.demo_active = Some(DemoShare {
+            source: SourceId(SHARED.into()),
+            with_audio: audio,
+        });
         self.screen_share.demo_system_audio = audio;
-        self.screen_share.demo_active_audio = audio;
         self.open_screen_chooser(ScreenFor::Group, cx);
         cx.notify();
     }
