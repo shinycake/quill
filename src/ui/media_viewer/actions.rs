@@ -603,7 +603,8 @@ impl QuillApp {
                 let wait = this
                     .update(cx, |this, cx| {
                         let idle = this.viewer.last_activity.elapsed().as_millis() as u64;
-                        let done = !this.viewer.state.is_open() || this.viewer.visibility.is_hidden();
+                        let done =
+                            !this.viewer.state.is_open() || this.viewer.visibility.is_hidden();
                         // Never mid-drag (a seek, volume or speed thumb).
                         let held = this.viewer.over_controls || this.viewer.controls.dragging();
                         if !done && controls_should_hide(idle, held) {

@@ -274,7 +274,6 @@ impl EditorMotion {
             || self.bubble.animating(now)
             || self.grid.animating(now)
             || self.quality_shift.animating(now)
-
     }
 }
 
@@ -471,9 +470,7 @@ impl QuillApp {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
-        let StripGesture::Held { grab, seek, .. } =
-            std::mem::take(&mut editor.motion.strip)
-        else {
+        let StripGesture::Held { grab, seek, .. } = std::mem::take(&mut editor.motion.strip) else {
             return;
         };
         if grab == Grab::Head {

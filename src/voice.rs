@@ -261,8 +261,10 @@ impl Control {
 
     /// The encoder ended with a failure.
     fn fail(&self) {
-        self.handshake
-            .store(Handshake::Failed as u8, std::sync::atomic::Ordering::Release);
+        self.handshake.store(
+            Handshake::Failed as u8,
+            std::sync::atomic::Ordering::Release,
+        );
     }
 }
 
@@ -343,10 +345,8 @@ impl VoiceCapture {
                             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
                             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                         };
-                        let want = matches!(
-                            control.stage(),
-                            Handshake::PauseAsked | Handshake::Flushed
-                        );
+                        let want =
+                            matches!(control.stage(), Handshake::PauseAsked | Handshake::Flushed);
                         if want != paused {
                             paused = want;
                             if paused {

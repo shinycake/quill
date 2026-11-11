@@ -39,7 +39,9 @@ impl Presenting {
     /// A picture with this time was handed out.
     pub(super) fn shown(&mut self, pts: f64) {
         *self = match *self {
-            Self::Ended { .. } => Self::Ended { last_pts: Some(pts) },
+            Self::Ended { .. } => Self::Ended {
+                last_pts: Some(pts),
+            },
             Self::AwaitingFirst | Self::Showing { .. } => Self::Showing { last_pts: pts },
         };
     }

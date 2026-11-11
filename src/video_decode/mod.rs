@@ -21,8 +21,8 @@
 
 mod bgra;
 mod clock;
-mod decoding;
 mod decode_loop;
+mod decoding;
 mod presenting;
 use presenting::Presenting;
 mod ffi;

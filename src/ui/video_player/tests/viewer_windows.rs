@@ -143,7 +143,10 @@ fn a_chat_windows_hold_ends_when_it_goes_to_the_background(cx: &mut TestAppConte
     };
     app.update(vcx, |app, cx| {
         app.in_window_scope(Some(CHAT), cx, |app, cx| {
-            assert!(app.viewer.clip.player().is_some(), "the clip plays in its window");
+            assert!(
+                app.viewer.clip.player().is_some(),
+                "the clip plays in its window"
+            );
             let now = cx.background_executor().now();
             let _ = app.viewer.controls.boost.press(now);
             let later = now + Duration::from_millis(quill::media_viewer::SPEED_BOOST_HOLD_MS + 50);

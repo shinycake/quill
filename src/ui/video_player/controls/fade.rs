@@ -63,7 +63,9 @@ enum Mode {
     Window,
     /// Full screen: the controls were asked for (a mouse move) and hide at
     /// `shown_until`; `None` once they hid.
-    Full { shown_until: Option<Instant> },
+    Full {
+        shown_until: Option<Instant>,
+    },
 }
 
 /// The moment the full-screen timer fires, `HIDE_TIMEOUT` after `now`.

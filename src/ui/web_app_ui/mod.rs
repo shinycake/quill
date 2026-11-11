@@ -970,9 +970,9 @@ fn bottom_button(setup: quill::web_app::bridge::ButtonSetup) -> BottomButton {
 mod awaited;
 mod emoji_status;
 mod helper_pipe;
-mod launch_flow;
 mod inline_results_button;
 mod invoice;
+mod launch_flow;
 mod phone;
 mod spawn_mini_app_window;
 

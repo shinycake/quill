@@ -190,9 +190,7 @@ impl Decoder {
             Ok(None) if reaching => return Turn::Idle(state, IDLE_WAIT),
             Ok(None) => {
                 if self.has_video && !self.decoded_a_picture {
-                    state
-                        .decoding
-                        .fail("The video has no pictures".to_string());
+                    state.decoding.fail("The video has no pictures".to_string());
                 } else {
                     state.decoding.end();
                 }

@@ -173,7 +173,10 @@ enum LineDrag {
     None,
     /// The progress line: the time previewed, and whether the drag paused
     /// a playing clip (the release resumes it).
-    Seek { preview: f64, paused_by_seek: bool },
+    Seek {
+        preview: f64,
+        paused_by_seek: bool,
+    },
     Volume,
 }
 

@@ -123,7 +123,10 @@ impl Player {
             .map(|info| info.frame_rate)
             .filter(|fps| fps.is_finite() && *fps > 0.0)
             .unwrap_or(30.0);
-        let shown = self.presenting.last_pts().unwrap_or_else(|| self.position());
+        let shown = self
+            .presenting
+            .last_pts()
+            .unwrap_or_else(|| self.position());
         self.seek((shown - 1.5 / fps).max(0.0));
     }
 }

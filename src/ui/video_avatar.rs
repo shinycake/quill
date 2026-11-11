@@ -97,8 +97,7 @@ impl QuillApp {
         if !on_screen || !super::video_player::supported() {
             return None;
         }
-        self.session()?
-            .info_cover_animation()
+        self.session()?.info_cover_animation()
     }
 
     /// Open, keep, pause or drop the cover player to match the state.
@@ -205,17 +204,15 @@ impl QuillApp {
             Cover::Playing(clip) => Some(clip),
             _ => None,
         };
-        let video = playing
-            .filter(|clip| clip.owner == owner)
-            .map(|clip| {
-                clip.behind.set(behind);
-                div()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .size_full()
-                    .child(clip.view.clone())
-            });
+        let video = playing.filter(|clip| clip.owner == owner).map(|clip| {
+            clip.behind.set(behind);
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .child(clip.view.clone())
+        });
         div()
             .relative()
             .flex_none()

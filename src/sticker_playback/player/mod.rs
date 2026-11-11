@@ -35,8 +35,8 @@ pub use head::{AHEAD, Pick, PlayHead, PlayMode, Rest, Timeline};
 
 use super::{FitzType, Tint};
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 /// The largest edge a clip is drawn at.
 pub const MAX_EDGE: u32 = 1024;

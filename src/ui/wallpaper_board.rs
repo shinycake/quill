@@ -25,8 +25,13 @@ pub(super) struct Job {
 /// for a key that is no longer wanted is dropped.
 enum Stage {
     /// Waiting for the worker; `order` is the request's place in line.
-    Queued { job: Job, order: u64 },
-    Running { slot: u64 },
+    Queued {
+        job: Job,
+        order: u64,
+    },
+    Running {
+        slot: u64,
+    },
     /// Finished, with its slot, until a lookup takes it.
     Done {
         slot: u64,

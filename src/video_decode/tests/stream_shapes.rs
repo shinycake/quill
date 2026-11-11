@@ -1,6 +1,6 @@
 use super::super::decode_loop::{Decoder, Turn};
-use super::super::presenting::Presenting;
 use super::super::ffi::FfiDemuxer;
+use super::super::presenting::Presenting;
 use super::super::{
     AUDIO_LOW_SECS, AUDIO_OUTPUT_LATENCY, AudioChunk, AudioTap, Demuxer, Item, MediaInfo,
     OpenOptions, Pixels, Player, SYNC_TOLERANCE, Shared, State, VideoFrame, lock,
@@ -446,7 +446,11 @@ fn a_clip_ends_on_time_after_its_sound_stopped_early() {
     let frames = frames_to_the_end(2.0);
     let run = rig.run(t0, frames - 1);
     rig.player.update_ended(run.now);
-    assert!(!rig.player.presenting.is_ended(), "{} of 2 s", run.last_shown());
+    assert!(
+        !rig.player.presenting.is_ended(),
+        "{} of 2 s",
+        run.last_shown()
+    );
     let run = rig.run(run.now, 1);
     rig.player.update_ended(run.now);
     assert!(rig.player.presenting.is_ended());
@@ -788,7 +792,10 @@ fn a_seek_into_sound_with_no_pictures_runs_on_the_sound_then_ends() {
     rig.player.seek(2.0);
     rig.settle();
     rig.player.update_ended(t0);
-    assert!(!rig.player.presenting.is_ended(), "the sound is still playing");
+    assert!(
+        !rig.player.presenting.is_ended(),
+        "the sound is still playing"
+    );
     let t1 = t0 + Duration::from_millis(500);
     rig.pull_sound(0.5);
     let heard = rig.player.position_at(t1);

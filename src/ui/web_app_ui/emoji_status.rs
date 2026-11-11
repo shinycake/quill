@@ -62,7 +62,9 @@ struct SetRequest {
 enum SetStage {
     /// Looking the emoji up; `request` is this lookup's `getCustomEmojiStickers`
     /// once it is on its way (`None` while the shared lookup is busy).
-    Resolving { request: Option<quill::ids::RequestId> },
+    Resolving {
+        request: Option<quill::ids::RequestId>,
+    },
     /// The prompt is up, with the emoji's character.
     Confirming { alt: String },
 }

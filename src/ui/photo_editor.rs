@@ -421,7 +421,9 @@ impl QuillApp {
                         if this.viewer.photo_editor.is_none()
                             && this.composer_sends.holds_item(&item)
                         {
-                            this.viewer.photo_editor.open(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
+                            this.viewer
+                                .photo_editor
+                                .open(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
                         }
                     }
                     Err(_) => this.set_note(StatusNote::error(tr(

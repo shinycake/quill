@@ -8,9 +8,13 @@ enum Run {
     Paused,
     /// Holding still after a seek until the first picture is shown;
     /// `playing` is whether playback was asked for.
-    HeldAfterSeek { playing: bool },
+    HeldAfterSeek {
+        playing: bool,
+    },
     /// Time runs from `anchor`.
-    Running { anchor: Instant },
+    Running {
+        anchor: Instant,
+    },
 }
 
 /// A wall clock that can be paused, seeked and sped up. It holds still

@@ -376,8 +376,12 @@ fn a_clip_error_stays_in_its_windows_viewer(cx: &mut TestAppContext) {
         app.in_window_scope(Some(OTHER), cx, |app, _| {
             app.viewer.clip.fail("This video can't be played".into());
         });
-        assert!(app.viewer.clip.error().is_none(), "the main viewer has none");
-        let theirs = app.in_window_scope(Some(OTHER), cx, |app, _| app.viewer.clip.error().cloned());
+        assert!(
+            app.viewer.clip.error().is_none(),
+            "the main viewer has none"
+        );
+        let theirs =
+            app.in_window_scope(Some(OTHER), cx, |app, _| app.viewer.clip.error().cloned());
         assert_eq!(
             theirs.flatten().as_deref(),
             Some("This video can't be played")

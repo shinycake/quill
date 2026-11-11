@@ -160,7 +160,8 @@ impl QuillApp {
     pub(super) fn submit_twofa_email_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut code = self.twofa.code.read(cx).value().trim().to_string();
         if code.is_empty() {
-            self.twofa.set_notice(Some(tr(keys::Q_PREFS_ENTER_THE_CODE_FROM_THE).into()));
+            self.twofa
+                .set_notice(Some(tr(keys::Q_PREFS_ENTER_THE_CODE_FROM_THE).into()));
             cx.notify();
             return;
         }
@@ -491,7 +492,8 @@ impl QuillApp {
         let mut new = self.twofa.new_password.read(cx).value().to_string();
         let hint = self.twofa.hint.read(cx).value().to_string();
         if code.is_empty() {
-            self.twofa.set_notice(Some(tr(keys::Q_PREFS_ENTER_THE_CODE_FROM_THE).into()));
+            self.twofa
+                .set_notice(Some(tr(keys::Q_PREFS_ENTER_THE_CODE_FROM_THE).into()));
             code.zeroize();
             new.zeroize();
             cx.notify();
@@ -631,7 +633,8 @@ impl QuillApp {
     fn submit_login_email(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let email = self.twofa.email.read(cx).value().trim().to_string();
         if email.is_empty() {
-            self.twofa.set_notice(Some(tr(keys::Q_PREFS_ENTER_THE_NEW_LOGIN_EMAIL).into()));
+            self.twofa
+                .set_notice(Some(tr(keys::Q_PREFS_ENTER_THE_NEW_LOGIN_EMAIL).into()));
             cx.notify();
             return;
         }
@@ -648,7 +651,8 @@ impl QuillApp {
     fn submit_login_email_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut code = self.twofa.code.read(cx).value().trim().to_string();
         if code.is_empty() {
-            self.twofa.set_notice(Some(tr(keys::Q_PREFS_ENTER_THE_CODE_FROM_THE).into()));
+            self.twofa
+                .set_notice(Some(tr(keys::Q_PREFS_ENTER_THE_CODE_FROM_THE).into()));
             cx.notify();
             return;
         }
@@ -670,7 +674,12 @@ impl QuillApp {
         let finished = self
             .session()
             .is_some_and(|s| s.auth_state.twofa_flow.notice.is_some());
-        if !finished || !matches!(self.twofa.view(), TwofaView::Recover | TwofaView::LoginEmail) {
+        if !finished
+            || !matches!(
+                self.twofa.view(),
+                TwofaView::Recover | TwofaView::LoginEmail
+            )
+        {
             return false;
         }
         self.twofa.goto(TwofaView::Status);

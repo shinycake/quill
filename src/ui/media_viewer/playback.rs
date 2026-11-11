@@ -558,7 +558,9 @@ impl QuillApp {
                         // The clip's window closed: the OS widget must not
                         // keep showing it, unless something else plays.
                         let _ = this.main().update(cx, |this, _| {
-                            if this.viewer.clip.player().is_none() && this.active_playback_id().is_none() {
+                            if this.viewer.clip.player().is_none()
+                                && this.active_playback_id().is_none()
+                            {
                                 quill::media_session::publish(None);
                             }
                         });

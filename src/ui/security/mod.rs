@@ -682,7 +682,8 @@ impl QuillApp {
         current.zeroize();
         new.zeroize();
         if !sent {
-            self.twofa.set_notice(Some(tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string()));
+            self.twofa
+                .set_notice(Some(tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string()));
             cx.notify();
             return;
         }
@@ -735,7 +736,8 @@ impl QuillApp {
         };
         current.zeroize();
         if !sent {
-            self.twofa.set_notice(Some(tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string()));
+            self.twofa
+                .set_notice(Some(tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string()));
             cx.notify();
             return;
         }

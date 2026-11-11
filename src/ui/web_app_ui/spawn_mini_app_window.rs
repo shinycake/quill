@@ -394,7 +394,9 @@ impl QuillApp {
         let Some(window) = self.mini_apps.window.as_mut() else {
             return;
         };
-        if window.launch.bot_user_id != bot_id || window.write_access != launch_flow::WriteAccess::Asking {
+        if window.launch.bot_user_id != bot_id
+            || window.write_access != launch_flow::WriteAccess::Asking
+        {
             return;
         }
         match result {

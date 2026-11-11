@@ -617,12 +617,10 @@ pub(super) fn wallpaper_layer(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        Cache, Composite, RETRY_AFTER, Shown, image_key, render_guarded, retry_time,
-    };
+    use super::{Cache, Composite, RETRY_AFTER, Shown, image_key, render_guarded, retry_time};
     use crate::ui::image_budget::begin_frame;
-    use crate::ui::wallpaper_board::{Board, Job};
     use crate::ui::wallpaper::Wallpaper;
+    use crate::ui::wallpaper_board::{Board, Job};
     use gpui_kit::{RenderImage, WindowId};
     use std::sync::Arc;
     use std::time::{Duration, Instant};

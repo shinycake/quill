@@ -115,7 +115,9 @@ impl QuillApp {
             && Self::viewer_is_gif_file(item, path)
             && !crate::ui::video_player::plays_gif_files()
         {
-            self.viewer.clip.animate(item.message_id, path.to_path_buf());
+            self.viewer
+                .clip
+                .animate(item.message_id, path.to_path_buf());
             cx.notify();
             return;
         }
