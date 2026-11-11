@@ -155,6 +155,15 @@ pub fn visible_tabs(
         .collect()
 }
 
+/// One page of a profile tab (Stories, Gifts) as it landed.
+pub struct ProfilePage {
+    pub items: Vec<SharedMediaItem>,
+    pub total_count: i32,
+    pub has_more: bool,
+    /// Adds to the loaded items instead of replacing them.
+    pub append: bool,
+}
+
 impl SharedMediaState {
     /// Whether an answer for `tab` of `chat_id` belongs to the open gallery:
     /// the chat matches and, when the request carried a stamp, the tab still
@@ -234,14 +243,17 @@ impl SharedMediaState {
         chat_id: ChatId,
         tab: SharedMediaTab,
         generation: Option<u64>,
-        items: Vec<SharedMediaItem>,
-        total_count: i32,
-        has_more: bool,
-        append: bool,
+        page: ProfilePage,
     ) -> bool {
         if !self.accepts_profile(chat_id, tab, generation) {
             return false;
         }
+        let ProfilePage {
+            items,
+            total_count,
+            has_more,
+            append,
+        } = page;
         let state = self.tab_state(tab);
         if append {
             state.items.extend(items);
@@ -473,10 +485,12 @@ impl Session {
             chat_id,
             SharedMediaTab::Stories,
             generation,
-            items,
-            total_count,
-            has_more,
-            false,
+            ProfilePage {
+                items,
+                total_count,
+                has_more,
+                append: false,
+            },
         );
     }
 
@@ -503,10 +517,12 @@ impl Session {
             chat_id,
             SharedMediaTab::Gifts,
             Some(generation),
-            items,
-            page.total_count,
-            !page.next_offset.is_empty(),
-            append,
+            ProfilePage {
+                items,
+                total_count: page.total_count,
+                has_more: !page.next_offset.is_empty(),
+                append,
+            },
         );
         if accepted {
             let state = self.media.shared_media.tab_state(SharedMediaTab::Gifts);
@@ -727,14 +743,34 @@ mod tests {
         };
         let tab = SharedMediaTab::Gifts;
         gallery.begin_profile_fetch(tab);
-        gallery.accept_profile(ChatId(1), tab, None, vec![row("a")], 2, true, false);
+        gallery.accept_profile(
+            ChatId(1),
+            tab,
+            None,
+            ProfilePage {
+                items: vec![row("a")],
+                total_count: 2,
+                has_more: true,
+                append: false,
+            },
+        );
         assert_eq!(
             gallery.tabs[tab.index()].status,
             SharedMediaTabStatus::Ready
         );
         assert!(gallery.begin_profile_more(tab).is_some());
         assert!(gallery.begin_profile_more(tab).is_none());
-        gallery.accept_profile(ChatId(1), tab, None, vec![row("b")], 2, false, true);
+        gallery.accept_profile(
+            ChatId(1),
+            tab,
+            None,
+            ProfilePage {
+                items: vec![row("b")],
+                total_count: 2,
+                has_more: false,
+                append: true,
+            },
+        );
         assert_eq!(gallery.tabs[tab.index()].items.len(), 2);
         assert!(!gallery.tabs[tab.index()].can_load_more());
         // A late failure keeps the list; another chat's answer is ignored.
@@ -743,7 +779,17 @@ mod tests {
             gallery.tabs[tab.index()].status,
             SharedMediaTabStatus::Ready
         );
-        gallery.accept_profile(ChatId(2), tab, None, vec![], 0, false, false);
+        gallery.accept_profile(
+            ChatId(2),
+            tab,
+            None,
+            ProfilePage {
+                items: vec![],
+                total_count: 0,
+                has_more: false,
+                append: false,
+            },
+        );
         assert_eq!(gallery.tabs[tab.index()].items.len(), 2);
     }
 
@@ -764,20 +810,50 @@ mod tests {
             file: FileId(0),
         };
         let first = gallery.begin_profile_fetch(tab);
-        gallery.accept_profile(ChatId(1), tab, Some(first), vec![row], 5, true, false);
+        gallery.accept_profile(
+            ChatId(1),
+            tab,
+            Some(first),
+            ProfilePage {
+                items: vec![row],
+                total_count: 5,
+                has_more: true,
+                append: false,
+            },
+        );
         let more = gallery.begin_profile_more(tab);
         assert_eq!(more, Some(first));
         gallery.close();
         gallery.open_for(ChatId(1));
         let fresh = gallery.begin_profile_fetch(tab);
         assert_ne!(fresh, first);
-        assert!(!gallery.accept_profile(ChatId(1), tab, more, vec![], 5, false, true));
+        assert!(!gallery.accept_profile(
+            ChatId(1),
+            tab,
+            more,
+            ProfilePage {
+                items: vec![],
+                total_count: 5,
+                has_more: false,
+                append: true
+            }
+        ));
         assert_eq!(
             gallery.tabs[tab.index()].status,
             SharedMediaTabStatus::Loading
         );
         assert!(!gallery.fail_profile(ChatId(1), tab, more, "late".into()));
-        assert!(gallery.accept_profile(ChatId(1), tab, Some(fresh), vec![], 5, true, false));
+        assert!(gallery.accept_profile(
+            ChatId(1),
+            tab,
+            Some(fresh),
+            ProfilePage {
+                items: vec![],
+                total_count: 5,
+                has_more: true,
+                append: false
+            }
+        ));
     }
 
     #[test]
