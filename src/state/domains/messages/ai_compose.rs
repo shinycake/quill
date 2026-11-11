@@ -480,30 +480,6 @@ impl Session {
     }
 }
 
-#[cfg(test)]
-mod keep_newest_tests {
-    use super::{AiBoxAnswer, keep_newest};
-    use crate::ai_compose::AiBoxError;
-
-    fn answer(token: u64) -> AiBoxAnswer {
-        AiBoxAnswer {
-            token,
-            outcome: Err(AiBoxError::TooLong),
-        }
-    }
-
-    #[test]
-    fn an_older_answer_never_replaces_a_newer_one() {
-        let mut slot = None;
-        keep_newest(&mut slot, answer(2));
-        keep_newest(&mut slot, answer(1));
-        assert_eq!(slot.map(|held| held.token), Some(2));
-        let mut slot = Some(answer(1));
-        keep_newest(&mut slot, answer(3));
-        assert_eq!(slot.map(|held| held.token), Some(3));
-    }
-}
-
 impl Session {
     /// Hold an AI answer for the composer drain. The newest ask of a window
     /// wins: an older request's answer never overwrites a newer one not yet
@@ -537,5 +513,29 @@ impl Session {
         {
             self.messages.ai_composer_blocks = Some((request, window, chat_id, rich, note));
         }
+    }
+}
+
+#[cfg(test)]
+mod keep_newest_tests {
+    use super::{AiBoxAnswer, keep_newest};
+    use crate::ai_compose::AiBoxError;
+
+    fn answer(token: u64) -> AiBoxAnswer {
+        AiBoxAnswer {
+            token,
+            outcome: Err(AiBoxError::TooLong),
+        }
+    }
+
+    #[test]
+    fn an_older_answer_never_replaces_a_newer_one() {
+        let mut slot = None;
+        keep_newest(&mut slot, answer(2));
+        keep_newest(&mut slot, answer(1));
+        assert_eq!(slot.map(|held| held.token), Some(2));
+        let mut slot = Some(answer(1));
+        keep_newest(&mut slot, answer(3));
+        assert_eq!(slot.map(|held| held.token), Some(3));
     }
 }
