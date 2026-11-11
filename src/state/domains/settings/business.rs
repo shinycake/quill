@@ -54,7 +54,7 @@ impl Session {
             .requests
             .has_purpose_for_user(RequestPurpose::GetUserFullInfo, me)
         {
-            return Fetch::Loading { stale: None };
+            return Fetch::Loading { stale: None, request: None };
         }
         match &self.settings.business.own_info_error {
             Some(error) => Fetch::Failed {

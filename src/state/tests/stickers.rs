@@ -98,6 +98,8 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { first_page: true }),
         None,
     );
+    with_purpose.stickers.gifs.search = crate::state::GifSearch::wanted();
+    with_purpose.stickers.gifs.search.sent(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -118,6 +120,8 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { first_page: false }),
         None,
     );
+    with_purpose.stickers.gifs.search = crate::state::GifSearch::wanted();
+    with_purpose.stickers.gifs.search.sent(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -390,4 +394,30 @@ fn a_failed_refetch_keeps_the_shown_sticker_set() {
     session.stickers.sticker_set_view = Some(StickerSetView::loading(5));
     session.fail_sticker_set_view(5);
     assert_eq!(stage(&session), Some(StickerSetViewStage::Failed));
+}
+
+#[test]
+fn a_gif_search_page_or_saved_list_of_another_request_changes_nothing() {
+    use crate::ids::RequestId;
+    use crate::state::{GifSearch, SavedGifs};
+    let (mut session, _) = session();
+    let gifs = &mut session.stickers.gifs;
+    gifs.search = GifSearch::wanted();
+    gifs.search.sent(RequestId(5));
+    assert!(!gifs.search.answered(Some(RequestId(4))));
+    assert!(gifs.search.is_loading());
+    gifs.search.failed_for(Some(RequestId(4)));
+    assert!(gifs.search.is_loading(), "an older request's error");
+    gifs.search.failed_for(Some(RequestId(5)));
+    assert!(gifs.search.failed());
+
+    gifs.saved.begin();
+    gifs.saved.sent(RequestId(8));
+    assert!(!gifs.saved.answered(Some(RequestId(7))));
+    gifs.saved.fetch_failed(Some(RequestId(7)));
+    assert!(gifs.saved.is_loading());
+    assert!(gifs.saved.answered(Some(RequestId(8))));
+    assert_eq!(gifs.saved, SavedGifs::Loaded);
+    gifs.saved.fetch_failed(Some(RequestId(8)));
+    assert_eq!(gifs.saved, SavedGifs::Loaded, "a settled fetch has no error to take");
 }

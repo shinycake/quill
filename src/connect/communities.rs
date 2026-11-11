@@ -70,7 +70,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = RequestPurpose::Communities(CommunitiesPurpose::GetJoined);
         let extra = self.session.request(purpose, None);
         let stale = self.session.communities.joined.take_data();
-        self.session.communities.joined = Fetch::Loading { stale };
+        self.session.communities.joined = Fetch::Loading { stale, request: None };
         match self.send_json_request(extra, &get_joined_communities(extra)) {
             Ok(extra) => Ok(Some(extra)),
             Err(err) => {
@@ -138,7 +138,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = RequestPurpose::Communities(CommunitiesPurpose::GetOwnedBots);
         let extra = self.session.request(purpose, None);
         let stale = self.session.communities.owned_bots.take_data();
-        self.session.communities.owned_bots = Fetch::Loading { stale };
+        self.session.communities.owned_bots = Fetch::Loading { stale, request: None };
         match self.send_json_request(extra, &get_owned_bots(extra)) {
             Ok(extra) => Ok(Some(extra)),
             Err(err) => {
@@ -249,7 +249,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .entry(community_id)
                 .or_default();
             let stale = fetch.take_data();
-            *fetch = Fetch::Loading { stale };
+            *fetch = Fetch::Loading { stale, request: None };
         }
         Ok(sent)
     }
@@ -369,7 +369,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .communities
                 .member_chats
-                .insert((community_id, member), Fetch::Loading { stale: None });
+                .insert((community_id, member), Fetch::Loading { stale: None, request: None });
         }
         Ok(sent)
     }

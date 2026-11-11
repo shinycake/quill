@@ -718,7 +718,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.stickers.gifs.saved.forget();
         }
         if self.session.stickers.gifs.search.failed() {
-            self.session.stickers.gifs.search = GifSearch::Loading;
+            self.session.stickers.gifs.search = GifSearch::wanted();
         }
         let saved = self.maybe_refresh_saved_animations()?;
         if self.session.stickers.gifs.search.is_loading() {
@@ -822,16 +822,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.stickers.gifs.saved.needs_fetch() {
             return Ok(None);
         }
-        let held = self.session.stickers.gifs.saved.loaded();
-        self.session.stickers.gifs.saved = SavedGifs::Loading { loaded: held };
+        self.session.stickers.gifs.saved.begin();
         let extra = self
             .session
             .request(RequestPurpose::GetSavedAnimations, None);
         match self.sender.send_json(&get_saved_animations(extra)) {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                self.session.stickers.gifs.saved.sent(extra);
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.stickers.gifs.saved = SavedGifs::Failed;
+                self.session.stickers.gifs.saved.send_failed();
                 Err(err)
             }
         }

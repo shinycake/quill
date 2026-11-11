@@ -833,7 +833,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.stickers.gifs.search_results.clear();
             self.session.stickers.gifs.search_next_offset.clear();
             if self.session.stickers.gifs.search.on() {
-                self.session.stickers.gifs.search = crate::state::GifSearch::Loading;
+                self.session.stickers.gifs.search = crate::state::GifSearch::wanted();
             }
         }
         if self.chats_path_active()

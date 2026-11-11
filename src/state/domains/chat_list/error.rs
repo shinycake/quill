@@ -208,9 +208,11 @@ impl Session {
                 ));
             }
             Some(RequestPurpose::GetArchiveChatListSettings) => {
-                self.chat_list
-                    .archive_settings
-                    .fail(format!("error {}", err.code));
+                self.chat_list.archive_settings.failed(
+                    pending.map(|p| p.id),
+                    format!("error {}", err.code),
+                    false,
+                );
                 self.chat_list.archive_mute.note_reload_failed();
                 self.chats_state.chat_action_error.push(format!(
                     "could not load archive settings (error {})",

@@ -290,7 +290,7 @@ impl Session {
             StickersPayload::Animations { animations, files } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedAnimations) {
                     self.remember_files(&files);
-                    self.accept_saved_animations(animations);
+                    self.accept_saved_animations(pending.map(|p| p.id), animations);
                 }
             }
             StickersPayload::UpdateSavedAnimations { .. } => {

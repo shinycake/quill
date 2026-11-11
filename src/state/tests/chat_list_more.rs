@@ -133,6 +133,7 @@ fn cl2_archive_settings_fetch_stores_and_set_rolls_back() {
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetArchiveChatListSettings, None);
     session.chat_list.archive_settings.begin();
+    session.chat_list.archive_settings.sent(extra);
     apply_json(
         &mut session,
         &seq,

@@ -385,6 +385,8 @@ fn a_failed_first_page_is_asked_again_once_back_online() {
     assert!(!session.threads.saved.waiting_to_retry());
 
     let tags = session.request(RequestPurpose::GetSavedMessagesTags { topic_id: 0 }, None);
+    session.threads.saved.tags.begin();
+    session.threads.saved.tags.sent(tags);
     apply_json(&mut session, &seq, &sink, &error(tags));
     assert!(session.threads.saved.waiting_to_retry());
     assert!(session.threads.saved.tags.error().is_some());

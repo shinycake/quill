@@ -258,9 +258,26 @@ impl Session {
         self.stickers.stickers.set = StickerSetStage::Loading { set_id, request };
     }
 
-    pub fn accept_saved_animations(&mut self, animations: Vec<AnimationItem>) {
-        self.stickers.gifs.animations = animations;
-        self.stickers.gifs.saved = crate::state::SavedGifs::Loaded;
+    /// The saved GIFs answered by `request`; another request's list is
+    /// not the fetch awaited.
+    pub fn accept_saved_animations(
+        &mut self,
+        request: Option<RequestId>,
+        animations: Vec<AnimationItem>,
+    ) {
+        if self.stickers.gifs.saved.answered(request) {
+            self.stickers.gifs.animations = animations;
+        }
+    }
+
+    /// The offline panel shows a search nobody can answer: no bot, no GIFs.
+    pub fn show_gif_search_without_bot(&mut self, query: &str) {
+        let gifs = &mut self.stickers.gifs;
+        gifs.search = crate::state::GifSearch::Shown;
+        gifs.search_query = query.to_string();
+        gifs.search_results.clear();
+        gifs.search_next_offset.clear();
+        gifs.searches_kept.keep(&gifs.search_query, &[]);
     }
 
     /// Slice S9: store a GIF-search `inlineQueryResults` page. A first page
@@ -270,11 +287,14 @@ impl Session {
     /// `first_page`.
     pub fn accept_gif_search_results(
         &mut self,
+        request: Option<RequestId>,
         animations: Vec<AnimationItem>,
         next_offset: String,
         first_page: bool,
     ) {
-        self.stickers.gifs.search.answered();
+        if !self.stickers.gifs.search.answered(request) {
+            return;
+        }
         if first_page {
             self.stickers.gifs.search_results = animations;
         } else {

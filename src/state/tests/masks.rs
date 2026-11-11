@@ -123,7 +123,7 @@ fn a_confirmed_change_drops_both_lists_and_an_error_marks_failure() {
         .stickers
         .masks
         .sets
-        .insert(11, Fetch::Loading { stale: None });
+        .insert(11, Fetch::Loading { stale: None, request: None });
 
     let extra = session.request(
         StickersPurpose::ChangeMaskSet {

@@ -83,7 +83,7 @@ impl Session {
                 _ => None,
             };
             if self.stickers.gifs.search_bot_user_id.is_none() {
-                self.stickers.gifs.search.fail();
+                self.stickers.gifs.search.send_failed();
             }
         }
         // Bots slice: `searchPublicChat` answer for `@botname`

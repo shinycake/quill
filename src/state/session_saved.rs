@@ -112,9 +112,22 @@ impl Session {
     }
 
     /// `updateSavedMessagesTags` / `getSavedMessagesTags`.
-    pub(crate) fn apply_saved_tags(&mut self, topic_id: i64, tags: Vec<SavedMessagesTag>) {
+    /// An answer (`request`) lands only in the fetch that waits for it; an
+    /// update (`None`) is the server's current list, whatever the fetch.
+    pub(crate) fn apply_saved_tags(
+        &mut self,
+        topic_id: i64,
+        tags: Vec<SavedMessagesTag>,
+        request: Option<RequestId>,
+    ) {
         if topic_id == 0 {
-            self.threads.saved.tags.succeed(tags);
+            let fetch = &mut self.threads.saved.tags;
+            match request {
+                Some(_) => {
+                    fetch.answered(request, tags);
+                }
+                None => fetch.succeed(tags),
+            }
         } else {
             self.threads.saved.topic_tags.insert(topic_id, tags);
         }

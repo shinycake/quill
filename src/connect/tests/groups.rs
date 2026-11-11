@@ -357,7 +357,7 @@ fn driver_mutation_confirmed_refetches_dropped_cache() {
     // The dropped pack is being asked for again, not kept as the answer.
     assert!(matches!(
         driver.session.groups.welcome_messages.get(&13),
-        Some(crate::state::fetch::Fetch::Loading { stale: None })
+        Some(crate::state::fetch::Fetch::Loading { stale: None, request: None })
     ));
     assert!(
         sent_types().iter().any(|t| t == "loadChatWelcomeMessages"),

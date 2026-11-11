@@ -197,7 +197,7 @@ impl Session {
                 // The old numbers are gone; the next open refetches.
                 let network = &mut self.settings.privacy_data.network;
                 *network = if network.is_loading() {
-                    crate::state::fetch::Fetch::Loading { stale: None }
+                    crate::state::fetch::Fetch::Loading { stale: None, request: None }
                 } else {
                     crate::state::fetch::Fetch::Idle
                 };

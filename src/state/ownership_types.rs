@@ -129,7 +129,7 @@ fn wait_text(secs: i32) -> String {
 impl Session {
     /// A `canTransferOwnership` request went out.
     pub fn begin_ownership_check(&mut self) {
-        self.groups.ownership.check = Fetch::Loading { stale: None };
+        self.groups.ownership.check = Fetch::Loading { stale: None, request: None };
     }
 
     pub(crate) fn accept_can_transfer_ownership(&mut self, result: CanTransferOwnershipResult) {

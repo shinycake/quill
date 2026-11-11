@@ -174,7 +174,10 @@ impl Session {
                     | RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { .. })
             )
         ) {
-            self.stickers.gifs.search.fail();
+            self.stickers
+                .gifs
+                .search
+                .failed_for(pending.map(|p| p.id));
         }
         if matches!(
             pending.map(|p| p.purpose),
@@ -183,7 +186,10 @@ impl Session {
             self.stickers.gifs.saved.mark_failed();
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedAnimations) {
-            self.stickers.gifs.saved = crate::state::SavedGifs::Failed;
+            self.stickers
+                .gifs
+                .saved
+                .fetch_failed(pending.map(|p| p.id));
         }
     }
 }

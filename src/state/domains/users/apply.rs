@@ -55,7 +55,12 @@ impl Session {
                 } else if self.apply_web_app_users(&user_ids, pending) {
                     // Apps tab: `getGrossingWebAppBots`.
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetContacts) {
-                    self.users_state.contacts.succeed(user_ids);
+                    // Only the fetch that waits for it takes the list: an
+                    // older one, answered after a change dropped the list,
+                    // would bring back what the change removed.
+                    self.users_state
+                        .contacts
+                        .answered(pending.map(|p| p.id), user_ids);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCloseFriends) {
                     // B14: `getCloseFriends` answer.
                     self.stories.close_friends = CloseFriendsList::Ready(user_ids);

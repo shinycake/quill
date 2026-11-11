@@ -282,9 +282,28 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.has_purpose(purpose) {
             return Ok(None);
         }
-        self.send_purpose(purpose, None, |extra| {
+        if topic_id != 0 {
+            return self.send_purpose(purpose, None, |extra| {
+                get_saved_messages_tags(extra, topic_id)
+            });
+        }
+        // All of Saved Messages: the list's fetch records the ask, so a
+        // send that fails lands in `Failed` (the pump waits for the
+        // connection) instead of being asked again at every pump.
+        let saved = &mut self.session.threads.saved;
+        if !saved.tags.is_idle() {
+            return Ok(None);
+        }
+        saved.tags.begin();
+        let sent = self.send_purpose(purpose, None, |extra| {
             get_saved_messages_tags(extra, topic_id)
-        })
+        });
+        let tags = &mut self.session.threads.saved.tags;
+        match &sent {
+            Ok(Some(extra)) => tags.sent(*extra),
+            _ => tags.fail_dropping_data("could not send the request"),
+        }
+        sent
     }
 
     /// Enter a sublist: reset its view, load its first page and its tags.

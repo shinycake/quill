@@ -38,6 +38,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .fail_dropping_data("could not send the request");
             return Err(err);
         }
+        self.session.users_state.contacts.sent(extra);
         Ok(Some(extra))
     }
 

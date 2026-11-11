@@ -410,6 +410,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // A cached copy stays on screen while it reloads.
         self.session.chat_list.archive_settings.begin();
+        self.session.chat_list.archive_settings.sent(extra);
         Ok(Some(extra))
     }
 

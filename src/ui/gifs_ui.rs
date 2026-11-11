@@ -180,9 +180,7 @@ impl QuillApp {
                 GifWanted::Saved => session.stickers.gifs.search = quill::state::GifSearch::Off,
                 GifWanted::Search(query) => {
                     // No search bot offline: the demo finds nothing.
-                    session.stickers.gifs.search = quill::state::GifSearch::Shown;
-                    session.stickers.gifs.search_query = query.clone();
-                    session.accept_gif_search_results(Vec::new(), String::new(), true);
+                    session.show_gif_search_without_bot(query);
                 }
             }
             true

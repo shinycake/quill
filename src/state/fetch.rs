@@ -13,7 +13,13 @@ pub enum Fetch<T> {
     #[default]
     Idle,
     /// A request is in flight; `stale` is the last answer, if any.
-    Loading { stale: Option<T> },
+    /// `request` is the one that asked (`None` until it is sent, or for a
+    /// fetch whose answer needs no matching): only its own answer or error
+    /// acts through [`Fetch::answered`] and [`Fetch::failed`].
+    Loading {
+        stale: Option<T>,
+        request: Option<crate::ids::RequestId>,
+    },
     /// The latest request answered.
     Ready(T),
     /// The latest request failed; `stale` is the last answer, if any.
@@ -49,7 +55,7 @@ impl<T> Fetch<T> {
         match self {
             Self::Idle => None,
             Self::Ready(value) => Some(value),
-            Self::Loading { stale } | Self::Failed { stale, .. } => stale.as_ref(),
+            Self::Loading { stale, .. } | Self::Failed { stale, .. } => stale.as_ref(),
         }
     }
 
@@ -57,7 +63,7 @@ impl<T> Fetch<T> {
         match self {
             Self::Idle => None,
             Self::Ready(value) => Some(value),
-            Self::Loading { stale } | Self::Failed { stale, .. } => stale.as_mut(),
+            Self::Loading { stale, .. } | Self::Failed { stale, .. } => stale.as_mut(),
         }
     }
 
@@ -66,7 +72,7 @@ impl<T> Fetch<T> {
         match std::mem::take(self) {
             Self::Idle => None,
             Self::Ready(value) => Some(value),
-            Self::Loading { stale } | Self::Failed { stale, .. } => stale,
+            Self::Loading { stale, .. } | Self::Failed { stale, .. } => stale,
         }
     }
 
@@ -78,8 +84,9 @@ impl<T> Fetch<T> {
             return;
         }
         *self = match std::mem::take(self) {
-            Self::Loading { .. } => Self::Loading {
+            Self::Loading { request, .. } => Self::Loading {
                 stale: Some(make()),
+                request,
             },
             Self::Failed { error, .. } => Self::Failed {
                 error,
@@ -93,7 +100,53 @@ impl<T> Fetch<T> {
     /// gone.
     pub fn begin(&mut self) {
         let stale = self.take_data();
-        *self = Self::Loading { stale };
+        *self = Self::Loading {
+            stale,
+            request: None,
+        };
+    }
+
+    /// The request that was begun went out as `request`.
+    pub fn sent(&mut self, request: crate::ids::RequestId) {
+        if let Self::Loading { request: slot, .. } = self {
+            *slot = Some(request);
+        }
+    }
+
+    /// The fetch waits for the answer of `request`.
+    pub fn waits_for(&self, request: crate::ids::RequestId) -> bool {
+        matches!(self, Self::Loading { request: Some(asked), .. } if *asked == request)
+    }
+
+    /// `request` answered: taken only by the fetch that waits for it
+    /// (`false` and no change for an older request, or after the fetch was
+    /// dropped for a new one).
+    pub fn answered(&mut self, request: Option<crate::ids::RequestId>, value: T) -> bool {
+        if request.is_some_and(|request| self.waits_for(request)) {
+            *self = Self::Ready(value);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// `request` failed: only the fetch that waits for it fails. The held
+    /// data goes when `drop_data`.
+    pub fn failed(
+        &mut self,
+        request: Option<crate::ids::RequestId>,
+        error: impl Into<String>,
+        drop_data: bool,
+    ) -> bool {
+        if !request.is_some_and(|request| self.waits_for(request)) {
+            return false;
+        }
+        if drop_data {
+            self.fail_dropping_data(error);
+        } else {
+            self.fail(error);
+        }
+        true
     }
 
     /// The request answered.
@@ -302,7 +355,7 @@ mod tests {
         };
         bare.clear_error();
         assert!(bare.is_idle());
-        let mut loading: Fetch<i32> = Fetch::Loading { stale: None };
+        let mut loading: Fetch<i32> = Fetch::Loading { stale: None, request: None };
         loading.clear_error();
         assert!(loading.is_loading());
     }
@@ -314,13 +367,14 @@ mod tests {
         idle.data_mut().into_iter().for_each(|list| list.push(1));
         assert_eq!(idle, Fetch::Ready(vec![1]));
 
-        let mut loading: Fetch<Vec<i32>> = Fetch::Loading { stale: None };
+        let mut loading: Fetch<Vec<i32>> = Fetch::Loading { stale: None, request: None };
         loading.insert_data_if_missing(Vec::new);
         loading.data_mut().into_iter().for_each(|list| list.push(2));
         assert_eq!(
             loading,
             Fetch::Loading {
-                stale: Some(vec![2])
+                stale: Some(vec![2]),
+                request: None,
             }
         );
 

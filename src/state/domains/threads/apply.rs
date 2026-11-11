@@ -25,12 +25,12 @@ impl Session {
             ThreadsPayload::UpdateSavedMessagesTags {
                 saved_messages_topic_id,
                 tags,
-            } => self.apply_saved_tags(saved_messages_topic_id, tags),
+            } => self.apply_saved_tags(saved_messages_topic_id, tags, None),
             ThreadsPayload::SavedMessagesTags { tags } => {
                 if let Some(RequestPurpose::GetSavedMessagesTags { topic_id }) =
                     pending.map(|p| p.purpose)
                 {
-                    self.apply_saved_tags(topic_id, tags);
+                    self.apply_saved_tags(topic_id, tags, pending.map(|p| p.id));
                 }
             }
             // Phase 5.1: `getForumTopics` response — cache the first page

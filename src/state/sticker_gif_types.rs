@@ -253,9 +253,11 @@ pub enum SavedGifs {
     /// Never fetched, or dropped for a refetch.
     #[default]
     NotLoaded,
-    /// A fetch is out; `loaded` is whether an earlier answer is held.
+    /// A fetch is out as `request` (`None` until it is sent); `loaded` is
+    /// whether an earlier answer is held.
     Loading {
         loaded: bool,
+        request: Option<crate::ids::RequestId>,
     },
     Loaded,
     /// `updateSavedAnimations` arrived (another device changed the
@@ -275,7 +277,7 @@ impl SavedGifs {
     pub fn loaded(self) -> bool {
         match self {
             Self::NotLoaded => false,
-            Self::Loading { loaded } => loaded,
+            Self::Loading { loaded, .. } => loaded,
             Self::Loaded | Self::Stale | Self::Failed => true,
         }
     }
@@ -286,7 +288,7 @@ impl SavedGifs {
             Self::NotLoaded | Self::Stale => true,
             // A fetch in flight is deduped by the request registry; one
             // dropped for a refetch has nothing held to show meanwhile.
-            Self::Loading { loaded } => !loaded,
+            Self::Loading { loaded, .. } => !loaded,
             Self::Loaded | Self::Failed => false,
         }
     }
@@ -305,12 +307,66 @@ impl SavedGifs {
         }
     }
 
-    /// What is held is dropped and fetched again.
+    /// What is held is dropped and fetched again. A fetch in flight keeps
+    /// its request: its answer is still the one awaited.
     pub fn forget(&mut self) {
         *self = match self {
-            Self::Loading { .. } => Self::Loading { loaded: false },
+            Self::Loading { request, .. } => Self::Loading {
+                loaded: false,
+                request: *request,
+            },
             _ => Self::NotLoaded,
         };
+    }
+
+    /// A fetch is about to go out; an answer held stays readable.
+    pub fn begin(&mut self) {
+        *self = Self::Loading {
+            loaded: self.loaded(),
+            request: None,
+        };
+    }
+
+    /// The fetch went out as `request`.
+    pub fn sent(&mut self, request: crate::ids::RequestId) {
+        if let Self::Loading { loaded, .. } = *self {
+            *self = Self::Loading {
+                loaded,
+                request: Some(request),
+            };
+        }
+    }
+
+    /// The answer of `request` arrived. `false` (and nothing changes) when
+    /// it is not the fetch awaited.
+    pub fn answered(&mut self, request: Option<crate::ids::RequestId>) -> bool {
+        match *self {
+            Self::Loading {
+                request: Some(asked),
+                ..
+            } if Some(asked) == request => {
+                *self = Self::Loaded;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The fetch `request` failed; another request's error changes nothing.
+    pub fn fetch_failed(&mut self, request: Option<crate::ids::RequestId>) {
+        if let Self::Loading {
+            request: Some(asked),
+            ..
+        } = *self
+            && Some(asked) == request
+        {
+            *self = Self::Failed;
+        }
+    }
+
+    /// The fetch never left.
+    pub fn send_failed(&mut self) {
+        *self = Self::Failed;
     }
 }
 
@@ -322,8 +378,11 @@ pub enum GifSearch {
     Off,
     /// A search is shown, answered or not asked yet.
     Shown,
-    /// A page of the search is wanted or out.
-    Loading,
+    /// A page of the search is wanted (`None`) or out as `request`: the
+    /// bot lookup or the page, whichever the search waits for.
+    Loading {
+        request: Option<crate::ids::RequestId>,
+    },
     /// The last search page failed (or no search bot is known).
     Failed,
 }
@@ -335,24 +394,58 @@ impl GifSearch {
     }
 
     pub fn is_loading(self) -> bool {
-        self == Self::Loading
+        matches!(self, Self::Loading { .. })
+    }
+
+    /// A page is wanted; nothing is out yet.
+    pub fn wanted() -> Self {
+        Self::Loading { request: None }
+    }
+
+    /// The lookup or page went out as `request`.
+    pub fn sent(&mut self, request: crate::ids::RequestId) {
+        if matches!(self, Self::Loading { .. }) {
+            *self = Self::Loading {
+                request: Some(request),
+            };
+        }
     }
 
     pub fn failed(self) -> bool {
         self == Self::Failed
     }
 
-    /// A search page failed; nothing changes while the saved GIFs show.
-    pub fn fail(&mut self) {
+    /// A search page never left (or no search bot is known); nothing
+    /// changes while the saved GIFs show.
+    pub fn send_failed(&mut self) {
         if self.on() {
             *self = Self::Failed;
         }
     }
 
-    /// A search page arrived.
-    pub fn answered(&mut self) {
-        if self.on() {
-            *self = Self::Shown;
+    /// `request` failed: only the lookup or page the search waits for
+    /// fails it.
+    pub fn failed_for(&mut self, request: Option<crate::ids::RequestId>) {
+        if let Self::Loading {
+            request: Some(asked),
+        } = *self
+            && Some(asked) == request
+        {
+            *self = Self::Failed;
+        }
+    }
+
+    /// The page `request` arrived. `false` (and nothing changes) when it is
+    /// not the one the search waits for: an older search's page.
+    pub fn answered(&mut self, request: Option<crate::ids::RequestId>) -> bool {
+        match *self {
+            Self::Loading {
+                request: Some(asked),
+            } if Some(asked) == request => {
+                *self = Self::Shown;
+                true
+            }
+            _ => false,
         }
     }
 }
