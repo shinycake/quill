@@ -45,6 +45,14 @@ pub(super) struct PieZoom {
     pub window: (usize, usize),
     /// The selected days, as x indices.
     pub slider: Entity<SliderState>,
+    /// Redraws on a move; dropped with the pie.
+    _changes: Subscription,
+}
+
+/// The range slider with its subscription, so they drop together.
+pub(super) struct RangeSelector {
+    pub slider: Entity<SliderState>,
+    _changes: Subscription,
 }
 
 pub(super) struct ChartState {
@@ -53,7 +61,7 @@ pub(super) struct ChartState {
     pub(super) enabled: Vec<bool>,
     /// The visible range as x indices; `None` when the chart has no
     /// range selector.
-    pub(super) range: Option<Entity<SliderState>>,
+    pub(super) range: Option<RangeSelector>,
     /// The point the kit tooltip shows, set while the tooltip draws;
     /// a click on the plot zooms into it.
     pub(super) hovered: Rc<Cell<Option<usize>>>,
@@ -65,8 +73,6 @@ pub(super) struct ChartState {
     /// of lines or range rather than on every hover frame.
     shown_points: PointsCache,
     all_points: PointsCache,
-    _range_changes: Option<Subscription>,
-    _pie_changes: Option<Subscription>,
 }
 
 /// A range slider over x indices `min..=max` starting at `value`.
@@ -116,8 +122,6 @@ impl ChartState {
             focus: cx.focus_handle(),
             shown_points: PointsCache::default(),
             all_points: PointsCache::default(),
-            _range_changes: None,
-            _pie_changes: None,
         };
         state.reset_range(cx);
         state
@@ -127,18 +131,20 @@ impl ChartState {
         let len = self.chart.x.len();
         if self.chart.footer_hidden || len < 2 {
             self.range = None;
-            self._range_changes = None;
             return;
         }
         let back = len - 1;
         let (first, last) = self.chart.default_zoom;
         let (first, last) = (first.min(back), last.min(back));
         let slider = index_slider(0, back, (first.min(last), first.max(last)), cx);
-        self._range_changes = Some(cx.subscribe(&slider, |state, _, _: &SliderEvent, cx| {
+        let changes = cx.subscribe(&slider, |state, _, _: &SliderEvent, cx| {
             state.key_point = None;
             cx.notify();
-        }));
-        self.range = Some(slider);
+        });
+        self.range = Some(RangeSelector {
+            slider,
+            _changes: changes,
+        });
     }
 
     /// Called on every render: a refreshed graph of different data
@@ -154,7 +160,6 @@ impl ChartState {
             self.enabled = chart.lines.iter().map(|l| !l.hidden_on_start).collect();
             self.key_point = None;
             self.pie = None;
-            self._pie_changes = None;
             self.reset_range(cx);
         }
         self.shown_points = PointsCache::default();
@@ -177,10 +182,10 @@ impl ChartState {
     /// The first and last point shown.
     pub(super) fn visible(&self, cx: &App) -> (usize, usize) {
         let back = self.chart.x.len().saturating_sub(1);
-        let Some(slider) = self.range.as_ref() else {
+        let Some(range) = self.range.as_ref() else {
             return (0, back);
         };
-        let (first, last) = slider_indices(slider.read(cx), 0, back);
+        let (first, last) = slider_indices(range.slider.read(cx), 0, back);
         // One point is no range: keep at least two in view.
         if first == last && back > 0 {
             if last < back {
@@ -230,15 +235,18 @@ impl ChartState {
         let window = local_zoom_window(self.chart.x.len(), index);
         let at = index.clamp(window.0, window.1);
         let slider = index_slider(window.0, window.1, (at, at), cx);
-        self._pie_changes = Some(cx.subscribe(&slider, |_, _, _: &SliderEvent, cx| cx.notify()));
-        self.pie = Some(PieZoom { window, slider });
+        let changes = cx.subscribe(&slider, |_, _, _: &SliderEvent, cx| cx.notify());
+        self.pie = Some(PieZoom {
+            window,
+            slider,
+            _changes: changes,
+        });
         self.key_point = None;
         cx.notify();
     }
 
     pub(super) fn exit_pie(&mut self, cx: &mut Context<Self>) {
         if self.pie.take().is_some() {
-            self._pie_changes = None;
             cx.notify();
         }
     }

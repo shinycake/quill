@@ -42,7 +42,7 @@ impl QuillApp {
     /// A text field of the viewer owns the keyboard: Space and the arrows
     /// belong to it, not to playback.
     pub(super) fn story_text_input_open(&self, window: &Window, cx: &App) -> bool {
-        self.stories.viewer_ui().reply_open
+        self.stories.viewer_ui().reply_is_open()
             || self.stories.viewer_ui().report_open
             || self.stories.viewer_ui().share_open
             || self.stories.viewer_ui().close_friends.is_open()

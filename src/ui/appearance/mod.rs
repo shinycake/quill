@@ -78,11 +78,7 @@ impl QuillApp {
     pub(super) fn keybinding_capture_active(&mut self) -> bool {
         let shown = self.settings.open
             && self.settings.page == Some(quill::settings_catalog::Page::Shortcuts);
-        super::keybindings::capture_active(
-            shown,
-            &mut self.preferences.keybinding_capture,
-            &mut self.preferences.keybinding_error,
-        )
+        self.preferences.keybinding.capture_active(shown)
     }
 
     /// The app's own prefs folder (`<app root>/app`). Appearance is a
@@ -157,7 +153,7 @@ impl QuillApp {
         let accent = quill::system_accent::effective(
             self.appearance.accent_rgb,
             self.appearance.system_accent,
-            self.preferences.system_accent,
+            self.preferences.system_accent.color(),
         );
         let scale = self.appearance.interface_scale_pct;
         let family = super::appearance_power::interface_font(&self.appearance.font_family, cx);

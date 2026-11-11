@@ -204,20 +204,21 @@ fn a_closed_boxs_video_pick_opens_no_editor(cx: &mut TestAppContext) {
     let h = new_app(cx);
     in_window(&h, h.main, None, cx, |app, window, cx| {
         app.message_ui.menu_ui.sticker_set_open = false;
-        app.sticker_box.pending_video = Some(PendingVideo {
-            pick: PickExisting {
-                set_id: 78,
-                kind: SetKind::Stickers,
-                adapt: false,
-            },
-            file_id: quill::ids::FileId(5),
-            file: PickedFile::Video,
-            emoji: None,
-            window: None,
-        });
+        app.sticker_box.pending =
+            crate::ui::sticker_set_box::state::PickWait::Downloading(PendingVideo {
+                pick: PickExisting {
+                    set_id: 78,
+                    kind: SetKind::Stickers,
+                    adapt: false,
+                },
+                file_id: quill::ids::FileId(5),
+                file: PickedFile::Video,
+                emoji: None,
+                window: None,
+            });
         app.sticker_box_window_upkeep(window, cx);
         assert!(
-            app.sticker_box.pending_video.is_none(),
+            app.sticker_box.pending.downloading().is_none(),
             "the pick is dropped"
         );
         assert!(app.composer_ui.send_box.video_editor.is_none());

@@ -228,6 +228,21 @@ impl ComposerStage {
     }
 }
 
+/// What the composer is for. Edit and repost are exclusive; each carries
+/// `(poster_chat_id, story_id)` of the story it works on.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ComposerMode {
+    #[default]
+    New,
+    /// Phase 9.5: the source story, sent as `postStory.from_story_full_id`
+    /// (`td_api.tl:13715`).
+    Repost(i64, i32),
+    /// Phase 9.5: the posted story being edited (`editStory`,
+    /// `td_api.tl:13732`). The media path is optional (empty = keep
+    /// current content); caption + areas are prefilled from the story.
+    Edit(i64, i32),
+}
+
 /// Composer state. Pure (no GPUI); the UI layer owns the text inputs and
 /// syncs them into this before posting.
 #[derive(Debug, Clone, Default)]
@@ -250,15 +265,8 @@ pub struct StoryComposer {
     /// UI-local validation / flow error (no valid media path yet, no
     /// users selected, demo mode, …). Cleared on open.
     pub local_error: Option<String>,
-    /// Phase 9.5: edit mode — `(poster_chat_id, story_id)` of the posted
-    /// story being edited (`editStory`, `td_api.tl:13732`). The media path
-    /// is optional (empty = keep current content); caption + areas are
-    /// prefilled from the story.
-    pub edit_target: Option<(i64, i32)>,
-    /// Phase 9.5: repost mode — `(poster_chat_id, story_id)` of the
-    /// source story; sent as `postStory.from_story_full_id`
-    /// (`td_api.tl:13715`).
-    pub repost_source: Option<(i64, i32)>,
+    /// What the composer posts: a new story, a repost or an edit.
+    pub mode: ComposerMode,
     /// Phase 9.5: post on behalf of this chat (`getChatsToPostStories`,
     /// `td_api.tl:13698`); `None` = the current user's own stories.
     /// Privacy is server-ignored for channel/supergroup posts, so the UI
@@ -278,7 +286,7 @@ impl StoryComposer {
     pub fn open_edit(poster_chat_id: i64, story_id: i32) -> Self {
         Self {
             open: true,
-            edit_target: Some((poster_chat_id, story_id)),
+            mode: ComposerMode::Edit(poster_chat_id, story_id),
             ..Default::default()
         }
     }
@@ -287,14 +295,31 @@ impl StoryComposer {
     pub fn open_repost(poster_chat_id: i64, story_id: i32) -> Self {
         Self {
             open: true,
-            repost_source: Some((poster_chat_id, story_id)),
+            mode: ComposerMode::Repost(poster_chat_id, story_id),
             ..Default::default()
         }
     }
 
     /// Phase 9.5: true in edit mode — the media path may be empty (keep).
     pub fn is_edit(&self) -> bool {
-        self.edit_target.is_some()
+        matches!(self.mode, ComposerMode::Edit(..))
+    }
+
+    /// Edit mode: `(poster_chat_id, story_id)` of the posted story.
+    pub fn edit_target(&self) -> Option<(i64, i32)> {
+        match self.mode {
+            ComposerMode::Edit(chat, story) => Some((chat, story)),
+            _ => None,
+        }
+    }
+
+    /// Repost mode: `(poster_chat_id, story_id)` of the source story, sent
+    /// as `postStory.from_story_full_id` (`td_api.tl:13715`).
+    pub fn repost_source(&self) -> Option<(i64, i32)> {
+        match self.mode {
+            ComposerMode::Repost(chat, story) => Some((chat, story)),
+            _ => None,
+        }
     }
 
     pub fn close(&mut self) {
@@ -550,11 +575,11 @@ mod tests {
     fn edit_and_repost_modes() {
         let c = StoryComposer::open_edit(11, 5);
         assert!(c.open && c.is_edit());
-        assert_eq!(c.edit_target, Some((11, 5)));
-        assert_eq!(c.repost_source, None);
+        assert_eq!(c.edit_target(), Some((11, 5)));
+        assert_eq!(c.repost_source(), None);
         let c = StoryComposer::open_repost(22, 3);
         assert!(c.open && !c.is_edit());
-        assert_eq!(c.repost_source, Some((22, 3)));
+        assert_eq!(c.repost_source(), Some((22, 3)));
         assert_eq!(c.as_chat_id, None);
     }
 }

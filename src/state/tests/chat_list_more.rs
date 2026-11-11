@@ -182,6 +182,26 @@ fn cl2_archive_settings_fetch_stores_and_set_rolls_back() {
 }
 
 #[test]
+fn a_refused_archive_settings_fetch_leaves_loading() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request(RequestPurpose::GetArchiveChatListSettings, None);
+    session.chat_list.archive_settings.begin();
+    assert!(session.chat_list.archive_settings.is_loading());
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"INTERNAL"}}"#,
+            extra.0
+        ),
+    );
+    assert!(!session.chat_list.archive_settings.is_loading());
+    assert!(session.chat_list.archive_settings.error().is_some());
+}
+
+#[test]
 fn cl2_mark_all_read_and_clear_recents_errors_surface() {
     // Slice CL2: refused `readChatList` / `clearRecentlyFoundChats`
     // surface in `chat_action_error` — never silent.

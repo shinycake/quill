@@ -319,7 +319,7 @@ fn renaming_and_deleting_name_the_set_by_its_short_name() {
     feed(&mut driver, &seq, &sink, ok(extra));
     assert!(edits(&driver).refresh_needed);
     assert!(
-        !driver.session.stickers.stickers.installed_loaded,
+        !driver.session.stickers.stickers.installed_loaded(),
         "the installed list is fetched again so the panel shows the new name"
     );
 

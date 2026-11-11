@@ -85,7 +85,7 @@ impl QuillApp {
         self.sticker_box
             .rename_input
             .update(cx, |input, cx| input.set_value(&title, window, cx));
-        self.sticker_box.rename_open = true;
+        self.sticker_box.confirm = crate::ui::sticker_set_box::state::SetConfirm::Rename;
         cx.notify();
     }
 
@@ -105,20 +105,21 @@ impl QuillApp {
         {
             *current = title;
         }
-        self.sticker_box.rename_open = false;
+        self.sticker_box.confirm.close_rename();
         cx.notify();
         true
     }
 
     /// A cell's "Delete sticker": the confirmation box.
     pub(super) fn ask_delete_sticker(&mut self, item: StickerItem, cx: &mut Context<Self>) {
-        self.sticker_box.delete_sticker = Some(item);
+        self.sticker_box.confirm =
+            crate::ui::sticker_set_box::state::SetConfirm::DeleteSticker(item);
         cx.notify();
     }
 
     /// "Delete" in that box.
     pub(super) fn confirm_delete_sticker(&mut self, set_id: i64, cx: &mut Context<Self>) {
-        let Some(item) = self.sticker_box.delete_sticker.take() else {
+        let Some(item) = self.sticker_box.confirm.close_delete_sticker() else {
             return;
         };
         if let Some(live) = self.live.as_mut() {
@@ -142,7 +143,7 @@ impl QuillApp {
 
     /// "Remove" in "Delete for Everyone": the set is gone for good.
     pub(super) fn confirm_delete_set_everyone(&mut self, set_id: i64, cx: &mut Context<Self>) {
-        self.sticker_box.delete_set_open = false;
+        self.sticker_box.confirm.close_delete_set();
         if let Some(live) = self.live.as_mut() {
             if live.driver.delete_owned_sticker_set(set_id).is_err() {
                 self.set_note(StatusNote::error(tr(keys::Q_MEDIA_COULDNT_DELETE_THE_SET)));
@@ -155,7 +156,7 @@ impl QuillApp {
 
     /// "Remove" in "Delete for Myself": the set is uninstalled.
     pub(super) fn confirm_remove_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
-        self.sticker_box.remove_set_open = false;
+        self.sticker_box.confirm.close_remove_set();
         self.toggle_viewed_sticker_set(set_id, false, cx);
     }
 
@@ -409,8 +410,7 @@ impl QuillApp {
             return;
         };
         // This pick replaces any earlier one still decoding or downloading.
-        self.sticker_box.pending_still = None;
-        self.sticker_box.pending_video = None;
+        self.sticker_box.pending = crate::ui::sticker_set_box::state::PickWait::None;
         if !pick.adapt {
             self.sticker_box.pick = None;
             self.add_existing_to_owned_set(pick.set_id, pick.kind, item, cx);
@@ -437,13 +437,16 @@ impl QuillApp {
                     if let Some(live) = self.live.as_mut() {
                         let _ = live.driver.download_file(file_id, 16);
                     }
-                    self.sticker_box.pending_video = Some(super::state::PendingVideo {
-                        pick,
-                        file_id,
-                        file: super::state::PickedFile::Still(item.format),
-                        emoji: None,
-                        window: self.windows.scope,
-                    });
+                    self.sticker_box.pending =
+                        crate::ui::sticker_set_box::state::PickWait::Downloading(
+                            super::state::PendingVideo {
+                                pick,
+                                file_id,
+                                file: super::state::PickedFile::Still(item.format),
+                                emoji: None,
+                                window: self.windows.scope,
+                            },
+                        );
                     cx.notify();
                     return;
                 }
@@ -461,7 +464,7 @@ impl QuillApp {
         format: StickerFormat,
         cx: &mut Context<Self>,
     ) {
-        self.sticker_box.pending_still = Some((pick, file_id));
+        self.sticker_box.pending = super::state::PickWait::Decoding(pick, file_id);
         let path = self.local_media_path(file_id);
         self.run_off_ui_scoped_then(
             move || {
@@ -483,10 +486,9 @@ impl QuillApp {
         pixels: Option<image::RgbaImage>,
         cx: &mut Context<Self>,
     ) {
-        if self.sticker_box.pending_still != Some((pick, file_id)) {
+        if !self.sticker_box.pending.finish_decoding(pick, file_id) {
             return;
         }
-        self.sticker_box.pending_still = None;
         self.edit_pixels_for_set(pick.set_id, pick.kind, pixels, cx);
     }
 

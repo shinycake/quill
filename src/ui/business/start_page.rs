@@ -174,12 +174,12 @@ impl QuillApp {
     /// The hello sticker a start page without its own sticker shows.
     pub(super) fn business_random_greeting(&mut self, seed: i64) -> Option<StickerItem> {
         let session = self.session()?;
-        if !session.stickers.stickers.greeting_loaded
+        if session.stickers.stickers.greeting.is_idle()
             && let Some(live) = self.live.as_mut()
         {
             let _ = live.driver.fetch_greeting_stickers();
         }
-        let list = &self.session()?.stickers.stickers.greeting;
+        let list = self.session()?.stickers.stickers.greeting.data()?;
         let at = (seed.unsigned_abs() as usize).checked_rem(list.len())?;
         list.get(at).cloned()
     }

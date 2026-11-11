@@ -145,12 +145,22 @@ fn ns_window(window: &Window) -> Option<Retained<NSWindow>> {
 }
 
 struct SyncState {
-    pending: Cell<bool>,
+    /// The throttled sync: holding its task is the scheduled stage.
+    sync: RefCell<SyncStage>,
     /// The composer entity a selection change is followed on. Every account
     /// on screen has its own, so a sync that finds another one follows it.
     followed_composer: Cell<Option<EntityId>>,
     /// The recent emoji the emoji list was built from, and that list.
     emoji: RefCell<(Option<Vec<String>>, Rc<Vec<super::model::PickerItem>>)>,
+}
+
+/// Whether a sync waits out its throttle.
+enum SyncStage {
+    Idle,
+    Scheduled {
+        /// Dropping the state drops the task and with it the sync.
+        _task: gpui_kit::Task<()>,
+    },
 }
 
 /// Demo capture asked for a picture of the bars.
@@ -193,7 +203,7 @@ pub(super) fn install(demo: bool, window: &mut Window, cx: &mut Context<QuillApp
     });
     forget_applied();
     let state = Rc::new(SyncState {
-        pending: Cell::new(false),
+        sync: RefCell::new(SyncStage::Idle),
         followed_composer: Cell::new(None),
         emoji: RefCell::new((None, Rc::default())),
     });
@@ -228,23 +238,26 @@ pub(super) fn install(demo: bool, window: &mut Window, cx: &mut Context<QuillApp
     let schedule = {
         let state = state.clone();
         move |cx: &mut Context<QuillApp>| {
-            if state.pending.get() {
+            if matches!(*state.sync.borrow(), SyncStage::Scheduled { .. }) {
                 return;
             }
             let has_host = HOST.with(|host| host.try_borrow().is_ok_and(|host| host.is_some()));
             if !enabled() && !has_host {
                 return;
             }
-            state.pending.set(true);
-            let state = state.clone();
-            cx.spawn(async move |this, cx| {
+            let task_state = state.clone();
+            let task = cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(SYNC_THROTTLE).await;
-                state.pending.set(false);
+                // The finished stage (this task's own handle) is dropped at
+                // the end, not while it runs.
+                let _finished = task_state.sync.replace(SyncStage::Idle);
                 let _ = handle.update(cx, |_, window, cx| {
-                    let _ = this.update(cx, |app, cx| sync(app, window, cx, &state));
+                    let _ = this.update(cx, |app, cx| sync(app, window, cx, &task_state));
                 });
-            })
-            .detach();
+            });
+            if let Ok(mut stage) = state.sync.try_borrow_mut() {
+                *stage = SyncStage::Scheduled { _task: task };
+            }
         }
     };
     let shared: Rc<dyn Fn(&mut Context<QuillApp>)> = Rc::new(schedule.clone());

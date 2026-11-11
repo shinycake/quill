@@ -99,17 +99,17 @@ impl QuillApp {
 
     pub(super) fn select_wallet_nft(&mut self, address: Option<String>, cx: &mut Context<Self>) {
         if let Some(wallet) = self.ton_wallet_mut() {
-            wallet.money.selected_nft = address;
-            wallet.money.selected_tx = None;
+            wallet.money.view = match address {
+                Some(address) => quill::ton_wallet::MoneyView::Nft(address),
+                None => quill::ton_wallet::MoneyView::Overview,
+            };
         }
         cx.notify();
     }
 
     pub(super) fn money_back(&mut self, cx: &mut Context<Self>) {
         if let Some(wallet) = self.ton_wallet_mut() {
-            wallet.money.selected_tx = None;
-            wallet.money.selected_nft = None;
-            wallet.money.tx_lookup = quill::ton_wallet::TxLookup::Idle;
+            wallet.money.view = quill::ton_wallet::MoneyView::Overview;
         }
         cx.notify();
     }
@@ -197,11 +197,11 @@ impl QuillApp {
             let money = &session.ton_wallet.money;
             let body = if money.hint_open {
                 super::ton_wallet_details::first_grams_hint(&session.ton_wallet, cx)
-            } else if let Some(tx) = money.selected_tx.as_ref() {
+            } else if let Some(tx) = money.selected_tx() {
                 super::ton_wallet_details::tx_details(session, tx, &roots, cx)
             } else if let Some(nft) = money.selected_nft() {
                 super::ton_wallet_details::nft_details(session, nft, &roots, cx)
-            } else if money.tx_lookup != quill::ton_wallet::TxLookup::Idle {
+            } else if matches!(money.view, quill::ton_wallet::MoneyView::Lookup(_)) {
                 super::ton_wallet_details::tx_lookup_state(money.tx_error(), cx)
             } else {
                 overview(session, &roots, cx)
@@ -383,16 +383,16 @@ fn overview(
     body = body.child(tabs);
     let (loading, loaded, error, empty, more) = match money.tab {
         MoneyTab::Transactions => (
-            money.history.loading,
-            money.history.loaded,
-            money.history.error.clone(),
+            money.history.loading(),
+            money.history.loaded(),
+            money.history.error().map(str::to_string),
             money.history.items.is_empty(),
             money.history.has_more(),
         ),
         MoneyTab::Collectibles => (
-            money.nfts.loading,
-            money.nfts.loaded,
-            money.nfts.error.clone(),
+            money.nfts.loading(),
+            money.nfts.loaded(),
+            money.nfts.error().map(str::to_string),
             money.nfts.items.is_empty(),
             money.nfts.has_more(),
         ),

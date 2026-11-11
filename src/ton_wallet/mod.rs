@@ -111,10 +111,10 @@ pub enum ProfileAddress {
 pub struct Paged<T> {
     pub items: Vec<T>,
     pub next_offset: String,
-    pub loading: bool,
-    /// The first page arrived (an empty list then means "nothing yet").
-    pub loaded: bool,
-    pub error: Option<String>,
+    /// The page request: the first page arriving makes it `Ready` (an
+    /// empty list then means "nothing yet"); a later request or failure
+    /// keeps the list shown.
+    pub fetch: Fetch<()>,
 }
 
 impl<T> Default for Paged<T> {
@@ -122,9 +122,7 @@ impl<T> Default for Paged<T> {
         Self {
             items: Vec::new(),
             next_offset: String::new(),
-            loading: false,
-            loaded: false,
-            error: None,
+            fetch: Fetch::Idle,
         }
     }
 }
@@ -137,19 +135,29 @@ impl<T> Paged<T> {
         }
         self.items.extend(items);
         self.next_offset = next_offset;
-        self.loading = false;
-        self.loaded = true;
-        self.error = None;
+        self.fetch.succeed(());
     }
 
     /// The request failed: stop loading and keep what is shown.
     pub fn fail(&mut self, error: String) {
-        self.loading = false;
-        self.error = Some(error);
+        self.fetch.fail(error);
+    }
+
+    pub fn loading(&self) -> bool {
+        self.fetch.is_loading()
+    }
+
+    /// The first page arrived.
+    pub fn loaded(&self) -> bool {
+        self.fetch.data().is_some()
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        self.fetch.error()
     }
 
     pub fn has_more(&self) -> bool {
-        self.loaded && !self.next_offset.is_empty()
+        self.loaded() && !self.next_offset.is_empty()
     }
 }
 
@@ -168,24 +176,32 @@ pub struct MoneyPage {
     pub tab: MoneyTab,
     pub history: Paged<WalletTx>,
     pub nfts: Paged<WalletNft>,
-    /// The transaction whose details are shown.
-    pub selected_tx: Option<WalletTx>,
-    /// The NFT whose details are shown (by address).
-    pub selected_nft: Option<String>,
-    /// The lookup of a clicked transfer card's transaction.
-    pub tx_lookup: TxLookup,
+    /// The list, or what replaces it.
+    pub view: MoneyView,
     /// The "Your first Grams!" info is up over the details.
     pub hint_open: bool,
 }
 
-/// A clicked transfer card's transaction lookup. The answer shows the
-/// details only while the lookup is `Loading` for the request that answers;
-/// "back" or another click replaces it, so a late answer for an earlier
-/// card is dropped.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum TxLookup {
+/// What the Money page shows in place of its lists. Each way back to the
+/// overview is `back` or the other tab; a lookup's answer shows the details
+/// only while the view is `Lookup(Loading)` for the request that answers, so
+/// a late answer for an earlier card is dropped.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum MoneyView {
     #[default]
-    Idle,
+    Overview,
+    /// A clicked transfer card's transaction is looked up (or the lookup
+    /// failed).
+    Lookup(TxLookup),
+    /// The transaction whose details are shown.
+    Tx(WalletTx),
+    /// The NFT whose details are shown (by address).
+    Nft(String),
+}
+
+/// A clicked transfer card's transaction lookup.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TxLookup {
     Loading {
         request: crate::ids::RequestId,
     },
@@ -196,21 +212,31 @@ pub enum TxLookup {
 impl MoneyPage {
     /// Whether the card lookup waits for the answer of `request`.
     pub fn tx_lookup_waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
-        request.is_some_and(|id| self.tx_lookup == TxLookup::Loading { request: id })
+        request.is_some_and(|id| self.view == MoneyView::Lookup(TxLookup::Loading { request: id }))
     }
 
     /// The text of a failed lookup.
     pub fn tx_error(&self) -> Option<&str> {
-        match &self.tx_lookup {
-            TxLookup::Failed(text) => Some(text),
+        match &self.view {
+            MoneyView::Lookup(TxLookup::Failed(text)) => Some(text),
+            _ => None,
+        }
+    }
+
+    /// The transaction whose details are shown.
+    pub fn selected_tx(&self) -> Option<&WalletTx> {
+        match &self.view {
+            MoneyView::Tx(tx) => Some(tx),
             _ => None,
         }
     }
 
     /// The NFT whose details are shown.
     pub fn selected_nft(&self) -> Option<&WalletNft> {
-        let address = self.selected_nft.as_deref()?;
-        self.nfts.items.iter().find(|nft| nft.address == address)
+        let MoneyView::Nft(address) = &self.view else {
+            return None;
+        };
+        self.nfts.items.iter().find(|nft| &nft.address == address)
     }
 }
 

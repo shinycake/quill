@@ -167,7 +167,7 @@ fn ignoring_a_word_does_not_ask_the_backend_on_the_ui_thread(cx: &mut TestAppCon
     let backend = Arc::new(CountingBackend(Default::default()));
     app.update_in(&mut vcx, |app, _, cx| {
         app.spell.checker = Arc::new(SpellChecker::new(backend.clone()));
-        app.composer_ui.spelling.misspellings = vec![
+        app.composer_ui.spelling.underlines.found = vec![
             Misspelling {
                 word: "teh".into(),
                 start: 0,
@@ -183,7 +183,8 @@ fn ignoring_a_word_does_not_ask_the_backend_on_the_ui_thread(cx: &mut TestAppCon
         let left: Vec<_> = app
             .composer_ui
             .spelling
-            .misspellings
+            .underlines
+            .found
             .iter()
             .map(|m| m.word.as_str())
             .collect();

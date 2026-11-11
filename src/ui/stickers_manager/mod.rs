@@ -59,10 +59,16 @@ struct ManagerView {
     installed: Vec<StickerSetInfo>,
     trending: Vec<StickerSetInfo>,
     archived: Vec<StickerSetInfo>,
-    /// The list on screen is still being fetched.
-    loading: bool,
-    failed: bool,
+    status: ListStatus,
     unread: usize,
+}
+
+/// Where the list on screen is: fetching, failed, or what it holds.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ListStatus {
+    Loading,
+    Failed,
+    Shown,
 }
 
 impl QuillApp {
@@ -82,8 +88,7 @@ impl QuillApp {
                 installed: Vec::new(),
                 trending: Vec::new(),
                 archived: Vec::new(),
-                loading: false,
-                failed: false,
+                status: ListStatus::Shown,
                 unread: 0,
             };
         };
@@ -102,7 +107,7 @@ impl QuillApp {
                     ManagerTab::Archived => &panel.lists.archived,
                 };
                 let loading =
-                    list.is_loading() || tab == ManagerTab::Installed && !panel.installed_loaded;
+                    list.is_loading() || tab == ManagerTab::Installed && !panel.installed_loaded();
                 (
                     tab,
                     panel.sets.clone(),
@@ -156,15 +161,21 @@ impl QuillApp {
             installed,
             trending,
             archived,
-            loading,
-            failed,
+            status: if failed {
+                ListStatus::Failed
+            } else if loading {
+                ListStatus::Loading
+            } else {
+                ListStatus::Shown
+            },
             unread,
         }
     }
 
     /// Open the box on the installed stickers.
     pub(super) fn open_archived_stickers(&mut self, cx: &mut Context<Self>) {
-        self.settings.sticker_settings_open = true;
+        self.settings
+            .set_box(crate::ui::settings_state::SettingsBox::Stickers, true);
         self.open_box(DialogKind::ArchivedStickers);
         self.settings.sticker_manager.composer_tab = self
             .session()
@@ -200,7 +211,11 @@ impl QuillApp {
 
     /// Close the box and send what it changed (tdesktop `saveChanges`).
     pub(super) fn close_stickers_manager(&mut self, cx: &mut Context<Self>) {
-        let was_open = std::mem::replace(&mut self.settings.sticker_settings_open, false);
+        let was_open = self
+            .settings
+            .box_open(crate::ui::settings_state::SettingsBox::Stickers);
+        self.settings
+            .set_box(crate::ui::settings_state::SettingsBox::Stickers, false);
         self.finish_manager(Kind::Stickers);
         if let Some(live) = self.live.as_mut() {
             live.driver.close_sticker_panel();
@@ -452,9 +467,9 @@ impl QuillApp {
                 cx,
             ))
         });
-        let status = if view.failed {
+        let status = if view.status == ListStatus::Failed {
             Some(tr(keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN))
-        } else if view.loading && sets.is_empty() {
+        } else if view.status == ListStatus::Loading && sets.is_empty() {
             Some(tr(keys::CONTACTS_LOADING))
         } else if sets.is_empty() {
             Some(match (view.tab, kind) {
@@ -580,7 +595,7 @@ crate::ui::shell::register_dialogs! {
     /// Settings > Chats > "Manage sticker sets".
     ArchivedStickers => DialogSpec::new(
         5000,
-        |app| app.settings.sticker_settings_open,
+        |app| app.settings.box_open(crate::ui::settings_state::SettingsBox::Stickers),
         QuillApp::build_stickers_manager_dialog,
     )
     .close(|app, _, cx| app.close_stickers_manager(cx)),

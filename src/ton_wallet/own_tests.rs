@@ -197,17 +197,17 @@ fn wallet_state_hides_everything_when_the_option_is_off() {
 
 #[test]
 fn paged_lists_replace_then_append() {
-    let mut list: Paged<u8> = Paged {
-        loading: true,
-        ..Paged::default()
-    };
+    let mut list: Paged<u8> = Paged::default();
+    list.fetch.begin();
+    assert!(list.loading() && !list.loaded());
     list.apply(vec![1, 2], "next".into(), false);
-    assert!(list.has_more() && !list.loading);
+    assert!(list.has_more() && !list.loading());
     list.apply(vec![3], String::new(), true);
     assert_eq!(list.items, vec![1, 2, 3]);
     assert!(!list.has_more());
     list.fail("boom".into());
     assert_eq!(list.items.len(), 3);
+    assert!(list.loaded() && list.error() == Some("boom"));
     list.apply(vec![9], String::new(), false);
     assert_eq!(list.items, vec![9]);
 }

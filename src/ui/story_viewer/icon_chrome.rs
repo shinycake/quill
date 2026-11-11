@@ -482,7 +482,7 @@ impl QuillApp {
                 ))
                 .child(div().flex_1());
         } else {
-            if can_reply && !self.stories.viewer_ui().reply_open {
+            if can_reply && !self.stories.viewer_ui().reply_is_open() {
                 row = row.child(
                     div()
                         .id("story-reply")
@@ -554,7 +554,7 @@ impl QuillApp {
             );
         }
         let mut column = div().flex().flex_col().gap_2().items_center();
-        if self.stories.viewer_ui().reply_open && !interactions {
+        if self.stories.viewer_ui().reply_is_open() && !interactions {
             column = column.child(self.story_reply_row(cx));
         }
         column.child(row).into_any_element()

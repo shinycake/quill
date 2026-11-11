@@ -19,14 +19,23 @@ pub(super) type EmojiWarm = (Option<(quill::ids::ChatId, i32)>, Vec<i64>, usize,
 /// the deleted-story and passcode ones included, ends all of it, so the
 /// next viewer cannot open on the last story's editor and Save cannot
 /// send the old `(chat_id, story_id)`.
+/// The story reply row: closed, open for typing, or open with the shared
+/// emoji / sticker / GIF panel it opened. A recording started from the row
+/// is the recorder's (`CaptureFor::StoryReply`).
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ReplyRow {
+    #[default]
+    Closed,
+    Typing,
+    Panel,
+}
+
 #[derive(Default)]
 pub(crate) struct StoryViewerUi {
     /// Phase 9.2: story reaction picker open above the viewer overlay.
     pub(super) reaction_picker_open: bool,
-    /// Phase 9.2: story reply input open in the viewer overlay.
-    pub(super) reply_open: bool,
-    /// The shared emoji / sticker / GIF panel was opened from the reply row.
-    pub(super) reply_panel: bool,
+    /// Phase 9.2: the story reply row in the viewer overlay.
+    pub(super) reply: ReplyRow,
     /// Phase 9.5: viewers panel open in the viewer overlay
     /// (`getStoryInteractions`).
     pub(super) viewers_open: bool,
@@ -92,6 +101,38 @@ pub(super) enum ViewerPanel {
 }
 
 impl StoryViewerUi {
+    pub(super) fn reply_is_open(&self) -> bool {
+        self.reply != ReplyRow::Closed
+    }
+
+    /// The panel was opened from the open reply row.
+    pub(super) fn reply_panel_shown(&self) -> bool {
+        self.reply == ReplyRow::Panel
+    }
+
+    pub(super) fn open_reply(&mut self) {
+        if self.reply == ReplyRow::Closed {
+            self.reply = ReplyRow::Typing;
+        }
+    }
+
+    pub(super) fn close_reply(&mut self) {
+        self.reply = ReplyRow::Closed;
+    }
+
+    /// The panel opens from the row: a closed row has none.
+    pub(super) fn open_reply_panel(&mut self) {
+        if self.reply == ReplyRow::Typing {
+            self.reply = ReplyRow::Panel;
+        }
+    }
+
+    pub(super) fn close_reply_panel(&mut self) {
+        if self.reply == ReplyRow::Panel {
+            self.reply = ReplyRow::Typing;
+        }
+    }
+
     /// `keep` is being opened: every other panel closes. A call a closed
     /// panel already sent (`cover_request`, `privacy_request`, a saving
     /// close-friends list) stays tracked, so its answer still settles.
@@ -335,5 +376,28 @@ impl StoryUi {
             media_saves: std::collections::HashMap::new(),
             closed: StoryViewerUi::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod reply_tests {
+    use super::StoryViewerUi;
+
+    #[test]
+    fn the_panel_belongs_to_an_open_row_and_goes_with_it() {
+        let mut ui = StoryViewerUi::default();
+        ui.open_reply_panel();
+        assert!(!ui.reply_is_open(), "a closed row has no panel");
+        ui.open_reply();
+        ui.open_reply_panel();
+        assert!(ui.reply_is_open() && ui.reply_panel_shown());
+        ui.close_reply_panel();
+        assert!(ui.reply_is_open() && !ui.reply_panel_shown());
+        ui.open_reply_panel();
+        ui.close_reply();
+        assert!(!ui.reply_is_open() && !ui.reply_panel_shown());
+        // Reopening starts without the old panel.
+        ui.open_reply();
+        assert!(!ui.reply_panel_shown());
     }
 }

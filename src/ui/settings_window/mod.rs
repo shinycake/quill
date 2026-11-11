@@ -165,7 +165,9 @@ impl QuillApp {
         // wash or animation tick is left waiting for a row that is gone.
         self.settings.arrival = None;
         match page {
-            Page::Account => self.settings.log_out_confirm = false,
+            Page::Account => self
+                .settings
+                .set_box(crate::ui::settings_state::SettingsBox::LogOut, false),
             Page::Privacy => self.close_privacy_layers(),
             Page::Notifications => self.leave_notification_settings(),
             Page::Language => self.leave_language_settings(),
@@ -264,7 +266,7 @@ impl QuillApp {
             // Escape and Find are app-wide bindings: answered here first,
             // so they act on Settings rather than on the chats behind it.
             .on_action(cx.listener(|this, _: &CancelSearch, window, cx| {
-                if this.preferences.keybinding_capture.is_some() {
+                if this.preferences.keybinding.capture.waiting().is_some() {
                     return;
                 }
                 if this.search_field_focused(window, cx) {
@@ -419,7 +421,8 @@ crate::ui::screenshot_demo::register_demos![
         |app, _, cx| {
             app.demo_settings(Page::Account, cx);
             // box-host: demo
-            app.settings.log_out_confirm = true;
+            app.settings
+                .set_box(crate::ui::settings_state::SettingsBox::LogOut, true);
         }
     ),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-search").setup(

@@ -95,14 +95,28 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// B11: the hello stickers an empty private chat offers
     /// (`getGreetingStickers`), asked once per session.
     pub fn fetch_greeting_stickers(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if self.session.stickers.stickers.greeting_loaded {
+        // One attempt per session: asked only from `Idle`, so a failure
+        // does not retry on every frame.
+        if !self.session.stickers.stickers.greeting.is_idle() {
             return Ok(None);
         }
-        // One attempt per session: a failure must not retry on every frame.
-        self.session.stickers.stickers.greeting_loaded = true;
-        self.sticker_request(RequestPurpose::GetGreetingStickers, |id| {
+        let sent = self.sticker_request(RequestPurpose::GetGreetingStickers, |id| {
             crate::telegram::requests::get_greeting_stickers(id)
-        })
+        });
+        // The answer or the error leaves `Loading`; a request that never
+        // went out leaves it here.
+        match sent {
+            Ok(Some(_)) => self.session.stickers.stickers.greeting.begin(),
+            _ => self
+                .session
+                .stickers
+                .stickers
+                .greeting
+                .fail(crate::lang::tr(
+                    crate::lang::keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN,
+                )),
+        }
+        sent
     }
 
     /// Open the sticker panel and load installed regular sets
@@ -620,7 +634,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         if self.session.settings.media_prefs.sticker_suggest_mode
             == StickerSuggestMode::InstalledOnly
-            && !self.session.stickers.stickers.installed_loaded
+            && !self.session.stickers.stickers.installed_loaded()
         {
             drop(
                 self.session

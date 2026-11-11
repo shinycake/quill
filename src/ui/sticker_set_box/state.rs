@@ -113,15 +113,9 @@ pub(crate) struct StickerSetBoxUi {
     /// "Edit Stickers" was pressed: cells drag to reorder, the footer is
     /// "Done" (tdesktop `setReorderState`).
     pub(crate) reordering: bool,
-    /// The "Edit Sticker Set Name" box is open.
-    pub(crate) rename_open: bool,
+    /// The confirmation or rename box over the set box, if any.
+    pub(crate) confirm: SetConfirm,
     pub(crate) rename_input: Entity<InputState>,
-    /// The "Delete sticker" box, with the sticker it asks about.
-    pub(crate) delete_sticker: Option<StickerItem>,
-    /// "Delete for Everyone" confirmation.
-    pub(crate) delete_set_open: bool,
-    /// "Delete for Myself" confirmation.
-    pub(crate) remove_set_open: bool,
     /// The "New Sticker" / "New Emoji" box.
     pub(crate) create: Option<CreateSticker>,
     /// The box's "Done" is encoding a video sticker.
@@ -129,10 +123,118 @@ pub(crate) struct StickerSetBoxUi {
     pub(crate) emoji_search: Entity<InputState>,
     /// The existing-sticker chooser.
     pub(crate) pick: Option<PickExisting>,
-    /// A chosen video waiting for its download.
-    pub(crate) pending_video: Option<PendingVideo>,
-    /// A chosen still sticker being decoded for the editor.
-    pub(crate) pending_still: Option<(PickExisting, FileId)>,
+    /// A chosen sticker or video on its way to the editor.
+    pub(crate) pending: PickWait,
+}
+
+/// The box over the set box (kit dialogs never stack, so one at a time).
+#[derive(Debug, Default)]
+pub(crate) enum SetConfirm {
+    #[default]
+    None,
+    /// The "Edit Sticker Set Name" box.
+    Rename,
+    /// The "Delete sticker" box, with the sticker it asks about.
+    DeleteSticker(StickerItem),
+    /// "Delete for Everyone" confirmation.
+    DeleteSet,
+    /// "Delete for Myself" confirmation.
+    RemoveSet,
+}
+
+impl SetConfirm {
+    pub(crate) fn is_rename(&self) -> bool {
+        matches!(self, Self::Rename)
+    }
+
+    pub(crate) fn is_delete_set(&self) -> bool {
+        matches!(self, Self::DeleteSet)
+    }
+
+    pub(crate) fn is_remove_set(&self) -> bool {
+        matches!(self, Self::RemoveSet)
+    }
+
+    /// The sticker the "Delete sticker" box asks about.
+    pub(crate) fn delete_sticker(&self) -> Option<&StickerItem> {
+        match self {
+            Self::DeleteSticker(item) => Some(item),
+            _ => None,
+        }
+    }
+
+    /// Close the rename box; another box stays.
+    pub(crate) fn close_rename(&mut self) {
+        if self.is_rename() {
+            *self = Self::None;
+        }
+    }
+
+    /// Close the "Delete sticker" box, handing back its sticker.
+    pub(crate) fn close_delete_sticker(&mut self) -> Option<StickerItem> {
+        match std::mem::take(self) {
+            Self::DeleteSticker(item) => Some(item),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+
+    pub(crate) fn close_delete_set(&mut self) {
+        if self.is_delete_set() {
+            *self = Self::None;
+        }
+    }
+
+    pub(crate) fn close_remove_set(&mut self) {
+        if self.is_remove_set() {
+            *self = Self::None;
+        }
+    }
+}
+
+/// Where a chosen existing sticker is on its way to the editor: one pick
+/// at a time, so a new pick replaces whatever waited before it.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) enum PickWait {
+    #[default]
+    None,
+    /// The file is downloading.
+    Downloading(PendingVideo),
+    /// A still sticker is being decoded for the photo editor.
+    Decoding(PickExisting, FileId),
+}
+
+impl PickWait {
+    pub(crate) fn downloading(&self) -> Option<&PendingVideo> {
+        match self {
+            Self::Downloading(pending) => Some(pending),
+            _ => None,
+        }
+    }
+
+    /// Stop waiting for the download, handing back what waited.
+    pub(crate) fn take_downloading(&mut self) -> Option<PendingVideo> {
+        match std::mem::take(self) {
+            Self::Downloading(pending) => Some(pending),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+
+    /// Stop waiting for the decode of this pick; false when it is not the
+    /// one waited for (the box closed or another sticker was picked).
+    pub(crate) fn finish_decoding(&mut self, pick: PickExisting, file_id: FileId) -> bool {
+        if *self == Self::Decoding(pick, file_id) {
+            *self = Self::None;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 /// The video encode behind "Done": at most one runs, and only the job that
@@ -182,19 +284,15 @@ impl StickerSetBoxUi {
     pub(crate) fn new(window: &mut Window, cx: &mut App) -> Self {
         Self {
             reordering: false,
-            rename_open: false,
+            confirm: SetConfirm::None,
             rename_input: cx
                 .new(|cx| InputState::new(window, cx).placeholder(tr(keys::Q_MEDIA_SET_NAME))),
-            delete_sticker: None,
-            delete_set_open: false,
-            remove_set_open: false,
             create: None,
             encoding: Encoding::Idle,
             emoji_search: cx
                 .new(|cx| InputState::new(window, cx).placeholder(tr(keys::Q_MEDIA_SEARCH_EMOJI))),
             pick: None,
-            pending_video: None,
-            pending_still: None,
+            pending: PickWait::None,
         }
     }
 
@@ -210,14 +308,10 @@ impl StickerSetBoxUi {
     /// Leave every editing flow (the box closed or changed set).
     pub(crate) fn reset(&mut self) {
         self.reordering = false;
-        self.rename_open = false;
-        self.delete_sticker = None;
-        self.delete_set_open = false;
-        self.remove_set_open = false;
+        self.confirm = SetConfirm::None;
         self.discard_create();
         self.pick = None;
-        self.pending_video = None;
-        self.pending_still = None;
+        self.pending = PickWait::None;
     }
 }
 
@@ -257,5 +351,49 @@ mod encoding_tests {
         assert!(encoding.is_running());
         assert!(encoding.finish(&newer));
         assert!(!encoding.is_running());
+    }
+}
+
+#[cfg(test)]
+mod confirm_tests {
+    use super::{PickExisting, PickWait, SetConfirm, SetKind};
+    use quill::ids::FileId;
+
+    fn pick() -> PickExisting {
+        PickExisting {
+            set_id: 7,
+            kind: SetKind::Stickers,
+            adapt: false,
+        }
+    }
+
+    #[test]
+    fn closing_one_box_leaves_another_open() {
+        let mut confirm = SetConfirm::DeleteSet;
+        confirm.close_rename();
+        confirm.close_remove_set();
+        assert!(
+            confirm.is_delete_set(),
+            "another box's close is not its own"
+        );
+        confirm.close_delete_set();
+        assert!(matches!(confirm, SetConfirm::None));
+    }
+
+    #[test]
+    fn opening_a_box_replaces_the_one_under_it() {
+        let mut confirm = SetConfirm::Rename;
+        assert!(confirm.is_rename());
+        confirm = SetConfirm::RemoveSet;
+        assert!(!confirm.is_rename() && confirm.is_remove_set());
+    }
+
+    #[test]
+    fn a_new_pick_replaces_the_one_waiting_and_only_its_own_decode_lands() {
+        let mut wait = PickWait::Decoding(pick(), FileId(1));
+        assert!(!wait.finish_decoding(pick(), FileId(2)), "another sticker");
+        assert!(wait.finish_decoding(pick(), FileId(1)));
+        assert_eq!(wait, PickWait::None);
+        assert!(!wait.finish_decoding(pick(), FileId(1)), "already landed");
     }
 }

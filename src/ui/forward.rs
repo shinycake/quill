@@ -148,7 +148,6 @@ impl QuillApp {
         if !self.selection_forwardable(draft.from_chat_id) || !self.share.forward.open_picker() {
             return;
         }
-        self.share.focus_search = true;
         self.share.selection.clear();
         self.share
             .comment_input

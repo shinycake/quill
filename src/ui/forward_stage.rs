@@ -17,6 +17,8 @@
 use quill::composer::ForwardDraft;
 use quill::ids::ChatId;
 
+use super::mount::Mount;
+
 /// The forward being built in one window.
 #[derive(Debug, Default)]
 pub(crate) enum ForwardStage {
@@ -30,9 +32,13 @@ pub(crate) enum ForwardStage {
     /// forward bar the box was opened over ("Change recipient"), which
     /// leaving the box returns to; `None`: the box was opened from a
     /// selection, which leaving it returns to.
+    ///
+    /// `mount` is the box's own opening stage: its search field takes focus
+    /// on the first draw after the dialog has mounted.
     Picking {
         draft: ForwardDraft,
         bar: Option<ChatId>,
+        mount: Mount,
     },
     /// One destination chosen: the forward bar waits above `dest`'s
     /// composer, and Send forwards (the typed comment first). No selection
@@ -42,7 +48,8 @@ pub(crate) enum ForwardStage {
     /// the forward that was there (never `Picking` or another chooser:
     /// [`Self::open_reply_chooser`] builds it). Opening the forward box
     /// ends it; closing it returns to what is under it.
-    ReplyChooser(Box<ForwardStage>),
+    /// The `Mount` is the chooser's opening stage, as in `Picking`.
+    ReplyChooser(Box<ForwardStage>, Mount),
 }
 
 impl ForwardStage {
@@ -51,7 +58,7 @@ impl ForwardStage {
     pub(crate) fn draft(&self) -> Option<&ForwardDraft> {
         match self {
             Self::None => None,
-            Self::ReplyChooser(under) => under.draft(),
+            Self::ReplyChooser(under, _) => under.draft(),
             Self::Selecting(draft) | Self::Picking { draft, .. } | Self::Bar { draft, .. } => {
                 Some(draft)
             }
@@ -63,7 +70,7 @@ impl ForwardStage {
     pub(crate) fn draft_mut(&mut self) -> Option<&mut ForwardDraft> {
         match self {
             Self::None => None,
-            Self::ReplyChooser(under) => under.draft_mut(),
+            Self::ReplyChooser(under, _) => under.draft_mut(),
             Self::Selecting(draft) | Self::Picking { draft, .. } | Self::Bar { draft, .. } => {
                 Some(draft)
             }
@@ -75,9 +82,9 @@ impl ForwardStage {
     pub(crate) fn selection_mut(&mut self) -> Option<&mut ForwardDraft> {
         *self = match std::mem::take(self) {
             Self::Bar { draft, .. } => Self::Selecting(draft),
-            Self::ReplyChooser(mut under) => {
+            Self::ReplyChooser(mut under, mount) => {
                 under.selection_mut();
-                Self::ReplyChooser(under)
+                Self::ReplyChooser(under, mount)
             }
             other => other,
         };
@@ -91,7 +98,7 @@ impl ForwardStage {
 
     /// "Reply in Another Chat"'s chooser is open.
     pub(crate) fn reply_chooser_open(&self) -> bool {
-        matches!(self, Self::ReplyChooser(_))
+        matches!(self, Self::ReplyChooser(..))
     }
 
     /// Open the reply chooser: a forward box open now closes first (back to
@@ -99,8 +106,8 @@ impl ForwardStage {
     pub(crate) fn open_reply_chooser(&mut self) {
         self.close_picker();
         *self = match std::mem::take(self) {
-            chooser @ Self::ReplyChooser(_) => chooser,
-            under => Self::ReplyChooser(Box::new(under)),
+            chooser @ Self::ReplyChooser(..) => chooser,
+            under => Self::ReplyChooser(Box::new(under), Mount::Mounting),
         };
     }
 
@@ -108,7 +115,7 @@ impl ForwardStage {
     /// was open.
     pub(crate) fn close_reply_chooser(&mut self) -> bool {
         match std::mem::take(self) {
-            Self::ReplyChooser(under) => {
+            Self::ReplyChooser(under, _) => {
                 *self = *under;
                 true
             }
@@ -116,6 +123,16 @@ impl ForwardStage {
                 *self = other;
                 false
             }
+        }
+    }
+
+    /// The first draw of an opened box (or reply chooser) asks: true once
+    /// per opening, so its search field takes focus after the dialog has
+    /// mounted. The opening stage is the box's own; nothing sets it by hand.
+    pub(crate) fn take_first_draw(&mut self) -> bool {
+        match self {
+            Self::Picking { mount, .. } | Self::ReplyChooser(_, mount) => mount.take_first_draw(),
+            _ => false,
         }
     }
 
@@ -129,7 +146,7 @@ impl ForwardStage {
         match self {
             Self::Bar { dest, .. } => Some(*dest),
             Self::Picking { bar, .. } => *bar,
-            Self::ReplyChooser(under) => under.bar_dest(),
+            Self::ReplyChooser(under, _) => under.bar_dest(),
             Self::None | Self::Selecting(_) => None,
         }
     }
@@ -138,7 +155,7 @@ impl ForwardStage {
     pub(crate) fn bar_shown(&self) -> Option<ChatId> {
         match self {
             Self::Bar { dest, .. } => Some(*dest),
-            Self::ReplyChooser(under) => under.bar_shown(),
+            Self::ReplyChooser(under, _) => under.bar_shown(),
             _ => None,
         }
     }
@@ -147,8 +164,11 @@ impl ForwardStage {
     /// was picked in (the box may be open over it).
     pub(crate) fn selection(&self) -> Option<&ForwardDraft> {
         match self {
-            Self::Selecting(draft) | Self::Picking { draft, bar: None } => Some(draft),
-            Self::ReplyChooser(under) => under.selection(),
+            Self::Selecting(draft)
+            | Self::Picking {
+                draft, bar: None, ..
+            } => Some(draft),
+            Self::ReplyChooser(under, _) => under.selection(),
             _ => None,
         }
     }
@@ -158,9 +178,9 @@ impl ForwardStage {
     pub(crate) fn take_draft(&mut self) -> Option<ForwardDraft> {
         match std::mem::take(self) {
             Self::None => None,
-            Self::ReplyChooser(mut under) => {
+            Self::ReplyChooser(mut under, mount) => {
                 let draft = under.take_draft();
-                *self = Self::ReplyChooser(under);
+                *self = Self::ReplyChooser(under, mount);
                 draft
             }
             Self::Selecting(draft) | Self::Picking { draft, .. } | Self::Bar { draft, .. } => {
@@ -178,11 +198,16 @@ impl ForwardStage {
         self.close_reply_chooser();
         *self = match std::mem::take(self) {
             Self::None => return false,
-            chooser @ Self::ReplyChooser(_) => chooser,
-            Self::Selecting(draft) => Self::Picking { draft, bar: None },
+            chooser @ Self::ReplyChooser(..) => chooser,
+            Self::Selecting(draft) => Self::Picking {
+                draft,
+                bar: None,
+                mount: Mount::Mounting,
+            },
             Self::Bar { draft, dest } => Self::Picking {
                 draft,
                 bar: Some(dest),
+                mount: Mount::Mounting,
             },
             picking @ Self::Picking { .. } => picking,
         };
@@ -192,10 +217,13 @@ impl ForwardStage {
     /// Leave the box: back to the selection or the bar it was opened over.
     pub(crate) fn close_picker(&mut self) {
         *self = match std::mem::take(self) {
-            Self::Picking { draft, bar: None } => Self::Selecting(draft),
+            Self::Picking {
+                draft, bar: None, ..
+            } => Self::Selecting(draft),
             Self::Picking {
                 draft,
                 bar: Some(dest),
+                ..
             } => Self::Bar { draft, dest },
             other => other,
         };
@@ -206,10 +234,14 @@ impl ForwardStage {
     pub(crate) fn drop_bar(&mut self) {
         *self = match std::mem::take(self) {
             Self::Bar { draft, .. } => Self::Selecting(draft),
-            Self::Picking { draft, .. } => Self::Picking { draft, bar: None },
-            Self::ReplyChooser(mut under) => {
+            Self::Picking { draft, mount, .. } => Self::Picking {
+                draft,
+                bar: None,
+                mount,
+            },
+            Self::ReplyChooser(mut under, mount) => {
                 under.drop_bar();
-                Self::ReplyChooser(under)
+                Self::ReplyChooser(under, mount)
             }
             other => other,
         };
@@ -221,7 +253,7 @@ impl ForwardStage {
             return;
         }
         *self = match std::mem::take(self) {
-            Self::ReplyChooser(_) => Self::ReplyChooser(Box::new(Self::None)),
+            Self::ReplyChooser(_, mount) => Self::ReplyChooser(Box::new(Self::None), mount),
             _ => Self::None,
         };
     }
@@ -301,6 +333,7 @@ mod tests {
         let mut stage = ForwardStage::Picking {
             draft: draft(),
             bar: Some(ChatId(2)),
+            mount: Mount::Shown,
         };
         stage.drop_bar();
         assert!(stage.picker_open());
