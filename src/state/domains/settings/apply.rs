@@ -316,7 +316,7 @@ impl Session {
                     self.settings.connected_websites.succeed(websites);
                 }
             }
-            SettingsPayload::ScopeNotificationSettings { settings, .. } => {
+            SettingsPayload::ScopeNotificationSettings { settings } => {
                 // Parity slice: `getScopeNotificationSettings` answer; the
                 // scope is correlated via the pending request (the response
                 // carries no scope field).

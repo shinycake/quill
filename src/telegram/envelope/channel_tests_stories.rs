@@ -604,7 +604,7 @@ fn get_story_video_parses_thumb_and_duration() {
                     assert_eq!(thumb_width, 320);
                     assert_eq!(thumb_height, 240);
                     assert_eq!(duration_secs, 12);
-                    assert_eq!(file_id, FileId(72));
+                    assert_eq!(file_id, Some(FileId(72)));
                 }
                 other => panic!("{other:?}"),
             }

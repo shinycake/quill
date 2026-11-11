@@ -435,8 +435,7 @@ fn saving_without_a_password_asks_to_turn_it_on(cx: &mut TestAppContext) {
                 password_hint: String::new(),
                 has_recovery_email_address: false,
                 has_passport_data: false,
-                pending_email_pattern: None,
-                pending_email_code_length: 0,
+                pending_email: None,
                 login_email_address_pattern: String::new(),
                 pending_reset_date: 0,
             });

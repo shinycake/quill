@@ -755,3 +755,17 @@ fn a_file_being_sent_keeps_the_local_state_it_was_in() {
         "sending twice is sending"
     );
 }
+
+#[test]
+fn a_thumbnail_is_a_still_a_clip_or_nothing() {
+    use super::message_audio_video::Thumb;
+    assert_eq!(Thumb::of(None, 9, 9, true), Thumb::None);
+    assert_eq!(Thumb::of(Some(FileId(0)), 9, 9, true), Thumb::None);
+    let still = Thumb::of(Some(FileId(5)), 90, 60, true);
+    assert_eq!((still.still(), still.clip()), (Some(FileId(5)), None));
+    assert_eq!(still.size(), (90, 60));
+    let clip = Thumb::of(Some(FileId(6)), 90, 60, false);
+    assert_eq!((clip.still(), clip.clip()), (None, Some(FileId(6))));
+    assert_eq!(clip.file_id(), Some(FileId(6)));
+    assert_eq!(Thumb::None.size(), (0, 0));
+}

@@ -92,17 +92,20 @@ impl Follow {
     /// Move to the stage for `wanted` at `now`, reading the OS again on the
     /// edge to following and while `connection` is opening one.
     pub fn step(&mut self, wanted: bool, connection: ConnectionState, now: Instant) {
-        *self = match (*self, wanted) {
-            (_, false) => Self::Off,
-            (Self::Off, true) => {
-                refresh();
-                Self::On { asked: None }
-            }
-            (Self::On { asked }, true) if reread_due(connection, asked, now) => {
+        let was = *self;
+        *self = if !wanted {
+            Self::Off
+        } else {
+            let asked = was.asked();
+            if reread_due(connection, asked, now) {
                 refresh();
                 Self::On { asked: Some(now) }
+            } else {
+                if was == Self::Off {
+                    refresh();
+                }
+                Self::On { asked }
             }
-            (on, true) => on,
         };
     }
 }

@@ -45,9 +45,7 @@ fn scope_notification_settings_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::Settings(SettingsPayload::ScopeNotificationSettings {
-            settings, ..
-        }) => {
+        EnvelopePayload::Settings(SettingsPayload::ScopeNotificationSettings { settings }) => {
             assert_eq!(settings.mute_for, 3600);
             assert_eq!(settings.sound_id, -1);
             assert!(settings.show_preview);

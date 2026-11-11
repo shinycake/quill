@@ -149,8 +149,8 @@ pub enum StoryContentView {
         /// `storyVideo.duration:double` — whole seconds for the label.
         duration_secs: i32,
         /// `storyVideo.video:file` — downloaded when there is no thumbnail
-        /// so the file lands local.
-        file_id: FileId,
+        /// so the file lands local; `None` when it did not parse.
+        file_id: Option<FileId>,
         /// `storyVideo.preload_prefix_size`: bytes of the clip the server
         /// expects clients to preload (0 = unknown).
         preload_prefix_size: i32,
@@ -703,7 +703,7 @@ pub(crate) fn parse_story_content(
                     files.push(file);
                     id
                 })
-                .unwrap_or(FileId(0));
+                .filter(|id| id.0 != 0);
             let thumb = video
                 .and_then(|video| video.get("thumbnail"))
                 .filter(|thumb| !thumb.is_null());

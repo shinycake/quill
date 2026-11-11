@@ -407,9 +407,8 @@ impl Session {
                 // A dice's roll and landing: their thumbnails are the
                 // stills shown until the animations decode.
                 MessageContent::Dice(dice) => {
-                    for file_id in [&dice.initial, &dice.landing]
-                        .into_iter()
-                        .flatten()
+                    for file_id in dice
+                        .stickers()
                         .flat_map(|stickers| stickers.layers())
                         .filter_map(|sticker| sticker.display_file_id())
                     {

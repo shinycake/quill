@@ -275,13 +275,20 @@ pub struct PasswordState {
     pub password_hint: String,
     pub has_recovery_email_address: bool,
     pub has_passport_data: bool,
-    /// Pattern of the pending recovery email (e.g. "i***@example.com"),
-    /// `None` when no confirmation is pending.
-    pub pending_email_pattern: Option<String>,
-    /// Expected confirmation-code length (`length` of the code info).
-    pub pending_email_code_length: i32,
+    /// The recovery email whose confirmation is pending, `None` when none
+    /// is.
+    pub pending_email: Option<PendingRecoveryEmail>,
     pub login_email_address_pattern: String,
     pub pending_reset_date: i32,
+}
+
+/// `emailAddressAuthenticationCodeInfo` of a pending recovery email.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingRecoveryEmail {
+    /// Pattern of the email (e.g. "i***@example.com").
+    pub pattern: String,
+    /// Expected confirmation-code length.
+    pub code_length: i32,
 }
 
 fn parse_code_kind(value: Option<&Value>) -> Option<CodeKind> {

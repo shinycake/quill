@@ -48,7 +48,7 @@ impl QuillApp {
         } else if let Some(wallet) = self.ton_wallet_mut()
             && wallet.can_use
         {
-            wallet.money.open = true;
+            wallet.money.get_or_insert_default();
         }
         self.open_box(DialogKind::Money);
         cx.notify();
@@ -57,14 +57,14 @@ impl QuillApp {
     pub(super) fn close_money(&mut self, cx: &mut Context<Self>) {
         if self
             .ton_wallet_mut()
-            .is_some_and(|wallet| wallet.money.hint_open())
+            .is_some_and(|wallet| wallet.money_page().hint_open())
         {
             self.dismiss_first_grams_hint(cx);
         }
         if let Some(live) = self.live.as_mut() {
             live.driver.close_money_page();
         } else if let Some(wallet) = self.ton_wallet_mut() {
-            wallet.money = Default::default();
+            wallet.money = None;
         }
         cx.notify();
     }
@@ -72,8 +72,10 @@ impl QuillApp {
     pub(super) fn set_money_tab(&mut self, tab: MoneyTab, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.set_money_tab(tab);
-        } else if let Some(wallet) = self.ton_wallet_mut() {
-            wallet.money.tab = tab;
+        } else if let Some(wallet) = self.ton_wallet_mut()
+            && let Some(money) = wallet.money.as_mut()
+        {
+            money.tab = tab;
         }
         cx.notify();
     }
@@ -98,8 +100,10 @@ impl QuillApp {
     }
 
     pub(super) fn select_wallet_nft(&mut self, address: Option<String>, cx: &mut Context<Self>) {
-        if let Some(wallet) = self.ton_wallet_mut() {
-            wallet.money.detail = match address {
+        if let Some(wallet) = self.ton_wallet_mut()
+            && let Some(money) = wallet.money.as_mut()
+        {
+            money.detail = match address {
                 Some(address) => quill::ton_wallet::MoneyDetail::Nft(address),
                 None => quill::ton_wallet::MoneyDetail::Overview,
             };
@@ -108,8 +112,10 @@ impl QuillApp {
     }
 
     pub(super) fn money_back(&mut self, cx: &mut Context<Self>) {
-        if let Some(wallet) = self.ton_wallet_mut() {
-            wallet.money.detail = quill::ton_wallet::MoneyDetail::Overview;
+        if let Some(wallet) = self.ton_wallet_mut()
+            && let Some(money) = wallet.money.as_mut()
+        {
+            money.detail = quill::ton_wallet::MoneyDetail::Overview;
         }
         cx.notify();
     }
@@ -119,8 +125,8 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.dismiss_first_transfer_hint();
         } else if let Some(session) = self.demo_session.as_mut() {
-            if let quill::ton_wallet::MoneyDetail::Tx { hint, .. } =
-                &mut session.ton_wallet.money.detail
+            if let Some(money) = session.ton_wallet.money.as_mut()
+                && let quill::ton_wallet::MoneyDetail::Tx { hint, .. } = &mut money.detail
             {
                 *hint = false;
             }
@@ -198,7 +204,7 @@ impl QuillApp {
             let Some(session) = this.session() else {
                 return dialog.on_close(on_close);
             };
-            let money = &session.ton_wallet.money;
+            let money = session.ton_wallet.money_page();
             use quill::ton_wallet::MoneyDetail;
             let body = match &money.detail {
                 MoneyDetail::Tx { hint: true, .. } => {
@@ -250,7 +256,7 @@ fn overview(
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let wallet = &session.ton_wallet;
-    let money = &wallet.money;
+    let money = wallet.money_page();
     let muted = cx.theme().muted_foreground;
     let mut body = div().flex().flex_col().gap_3();
     let own = wallet.own.as_ref();
@@ -608,7 +614,7 @@ crate::ui::shell::register_dialogs! {
     /// Settings → Money: the own TON wallet, read-only.
     Money => DialogSpec::new(
         3810,
-        |app| app.session().is_some_and(|s| s.ton_wallet.can_use && s.ton_wallet.money.open),
+        |app| app.session().is_some_and(|s| s.ton_wallet.can_use && s.ton_wallet.money_open()),
         QuillApp::build_money_dialog,
     )
     .close(|app, _, cx| app.close_money(cx)),

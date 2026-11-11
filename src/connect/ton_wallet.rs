@@ -39,6 +39,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.ton_wallet.explorer.cancel();
             return Err(err);
         }
+        self.session.ton_wallet.explorer.sent(extra);
         Ok(true)
     }
 
@@ -79,28 +80,29 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.ton_wallet.currency = Some(currency);
         }
         let wallet = &mut self.session.ton_wallet;
-        wallet.money = MoneyPage {
-            open: true,
-            ..MoneyPage::default()
-        };
+        wallet.money = Some(MoneyPage::default());
         if wallet.state_fetch.can_ask() {
             wallet.state_fetch.begin();
-            if let Err(err) =
-                self.send_wallet(TonWalletPurpose::LoadState, None, load_ton_wallet_state)
-            {
-                self.session.ton_wallet.state_fetch.cancel();
-                return Err(err);
+            match self.send_wallet(TonWalletPurpose::LoadState, None, load_ton_wallet_state) {
+                Ok(request) => self.session.ton_wallet.state_fetch.sent(request),
+                Err(err) => {
+                    self.session.ton_wallet.state_fetch.cancel();
+                    return Err(err);
+                }
             }
         }
         if self.session.ton_wallet.rates_fetch.can_ask() {
             self.session.ton_wallet.rates_fetch.begin();
-            if let Err(err) = self.send_wallet(
+            match self.send_wallet(
                 TonWalletPurpose::ExchangeRates,
                 None,
                 get_currency_exchange_rates,
             ) {
-                self.session.ton_wallet.rates_fetch.cancel();
-                return Err(err);
+                Ok(request) => self.session.ton_wallet.rates_fetch.sent(request),
+                Err(err) => {
+                    self.session.ton_wallet.rates_fetch.cancel();
+                    return Err(err);
+                }
             }
         }
         self.fetch_ton_explorer_url()?;
@@ -109,7 +111,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Close the Money page (its lists are dropped; the state is kept).
     pub fn close_money_page(&mut self) {
-        self.session.ton_wallet.money = MoneyPage::default();
+        self.session.ton_wallet.money = None;
     }
 
     /// The first (`append == false`) or next page of transactions.
@@ -117,7 +119,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.wallet_ready() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let history = &self.session.ton_wallet.money.history;
+        let Some(money) = self.session.ton_wallet.money.as_mut() else {
+            return Ok(());
+        };
+        let history = &money.history;
         if history.is_loading() || (append && !history.has_more()) {
             return Ok(());
         }
@@ -131,15 +136,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         }) {
             Ok(sent) => sent,
             Err(err) => {
-                self.session
-                    .ton_wallet
-                    .money
-                    .history
-                    .send_failed(WALLET_SEND_FAILED.into());
+                if let Some(money) = self.session.ton_wallet.money.as_mut() {
+                    money.history.send_failed(WALLET_SEND_FAILED.into());
+                }
                 return Err(err);
             }
         };
-        self.session.ton_wallet.money.history.begin(sent, append);
+        if let Some(money) = self.session.ton_wallet.money.as_mut() {
+            money.history.begin(sent, append);
+        }
         Ok(())
     }
 
@@ -148,7 +153,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.wallet_ready() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let nfts = &self.session.ton_wallet.money.nfts;
+        let Some(money) = self.session.ton_wallet.money.as_mut() else {
+            return Ok(());
+        };
+        let nfts = &money.nfts;
         if nfts.is_loading() || (append && !nfts.has_more()) {
             return Ok(());
         }
@@ -162,21 +170,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         }) {
             Ok(sent) => sent,
             Err(err) => {
-                self.session
-                    .ton_wallet
-                    .money
-                    .nfts
-                    .send_failed(WALLET_SEND_FAILED.into());
+                if let Some(money) = self.session.ton_wallet.money.as_mut() {
+                    money.nfts.send_failed(WALLET_SEND_FAILED.into());
+                }
                 return Err(err);
             }
         };
-        self.session.ton_wallet.money.nfts.begin(sent, append);
+        if let Some(money) = self.session.ton_wallet.money.as_mut() {
+            money.nfts.begin(sent, append);
+        }
         Ok(())
     }
 
     /// Switch the Money page's tab; Collectibles loads on first view.
     pub fn set_money_tab(&mut self, tab: MoneyTab) -> Result<(), ConnectSendError> {
-        let money = &mut self.session.ton_wallet.money;
+        let Some(money) = self.session.ton_wallet.money.as_mut() else {
+            return Ok(());
+        };
         money.tab = tab;
         money.detail = MoneyDetail::Overview;
         if tab == MoneyTab::Collectibles && !money.nfts.is_loaded() && !money.nfts.is_loading() {
@@ -194,27 +204,27 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.wallet_ready() {
             return Ok(false);
         }
+        // A failed lookup is asked again; a lookup out, an address and "no
+        // wallet" are not.
         if user_id <= 0
             || self.session.my_user_id == Some(user_id)
             || self
                 .session
                 .ton_wallet
                 .profile_addresses
-                .contains_key(&user_id)
+                .get(&user_id)
+                .is_some_and(|known| !matches!(known, ProfileAddress::Failed))
         {
             return Ok(false);
         }
+        let request = self.send_wallet(TonWalletPurpose::UserAddress, Some(user_id), |extra| {
+            get_user_ton_wallet_addresses(extra, &[user_id])
+        })?;
         self.session
             .ton_wallet
             .profile_addresses
-            .insert(user_id, ProfileAddress::Loading);
-        let sent = self.send_wallet(TonWalletPurpose::UserAddress, Some(user_id), |extra| {
-            get_user_ton_wallet_addresses(extra, &[user_id])
-        });
-        if sent.is_err() {
-            self.session.ton_wallet.profile_addresses.remove(&user_id);
-        }
-        sent.map(|_| true)
+            .insert(user_id, ProfileAddress::Loading { request });
+        Ok(true)
     }
 
     /// A transfer card was clicked: open the Money page on that
@@ -227,32 +237,34 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.wallet_ready() || transaction_id.is_empty() {
             return Ok(false);
         }
-        if !self.session.ton_wallet.money.open {
+        if self.session.ton_wallet.money.is_none() {
             self.open_money_page()?;
         }
-        let known = self
-            .session
-            .ton_wallet
-            .money
-            .history
-            .items()
-            .iter()
-            .find(|tx| tx.id == transaction_id)
-            .cloned();
+        let known = self.session.ton_wallet.money.as_ref().and_then(|money| {
+            money
+                .history
+                .items()
+                .iter()
+                .find(|tx| tx.id == transaction_id)
+                .cloned()
+        });
         if let Some(tx) = known {
             self.session.show_wallet_transaction(tx);
             return Ok(true);
         }
-        self.session.ton_wallet.money.detail = MoneyDetail::Overview;
+        if let Some(money) = self.session.ton_wallet.money.as_mut() {
+            money.detail = MoneyDetail::Overview;
+        }
         let id = transaction_id.to_string();
         let sent = self.send_wallet(TonWalletPurpose::Transaction, None, |extra| {
             get_ton_wallet_transaction(extra, &id)
         });
-        let money = &mut self.session.ton_wallet.money;
-        money.detail = match &sent {
-            Ok(request) => MoneyDetail::Lookup { request: *request },
-            Err(_) => MoneyDetail::Overview,
-        };
+        if let Some(money) = self.session.ton_wallet.money.as_mut() {
+            money.detail = match &sent {
+                Ok(request) => MoneyDetail::Lookup { request: *request },
+                Err(_) => MoneyDetail::Overview,
+            };
+        }
         sent.map(|_| true)
     }
 
@@ -260,7 +272,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// TDLib stops suggesting it (`hideSuggestedAction`, as the iOS app
     /// dismisses the server suggestion).
     pub fn dismiss_first_transfer_hint(&mut self) -> Result<(), ConnectSendError> {
-        if let MoneyDetail::Tx { hint, .. } = &mut self.session.ton_wallet.money.detail {
+        if let Some(money) = self.session.ton_wallet.money.as_mut()
+            && let MoneyDetail::Tx { hint, .. } = &mut money.detail
+        {
             *hint = false;
         }
         if !self.chats_path_active()
