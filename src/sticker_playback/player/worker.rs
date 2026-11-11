@@ -2,8 +2,8 @@
 //! opener thread runs) and draws or unpacks the frames of the clips it owns.
 #![deny(clippy::indexing_slicing)]
 
-use super::engine::{Open, Stage};
 use super::engine::{Job, Shared, State};
+use super::engine::{Open, Stage};
 use super::source::{Source, frame_len};
 use super::store::{self, Scratch, StoredFrame};
 use super::{ClipInfo, ClipKey, Rendered};

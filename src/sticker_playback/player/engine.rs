@@ -263,8 +263,6 @@ pub(super) struct State {
     served: u64,
     /// The last clip id handed out.
     opened: u64,
-    /// No opener thread started: workers decode their own clips.
-    workers_decode: bool,
     /// Frames each worker drew in a row while one of its clips waited to
     /// open.
     frames_in_a_row: Vec<u32>,
@@ -354,9 +352,6 @@ impl State {
         if let Some(life) = self.openers.get_mut(index) {
             *life = WorkerLife::Gone;
         }
-        if self.openers.iter().all(|life| *life == WorkerLife::Gone) {
-            self.workers_decode = true;
-        }
         let mut changed = false;
         for clip in self.clips.values_mut() {
             if clip.stage.decoding_on(index) {
@@ -366,6 +361,12 @@ impl State {
             }
         }
         changed
+    }
+
+    /// No opener thread runs (none started, or all ended): the draw workers
+    /// decode their own clips.
+    fn workers_decode(&self) -> bool {
+        self.openers.iter().all(|life| *life == WorkerLife::Gone)
     }
 
     /// A thread of the engine ended: what it owned will never finish.
@@ -415,7 +416,6 @@ impl Engine {
                 stats: EngineStats::default(),
                 served: 0,
                 opened: 0,
-                workers_decode: false,
                 frames_in_a_row: vec![0; workers],
             }),
             work: Condvar::new(),
@@ -763,7 +763,7 @@ impl State {
     /// started). A clip waiting to open goes first once
     /// [`FRAMES_BEFORE_OPEN`] frames went before it.
     pub(super) fn next_job(&mut self, me: usize) -> Option<Job> {
-        let workers_decode = self.workers_decode;
+        let workers_decode = self.workers_decode();
         let opening = self.clips.iter().find_map(|(key, clip)| {
             let own = match &clip.stage {
                 Stage::Waiting(Origin::Lottie(_)) => true,
@@ -838,7 +838,7 @@ impl State {
         &mut self,
         opener: usize,
     ) -> Option<(ClipKey, u64, DecodeAll, Cancel)> {
-        if self.workers_decode {
+        if self.workers_decode() {
             return None;
         }
         let (key, clip) = self

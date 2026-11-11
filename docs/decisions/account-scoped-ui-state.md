@@ -8074,3 +8074,19 @@ whose variants carry the data, with a way out of every stage.
 | 14-025 | A seek, step back or reopen drops the pending stepped picture. |
 | 14-042 | A failed message translation is dropped when the chat is shown again (a new pump scan), so it is asked once more; not on every pass. |
 | 14-043 | `ToastStage { None, Shown { toast, _hide } }` replaces the `Option` and `toast_seq`. |
+
+### Sweep fixes (r2-06b)
+
+| Id | Fix |
+| --- | --- |
+| 03-C011 | `VenueList::Failed` is its own list state (a failed lookup or bot lookup), drawn with "Couldn't load places." and a Retry (`LocationPicker::retry_venues`, `LocationSharing::retry_venues`, which also asks for the bot again when that was what failed). A missing bot is still "No places found" (`venues_unavailable`). |
+| 03-C012 | `AddressStage::HiddenWhileMoving` is gone: `Pin::Moving` is the one source for "the pin is lifted", and `address_line` hides the kept address while it holds. |
+| 03-C010 | Not a bug: `TileState::Failed` is a stage with exits (the map resting after a move, a resize), and `tile_to_request` skipping it is what keeps a dead connection from being asked on every poll. Tests: `a_failed_tile_is_asked_again_*`. |
+| 06-035 | Already fixed by r2-06: `State::opener_ended` fails the clips `Stage::Decoding { opener }` held. |
+| 06-036 | The first-frame mark lives in the open stage: `Stage::{Ready, Drawing}` carry `Open { info, first_frame: FirstFrame::{Awaited, Handed} }`, so `Clip::delivered` is gone and a re-opened clip (a new `Clip`) starts at `Awaited`. `State::workers_decode` (a copy of "every opener is gone") is derived. |
+| 10-072, 10-073 | Already fixed by r2-06 (Sending editor kept; `original_emoji` deleted). |
+| 10-079 | The manage dialog's body is built in the content closure (`forum_manage_body`), so there is no one-shot cell. |
+| 10-081, 10-082, 11-002, 11-004, 11-009, 11-030, 11-034, 14-024, 14-025, 14-043 | Already fixed by r2-06 (see its table); re-read here and found closed. |
+| 10-083 | `Decode::Failed(key)` is distinct from `Sdr`: no badge, no frame, not re-decoded from render, dropped by `reset` so the next open asks again. |
+| 14-042 | Turning translation on from the bar also starts a new pump scan, which drops the failures and asks again. |
+| new-01 | `FfmpegBackend::{image, surface}` (an image xor a surface, kept in step by hand) are one `OnScreen { Nothing, Image, Surface }`. |
