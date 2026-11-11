@@ -105,7 +105,7 @@ fn a_switch_closes_the_checkout(cx: &mut TestAppContext) {
     frames(&mut vcx);
     app.update_in(&mut vcx, |app, window, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.form_loading = true;
+            session.payments.form_request = Some(quill::ids::RequestId(1));
         }
         app.open_payment_dialog(window, cx);
     });
@@ -360,7 +360,7 @@ fn a_switch_closes_a_dialog_hidden_behind_another(cx: &mut TestAppContext) {
     app.update_in(&mut vcx, |app, window, cx| {
         app.open_giveaway_form(CHAT, None, window, cx);
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.form_loading = true;
+            session.payments.form_request = Some(quill::ids::RequestId(1));
         }
         app.open_payment_dialog(window, cx);
     });

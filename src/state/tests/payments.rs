@@ -15,12 +15,11 @@ fn payment_form_applies_only_to_own_request() {
     assert!(session.payments.form.is_none());
     let extra = session.request(RequestPurpose::GetPaymentForm, Some(ChatId(51)));
     session.payments.form_request = Some(extra);
-    session.payments.form_loading = true;
     apply_json(&mut session, &seq, &sink, &form_json(&extra.0.to_string()));
     let form = session.payments.form.as_ref().expect("form applies");
     assert_eq!(form.id, 7);
     assert_eq!(form.product_title, "Time machine");
-    assert!(!session.payments.form_loading);
+    assert!(!session.payments.form_loading());
 }
 
 #[test]
@@ -83,7 +82,6 @@ fn payment_request_survives_form_and_validated_answers() {
 fn payment_form_error_surfaces_note() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.payments.form_loading = true;
     let extra = session.request(RequestPurpose::GetPaymentForm, Some(ChatId(51)));
     session.payments.form_request = Some(extra);
     apply_json(
@@ -95,7 +93,7 @@ fn payment_form_error_surfaces_note() {
             extra.0
         ),
     );
-    assert!(!session.payments.form_loading);
+    assert!(!session.payments.form_loading());
     assert!(
         session
             .payments
@@ -263,7 +261,7 @@ fn star_subscription_mutation_ok_marks_stale() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::EditStarSubscription, None);
-    session.payments.star_subscriptions_mutating = true;
+    session.payments.star_subscription_edit = Some(extra);
     apply_json(
         &mut session,
         &seq,
@@ -271,7 +269,7 @@ fn star_subscription_mutation_ok_marks_stale() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
     assert!(session.payments.star_subscriptions_stale);
-    assert!(!session.payments.star_subscriptions_mutating);
+    assert!(!session.payments.star_subscriptions_mutating());
     assert!(session.payments.star_subscriptions_error.is_none());
 }
 

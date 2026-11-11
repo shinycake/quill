@@ -284,7 +284,9 @@ impl Session {
             Some(RequestPurpose::EditStarSubscription | RequestPurpose::ReuseStarSubscription)
         ) {
             self.payments.star_subscriptions_stale = true;
-            self.payments.star_subscriptions_mutating = false;
+            if pending.map(|p| p.id) == self.payments.star_subscription_edit {
+                self.payments.star_subscription_edit = None;
+            }
             self.payments.star_subscriptions_error = None;
         }
         // `toggleGiftIsSaved` / `sellGift` succeeded: refetch the list from

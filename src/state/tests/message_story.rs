@@ -226,7 +226,10 @@ fn a_checkout_opened_meanwhile_does_not_take_the_payment_answer() {
             );
         },
     );
-    assert!(!session.payments.form_paid, "the new checkout is not paid");
+    assert!(
+        !session.payments.checkout.is_paid(),
+        "the new checkout is not paid"
+    );
     assert!(session.payments.note.is_none(), "and shows no outcome");
     assert_eq!(session.payments.form.as_ref().map(|f| f.id), Some(2));
     let note = session.payments.unlocked_notice.take().expect("a note");
@@ -243,7 +246,6 @@ fn an_earlier_checkouts_form_answer_is_dropped() {
     session.payments.form_request = Some(first);
     let second = session.request(RequestPurpose::GetPaymentForm, None);
     session.payments.form_request = Some(second);
-    session.payments.form_loading = true;
     let form = |extra: u64, id: i64| {
         format!(
             r#"{{"@type":"paymentForm","@extra":"{extra}","id":{id},"type":{{"@type":"paymentFormTypeStars","star_count":5}},"seller_bot_user_id":5,"product_info":{{"@type":"productInfo","title":"x","description":{{"@type":"formattedText","text":"","entities":[]}},"photo":null}}}}"#
@@ -251,7 +253,7 @@ fn an_earlier_checkouts_form_answer_is_dropped() {
     };
     apply_json(&mut session, &seq, &sink, &form(first.0, 1));
     assert!(session.payments.form.is_none());
-    assert!(session.payments.form_loading, "still waiting for its own");
+    assert!(session.payments.form_loading(), "still waiting for its own");
     apply_json(&mut session, &seq, &sink, &form(second.0, 2));
     assert_eq!(session.payments.form.as_ref().map(|f| f.id), Some(2));
 }

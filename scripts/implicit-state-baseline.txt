@@ -127,9 +127,6 @@ ParsedGroupCall::loaded_all_participants
 ParsedSession::is_password_pending
 PasswordBox::sending
 PasswordBox::sending+error
-PaymentsState::form_loading
-PaymentsState::form_loading+receipt_error
-PaymentsState::verification_started
 PhotoSources::busy
 PlayHead::started
 PlaybackHealth::output_failed
@@ -179,7 +176,6 @@ SettingsState::storage_limits_seed_sent
 SettingsState::storage_stats_loading
 SharedMediaTabState::loading_more
 SharedMediaTabState::loading_more+error
-Shown::waiting_for_input
 SignInUi::tick_armed
 SignInUi::tick_armed+error_clock
 StageFacts::create_pending

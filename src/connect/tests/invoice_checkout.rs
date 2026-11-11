@@ -186,13 +186,13 @@ fn a_successful_payment_locks_the_form_and_a_new_form_unlocks_it() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.payments.form_paid);
+    assert!(driver.session.payments.checkout.is_paid());
     driver.send_payment_form_request(invoice).unwrap();
     let request = sent_request(&recorder, "getPaymentForm");
     driver
         .ingest(copy_and_parse(&stars_form(&request["@extra"]), &seq, &sink).unwrap())
         .unwrap();
-    assert!(!driver.session.payments.form_paid);
+    assert!(!driver.session.payments.checkout.is_paid());
 }
 
 struct StripeReplay;
@@ -305,5 +305,5 @@ fn a_new_card_pays_with_the_provider_token_and_may_need_verification() {
             .map(|step| step.url.as_str()),
         Some("https://hooks.stripe.com/3d_secure/x")
     );
-    assert!(!driver.session.payments.form_paid);
+    assert!(!driver.session.payments.checkout.is_paid());
 }

@@ -45,7 +45,7 @@ impl QuillApp {
         // A giveaway that was paid is paid: its form closes with the
         // checkout, so Start cannot pay for it a second time.
         let paid_giveaway = self.session().is_some_and(|s| {
-            s.payments.form_paid
+            s.payments.checkout.is_paid()
                 && s.payments
                     .request
                     .as_ref()
@@ -387,7 +387,7 @@ impl QuillApp {
             .primary();
         body = body.child(if session.payments.checkout_sending() {
             pay.label(tr(keys::Q_MONEY_PROCESSING)).disabled(true)
-        } else if session.payments.form_paid {
+        } else if session.payments.checkout.is_paid() {
             pay.label(tr(keys::PAYMENTS_DATE_LABEL)).disabled(true)
         } else if can_pay {
             pay.on_click(cx.listener(|this, _, window, cx| {
@@ -474,7 +474,7 @@ impl QuillApp {
                 session.payments.request.clone(),
                 session.payments.order_info.clone(),
                 session.payments.shipping_id.clone(),
-                session.payments.form_paid,
+                session.payments.checkout.is_paid(),
             )
         });
         let dialog = self.payments.dialog.as_ref();
@@ -810,7 +810,7 @@ crate::ui::shell::register_dialogs! {
     // management dialog.
     Subscriptions => DialogSpec::new(
         3700,
-        |app| app.session().is_some_and(|s| s.payments.subscriptions_open),
+        |app| app.session().is_some_and(|s| s.payments.subscriptions.is_open()),
         QuillApp::build_subscriptions_dialog,
     )
     .close(|app, _, cx| app.close_subscriptions(cx)),

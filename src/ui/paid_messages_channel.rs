@@ -7,7 +7,7 @@
 use super::app::QuillApp;
 use super::chat_theme::{danger, text_muted};
 use super::paid_messages_privacy::price_slider;
-use super::paid_messages_state::{DirectMessagesBox, DirectStage, PriceSlider};
+use super::paid_messages_state::{DirectMessagesBox, DirectStage, PriceSlider, PriceSource};
 use super::pressable::action_row;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
@@ -122,15 +122,18 @@ impl QuillApp {
             // The price of an enabled group may not have arrived yet.
             let _ = live.driver.fetch_direct_messages_price(chat_id);
         }
-        let seeded = state.price.is_some();
+        let source = if state.price.is_some() {
+            PriceSource::Channel
+        } else {
+            PriceSource::Default
+        };
         let price = state.price.unwrap_or(DEFAULT_CHANNEL_PRICE);
         let slider = direct_messages_slider(cx, price, max);
         self.paid_messages.direct = Some(DirectMessagesBox {
             chat_id: chat_id.0,
             enabled: state.enabled,
             price: slider,
-            touched: false,
-            seeded,
+            source,
             stage: DirectStage::Editing,
         });
         self.open_box(DialogKind::DirectMessages);
@@ -143,7 +146,7 @@ impl QuillApp {
         let Some(boxed) = self.paid_messages.direct.as_ref() else {
             return;
         };
-        if boxed.seeded || boxed.touched {
+        if boxed.source != PriceSource::Default {
             return;
         }
         let Some(session) = self.session() else {
@@ -156,7 +159,7 @@ impl QuillApp {
         let slider = direct_messages_slider(cx, price, max);
         if let Some(boxed) = self.paid_messages.direct.as_mut() {
             boxed.price = slider;
-            boxed.seeded = true;
+            boxed.source = PriceSource::Channel;
         }
     }
 
@@ -277,7 +280,8 @@ impl QuillApp {
             // Without the price the channel has now, only a deliberate
             // slider move may write one.
             let changed = boxed.enabled != was_enabled
-                || (boxed.enabled && (boxed.touched || known.is_some_and(|k| k != price)));
+                || (boxed.enabled
+                    && (boxed.source == PriceSource::Chosen || known.is_some_and(|k| k != price)));
             let link = session
                 .chat_usernames(chat_id)
                 .and_then(|lists| lists.active.first().cloned())
@@ -375,7 +379,7 @@ impl QuillApp {
                         ),
                 );
             }
-            if was_enabled && known.is_none() && !boxed.touched {
+            if was_enabled && known.is_none() && boxed.source != PriceSource::Chosen {
                 body = body.child(
                     div()
                         .text_xs()
@@ -450,7 +454,7 @@ fn direct_messages_slider(cx: &mut Context<QuillApp>, price: i64, max: i64) -> P
     price_slider(cx, price_steps(price, 0, max), price, |this, price| {
         if let Some(boxed) = this.paid_messages.direct.as_mut() {
             boxed.price.price = price;
-            boxed.touched = true;
+            boxed.source = PriceSource::Chosen;
         }
     })
 }

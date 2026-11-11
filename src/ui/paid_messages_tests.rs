@@ -2,6 +2,7 @@
 //! paid send, the Messages price and Remove Fee. No Stars ever move: the
 //! demo session has no sender.
 
+use super::paid_messages_state::PriceSource;
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -276,7 +277,11 @@ fn the_direct_messages_box_takes_the_price_when_it_arrives(cx: &mut TestAppConte
         app.open_direct_messages(ChatId(13), cx);
         let boxed = app.paid_messages.direct.as_ref().expect("opens");
         assert!(boxed.enabled);
-        assert!(!boxed.seeded, "the price is still on its way");
+        assert_eq!(
+            boxed.source,
+            PriceSource::Default,
+            "the price is still on its way"
+        );
         let session = app.demo_session.as_mut().unwrap();
         session
             .payments
@@ -286,7 +291,7 @@ fn the_direct_messages_box_takes_the_price_when_it_arrives(cx: &mut TestAppConte
         app.seed_direct_messages_price(cx);
         let boxed = app.paid_messages.direct.as_ref().expect("still open");
         assert_eq!(boxed.price.price, 50);
-        assert!(boxed.seeded && !boxed.touched);
+        assert_eq!(boxed.source, PriceSource::Channel);
     });
 }
 

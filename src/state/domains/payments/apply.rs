@@ -39,8 +39,7 @@ impl Session {
                 {
                     self.payments.form_request = None;
                     self.payments.form = Some(form);
-                    self.payments.form_loading = false;
-                    self.payments.form_paid = false;
+                    self.payments.checkout = crate::state::CheckoutStage::Open;
                     self.payments.order_info = OrderInfoStage::Unvalidated;
                     self.payments.shipping_id = None;
                     self.payments.note = None;
@@ -75,7 +74,7 @@ impl Session {
                 {
                     let shown = self.payments.shows(&paid.invoice);
                     if shown {
-                        self.payments.verification_started = false;
+                        self.payments.checkout = crate::state::CheckoutStage::Open;
                     }
                     if result.success {
                         self.note_paid_media_unlocked(&paid);
@@ -90,7 +89,7 @@ impl Session {
                             );
                         }
                         if shown {
-                            self.payments.form_paid = true;
+                            self.payments.checkout = crate::state::CheckoutStage::Paid;
                             self.payments.note = Some(format!(
                                 "✅ {}",
                                 crate::lang::tr(crate::lang::keys::Q_MONEY_PAYMENT_SUCCESS_NOTE)
@@ -112,7 +111,7 @@ impl Session {
                             giveaway_chat_id: paid.invoice.giveaway_chat_id(),
                         });
                         if shown {
-                            self.payments.verification_started = true;
+                            self.payments.checkout = crate::state::CheckoutStage::Verifying;
                         }
                     } else if shown {
                         self.payments.note = Some(

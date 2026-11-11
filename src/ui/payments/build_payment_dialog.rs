@@ -26,7 +26,7 @@ impl QuillApp {
                 return dialog.on_close(on_close.clone());
             };
             if session.payments.form.is_none()
-                && !session.payments.form_loading
+                && !session.payments.form_loading()
                 && session.payments.note.is_none()
             {
                 return dialog.on_close(on_close.clone());
@@ -35,7 +35,7 @@ impl QuillApp {
                 return dialog.on_close(on_close.clone());
             };
             let mut body = div().flex().flex_col().gap_3();
-            if session.payments.form_loading {
+            if session.payments.form_loading() {
                 body = body.child(
                     div()
                         .text_sm()
@@ -307,8 +307,12 @@ impl QuillApp {
                             .child(tr(keys::Q_MONEY_NO_ACTIVE_SUBSCRIPTIONS)),
                     );
                 }
-                let mutating = session.payments.star_subscriptions_mutating;
-                let confirming = session.payments.subscription_cancel_confirm.clone();
+                let mutating = session.payments.star_subscriptions_mutating();
+                let confirming = session
+                    .payments
+                    .subscriptions
+                    .cancel_confirm()
+                    .map(str::to_string);
                 let chat_titles: std::collections::HashMap<i64, String> = session
                     .chats
                     .iter()
@@ -356,7 +360,7 @@ impl QuillApp {
             return;
         }
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.payments.subscriptions_open = true;
+            live.driver.session.payments.subscriptions.open();
             live.driver.maybe_fetch_star_subscriptions()
         });
         self.open_box(DialogKind::Subscriptions);
@@ -371,8 +375,7 @@ impl QuillApp {
     /// Slice `parity:bots-payment-recurring`: close the Subscriptions dialog.
     pub(in crate::ui) fn close_subscriptions(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.payments.subscriptions_open = false;
-            live.driver.session.payments.subscription_cancel_confirm = None;
+            live.driver.session.payments.subscriptions.close();
         }
         cx.notify();
     }
@@ -387,7 +390,7 @@ impl QuillApp {
         let Some(payments) = self.session().map(|s| &s.payments) else {
             return;
         };
-        if !payments.subscriptions_open
+        if !payments.subscriptions.is_open()
             || (payments.star_subscriptions_error.is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.payments.subs_scroll),
@@ -421,7 +424,7 @@ impl QuillApp {
     /// money action).
     pub(in crate::ui) fn ask_cancel_subscription(&mut self, id: String, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.payments.subscription_cancel_confirm = Some(id);
+            live.driver.session.payments.subscriptions.ask_cancel(id);
         }
         cx.notify();
     }
@@ -429,14 +432,17 @@ impl QuillApp {
     /// Slice `parity:bots-payment-recurring`: "Yes, cancel" —
     /// `editStarSubscription` with `is_canceled: true`.
     pub(in crate::ui) fn confirm_cancel_subscription(&mut self, cx: &mut Context<Self>) {
-        let id = self
-            .session()
-            .and_then(|s| s.payments.subscription_cancel_confirm.clone());
+        let id = self.session().and_then(|s| {
+            s.payments
+                .subscriptions
+                .cancel_confirm()
+                .map(str::to_string)
+        });
         let Some(id) = id else {
             return;
         };
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.payments.subscription_cancel_confirm = None;
+            live.driver.session.payments.subscriptions.clear_confirm();
             live.driver.edit_star_subscription(&id, true)
         });
         if !matches!(sent, Some(Ok(_))) {
@@ -451,7 +457,7 @@ impl QuillApp {
     /// cancel confirmation without touching the subscription.
     pub(in crate::ui) fn dismiss_cancel_confirm(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.payments.subscription_cancel_confirm = None;
+            live.driver.session.payments.subscriptions.clear_confirm();
         }
         cx.notify();
     }

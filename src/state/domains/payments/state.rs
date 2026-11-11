@@ -115,8 +115,6 @@ pub struct PaymentsState {
     pub request: Option<PaymentRequest>,
     /// Slice P1: the fetched `paymentForm`, shown in the checkout dialog.
     pub form: Option<PaymentFormData>,
-    /// Slice P1: `getPaymentForm` is in flight (dialog shows a spinner).
-    pub form_loading: bool,
     /// Where the checkout's order info stands (`validateOrderInfo`).
     pub order_info: OrderInfoStage,
     /// Slice P1: the chosen shipping option id (default: the first).
@@ -141,9 +139,8 @@ pub struct PaymentsState {
     /// and is disabled while one is in flight for the invoice shown
     /// ([`PaymentsState::checkout_sending`]).
     pub paying: Vec<PaymentInFlight>,
-    /// The open form was paid: Pay stays off, so one form is never sent
-    /// twice.
-    pub form_paid: bool,
+    /// How the checkout on screen stands after Pay (`CheckoutStage`).
+    pub checkout: CheckoutStage,
     /// "Media Unlocked" note after a paid-media purchase, drained into the
     /// status bar by the UI poll.
     pub unlocked_notice: Option<String>,
@@ -157,10 +154,6 @@ pub struct PaymentsState {
     /// `sendPaymentForm` — the UI takes it on the next poll and opens it
     /// in the OS browser (3-D Secure and similar).
     pub verification_url: Option<PaymentVerification>,
-    /// The last `sendPaymentForm` answer asked for a verification step.
-    /// Unlike `verification_url` nothing drains it; a mini app's checkout
-    /// reads it to report `pending`.
-    pub verification_started: bool,
     pub marketplace_gift: Option<crate::marketplace::GiftPurchase>,
     pub gift_text_length_max: Option<usize>,
     /// TDLib `poll_country_count_max`: countries a poll may be limited to.
@@ -188,19 +181,16 @@ pub struct PaymentsState {
     /// Slice `parity:bots-payment-recurring`: an `editStarSubscription` /
     /// `reuseStarSubscription` is in flight — the dialog disables its
     /// action buttons until the `ok` (or error) lands.
-    pub star_subscriptions_mutating: bool,
-    /// Slice `parity:bots-payment-recurring`: the Subscriptions dialog is
-    /// on screen.
-    pub subscriptions_open: bool,
+    pub star_subscription_edit: Option<RequestId>,
+    /// Slice `parity:bots-payment-recurring`: the Subscriptions dialog, and
+    /// the subscription awaiting cancel confirmation in it.
+    pub subscriptions: SubscriptionsBox,
     /// Premium / Stars / received-gifts hub state (`crate::premium_hub`).
     pub hub: crate::premium_hub::PremiumHub,
     /// Gift management and the send-gift dialog (`crate::gift_manage`).
     pub gifts_manage: crate::gift_manage::GiftManageState,
     /// Revenue screens and affiliate programs (`crate::earn`).
     pub earn: crate::earn::EarnState,
-    /// Slice `parity:bots-payment-recurring`: subscription id awaiting
-    /// cancel confirmation in the dialog.
-    pub subscription_cancel_confirm: Option<String>,
     /// TDLib's `is_premium` option: the account's current Premium state.
     /// `None` until the option arrives.
     pub premium_option: Option<bool>,
@@ -234,6 +224,96 @@ pub struct PaymentInFlight {
     pub invoice: crate::payment_invoice::InputInvoice,
     /// The form it was sent for, read by the paid-media note.
     pub form: Option<PaymentFormData>,
+}
+
+/// Where the checkout on screen stands after Pay. Closing it, starting
+/// another and a new form all return it to `Open`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CheckoutStage {
+    /// Nothing sent for this form, or the last send failed.
+    #[default]
+    Open,
+    /// The open form was paid: Pay stays off, so one form is never sent
+    /// twice.
+    Paid,
+    /// The last `sendPaymentForm` answer asked for a verification step.
+    /// Unlike `verification_url` nothing drains it; a mini app's checkout
+    /// reads it to report `pending`.
+    Verifying,
+}
+
+impl CheckoutStage {
+    pub fn is_paid(self) -> bool {
+        self == Self::Paid
+    }
+
+    pub fn verifying(self) -> bool {
+        self == Self::Verifying
+    }
+}
+
+/// The Subscriptions dialog: closed, or open with the subscription whose
+/// cancel waits for its confirmation. Closing drops the confirmation.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum SubscriptionsBox {
+    #[default]
+    Closed,
+    Open {
+        cancel_confirm: Option<String>,
+    },
+}
+
+impl SubscriptionsBox {
+    pub fn is_open(&self) -> bool {
+        matches!(self, Self::Open { .. })
+    }
+
+    /// The subscription id awaiting cancel confirmation.
+    pub fn cancel_confirm(&self) -> Option<&str> {
+        match self {
+            Self::Open { cancel_confirm } => cancel_confirm.as_deref(),
+            Self::Closed => None,
+        }
+    }
+
+    pub fn open(&mut self) {
+        if !self.is_open() {
+            *self = Self::Open {
+                cancel_confirm: None,
+            };
+        }
+    }
+
+    pub fn close(&mut self) {
+        *self = Self::Closed;
+    }
+
+    /// Ask to confirm a cancel (no effect while closed).
+    pub fn ask_cancel(&mut self, id: String) {
+        if let Self::Open { cancel_confirm } = self {
+            *cancel_confirm = Some(id);
+        }
+    }
+
+    pub fn clear_confirm(&mut self) {
+        if let Self::Open { cancel_confirm } = self {
+            *cancel_confirm = None;
+        }
+    }
+}
+
+impl PaymentsState {
+    /// `getPaymentForm` is in flight (the dialog shows a spinner): its
+    /// request is the one whose answer the checkout waits for.
+    pub fn form_loading(&self) -> bool {
+        self.form_request.is_some()
+    }
+
+    /// An `editStarSubscription` / `reuseStarSubscription` is in flight:
+    /// the dialog disables its action buttons until its answer lands.
+    pub fn star_subscriptions_mutating(&self) -> bool {
+        self.star_subscription_edit.is_some()
+    }
 }
 
 impl PaymentsState {
@@ -328,19 +408,17 @@ impl PaymentsState {
         Self {
             request: None,
             form: None,
-            form_loading: false,
             order_info: OrderInfoStage::Unvalidated,
             shipping_id: None,
             receipt: ReceiptStage::Closed,
             note: None,
             form_request: None,
             paying: Vec::new(),
-            form_paid: false,
+            checkout: CheckoutStage::Open,
             unlocked_notice: None,
             notices: Vec::new(),
             receipt_error: None,
             verification_url: None,
-            verification_started: false,
             marketplace_gift: None,
             gift_text_length_max: None,
             poll_countries_max: None,
@@ -350,12 +428,11 @@ impl PaymentsState {
             star_subscriptions_error: None,
             star_subscriptions_offset: String::new(),
             star_subscriptions_stale: false,
-            star_subscriptions_mutating: false,
-            subscriptions_open: false,
+            star_subscription_edit: None,
+            subscriptions: SubscriptionsBox::Closed,
             hub: crate::premium_hub::PremiumHub::default(),
             gifts_manage: Default::default(),
             earn: Default::default(),
-            subscription_cancel_confirm: None,
             premium_option: None,
             premium_available: None,
             bank_card: None,

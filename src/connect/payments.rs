@@ -264,17 +264,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         subscription_id: &str,
         is_canceled: bool,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.payments.star_subscriptions_mutating {
+        if !self.chats_path_active() || self.session.payments.star_subscriptions_mutating() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
             .request(RequestPurpose::EditStarSubscription, None);
-        self.session.payments.star_subscriptions_mutating = true;
+        self.session.payments.star_subscription_edit = Some(extra);
         self.session.payments.star_subscriptions_error = None;
         let json = edit_star_subscription(extra, subscription_id, is_canceled);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.payments.star_subscriptions_mutating = false;
+            self.session.payments.star_subscription_edit = None;
             return Err(err);
         }
         Ok(extra)
@@ -288,17 +288,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         subscription_id: &str,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.payments.star_subscriptions_mutating {
+        if !self.chats_path_active() || self.session.payments.star_subscriptions_mutating() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
             .request(RequestPurpose::ReuseStarSubscription, None);
-        self.session.payments.star_subscriptions_mutating = true;
+        self.session.payments.star_subscription_edit = Some(extra);
         self.session.payments.star_subscriptions_error = None;
         let json = reuse_star_subscription(extra, subscription_id);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.payments.star_subscriptions_mutating = false;
+            self.session.payments.star_subscription_edit = None;
             return Err(err);
         }
         Ok(extra)

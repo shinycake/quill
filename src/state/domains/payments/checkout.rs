@@ -10,14 +10,13 @@ impl Session {
     /// its answer.
     pub fn close_checkout(&mut self) {
         let payments = &mut self.payments;
-        payments.form_loading = false;
         payments.form_request = None;
         payments.note = None;
         payments.order_info = OrderInfoStage::Unvalidated;
         payments.shipping_id = None;
         payments.form = None;
         payments.request = None;
-        payments.form_paid = false;
+        payments.checkout = crate::state::CheckoutStage::Open;
     }
 
     /// `sendPaymentForm` went out as `request_id` for the checkout on

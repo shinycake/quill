@@ -251,7 +251,7 @@ fn a_paid_checkout_reports_paid_and_closes(cx: &mut TestAppContext) {
         payments.request = Some(quill::state::PaymentRequest {
             invoice: quill::payment_invoice::InputInvoice::Name("abc".into()),
         });
-        payments.form_paid = true;
+        payments.checkout = quill::state::CheckoutStage::Paid;
         app.poll_invoice(cx);
         let (event, data) = reply(&received);
         assert_eq!(event, "invoice_closed");

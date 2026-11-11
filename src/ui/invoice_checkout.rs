@@ -31,7 +31,7 @@ impl QuillApp {
     pub(super) fn payment_dialog_visible(&self) -> bool {
         self.payments.dialog.is_some()
             && self.session().is_some_and(|s| {
-                s.payments.form.is_some() || s.payments.form_loading || s.payments.note.is_some()
+                s.payments.form.is_some() || s.payments.form_loading() || s.payments.note.is_some()
             })
     }
 
@@ -53,8 +53,7 @@ impl QuillApp {
             payments.form = None;
             payments.order_info = quill::state::OrderInfoStage::Unvalidated;
             payments.shipping_id = None;
-            payments.form_paid = false;
-            payments.form_loading = true;
+            payments.checkout = quill::state::CheckoutStage::Open;
             payments.note = None;
             live.driver.send_payment_form_request(invoice)
         });
@@ -62,9 +61,6 @@ impl QuillApp {
         match sent {
             Some(Ok(_)) => self.open_payment_dialog(window, cx),
             _ => {
-                if let Some(live) = self.live.as_mut() {
-                    live.driver.session.payments.form_loading = false;
-                }
                 self.set_note(StatusNote::error(tr(
                     keys::Q_MONEY_COULD_NOT_LOAD_THE_PAYMENT,
                 )));
@@ -206,7 +202,7 @@ impl QuillApp {
             (
                 session.payments.form.clone(),
                 session.payments.request.clone(),
-                session.payments.form_paid,
+                session.payments.checkout.is_paid(),
             )
         });
         let Some((Some(form), Some(request), false)) = snapshot else {
@@ -284,7 +280,7 @@ impl QuillApp {
             .primary();
         body.child(if session.payments.checkout_sending() {
             pay.label(tr(keys::Q_MONEY_PROCESSING)).disabled(true)
-        } else if session.payments.form_paid {
+        } else if session.payments.checkout.is_paid() {
             pay.label(tr(keys::SR_MESSAGE_INVOICE_PAID)).disabled(true)
         } else if too_poor {
             pay.disabled(true)

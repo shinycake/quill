@@ -21,7 +21,6 @@ impl Session {
             Some(RequestPurpose::GetPaymentForm) => {
                 if extra.is_some() && self.payments.form_request == extra {
                     self.payments.form_request = None;
-                    self.payments.form_loading = false;
                     self.payments.note = Some(crate::lang::tr_with(
                         crate::lang::keys::Q_MONEY_PAYMENT_FAILED_REASON,
                         &[("reason", &error_reason(err))],
@@ -36,7 +35,6 @@ impl Session {
                     )
                 {
                     self.payments.order_info = OrderInfoStage::Unvalidated;
-                    self.payments.form_loading = false;
                     self.payments.note = Some(crate::lang::tr_with(
                         crate::lang::keys::Q_MONEY_PAYMENT_FAILED_REASON,
                         &[("reason", &error_reason(err))],
@@ -227,7 +225,9 @@ impl Session {
                 }
             }
             Some(RequestPurpose::EditStarSubscription | RequestPurpose::ReuseStarSubscription) => {
-                self.payments.star_subscriptions_mutating = false;
+                if self.payments.star_subscription_edit == extra {
+                    self.payments.star_subscription_edit = None;
+                }
                 self.payments.star_subscriptions_error = Some(format!(
                     "Couldn't update the subscription: {}",
                     error_reason(err)
