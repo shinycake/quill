@@ -515,6 +515,12 @@ impl QuillApp {
         if !empty && start_param.is_none() {
             return None;
         }
+        // The empty chat's intro card already shows the description, and
+        // Telegram Desktop shows nothing else there: block, restart and
+        // the rest live in the profile and the chat menu.
+        if empty && start_param.is_none() && super::bot_about::bot_about_text(&info).is_some() {
+            return None;
+        }
         let blocked = session.chats.get(&open.0).is_some_and(|chat| chat.blocked);
         let username = session
             .users
