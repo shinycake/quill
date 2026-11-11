@@ -555,9 +555,10 @@ impl QuillApp {
                     .live
                     .as_mut()
                     .map(|live| live.driver.search_web_app(bot_id, short_name));
-                if matches!(sent, Some(Ok(_))) {
+                if let Some(Ok(request)) = sent {
                     let window = self.asking_window_or_last_press();
                     self.mini_apps.flow.search(Awaited {
+                        request,
                         then: PendingOpen::Link {
                             chat_id: Some(chat_id),
                             bot_id,
@@ -597,9 +598,10 @@ impl QuillApp {
                     .live
                     .as_mut()
                     .map(|live| live.driver.fetch_attachment_menu_bot(bot_id));
-                if matches!(sent, Some(Ok(_))) {
+                if let Some(Ok(request)) = sent {
                     let window = self.asking_window_or_last_press();
                     self.mini_apps.flow.fetch_attach_bot(Awaited {
+                        request,
                         then: PendingOpen::Attach {
                             chat_id: target,
                             bot_id,
@@ -778,9 +780,13 @@ impl QuillApp {
                         bot.request_write_access && allow_write,
                     )
                 });
-                if matches!(sent, Some(Ok(_))) {
+                if let Some(Ok(request)) = sent {
                     let window = self.asking_window_or_last_press();
-                    self.mini_apps.flow.add(Awaited { then, window });
+                    self.mini_apps.flow.add(Awaited {
+                        request,
+                        then,
+                        window,
+                    });
                     self.ensure_mini_app_poll(cx);
                 } else {
                     self.set_status_note(
@@ -972,6 +978,7 @@ mod helper_pipe;
 mod inline_results_button;
 mod invoice;
 mod launch_flow;
+mod mini_app_poll;
 mod phone;
 mod spawn_mini_app_window;
 

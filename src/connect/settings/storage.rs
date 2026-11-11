@@ -12,9 +12,6 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn maybe_fetch_storage_statistics(
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
         if !self.session.settings.storage_stats.can_ask()
             || self
                 .session
@@ -22,6 +19,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .has_purpose(RequestPurpose::GetStorageStatistics)
         {
             return Ok(None);
+        }
+        // A refused ask ends in the failure the usage list draws with its
+        // Retry, never in a list that waits for good.
+        if !self.chats_path_active() {
+            self.session
+                .settings
+                .storage_stats
+                .fail("Couldn't load storage usage.");
+            return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
@@ -33,6 +39,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             Err(err) => {
                 self.session.requests.take(extra);
+                self.session
+                    .settings
+                    .storage_stats
+                    .fail("Couldn't load storage usage.");
                 Err(err)
             }
         }
@@ -57,11 +67,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// per-network settings from the answer; TDLib has no getter for
     /// the *current* values, so this is the only server read.
     pub fn fetch_auto_download_presets(&mut self) -> Result<(), ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
         if !self.session.settings.data_storage.seeded.askable() {
             return Ok(());
+        }
+        if !self.chats_path_active() {
+            self.session.settings.data_storage.seeded =
+                PresetsSeed::Failed("Couldn't load auto-download settings.".to_owned());
+            return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
@@ -107,6 +119,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         settings: AutoDownloadNetSettings,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
+            self.session.settings.data_storage_save.fail(
+                StorageSaveKind::AutoDownload,
+                "Couldn't save auto-download settings.",
+            );
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(
@@ -139,9 +155,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.settings.data_storage.seeded.is_seeded() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
         // Every network is sent even if one send fails, so a failure never
         // leaves the later networks out of a toggle that covers all three.
         let mut first_error = None;
@@ -171,7 +184,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         file_types: &[&str],
         chat_ids: &[i64],
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.storage_clear.is_clearing() {
+        if self.session.settings.storage_clear.is_clearing() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.chats_path_active() {
+            self.session.settings.storage_clear =
+                StorageClear::Failed("Couldn't clear the cache.".to_string());
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(RequestPurpose::OptimizeStorage, None);
@@ -199,16 +217,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         size: Option<i64>,
         keep: Option<i64>,
     ) -> Result<(), ConnectSendError> {
+        self.session
+            .settings
+            .data_storage_save
+            .begin(StorageSaveKind::Limits);
         if !self.chats_path_active() {
+            self.session
+                .settings
+                .data_storage_save
+                .fail(StorageSaveKind::Limits, "Couldn't save the storage limits.");
             return Err(ConnectSendError::InvalidRequest);
         }
         // All four options go out even if one send fails; the first error
         // is the outcome.
         let mut first_error = None;
-        self.session
-            .settings
-            .data_storage_save
-            .begin(StorageSaveKind::Limits);
         for (name, value) in crate::storage_limits::options_for(size, keep) {
             let extra = self.session.request(RequestPurpose::SetStorageOption, None);
             let json = match value {

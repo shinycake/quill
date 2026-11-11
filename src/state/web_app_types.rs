@@ -94,6 +94,8 @@ impl PhoneShare {
 /// The outcome of one `toggleBotIsAddedToAttachmentMenu`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttachmentToggle {
+    /// The `toggleBotIsAddedToAttachmentMenu` call this answers.
+    pub request: crate::ids::RequestId,
     pub bot_user_id: i64,
     /// Whether the bot is in the menu now, or why the change failed.
     pub result: Result<bool, String>,
@@ -144,23 +146,24 @@ pub struct WebApps {
     pub dropped_launches: Vec<i64>,
     /// `updateAttachmentMenuBots`: the bots in the attachment menu.
     pub attachment_menu_bots: Vec<AttachmentMenuBot>,
-    /// One-shot: `getAttachmentMenuBot` answer (for adding a bot), or a
-    /// failure message, with the bot it was asked for: the flow waiting
-    /// takes only its own bot's answer.
-    pub attachment_menu_bot: Option<(i64, Result<AttachmentMenuBot, String>)>,
+    /// One-shot: `getAttachmentMenuBot` answers (for adding a bot), or a
+    /// failure message, oldest first, each with the request it answers: the
+    /// flow waiting takes only the answer of its own request.
+    pub attachment_menu_bot: Vec<(crate::ids::RequestId, Result<AttachmentMenuBot, String>)>,
     /// One-shot: `toggleBotIsAddedToAttachmentMenu` outcomes, oldest
-    /// first, each with the bot it answers: the flow waiting takes only its
-    /// own bot's.
+    /// first, each with the request it answers: the flow waiting takes only
+    /// its own request's.
     pub attachment_menu_toggled: Vec<AttachmentToggle>,
     /// One-shot: the write-access answer, with the request it answers.
     pub write_access: Option<WriteAnswer>,
     /// One-shot: `toggleBotCanManageEmojiStatus` outcome,
     /// `(bot_user_id, done)`.
     pub emoji_access: Option<(i64, bool)>,
-    /// One-shot: `searchWebApp` answer for a `t.me/bot/app` link, the app
-    /// or a failure message, with the bot it was asked for: a second link
-    /// clicked before the first answered takes only its own answer.
-    pub found: Option<(i64, Result<FoundWebApp, String>)>,
+    /// One-shot: `searchWebApp` answers for `t.me/bot/app` links, the app
+    /// or a failure message, oldest first, each with the request it
+    /// answers: a second link of the same bot clicked before the first
+    /// answered takes only its own answer.
+    pub found: Vec<(crate::ids::RequestId, Result<FoundWebApp, String>)>,
     /// `(launch_id, req_id)` of custom requests in flight, by `RequestId`.
     pub custom_requests: HashMap<u64, (i64, String)>,
     /// One-shot: custom request answers.

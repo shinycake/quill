@@ -139,6 +139,7 @@ mod sticker_categories;
 mod sticker_creator;
 mod sticker_manager;
 mod sticker_tabs;
+mod storage_refused;
 mod stories;
 mod story_fetch_retry;
 mod story_insights;

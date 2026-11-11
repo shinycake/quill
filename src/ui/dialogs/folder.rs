@@ -146,6 +146,20 @@ impl FolderShareView {
         }
     }
 
+    /// The form's Cancel: back to the list. A request still out goes with
+    /// it, so the list's busy state and its answer (the error line, or the
+    /// quiet success) belong to the request that was sent.
+    pub(crate) fn cancelled_form(&self) -> Self {
+        FolderShareView::List {
+            confirm_delete: None,
+            copied: CopyMark::Idle,
+            op: match self.op() {
+                LinkOp::Saving(request) => LinkOp::Saving(*request),
+                LinkOp::Idle | LinkOp::Failed(_) => LinkOp::Idle,
+            },
+        }
+    }
+
     /// The request this view waits on, or the line it failed with.
     pub(crate) fn op(&self) -> &LinkOp {
         match self {

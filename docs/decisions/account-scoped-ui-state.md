@@ -8525,3 +8525,23 @@ send settles its own part, and the four-field checkout is one value.
 | 10-083 | `Decode::Failed(key)` is distinct from `Sdr`: no badge, no frame, not re-decoded from render, dropped by `reset` so the next open asks again. |
 | 14-042 | Turning translation on from the bar also starts a new pump scan, which drops the failures and asks again. |
 | new-01 | `FfmpegBackend::{image, surface}` (an image xor a surface, kept in step by hand) are one `OnScreen { Nothing, Image, Surface }`. |
+
+### Sweep fixes (r2-04b)
+
+| id | result |
+| --- | --- |
+| 08-116 | The row still leaves as the delete goes out (as in tdesktop), but the delete is now a `ScheduledDelete { request, chat_id }` on the chat view. A refusal says so and loads that chat's list again, so a row still scheduled comes back. A chat change forgets the waits. |
+| 08-115 | Verified (r2-04): `ScheduledDialog` carries the load stage and its Retry. |
+| 09-017 | r2-04's `on_mouse_up_out` on every row ran in the capture phase before the pressed row's own release, so it also cleared a real swipe. The press is now `SwipeReply` (`Idle`, `Pressed { chat, message, x }`): the row's release takes it, the history's release listener ends the gesture after the rows saw it (deferred), and it lives in `ChatUi`, so a chat change drops it. |
+| 09-014, 09-015, 09-034, 09-035, 09-036, 09-031 | Verified against the current code: older and newer pages stop on failure and draw Retry; `leave_data_storage` resets the scroll; `PresetsSeed`, `AutoDownloadAnswers` and `StorageSaveFailures` stand. |
+| 09-030 | Also closed the early returns: `set_auto_download_settings`, `set_less_data_for_calls`, `set_storage_limits`, `clear_storage`, `fetch_auto_download_presets` and `maybe_fetch_storage_statistics` refused before any request now end in the failure line / Retry the page draws. |
+| 09-109, 09-110, 09-111 | The form's Cancel while its save is out goes back to the list carrying that `LinkOp::Saving(request)` (`FolderShareView::cancelled_form`): the list waits, and the answer's error line or quiet success lands there, instead of being dropped with the form. |
+| 09-112, 09-115 | Verified: the copy mark owns its timer; refused folder fetches end in the error with Retry. The dialog body's `RefCell::borrow_mut` is a `try_borrow_mut`. |
+| 14-076, 14-077, 14-082 | Verified. A helper that starts but never says ready (`HelperState::Starting { since }`) is given up after 30 s: the window closes and TDLib hears `closeWebApp`. |
+| 14-078 | `searchWebApp`, `getAttachmentMenuBot` and `toggleBotIsAddedToAttachmentMenu` answers carry the `RequestId`; `Awaited` holds the request it sent and the flow takes only that answer. The slots are mailboxes (`Vec`), so two answers landing in one poll no longer overwrite each other. |
+| 14-086 | The mini-app poll is `run_poll_loop` on a new `wake::MINI_APPS` signal. The helper's reader thread pokes it per event and on exit, and the session pokes it when a mini-app answer lands. Stages that watch other state (a suggested emoji lookup, the phone and payment flows, a starting helper) tick every 250 ms while they last; the 5 s ceiling is the safety net. A hidden or idle app costs no wake-ups. |
+
+- **No new CI guard.** The shapes are about which state a function reads;
+  the tests walk each exit (`two_searches_of_one_bot_keep_their_own_answers`,
+  `a_refused_delete_asks_for_its_chat_list_and_leaves`, the `SwipeReply`
+  tests, `storage_refused`, `cancelling_the_form_keeps_the_save_it_sent`).
