@@ -6915,7 +6915,7 @@ as "already fixed".
 | 05-149 | `recommended` is a `Fetch`. |
 | 05-148, 05-232 | `date_jump` is `DateJumpAnswer { Idle, Resolved, NotFound }` (jump and note). The pending jump stays on the per-window view. |
 | 05-159, 10-153 | Already fixed: `HistoryCalendar` pages with `CalendarPaging`. |
-| 05-208 | `SearchState::surface` is `SearchSurface { Closed, Recents, Query }`. |
+| 05-208 | `SearchState::surface` is `SearchSurface { Closed, Recents, Query }`. `SearchState::public_limits_exceeded` stays a bool: it is TDLib's quota fact from the `searchPublicPosts` answer, independent of any stage. |
 | 05-206, 05-230 | The in-chat search is open exactly when its status is not `Closed` (`is_open`); the page and jump stages were already enums. |
 | 05-207, 06-031, 09-X022 | `TopicHistory::older` gains `Complete` and `newer` is `NewerEnd { AtLatest, More, Failed }`; `ThreadsState::topic_load_failed` was already gone. |
 | 05-145 | `time_zones` is a `Fetch`; the Business extra state was already `Fetch`. |

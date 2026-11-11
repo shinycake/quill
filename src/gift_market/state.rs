@@ -114,9 +114,11 @@ impl ResaleSearch {
         }
     }
 
-    /// Whether another page can be asked for.
+    /// Whether another page can be asked for. A failed next page still
+    /// offers Show more, so asking again retries it; a failed first page has
+    /// no offset and offers nothing.
     pub fn has_more(&self) -> bool {
-        self.load == PageLoad::Ready && !self.next_offset.is_empty()
+        matches!(self.load, PageLoad::Ready | PageLoad::Failed(_)) && !self.next_offset.is_empty()
     }
 
     /// Takes a page: the first replaces the list, later ones append. Own
