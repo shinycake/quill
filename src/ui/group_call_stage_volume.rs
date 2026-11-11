@@ -191,7 +191,29 @@ impl QuillApp {
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod tests {
-    use super::{LEVEL_MAX, LEVEL_MIN, level_for_percent, percent_for_level};
+    use super::{LEVEL_MAX, LEVEL_MIN, SliderStage, level_for_percent, percent_for_level};
+    use quill::ids::RequestId;
+
+    #[test]
+    fn a_sent_level_snaps_back_once_its_answer_is_in() {
+        let request = RequestId(7);
+        let sent = SliderStage::Sent {
+            made: 10000,
+            request,
+        };
+        assert!(
+            sent.serves(10000, |_| true),
+            "the drag shows while it is out"
+        );
+        assert!(
+            !sent.serves(10000, |_| false),
+            "answered, level unchanged: the slider is made from the server's level"
+        );
+        assert!(!sent.serves(15000, |_| false), "answered with a new level");
+        assert!(SliderStage::Dragging(10000).serves(15000, |_| false));
+        assert!(SliderStage::Made(10000).serves(10000, |_| false));
+        assert!(!SliderStage::Made(10000).serves(15000, |_| false));
+    }
 
     #[test]
     fn levels_map_to_percents_and_back() {

@@ -226,7 +226,7 @@ impl CallsState {
     }
 
     /// A `getGroupCall` for `group_call_id` failed.
-    pub(crate) fn note_group_call_fetch_failed(&mut self, group_call_id: i32) {
+    pub fn note_group_call_fetch_failed(&mut self, group_call_id: i32) {
         if !self.group_call_fetch_failures.contains(&group_call_id) {
             self.group_call_fetch_failures.push(group_call_id);
         }

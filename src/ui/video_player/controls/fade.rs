@@ -310,6 +310,37 @@ mod tests {
     }
 
     #[test]
+    fn the_wake_up_task_lives_and_dies_with_the_deadline() {
+        let t0 = Instant::now();
+        let mut c = ControlsFade::default();
+        let armed = std::cell::Cell::new(0);
+        let arm = |c: &mut ControlsFade| {
+            c.arm_timer(|| {
+                armed.set(armed.get() + 1);
+                gpui_kit::Task::ready(())
+            })
+        };
+        arm(&mut c);
+        assert_eq!(armed.get(), 0, "no deadline in a normal window");
+        c.set_full(true, t0);
+        arm(&mut c);
+        arm(&mut c);
+        assert_eq!(armed.get(), 1, "one task while the deadline runs");
+        c.mouse_moved(t0 + Duration::from_secs(1));
+        arm(&mut c);
+        assert_eq!(armed.get(), 1, "a move only pushes the deadline");
+        c.tick(t0 + Duration::from_secs(1) + HIDE_TIMEOUT);
+        arm(&mut c);
+        assert_eq!(armed.get(), 1, "hidden: the task went with the deadline");
+        c.mouse_moved(t0 + Duration::from_secs(9));
+        arm(&mut c);
+        assert_eq!(armed.get(), 2, "shown again: a fresh task");
+        c.set_full(false, t0 + Duration::from_secs(10));
+        arm(&mut c);
+        assert_eq!(armed.get(), 2, "leaving full screen ends it");
+    }
+
+    #[test]
     fn an_interrupted_slide_turns_back_from_where_it_is() {
         let t0 = Instant::now();
         let mut c = ControlsFade::default();

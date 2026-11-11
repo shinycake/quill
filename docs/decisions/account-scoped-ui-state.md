@@ -8043,3 +8043,26 @@ whose variants carry the data, with a way out of every stage.
 - **A refused refetch of a stale proxy list** lands in
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
+
+### Sweep fixes (r2-28)
+
+Round 2, the call window, history helpers, giveaway pickers and the image
+budget. Every file of the bundle was read again from the top.
+
+| ids | what |
+| --- | --- |
+| 10-042, 10-045, 10-047, 10-054 | The box over the call window is one `CallBox { None, Rename, Settings, Invite, Share, Stream }`, held by the `CallView` of the call it acts on (`GroupCallScreen.view`), together with the pin, the in-call chat, the member levels and the stage volume. `settings_open`, `title_dialog`, `GroupCallBoxes.call_box`, `StreamWindow.overlay`, `boxes_call` and the pin field are gone. A call change drops the view whole, and so does an account switch (the screen is replaced). Opening a box needs a tracked call, so a share box can no longer be left open for a dropped one (`call: i32`). The screen-share privacy box stays the chooser's own stage: it is a shell dialog with its own enum, and `sync_group_call_boxes` still closes it with the window. |
+| 10-048, 10-049 | `GroupCallScreen::start_join` keeps a wish under a join like `want_stream` keeps a join under a wish. A failed `getGroupCall` is recorded by call id (`CallsState::group_call_fetch_failures`) and taken by the wish that asked for that call, so it ends whichever call is tracked. |
+| 10-050, 10-056 | The controls fade holds its wake-up task in `Reveal::Shown { until, timer }`: hiding, leaving full screen and `clear` drop it. The window's layout is `CallWindow::Open { layout }`; `window_is_stream` is gone. |
+| 10-046 | The stage slider's release is `SliderStage::Sent { request }`: once the answer is in the slider is made again from the server's level, so a refused change snaps back. `set_group_call_participant_volume` returns the request. |
+| 10-036 | The big button reads Connecting while the join request is pending (`JoinVideoChat` in the session's requests). |
+| 10-034 | `PushToTalk<T>` carries the release timer in `Releasing { mute_at, wake }`; a new press, the deadline and a reset drop it. |
+| 10-035 | The push-to-talk key capture is `Capture::PushToTalk`, the same stage as the Shortcuts rows: opening a row replaces it, and the lock, leaving the Calls page and an account change end it. `ptt_capture` is gone. |
+| 10-031, 10-032, 10-033 | `glyph_sweep` uses `try_borrow_mut`; `Sweep::Left` replaces `IdleTrigger` and is spent by the same `begin` that decides; a `Marked` sweep whose frame never starts (hidden window) is given up after two trims. |
+| 10-030, 10-039 | The group settings dialog hands its body over in a `Cell`; the invite-link page asks the list and the counts independently, and Retry sends the counts too. |
+| 10-084, 10-086 | The reaction fly is taken out of its slot by the first frame after its run. The date pill's `settle` ends `Showing` when the hold runs out, with its timer and `covered_row`, which now lives in `Showing`. |
+| 10-085 | Skipped as a stage, kept as a method: `ends`, `had_newer`, the chrome marks and `media_signature` describe the rows that are still in `rows`, which the next build is compared against (the splice keeps the reader's anchor); resetting them with `rows_key` would turn every append or prepend into a full replace. `rows_key` is cleared only by `HistoryUi::invalidate_rows`. |
+| 10-087 | The deferred focus-in checks the history still has focus. |
+| 10-089, 10-090 | `Entry.stage` is `EntryStage { Loading, Ready { bytes }, Failed { at } }`. The thread-local maps and `SizedLoad` use `try_borrow(_mut)` through `with_cell` / `read_cell`, with the safe answer when a cell is busy. |
+| 10-026, 10-027 | The giveaway form has its own search input (`GiveawayForm.search`); the gift pickers keep `pick_search`. The members list decides from its stage in one place (`members_page_due`) and a failed page draws a Retry. |
+| 10-099, 10-100, 10-103 | `InlineMembersUi::refetch` is the one transition for stale, Retry and open. A refused administrators send records the failure the list draws with Retry; a refused next-page send of the inline results sets `more_failed`. |

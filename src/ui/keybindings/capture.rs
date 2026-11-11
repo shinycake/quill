@@ -149,6 +149,30 @@ mod tests {
     }
 
     #[test]
+    fn the_push_to_talk_capture_is_one_stage_with_the_row_captures() {
+        let mut ui = KeybindingUi::default();
+        ui.toggle_ptt_capture();
+        assert!(ui.capture.push_to_talk_armed() && ui.capture.waiting().is_none());
+        // Shortcuts do not take its key, and leaving that page keeps it.
+        assert!(!ui.capture_active(true));
+        assert!(!ui.capture_active(false));
+        assert!(ui.capture.push_to_talk_armed());
+        // A row's capture replaces it; the Calls page ending its own wait
+        // leaves the row's alone.
+        ui.start_capture("focus-composer".into());
+        assert!(!ui.capture.push_to_talk_armed());
+        ui.end_ptt_capture();
+        assert_eq!(ui.capture.waiting(), Some("focus-composer"));
+        // The lock, a page change or an account change end whichever waits.
+        ui.toggle_ptt_capture();
+        ui.end();
+        assert_eq!(ui.capture, Capture::Idle);
+        ui.toggle_ptt_capture();
+        ui.toggle_ptt_capture();
+        assert_eq!(ui.capture, Capture::Idle, "a second press disarms");
+    }
+
+    #[test]
     fn a_refusal_is_dropped_with_the_page_and_is_not_a_capture() {
         let mut ui = KeybindingUi::default();
         ui.refusals
