@@ -108,7 +108,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         owner: MessageSender,
     ) -> Result<RequestId, ConnectSendError> {
         let extra = self.session.request(
-            RequestPurpose::Payments(PaymentsPurpose::GetGiftCollections),
+            RequestPurpose::Payments(PaymentsPurpose::GetGiftCollections { owner }),
             None,
         );
         self.session.payments.gifts_manage.collections_loading = true;
@@ -237,8 +237,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn transfer_picked_gift(&mut self) -> Result<RequestId, ConnectSendError> {
         let Some(TransferPicker {
             id,
-            gift_name,
-            stage: TransferStage::ConfirmPeer { user_id, name },
+            stage: TransferStage::ConfirmPeer { user_id, .. },
             ..
         }) = self.session.payments.gifts_manage.transfer().cloned()
         else {
@@ -262,18 +261,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let to = MessageSender::User { user_id };
-        let extra = self.mutate_own_gifts(PaymentsPurpose::TransferGift, |extra, _| {
+        let sent = self.mutate_own_gifts(PaymentsPurpose::TransferGift, |extra, _| {
             rq::transfer_gift(extra, &id, to, star_count)
         })?;
-        self.session.payments.gifts_manage.transferring = Some((
-            extra,
-            crate::gift_manage::GiftTransferred {
-                gift_name,
-                recipient: name,
-                user_id,
-            },
-        ));
-        Ok(extra)
+        // The confirmation holds until this request's answer: Cancel and
+        // Esc wait, and only its ok or error moves the picker on.
+        if let Some(picker) = self.session.payments.gifts_manage.transfer_mut() {
+            picker.begin_transfer(sent);
+        }
+        Ok(sent)
     }
 
     /// Whether the export of gift `id` may be asked for now: an unlocked

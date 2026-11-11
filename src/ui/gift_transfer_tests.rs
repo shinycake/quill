@@ -71,7 +71,8 @@ fn the_picker_opens_over_the_gift_and_walks_its_steps(cx: &mut TestAppContext) {
             stage(app),
             Some(TransferStage::ConfirmPeer {
                 user_id: 502,
-                name: "Maya Chen".into()
+                name: "Maya Chen".into(),
+                error: None,
             })
         );
         assert!(stage_view(app, cx).is_some_and(|v| v.title.is_none()));

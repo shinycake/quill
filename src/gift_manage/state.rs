@@ -119,10 +119,6 @@ pub struct GiftManageState {
     pub send: SendGiftState,
     /// A finished transfer, for the toast and the recipient's chat.
     pub transferred: Option<GiftTransferred>,
-    /// The transfer on its way, with who it goes to as the user confirmed
-    /// it: only that request's answer reports it, whatever the picker shows
-    /// by then.
-    pub transferring: Option<(crate::ids::RequestId, GiftTransferred)>,
     /// Fragment's export page from `getUpgradedGiftWithdrawalUrl`, waiting
     /// for the UI to open it.
     pub export_url: Option<String>,

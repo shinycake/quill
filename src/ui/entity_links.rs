@@ -491,7 +491,7 @@ impl QuillApp {
                 .bank_card
                 .as_ref()
                 .filter(|lookup| &lookup.number == number)
-                .and_then(|lookup| lookup.info.as_ref())
+                .and_then(|lookup| lookup.info())
                 .map(|info| (info.title.clone(), info.actions.clone()))
                 .unwrap_or_default(),
             _ => Default::default(),

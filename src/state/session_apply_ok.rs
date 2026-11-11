@@ -26,6 +26,7 @@ impl Session {
         self.apply_gift_code_ok(pending);
         self.apply_giveaway_ok(pending);
         self.apply_gift_manage_ok(pending);
+        self.apply_ton_wallet_ok(pending);
         self.apply_earn_ok(pending);
         self.apply_paid_reaction_ok(pending);
         self.apply_passkeys_ok(pending);

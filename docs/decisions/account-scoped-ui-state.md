@@ -4591,3 +4591,91 @@ Media and players. Entry ids in brackets; a skipped entry says why.
   replacement with the reason; the driver sends only a `Ready` probe, so
   no ffprobe subprocess runs on the UI thread (02-144, fixed after being
   skipped).
+
+### Sweep fixes (s3-payments-2)
+
+Payments, gifts and Stars, second half. A failure or an answer lands only on
+the request that asked; a stage that waits has a way out.
+
+- **Errors matched to what asked.** The Stars history and the received gifts
+  list apply an error only when it is the newest request's (`tx_request`,
+  `gifts_request`; 04-036, with 05-114). Resale search, auction state and
+  craft candidates compare the failed request with `request_id`,
+  `auction_request` and `candidates_request` before touching the stage, so an
+  older failure no longer stops the newer search or clears the auction box
+  that was waiting (03-061, with 05-120). `PaymentsPurpose::GetGiftCollections`
+  carries its owner and the list applies only to the open owner (03-064).
+- **One enum per lookup.** `BankCardLookup` is `Loading { request }` /
+  `Ready` / `Failed`; the answer applies to the lookup that waits for it
+  (05-107). The wallet's `state_requested`, `rates_requested` and
+  `explorer_url_requested` are `Fetch<()>`: `begin()` before the send,
+  `cancel()` when it never left, `Failed` on an error (the next open asks
+  again), `Ready` from the answer (05-126, 07-011). The wallet transaction
+  lookup is `TxLookup` (`Idle` / `Loading { request }` / `Failed`): a late
+  answer for a card that was replaced is dropped (07-007). `BoostsListState`
+  holds one `BoostsPage` (Show more now shows progress and a double click
+  sends once, 05-233). Earn balances are a `BalanceFetch` per peer; a failure
+  stays until the profile is left, so the per-frame upkeep never re-asks
+  (09-056). The countries list is `Fetch<Vec<Country>>`: the per-frame
+  `fetch_countries` asks once, `retry_countries` is for a click, the giveaway
+  page draws the failure with Retry (10-009). The market's acquired gifts and
+  upgrade previews are `Fetch` per gift: "N items bought" shows the failure
+  with Retry (09-X062) and the preview is asked as the info box opens, never
+  from its render (09-128).
+- **Stages that kept a choice.** The gift transfer confirmation becomes
+  `TransferStage::Transferring` once `transferGift` is out: Cancel and Esc
+  wait, the answer still brings the toast and the chat, a failure returns to
+  the confirmation with the reason drawn in it, not under the dialog via
+  `hub.gifts_error` (10-002). `GiftMarketUi::auction_open` replaces
+  `pending_auction` and is dropped when the send box it came from closed
+  (10-005). A giveaway launch in flight survives reopening the form
+  of the chat it was started for only (`GiveawayLaunch::for_form`): another
+  chat's form starts `Idle`, so A's answer shows nothing in B's form and only
+  drops A's cached boost status (10-004; no toast for A, which tdesktop shows
+  in the form it came from). The Direct Messages box has a
+  `DirectStage`: it stays open while Save is out, closes from the answer and
+  shows a refusal in itself; another target's save holding the shared
+  `PaidSave` slot never closes it as saved (11-p6-002). The Star reaction box stays open
+  with the reason when Send is refused or cannot go out, and only closes
+  when the Stars were added (11-p7-003). Files chosen for forwarding stay in
+  the chooser until their chat is open (05-034, 13-036).
+- **Owner going away.** A join box parked for the recipients is dropped by the
+  earn Farewell, when the layer is left and when the bot profile it came
+  from closes (`set_open_info_panel`, 09-X032). A "learn more" gift
+  value lookup is dropped when the gift box it was asked from is gone
+  or shows another gift (10-003). The Premium bot's queued `/start` (`PremiumAutoStart`) is tied to the
+  generation of the link's resolve: that resolve's error, stale or not,
+  drops it, another flow's does not; it is also dropped by the payments
+  Farewell and when another link opens a chat (04-048). The Stars history
+  fields (04-036 fold into one enum) were not converted.
+- **Failures that said nothing.** A failed collectible lookup other than a
+  username that is not a collectible one posts a status note (08-118; we
+  chose a note for the phone case too: the register asks for it and a dead
+  tap is worse). A listing purchase that cannot start posts a note, and a
+  second listing cannot replace a purchase on its way (09-127). The craft
+  "Select Gifts" list shows a failed search and Retry, not "none on sale"
+  (09-X065). The withdrawal amount is brought down to the available balance
+  and the option maximum when Withdraw is pressed (09-065). The receipt's
+  Total includes the shipping option and the tip (06-061). `ISK` is a
+  zero-decimal currency (06-062; ISO 4217 says 0, Telegram's currency table
+  could not be read here). The GPU-loss recovery waits for a new device for at
+  most 20 s on the executor clock, then gives up and quits (13-039).
+- **Already fixed on this branch.** 09-X023: `checkout_prefill_upkeep` fills
+  the checkout at the first frame after the form lands, in the window that
+  hosts the box (test `the_checkout_prefills_in_the_window_that_hosts_it`).
+  08-015: `send_boost_chat` already leaves `Working` when the send fails; the
+  list is now put back too (test). 12-014, 12-015: the fixed-time pollers are
+  gone; the downloads are a function of the hub state (`preview_downloads`,
+  tested), run at every main frame.
+- **Merged with the s1/s2 money fixes.** The transfer's request id lives in
+  `TransferStage::Transferring { request }` (main's separate `transferring`
+  slot is gone); its ok and error settle the picker only for that request
+  (test `a_transfer_settles_only_on_its_own_request`). `for_form` never
+  forgets a `Launching`: the form and the driver compare `chat_id`, and
+  `Launched` and `Failed` carry the chat, so going A, B, back to A keeps A's
+  Start disabled (test `going_back_to_a_chat_keeps_its_launch_in_flight`)
+  and A's answer never shows in B's form. The upgrade previews are `Fetch`
+  values, so main's `failed_previews` set is gone. The paid-message save
+  holds its request (`PaidSave::Saving { target, request }`) and only that
+  request's ok or error settles it (test
+  `only_the_save_that_holds_the_slot_is_settled_by_its_answer`).

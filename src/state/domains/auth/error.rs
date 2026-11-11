@@ -38,6 +38,12 @@ impl Session {
                 self.auth_state.password_state_loading = false;
                 self.auth_state.password_op_error = Some(password_op_error_line(op, err));
             }
+            // The country list failed: the boxes say so and offer Retry (a
+            // user action, never a frame), instead of "Loading countries"
+            // for good.
+            Some(RequestPurpose::GetCountries) => {
+                self.auth_state.countries.fail(error_reason(err));
+            }
             // Slice A8: a refused change-number op (code send /
             // resend, code check) clears the in-flight flags and
             // parks the honest, classified error line — never a
@@ -56,14 +62,6 @@ impl Session {
                 self.auth_state.change_number_checking = false;
                 self.auth_state.change_number_error =
                     Some(sessions_error_line("check the verification code", err));
-            }
-            // The country list failed: the boxes say so and offer Retry,
-            // instead of "Loading countries" for good.
-            Some(RequestPurpose::GetCountries) => {
-                self.auth_state.countries = crate::state::fetch::Fetch::Failed {
-                    error: format!("{:?}", err.class),
-                    stale: self.auth_state.countries.take_data(),
-                };
             }
             // TDLib answers and stays in WaitTdlibParameters, which sends no
             // update: without this the card says "Connecting" forever.

@@ -29,7 +29,13 @@ impl Session {
             return;
         };
         match (payload, purpose) {
-            (GiftManagePayload::Collections(list), PaymentsPurpose::GetGiftCollections) => {
+            (
+                GiftManagePayload::Collections(list),
+                PaymentsPurpose::GetGiftCollections { owner },
+            ) => {
+                if self.payments.hub.gifts_owner != Some(owner) {
+                    return;
+                }
                 let files: Vec<ParsedFile> =
                     list.iter().flat_map(|c| c.files.iter().cloned()).collect();
                 self.remember_files(&files);
@@ -117,8 +123,8 @@ impl Session {
                 hub.tx_loaded = false;
                 // tdesktop `ShowGiftTransferredToast`, then the recipient's
                 // chat (`showPeerHistory`).
-                manage.transferred = match manage.transferring.take() {
-                    Some((request, done)) if Some(request) == pending.map(|p| p.id) => Some(done),
+                manage.transferred = match (manage.transfer(), pending.map(|p| p.id)) {
+                    (Some(picker), Some(request)) => picker.transferred_by(request),
                     _ => None,
                 };
                 manage.flow = None;
@@ -301,7 +307,11 @@ impl Session {
         let manage = &mut self.payments.gifts_manage;
         match purpose {
             PaymentsPurpose::GetGiftOption(_) => {}
-            PaymentsPurpose::GetGiftCollections => manage.collections_loading = false,
+            PaymentsPurpose::GetGiftCollections { owner } => {
+                if self.payments.hub.gifts_owner == Some(owner) {
+                    manage.collections_loading = false;
+                }
+            }
             PaymentsPurpose::GetAvailableGifts if !manage.send.asked_gifts(pending) => {}
             PaymentsPurpose::GetPremiumGiftOptions if !manage.send.asked_premium(pending) => {}
             PaymentsPurpose::GetAvailableGifts => {
@@ -310,6 +320,15 @@ impl Session {
             }
             PaymentsPurpose::GetPremiumGiftOptions => {
                 manage.send.premium_fetch = GiftListFetch::Failed;
+            }
+            PaymentsPurpose::TransferGift => {
+                if let (Some(picker), Some(request)) =
+                    (manage.transfer_mut(), pending.map(|p| p.id))
+                {
+                    picker
+                        .transfer_failed(request, format!("Couldn't transfer the gift: {reason}"));
+                }
+                self.payments.hub.gift_mutating = false;
             }
             PaymentsPurpose::DeleteGift => {
                 manage.deleting = None;

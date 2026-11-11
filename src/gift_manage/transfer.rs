@@ -7,6 +7,7 @@
 //! via Blockchain" row and the people the picker lists. Nothing here sends
 //! a request; the driver is `connect::gift_manage`.
 
+use super::GiftTransferred;
 use crate::premium_hub::ReceivedGift;
 
 /// Seconds in an hour, and the half hour tdesktop rounds by.
@@ -94,7 +95,20 @@ pub enum TransferStage {
     /// "Transfer {name}": the search, "Send via Blockchain" and contacts.
     Pick,
     /// "Do you want to transfer ownership of {name} to {recipient}?"
-    ConfirmPeer { user_id: i64, name: String },
+    /// `error` is why the last "Transfer" failed, shown in this dialog.
+    ConfirmPeer {
+        user_id: i64,
+        name: String,
+        error: Option<String>,
+    },
+    /// "Transfer" was pressed: `transferGift` is out. Cancel and Esc wait
+    /// for the answer to `request`, which brings the toast and the
+    /// recipient's chat; its failure returns to the confirmation.
+    Transferring {
+        user_id: i64,
+        name: String,
+        request: crate::ids::RequestId,
+    },
     /// "Unlocking in progress".
     Locked { hours: i64 },
     /// "Manage with Fragment" with "Open Fragment".
@@ -171,12 +185,68 @@ impl TransferPicker {
         self.exporting() || self.stage == TransferStage::Probing
     }
 
+    /// Whether `transferGift` is out.
+    pub fn transferring(&self) -> bool {
+        matches!(self.stage, TransferStage::Transferring { .. })
+    }
+
+    /// `transferGift` (`request`) went out for the contact the confirmation
+    /// names.
+    pub fn begin_transfer(&mut self, request: crate::ids::RequestId) {
+        if let TransferStage::ConfirmPeer { user_id, name, .. } = &self.stage {
+            self.stage = TransferStage::Transferring {
+                user_id: *user_id,
+                name: name.clone(),
+                request,
+            };
+        }
+    }
+
+    /// The finished transfer when `request` is the one this picker waits
+    /// for: the toast and the recipient's chat.
+    pub fn transferred_by(&self, request: crate::ids::RequestId) -> Option<GiftTransferred> {
+        match &self.stage {
+            TransferStage::Transferring {
+                user_id,
+                name,
+                request: asked,
+            } if *asked == request => Some(GiftTransferred {
+                gift_name: self.gift_name.clone(),
+                recipient: name.clone(),
+                user_id: *user_id,
+            }),
+            _ => None,
+        }
+    }
+
+    /// `transferGift` (`request`) failed: the confirmation is back with the
+    /// reason, to retry or cancel. Another request's failure changes
+    /// nothing.
+    pub fn transfer_failed(&mut self, request: crate::ids::RequestId, reason: String) {
+        if let TransferStage::Transferring {
+            user_id,
+            name,
+            request: asked,
+        } = &self.stage
+        {
+            if *asked != request {
+                return;
+            }
+            self.stage = TransferStage::ConfirmPeer {
+                user_id: *user_id,
+                name: name.clone(),
+                error: Some(reason),
+            };
+        }
+    }
+
     /// A contact was picked: ask before giving the gift away.
     pub fn choose(&mut self, user_id: i64, name: impl Into<String>) {
         if self.stage == TransferStage::Pick {
             self.stage = TransferStage::ConfirmPeer {
                 user_id,
                 name: name.into(),
+                error: None,
             };
         }
     }
@@ -244,9 +314,9 @@ impl TransferPicker {
     }
 
     /// Cancel or OK on a step: back to the list. Not while an export
-    /// request is out.
+    /// request or the transfer is out.
     pub fn back(&mut self) {
-        if !self.export_busy() {
+        if !self.export_busy() && !self.transferring() {
             self.stage = TransferStage::Pick;
         }
     }

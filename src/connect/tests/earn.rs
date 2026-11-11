@@ -375,6 +375,29 @@ fn balances_are_fetched_once_and_follow_updates() {
 }
 
 #[test]
+fn a_failed_balance_waits_for_the_next_visit_instead_of_asking_every_frame() {
+    let mut p = parts();
+    let peer = EarnPeer::Chat(CHANNEL);
+    p.0.fetch_earn_balances(peer, true, true).unwrap();
+    error(&mut p, "getChatRevenueStatistics", "FLOOD_WAIT_3");
+    error(&mut p, "getStarTransactions", "FLOOD_WAIT_3");
+    // The failure is not forgotten while the profile stays open: the
+    // upkeep sees it asked and sends nothing.
+    assert!(!p.0.session.payments.earn.balances_unasked(peer, true, true));
+    p.0.fetch_earn_balances(peer, true, true).unwrap();
+    assert_eq!(count(&p.1, "getChatRevenueStatistics"), 1);
+    assert_eq!(count(&p.1, "getStarTransactions"), 1);
+    // Leaving the profile lets the next visit ask again.
+    p.0.session.payments.earn.forget_failed_balances();
+    assert!(p.0.session.payments.earn.balances_unasked(peer, true, true));
+    p.0.fetch_earn_balances(peer, true, true).unwrap();
+    assert_eq!(count(&p.1, "getChatRevenueStatistics"), 2);
+    assert_eq!(count(&p.1, "getStarTransactions"), 2);
+    answer(&mut p, "getChatRevenueStatistics", ton_stats(42));
+    assert_eq!(p.0.session.payments.earn.ton_balance(peer), Some(42));
+}
+
+#[test]
 fn options_set_the_limits() {
     let mut p = parts();
     feed(

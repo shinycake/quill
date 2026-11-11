@@ -4,8 +4,8 @@ use super::*;
 use crate::ids::{ChatId, RequestId};
 use crate::state::GroupsPurpose;
 use crate::state::{
-    AdminLinksState, BOOSTS_PAGE_SIZE, BoostsListState, INVITE_ADMIN_PAGE_SIZE, InviteLinkFetch,
-    LinkRequestsState, RequestPurpose,
+    AdminLinksState, BOOSTS_PAGE_SIZE, BoostsListState, BoostsPage, INVITE_ADMIN_PAGE_SIZE,
+    InviteLinkFetch, LinkRequestsState, RequestPurpose,
 };
 use crate::telegram::requests::{
     delete_all_revoked_chat_invite_links, get_chat_boost_link, get_chat_boosts,
@@ -288,7 +288,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(state) = self.session.groups.chat_boost_lists.get(&chat_id.0) else {
             return Ok(None);
         };
-        if state.loading || state.next_offset.is_empty() {
+        if state.loading() || state.next_offset.is_empty() {
             return Ok(None);
         }
         let (only_gifts, offset) = (state.only_gifts, state.next_offset.clone());
@@ -312,10 +312,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::GetChatBoosts { append }, Some(chat_id));
         match self.session.groups.chat_boost_lists.get_mut(&chat_id.0) {
-            Some(state) if append => {
-                state.error = None;
-                state.request = Some(extra);
-            }
+            Some(state) if append => state.page = BoostsPage::Loading { request: extra },
             _ => {
                 self.session.groups.chat_boost_lists.insert(
                     chat_id.0,
@@ -324,9 +321,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         total_count: 0,
                         boosts: Vec::new(),
                         next_offset: String::new(),
-                        loading: true,
-                        error: None,
-                        request: Some(extra),
+                        page: BoostsPage::Loading { request: extra },
                     },
                 );
             }
@@ -334,7 +329,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let payload = get_chat_boosts(extra, chat_id.0, only_gifts, offset, BOOSTS_PAGE_SIZE);
         let sent = self.links_boosts_send(extra, &payload);
         if sent.is_err() {
-            self.session.groups.chat_boost_lists.remove(&chat_id.0);
+            // A page that never left keeps the list it extends.
+            if append && let Some(state) = self.session.groups.chat_boost_lists.get_mut(&chat_id.0)
+            {
+                state.page = BoostsPage::Idle;
+            } else {
+                self.session.groups.chat_boost_lists.remove(&chat_id.0);
+            }
         }
         sent
     }

@@ -151,10 +151,10 @@ impl QuillApp {
     pub(super) fn open_craft_info(&mut self, gift: CraftGift, cx: &mut Context<Self>) {
         let gate = gift.gate(true, now_unix());
         if let Some(notice) = gate_notice(gate) {
-            self.open_market_box(notice);
+            self.gift_market.push(notice);
         } else if gate == CraftGate::Ready {
             self.gift_market.craft_primary = Some(gift);
-            self.open_market_box(MarketBox::CraftInfo);
+            self.gift_market.push(MarketBox::CraftInfo);
         }
         self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         cx.notify();
@@ -660,7 +660,6 @@ impl QuillApp {
             .ghost()
             .on_click(cx.listener(|this, _, window, cx| {
                 this.gift_market.stack.clear();
-                this.forget_failed_previews();
                 this.after_craft_pop();
                 cx.notify();
                 this.close_kit_dialog_if_done(DialogKind::GiftMarket, window, cx);

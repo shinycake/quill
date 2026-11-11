@@ -403,13 +403,26 @@ fn acquired_and_preview_requests() {
             "unique_gift_number": 0, "text": {"text": ""}, "is_private": false}]}),
     );
     assert_eq!(
-        f.driver.session.payments.gift_market.acquired[&800].len(),
-        1
+        f.driver.session.payments.gift_market.acquired[&800]
+            .data()
+            .map(Vec::len),
+        Some(1)
     );
     f.driver.fetch_gift_upgrade_preview(800).unwrap();
     assert_eq!(f.last("getGiftUpgradePreview")["regular_gift_id"], "800");
     // Not twice while in flight.
     assert!(f.driver.fetch_gift_upgrade_preview(800).is_err());
+    // A failure is shown, and the next opening of the box asks again.
+    f.answer(
+        "getGiftUpgradePreview",
+        json!({"@type": "error", "code": 500, "message": "TIMEOUT"}),
+    );
+    assert!(
+        f.driver.session.payments.gift_market.previews[&800]
+            .error()
+            .is_some()
+    );
+    f.driver.fetch_gift_upgrade_preview(800).unwrap();
     f.answer(
         "getGiftUpgradePreview",
         json!({"@type": "giftUpgradePreview", "models": [], "symbols": [], "backdrops": [], "prices": [], "next_prices": []}),
@@ -420,7 +433,9 @@ fn acquired_and_preview_requests() {
             .payments
             .gift_market
             .previews
-            .contains_key(&800)
+            .get(&800)
+            .and_then(|preview| preview.data())
+            .is_some()
     );
 }
 
@@ -520,16 +535,27 @@ fn craft_buys_a_listing_into_a_slot() {
     assert!(f.driver.session.take_gift_market_toasts().is_empty());
 }
 
+/// A preview in flight is not asked twice; a failed one says so, and is
+/// asked again only by a box opening or its Retry (never from a render).
 #[test]
-fn a_failed_upgrade_preview_is_not_asked_again() {
+fn a_failed_upgrade_preview_waits_for_a_user_action() {
     let mut f = Fixture::new();
     f.driver.fetch_gift_upgrade_preview(801).unwrap();
+    assert!(
+        f.driver.fetch_gift_upgrade_preview(801).is_err(),
+        "in flight"
+    );
     f.answer(
         "getGiftUpgradePreview",
         json!({"@type": "error", "code": 500, "message": "boom"}),
     );
-    assert!(f.driver.fetch_gift_upgrade_preview(801).is_err());
+    assert!(
+        f.driver.session.payments.gift_market.previews[&801]
+            .error()
+            .is_some()
+    );
     assert!(f.driver.fetch_gift_upgrade_preview(802).is_ok());
+    assert!(f.driver.fetch_gift_upgrade_preview(801).is_ok(), "Retry");
 }
 
 /// Opening a resale list while a buy's `sendResoldGift` is out keeps that

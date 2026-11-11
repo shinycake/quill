@@ -462,7 +462,11 @@ pub enum PaidTarget {
 pub enum PaidSave {
     #[default]
     Idle,
-    Saving(PaidTarget),
+    /// `request` is out for `target`: only its answer settles the save.
+    Saving {
+        target: PaidTarget,
+        request: crate::ids::RequestId,
+    },
     Failed {
         target: PaidTarget,
         line: String,
@@ -471,7 +475,29 @@ pub enum PaidSave {
 
 impl PaidSave {
     pub fn is_saving(&self) -> bool {
-        matches!(self, Self::Saving(_))
+        matches!(self, Self::Saving { .. })
+    }
+
+    /// The `ok` of `request`: the save is done when it is the one that
+    /// holds the slot. Another request's answer (an older save that a newer
+    /// one replaced) leaves the slot alone.
+    pub fn settle(&mut self, request: crate::ids::RequestId) {
+        if matches!(self, Self::Saving { request: held, .. } if *held == request) {
+            *self = Self::Idle;
+        }
+    }
+
+    /// The error of `request`, when it holds the slot: the save failed with
+    /// `line`.
+    pub fn fail(&mut self, request: crate::ids::RequestId, line: String) {
+        if let Self::Saving {
+            target,
+            request: held,
+        } = *self
+            && held == request
+        {
+            *self = Self::Failed { target, line };
+        }
     }
 
     /// The failure line of a save for `target`.

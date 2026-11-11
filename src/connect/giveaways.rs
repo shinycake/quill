@@ -90,15 +90,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some((giveaway_id, winner_count, star_count)) = draft.prepaid_launch() else {
             return Err(ConnectSendError::InvalidRequest);
         };
+        let chat_id = draft.boosted_chat_id;
+        // A launch for this chat on its way is not sent twice, even when a
+        // later launch for another chat took the progress slot.
         if draft.validate(now).is_err()
-            || matches!(
-                self.session.payments.giveaway.launch,
-                GiveawayLaunch::Launching { .. }
+            || self
+                .session
+                .payments
+                .giveaway
+                .launch
+                .is_launching_for(chat_id)
+            || self.session.requests.has_purpose_for_chat(
+                RequestPurpose::LaunchPrepaidGiveaway,
+                crate::ids::ChatId(chat_id),
             )
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let chat_id = draft.boosted_chat_id;
         let extra = self.session.request(
             RequestPurpose::LaunchPrepaidGiveaway,
             Some(crate::ids::ChatId(chat_id)),

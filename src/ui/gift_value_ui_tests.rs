@@ -209,3 +209,56 @@ fn a_look_alike_fragment_address_asks_before_opening(cx: &mut TestAppContext) {
     assert_eq!(note, note_before);
     assert!(vcx.debug_bounds("gift-value-box").is_none());
 }
+
+#[gpui_kit::test]
+fn a_lookup_asked_from_a_box_that_is_gone_does_not_open_later(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    set_lookup(&app, vcx, |_| None);
+    click(vcx, "gift-value-learn-more");
+    assert!(lookup_of(&app, vcx).is_some_and(|lookup| lookup.loading));
+    // The gift box is left before the answer lands.
+    app.update_in(vcx, |app, _, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.payments.hub.gift_selected = None;
+        }
+        app.gift_market.stack.clear();
+        cx.notify();
+    });
+    settle(vcx);
+    assert!(
+        lookup_of(&app, vcx).is_none(),
+        "the pending lookup is dropped"
+    );
+}
+
+/// X's "learn more" is pending and the host now shows gift Y (another
+/// gift was picked): the lookup is dropped, not opened over Y's box.
+#[gpui_kit::test]
+fn a_lookup_for_one_gift_is_dropped_when_the_box_shows_another(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    set_lookup(&app, vcx, |_| None);
+    click(vcx, "gift-value-learn-more");
+    assert!(lookup_of(&app, vcx).is_some_and(|lookup| lookup.loading));
+    app.update_in(vcx, |app, _, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            let hub = &mut session.payments.hub;
+            let selected = hub.gift_selected.clone();
+            if let Some(c) = hub
+                .gifts
+                .iter_mut()
+                .find(|g| Some(&g.id) == selected.as_ref())
+                .and_then(|g| g.gift.collectible.as_deref_mut())
+            {
+                c.name = "another-gift-1".into();
+            }
+        }
+        cx.notify();
+    });
+    settle(vcx);
+    assert!(
+        lookup_of(&app, vcx).is_none(),
+        "another gift's box does not keep this lookup"
+    );
+}

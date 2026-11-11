@@ -17,9 +17,9 @@ impl Session {
             PaymentsPayload::BankCardInfo(info) => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBankCardInfo)
                     && let Some(lookup) = self.payments.bank_card.as_mut()
+                    && lookup.waits_for(pending.map(|p| p.id))
                 {
-                    lookup.loading = false;
-                    lookup.info = Some(info);
+                    lookup.stage = BankCardStage::Ready(info);
                 }
             }
             PaymentsPayload::CollectibleInfo(info) => {

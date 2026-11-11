@@ -4,6 +4,7 @@ use super::super::*;
 use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::platform::MemorySecretStore;
+use crate::premium_hub::PremiumAutoStart;
 use crate::state::{DeepLinkAction, DeepLinkState};
 use crate::telegram::client::copy_and_parse;
 use serde_json::json;
@@ -134,7 +135,6 @@ fn a_failed_premium_bot_link_drops_its_auto_start() {
     let recorder = Arc::new(RecordingSender::new());
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
-    driver.session.payments.hub.auto_start = Some(("premiumbot".into(), "ref".into()));
     let extra = driver
         .resolve_deep_link(DeepLinkAction::OpenUsername {
             domain: "PremiumBot".into(),
@@ -144,6 +144,26 @@ fn a_failed_premium_bot_link_drops_its_auto_start() {
         })
         .unwrap()
         .unwrap();
+    let generation = driver.session.chats_state.deep_link_seq;
+    driver.session.payments.hub.auto_start = Some(PremiumAutoStart {
+        username: "premiumbot".into(),
+        start_ref: "ref".into(),
+        generation,
+    });
+    // Another flow's failure (an older generation) leaves it.
+    let other = driver.session.request(
+        crate::state::RequestPurpose::Chats(crate::state::ChatsPurpose::DeepLinkResolve {
+            generation: generation + 7,
+        }),
+        None,
+    );
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type": "error", "@extra": other.as_extra(), "code": 500, "message": "Network"}),
+    );
+    assert!(driver.session.payments.hub.auto_start.is_some());
     feed(
         &mut driver,
         &seq,

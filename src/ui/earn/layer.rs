@@ -84,6 +84,9 @@ impl QuillApp {
     pub(in crate::ui) fn drop_earn_layer(&mut self, cx: &mut Context<Self>) {
         self.earn.fade = None;
         self.earn.back.clear();
+        if let Some(earn) = self.earn_mut() {
+            earn.pending_join = None;
+        }
         let restore = self.earn.restore.take();
         if let Some(live) = self.live.as_mut() {
             live.driver.set_info_panel(restore);

@@ -102,7 +102,8 @@ impl QuillApp {
                 .submit_on_enter(false)
         });
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.payments.giveaway.launch = GiveawayLaunch::Idle;
+            let giveaway = &mut live.driver.session.payments.giveaway;
+            giveaway.launch = std::mem::take(&mut giveaway.launch).for_form();
             if new_giveaway {
                 let _ = live.driver.request_giveaway_options(chat_id.0);
             }
@@ -121,16 +122,15 @@ impl QuillApp {
     pub(super) fn close_giveaway_form(&mut self, cx: &mut Context<Self>) {
         let boosted = self.giveaway.form.take().map(|f| f.draft.boosted_chat_id);
         if let Some(live) = self.live.as_mut() {
-            let launched = matches!(
-                live.driver.session.payments.giveaway.launch,
-                GiveawayLaunch::Launched | GiveawayLaunch::Paid { .. }
-            );
-            if !matches!(
-                live.driver.session.payments.giveaway.launch,
-                GiveawayLaunch::Launching { .. }
-            ) {
-                live.driver.session.payments.giveaway.launch = GiveawayLaunch::Idle;
-            }
+            let giveaway = &mut live.driver.session.payments.giveaway;
+            let launched = boosted.is_some_and(|chat| {
+                matches!(
+                    giveaway.launch,
+                    GiveawayLaunch::Launched { chat_id } | GiveawayLaunch::Paid { chat_id }
+                        if chat_id == chat
+                )
+            });
+            giveaway.launch = std::mem::take(&mut giveaway.launch).for_form();
             if launched && let Some(chat) = boosted {
                 let _ = live.driver.fetch_chat_boost_status(ChatId(chat));
             }
@@ -503,9 +503,11 @@ impl QuillApp {
                     keys::Q_MONEY_START_GIVEAWAY_OPENS_THE_CHECKOUT,
                 )));
         }
-        let note = form.note.clone().or_else(|| match &giveaway.launch {
-            GiveawayLaunch::Failed(text) => Some(text.clone()),
-            _ => None,
+        let note = form.note.clone().or_else(|| {
+            giveaway
+                .launch
+                .failure_for(draft.boosted_chat_id)
+                .map(str::to_owned)
         });
         if let Some(note) = note {
             body = body.child(
@@ -545,7 +547,7 @@ impl QuillApp {
                 .session()
                 .map(|s| s.payments.giveaway.launch.clone())
                 .unwrap_or_default();
-            let launching = matches!(launch, GiveawayLaunch::Launching { .. });
+            let launching = settled_chat.is_some_and(|chat| launch.is_launching_for(chat));
             let launched = settled_chat.is_some_and(|chat| launch.is_done_for(chat));
             let paying = settled_chat.is_some_and(|chat| {
                 this.session()

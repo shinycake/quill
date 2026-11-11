@@ -312,32 +312,47 @@ fn bank_card_info_applies_only_to_own_request_and_clears_on_error() {
             r#"{{"@type":"bankCardInfo","@extra":"{extra}","title":"Example Bank","actions":[{{"@type":"bankCardActionOpenUrl","text":"Website","url":"https://bank.example"}}]}}"#
         )
     };
+    let error_json = |extra: u64| {
+        format!(
+            r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"BANK_CARD_NUMBER_INVALID"}}"#
+        )
+    };
+    let first = session.request(RequestPurpose::GetBankCardInfo, None);
     session.payments.bank_card = Some(BankCardLookup {
         number: "4242424242424242".into(),
-        info: None,
-        loading: true,
+        stage: BankCardStage::Loading { request: first },
     });
     apply_json(&mut session, &seq, &sink, &info_json("999"));
-    assert!(session.payments.bank_card.as_ref().unwrap().info.is_none());
-    let extra = session.request(RequestPurpose::GetBankCardInfo, None);
-    apply_json(&mut session, &seq, &sink, &info_json(&extra.0.to_string()));
-    let lookup = session.payments.bank_card.as_ref().unwrap();
-    assert!(!lookup.loading);
-    assert_eq!(lookup.info.as_ref().unwrap().title, "Example Bank");
-
-    let extra = session.request(RequestPurpose::GetBankCardInfo, None);
-    session.payments.bank_card.as_mut().unwrap().loading = true;
-    apply_json(
-        &mut session,
-        &seq,
-        &sink,
-        &format!(
-            r#"{{"@type":"error","@extra":"{}","code":400,"message":"BANK_CARD_NUMBER_INVALID"}}"#,
-            extra.0
-        ),
+    assert!(
+        session
+            .payments
+            .bank_card
+            .as_ref()
+            .unwrap()
+            .info()
+            .is_none()
     );
+    // The user taps a second card before the first answers.
+    let second = session.request(RequestPurpose::GetBankCardInfo, None);
+    session.payments.bank_card = Some(BankCardLookup {
+        number: "5555555555554444".into(),
+        stage: BankCardStage::Loading { request: second },
+    });
+    apply_json(&mut session, &seq, &sink, &info_json(&first.0.to_string()));
     let lookup = session.payments.bank_card.as_ref().unwrap();
-    assert!(!lookup.loading && lookup.info.is_none());
+    assert_eq!(lookup.stage, BankCardStage::Loading { request: second });
+    apply_json(&mut session, &seq, &sink, &error_json(first.0));
+    let lookup = session.payments.bank_card.as_ref().unwrap();
+    assert_eq!(lookup.stage, BankCardStage::Loading { request: second });
+    apply_json(&mut session, &seq, &sink, &info_json(&second.0.to_string()));
+    let lookup = session.payments.bank_card.as_ref().unwrap();
+    assert_eq!(lookup.info().unwrap().title, "Example Bank");
+
+    let third = session.request(RequestPurpose::GetBankCardInfo, None);
+    session.payments.bank_card.as_mut().unwrap().stage = BankCardStage::Loading { request: third };
+    apply_json(&mut session, &seq, &sink, &error_json(third.0));
+    let lookup = session.payments.bank_card.as_ref().unwrap();
+    assert_eq!(lookup.stage, BankCardStage::Failed);
 }
 
 #[test]

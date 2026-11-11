@@ -79,6 +79,19 @@ pub(crate) struct CustomBidUi {
     pub(super) error: Option<String>,
 }
 
+/// Where "open this auction" stands. It leaves `Waiting` when the state
+/// arrives, when the request failed, when the box it came from closed, or
+/// when the market box stack empties.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AuctionOpen {
+    Idle,
+    Waiting {
+        /// Asked from the send-gift box, whose recipient the bid uses: the
+        /// answer is dropped once that box is gone.
+        from_send_box: bool,
+    },
+}
+
 pub(crate) struct GiftMarketUi {
     pub(super) stack: Vec<MarketBox>,
     /// Who an auction bid is for: the send-gift box's recipient, or the
@@ -87,9 +100,9 @@ pub(crate) struct GiftMarketUi {
     pub(super) hide_name: bool,
     pub(super) slider: Option<BidSliderUi>,
     pub(super) custom: Option<CustomBidUi>,
-    /// A tile or link asked for this auction; its box opens when the
-    /// state arrives.
-    pub(super) pending_auction: bool,
+    /// A tile or link asked for an auction; its box opens when the state
+    /// arrives.
+    pub(super) auction_open: AuctionOpen,
     /// The sticker files last asked for; downloads go out only when the
     /// set changes, not every frame.
     pub(super) requested_files: Vec<quill::ids::FileId>,
@@ -126,7 +139,7 @@ impl GiftMarketUi {
             hide_name: false,
             slider: None,
             custom: None,
-            pending_auction: false,
+            auction_open: AuctionOpen::Idle,
             requested_files: Vec::new(),
             #[cfg(test)]
             bar_opens: 0,

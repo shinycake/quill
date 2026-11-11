@@ -4,6 +4,7 @@ use crate::gift_market::{
     CraftGift, CraftResult, GiftMarketPayload, GiftMarketPurpose, bid_done_toast, error_note,
 };
 use crate::marketplace::GiftPurchaseResult;
+use crate::state::fetch::Fetch;
 use crate::state::*;
 
 fn market_purpose(pending: Option<&PendingRequest>) -> Option<GiftMarketPurpose> {
@@ -77,14 +78,20 @@ impl Session {
             }
             GiftMarketPayload::AcquiredGifts(list) => {
                 if let Some(GiftMarketPurpose::AcquiredGifts { gift_id }) = purpose {
-                    self.payments.gift_market.acquired.insert(gift_id, list);
+                    self.payments
+                        .gift_market
+                        .acquired
+                        .insert(gift_id, Fetch::Ready(list));
                 }
             }
             GiftMarketPayload::UpgradePreview(preview) => {
                 if let Some(GiftMarketPurpose::UpgradePreview { gift_id }) = purpose {
                     let files: Vec<ParsedFile> = preview.files().cloned().collect();
                     self.remember_files(&files);
-                    self.payments.gift_market.previews.insert(gift_id, preview);
+                    self.payments
+                        .gift_market
+                        .previews
+                        .insert(gift_id, Fetch::Ready(preview));
                 }
             }
             GiftMarketPayload::CraftCandidates(candidates) => {
@@ -259,7 +266,9 @@ impl Session {
                     .iter_mut()
                     .chain(market.craft.as_mut().map(|craft| &mut craft.market))
                 {
-                    if search.loading {
+                    // Only the search that sent this request fails; a newer
+                    // filter's search (or the other box's) keeps loading.
+                    if search.loading && request != 0 && search.request_id == request {
                         search.loading = false;
                         search.loaded = true;
                         search.error = Some(note.clone());
@@ -282,6 +291,9 @@ impl Session {
                 }
             }
             GiftMarketPurpose::AuctionState { .. } => {
+                if request == 0 || market.auction_request != request {
+                    return;
+                }
                 market.auction_loading = false;
                 market.notes.push(note);
             }
@@ -294,10 +306,15 @@ impl Session {
                 }
             }
             GiftMarketPurpose::GiftsForCrafting { .. } => {
-                if let Some(craft) = market.craft.as_mut() {
-                    craft.candidates_loading = false;
-                    craft.candidates_loaded = true;
-                }
+                let Some(craft) = market
+                    .craft
+                    .as_mut()
+                    .filter(|craft| request != 0 && craft.candidates_request == request)
+                else {
+                    return;
+                };
+                craft.candidates_loading = false;
+                craft.candidates_loaded = true;
                 market.notes.push(note);
             }
             GiftMarketPurpose::Craft => {
@@ -311,12 +328,21 @@ impl Session {
                 craft.crafting = false;
                 market.notes.push(note);
             }
-            GiftMarketPurpose::OpenAuction
-            | GiftMarketPurpose::CloseAuction
-            | GiftMarketPurpose::AcquiredGifts { .. } => {}
-            GiftMarketPurpose::UpgradePreview { gift_id } => {
-                market.failed_previews.insert(gift_id);
+            GiftMarketPurpose::AcquiredGifts { gift_id } => {
+                market
+                    .acquired
+                    .entry(gift_id)
+                    .or_default()
+                    .fail(error_reason(err));
             }
+            GiftMarketPurpose::UpgradePreview { gift_id } => {
+                market
+                    .previews
+                    .entry(gift_id)
+                    .or_default()
+                    .fail(error_reason(err));
+            }
+            GiftMarketPurpose::OpenAuction | GiftMarketPurpose::CloseAuction => {}
         }
     }
 

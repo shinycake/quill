@@ -192,7 +192,7 @@ fn wallet_state_hides_everything_when_the_option_is_off() {
     assert_eq!(wallet.profile_address(5), Some("EQfive"));
     wallet.set_can_use(false);
     assert_eq!(wallet.profile_address(5), None);
-    assert!(wallet.own.is_none() && !wallet.money.open && !wallet.state_requested);
+    assert!(wallet.own.is_none() && !wallet.money.open && wallet.state_fetch.is_idle());
 }
 
 #[test]

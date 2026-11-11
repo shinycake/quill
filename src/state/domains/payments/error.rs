@@ -59,9 +59,10 @@ impl Session {
             }
             // No card info: the menu keeps only "Copy Card Number".
             Some(RequestPurpose::GetBankCardInfo) => {
-                if let Some(lookup) = self.payments.bank_card.as_mut() {
-                    lookup.loading = false;
-                    lookup.info = None;
+                if let Some(lookup) = self.payments.bank_card.as_mut()
+                    && lookup.waits_for(pending.map(|p| p.id))
+                {
+                    lookup.stage = BankCardStage::Failed;
                 }
             }
             // Nothing to show: a username is copied as a link (tdesktop's
@@ -136,18 +137,24 @@ impl Session {
             // request failed — surface the reason in the dialog
             // instead of spinning forever; a failed mutation also
             // releases the disabled buttons.
+            // Only the newest history request fails the list: an older one
+            // answering late must not stop the spinner of the live one.
             Some(RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { .. })) => {
-                self.payments.hub.tx_loading = false;
-                self.payments.hub.tx_error =
-                    Some(format!("Couldn't load transactions: {}", error_reason(err)));
+                if pending.is_some_and(|p| p.id.0 == self.payments.hub.tx_request) {
+                    self.payments.hub.tx_loading = false;
+                    self.payments.hub.tx_error =
+                        Some(format!("Couldn't load transactions: {}", error_reason(err)));
+                }
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GetWearableGifts)) => {
                 self.users_state.wearable_gifts_loaded = true;
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { .. })) => {
-                self.payments.hub.gifts_loading = false;
-                self.payments.hub.gifts_error =
-                    Some(format!("Couldn't load gifts: {}", error_reason(err)));
+                if pending.is_some_and(|p| p.id.0 == self.payments.hub.gifts_request) {
+                    self.payments.hub.gifts_loading = false;
+                    self.payments.hub.gifts_error =
+                        Some(format!("Couldn't load gifts: {}", error_reason(err)));
+                }
             }
             Some(
                 RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { .. })
@@ -199,9 +206,13 @@ impl Session {
             Some(RequestPurpose::Payments(PaymentsPurpose::Grams(purpose))) => {
                 self.apply_grams_error(err, purpose, pending)
             }
-            Some(RequestPurpose::Payments(PaymentsPurpose::TonWallet(purpose))) => {
-                self.apply_ton_wallet_error(err, purpose, pending.and_then(|p| p.user_id))
-            }
+            Some(RequestPurpose::Payments(PaymentsPurpose::TonWallet(purpose))) => self
+                .apply_ton_wallet_error(
+                    err,
+                    purpose,
+                    pending.and_then(|p| p.user_id),
+                    pending.map(|p| p.id),
+                ),
             Some(RequestPurpose::Payments(PaymentsPurpose::Earn(purpose))) => {
                 self.apply_earn_error(err, purpose, pending.map(|p| p.id))
             }
@@ -210,6 +221,11 @@ impl Session {
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GiftMarket(purpose))) => {
                 self.apply_gift_market_error(err, purpose, pending.map_or(0, |p| p.id.0))
+            }
+            // The explorer stays the default; the next wallet or address
+            // menu asks again.
+            Some(RequestPurpose::GetTonExplorerUrl) => {
+                self.ton_wallet.explorer.fail(error_reason(err));
             }
             // The next look at the sticker preview asks again.
             Some(RequestPurpose::GetPremiumStickerExamples) => {

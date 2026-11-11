@@ -1,5 +1,6 @@
 //! Request purposes for payments, Premium, Stars and gifts.
 use crate::state::request_purpose::flat_purposes;
+use crate::telegram::envelope::MessageSender;
 
 /// In-flight requests for payments, Premium, Stars and gifts; wrapped as
 /// [`RequestPurpose::Payments`].
@@ -147,8 +148,11 @@ pub enum PaymentsPurpose {
     GiftExportProbe,
     /// `setGiftResalePrice`. Response is `ok`.
     SetGiftResalePrice,
-    /// `getGiftCollections`. Response is `giftCollections`.
-    GetGiftCollections,
+    /// `getGiftCollections` of `owner`. Response is `giftCollections`; an
+    /// answer for another owner than the open list is dropped.
+    GetGiftCollections {
+        owner: MessageSender,
+    },
     /// `createGiftCollection`, `setGiftCollectionName`,
     /// `addGiftCollectionGifts` and `removeGiftCollectionGifts` answer with
     /// `giftCollection`; `deleteGiftCollection` with `ok`.
@@ -190,7 +194,7 @@ impl PaymentsPurpose {
                 | Self::GiftExportUrl
                 | Self::GiftExportProbe
                 | Self::SetGiftResalePrice
-                | Self::GetGiftCollections
+                | Self::GetGiftCollections { .. }
                 | Self::ChangeGiftCollection
                 | Self::DeleteGiftCollection
                 | Self::DeleteGift
@@ -238,7 +242,6 @@ flat_purposes!(Payments(PaymentsPurpose) {
     GiftExportUrl,
     GiftExportProbe,
     SetGiftResalePrice,
-    GetGiftCollections,
     ChangeGiftCollection,
     DeleteGiftCollection,
     DeleteGift,

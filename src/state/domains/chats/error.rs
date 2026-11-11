@@ -117,9 +117,16 @@ impl Session {
                             ChatsPurpose::DeepLinkInternalType { .. }
                         ))
                     ) && crate::text::openable_http_url(&self.chats_state.deep_link_original);
-                // The Premium bot's `/start` was for the link that failed:
-                // a later link to the bot must not send it unasked.
-                if !stale {
+                // The Premium bot's `/start` was for the link that failed
+                // (stale or not): a later link to the bot must not send it
+                // unasked. Another flow's failure leaves it alone.
+                if self
+                    .payments
+                    .hub
+                    .auto_start
+                    .as_ref()
+                    .is_some_and(|auto| auto.generation == generation)
+                {
                     self.payments.hub.auto_start = None;
                 }
                 if limit_box {

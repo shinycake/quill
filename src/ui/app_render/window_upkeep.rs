@@ -142,6 +142,13 @@ impl QuillApp {
         {
             self.maybe_prefill_folder_editor(window, cx);
         }
+        // Direct Messages: Save is out; the box closes from its answer.
+        if self
+            .windows
+            .dialog_may_show_in(DialogKind::DirectMessages, here)
+        {
+            self.direct_messages_upkeep(window, cx);
+        }
         // A collectible lookup that failed copies its link, with the toast
         // in the box's window.
         if self
@@ -179,6 +186,7 @@ impl QuillApp {
     fn gift_boxes_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use crate::ui::shell::DialogKind;
         let here = self.windows.scope;
+        self.drop_orphaned_gift_value();
         // Gift market: an auction whose state arrived, the followed
         // auction, the forge, toasts and sticker downloads.
         if self

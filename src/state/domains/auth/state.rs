@@ -54,7 +54,7 @@ impl AuthState {
     pub(crate) fn new() -> Self {
         Self {
             last_auth_error: None,
-            countries: Default::default(),
+            countries: crate::state::fetch::Fetch::Idle,
             guessed_country_iso: None,
             change_number_phone: None,
             change_number_timeout: None,

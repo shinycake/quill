@@ -312,6 +312,7 @@ impl QuillApp {
                 )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
+            demo.payments.paid_messages.save = quill::paid_messages::PaidSave::Idle;
             demo.finish_unpaid_exception(boxed.user_id);
         }
         cx.notify();

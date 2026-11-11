@@ -150,7 +150,8 @@ fn the_picker_walks_its_stages() {
         picker.stage,
         TransferStage::ConfirmPeer {
             user_id: 5,
-            name: "Maya".into()
+            name: "Maya".into(),
+            error: None,
         }
     );
     picker.back();
@@ -262,4 +263,36 @@ fn the_list_skips_me_bots_service_and_deleted_accounts() {
     // Every word must start a part of the name.
     assert!(transfer_candidates(rows, Some(7), "chen m").len() == 1);
     assert!(transfer_candidates(rows, Some(7), "aya").is_empty());
+}
+
+/// The transfer in flight answers only to its own request: another
+/// `transferGift`'s error or ok neither returns to the confirmation nor
+/// reports a transfer.
+#[test]
+fn a_transfer_settles_only_on_its_own_request() {
+    use crate::ids::RequestId;
+    let mut picker = TransferPicker::new("g", "Plush Pepe #4", "plushpepe-4");
+    picker.choose(21, "Maya");
+    picker.begin_transfer(RequestId(5));
+    picker.transfer_failed(RequestId(4), "other".into());
+    assert!(picker.transferring(), "another request's error");
+    assert_eq!(picker.transferred_by(RequestId(4)), None);
+    let done = picker.transferred_by(RequestId(5)).expect("its own ok");
+    assert_eq!(
+        (
+            done.user_id,
+            done.recipient.as_str(),
+            done.gift_name.as_str()
+        ),
+        (21, "Maya", "Plush Pepe #4")
+    );
+    picker.transfer_failed(RequestId(5), "BAD".into());
+    assert_eq!(
+        picker.stage,
+        TransferStage::ConfirmPeer {
+            user_id: 21,
+            name: "Maya".into(),
+            error: Some("BAD".into()),
+        }
+    );
 }

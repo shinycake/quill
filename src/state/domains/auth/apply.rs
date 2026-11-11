@@ -57,14 +57,11 @@ impl Session {
             // presentation answer, consumed by the driver pump.
             AuthPayload::Countries { countries } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCountries) {
-                    self.auth_state.countries = if countries.is_empty() {
-                        crate::state::fetch::Fetch::Failed {
-                            error: "empty list".to_string(),
-                            stale: None,
-                        }
+                    if countries.is_empty() {
+                        self.auth_state.countries.fail("empty list");
                     } else {
-                        crate::state::fetch::Fetch::Ready(countries)
-                    };
+                        self.auth_state.countries.succeed(countries);
+                    }
                 }
             }
         }

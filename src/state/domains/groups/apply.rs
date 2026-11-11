@@ -235,6 +235,9 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBoostsPerGift) {
                     self.groups.boosts_per_gift = Some(boosts_per_gift);
                 }
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTonExplorerUrl) {
+                    self.ton_wallet.explorer.succeed(());
+                }
                 // Any app-config answer carries the current explorer.
                 if ton_explorer_url.is_some() {
                     self.ton_wallet.explorer_url = ton_explorer_url;
@@ -392,7 +395,7 @@ impl Session {
                     && let RequestPurpose::GetChatBoosts { append } = pending.purpose
                     && let Some(chat_id) = pending.chat_id
                     && let Some(state) = self.groups.chat_boost_lists.get_mut(&chat_id.0)
-                    && state.request == Some(pending.id)
+                    && state.waits_for(pending.id)
                 {
                     if !append {
                         state.boosts.clear();
@@ -400,9 +403,7 @@ impl Session {
                     state.boosts.extend(boosts);
                     state.total_count = total_count;
                     state.next_offset = next_offset;
-                    state.loading = false;
-                    state.error = None;
-                    state.request = None;
+                    state.page = BoostsPage::Idle;
                 }
             }
             // `getChatBoostLink` answer.
