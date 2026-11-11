@@ -96,6 +96,17 @@ impl QuillApp {
         self.set_note(StatusNote::error(text));
     }
 
+    fn retry_gift_collections(&mut self, cx: &mut Context<Self>) {
+        let sent = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.retry_gift_collections());
+        if let Some(Err(_)) = sent {
+            self.note_gift_refused(tr(keys::Q_MONEY_COULD_NOT_LOAD_THE_COLLECTIONS));
+        }
+        cx.notify();
+    }
+
     fn pick_gift_collection(&mut self, id: i32, cx: &mut Context<Self>) {
         let sent = self
             .live
@@ -253,7 +264,7 @@ pub(super) fn gift_collection_tabs(
 ) -> AnyElement {
     let manage = &session.payments.gifts_manage;
     let busy = session.payments.hub.gifts_op.is_mutating();
-    if manage.collections.is_empty() && !mine {
+    if manage.collections.items().is_empty() && !mine && manage.collections.error().is_none() {
         return div().into_any_element();
     }
     let active = manage.active_collection;
@@ -265,7 +276,7 @@ pub(super) fn gift_collection_tabs(
             .selected(active == 0)
             .on_click(cx.listener(|this, _, _, cx| this.pick_gift_collection(0, cx))),
     );
-    for collection in &manage.collections {
+    for collection in manage.collections.items() {
         let id = collection.id;
         tabs = tabs.child(
             Button::new(format!("gift-collection-{id}"))
@@ -275,7 +286,7 @@ pub(super) fn gift_collection_tabs(
                 .on_click(cx.listener(move |this, _, _, cx| this.pick_gift_collection(id, cx))),
         );
     }
-    let can_add = (manage.collections.len() as i64) < manage.limits.collections();
+    let can_add = (manage.collections.items().len() as i64) < manage.limits.collections();
     if mine && can_add {
         tabs = tabs.child(
             Button::new("gift-collection-new")
@@ -287,6 +298,17 @@ pub(super) fn gift_collection_tabs(
                     this.set_gift_flow(Some(GiftFlow::NewCollection), window, cx)
                 })),
         );
+    }
+    if let Some(error) = manage.collections.error() {
+        tabs = tabs
+            .child(div().text_sm().child(error.to_string()))
+            .child(
+                Button::new("gift-collections-retry")
+                    .label(tr(keys::Q_CHAT_RETRY))
+                    .small()
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| this.retry_gift_collections(cx))),
+            );
     }
     let mut col = div().flex().flex_col().gap_2().child(tabs);
     if mine && active != 0 && manage.flow.is_none() {

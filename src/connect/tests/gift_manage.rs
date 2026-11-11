@@ -102,7 +102,7 @@ fn opening_my_gifts_loads_collections_and_limits_once() {
         json!({"@type": "giftCollections", "@extra": sent["@extra"], "collections": [
             {"@type": "giftCollection", "id": 4, "name": "Cats", "gift_count": 1}]}),
     );
-    assert_eq!(p.0.session.payments.gifts_manage.collections.len(), 1);
+    assert_eq!(p.0.session.payments.gifts_manage.collections.items().len(), 1);
     // The limit options land by name.
     let option =
         p.1.snapshot()
@@ -336,13 +336,7 @@ fn collections_are_created_renamed_filled_and_deleted() {
         json!({"@type": "giftCollection", "@extra": extra.as_extra(), "id": 5, "name": "Dogs", "gift_count": 0}),
     );
     // The answer marks both lists stale; the same ingest refetches them.
-    assert!(
-        !p.0.session
-            .payments
-            .gifts_manage
-            .collections_fetch
-            .is_stale()
-    );
+    assert!(!p.0.session.payments.gifts_manage.collections.is_outdated());
     assert_eq!(count(&p.1, "getGiftCollections"), before + 1);
 
     // Add only when absent, remove only when present.
@@ -676,4 +670,24 @@ fn an_earlier_boxs_gift_answers_are_dropped() {
     );
     let send = &p.0.session.payments.gifts_manage.send;
     assert!(send.gifts_fetch == GiftListFetch::Answered && send.gifts.len() == 1);
+}
+
+#[test]
+fn a_failed_collections_list_shows_an_error_and_retry_asks_again() {
+    let mut p = parts();
+    open_my_gifts(&mut p, vec![received("a", json!({}))]);
+    let sent = sent_request(&p.1, "getGiftCollections");
+    feed(
+        &mut p,
+        json!({"@type": "error", "@extra": sent["@extra"], "code": 500, "message": "BOOM"}),
+    );
+    let collections = &p.0.session.payments.gifts_manage.collections;
+    assert!(collections.error().is_some(), "{collections:?}");
+    // Nothing asks again by itself.
+    assert_eq!(count(&p.1, "getGiftCollections"), 1);
+    assert!(p.0.retry_gift_collections().unwrap().is_some());
+    assert_eq!(count(&p.1, "getGiftCollections"), 2);
+    assert!(p.0.session.payments.gifts_manage.collections.is_loading());
+    // A retry with nothing failed sends nothing.
+    assert!(p.0.retry_gift_collections().unwrap().is_none());
 }

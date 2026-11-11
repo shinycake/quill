@@ -8,6 +8,7 @@ use super::*;
 use crate::gift_manage::*;
 use crate::ids::{ChatId, RequestId};
 use crate::local_time::now_unix;
+use crate::state::fetch::Fetch;
 use crate::state::{PaymentsPurpose, RequestPurpose};
 use crate::telegram::envelope::MessageSender;
 use crate::telegram::requests_gifts as rq;
@@ -123,28 +124,39 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Payments(PaymentsPurpose::GetGiftCollections { owner }),
             None,
         );
-        self.send_json_request(extra, &rq::get_gift_collections(extra, owner))?;
-        self.session.payments.gifts_manage.collections_fetch = CollectionsFetch::Loading;
-        Ok(extra)
+        let collections = &mut self.session.payments.gifts_manage.collections;
+        collections.begin();
+        collections.sent(extra);
+        self.send_json_request(extra, &rq::get_gift_collections(extra, owner))
+            .inspect_err(|_| {
+                self.session.payments.gifts_manage.collections.fail(crate::lang::tr(
+                    crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_THE_COLLECTIONS,
+                ));
+            })
+    }
+
+    /// The collections list failed: ask for it again (the Retry button).
+    pub fn retry_gift_collections(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        let failed = matches!(
+            self.session.payments.gifts_manage.collections,
+            Fetch::Failed { .. }
+        );
+        let Some(owner) = self.session.payments.hub.gifts_owner.filter(|_| failed) else {
+            return Ok(None);
+        };
+        self.fetch_gift_collections(owner).map(Some)
     }
 
     /// Reload the collections after a collection mutation marked them stale.
     pub fn refresh_gift_collections_if_stale(
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self
-            .session
-            .payments
-            .gifts_manage
-            .collections_fetch
-            .is_stale()
-        {
+        if !self.session.payments.gifts_manage.collections.is_outdated() {
             return Ok(None);
         }
         let Some(owner) = self.session.payments.hub.gifts_owner else {
             return Ok(None);
         };
-        self.session.payments.gifts_manage.collections_fetch = CollectionsFetch::Idle;
         self.fetch_gift_collections(owner).map(Some)
     }
 
@@ -441,7 +453,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn create_gift_collection(&mut self, name: &str) -> Result<RequestId, ConnectSendError> {
         let manage = &self.session.payments.gifts_manage;
         if !valid_collection_name(name)
-            || manage.collections.len() as i64 >= manage.limits.collections()
+            || manage.collections.items().len() as i64 >= manage.limits.collections()
         {
             return Err(ConnectSendError::InvalidRequest);
         }

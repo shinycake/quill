@@ -2,6 +2,7 @@
 //! `PaymentsState::gifts_manage`, so the poll loop and reducer own every
 //! transition.
 
+use crate::state::fetch::Fetch;
 use super::{
     AvailableGift, GiftCollection, GiftLimits, GiftRecipient, PremiumGiftOption, TransferPicker,
 };
@@ -153,9 +154,10 @@ pub struct GiftManageState {
     /// The `getOption` batch behind `limits`: a failed one is asked again
     /// at the next gifts open.
     pub limits_ask: crate::state::fetch::BatchAsk,
-    pub collections: Vec<GiftCollection>,
-    /// Where the owner's collections list stands.
-    pub collections_fetch: CollectionsFetch,
+    /// The owner's collections. A change while the list is out outdates
+    /// it (the answer in flight is dropped and the list is asked again);
+    /// a failed list shows a Retry.
+    pub collections: Fetch<Vec<GiftCollection>>,
     /// The collection tab that is open; 0 = all gifts.
     pub active_collection: i32,
     pub flow: Option<GiftFlow>,
@@ -167,36 +169,6 @@ pub struct GiftManageState {
     /// What finished that the UI shows once: the window that hosts the
     /// gifts drains them (`take_events`); a list that closes drops them.
     pub events: Vec<GiftEvent>,
-}
-
-/// The collections list of the open gifts owner: current, on its way, or
-/// out of date because a collection changed (the next look asks again). A
-/// change while a request is out leaves it `Stale`, so that answer is taken
-/// but the list is asked for once more.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum CollectionsFetch {
-    #[default]
-    Idle,
-    Loading,
-    Stale,
-}
-
-impl CollectionsFetch {
-    pub fn is_loading(self) -> bool {
-        self == Self::Loading
-    }
-
-    pub fn is_stale(self) -> bool {
-        self == Self::Stale
-    }
-
-    /// The answer (or error) of the request in flight: a `Stale` list
-    /// stays so.
-    pub fn settle(&mut self) {
-        if *self == Self::Loading {
-            *self = Self::Idle;
-        }
-    }
 }
 
 /// A result the UI shows once.
@@ -269,13 +241,12 @@ impl GiftManageState {
     }
 
     pub fn collection(&self, id: i32) -> Option<&GiftCollection> {
-        self.collections.iter().find(|c| c.id == id)
+        self.collections.items().iter().find(|c| c.id == id)
     }
 
     /// Forget the per-owner state when another gifts list opens.
     pub fn reset_for_owner(&mut self) {
-        self.collections.clear();
-        self.collections_fetch = CollectionsFetch::Idle;
+        self.collections = Fetch::Idle;
         self.active_collection = 0;
         self.flow = None;
         self.deleting = None;

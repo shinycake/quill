@@ -343,20 +343,17 @@ fn an_auction_gift_is_marked_limited() {
 }
 
 #[test]
-fn a_collection_change_while_the_list_loads_asks_again_after_it() {
-    use crate::gift_manage::CollectionsFetch;
-    let mut fetch = CollectionsFetch::Loading;
+fn a_collection_change_while_the_list_loads_drops_that_answer() {
+    use crate::ids::RequestId;
+    use crate::state::fetch::Fetch;
+    let mut fetch: Fetch<Vec<i32>> = Fetch::Idle;
+    fetch.begin();
+    fetch.sent(RequestId(1));
     // A collection changed while the request was out: the list is stale.
-    fetch = match fetch {
-        CollectionsFetch::Loading => CollectionsFetch::Stale,
-        other => other,
-    };
-    // The answer of the request in flight does not clear it.
-    fetch.settle();
-    assert!(fetch.is_stale());
-    let mut loading = CollectionsFetch::Loading;
-    loading.settle();
-    assert_eq!(loading, CollectionsFetch::Idle);
+    fetch.outdate();
+    // The answer of the request in flight predates the change.
+    assert!(!fetch.answered(Some(RequestId(1)), vec![1]));
+    assert!(fetch.is_outdated());
 }
 
 #[test]

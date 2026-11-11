@@ -3,7 +3,7 @@
 //! lists stale and the connect driver refetches them from the server.
 use crate::earn::EarnErrorHint;
 use crate::gift_manage::{
-    CollectionsFetch, ExportError, ExportSend, GiftEvent, GiftListFetch, GiftManagePayload,
+    ExportError, ExportSend, GiftEvent, GiftListFetch, GiftManagePayload,
     GiftManageState, ProbeOutcome, SendStage, TransferStage,
 };
 use crate::lang::{keys, tr_with};
@@ -37,15 +37,19 @@ impl Session {
                 GiftManagePayload::Collections(list),
                 PaymentsPurpose::GetGiftCollections { owner },
             ) => {
-                if self.payments.hub.gifts_owner != Some(owner) {
+                // Only the request the list waits on: an older one for the
+                // same owner, or one a change outdated, lands nowhere.
+                let asked = pending.map(|p| p.id);
+                if self.payments.hub.gifts_owner != Some(owner)
+                    || !asked.is_some_and(|id| self.payments.gifts_manage.collections.waits_for(id))
+                {
                     return;
                 }
                 let files: Vec<ParsedFile> =
                     list.iter().flat_map(|c| c.files.iter().cloned()).collect();
                 self.remember_files(&files);
                 let manage = &mut self.payments.gifts_manage;
-                manage.collections_fetch.settle();
-                manage.collections = list;
+                manage.collections.answered(asked, list);
                 if manage.active_collection != 0
                     && manage.collection(manage.active_collection).is_none()
                 {
@@ -54,7 +58,7 @@ impl Session {
                 }
             }
             (GiftManagePayload::Collection(_), PaymentsPurpose::ChangeGiftCollection) => {
-                self.payments.gifts_manage.collections_fetch = CollectionsFetch::Stale;
+                self.payments.gifts_manage.collections.outdate();
                 self.payments
                     .gifts_manage
                     .close_flow_answered_by(PaymentsPurpose::ChangeGiftCollection);
@@ -151,7 +155,7 @@ impl Session {
                 hub.gift_notice = None;
                 manage.close_flow_answered_by(PaymentsPurpose::DeleteGiftCollection);
                 manage.active_collection = 0;
-                manage.collections_fetch = CollectionsFetch::Stale;
+                manage.collections.outdate();
                 manage.note = Some("Collection deleted.".into());
             }
             PaymentsPurpose::DeleteGift => self.finish_gift_delete(request),
@@ -211,7 +215,7 @@ impl Session {
             }
             hub.gift_view.close_if_selected(Some(id.as_str()));
         }
-        manage.collections_fetch = CollectionsFetch::Stale;
+        manage.collections.outdate();
         manage.events.push(GiftEvent::Deleted);
     }
 
@@ -339,7 +343,11 @@ impl Session {
             PaymentsPurpose::GetGiftOption(_) => manage.limits_ask.fail(pending.map(|p| p.id)),
             PaymentsPurpose::GetGiftCollections { owner } => {
                 if self.payments.hub.gifts_owner == Some(owner) {
-                    manage.collections_fetch.settle();
+                    manage.collections.failed(
+                        pending.map(|p| p.id),
+                        crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_THE_COLLECTIONS),
+                        false,
+                    );
                 }
             }
             PaymentsPurpose::GetAvailableGifts if !manage.send.asked_gifts(pending) => {}
