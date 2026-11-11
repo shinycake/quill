@@ -27,11 +27,18 @@ impl Session {
             // Slice S4: Data & Storage request failures surface
             // on the screen (the S3 pattern) — never as toasts.
             Some(RequestPurpose::Settings(SettingsPurpose::SetAutoDownloadSettings { .. })) => {
-                self.settings.data_storage_save.fail(format!(
-                    "Couldn't save auto-download settings: {}",
-                    error_reason(err)
-                ));
-                self.settings.auto_download_answer = extra.map(AutoDownloadAnswer::Refused);
+                self.settings.data_storage_save.fail(
+                    StorageSaveKind::AutoDownload,
+                    format!(
+                        "Couldn't save auto-download settings: {}",
+                        error_reason(err)
+                    ),
+                );
+                if let Some(request) = extra {
+                    self.settings
+                        .auto_download_answers
+                        .push(AutoDownloadAnswer::Refused(request));
+                }
             }
             Some(RequestPurpose::OptimizeStorage) => {
                 self.settings.storage_clear = StorageClear::Failed(format!(
@@ -40,10 +47,10 @@ impl Session {
                 ));
             }
             Some(RequestPurpose::SetStorageOption) => {
-                self.settings.data_storage_save.fail(format!(
-                    "Couldn't save the storage limits: {}",
-                    error_reason(err)
-                ));
+                self.settings.data_storage_save.fail(
+                    StorageSaveKind::Limits,
+                    format!("Couldn't save the storage limits: {}", error_reason(err)),
+                );
             }
             // Batch 4: `setOption("online")` is fire-and-forget; the next
             // presence check sends it again.
@@ -67,16 +74,19 @@ impl Session {
                 );
             }
             Some(RequestPurpose::GetAutoDownloadSettingsPresets) => {
-                // Only the fetch that waits for this request fails; the next
-                // open asks again.
-                self.settings.auto_download_presets.failed(
-                    pending.map(|p| p.id),
-                    format!(
-                        "Couldn't load auto-download settings: {}",
-                        error_reason(err)
-                    ),
-                    false,
-                );
+                // Only the fetch the prefs wait for fails them.
+                if self
+                    .settings
+                    .data_storage
+                    .seeded
+                    .waits_for(pending.map(|p| p.id))
+                {
+                    self.settings.data_storage.seeded =
+                        crate::data_settings::PresetsSeed::Failed(format!(
+                            "Couldn't load auto-download settings: {}",
+                            error_reason(err)
+                        ));
+                }
             }
             // Slice S3: privacy-screen request failures surface
             // on the Privacy screen (the UI reads the state),

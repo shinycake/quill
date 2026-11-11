@@ -243,8 +243,8 @@ impl StorageClear {
 }
 
 pub struct SettingsState {
-    /// See [`AutoDownloadAnswer`].
-    pub auto_download_answer: Option<AutoDownloadAnswer>,
+    /// See [`AutoDownloadAnswers`].
+    pub auto_download_answers: AutoDownloadAnswers,
     /// Mirror of `settings::Preferences::notify_view` (tdesktop "Name" /
     /// "Text"), loaded from `prefs.json` at connect time.
     pub notify_view: crate::notify::NotifyView,
@@ -329,12 +329,9 @@ pub struct SettingsState {
     pub data_storage_dirty: bool,
     /// Slice S4: last Data & Storage failure, shown on the screen
     /// (failures surface there, never as toasts — the S3 pattern).
-    /// Slice S4: the `getAutoDownloadSettingsPresets` round trip: in
-    /// flight, or why it failed (`Ready` once the answer seeded the prefs).
-    pub auto_download_presets: Fetch<()>,
-    /// Slice S4: how the last `setAutoDownloadSettings` / storage-limit
-    /// save went; a failure shows on the screen (never as a toast).
-    pub data_storage_save: Fetch<()>,
+    /// Slice S4: the failure line of each kind of Data & Storage save; it
+    /// shows on the screen (never as a toast).
+    pub data_storage_save: StorageSaveFailures,
     /// Batch 6: the `optimizeStorage` round trip and its result.
     pub storage_clear: StorageClear,
     /// Batch 6: the local storage limits TDLib reports (`updateOption`).
@@ -573,9 +570,8 @@ impl SettingsState {
             storage_stats: Fetch::Idle,
             data_storage: DataStoragePrefs::default(),
             data_storage_dirty: false,
-            auto_download_answer: None,
-            auto_download_presets: Fetch::Idle,
-            data_storage_save: Fetch::Idle,
+            auto_download_answers: AutoDownloadAnswers::default(),
+            data_storage_save: StorageSaveFailures::default(),
             storage_clear: StorageClear::Idle,
             storage_limits: Default::default(),
             privacy_data: Default::default(),
@@ -633,8 +629,9 @@ impl SettingsState {
     /// The Data & Storage failure line: the presets fetch, the cache clear
     /// or the last save, each from its own stage.
     pub fn data_storage_error(&self) -> Option<&str> {
-        self.auto_download_presets
-            .error()
+        self.data_storage
+            .seeded
+            .failure()
             .or_else(|| self.storage_clear.failed())
             .or_else(|| self.data_storage_save.error())
     }

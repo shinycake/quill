@@ -267,7 +267,7 @@ pub(crate) struct ChatUi {
     pub(super) scheduled_selected: Vec<MessageId>,
     /// M1: the scheduled-messages dialog (view/delete). Here so that a
     /// chat change closes it: its rows act on the chat shown.
-    pub(super) scheduled_dialog_open: bool,
+    pub(super) scheduled_dialog: super::composer::ScheduledDialog,
     /// M1: the schedule picker popup above the composer: `Some` while it is
     /// open, with the date+time picker it holds (created when the popup
     /// opens, see `open_schedule_picker`). Its Reschedule target is a message
@@ -570,11 +570,19 @@ impl QuillApp {
     /// it a round video or GIF parked to play during it, so it neither
     /// starts with sound when the chat shows again nor holds the slot.
     fn replace_chat_ui(&mut self, next: ChatUi) {
-        let old = std::mem::replace(&mut *self.screen.chat_ui, next);
+        let mut old = std::mem::replace(&mut *self.screen.chat_ui, next);
         // The send menu (and its effect card) was opened over the old
         // value's composer; its popup and subscriptions go with it.
         self.composer_ui.send_menu.open = None;
         if let Some(request) = old.edit_sending()
+            && let Some(live) = self.live.as_mut()
+        {
+            live.driver.session.acks.forget(request);
+        }
+        // A rich send still waiting goes on waiting off the view, so a
+        // refusal after the chat changed still gives the text back.
+        self.leave_sent_text(std::mem::take(&mut old.sent_text));
+        if let Some(request) = old.scheduled_dialog.loading()
             && let Some(live) = self.live.as_mut()
         {
             live.driver.session.acks.forget(request);

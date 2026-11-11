@@ -282,6 +282,52 @@ fn stale_history_request_is_swept_into_the_retry_state() {
 }
 
 #[test]
+fn a_failed_older_page_of_a_window_with_rows_waits_for_retry() {
+    let mut h = Harness::new();
+    let first = h.open_history();
+    h.ingest(&format!(
+        r#"{{"@type":"messages","@extra":"{}","total_count":1,"messages":[{{"@type":"message","id":5242880,"chat_id":7,"is_outgoing":false,"date":1700000000,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"hi","entities":[]}}}}}}]}}"#,
+        first.0
+    ));
+    let page = h
+        .driver
+        .fetch_history()
+        .unwrap()
+        .expect("older page asked while rows are shown");
+    h.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":500,"message":"Timeout"}}"#,
+        page.0
+    ));
+    // Row 0 paints again and again: the failed page is not re-sent.
+    let before = h.recorder.snapshot().len();
+    for _ in 0..3 {
+        assert!(h.driver.fetch_history().unwrap().is_none());
+    }
+    assert_eq!(h.recorder.snapshot().len(), before);
+    // The Retry strip asks again.
+    assert!(h.driver.retry_history().unwrap().is_some());
+}
+
+#[test]
+fn folder_boxes_refused_before_a_request_end_in_an_error_with_retry() {
+    let mut h = Harness::new();
+    h.driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
+    assert!(h.driver.fetch_folder_share(5).is_err());
+    assert!(h.driver.fetch_chat_folder(5).is_err());
+    assert!(h.driver.fetch_chat_folder_chats_to_leave(5).is_err());
+    let chat_list = &h.driver.session.chat_list;
+    let share = chat_list.folder_shares.get(&5).expect("entry");
+    assert!(share.links.error().is_some() && share.chats.error().is_some());
+    assert!(chat_list.folder_specs.error(5).is_some());
+    assert!(
+        chat_list
+            .folder_chats_to_leave
+            .get(&5)
+            .is_some_and(|f| f.error().is_some())
+    );
+}
+
+#[test]
 fn history_error_answer_also_offers_retry() {
     let mut h = Harness::new();
     let extra = h.open_history();

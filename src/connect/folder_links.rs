@@ -52,6 +52,17 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// the Share Folder dialog shows. Each is deduped per folder.
     pub fn fetch_folder_share(&mut self, folder_id: i32) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() {
+            // Refused before any request: the box ends in the error with a
+            // Retry, not in "Loading".
+            let line = ConnectSendError::InvalidRequest.stage_line();
+            let share = self
+                .session
+                .chat_list
+                .folder_shares
+                .entry(folder_id)
+                .or_default();
+            share.links.fail(line.clone());
+            share.chats.fail(line);
             return Err(ConnectSendError::InvalidRequest);
         }
         if !self

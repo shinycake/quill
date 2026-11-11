@@ -69,6 +69,7 @@ mod similar_strip;
 mod sponsored_placement;
 mod status_badges;
 mod stickers;
+mod storage_save_failures;
 mod stories;
 mod stories_more;
 mod story_insights;

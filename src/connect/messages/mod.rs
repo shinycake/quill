@@ -194,6 +194,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(Some(extra))
     }
 
+    /// The Retry strip at the newer end: ask for the failed newer page again.
+    pub fn retry_history_newer(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        let Some(chat_id) = self.session.open_chat_id() else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if let Some(history) = self.session.histories.get_mut(&chat_id.0) {
+            history.clear_newer_failed();
+        }
+        self.fetch_history_newer_for(chat_id)
+    }
+
     /// Jump the open chat to its latest messages: replace a window that
     /// stops short of them (and drop the unread divider) and load the
     /// newest page.

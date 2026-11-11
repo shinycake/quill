@@ -73,9 +73,11 @@ impl Session {
             BotsPayload::CustomRequestResult { result } => {
                 if let Some(p) = pending
                     && p.purpose == RequestPurpose::SendWebAppCustomRequest
-                    && let Some(req_id) = self.bots.web_apps.custom_requests.remove(&p.id.0)
+                    && let Some((launch_id, req_id)) =
+                        self.bots.web_apps.custom_requests.remove(&p.id.0)
                 {
                     self.bots.web_apps.custom_replies.push(CustomRequestReply {
+                        launch_id,
                         req_id,
                         result: Ok(result),
                     });
@@ -257,8 +259,11 @@ impl Session {
                     .fail(format!("error {}", err.code));
             }
             RequestPurpose::SendWebAppCustomRequest => {
-                if let Some(req_id) = self.bots.web_apps.custom_requests.remove(&p.id.0) {
+                if let Some((launch_id, req_id)) =
+                    self.bots.web_apps.custom_requests.remove(&p.id.0)
+                {
                     self.bots.web_apps.custom_replies.push(CustomRequestReply {
+                        launch_id,
                         req_id,
                         result: Err(if err.code == 400 {
                             "BAD_REQUEST".into()

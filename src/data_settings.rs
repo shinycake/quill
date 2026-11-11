@@ -226,8 +226,8 @@ pub fn size_cap_label(bytes: i64) -> String {
 /// Whether a value TDLib has no getter for was learned. It persists as the
 /// bool the account folder always held (`true` = known), so an interrupted
 /// ask is asked again on the next run. The ask itself is not a variant: its
-/// stage is the request's own (`Settings::auto_download_presets` for the
-/// presets), so a refusal or a lost answer cannot leave it stuck here.
+/// stage is the request's own, so a refusal or a lost answer cannot leave
+/// it stuck here. The presets have a stage of their own ([`PresetsSeed`]).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "bool", into = "bool")]
 pub enum Seed {
@@ -254,6 +254,61 @@ impl From<Seed> for bool {
     }
 }
 
+/// The auto-download settings' seed from `getAutoDownloadSettingsPresets`:
+/// one stage, with the request it waits for and why it failed. Only the
+/// bool "seeded" reaches the disk.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "bool", into = "bool")]
+pub enum PresetsSeed {
+    #[default]
+    Unseeded,
+    /// This request is out: its answer seeds the prefs, its error fails.
+    Loading(crate::ids::RequestId),
+    /// The fetch failed (the page shows why and a Retry); nothing asks again
+    /// on its own.
+    Failed(String),
+    Seeded,
+}
+
+impl PresetsSeed {
+    pub fn is_seeded(&self) -> bool {
+        matches!(self, Self::Seeded)
+    }
+
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading(_))
+    }
+
+    /// Whether the fetch may go out: nothing seeded it and none is out.
+    pub fn askable(&self) -> bool {
+        matches!(self, Self::Unseeded | Self::Failed(_))
+    }
+
+    pub fn failure(&self) -> Option<&str> {
+        match self {
+            Self::Failed(why) => Some(why),
+            _ => None,
+        }
+    }
+
+    /// `request` is the fetch the prefs wait for.
+    pub fn waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!((self, request), (Self::Loading(waiting), Some(got)) if *waiting == got)
+    }
+}
+
+impl From<bool> for PresetsSeed {
+    fn from(seeded: bool) -> Self {
+        if seeded { Self::Seeded } else { Self::Unseeded }
+    }
+}
+
+impl From<PresetsSeed> for bool {
+    fn from(seed: PresetsSeed) -> Self {
+        seed.is_seeded()
+    }
+}
+
 /// Slice S4: per-account per-network auto-download settings,
 /// persisted as JSON next to the account root (`data_storage.json`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -262,7 +317,7 @@ pub struct DataStoragePrefs {
     /// True once seeded from `getAutoDownloadSettingsPresets` (or
     /// loaded from disk); the screen shows "Loading…" until then.
     #[serde(default)]
-    pub seeded: Seed,
+    pub seeded: PresetsSeed,
     /// True once the cache limits got their first value on this account
     /// (`ConnectDriver::maybe_seed_storage_limits`). Never reset, so a
     /// later "No limit" sticks.
@@ -282,7 +337,7 @@ impl Default for DataStoragePrefs {
     fn default() -> Self {
         Self {
             version: DATA_STORAGE_PREFS_VERSION,
-            seeded: Seed::Unseeded,
+            seeded: PresetsSeed::Unseeded,
             storage_limits_seeded: Seed::Unseeded,
             disk_paused: std::collections::BTreeSet::new(),
             mobile: AutoDownloadNetSettings::default(),
@@ -321,7 +376,7 @@ impl DataStoragePrefs {
         self.roaming = low;
         self.mobile = medium;
         self.wifi = high;
-        self.seeded = Seed::Seeded;
+        self.seeded = PresetsSeed::Seeded;
     }
 
     /// Slice S4: one-line summary for a network row, e.g.
@@ -470,7 +525,7 @@ mod tests {
     fn network_summary_states() {
         let mut prefs = DataStoragePrefs::default();
         assert_eq!(prefs.network_summary(NetworkKind::WiFi), "Loading…");
-        prefs.seeded = Seed::Seeded;
+        prefs.seeded = PresetsSeed::Seeded;
         assert_eq!(prefs.network_summary(NetworkKind::WiFi), "Off");
         prefs.wifi.is_auto_download_enabled = true;
         prefs.wifi.max_photo_file_size = 15 * 1024 * 1024;
@@ -499,7 +554,7 @@ mod tests {
             exports: dir.join("exports"),
         };
         let mut prefs = DataStoragePrefs {
-            seeded: Seed::Seeded,
+            seeded: PresetsSeed::Seeded,
             ..Default::default()
         };
         prefs.wifi.is_auto_download_enabled = true;
@@ -515,7 +570,12 @@ mod tests {
         old["storage_limits_seeded"] = serde_json::json!(true);
         let seeded: DataStoragePrefs = serde_json::from_value(old).expect("an old file loads");
         assert!(seeded.seeded.is_seeded() && seeded.storage_limits_seeded.is_seeded());
-        let json = serde_json::to_value(DataStoragePrefs::default()).expect("serializes");
+        // A request in flight is never written as known.
+        let prefs = DataStoragePrefs {
+            seeded: PresetsSeed::Loading(crate::ids::RequestId(1)),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&prefs).expect("serializes");
         assert_eq!(json["seeded"], serde_json::json!(false));
         assert!(Seed::from(true).is_seeded() && !Seed::from(false).is_seeded());
     }

@@ -445,7 +445,7 @@ impl QuillApp {
                                             .use_less_data_for_calls = on;
                                     }
                                     demo.settings.data_storage.seeded =
-                                        quill::data_settings::Seed::Seeded;
+                                        quill::data_settings::PresetsSeed::Seeded;
                                 }
                                 cx.notify();
                             })),

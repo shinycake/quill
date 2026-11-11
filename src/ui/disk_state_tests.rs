@@ -492,13 +492,11 @@ fn the_storage_list_stays_in_view_when_rows_above_arrive(cx: &mut TestAppContext
     };
     let rows = |app: &mut QuillApp, arrived: bool| {
         if let Some(demo) = app.demo_session.as_mut() {
-            if arrived {
-                demo.settings.data_storage.seeded = quill::data_settings::Seed::Seeded;
-                demo.settings.auto_download_presets.succeed(());
+            demo.settings.data_storage.seeded = if arrived {
+                quill::data_settings::PresetsSeed::Seeded
             } else {
-                demo.settings.data_storage.seeded = quill::data_settings::Seed::Unseeded;
-                demo.settings.auto_download_presets.begin();
-            }
+                quill::data_settings::PresetsSeed::Loading(quill::ids::RequestId(1))
+            };
         }
     };
     app.update_in(&mut vcx, |app, _, cx| {

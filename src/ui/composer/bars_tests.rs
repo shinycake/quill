@@ -735,6 +735,7 @@ fn a_refused_rich_send_gives_the_text_back(cx: &mut TestAppContext) {
             app.chat_ui.sent_text = SentText::Sent {
                 request: RequestId(9),
                 markup: "# Title\nbody".into(),
+                slot: None,
             };
         });
     };
@@ -792,6 +793,7 @@ fn a_refused_send_drops_its_draft_clear_and_gives_back_the_text(cx: &mut TestApp
         app.chat_ui.sent_text = SentText::Sent {
             request: RequestId(9),
             markup: "rich".into(),
+            slot: None,
         };
     });
     assert!(clear_waits(&app, vcx));
@@ -807,6 +809,7 @@ fn a_refused_send_drops_its_draft_clear_and_gives_back_the_text(cx: &mut TestApp
         app.chat_ui.sent_text = SentText::InlinePick {
             request: RequestId(10),
             markup: "@bot cats".into(),
+            slot: None,
         };
     });
     vcx.update(|window, cx| {
