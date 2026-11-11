@@ -20,7 +20,6 @@ bare:CallLinkStep::Busy 1
 bare:CallPhase::Busy 1
 bare:CallRating::Sent 1
 bare:CallSound::Busy 1
-bare:CallTick::Running 1
 bare:CallUpload::Sent 1
 bare:CallWindow::Opening 2
 bare:CameraStage::Starting 1
@@ -109,7 +108,6 @@ bare:Picture::Loading 1
 bare:PictureState::Waiting 1
 bare:PinTarget::Loading 1
 bare:PingStatus::Checking 1
-bare:PipWindowStage::Opening 1
 bare:PlayHead::Waiting 1
 bare:PlayState::Opening 1
 bare:Playback::Waiting 1

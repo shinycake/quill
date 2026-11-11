@@ -194,3 +194,6 @@ pending_deep_link.link | a link waiting for the deep-link pump: one from outside
 pending_deep_link.window | the chat window the link was clicked in; followed only with its account (`QueuedLink::for_screen`)
 pending_deep_link.by_agent | an agent's step queued the link; followed only with its account (`QueuedLink::for_screen`)
 main_window.dialogs_closed | windows whose kit dialog the app closed, for the shell that shows it to forget its `open_dialog` (the kit layer names no dialog, so the shell cannot ask it); a window's entry is taken by that shell's next sync and dropped when the window closes
+preferences.link_handler_recheck * | the re-reads of the operating system's tg: link handler after "Make Quill the default": the handler is one per OS user, so the stage is the process's; leaving Settings' System page or a second click drops its task
+calls.tick * | the 1 s call clock: one task for the process, which reads the screen and every background account's ring on each beat and ends by itself when neither wants it
+background.close_waiters * | the work waiting on closing clients of every account (`after_closing`): each task is held here, ends by itself and gives up after its cap

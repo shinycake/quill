@@ -290,11 +290,7 @@ impl QuillApp {
             return Some((picture, Some(PictureState::LivePaused { wide: contain })));
         }
         let player = player?;
-        let input = LiveInput {
-            state: Some(player.state()),
-            idle: false,
-            failed: false,
-        };
+        let input = LiveInput::Expected(Some(player.state()));
         let now = cx.background_executor().now();
         let (overlay, due) = self
             .group_call

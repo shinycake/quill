@@ -693,6 +693,45 @@ fn an_account_switch_closes_a_story_pip(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn a_pip_opened_over_one_still_opening_ends_with_one_window(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_live(cx, "ready-live-story");
+    let vcx = &mut vcx;
+    let before = vcx.update(|_, cx| cx.windows().len());
+    app.update_in(vcx, |app, _, cx| {
+        let (Some((chat_id, story_id)), Some(player)) =
+            (app.stories.live.watching(), app.stories.live.player.clone())
+        else {
+            return;
+        };
+        let source = crate::ui::calls::live_pip::LivePipSource::Story { chat_id, story_id };
+        // The second opens before the first one's deferred open landed.
+        app.open_live_pip(player.clone(), source, None, cx);
+        app.open_live_pip(player, source, None, cx);
+        assert!(
+            app.group_call
+                .live_pip
+                .as_ref()
+                .is_some_and(|link| link.window.window().is_none()),
+            "the newer link still waits for its own open"
+        );
+        // As the story header's PiP button leaves the viewer.
+        app.close_story_viewer(cx);
+    });
+    frames(vcx);
+    let after = vcx.update(|_, cx| cx.windows().len());
+    assert_eq!(after, before + 1, "one PiP window, not two");
+    app.read_with(vcx, |app, _| {
+        assert!(
+            app.group_call
+                .live_pip
+                .as_ref()
+                .is_some_and(|link| link.window.window().is_some()),
+            "its own open landed"
+        );
+    });
+}
+
+#[gpui_kit::test]
 fn a_stream_in_pip_leaves_the_header_of_another_story_alone(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_live(cx, "ready-live-story");
     let vcx = &mut vcx;

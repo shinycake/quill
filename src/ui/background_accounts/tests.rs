@@ -52,7 +52,7 @@ fn ring() -> BackgroundRing {
         account_name: "Work".into(),
         prompt: RingPrompt::Shown,
         // No OS notification in tests.
-        notice: RingNotice::Sent,
+        notice: RingNotice::Posted { tag: String::new() },
     }
 }
 
@@ -109,7 +109,7 @@ fn the_tick_loops_another_accounts_ringtone_with_no_poll(cx: &mut TestAppContext
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
         assert_eq!(app.calls.sounds.looping(), Some(CallSound::Incoming));
-        assert!((app.calls.tick == crate::ui::calls_state::CallTick::Running));
+        assert!(app.calls.tick.ticks());
     });
     app.update_in(&mut vcx, |app, _, _| {
         app.background.ringing = None;
@@ -117,10 +117,7 @@ fn the_tick_loops_another_accounts_ringtone_with_no_poll(cx: &mut TestAppContext
     vcx.executor().advance_clock(Duration::from_secs(1));
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
-        assert!(
-            !(app.calls.tick == crate::ui::calls_state::CallTick::Running),
-            "no ring, no tick"
-        );
+        assert!(!app.calls.tick.ticks(), "no ring, no tick");
     });
 }
 

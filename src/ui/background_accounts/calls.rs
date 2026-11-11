@@ -39,12 +39,12 @@ pub(super) enum RingPrompt {
     Dismissed,
 }
 
-/// The OS "Incoming call" notification of a ring: sent once, and only
-/// counted once the system took it.
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// The OS "Incoming call" notification of a ring: posted once, and only
+/// counted once the system took it. It keeps the tag that dismisses it.
+#[derive(Clone, PartialEq, Eq)]
 pub(super) enum RingNotice {
     Unsent,
-    Sent,
+    Posted { tag: String },
 }
 
 impl QuillApp {
@@ -167,7 +167,7 @@ impl QuillApp {
         let Some(ring) = self.background.ringing.as_mut() else {
             return;
         };
-        if ring.notice == RingNotice::Sent {
+        if matches!(ring.notice, RingNotice::Posted { .. }) {
             return;
         }
         let Some(notification) = decide_call_notify(&CallNotifyInput {
@@ -181,12 +181,13 @@ impl QuillApp {
             return;
         };
         let account = ring.account.clone();
+        let tag = quill::notify_call::call_notification_tag(&account.0, ring.call_id);
         // Counted only when it went out: a refused one is tried again at the
         // next poll.
         if self.spawn_call_notification_as(&account, notification, cx)
             && let Some(ring) = self.background.ringing.as_mut()
         {
-            ring.notice = RingNotice::Sent;
+            ring.notice = RingNotice::Posted { tag };
         }
     }
 
@@ -203,13 +204,10 @@ impl QuillApp {
         let Some(ring) = self.background.ringing.take() else {
             return;
         };
-        if ring.notice == RingNotice::Sent
+        if let RingNotice::Posted { tag } = &ring.notice
             && quill::notify::current_backend() == quill::notify::NotifyBackend::Native
         {
-            cx.dismiss_system_notification(&quill::notify_call::call_notification_tag(
-                &ring.account.0,
-                ring.call_id,
-            ));
+            cx.dismiss_system_notification(tag);
         }
         cx.notify();
     }

@@ -1,3 +1,4 @@
 # Timers that must run on a clock (scripts/check-owned-timers.py).
 # One per line: <rule>:<Type::function> <what ends it, and why it has no event>
 poll:run_poll_loop the shared poll loop itself (src/ui/wake_wait.rs): it rests on a quill::wake signal and ends when its pass returns None; the timer is only the gap that gives the thread back between two passes
+poll:QuillApp::sync_omarchy_watch ends when Quill stops following Omarchy (`Omarchy::Watching` leaves to `Found`, dropping the task) or the app goes; no event because Omarchy signals a theme switch only by rewriting a file and Quill has no file-watch dependency; one stat every 2 s on a background thread, only while following

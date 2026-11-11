@@ -157,7 +157,6 @@ QuillApp::build_subscriptions_dialog::body.borrow_mut 1
 QuillApp::build_suggest_price_dialog::body.borrow_mut 1
 QuillApp::build_suggest_time_dialog::body.borrow_mut 1
 QuillApp::build_text_box::body.borrow_mut 1
-QuillApp::build_theme_editor_dialog::body.borrow_mut 1
 QuillApp::build_translate_dialog::body.borrow_mut 1
 QuillApp::build_twofa_dialog::body.borrow_mut 1
 QuillApp::build_username_dialog::body.borrow_mut 1
@@ -248,7 +247,6 @@ SelectableRichText::paint::owners.borrow_mut 1
 SizedLoad::get::state.borrow 1
 SizedLoad::new::state.borrow_mut 1
 SizedLoad::use_by::state.borrow_mut 1
-StreamSound::start_with::slot.borrow 1
 TrayReads::forget::photo_sizes.borrow_mut 1
 Wallpaper::with_stored_rotation::r.borrow 1
 WindowZoom::fire_resize::resize.borrow_mut 1
@@ -360,7 +358,6 @@ set_app::slot.borrow_mut 1
 set_display::displays.borrow_mut 1
 set_zoom::list.borrow_mut 1
 settle::f.borrow_mut 1
-share_output_with_video::slot.borrow_mut 1
 shared::playing.borrow 1
 shown_unwatched::badges.borrow 1
 shows_now::slices.borrow 1
@@ -383,7 +380,6 @@ tracker::seen.borrow_mut 1
 tray_available::cell.borrow 2
 tray_registering::cell.borrow 1
 utc_offset_at::cell.borrow_mut 1
-video_output_ready::slot.borrow 1
 video_redraws::asks.borrow 1
 video_request::asks.borrow_mut 1
 video_request_done::answered.borrow_mut 1

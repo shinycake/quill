@@ -1,2 +1,3 @@
 # In-flight variants that wait for nothing Quill started (scripts/check-stage-enums.py).
 # One per line: <rule>:<Enum>::<Variant> <reason>
+bare:Stretch::Starting the time stretcher's position before its first slice (src/ui/audio/tempo.rs): a pure function of the samples pulled, with no request or task to hold; the variant is the initial value, not work in flight

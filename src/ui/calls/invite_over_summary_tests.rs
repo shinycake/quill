@@ -106,19 +106,13 @@ fn an_invitation_alone_keeps_the_call_tick(cx: &mut TestAppContext) {
             rings_until: i64::MAX,
         });
         app.ensure_call_tick(cx);
-        assert!(
-            (app.calls.tick == crate::ui::calls_state::CallTick::Running),
-            "the tick starts"
-        );
+        assert!(app.calls.tick.ticks(), "the tick starts");
     });
     vcx.executor()
         .advance_clock(std::time::Duration::from_secs(3));
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
-        assert!(
-            (app.calls.tick == crate::ui::calls_state::CallTick::Running),
-            "and keeps beating"
-        );
+        assert!(app.calls.tick.ticks(), "and keeps beating");
         assert_eq!(app.calls.sounds.looping(), Some(CallSound::Incoming));
     });
 }
