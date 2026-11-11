@@ -1,6 +1,7 @@
 //! Connect driver: storage statistics, auto-download presets and storage limits.
 use super::*;
-use crate::state::StorageClear;
+use crate::data_settings::PresetsSeed;
+use crate::state::{StorageClear, StorageSaveKind};
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase S2: `getStorageStatistics` for the storage-usage overlay —
@@ -59,30 +60,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.settings.data_storage.seeded != Seed::Unseeded
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetAutoDownloadSettingsPresets)
-        {
+        if !self.session.settings.data_storage.seeded.askable() {
             return Ok(());
         }
         let extra = self
             .session
             .request(RequestPurpose::GetAutoDownloadSettingsPresets, None);
-        self.session.settings.auto_download_presets.begin();
         if let Err(err) = self
             .sender
             .send_json(&get_auto_download_settings_presets(extra))
         {
             self.session.requests.take(extra);
-            self.session
-                .settings
-                .auto_download_presets
-                .fail("Couldn't load auto-download settings.");
+            self.session.settings.data_storage.seeded =
+                PresetsSeed::Failed("Couldn't load auto-download settings.".to_owned());
             return Err(err);
         }
-        self.session.settings.data_storage.seeded = Seed::InFlight;
+        self.session.settings.data_storage.seeded = PresetsSeed::Loading(extra);
         Ok(())
     }
 
@@ -95,6 +88,20 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `data_storage_dirty` on the next ingest. A send failure or
     /// TDLib error leaves the local prefs untouched.
     pub fn set_auto_download_settings(
+        &mut self,
+        network: NetworkKind,
+        settings: AutoDownloadNetSettings,
+    ) -> Result<RequestId, ConnectSendError> {
+        self.session
+            .settings
+            .data_storage_save
+            .begin(StorageSaveKind::AutoDownload);
+        self.send_auto_download_settings(network, settings)
+    }
+
+    /// One `setAutoDownloadSettings` of a batch: the batch cleared the
+    /// earlier failure, this one may add its own.
+    fn send_auto_download_settings(
         &mut self,
         network: NetworkKind,
         settings: AutoDownloadNetSettings,
@@ -112,10 +119,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let payload = set_auto_download_settings(extra, settings.to_json(), network.td_type());
         if let Err(err) = self.sender.send_json(&payload) {
             self.session.requests.take(extra);
-            self.session
-                .settings
-                .data_storage_save
-                .fail("Couldn't save auto-download settings.");
+            self.session.settings.data_storage_save.fail(
+                StorageSaveKind::AutoDownload,
+                "Couldn't save auto-download settings.",
+            );
             return Err(err);
         }
         Ok(extra)
@@ -138,10 +145,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Every network is sent even if one send fails, so a failure never
         // leaves the later networks out of a toggle that covers all three.
         let mut first_error = None;
+        self.session
+            .settings
+            .data_storage_save
+            .begin(StorageSaveKind::AutoDownload);
         for network in NetworkKind::ALL {
             let mut settings = *self.session.settings.data_storage.for_network(network);
             settings.use_less_data_for_calls = on;
-            if let Err(err) = self.set_auto_download_settings(network, settings) {
+            if let Err(err) = self.send_auto_download_settings(network, settings) {
                 first_error.get_or_insert(err);
             }
         }
@@ -194,6 +205,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         // All four options go out even if one send fails; the first error
         // is the outcome.
         let mut first_error = None;
+        self.session
+            .settings
+            .data_storage_save
+            .begin(StorageSaveKind::Limits);
         for (name, value) in crate::storage_limits::options_for(size, keep) {
             let extra = self.session.request(RequestPurpose::SetStorageOption, None);
             let json = match value {
@@ -209,7 +224,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session
                     .settings
                     .data_storage_save
-                    .fail("Couldn't save the storage limits.");
+                    .fail(StorageSaveKind::Limits, "Couldn't save the storage limits.");
                 first_error.get_or_insert(err);
             }
         }

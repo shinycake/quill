@@ -493,9 +493,9 @@ fn the_storage_list_stays_in_view_when_rows_above_arrive(cx: &mut TestAppContext
     let rows = |app: &mut QuillApp, arrived: bool| {
         if let Some(demo) = app.demo_session.as_mut() {
             demo.settings.data_storage.seeded = if arrived {
-                quill::data_settings::Seed::Seeded
+                quill::data_settings::PresetsSeed::Seeded
             } else {
-                quill::data_settings::Seed::InFlight
+                quill::data_settings::PresetsSeed::Loading(quill::ids::RequestId(1))
             };
         }
     };

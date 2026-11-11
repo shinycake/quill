@@ -208,10 +208,13 @@ impl Session {
         })) = pending.map(|p| p.purpose)
         {
             *self.settings.data_storage.for_network_mut(network) = settings;
-            self.settings.data_storage.seeded = crate::data_settings::Seed::Seeded;
-            self.settings.data_storage_save.succeed(());
+            self.settings.data_storage.seeded = crate::data_settings::PresetsSeed::Seeded;
             self.settings.data_storage_dirty = true;
-            self.settings.auto_download_answer = extra.map(AutoDownloadAnswer::Saved);
+            if let Some(request) = extra {
+                self.settings
+                    .auto_download_answers
+                    .push(AutoDownloadAnswer::Saved(request));
+            }
         }
         // Batch 4: a `confirmSession` / `terminateSession` for the
         // new-login alert succeeded.
@@ -238,14 +241,6 @@ impl Session {
             pending.map(|p| p.purpose)
         {
             self.apply_password_op_ok(op, pending.map(|p| p.id));
-        }
-        // Batch 6: a storage limit option was accepted; TDLib echoes the
-        // value as `updateOption`.
-        if matches!(
-            pending.map(|p| p.purpose),
-            Some(RequestPurpose::SetStorageOption)
-        ) {
-            self.settings.data_storage_save.succeed(());
         }
         // Slice A4: a `disconnectWebsite` /
         // `disconnectAllWebsites` succeeded — same stale pattern
