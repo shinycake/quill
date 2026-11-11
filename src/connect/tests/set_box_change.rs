@@ -140,3 +140,41 @@ fn a_refused_step_of_the_managers_saved_change_is_reported_once() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A set box's own refused change, answered while the manager's saved
+/// change waits behind it, is not a failure of the manager's change.
+#[test]
+fn a_set_boxs_refusal_is_not_reported_as_the_managers() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let box_change = driver.manage_sticker_set(77, true, false).unwrap().unwrap();
+    // The manager closed meanwhile: its removal waits for the box's.
+    driver.commit_sticker_manager(false, vec![5], None).unwrap();
+    answer(
+        &mut driver,
+        &seq,
+        &sink,
+        box_change,
+        json!({"@type":"error","code":500,"message":"test"}),
+    );
+    assert_eq!(driver.session.stickers.manager.failure, None);
+    // Its own step then goes out, and its refusal is reported.
+    let removal = sent_request(&recorder, "changeStickerSet");
+    let extra: crate::ids::RequestId = removal["@extra"].as_str().unwrap().parse().unwrap();
+    assert_ne!(extra, box_change, "the manager's step is its own request");
+    answer(
+        &mut driver,
+        &seq,
+        &sink,
+        extra,
+        json!({"@type":"error","code":500,"message":"test"}),
+    );
+    assert_eq!(
+        driver.session.stickers.manager.failure,
+        Some(crate::state::CommitFailure { masks: false })
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}

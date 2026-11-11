@@ -49,7 +49,7 @@ impl QuillApp {
         Some(
             Popover::new("composer-send-as-menu")
                 .anchor(Anchor::BottomLeft)
-                .open(self.chat_ui.send_as_open)
+                .open(self.chat_ui.send_as_open && !self.send_as_list_empty())
                 .on_open_change(move |open, _, cx| {
                     let open = *open;
                     let _ = view.update(cx, |this, cx| {
@@ -87,8 +87,20 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// TDLib answered with no identity to send as: there is nothing to
+    /// pick, so the menu stays shut (tdesktop shows the button only for a
+    /// non-empty list).
+    pub(super) fn send_as_list_empty(&self) -> bool {
+        let Some(session) = self.session() else {
+            return false;
+        };
+        session.open_chat.is_some_and(|chat| {
+            matches!(session.message_senders_fetch(chat), Fetch::Ready(list) if list.is_empty())
+        })
+    }
+
     pub(super) fn toggle_send_as(&mut self, cx: &mut Context<Self>) {
-        self.chat_ui.send_as_open = !self.chat_ui.send_as_open;
+        self.chat_ui.send_as_open = !self.chat_ui.send_as_open && !self.send_as_list_empty();
         if self.chat_ui.send_as_open {
             let chat = self.session().and_then(|s| s.open_chat);
             if let (Some(chat), Some(live)) = (chat, self.live.as_mut()) {

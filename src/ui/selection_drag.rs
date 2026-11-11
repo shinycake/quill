@@ -739,4 +739,23 @@ mod tests {
         assert!(app.read_with(vcx, |app, _| app.message_ui.selection_drag.is_none()));
         assert!(selected(&app, vcx).is_empty(), "nothing was selected");
     }
+
+    #[gpui_kit::test]
+    fn locking_ends_a_held_press(cx: &mut TestAppContext) {
+        let (app, mut vcx) = new_app(cx);
+        let vcx = &mut vcx;
+        let rows = rows(&app, vcx);
+        let a = &rows[0];
+        vcx.simulate_mouse_down(blank_point(a), MouseButton::Left, Modifiers::default());
+        assert!(app.read_with(vcx, |app, _| app.message_ui.selection_drag.is_some()));
+        // The release never reaches a locked window.
+        app.update(vcx, |app, cx| {
+            app.account.passcode.enabled = true;
+            app.lock_by_passcode(cx);
+        });
+        assert!(
+            app.read_with(vcx, |app, _| app.message_ui.selection_drag.is_none()),
+            "the lock ended the drag"
+        );
+    }
 }

@@ -4123,19 +4123,32 @@ and 10 are widget items another fixer owns).
   every window's message widgets off screen (14-048, the lock case; minimized
   and tray-hidden windows have no signal to hang it on, so they are not
   covered). A failed widget storage write stays pending: the entry is clean
-  only after the write took, and a prune keeps an entry it could not write
-  (14-055).
+  only after the write took (14-055). `prune_hidden` counts only hidden
+  widgets that hold a runtime or a frame; one whose write fails sheds both
+  and keeps its `stored` copy for the save timer, so it is neither retried nor
+  logged on every pass, and it never keeps frames. `WidgetEntry::wants_frames`
+  is the runtime's own ask; `ticks()` is that ask while a window draws the
+  widget, and a widget that comes back on screen asks for its animation tick
+  again, as nothing else would (14-049). `ChatWindows::thread_asker` is the
+  `ThreadAsker` enum (`Nobody`, `Main`, `ChatWindow`).
 - **One-shot outcomes.** `Session::forget_screen_outcomes` runs in
   `put_on_screen`: a bank page, a copied link, a forward answer or an old
   error that landed while the account was in the background is not drained
-  as news when it comes back (11-p6-005).
+  as news when it comes back (11-p6-005). It covers every outcome
+  `poll_drains` takes (bot callback answers, login-URL answers with their
+  request, receipt and unlock notes, send-permission and flood notes); a test
+  scans `poll_drains.rs`, so a drained outcome that is not forgotten fails.
 - **Lost input.** A reply typed into a notification that could not be sent
   waits in `unsent_replies` and goes into the composer of the chat the click
-  opened (11-p5-024). A held history press ends when a move reports the
-  button up, or the window loses focus, instead of polling for ever
-  (11-p4-002). A saved manager change that failed (a refused or unsendable
+  opened (11-p5-024); a chat with a window of its own gets it in that
+  window's composer (`compose_unsent_reply` in the window's scope, at its next
+  frame), and behind the lock it is kept until a click after the unlock. A held history press ends when a move reports the
+  button up, or the window loses focus, or Quill locks, instead of polling
+  for ever (11-p4-002). A saved manager change that failed (a refused or unsendable
   step) leaves `StickersManager::failure`, which the poll turns into one toast
-  (13-010). "Done" in the New Sticker box leaves the box only when the upload
+  (13-010); only the failure of that change's own request counts
+  (`ManagerCommit::sent`), not a set box's refused change. An answered empty
+  send-as list opens no menu. "Done" in the New Sticker box leaves the box only when the upload
   went out (13-007); a still sticker to adapt that is not downloaded is
   fetched and decoded on arrival (13-006).
 - **Pull to the next channel.** The machine leaves `jumping` when the jump
