@@ -38,37 +38,18 @@ pub(crate) struct GroupTypeBox {
     link: LinkCheck,
 }
 
-/// Where the link field stands. `version` names a keystroke (unique across
-/// boxes, see `next_link_version`): a check timer
-/// for an older one does nothing. `Refused` (Save found the link unusable;
-/// the line under the field says why) leaves with the next keystroke.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Where the link field stands. `Typed` owns the pause before the server
+/// check: the next keystroke, closing the box or the box going away drops
+/// the timer with it. `Refused` (Save found the link unusable; the line
+/// under the field says why) leaves with the next keystroke.
+#[derive(Default)]
 enum LinkCheck {
     #[default]
     Idle,
     Typed {
-        version: u64,
+        _timer: Task<()>,
     },
-    Refused {
-        version: u64,
-    },
-}
-
-/// Versions are process-wide, not per box: the pause task of a box that was
-/// closed (its Task is detached) must not match a version of the box that
-/// opened after it.
-fn next_link_version() -> u64 {
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-}
-
-impl LinkCheck {
-    fn version(self) -> u64 {
-        match self {
-            Self::Idle => 0,
-            Self::Typed { version } | Self::Refused { version } => version,
-        }
-    }
+    Refused,
 }
 
 /// What the box knows about its chat, read from the session each frame.
@@ -112,7 +93,7 @@ impl GroupTypeBox {
             .session()
             .is_some_and(|s| s.group_username_check_failed(facts.chat_id, &text));
         match link_status(&text, &facts.editable, verdict) {
-            LinkStatus::Empty if matches!(self.link, LinkCheck::Refused { .. }) => {
+            LinkStatus::Empty if matches!(self.link, LinkCheck::Refused) => {
                 LinkStatus::Problem(LinkProblem::TooShort)
             }
             LinkStatus::Pending if failed => LinkStatus::Problem(LinkProblem::CheckFailed),
@@ -246,8 +227,7 @@ impl QuillApp {
             return;
         };
         let text = type_box.link_text(cx);
-        let version = next_link_version();
-        type_box.link = LinkCheck::Typed { version };
+        type_box.link = LinkCheck::Idle;
         if facts.setup {
             self.new_chat_link_edited();
         }
@@ -255,20 +235,22 @@ impl QuillApp {
         if local_link_status(&text) != LinkStatus::Pending || text == facts.editable {
             return;
         }
-        self.spawn_screen(cx, async move |this, cx| {
+        let timer = self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(CHECK_DELAY_MS))
                 .await;
-            let _ = this.update(cx, |this, cx| this.check_group_link(version, cx));
-        })
-        .detach();
+            let _ = this.update(cx, |this, cx| this.check_group_link(cx));
+        });
+        if let Some(type_box) = self.group_type_box_mut() {
+            type_box.link = LinkCheck::Typed { _timer: timer };
+        }
     }
 
-    fn check_group_link(&mut self, version: u64, cx: &mut Context<Self>) {
+    fn check_group_link(&mut self, cx: &mut Context<Self>) {
         let Some(type_box) = self.group_type_box() else {
             return;
         };
-        if type_box.link.version() != version || !type_box.draft.public {
+        if !type_box.draft.public {
             return;
         }
         let text = type_box.link_text(cx);
@@ -305,8 +287,7 @@ impl QuillApp {
         };
         let text = type_box.link_text(cx);
         if local_link_status(&text) == LinkStatus::Pending && text != facts.editable {
-            let version = type_box.link.version();
-            self.check_group_link(version, cx);
+            self.check_group_link(cx);
         }
     }
 
@@ -339,9 +320,8 @@ impl QuillApp {
             type_box.draft.request_to_join = false;
         }
         let pending = public && local_link_status(&type_box.link_text(cx)) == LinkStatus::Pending;
-        let version = type_box.link.version();
         if pending {
-            self.check_group_link(version, cx);
+            self.check_group_link(cx);
         }
         cx.notify();
     }
@@ -378,9 +358,7 @@ impl QuillApp {
                 self.recheck_group_type_link(cx);
             }
             if let Some(type_box) = self.group_type_box_mut() {
-                type_box.link = LinkCheck::Refused {
-                    version: type_box.link.version(),
-                };
+                type_box.link = LinkCheck::Refused;
                 type_box
                     .link_input
                     .update(cx, |input, cx| input.focus(window, cx));
@@ -401,16 +379,22 @@ impl QuillApp {
             && !facts.basic
             && self
                 .session()
-                .is_some_and(|s| s.chat_invite_link_count_failed(facts.chat_id))
+                .is_some_and(|s| s.chat_invite_link_count_unknown(facts.chat_id))
         {
-            // The count did not load: Save asks for it again instead of
+            // The count is not in (still loading, or failed):
+            // Save asks for it again (a no-op while it loads) instead of
             // skipping the question as if the chat had no links.
+            let failed = self
+                .session()
+                .is_some_and(|s| s.chat_invite_link_count_failed(facts.chat_id));
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.fetch_chat_invite_link_counts(facts.chat_id);
             }
-            self.set_note(StatusNote::error(tr(
-                keys::Q_PEOPLE_COULD_NOT_REFRESH_INVITE_LINKS,
-            )));
+            self.set_note(StatusNote::error(tr(if failed {
+                keys::Q_PEOPLE_COULD_NOT_REFRESH_INVITE_LINKS
+            } else {
+                keys::Q_PEOPLE_INVITE_LINKS_ARE_STILL_LOADING
+            })));
             cx.notify();
             return;
         }

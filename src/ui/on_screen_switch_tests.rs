@@ -494,7 +494,7 @@ fn the_story_viewer_blocks_shortcuts_in_the_main_window_only(cx: &mut TestAppCon
         areas: Vec::new(),
     };
     app.update_in(&mut vcx, |app, window, cx| {
-        app.stories.viewer = StoryViewer::open(vec![item], 0);
+        app.stories.viewer.show(StoryViewer::open(vec![item], 0));
         assert!(app.shortcut_blocked(window, cx), "main window");
         app.windows.scope = Some(CHAT);
         assert!(!app.shortcut_blocked(window, cx), "a chat window");

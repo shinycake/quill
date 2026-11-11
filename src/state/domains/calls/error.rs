@@ -306,8 +306,9 @@ impl Session {
             })) => {
                 if let Some(tracked) = self.calls.active_group_call.as_mut()
                     && tracked.id == group_call_id
+                    && let Some(request) = pending.map(|p| p.id)
                 {
-                    tracked.share_links.failed(can_self_unmute);
+                    tracked.share_links.failed(can_self_unmute, request);
                 }
                 if !can_self_unmute {
                     self.calls.group_call_error =

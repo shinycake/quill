@@ -723,7 +723,6 @@ impl QuillApp {
             let _ = live.driver.sync_story_preloads(&[], &[]);
         }
         self.stories.viewer.close();
-        self.chat_list.pending_story_open = None;
         // The player and the clock belong to the open viewer: a close that
         // skips the rest of `close_story_viewer` (a deleted story, the
         // passcode lock) must not leave the clip playing.
@@ -766,8 +765,9 @@ impl QuillApp {
             || self.stories.viewer_ui().pause.is_paused()
             // A repost's press waits for its story's answer.
             || self
-                .chat_list
-                .pending_story_open
+                .stories
+                .viewer
+                .waiting()
                 .is_some_and(|open| open.if_gone.is_some())
             || self.stories.viewer_ui().menu_open
             || self.stories.stealth_box.is_some()
@@ -881,6 +881,7 @@ mod panel_tests;
 mod reply_media;
 mod repost;
 mod siblings;
+mod story_open;
 #[cfg(feature = "demo-capture")]
 mod story_demo;
 #[cfg(test)]
@@ -899,3 +900,4 @@ mod window_active_tests;
 
 pub(in crate::ui) use live_state::LiveStoryUi;
 pub(in crate::ui) use open::PendingStoryOpen;
+pub(in crate::ui) use story_open::StoryOpen;

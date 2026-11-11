@@ -117,7 +117,7 @@ impl QuillApp {
             self.switch_open_story(prev, next);
         }
         // The user moved on: a press still waiting for its story is dropped.
-        self.chat_list.pending_story_open = None;
+        self.stories.viewer.stop_waiting();
         self.replace_story_item(prev, next, cx);
         self.stories.video.retry();
         self.stories.playback.start(Instant::now());

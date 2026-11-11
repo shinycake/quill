@@ -295,8 +295,9 @@ impl Session {
                     group_call_id,
                     can_self_unmute,
                 })) = pending.map(|p| p.purpose)
+                    && let Some(request) = pending.map(|p| p.id)
                 {
-                    self.set_group_call_invite_link(group_call_id, can_self_unmute, url);
+                    self.set_group_call_invite_link(group_call_id, can_self_unmute, request, url);
                 // B1: `getLoginUrl` returns `httpUrl` too (schema 1.8.67,
                 // line 7458) — the authorized URL after consent.
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetLoginUrl) {

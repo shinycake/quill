@@ -99,7 +99,9 @@ impl QuillApp {
         }
         // A newer open replaces one still waiting.
         let rebuilt = self.rebuild_story_viewer(open, cx);
-        self.chat_list.pending_story_open = (!rebuilt).then_some(open);
+        if !rebuilt {
+            self.stories.viewer.wait(open);
+        }
         cx.notify();
     }
 
@@ -120,7 +122,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(open) = self.chat_list.pending_story_open else {
+        let Some(open) = self.stories.viewer.waiting() else {
             return;
         };
         let Some(session) = self.session() else {
@@ -138,22 +140,22 @@ impl QuillApp {
                 (StoryCardState::Expired, _) | (StoryCardState::Loading, true)
             )
         {
-            self.chat_list.pending_story_open = None;
+            self.stories.viewer.stop_waiting();
             return self.show_story_repost_gone(gone, window, cx);
         }
         match state {
             StoryCardState::Ready => {
-                self.chat_list.pending_story_open = None;
+                self.stories.viewer.stop_waiting();
                 self.rebuild_story_viewer(open, cx);
             }
             StoryCardState::Expired => {
-                self.chat_list.pending_story_open = None;
+                self.stories.viewer.stop_waiting();
                 if open.scope == StoryOpenScope::Link {
                     self.set_status_note(StatusNote::info(tr(keys::STORIES_LINK_INVALID)), cx);
                 }
             }
             StoryCardState::Loading if failed => {
-                self.chat_list.pending_story_open = None;
+                self.stories.viewer.stop_waiting();
                 let note = match open.scope {
                     StoryOpenScope::Link => keys::STORIES_LINK_INVALID,
                     StoryOpenScope::Single | StoryOpenScope::Tray => {
@@ -250,10 +252,10 @@ impl QuillApp {
         // until now is left, its reply and editors with it, as a step to
         // another story would, draft included.
         self.replace_story_item(previous, current, cx);
-        self.stories.viewer = viewer;
+        self.stories.viewer.show(viewer);
         self.switch_open_story(previous, current);
         // Phase 9.6: (re)start the playback clock + tick whenever the
-        // viewer (re)opens — also covers the deferred `pending_story_open`
+        // viewer (re)opens — also covers the deferred `StoryOpen::Waiting`
         // path, which funnels through here.
         self.stories.playback.start(Instant::now());
         self.stories.video.retry();

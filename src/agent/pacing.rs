@@ -219,6 +219,7 @@ mod tests {
     use super::{
         ANY_GAP, NEW_PEERS_PER_DAY, Refusal, SAME_CHAT_GAP, State, flood, flood_seconds,
         forget_account, take_turn,
+        Turn,
     };
     use crate::ids::AccountKey;
     use std::time::{Duration, Instant};
@@ -267,21 +268,26 @@ mod tests {
     fn a_dropped_turn_is_released_and_a_committed_one_is_kept() {
         let _guard = crate::locks::lock_or_recover(&FLOOD_TEST);
         let account = AccountKey("turn-drop".into());
-        let count = || {
+        let now = Instant::now();
+        let book = |chat: i64| {
+            let mut guard = crate::locks::lock_or_recover(&super::STATE);
+            let state = guard.get_or_insert_with(State::default);
+            let (_, booking) = state
+                .reserve(now, &account, (9010, chat), 1, true)
+                .unwrap();
+            Turn {
+                booking: Some(booking),
+            }
+        };
+        let has = |chat: i64| {
             crate::locks::lock_or_recover(&super::STATE)
                 .as_ref()
-                .map_or(0, |s| s.new_peers.len())
+                .is_some_and(|s| s.next_in_chat.contains_key(&(9010, chat)))
         };
-        let before = count();
-        match take_turn(&account, 9010, 10, 1, true) {
-            Ok(turn) => drop(turn),
-            Err(_) => return,
-        }
-        assert_eq!(count(), before, "dropped without commit");
-        if let Ok(turn) = take_turn(&account, 9011, 11, 1, true) {
-            turn.commit();
-            assert_eq!(count(), before + 1, "committed");
-        }
+        drop(book(10));
+        assert!(!has(10), "dropped without commit");
+        book(11).commit();
+        assert!(has(11), "committed");
     }
 
     #[test]
@@ -291,13 +297,22 @@ mod tests {
         let b = AccountKey("flood-b".into());
         flood(&a, 30);
         assert!(matches!(take_turn(&a, 9002, 2, 1, false), Err(Refusal::Flood(s)) if s > 0));
-        assert!(
-            take_turn(&b, 9003, 3, 1, false).is_ok(),
-            "another account's sends are not held to it"
-        );
+        {
+            let guard = crate::locks::lock_or_recover(&super::STATE);
+            let flooded = |k: &AccountKey| {
+                guard
+                    .as_ref()
+                    .is_some_and(|s| s.flood_until.contains_key(k))
+            };
+            assert!(!flooded(&b), "another account's sends are not held to it");
+            assert!(flooded(&a));
+        }
         forget_account(&a);
+        let guard = crate::locks::lock_or_recover(&super::STATE);
         assert!(
-            take_turn(&a, 9004, 4, 1, false).is_ok(),
+            guard
+                .as_ref()
+                .is_some_and(|s| !s.flood_until.contains_key(&a)),
             "a log-out clears the account's flood wait"
         );
     }

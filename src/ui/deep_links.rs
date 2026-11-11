@@ -5,7 +5,7 @@
 //! needed) fires `getDeepLinkInfo` once auth is Ready and drives the
 //! driver-facing half of the flow; the chat open itself happens in
 //! render via [`QuillApp::open_deep_link_chat`], which has the `Window`
-//! (same take-once pattern as `pending_story_open`).
+//! (same take-once pattern as `StoryOpen::Waiting`).
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::links_state::{FlowOrigin, PendingOpen, QueuedLink, ResolvedLink, ResolvedStep};

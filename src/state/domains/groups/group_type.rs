@@ -241,9 +241,18 @@ impl Session {
         }
     }
 
-    /// The count of active invite links could not be read (the request
-    /// failed or was refused). Unlike a chat that has none, Save cannot
-    /// tell whether to ask about applying to existing links.
+    /// The count of active invite links was asked for and has no answer
+    /// yet, or failed or was refused. Unlike a chat that has none (or one
+    /// whose count is not asked for, as for admins), Save cannot tell
+    /// whether to ask about applying to existing links.
+    pub fn chat_invite_link_count_unknown(&self, chat_id: ChatId) -> bool {
+        matches!(
+            self.groups.invite_link_counts.get(&chat_id.0),
+            Some(InviteLinkCountsFetch::Loading | InviteLinkCountsFetch::Failed(_))
+        )
+    }
+
+    /// The count was asked for and failed (or the send was refused).
     pub fn chat_invite_link_count_failed(&self, chat_id: ChatId) -> bool {
         matches!(
             self.groups.invite_link_counts.get(&chat_id.0),

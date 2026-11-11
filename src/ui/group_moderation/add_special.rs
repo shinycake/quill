@@ -157,10 +157,16 @@ impl QuillApp {
     /// tdesktop `kickUser`: banned with `KickedRestrictedRights`, forever.
     fn kick_from_add_special(&mut self, chat_id: ChatId, user_id: i64, cx: &mut Context<Self>) {
         let note = match self.live.as_mut() {
+            // The picker closes and the note says "banned" when the answer
+            // arrives (`settle_member_changes`).
             Some(live) => match live.driver.ban_chat_member(chat_id, user_id, 0) {
-                Ok(Some(_)) => {
-                    self.admin.add_special = None;
-                    StatusNote::silent(tr(keys::Q_PEOPLE_MEMBER_BANNED))
+                Ok(Some(request)) => {
+                    self.admin.member_changes.push(super::MemberChange {
+                        request,
+                        kind: super::MemberChangeKind::Kick,
+                    });
+                    cx.notify();
+                    return;
                 }
                 Ok(None) | Err(_) => {
                     StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_MEMBER_STATUS))
@@ -168,8 +174,6 @@ impl QuillApp {
             },
             None => StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE)),
         };
-        // The member page is fetched again when the request answers
-        // (`member_list_stale`), not before the change applies.
         self.set_note(note);
         cx.notify();
     }

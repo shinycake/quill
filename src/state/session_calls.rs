@@ -584,11 +584,17 @@ impl Session {
 
     /// Store a `getVideoChatInviteLink` `HttpUrl` answer on the tracked
     /// call: the speaker link when the request had `can_self_unmute`.
-    pub fn set_group_call_invite_link(&mut self, group_call_id: i32, speaker: bool, link: String) {
+    pub fn set_group_call_invite_link(
+        &mut self,
+        group_call_id: i32,
+        speaker: bool,
+        request: crate::ids::RequestId,
+        link: String,
+    ) {
         if let Some(tracked) = self.calls.active_group_call.as_mut()
             && tracked.id == group_call_id
         {
-            tracked.share_links.answered(speaker, link);
+            tracked.share_links.answered(speaker, request, link);
         }
     }
 }

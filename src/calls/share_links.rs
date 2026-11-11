@@ -11,13 +11,16 @@
 //! both are `getVideoChatInviteLink` (schema 1.8.68), which "Returns invite
 //! link to a video chat in a public chat".
 
+use crate::ids::RequestId;
+
 /// One of the two links: not asked for, being fetched, or answered.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum ShareLink {
     #[default]
     Idle,
-    /// Its request is in flight.
-    Fetching,
+    /// Its request is in flight; only that request's answer or error
+    /// settles it.
+    Fetching(RequestId),
     /// The speaker link cannot exist for this viewer or call (no right to
     /// manage it, an RTMP stream). Settled from the call's facts at each
     /// click, so it is asked for once they change (promoted to admin).
@@ -33,7 +36,7 @@ impl ShareLink {
         match self {
             Self::Got(link) => Some(link),
             Self::Unavailable => Some(""),
-            Self::Idle | Self::Fetching => None,
+            Self::Idle | Self::Fetching(_) => None,
         }
     }
 }
@@ -60,7 +63,8 @@ impl VideoChatShareLinks {
 
     /// Requests are in flight (tdesktop `generatingLink`).
     pub fn generating(&self) -> bool {
-        self.listener == ShareLink::Fetching || self.speaker == ShareLink::Fetching
+        matches!(self.listener, ShareLink::Fetching(_))
+            || matches!(self.speaker, ShareLink::Fetching(_))
     }
 
     /// Both answers are in: the share box can open (tdesktop `shareReady`).
@@ -85,7 +89,8 @@ impl VideoChatShareLinks {
     /// Plan a click (tdesktop's callback): nothing while ready or already
     /// generating; otherwise the listener link and, when the viewer can
     /// manage a non-RTMP call, the speaker link. Settles the speaker link
-    /// to "none" when it cannot exist and marks the requests in flight.
+    /// to "none" when it cannot exist. The caller marks each request it
+    /// sends with [`Self::sent`]; one that is refused leaves the slot idle.
     pub fn plan(&mut self, can_manage: bool, rtmp: bool) -> LinkRequests {
         let possible = can_manage && !rtmp;
         if !possible {
@@ -98,43 +103,42 @@ impl VideoChatShareLinks {
         if self.ready() || self.generating() {
             return LinkRequests::default();
         }
-        let wanted = LinkRequests {
+        LinkRequests {
             listener: self.listener_link().is_none(),
             speaker: self.speaker == ShareLink::Idle,
-        };
-        if wanted.listener {
-            self.listener = ShareLink::Fetching;
         }
-        if wanted.speaker {
-            self.speaker = ShareLink::Fetching;
-        }
-        wanted
     }
 
-    /// One answer arrived (`speaker` = the request had `can_self_unmute`).
-    /// Only a slot that waits takes it: the answer of a request whose links
-    /// were reset meanwhile (a revoke) is dropped.
-    pub fn answered(&mut self, speaker: bool, link: String) {
-        let slot = if speaker {
+    /// The request for one link went out as `request`.
+    pub fn sent(&mut self, speaker: bool, request: RequestId) {
+        *self.slot(speaker) = ShareLink::Fetching(request);
+    }
+
+    fn slot(&mut self, speaker: bool) -> &mut ShareLink {
+        if speaker {
             &mut self.speaker
         } else {
             &mut self.listener
-        };
-        if *slot == ShareLink::Fetching {
+        }
+    }
+
+    /// One answer arrived (`speaker` = the request had `can_self_unmute`).
+    /// Only the slot that waits for `request` takes it: the answer of a
+    /// request whose links were reset meanwhile (a revoke), or replaced by a
+    /// later click, is dropped.
+    pub fn answered(&mut self, speaker: bool, request: RequestId, link: String) {
+        let slot = self.slot(speaker);
+        if *slot == ShareLink::Fetching(request) {
             *slot = ShareLink::Got(link);
         }
     }
 
-    /// A request failed. A failed speaker link is left out (tdesktop's
+    /// `request` failed. A failed speaker link is left out (tdesktop's
     /// `fail` handler); a failed listener link goes back to idle so a later
     /// click can try again.
-    pub fn failed(&mut self, speaker: bool) {
-        let slot = if speaker {
-            &mut self.speaker
-        } else {
-            &mut self.listener
-        };
-        if *slot != ShareLink::Fetching {
+    pub fn failed(&mut self, speaker: bool, request: RequestId) {
+        let slot = self.slot(speaker);
+        if *slot != ShareLink::Fetching(request) {
             return;
         }
         *slot = if speaker {
@@ -142,18 +146,6 @@ impl VideoChatShareLinks {
         } else {
             ShareLink::Idle
         };
-    }
-
-    /// A planned request was never sent: back to idle, to be asked again.
-    pub fn unsent(&mut self, speaker: bool) {
-        let slot = if speaker {
-            &mut self.speaker
-        } else {
-            &mut self.listener
-        };
-        if *slot == ShareLink::Fetching {
-            *slot = ShareLink::Idle;
-        }
     }
 }
 
@@ -211,22 +203,46 @@ pub fn invite_row_action(facts: InviteRowFacts) -> Option<InviteRowAction> {
 mod tests {
     use super::*;
 
+    const LISTENER: RequestId = RequestId(1);
+    const SPEAKER: RequestId = RequestId(2);
+
+    /// A click whose requests all went out: the listener as `LISTENER`, the
+    /// speaker as `SPEAKER`.
+    fn click(links: &mut VideoChatShareLinks, can_manage: bool, rtmp: bool) -> LinkRequests {
+        let wanted = links.plan(can_manage, rtmp);
+        if wanted.listener {
+            links.sent(false, LISTENER);
+        }
+        if wanted.speaker {
+            links.sent(true, SPEAKER);
+        }
+        wanted
+    }
+
+    fn both() -> LinkRequests {
+        LinkRequests {
+            listener: true,
+            speaker: true,
+        }
+    }
+
+    fn listener_only() -> LinkRequests {
+        LinkRequests {
+            listener: true,
+            speaker: false,
+        }
+    }
+
     #[test]
     fn admin_asks_for_both_links_once() {
         let mut links = VideoChatShareLinks::default();
-        assert_eq!(
-            links.plan(true, false),
-            LinkRequests {
-                listener: true,
-                speaker: true
-            }
-        );
+        assert_eq!(click(&mut links, true, false), both());
         assert!(links.generating());
         // A second click while generating sends nothing.
         assert_eq!(links.plan(true, false), LinkRequests::default());
-        links.answered(false, "https://t.me/q?videochat".into());
+        links.answered(false, LISTENER, "https://t.me/q?videochat".into());
         assert!(!links.ready());
-        links.answered(true, "https://t.me/q?videochat=hash".into());
+        links.answered(true, SPEAKER, "https://t.me/q?videochat=hash".into());
         assert!(links.ready());
         assert!(!links.generating());
         // Ready: a click just opens the box.
@@ -236,14 +252,8 @@ mod tests {
     #[test]
     fn members_and_streams_get_only_the_listener_link() {
         let mut links = VideoChatShareLinks::default();
-        assert_eq!(
-            links.plan(false, false),
-            LinkRequests {
-                listener: true,
-                speaker: false
-            }
-        );
-        links.answered(false, "https://t.me/q?videochat".into());
+        assert_eq!(click(&mut links, false, false), listener_only());
+        links.answered(false, LISTENER, "https://t.me/q?videochat".into());
         assert!(links.ready());
         assert_eq!(links.speaker_link(), None);
 
@@ -255,38 +265,55 @@ mod tests {
     #[test]
     fn a_member_promoted_to_admin_gets_the_speaker_link_asked_for() {
         let mut links = VideoChatShareLinks::default();
-        links.plan(false, false);
-        links.answered(false, "L".into());
+        click(&mut links, false, false);
+        links.answered(false, LISTENER, "L".into());
         assert!(links.ready());
         // Promoted in the same call: the next click asks for the speaker link.
         assert_eq!(
-            links.plan(true, false),
+            click(&mut links, true, false),
             LinkRequests {
                 listener: false,
                 speaker: true
             }
         );
-        links.answered(true, "S".into());
+        links.answered(true, SPEAKER, "S".into());
         assert_eq!(links.speaker_link(), Some("S"));
     }
 
     #[test]
     fn an_answer_for_links_reset_meanwhile_is_dropped() {
         let mut links = VideoChatShareLinks::default();
-        links.plan(true, false);
+        click(&mut links, true, false);
         // A revoke resets the links while both requests are out.
         links = VideoChatShareLinks::default();
-        links.answered(false, "old".into());
-        links.failed(true);
+        links.answered(false, LISTENER, "old".into());
+        links.failed(true, SPEAKER);
         assert_eq!(links, VideoChatShareLinks::default());
+    }
+
+    #[test]
+    fn an_answer_of_a_request_asked_again_after_a_reset_is_dropped() {
+        let mut links = VideoChatShareLinks::default();
+        click(&mut links, true, false);
+        links = VideoChatShareLinks::default();
+        // The revoke is followed by a new click, with new request ids.
+        let wanted = links.plan(true, false);
+        assert_eq!(wanted, both());
+        links.sent(false, RequestId(10));
+        links.sent(true, RequestId(11));
+        links.answered(false, LISTENER, "revoked".into());
+        links.failed(true, SPEAKER);
+        assert!(links.generating(), "the old requests settle nothing");
+        links.answered(false, RequestId(10), "fresh".into());
+        assert_eq!(links.listener_link(), Some("fresh"));
     }
 
     #[test]
     fn failed_speaker_link_falls_back_to_listener() {
         let mut links = VideoChatShareLinks::default();
-        links.plan(true, false);
-        links.answered(false, "L".into());
-        links.failed(true);
+        click(&mut links, true, false);
+        links.answered(false, LISTENER, "L".into());
+        links.failed(true, SPEAKER);
         assert!(links.ready());
         assert!(!links.generating());
         assert_eq!(links.current(true), Some("L"));
@@ -296,54 +323,37 @@ mod tests {
     #[test]
     fn failed_listener_link_allows_a_retry() {
         let mut links = VideoChatShareLinks::default();
-        links.plan(true, false);
-        links.answered(true, "S".into());
-        links.failed(false);
+        click(&mut links, true, false);
+        links.answered(true, SPEAKER, "S".into());
+        links.failed(false, LISTENER);
         assert!(!links.generating());
         assert!(!links.ready());
         // Only the listener link is asked for again.
-        assert_eq!(
-            links.plan(true, false),
-            LinkRequests {
-                listener: true,
-                speaker: false
-            }
-        );
+        assert_eq!(links.plan(true, false), listener_only());
     }
 
     #[test]
     fn a_failed_listener_does_not_resend_the_speaker_in_flight() {
         let mut links = VideoChatShareLinks::default();
-        links.plan(true, false);
-        links.failed(false);
+        click(&mut links, true, false);
+        links.failed(false, LISTENER);
         // The speaker request is still out: a click asks for the listener
         // link only, and the box is not ready until both answer.
         assert!(links.generating());
         assert_eq!(links.plan(true, false), LinkRequests::default());
-        links.answered(true, "S".into());
-        assert_eq!(
-            links.plan(true, false),
-            LinkRequests {
-                listener: true,
-                speaker: false
-            }
-        );
+        links.answered(true, SPEAKER, "S".into());
+        assert_eq!(links.plan(true, false), listener_only());
     }
 
     #[test]
-    fn an_unsent_request_can_be_asked_again() {
+    fn a_request_that_was_not_sent_leaves_its_link_to_be_asked_again() {
         let mut links = VideoChatShareLinks::default();
-        links.plan(true, false);
-        links.failed(false);
-        links.unsent(true);
+        // The listener went out, the speaker send was refused.
+        assert_eq!(links.plan(true, false), both());
+        links.sent(false, LISTENER);
+        links.failed(false, LISTENER);
         assert!(!links.generating());
-        assert_eq!(
-            links.plan(true, false),
-            LinkRequests {
-                listener: true,
-                speaker: true
-            }
-        );
+        assert_eq!(links.plan(true, false), both());
     }
 
     #[test]

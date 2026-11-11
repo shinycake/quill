@@ -165,17 +165,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         .map(|_| ())
     }
 
+    /// The request, or `None` when the same delete is already on its way.
     pub fn delete_quick_reply_shortcut(
         &mut self,
         shortcut_id: i32,
-    ) -> Result<(), ConnectSendError> {
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         self.session.settings.quick_replies.error = None;
         self.send_quick_reply_request(
             RequestPurpose::Settings(SettingsPurpose::MutateQuickReplies),
             None,
             |extra| qr::delete_shortcut_request(extra, shortcut_id),
         )
-        .map(|_| ())
     }
 
     /// Send every message of the shortcut to a private chat with a user. The

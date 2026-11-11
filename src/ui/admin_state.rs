@@ -28,6 +28,9 @@ pub(crate) struct AdminUi {
     pub(super) permissions_dialog: Option<PermissionsDialog>,
     /// The "Add exception" / "Remove user" picker over the member dialog.
     pub(super) add_special: Option<AddSpecialDialog>,
+    /// Unbans and "Remove user" bans sent from the member boxes and not
+    /// answered yet.
+    pub(super) member_changes: Vec<super::group_moderation::MemberChange>,
     /// Slice G1: public username editor.
     pub(super) username_dialog: Option<UsernameDialog>,
     /// Slice G1: restrict/ban dialog.
@@ -120,6 +123,7 @@ impl AdminUi {
             member_dialog: None,
             permissions_dialog: None,
             add_special: None,
+            member_changes: Vec::new(),
             username_dialog: None,
             restrict_dialog: None,
             ownership_dialog: None,
