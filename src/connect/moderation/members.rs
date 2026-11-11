@@ -20,7 +20,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             self.session.groups.supergroup_members.insert(
                 (chat_id.0, filter),
-                SupergroupMembersFetch::Failed(send_failed_line("Could not load members")),
+                SupergroupMembersFetch::NotSent(send_failed_line("Could not load members")),
             );
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -73,7 +73,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // "Loading members" nothing will end.
             self.session.groups.supergroup_members.insert(
                 key,
-                SupergroupMembersFetch::Failed(send_failed_line("Could not load members")),
+                SupergroupMembersFetch::NotSent(send_failed_line("Could not load members")),
             );
             self.session.groups.member_asks.remove(&key);
             return Err(err);
@@ -106,7 +106,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             self.session.groups.basic_group_members.insert(
                 chat_id.0,
-                SupergroupMembersFetch::Failed(send_failed_line("Could not load members")),
+                SupergroupMembersFetch::NotSent(send_failed_line("Could not load members")),
             );
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -137,7 +137,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             self.session.groups.basic_group_members.insert(
                 chat_id.0,
-                SupergroupMembersFetch::Failed(send_failed_line("Could not load members")),
+                SupergroupMembersFetch::NotSent(send_failed_line("Could not load members")),
             );
             return Err(err);
         }

@@ -27,8 +27,6 @@ use quill::ton_wallet::{
     MoneyTab, TonWalletState, WalletNft, WalletSurface, WalletTx, fiat, format_gram_amount_with,
     own,
 };
-use std::cell::RefCell;
-use std::rc::Rc;
 
 impl QuillApp {
     pub(super) fn ton_wallet_mut(&mut self) -> Option<&mut TonWalletState> {
@@ -228,16 +226,7 @@ impl QuillApp {
                 MoneyDetail::Overview => overview(session, &roots, cx),
             };
             dialog
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::one_shot_dialog_content(body))
                 .on_close(on_close)
         })
     }

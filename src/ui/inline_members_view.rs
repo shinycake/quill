@@ -207,7 +207,7 @@ impl QuillApp {
                 }
                 (members.clone(), *total_count, MembersStage::Ready)
             }
-            Some(SupergroupMembersFetch::Failed(message)) => {
+            Some(SupergroupMembersFetch::Failed(message) | SupergroupMembersFetch::NotSent(message)) => {
                 (Vec::new(), 0, MembersStage::Failed(message.clone()))
             }
             Some(SupergroupMembersFetch::Loading) | None => {

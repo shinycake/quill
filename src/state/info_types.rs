@@ -487,7 +487,12 @@ pub enum SupergroupMembersFetch {
         members: Vec<ParsedChatMember>,
         total_count: i32,
     },
+    /// TDLib refused the request.
     Failed(String),
+    /// The request never left: the path was inactive or the sender closed.
+    /// Drawn like `Failed` with Retry, but it says nothing about whether the
+    /// viewer may see the members (so no administrators fallback).
+    NotSent(String),
 }
 
 /// Where the next page of a member list stands.
@@ -625,15 +630,30 @@ pub struct EventLogWait {
 /// Phase D3c: one cached `getChatEventLog` result. Events arrive in
 /// reverse chronological order (decreasing event `id`, schema 1.8.67,
 /// line 15252); pages append older events, deduped by event id.
-/// `has_more` is true when the last page was full — an older page is
-/// worth requesting.
+/// `older` says whether an older page is worth requesting.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ChatEventLogPage {
     pub events: Vec<ParsedChatEvent>,
-    pub has_more: bool,
+    pub older: OlderEvents,
+}
+
+/// Where the log's older events stand. A full last page is `Available`; a
+/// short one `Exhausted`; an older page that was refused (or never sent) is
+/// `Failed`, drawn with Retry, and asked again only from there.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum OlderEvents {
+    #[default]
+    Exhausted,
+    Available,
+    Failed(String),
 }
 
 impl ChatEventLogPage {
+    /// Older events may exist (also after a failed ask: Retry asks again).
+    pub fn has_more(&self) -> bool {
+        !matches!(self.older, OlderEvents::Exhausted)
+    }
+
     /// Slice G2: distinct admin user ids (first-seen order) from a loaded
     /// page; drives the per-admin filter chips in the info panel. Chat
     /// senders (`MessageSender::Chat`) are not admins and are skipped.

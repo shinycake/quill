@@ -17,7 +17,7 @@ use gpui_kit::*;
 use quill::event_log_list::{ListSync, plan_sync};
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use quill::state::{AdminListFetch, ChatEventLogFetch, ChatEventLogPage};
+use quill::state::{AdminListFetch, ChatEventLogFetch, ChatEventLogPage, OlderEvents};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -210,6 +210,33 @@ impl QuillApp {
     /// reader who has scrolled up where they are).
     pub(super) fn start_event_log_poll(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         self.event_log_page_for(chat_id).autoload.set(None);
+        self.spawn_event_log_poll(chat_id, cx);
+    }
+
+    /// The window woke up: a poll that stopped while the app was in the
+    /// background starts again, asking at once for what happened meanwhile.
+    pub(in crate::ui) fn resume_event_log_poll(&mut self, cx: &mut Context<Self>) {
+        let Some(chat_id) = self.event_log_open_chat() else {
+            return;
+        };
+        let stopped = self
+            .admin
+            .event_log_page
+            .as_ref()
+            .is_some_and(|page| page.chat == chat_id && page.poll.is_none());
+        if !stopped || !self.frame.window_active.get() {
+            return;
+        }
+        self.spawn_event_log_poll(chat_id, cx);
+        if !self.refused_while_locked()
+            && let Some(live) = self.live.as_mut()
+        {
+            let _ = live.driver.poll_chat_event_log(chat_id);
+        }
+        cx.notify();
+    }
+
+    fn spawn_event_log_poll(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if self.live.is_none() {
             return;
         }
@@ -230,13 +257,18 @@ impl QuillApp {
         self.event_log_page_for(chat_id).poll = Some(poll);
     }
 
-    /// One poll step; `false` once the page is closed.
+    /// One poll step; `false` once the page is closed or the app is inactive.
     fn event_log_poll_tick(&mut self, chat_id: ChatId, cx: &mut Context<Self>) -> bool {
         if self.event_log_open_chat() != Some(chat_id) {
             return false;
         }
-        if self.frame.window_active.get()
-            && !self.refused_while_locked()
+        if !self.frame.window_active.get() {
+            // Nothing to keep fresh for nobody: the timer stops here and
+            // `resume_event_log_poll` starts it when a window wakes.
+            self.event_log_page_for(chat_id).poll = None;
+            return false;
+        }
+        if !self.refused_while_locked()
             && let Some(live) = self.live.as_mut()
         {
             let _ = live.driver.poll_chat_event_log(chat_id);
@@ -516,7 +548,7 @@ impl QuillApp {
             .as_ref()
             .filter(|open| open.chat == chat_id)
             .map(|open| &open.autoload);
-        if page.has_more
+        if matches!(page.older, OlderEvents::Available)
             && at_top
             && let Some(mark) = mark
             && mark.get() != asked
@@ -542,7 +574,30 @@ impl QuillApp {
             .flex_1()
             .min_h_0()
             .w_full();
-        if page.has_more {
+        if let OlderEvents::Failed(line) = &page.older {
+            // The older page was refused: the log stays, with its Retry.
+            area = area.child(
+                div()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .justify_center()
+                    .gap_2()
+                    .py_1()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(line.clone())
+                    .child(
+                        Button::new("event-log-older-retry")
+                            .label(tr(keys::Q_PEOPLE_RETRY))
+                            .ghost()
+                            .xsmall()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.load_more_event_log(chat_id, cx);
+                            })),
+                    ),
+            );
+        } else if page.has_more() {
             // Above the first row while earlier events remain to load.
             area = area.child(
                 div()

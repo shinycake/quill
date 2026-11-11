@@ -70,7 +70,8 @@ pub(super) struct EventLogPage {
     /// The search debounce: each edit replaces it, so only the last one
     /// searches.
     pub(super) typed: Option<gpui_kit::Task<()>>,
-    /// The poll timer, which ends by itself when the page closes.
+    /// The poll timer, which ends by itself when the page closes or the app
+    /// goes inactive (`resume_event_log_poll` starts it again).
     pub(super) poll: Option<gpui_kit::Task<()>>,
 }
 

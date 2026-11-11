@@ -333,7 +333,7 @@ impl QuillApp {
                             .child(tr(keys::Q_PEOPLE_LOADING_MEMBERS)),
                     );
                 }
-                Some(SupergroupMembersFetch::Failed(message)) => {
+                Some(SupergroupMembersFetch::Failed(message) | SupergroupMembersFetch::NotSent(message)) => {
                     list = list.child(
                         div()
                             .flex()
