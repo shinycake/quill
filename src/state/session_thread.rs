@@ -146,6 +146,7 @@ impl Session {
         if Some(thread.origin_chat_id) != origin_chat
             || thread.origin_message_id.0 != message_id
             || thread.history.stale_pages.remove(&pending.id.0)
+            || !thread.status.takes_page_of(pending.id)
         {
             return;
         }
@@ -225,12 +226,22 @@ impl Session {
         {
             return;
         }
+        let resolving = matches!(pending.purpose, RequestPurpose::GetMessageThread { .. });
         if newer {
-            thread.history.fail_newer();
-        } else if !thread.status.is_loaded() {
-            thread.status = ThreadStatus::Failed(line);
-        } else {
+            if thread.status.is_loaded() {
+                thread.history.fail_newer();
+            }
+        } else if resolving {
+            // Only a thread still waiting for its resolve fails by it.
+            if thread.status == ThreadStatus::Resolving {
+                thread.status = ThreadStatus::Failed(line);
+            }
+        } else if thread.status.is_loaded() {
             thread.history.fail_older();
+        } else if matches!(thread.status, ThreadStatus::LoadingHistory(_))
+            && thread.status.takes_page_of(pending.id)
+        {
+            thread.status = ThreadStatus::Failed(line);
         }
     }
 
