@@ -416,10 +416,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if !self.open_owner_leave(chat_id, window, cx) {
-            self.open_group_confirm(
-                crate::ui::GroupConfirmAction::LeaveChat { chat_id: chat_id },
-                cx,
-            );
+            self.open_group_confirm(crate::ui::GroupConfirmAction::LeaveChat { chat_id }, cx);
         }
     }
 }

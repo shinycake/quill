@@ -595,7 +595,7 @@ impl QuillApp {
                 {
                     this.open_group_confirm(
                         GroupConfirmAction::BlockUser {
-                            chat_id: chat_id,
+                            chat_id,
                             block: !blocked,
                         },
                         cx,

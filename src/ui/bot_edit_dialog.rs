@@ -235,7 +235,7 @@ impl QuillApp {
         else {
             return;
         };
-        let changes = match owned_bots::edit_changes(&current_name, &current_about, &name, &about) {
+        let changes = match owned_bots::edit_changes(current_name, current_about, &name, &about) {
             Ok(changes) => changes,
             Err(problem) => {
                 if let Some(dialog) = self.dialogs.bot_edit_dialog.as_mut() {

@@ -112,10 +112,7 @@ impl QuillApp {
                     tr(keys::RIGHTS_GIGAGROUP_CONVERT),
                     false,
                     cx.listener(move |this, _, _, cx| {
-                        this.open_group_confirm(
-                            GroupConfirmAction::BroadcastIntro { chat_id: chat_id },
-                            cx,
-                        );
+                        this.open_group_confirm(GroupConfirmAction::BroadcastIntro { chat_id }, cx);
                     }),
                     cx,
                 ))
@@ -160,10 +157,7 @@ impl QuillApp {
                 },
                 true,
                 cx.listener(move |this, _, _, cx| {
-                    this.open_group_confirm(
-                        GroupConfirmAction::DeleteChat { chat_id: chat_id },
-                        cx,
-                    );
+                    this.open_group_confirm(GroupConfirmAction::DeleteChat { chat_id }, cx);
                 }),
                 cx,
             ));
