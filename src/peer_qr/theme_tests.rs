@@ -571,7 +571,10 @@ fn a_refused_gifts_request_settles_the_panel_instead_of_asking_every_frame() {
     fresh.start(owner, false, 20).unwrap();
     fresh.refuse(20);
     assert_eq!(gifts_layout(&fresh), GiftsLayout::Failed);
-    assert!(!fresh.wants_more(1_000), "a retry is the user's, not a frame's");
+    assert!(
+        !fresh.wants_more(1_000),
+        "a retry is the user's, not a frame's"
+    );
     // Retry asks for the first page again; it lands like any first page.
     let retry = fresh.start(owner, false, 30).unwrap();
     assert_eq!(gifts_layout(&fresh), GiftsLayout::Loading);

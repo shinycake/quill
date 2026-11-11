@@ -414,6 +414,18 @@ impl ThemeGifts {
         })
     }
 
+    /// After a failed request at `since`: a whole list stays whole (no
+    /// offset is left), else the next page waits [`GIFTS_RETRY_SECS`].
+    fn wait_until(&self, since: i64) -> GiftsStage {
+        GiftsStage::Listed(if self.offset.is_empty() {
+            GiftsRest::Complete
+        } else {
+            GiftsRest::Waiting {
+                at: since.saturating_add(GIFTS_RETRY_SECS),
+            }
+        })
+    }
+
     /// The panel may ask for the next page.
     pub fn wants_more(&self, now: i64) -> bool {
         match self.stage {
@@ -433,9 +445,7 @@ impl ThemeGifts {
     /// [`GIFTS_RETRY_SECS`] after it was asked for.
     pub fn fail(&mut self) {
         self.stage = match self.stage {
-            GiftsStage::Listed(_) => GiftsStage::Listed(GiftsRest::Waiting {
-                at: self.requested_at.saturating_add(GIFTS_RETRY_SECS),
-            }),
+            GiftsStage::Listed(_) => self.wait_until(self.requested_at),
             // No first page ever came: show what there is (nothing) as
             // a whole list, as tdesktop does.
             GiftsStage::First | GiftsStage::FirstFailed => GiftsStage::Listed(GiftsRest::Complete),
@@ -450,9 +460,7 @@ impl ThemeGifts {
     /// way out).
     pub fn refuse(&mut self, now: i64) {
         self.stage = match self.stage {
-            GiftsStage::Listed(_) => GiftsStage::Listed(GiftsRest::Waiting {
-                at: now.saturating_add(GIFTS_RETRY_SECS),
-            }),
+            GiftsStage::Listed(_) => self.wait_until(now),
             GiftsStage::First | GiftsStage::FirstFailed => GiftsStage::FirstFailed,
         };
     }

@@ -8,7 +8,8 @@ use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::peer_qr::appearance::SwatchKey;
 use crate::peer_qr::state::{QrPeer, SaveTicket};
 use crate::peer_qr::theme::{
-    GIFTS_RETRY_SECS, SaveRights, ShareTheme, ThemeChoice, ThemeEmoji, can_save,
+    GIFTS_RETRY_SECS, GiftsRest, GiftsStage, SaveRights, ShareTheme, ThemeChoice, ThemeEmoji,
+    can_save,
 };
 use crate::platform::MemorySecretStore;
 use crate::telegram::client::copy_and_parse;
@@ -294,7 +295,7 @@ fn the_gifts_panel_pages_through_your_upgraded_gifts() {
     assert_eq!(gifts.list.len(), 1, "burned gifts are left out");
     assert_eq!(gifts.list[0].id, 101);
     assert_eq!(gifts.list[0].received_id, "r1");
-    assert!(gifts.loaded && !gifts.complete);
+    assert_eq!(gifts.stage, GiftsStage::Listed(GiftsRest::More));
     rig.driver
         .fetch_share_theme_gifts(QrPeer::User(ME), true, NOW)
         .unwrap();
@@ -307,7 +308,7 @@ fn the_gifts_panel_pages_through_your_upgraded_gifts() {
     let gifts = &rig.driver.session.users_state.peer_qr.gifts;
     let ids: Vec<i64> = gifts.list.iter().map(|gift| gift.id).collect();
     assert_eq!(ids, vec![101, 103], "deduplicated by gift id");
-    assert!(gifts.complete);
+    assert_eq!(gifts.stage, GiftsStage::Listed(GiftsRest::Complete));
     let sent = rig.sent();
     rig.driver
         .fetch_share_theme_gifts(QrPeer::User(ME), true, NOW)
@@ -330,7 +331,7 @@ fn a_stale_gifts_page_is_dropped() {
         "next_offset": "", "gifts": [upgraded("r1", 101, false)]}),
     );
     let gifts = &rig.driver.session.users_state.peer_qr.gifts;
-    assert!(gifts.list.is_empty() && gifts.loading);
+    assert!(gifts.list.is_empty() && gifts.stage == GiftsStage::First);
 }
 
 #[test]
@@ -379,7 +380,7 @@ fn a_late_page_of_your_gifts_stays_out_of_a_channels_list() {
     );
     let gifts = &rig.driver.session.users_state.peer_qr.gifts;
     assert!(
-        gifts.list.is_empty() && gifts.loading,
+        gifts.list.is_empty() && gifts.stage == GiftsStage::First,
         "your page is dropped"
     );
     rig.feed(
@@ -408,7 +409,7 @@ fn a_failed_refetch_keeps_the_gifts_already_listed() {
     gifts_error(&mut rig, &again);
     assert_eq!(gift_ids(&rig), vec![101, 102]);
     let gifts = &rig.driver.session.users_state.peer_qr.gifts;
-    assert!(gifts.loaded && gifts.complete && !gifts.loading);
+    assert_eq!(gifts.stage, GiftsStage::Listed(GiftsRest::Complete));
 }
 
 #[test]
@@ -420,7 +421,8 @@ fn a_failed_first_page_shows_an_empty_list() {
     let first = rig.last();
     gifts_error(&mut rig, &first);
     let gifts = &rig.driver.session.users_state.peer_qr.gifts;
-    assert!(gifts.list.is_empty() && gifts.loaded && !gifts.loading);
+    assert!(gifts.list.is_empty());
+    assert_eq!(gifts.stage, GiftsStage::Listed(GiftsRest::Complete));
 }
 
 #[test]
@@ -440,7 +442,11 @@ fn a_failed_next_page_is_asked_for_again_a_little_later() {
     let second = rig.last();
     gifts_error(&mut rig, &second);
     let gifts = &rig.driver.session.users_state.peer_qr.gifts;
-    assert!(!gifts.complete, "a failed page does not end the list");
+    assert_ne!(
+        gifts.stage,
+        GiftsStage::Listed(GiftsRest::Complete),
+        "a failed page does not end the list"
+    );
     assert_eq!(gift_ids(&rig), vec![101]);
     let sent = rig.sent();
     rig.driver
@@ -458,11 +464,14 @@ fn a_failed_next_page_is_asked_for_again_a_little_later() {
         "next_offset": "", "gifts": [upgraded("r2", 102, false)]}),
     );
     assert_eq!(gift_ids(&rig), vec![101, 102]);
-    assert!(rig.driver.session.users_state.peer_qr.gifts.complete);
+    assert_eq!(
+        rig.driver.session.users_state.peer_qr.gifts.stage,
+        GiftsStage::Listed(GiftsRest::Complete)
+    );
 }
 
 /// A refused request settles the panel: it stops asking on every frame and
-/// shows the empty list instead of a spinner.
+/// says it could not load, with Retry, instead of a spinner or an empty list.
 #[test]
 fn a_refused_gifts_request_does_not_keep_asking() {
     let mut rig = Rig::new();
@@ -472,5 +481,6 @@ fn a_refused_gifts_request_does_not_keep_asking() {
             .is_err()
     );
     let gifts = &rig.driver.session.users_state.peer_qr.gifts;
-    assert!(gifts.loaded && gifts.complete && !gifts.wants_more(NOW));
+    assert_eq!(gifts.stage, GiftsStage::FirstFailed);
+    assert!(!gifts.wants_more(NOW));
 }
