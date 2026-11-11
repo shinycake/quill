@@ -26,7 +26,7 @@ impl QuillApp {
         // buttons are off while one is in flight, not silently ignored.
         let busy = self
             .session()
-            .is_some_and(|s| s.stories.page_ops.mutating(chat_id.0));
+            .is_some_and(|s| s.stories.page_ops.mutating(chat_id));
         let rename_input = page.rename_input.clone();
         let title = self
             .session()
@@ -38,17 +38,18 @@ impl QuillApp {
         // the TDLib reason.
         let op_status = self
             .session()
-            .and_then(|s| s.stories.page_ops.status_for(Some(chat_id.0)).cloned())
+            .and_then(|s| s.stories.page_ops.status_for(Some(chat_id)).cloned())
             .map(|op| match op.state {
-                StoryPageOpState::Checking => format!("{}…", op.label),
-                StoryPageOpState::Sending => format!("{}…", op.label),
-                StoryPageOpState::Succeeded => {
-                    tr_with(keys::Q_MEDIA_DONE, &[("label", &op.label.to_string())])
-                }
+                StoryPageOpState::Checking => format!("{}…", op.kind.label()),
+                StoryPageOpState::Sending => format!("{}…", op.kind.label()),
+                StoryPageOpState::Succeeded => tr_with(
+                    keys::Q_MEDIA_DONE,
+                    &[("label", &op.kind.label().to_string())],
+                ),
                 StoryPageOpState::Failed(reason) => tr_with(
                     keys::Q_MEDIA_FAILED,
                     &[
-                        ("label", &op.label.to_string()),
+                        ("label", &op.kind.label().to_string()),
                         ("reason", &reason.to_string()),
                     ],
                 ),

@@ -227,7 +227,7 @@ fn a_save_settles_by_its_own_request(cx: &mut TestAppContext) {
             session.stories.manage.settle(RequestId(30), None);
         }
         app.story_composer_upkeep(cx);
-        assert!(!app.stories.composer.open, "its own answer closed it");
+        assert!(!app.stories.composer.is_open(), "its own answer closed it");
     });
 }
 
@@ -251,7 +251,7 @@ fn a_failed_save_shows_its_reason(cx: &mut TestAppContext) {
             app.stories.composer.error(),
             Some("Story update failed: GONE")
         );
-        assert!(app.stories.composer.open);
+        assert!(app.stories.composer.is_open());
     });
 }
 

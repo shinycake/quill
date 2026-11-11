@@ -471,7 +471,7 @@ impl Render for QuillApp {
                 }
             })
             // Phase 9.3: story composer overlay above the story viewer.
-            .when(self.stories.composer.open, |this| {
+            .when(self.stories.composer.is_open(), |this| {
                 this.child(self.story_composer_overlay(cx))
             })
             // Phase 9.7: chat story page overlay (albums / chat page /

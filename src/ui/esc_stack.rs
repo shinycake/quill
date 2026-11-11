@@ -117,7 +117,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // Phase 9.3: the story composer is above the story viewer.
     layer!(
         "story-composer",
-        |app| app.stories.composer.open,
+        |app| app.stories.composer.is_open(),
         |app, _, cx| app.close_story_composer(cx)
     ),
     // The story reply row's voice recording and emoji / sticker / GIF

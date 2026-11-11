@@ -775,7 +775,7 @@ fn a_stale_answer_does_not_settle_the_op_tracked_now() {
     let purpose = RequestPurpose::SetChatActiveStoriesList;
     let label = crate::story_page::story_page_op_label(purpose);
     let first = session.request(purpose, Some(ChatId(11)));
-    session.begin_story_page_op(label.clone(), first);
+    session.begin_story_page_op(label, first);
     let second = session.request(purpose, Some(ChatId(12)));
     session.begin_story_page_op(label, second);
     apply_json(
@@ -905,7 +905,7 @@ fn close_friends_load_failure_survives_a_later_story_page_op() {
     session.stories.close_friends.begin_load(load);
     // Another op takes the viewer's page op before the failure lands.
     let other = session.request(RequestPurpose::SetChatActiveStoriesList, None);
-    session.begin_story_page_op("hiding", other);
+    session.begin_story_page_op(crate::story_page::StoryPageOpKind::Other, other);
     apply_json(
         &mut session,
         &seq,

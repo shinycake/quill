@@ -139,23 +139,9 @@ impl QuillApp {
             return;
         }
         let media = self.stories.composer.media.clone();
-        // Phase 9.4: sync the area inputs into composer state before
-        // validating — the link URL check runs up front so a typo
-        // surfaces locally instead of failing the post.
-        self.stories.composer.link_url = self
-            .stories
-            .composer_link
-            .read(cx)
-            .value()
-            .trim()
-            .to_string();
-        self.stories.composer.reaction_emojis = self
-            .stories
-            .composer_reaction
-            .read(cx)
-            .value()
-            .trim()
-            .to_string();
+        // Phase 9.4: the link URL check runs up front so a typo surfaces
+        // locally instead of failing the post.
+        let link_url = self.stories.composer_link.read(cx).value().to_string();
         let is_edit = self.stories.composer.is_edit();
         let error = if !is_edit && media.is_none() {
             Some(tr(keys::Q_MEDIA_CHOOSE_A_PHOTO_OR_VIDEO))
@@ -167,7 +153,7 @@ impl QuillApp {
         } else if !is_edit && self.stories.composer.needs_users() {
             Some(tr(keys::Q_MEDIA_PICK_AT_LEAST_ONE_USER))
         } else {
-            self.stories.composer.link_url_error()
+            StoryComposer::link_url_error(&link_url)
         };
         if let Some(error) = error {
             self.stories.composer.set_error(error);
@@ -213,9 +199,16 @@ impl QuillApp {
         let me = self.session().and_then(|s| s.my_user_id).unwrap_or(0);
         self.stories
             .composer
-            .as_chat_id
+            .post_as()
             .map(ChatId)
             .unwrap_or(ChatId(me))
+    }
+
+    /// `inputStoryAreas` from what the link and reaction inputs hold now.
+    fn story_composer_areas_json(&self, cx: &Context<Self>) -> serde_json::Value {
+        let link = self.stories.composer_link.read(cx).value();
+        let emojis = self.stories.composer_reaction.read(cx).value();
+        StoryComposer::areas_json(&link, &emojis)
     }
 
     /// Phase 9.5: Save pressed in edit mode — send `editStory` with
@@ -233,7 +226,7 @@ impl QuillApp {
         let content = media.map(|media| input_story_content(media.kind, &media.path));
         // Areas can't be edited unless the content changes — keep them
         // untouched when the media is kept.
-        let areas = content.as_ref().map(|_| self.stories.composer.areas_json());
+        let areas = content.as_ref().map(|_| self.story_composer_areas_json(cx));
         let Some(live) = self.live.as_mut() else {
             self.stories
                 .composer
@@ -282,6 +275,7 @@ impl QuillApp {
                     // so the post goes where the eligibility was computed.
                     let from_story = self.stories.composer.repost_source();
                     let media = self.stories.composer.media.clone();
+                    let areas = self.story_composer_areas_json(cx);
                     if let (Some(live), Some(media)) = (self.live.as_mut(), media) {
                         let caption = self
                             .screen
@@ -292,10 +286,9 @@ impl QuillApp {
                             .to_string();
                         let privacy = self.screen.stories.composer.privacy;
                         let user_ids = self.screen.stories.composer.selected_user_ids.clone();
-                        // Phase 9.4: areas + options are read from composer state
-                        // (synced in `story_composer_post`), so what lands in the
-                        // `postStory` JSON is exactly what the UI showed.
-                        let areas = self.screen.stories.composer.areas_json();
+                        // Phase 9.4: the areas were read from the inputs just
+                        // now, so what lands in the `postStory` JSON is exactly
+                        // what the UI showed.
                         let active_period = self.screen.stories.composer.expiry.seconds();
                         let is_posted_to_chat_page = self.screen.stories.composer.post_to_chat_page;
                         let protect_content = self.screen.stories.composer.protect_content;
@@ -399,7 +392,7 @@ impl QuillApp {
             ComposerStage::Posted => Some(tr(keys::Q_MEDIA_POSTED_IT_WILL_APPEAR_IN).into()),
             // A "Post as" list that failed to load says so under the
             // picker (`post_as`), not here.
-            ComposerStage::Editing | ComposerStage::Failed(_) => None,
+            ComposerStage::Closed | ComposerStage::Editing | ComposerStage::Failed(_) => None,
         }
     }
 
@@ -422,7 +415,7 @@ impl QuillApp {
         // replaced (schema: areas can't change unless content does).
         let is_edit = self.stories.composer.is_edit();
         let is_repost = self.stories.composer.repost_source().is_some();
-        let show_privacy = !is_edit && self.stories.composer.as_chat_id.is_none();
+        let show_privacy = !is_edit && self.stories.composer.post_as().is_none();
         let areas_editable = !is_edit || media.is_some();
         let title = if is_edit {
             tr(keys::Q_MEDIA_EDIT_STORY)
@@ -671,7 +664,7 @@ impl QuillApp {
             // Phase 6: kit RadioGroup (was: buttons with a ☑/☐ prefix).
             // Controlled: the chosen index writes the value. Index 0 is
             // "Myself", the rest are the eligible chats.
-            let as_selected: Option<usize> = match self.stories.composer.as_chat_id {
+            let as_selected: Option<usize> = match self.stories.composer.post_as() {
                 None => Some(0),
                 Some(chat_id) => as_chats
                     .iter()
@@ -698,7 +691,7 @@ impl QuillApp {
                             .map(|chat| Some(chat.0))
                     };
                     if let Some(chosen) = chosen {
-                        this.stories.composer.as_chat_id = chosen;
+                        this.stories.composer.set_post_as(chosen);
                     }
                     this.stories.composer.clear_error();
                     cx.notify();
