@@ -38,7 +38,6 @@ ChecklistDraft::others_can_mark_tasks_as_done
 ChecklistSend::others_can_mark_tasks_as_done
 CheckoutView::sending
 Clip::busy
-ComposerUi::draft_restore_pending
 ConnectDriver::parameters_sent
 CraftSession::candidates_loaded
 CraftSession::candidates_loading

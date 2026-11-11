@@ -366,17 +366,17 @@ impl QuillApp {
     /// this does not recurse.
     pub(super) fn apply_instant_replace(
         &mut self,
+        prev: &SharedString,
         text: &SharedString,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<SharedString> {
-        let prev = std::mem::replace(&mut self.composer_ui.prev_text, text.clone());
         let range = self.composer.read(cx).selected_range();
         if !range.is_empty() {
             return None;
         }
         let replace = quill::emoji_replace::instant_replacement(
-            &prev,
+            prev,
             text,
             range.start,
             self.chat_prefs.replace_emoji,
@@ -388,12 +388,13 @@ impl QuillApp {
         // A range edit keeps the formatting around it (codex:composer-input).
         self.replace_composer_text(replace.range.clone(), &replace.with, window, cx);
         let new_text = self.composer.read(cx).value();
-        self.composer_ui.prev_text = new_text.clone();
+        self.composer_ui.echo.set(new_text.clone());
         // Backspace right after puts the typed text back
         // (`revertFormatReplace`).
-        self.composer_ui.markdown_revert = Some(super::composer_field::MarkdownRevert {
+        let caret = self.composer.read(cx).selected_range().start;
+        self.composer_ui.echo.arm(super::composer_field::MarkdownRevert {
             text: new_text.to_string(),
-            caret: self.composer.read(cx).selected_range().start,
+            caret,
             restore: Some((
                 replace.range.start..replace.range.start + replace.with.len(),
                 original,

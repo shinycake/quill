@@ -751,7 +751,7 @@ impl QuillApp {
             session.leave_open_chat();
         }
         self.set_composer_markup("", window, cx);
-        self.composer_ui.prev_text = SharedString::default();
+        self.composer_ui.echo.set(SharedString::default());
         self.history.rows_key = None;
         if self
             .session()

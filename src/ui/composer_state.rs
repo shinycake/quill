@@ -60,9 +60,7 @@ pub(crate) struct ComposerUi {
     pub(super) preview_timer: Option<(String, gpui_kit::Task<()>)>,
     /// The composer text before the last keystroke, for "Replace emoji
     /// automatically" (it only reacts to one typed character).
-    pub(super) prev_text: gpui_kit::SharedString,
-    /// A typed markdown replacement Backspace can still take back.
-    pub(super) markdown_revert: Option<super::composer_field::MarkdownRevert>,
+    pub(super) echo: super::composer_field::FieldEcho,
     /// The one-time options of the send being made: "Silent send" and
     /// "Send with Effect" (`messageSendOptions.effect_id`). Set only for the
     /// duration of that send (`QuillApp::with_send_once`), never by a caller
@@ -75,8 +73,9 @@ pub(crate) struct ComposerUi {
     /// (`rich_draft`).
     pub(super) rich_draft: super::rich_draft::RichDraftUi,
     /// A topic or thread switch asked for the new slot's draft to be put
-    /// in the composer on the next frame (`restore_draft_if_pending`).
-    pub(super) draft_restore_pending: bool,
+    /// in the composer on the next frame (`restore_draft_if_pending`): the
+    /// slot it asked for, dropped when another is open by then.
+    pub(super) draft_restore: Option<(ChatId, quill::composer::DraftTopic)>,
     /// The session's remote draft revision this composer last checked
     /// (`QuillApp::adopt_remote_draft`).
     pub(super) remote_draft_seen: u64,
@@ -99,9 +98,10 @@ pub(crate) struct ComposerUi {
     pub(super) archive: super::drop_zones::ArchiveJob,
     /// A demo's fixed drop-zone state (no real drag in a screenshot).
     pub(super) drop_preview: Option<quill::drop_modes::DragState>,
-    /// Phase A1: the open chat whose slow-mode countdown is ticking
-    /// (`Some` exactly while the 1s tick task runs). Mirrors `voice_tick`.
-    pub(super) slow_mode_tick_chat: Option<ChatId>,
+    /// Phase A1: the open chat whose slow-mode countdown is ticking, with
+    /// the 1s tick task that drives it. Replacing or clearing it drops the
+    /// task. Mirrors `voice_tick`.
+    pub(super) slow_mode_tick: Option<(ChatId, gpui_kit::Task<()>)>,
     /// The attachment tray's file checks, price box and video editor.
     pub(super) send_box: super::send_box_state::SendBoxUi,
     pub(super) text_limit: super::composer_ui::TextLimitMemo,
@@ -118,12 +118,11 @@ impl ComposerUi {
             inline_scroll: gpui_kit::ScrollHandle::new(),
             inline_return: None,
             preview_timer: None,
-            prev_text: gpui_kit::SharedString::default(),
-            markdown_revert: None,
+            echo: Default::default(),
             once: Default::default(),
             send_menu: Default::default(),
             rich_draft: Default::default(),
-            draft_restore_pending: false,
+            draft_restore: None,
             remote_draft_seen: 0,
             shown_draft: None,
             placeholder_shown: None,
@@ -132,7 +131,7 @@ impl ComposerUi {
             drop_state: None,
             archive: Default::default(),
             drop_preview: None,
-            slow_mode_tick_chat: None,
+            slow_mode_tick: None,
             send_box: super::send_box_state::SendBoxUi::new(),
             text_limit: Default::default(),
             spelling: Default::default(),

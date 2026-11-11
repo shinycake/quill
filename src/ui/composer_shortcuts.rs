@@ -32,8 +32,23 @@ pub(super) struct ComposerLinkDialog {
     /// The text in that range, to detect a draft that changed meanwhile.
     selected: String,
     input: Entity<TextareaState>,
-    /// Focus the field once the dialog has mounted.
-    focus_on_mount: bool,
+    /// `Opening` until the dialog has mounted and focused the field.
+    stage: BoxStage,
+}
+
+/// Where a box stands in showing itself: it focuses its field once, at the
+/// first frame it is on screen.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BoxStage {
+    Opening,
+    Open,
+}
+
+impl BoxStage {
+    /// The first frame: true once, then the box is `Open`.
+    fn mounted(&mut self) -> bool {
+        std::mem::replace(self, Self::Open) == Self::Opening
+    }
 }
 
 /// The "Code Language" box (tdesktop `EditCodeLanguageBox`): one field,
@@ -43,8 +58,8 @@ pub(super) struct CodeLanguageDialog {
     block: Range<usize>,
     input: Entity<TextareaState>,
     error: Option<&'static str>,
-    /// Focus and select the field once the dialog has mounted.
-    focus_on_mount: bool,
+    /// `Opening` until the dialog has mounted and focused the field.
+    stage: BoxStage,
 }
 
 /// The chord for a shortcut as shown in menus: "⌘B" on macOS, "Ctrl+B"
@@ -156,7 +171,7 @@ impl QuillApp {
             range,
             selected,
             input,
-            focus_on_mount: true,
+            stage: BoxStage::Opening,
         });
         cx.notify();
     }
@@ -223,7 +238,7 @@ impl QuillApp {
     /// The link field, once, for the dialog to focus after it mounts.
     pub(super) fn take_link_focus(&mut self) -> Option<Entity<TextareaState>> {
         let dialog = self.chat_ui.link_dialog.as_mut()?;
-        std::mem::take(&mut dialog.focus_on_mount).then(|| dialog.input.clone())
+        dialog.stage.mounted().then(|| dialog.input.clone())
     }
 
     /// The link box's body: what the link is for and the address field.
@@ -317,7 +332,7 @@ impl QuillApp {
             block,
             input,
             error: None,
-            focus_on_mount: true,
+            stage: BoxStage::Opening,
         });
         cx.notify();
     }
@@ -400,7 +415,7 @@ impl QuillApp {
     /// The language field, once, for the dialog to focus after it mounts.
     pub(super) fn take_code_language_focus(&mut self) -> Option<Entity<TextareaState>> {
         let dialog = self.chat_ui.code_language.as_mut()?;
-        std::mem::take(&mut dialog.focus_on_mount).then(|| dialog.input.clone())
+        dialog.stage.mounted().then(|| dialog.input.clone())
     }
 
     /// The Code Language box's body (tdesktop `EditCodeLanguageBox`): the
