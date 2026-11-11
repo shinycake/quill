@@ -164,7 +164,7 @@ impl QuillApp {
                             .calls
                             .active_group_call
                             .as_ref()
-                            .is_some_and(|call| call.screen_sharing || call.screen_share_pending);
+                            .is_some_and(|call| call.screen.is_active());
                     screen.chosen().filter(|_| sharing).cloned()
                 })
             }
@@ -452,7 +452,7 @@ impl QuillApp {
                     .calls
                     .active_group_call
                     .as_ref()
-                    .is_some_and(|call| call.screen_sharing || call.screen_share_pending),
+                    .is_some_and(|call| call.screen.is_active()),
                 ScreenFor::Private(_) => session
                     .calls
                     .active_call
@@ -498,7 +498,7 @@ impl QuillApp {
                 .calls
                 .active_group_call
                 .as_ref()
-                .is_some_and(|call| call.screen_sharing || call.screen_share_pending),
+                .is_some_and(|call| call.screen.is_active()),
             ScreenFor::Private(_) => session
                 .calls
                 .active_call
@@ -521,8 +521,11 @@ impl QuillApp {
         match for_call {
             ScreenFor::Group => {
                 if let Some(call) = session.calls.active_group_call.as_mut() {
-                    call.screen_sharing = on;
-                    call.screen_share_paused = false;
+                    call.screen = if on {
+                        quill::state::ScreenShare::On
+                    } else {
+                        quill::state::ScreenShare::Off
+                    };
                 }
             }
             ScreenFor::Private(_) => {

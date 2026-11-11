@@ -43,7 +43,7 @@ fn open_call(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext, V
     app.update(&mut main, |app, cx| app.sync_call_window(cx));
     frames(&mut main);
     let window = app
-        .read_with(&main, |app, _| app.calls.window)
+        .read_with(&main, |app, _| app.calls.window.handle())
         .expect("the call window opens");
     let mut call = VisualTestContext::from_window(window, cx);
     frames(&mut call);
@@ -125,7 +125,7 @@ fn the_players_go_with_the_call(cx: &mut TestAppContext) {
     });
     frames(main);
     app.read_with(main, |app, _| {
-        assert!(app.calls.window.is_none(), "the window closed");
+        assert!(app.calls.window.handle().is_none(), "the window closed");
         assert!(app.calls.local_player.is_none());
         assert!(app.calls.remote_player.is_none());
     });

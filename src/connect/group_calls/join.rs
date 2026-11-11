@@ -483,8 +483,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // doesn't drop the new `joinVideoChat` answer.
             call.transport_ready = false;
             call.join_payload.clear();
-            call.screen_sharing = false;
-            call.screen_share_pending = false;
+            call.screen.stop();
             call.screen_share_answer.clear();
         }
         match conference.flatten() {

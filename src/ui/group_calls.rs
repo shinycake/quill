@@ -278,7 +278,7 @@ impl QuillApp {
         let sharing = self
             .session()
             .and_then(|session| session.calls.active_group_call.as_ref())
-            .is_some_and(|call| call.screen_sharing || call.screen_share_pending);
+            .is_some_and(|call| call.screen.is_active());
         if !sharing && self.open_screen_chooser(super::screen_share_state::ScreenFor::Group, cx) {
             return;
         }

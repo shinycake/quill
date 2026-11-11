@@ -479,10 +479,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// The level tap's error, if it could not open the microphone.
     pub fn group_call_level_error(&self) -> Option<&str> {
-        self.call_capture
-            .error
-            .as_deref()
-            .or(self.call_audio.error())
+        self.call_capture.error().or(self.call_audio.error())
     }
 
     pub(crate) fn send_speaking(

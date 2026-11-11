@@ -19,6 +19,7 @@ use super::call_panel_button::{ButtonLook, call_button};
 use super::call_panel_devices::{self as devices, DeviceMenuTarget};
 use super::call_panel_notices as notices;
 use super::calls::call_video::CallPicture;
+use super::calls_state::CallEnd;
 use super::chat_row::chat_avatar;
 use super::frame_clock::follow_app;
 use super::nested_click::SwallowPress;
@@ -243,20 +244,23 @@ impl QuillApp {
         let ringing = second.or(ringing);
         // The window's call, and when it ended.
         if ended {
-            if self
-                .call_screen
-                .ended_at
-                .is_none_or(|(id, _)| Some(id) != call_id)
-            {
-                self.call_screen.ended_at = call_id.map(|id| (id, Instant::now()));
+            if self.call_screen.end.call_id() != call_id {
+                self.call_screen.end = match call_id {
+                    Some(call_id) => CallEnd::Ended {
+                        call_id,
+                        at: Instant::now(),
+                    },
+                    None => CallEnd::Running,
+                };
             }
         } else {
-            self.call_screen.ended_at = None;
+            self.call_screen.end = CallEnd::Running;
         }
         let lingering = self
             .call_screen
-            .ended_at
-            .is_some_and(|(_, at)| busy || at.elapsed() < ENDED_LINGER);
+            .end
+            .at()
+            .is_some_and(|at| busy || at.elapsed() < ENDED_LINGER);
         let wanted = call_id.filter(|id| {
             (!ended || lingering)
                 && window_allowed(
@@ -266,7 +270,7 @@ impl QuillApp {
                     second.is_some(),
                 )
         });
-        match (wanted, self.calls.window) {
+        match (wanted, self.calls.window.handle()) {
             (Some(_), Some(handle)) => {
                 if ringing.is_some() && self.calls.raised_for != ringing {
                     self.calls.raised_for = ringing;
@@ -283,15 +287,21 @@ impl QuillApp {
         if wanted.is_none() {
             self.release_call_players(cx);
         }
-        if ended && lingering && !busy && self.call_screen.linger_wake != call_id {
-            self.call_screen.linger_wake = call_id;
+        if let (true, true, false, CallEnd::Ended { call_id, at }) =
+            (ended, lingering, busy, self.call_screen.end)
+        {
+            self.call_screen.end = CallEnd::Lingering { call_id, at };
             // Close once the linger is over, whichever window draws.
             // window-scope: the call window is the app's, no chat window's.
             // screen-scope: the sync reads the session on screen when it runs.
             cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(ENDED_LINGER).await;
                 let _ = this.update(cx, |this, cx| {
-                    this.call_screen.linger_wake = None;
+                    if let CallEnd::Lingering { call_id: mine, at } = this.call_screen.end
+                        && mine == call_id
+                    {
+                        this.call_screen.end = CallEnd::Ended { call_id, at };
+                    }
                     this.sync_call_windows(cx);
                     cx.notify();
                 });
@@ -451,7 +461,7 @@ impl QuillApp {
     pub(super) fn show_call_window(&mut self, cx: &mut Context<Self>) {
         self.call_screen.window_closed_by_user = None;
         self.call_screen.window_open_failed = None;
-        match self.calls.window {
+        match self.calls.window.handle() {
             Some(handle) => {
                 let _ = handle.update(cx, |_, window, _| window.activate_window());
             }

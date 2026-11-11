@@ -134,7 +134,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             OfferSend::Screen => calls
                 .active_group_call
                 .as_ref()
-                .is_some_and(|call| call.id == id && call.is_joined && call.screen_share_pending),
+                .is_some_and(|call| call.id == id && call.is_joined && call.screen.is_pending()),
         }
     }
 
@@ -326,7 +326,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             OfferSend::Screen => {
                 if let Some(call) = self.session.calls.group_call_mut(id) {
-                    call.screen_share_pending = false;
+                    call.screen.clear_pending();
                 }
             }
         }

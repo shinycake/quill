@@ -121,7 +121,10 @@ fn call_ids_and_video_chat_boxes_do_not_carry_over(cx: &mut TestAppContext) {
     frames(&mut vcx);
     app.update_in(&mut vcx, |app, window, cx| {
         app.call_screen.window_closed_by_user = Some(1);
-        app.call_screen.ended_at = Some((1, std::time::Instant::now()));
+        app.call_screen.end = crate::ui::calls_state::CallEnd::Ended {
+            call_id: 1,
+            at: std::time::Instant::now(),
+        };
         app.group_call_screen.window_closed_by_user = Some(1);
         app.group_call_screen.settings_open = true;
         app.group_call_screen.stream_join = Some((StreamJoinIntent::Call(1), None));
@@ -136,7 +139,10 @@ fn call_ids_and_video_chat_boxes_do_not_carry_over(cx: &mut TestAppContext) {
     frames(&mut vcx);
     app.read_with(&vcx, |app, cx| {
         assert_eq!(app.call_screen.window_closed_by_user, None);
-        assert!(app.call_screen.ended_at.is_none());
+        assert_eq!(
+            app.call_screen.end,
+            crate::ui::calls_state::CallEnd::Running
+        );
         let group = &app.group_call_screen;
         assert_eq!(group.window_closed_by_user, None);
         assert!(!group.settings_open);

@@ -8,6 +8,68 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+/// The 1s call clock: at most one task, which exits when unwanted.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum CallTick {
+    #[default]
+    Idle,
+    Running,
+}
+
+/// The call window: not there, being opened (at most one open at a time),
+/// or open.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) enum CallWindow {
+    #[default]
+    Closed,
+    Opening,
+    Open(AnyWindowHandle),
+}
+
+impl CallWindow {
+    /// The open window's handle.
+    pub(crate) fn handle(self) -> Option<AnyWindowHandle> {
+        match self {
+            CallWindow::Open(handle) => Some(handle),
+            CallWindow::Closed | CallWindow::Opening => None,
+        }
+    }
+}
+
+/// The ended call the window lingers on.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) enum CallEnd {
+    #[default]
+    Running,
+    /// The call ended at `at`; nobody waits for the linger yet.
+    Ended {
+        call_id: i32,
+        at: std::time::Instant,
+    },
+    /// The same, with the linger timer running, so the syncs from the poll
+    /// and every window's frame start one, not one each.
+    Lingering {
+        call_id: i32,
+        at: std::time::Instant,
+    },
+}
+
+impl CallEnd {
+    pub(crate) fn call_id(self) -> Option<i32> {
+        match self {
+            CallEnd::Running => None,
+            CallEnd::Ended { call_id, .. } | CallEnd::Lingering { call_id, .. } => Some(call_id),
+        }
+    }
+
+    pub(crate) fn at(self) -> Option<std::time::Instant> {
+        match self {
+            CallEnd::Running => None,
+            CallEnd::Ended { at, .. } | CallEnd::Lingering { at, .. } => Some(at),
+        }
+    }
+}
+
 pub(crate) struct CallUi {
     /// The call window's live players (`calls::call_video`): the peer's
     /// screen share or camera, and your camera (mirrored), each following
@@ -20,10 +82,9 @@ pub(crate) struct CallUi {
     /// The incoming call last announced with a system notification, and
     /// the account it rang on (call ids are per account).
     pub(super) notified: Option<(quill::ids::AccountKey, i32)>,
-    /// Phase C1: whether the call-duration 1s tick task is running
-    /// (keeps the overlay's ringing/connected clock fresh). Mirrors
-    /// `voice_tick`.
-    pub(super) tick_active: bool,
+    /// Phase C1: the call-duration 1s tick task (keeps the overlay's
+    /// ringing/connected clock fresh). Mirrors `voice_tick`.
+    pub(super) tick: CallTick,
     /// The call window's panel view, while the window is open: the
     /// clock's tick redraws it alone.
     pub(super) panel_view: Rc<Cell<Option<EntityId>>>,
@@ -31,8 +92,7 @@ pub(crate) struct CallUi {
     /// call whose window you closed stays closed until the call bar
     /// reopens it or a second call rings; each call that rings in raises
     /// it once (`raised_for`: the last one that did).
-    pub(super) window: Option<AnyWindowHandle>,
-    pub(super) window_opening: bool,
+    pub(super) window: CallWindow,
     pub(super) raised_for: Option<i32>,
     pub(super) sounds: super::call_sounds::CallSounds,
 }
@@ -51,10 +111,8 @@ pub(crate) struct CallScreen {
     /// sync, not even while a second call rings (the call bar or a
     /// notification's Open tries once more).
     pub(super) window_open_failed: Option<i32>,
-    pub(super) ended_at: Option<(i32, std::time::Instant)>,
-    /// The ended call whose linger timer is running, so the syncs from the
-    /// poll and every window's frame start one, not one each.
-    pub(super) linger_wake: Option<i32>,
+    /// When the window's call ended, and whether its linger timer runs.
+    pub(super) end: CallEnd,
     pub(super) sound_marks: super::call_sounds::SoundMarks,
 }
 
@@ -147,7 +205,9 @@ impl CallUi {
     /// handle and its panel view, so the clock's tick has no dead view to
     /// notify.
     pub(super) fn forget_window(&mut self) {
-        self.window = None;
+        if matches!(self.window, CallWindow::Open(_)) {
+            self.window = CallWindow::Closed;
+        }
         self.panel_view.set(None);
     }
 
@@ -157,10 +217,9 @@ impl CallUi {
             local_player: None,
             notify_clicks: Arc::new(Mutex::new(Vec::new())),
             notified: None,
-            tick_active: false,
+            tick: CallTick::Idle,
             panel_view: Rc::default(),
-            window: None,
-            window_opening: false,
+            window: CallWindow::Closed,
             raised_for: None,
             sounds: super::call_sounds::CallSounds::new(audio_output),
         }

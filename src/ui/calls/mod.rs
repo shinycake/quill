@@ -2,6 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::calls_state::CallTick;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -547,10 +548,10 @@ impl QuillApp {
     /// ringing / connected clock fresh and the ringtones looping. Mirrors
     /// the Phase A1 slow-mode tick (at most one task; exits when unwanted).
     pub(super) fn ensure_call_tick(&mut self, cx: &mut Context<Self>) {
-        if !self.call_tick_wanted() || self.calls.tick_active {
+        if !self.call_tick_wanted() || self.calls.tick == CallTick::Running {
             return;
         }
-        self.calls.tick_active = true;
+        self.calls.tick = CallTick::Running;
         // window-scope: the clock redraws every window's conversation (`notify_conversations`).
         // screen-scope: the call tick reads the current screen and the background accounts' rings on every beat, and must keep running across a switch.
         cx.spawn(async move |this, cx| {
@@ -566,7 +567,7 @@ impl QuillApp {
                             this.sync_call_sounds();
                             true
                         } else {
-                            this.calls.tick_active = false;
+                            this.calls.tick = CallTick::Idle;
                             false
                         }
                     })
@@ -576,7 +577,7 @@ impl QuillApp {
                 }
             }
             let _ = this.update(cx, |this, _| {
-                this.calls.tick_active = false;
+                this.calls.tick = CallTick::Idle;
             });
         })
         .detach();

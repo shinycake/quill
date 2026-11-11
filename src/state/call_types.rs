@@ -320,6 +320,75 @@ pub struct GroupCallVerificationState {
 /// manual Rejoin is left.
 pub const MAX_GROUP_CALL_REJOIN_ATTEMPTS: usize = 3;
 
+/// Your screen share in a group call.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ScreenShare {
+    #[default]
+    Off,
+    /// The `startGroupCallScreenSharing` answer is in flight.
+    Pending,
+    /// The presentation transport connected.
+    On,
+    /// Your shared window is hidden, so the share is paused (the driver
+    /// sent `toggleGroupCallScreenSharingIsPaused`). Your own tile shows
+    /// the paused state at once, before the participant update.
+    Paused,
+}
+
+impl ScreenShare {
+    /// The presentation runs (paused or not).
+    pub fn is_sharing(self) -> bool {
+        matches!(self, Self::On | Self::Paused)
+    }
+
+    /// Sharing, or on its way to it: the screen button says "stop".
+    pub fn is_active(self) -> bool {
+        self != Self::Off
+    }
+
+    pub fn is_pending(self) -> bool {
+        self == Self::Pending
+    }
+
+    pub fn is_paused(self) -> bool {
+        self == Self::Paused
+    }
+
+    /// The start request went out.
+    pub fn begin(&mut self) {
+        *self = Self::Pending;
+    }
+
+    /// The start answer did not come (refused, dropped): back to off.
+    pub fn clear_pending(&mut self) {
+        if *self == Self::Pending {
+            *self = Self::Off;
+        }
+    }
+
+    /// The presentation connected.
+    pub fn connected(&mut self) {
+        if *self == Self::Pending {
+            *self = Self::On;
+        }
+    }
+
+    /// The share is over, however it ended.
+    pub fn stop(&mut self) {
+        *self = Self::Off;
+    }
+
+    /// The shared window was hidden or shown. Only a running share has a
+    /// pause.
+    pub fn set_paused(&mut self, paused: bool) {
+        *self = match (*self, paused) {
+            (Self::On, true) => Self::Paused,
+            (Self::Paused, false) => Self::On,
+            (other, _) => other,
+        };
+    }
+}
+
 /// 10830, `updateGroupCallVerificationState` 10836).
 #[derive(Debug, Clone)]
 pub struct ActiveGroupCall {
@@ -371,15 +440,8 @@ pub struct ActiveGroupCall {
     /// subscribe failures), mirroring the 1:1 call's `transport_error`.
     /// The join itself is never blocked by these.
     pub transport_error: Option<String>,
-    /// Phase C2g: screen-share presentation state. `screen_share_pending`
-    /// while the `startGroupCallScreenSharing` answer is in flight;
-    /// `screen_sharing` once the presentation transport connected.
-    pub screen_share_pending: bool,
-    pub screen_sharing: bool,
-    /// Your shared window is hidden, so the share is paused (the driver
-    /// sent `toggleGroupCallScreenSharingIsPaused`). Your own tile shows
-    /// the paused state at once, before the participant update.
-    pub screen_share_paused: bool,
+    /// Phase C2g: screen-share presentation state (see [`ScreenShare`]).
+    pub screen: ScreenShare,
     /// The last screen share's failure (its offer, start, connect or
     /// stop). Kept apart from `transport_error`: a failed share leaves
     /// the call itself working.
@@ -631,9 +693,7 @@ impl ActiveGroupCall {
             join_payload: String::new(),
             transport_ready: false,
             transport_error: None,
-            screen_share_pending: false,
-            screen_sharing: false,
-            screen_share_paused: false,
+            screen: ScreenShare::Off,
             screen_share_error: None,
             screen_share_answer: String::new(),
             share_links: Default::default(),

@@ -236,8 +236,7 @@ impl Session {
                 if let Some(tracked) = self.calls.active_group_call.as_mut()
                     && tracked.id == group_call_id
                 {
-                    tracked.screen_share_pending = false;
-                    tracked.screen_sharing = false;
+                    tracked.screen.stop();
                     tracked.screen_share_answer.clear();
                 }
                 self.calls.group_call_error = Some(call_request_error_line(
@@ -251,8 +250,7 @@ impl Session {
                 if let Some(tracked) = self.calls.active_group_call.as_mut()
                     && tracked.id == group_call_id
                 {
-                    tracked.screen_share_pending = false;
-                    tracked.screen_sharing = false;
+                    tracked.screen.stop();
                     tracked.screen_share_answer.clear();
                 }
                 self.calls.group_call_error = Some(call_request_error_line(
@@ -269,9 +267,9 @@ impl Session {
             })) => {
                 if let Some(tracked) = self.calls.active_group_call.as_mut()
                     && tracked.id == group_call_id
-                    && tracked.screen_share_paused == paused
+                    && tracked.screen.is_paused() == paused
                 {
-                    tracked.screen_share_paused = !paused;
+                    tracked.screen.set_paused(!paused);
                 }
             }
             Some(

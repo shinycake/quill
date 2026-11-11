@@ -92,7 +92,7 @@ fn group_rejoin_answer_reconnects_native_transport() {
         .active_group_call
         .as_mut()
         .expect("tracked call")
-        .screen_sharing = true;
+        .screen = crate::state::ScreenShare::On;
     driver
         .session
         .calls
@@ -113,7 +113,7 @@ fn group_rejoin_answer_reconnects_native_transport() {
         .expect("tracked call");
     assert!(!call.transport_ready);
     assert!(call.join_payload.is_empty());
-    assert!(!call.screen_sharing && !call.screen_share_pending);
+    assert!(!call.screen.is_sharing());
     assert!(call.screen_share_answer.is_empty());
     // The new answer reconnects the fresh native context.
     let extra = sent_request(&recorder, "joinVideoChat")["@extra"]
@@ -413,7 +413,7 @@ fn group_screen_share_toggle_handshake() {
             .calls
             .active_group_call
             .as_ref()
-            .is_some_and(|call| call.screen_share_pending && !call.screen_sharing)
+            .is_some_and(|call| call.screen.is_pending())
     );
     ingest_call_json(
         &mut driver,
@@ -434,7 +434,7 @@ fn group_screen_share_toggle_handshake() {
             .calls
             .active_group_call
             .as_ref()
-            .is_some_and(|call| call.screen_sharing && !call.screen_share_pending)
+            .is_some_and(|call| call.screen.is_sharing())
     );
     driver
         .toggle_group_call_screen_share()
@@ -448,7 +448,7 @@ fn group_screen_share_toggle_handshake() {
             .calls
             .active_group_call
             .as_ref()
-            .is_some_and(|call| !call.screen_sharing && !call.screen_share_pending)
+            .is_some_and(|call| !call.screen.is_sharing())
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -501,7 +501,7 @@ fn a_presentation_that_cannot_connect_is_ended_on_telegram() {
         .active_group_call
         .as_ref()
         .expect("call");
-    assert!(!call.screen_sharing && !call.screen_share_pending);
+    assert!(!call.screen.is_sharing());
     assert!(call.screen_share_error.is_some());
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -541,8 +541,8 @@ fn group_screen_share_failure_stops_native_presentation() {
     // Simulate the reducer's error arm: flags cleared, error
     // surfaced, native presentation untouched.
     if let Some(call) = driver.session.calls.active_group_call.as_mut() {
-        call.screen_share_pending = false;
-        call.screen_sharing = false;
+        call.screen.clear_pending();
+        call.screen = crate::state::ScreenShare::Off;
         call.screen_share_answer.clear();
     }
     ingest_call_json(
@@ -576,7 +576,7 @@ fn group_screen_share_rejected_without_screen_source() {
             .calls
             .active_group_call
             .as_ref()
-            .is_some_and(|call| call.screen_share_pending || call.screen_sharing)
+            .is_some_and(|call| call.screen.is_active())
     );
     assert!(
         recorder

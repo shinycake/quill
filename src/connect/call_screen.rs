@@ -63,23 +63,42 @@ pub type SystemAudioOpener = Arc<
     dyn Fn(Arc<SystemAudioMix>) -> Result<Box<dyn SystemAudioCapture>, CaptureError> + Send + Sync,
 >;
 
+/// What the chooser picked: the source, and whether "Share System Audio"
+/// was ticked with it.
+struct Pick {
+    source: SourceId,
+    audio: bool,
+}
+
+/// Where the shared screen stands.
+#[derive(Default)]
+enum Share {
+    /// Nothing picked: the next share asks for a source.
+    #[default]
+    Idle,
+    /// Picked, and waiting for the call's engine to offer its frame sender.
+    Picked { pick: Pick, wait: EngineWait },
+    /// Opening or running. `pick` is the chooser's latest pick: a different
+    /// source than `active.source` switches on the next pump. `audio_note`
+    /// is why the system audio stopped while the screen goes on.
+    Running {
+        active: ActiveScreen,
+        pick: Pick,
+        audio_note: Option<String>,
+    },
+    /// The share stopped or could not start, for the call window.
+    Ended { error: String },
+}
+
 /// Driver-side state of the shared screen.
 #[derive(Default)]
 pub struct CallScreen {
-    /// The source the chooser picked for the next or running share.
-    chosen: Option<SourceId>,
-    /// Whether the chooser's "Share System Audio" was ticked with it.
-    with_audio: bool,
-    active: Option<ActiveScreen>,
+    share: Share,
     opener: Option<ScreenOpener>,
     audio_opener: Option<SystemAudioOpener>,
     /// Bumped for every preview handed to the UI, so its image cache
     /// never mistakes a new capture's picture for an old one.
     preview_seq: u64,
-    /// Why the share stopped or could not start, for the call window.
-    pub error: Option<String>,
-    /// How long a chosen share has waited for the engine's frame sender.
-    engine_wait: EngineWait,
 }
 
 /// Waiting for the engine to take the shared screen: a call whose engine is
@@ -182,37 +201,100 @@ impl CallScreen {
 
     /// Whether the picked share includes system audio.
     pub fn with_audio(&self) -> bool {
-        self.with_audio
+        self.pick().is_some_and(|pick| pick.audio)
+    }
+
+    fn pick(&self) -> Option<&Pick> {
+        match &self.share {
+            Share::Picked { pick, .. } | Share::Running { pick, .. } => Some(pick),
+            Share::Idle | Share::Ended { .. } => None,
+        }
+    }
+
+    fn active(&self) -> Option<&ActiveScreen> {
+        match &self.share {
+            Share::Running { active, .. } => Some(active),
+            _ => None,
+        }
+    }
+
+    fn active_mut(&mut self) -> Option<&mut ActiveScreen> {
+        match &mut self.share {
+            Share::Running { active, .. } => Some(active),
+            _ => None,
+        }
+    }
+
+    /// Why the share stopped or could not start, for the call window.
+    pub fn error(&self) -> Option<&str> {
+        match &self.share {
+            Share::Ended { error } => Some(error),
+            Share::Running {
+                audio_note: Some(note),
+                ..
+            } => Some(note),
+            _ => None,
+        }
+    }
+
+    /// The running capture closes. The pick stays for the next share, or
+    /// goes with the call (`keep_pick` false).
+    fn close_active(&mut self, keep_pick: bool) {
+        self.share = match std::mem::take(&mut self.share) {
+            Share::Running { pick, .. } if keep_pick => Share::Picked {
+                pick,
+                wait: EngineWait::Idle,
+            },
+            Share::Running { .. } => Share::Idle,
+            other => other,
+        };
+    }
+
+    /// The system audio stopped while the screen goes on.
+    fn audio_failed(&mut self, error: String) {
+        if let Share::Running {
+            pick, audio_note, ..
+        } = &mut self.share
+        {
+            pick.audio = false;
+            *audio_note = Some(error);
+        }
+    }
+
+    /// The share ended: the next one picks a source again.
+    fn end(&mut self, error: Option<String>) {
+        self.share = match error {
+            Some(error) => Share::Ended { error },
+            None => Share::Idle,
+        };
     }
 
     /// Whether system audio is being recorded for the running share.
     pub fn sharing_audio(&self) -> bool {
-        self.active
-            .as_ref()
+        self.active()
             .and_then(|active| active.audio.as_ref())
             .is_some_and(|audio| !audio.run.is_opening())
     }
 
     /// The source being shared right now.
     pub fn source(&self) -> Option<&SourceId> {
-        self.active.as_ref().map(|active| &active.source)
+        self.active().map(|active| &active.source)
     }
 
     /// The source picked for the next share.
     pub fn chosen(&self) -> Option<&SourceId> {
-        self.chosen.as_ref()
+        self.pick().map(|pick| &pick.source)
     }
 
     /// The call the screen feeds right now.
     pub fn target(&self) -> Option<CaptureTarget> {
-        self.active
-            .as_ref()
+        self.active()
             .filter(|active| !active.run.is_opening())
             .map(|active| active.target)
     }
 
     pub fn opening(&self) -> bool {
-        self.active.as_ref().is_some_and(|active| {
+        self.active().is_some_and(|active| {
             active.run.is_opening()
                 || active
                     .audio
@@ -223,13 +305,12 @@ impl CallScreen {
 
     /// Whether the shared window is hidden.
     pub fn paused(&self) -> bool {
-        self.active.as_ref().is_some_and(|active| active.paused)
+        self.active().is_some_and(|active| active.paused)
     }
 
     /// Frames the engine accepted from the running capture.
     pub fn frames_sent(&self) -> u64 {
-        self.active
-            .as_ref()
+        self.active()
             .and_then(|active| active.run.running())
             .map_or(0, |feeder| feeder.stats().sent())
     }
@@ -261,27 +342,40 @@ impl CallScreen {
             },
             |mut capture| capture.stop(),
         );
-        self.active = Some(ActiveScreen {
-            target,
-            source,
-            sink,
-            sender,
-            preview,
-            last_preview: 0,
-            paused: false,
-            audio: None,
-            capture,
-            run: DeviceRun::Opening,
-        });
+        let pick = Pick {
+            source: source.clone(),
+            audio: self.with_audio(),
+        };
+        self.share = Share::Running {
+            active: ActiveScreen {
+                target,
+                source,
+                sink,
+                sender,
+                preview,
+                last_preview: 0,
+                paused: false,
+                audio: None,
+                capture,
+                run: DeviceRun::Opening,
+            },
+            pick,
+            audio_note: None,
+        };
     }
 
     /// How the open went; `Ok` says whether events read while it ran
     /// paused the share.
     fn finish_open(&mut self) -> Option<Result<bool, String>> {
-        let active = self
-            .active
-            .as_mut()
-            .filter(|active| active.run.is_opening())?;
+        let Share::Running {
+            active, audio_note, ..
+        } = &mut self.share
+        else {
+            return None;
+        };
+        if !active.run.is_opening() {
+            return None;
+        }
         let started = active
             .capture
             .opened()?
@@ -294,13 +388,10 @@ impl CallScreen {
             Ok(feeder) => {
                 active.run = DeviceRun::Running(feeder);
                 let paused = active.paused;
-                self.error = None;
+                *audio_note = None;
                 Ok(paused)
             }
-            Err(err) => {
-                self.active = None;
-                Err(err)
-            }
+            Err(err) => Err(err),
         })
     }
 }
@@ -330,9 +421,22 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// without system audio. A running share switches to it on the next
     /// pump.
     pub fn choose_call_screen_source(&mut self, source: SourceId, with_audio: bool) {
-        self.call_screen.chosen = Some(source);
-        self.call_screen.with_audio = with_audio && self.call_screen.system_audio_enabled();
-        self.call_screen.error = None;
+        let pick = Pick {
+            source,
+            audio: with_audio && self.call_screen.system_audio_enabled(),
+        };
+        self.call_screen.share = match std::mem::take(&mut self.call_screen.share) {
+            // A running share switches to it on the next pump.
+            Share::Running { active, .. } => Share::Running {
+                active,
+                pick,
+                audio_note: None,
+            },
+            _ => Share::Picked {
+                pick,
+                wait: EngineWait::Idle,
+            },
+        };
     }
 
     /// Use a fake system audio capture (tests, demos).
@@ -364,7 +468,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return (call.screen_sharing && up).then_some(CaptureTarget::Private(call.id));
         }
         let call = self.session.calls.active_group_call.as_ref()?;
-        (call.is_joined && call.screen_sharing).then_some(CaptureTarget::Group(call.id))
+        (call.is_joined && call.screen.is_sharing()).then_some(CaptureTarget::Group(call.id))
     }
 
     /// Start, follow and stop the shared screen. Called from the driver
@@ -381,12 +485,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// to the call microphone.
     fn pump_system_audio(&mut self) {
         let screen = &mut self.call_screen;
-        let wanted = screen.with_audio && screen.system_audio_enabled();
+        let wanted = screen.with_audio() && screen.system_audio_enabled();
         let opener = screen.audio_opener.clone();
         let mut failed = None;
         let running = screen
-            .active
-            .as_mut()
+            .active_mut()
             .filter(|active| !active.run.is_opening());
         let mix = match running {
             Some(active) if wanted => {
@@ -418,8 +521,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         if let Some(err) = failed {
             // The screen keeps going without it; no retry every pump.
-            screen.with_audio = false;
-            screen.error = Some(err);
+            screen.audio_failed(err);
         }
         let same = match (self.call_capture.system_audio(), mix.as_ref()) {
             (Some(have), Some(want)) => Arc::ptr_eq(have, want),
@@ -433,39 +535,34 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     fn pump_shared_screen(&mut self, now: std::time::Instant) {
         let wanted = self.screen_wanted();
-        let chosen = self.call_screen.chosen.clone();
-        // A different call or source: close the old capture first.
-        let stale = self.call_screen.active.as_ref().is_some_and(|active| {
+        let chosen = self.call_screen.chosen().cloned();
+        // A different call or source: close the old capture first. When the
+        // share ended, the next one asks for a source again.
+        let stale = self.call_screen.active().is_some_and(|active| {
             wanted != Some(active.target) || chosen.as_ref() != Some(&active.source)
         });
         if stale {
-            self.call_screen.active = None;
-            // The share ended: the next one asks for a source again.
-            if wanted.is_none() {
-                self.call_screen.chosen = None;
-                self.call_screen.with_audio = false;
-            }
+            self.call_screen.close_active(wanted.is_some());
         }
         match self.screen_change() {
             ScreenChange::None => {}
             ScreenChange::Paused(paused) => self.set_screen_paused(paused),
             ScreenChange::Ended(error) => {
-                self.call_screen.active = None;
-                self.call_screen.chosen = None;
-                self.call_screen.with_audio = false;
-                self.call_screen.error = error;
+                self.call_screen.end(error);
                 self.stop_sharing_screen();
                 return;
             }
         }
         let Some(target) = wanted else {
-            self.call_screen.engine_wait = EngineWait::Idle;
+            if let Share::Picked { wait, .. } = &mut self.call_screen.share {
+                *wait = EngineWait::Idle;
+            }
             if let Some(call) = self.session.calls.active_group_call.as_mut() {
-                call.screen_share_paused = false;
+                call.screen.set_paused(false);
             }
             return;
         };
-        if self.call_screen.active.is_none() {
+        if self.call_screen.active().is_none() {
             let Some(source) = chosen else {
                 return;
             };
@@ -475,25 +572,25 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .filter(|engine| engine.is_available())
                 .and_then(|engine| engine.external_frame_sender(target))
             else {
-                if self.call_screen.engine_wait.expired(now) {
-                    self.call_screen.engine_wait = EngineWait::Idle;
-                    self.call_screen.chosen = None;
-                    self.call_screen.error = Some(
+                let expired = match &mut self.call_screen.share {
+                    Share::Picked { wait, .. } => wait.expired(now),
+                    _ => false,
+                };
+                if expired {
+                    self.call_screen.end(Some(
                         crate::lang::tr(crate::lang::keys::Q_OPS_SCREEN_SHARING_CALL_NOT_READY)
                             .into(),
-                    );
+                    ));
                     self.stop_sharing_screen();
                 }
                 return;
             };
-            self.call_screen.engine_wait = EngineWait::Idle;
             self.call_screen.open(target, source, sender);
         }
         match self.call_screen.finish_open() {
             Some(Ok(paused)) => self.set_screen_paused(paused),
             Some(Err(err)) => {
-                self.call_screen.chosen = None;
-                self.call_screen.error = Some(err);
+                self.call_screen.end(Some(err));
                 self.stop_sharing_screen();
                 return;
             }
@@ -504,7 +601,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Read the running capture's events: the last pause edge, or the end.
     fn screen_change(&mut self) -> ScreenChange {
-        let Some(active) = self.call_screen.active.as_mut() else {
+        let Some(active) = self.call_screen.active_mut() else {
             return ScreenChange::None;
         };
         let mut paused = active.paused;
@@ -526,7 +623,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Apply a pause edge: frames stop or resume, and a group call tells
     /// Telegram (`toggleGroupCallScreenSharingIsPaused`).
     fn set_screen_paused(&mut self, paused: bool) {
-        let Some(active) = self.call_screen.active.as_mut() else {
+        let Some(active) = self.call_screen.active_mut() else {
             return;
         };
         let changed = active.paused != paused;
@@ -546,8 +643,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return;
         };
-        let was = call.screen_share_paused;
-        call.screen_share_paused = paused;
+        let was = call.screen.is_paused();
+        call.screen.set_paused(paused);
         // A fresh share starts unpaused on the server: only edges go out.
         if !changed && was == paused {
             return;
@@ -586,18 +683,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             .calls
             .active_group_call
             .as_ref()
-            .is_some_and(|call| call.screen_sharing || call.screen_share_pending);
+            .is_some_and(|call| call.screen.is_active());
         if sharing {
             let _ = self.toggle_group_call_screen_share();
         }
         if let Some(call) = self.session.calls.active_group_call.as_mut() {
-            call.screen_share_paused = false;
+            call.screen.set_paused(false);
         }
     }
 
     /// Your shared screen for your own tile in the group call window.
     fn publish_screen_preview(&mut self) {
-        let Some(active) = self.call_screen.active.as_mut() else {
+        let Some(active) = self.call_screen.active_mut() else {
             return;
         };
         let CaptureTarget::Group(group_call_id) = active.target else {
