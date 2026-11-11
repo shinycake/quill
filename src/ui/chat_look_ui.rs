@@ -346,14 +346,8 @@ impl QuillApp {
                                 .set_chat_theme_name(chat_id, (!name.is_empty()).then_some(name)),
                             LookChange::WallpaperFile { .. } => {}
                             LookChange::Wallpaper { id, dimming } => {
-                                let found = session
-                                    .chats_state
-                                    .installed_backgrounds
-                                    .data()
-                                    .into_iter()
-                                    .flatten()
-                                    .find(|b| b.id == id)
-                                    .cloned();
+                                let found =
+                                    session.chats_state.installed_backgrounds.find(id).cloned();
                                 if let Some(background) = found {
                                     session.set_chat_background(
                                         chat_id,
@@ -566,12 +560,14 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let muted = cx.theme().muted_foreground;
-        let fetch = self.session().map(|s| &s.chats_state.installed_backgrounds);
+        let dark = cx.theme().is_dark();
+        let fetch = self
+            .session()
+            .map(|s| s.chats_state.installed_backgrounds.theme(dark));
         let Some(list) = fetch.and_then(|f| f.data().cloned()) else {
             // A failed list shows its error with a Retry (the Appearance
             // page's), not a "Loading" nothing will end.
             if let Some(error) = fetch.and_then(|f| f.error()).map(str::to_owned) {
-                let dark = cx.theme().is_dark();
                 return div()
                     .flex()
                     .flex_col()
@@ -621,10 +617,7 @@ impl QuillApp {
                             .session
                             .chats_state
                             .installed_backgrounds
-                            .data()
-                            .into_iter()
-                            .flatten()
-                            .find(|b| b.id == id)
+                            .find(id)
                             .cloned()
                     {
                         live.driver.download_background_file(&bg);
@@ -684,13 +677,7 @@ impl QuillApp {
                         });
                     } else if let WallpaperChoice::Installed(id) = state.wallpaper {
                         wallpaper = session.and_then(|s| {
-                            let bg = s
-                                .chats_state
-                                .installed_backgrounds
-                                .data()
-                                .into_iter()
-                                .flatten()
-                                .find(|b| b.id == id)?;
+                            let bg = s.chats_state.installed_backgrounds.find(id)?;
                             session_wallpaper(s, bg)
                         });
                     } else if state.wallpaper != WallpaperChoice::Remove

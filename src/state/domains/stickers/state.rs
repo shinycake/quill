@@ -3,6 +3,25 @@
 //! with `new`.
 use crate::state::*;
 
+/// The title of an emoji pack a message uses, for the message menu's
+/// footer. `Asking` leaves on the answer or the error of its own request;
+/// an ask whose request is gone is asked again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PackTitle {
+    /// `getStickerSet` is out as this request.
+    Asking(RequestId),
+    Known(String),
+}
+
+impl PackTitle {
+    pub fn known(&self) -> Option<&str> {
+        match self {
+            Self::Known(title) => Some(title),
+            Self::Asking(_) => None,
+        }
+    }
+}
+
 pub struct StickersState {
     /// Reaction options for the message whose reaction picker is open.
     pub message_reaction_options: MessageReactionsState,
@@ -28,7 +47,7 @@ pub struct StickersState {
     pub custom_emoji_preview: Option<CustomEmojiPreview>,
     /// Titles of the emoji packs a message uses, by set id, for the menu's
     /// "This message contains emoji from X pack" footer.
-    pub emoji_pack_titles: HashMap<i64, String>,
+    pub emoji_pack_titles: HashMap<i64, PackTitle>,
     /// Installed regular sticker sets + the loaded `stickerSet` for the picker.
     pub stickers: StickerPanel,
     pub emoji: EmojiPanel,

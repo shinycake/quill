@@ -383,7 +383,7 @@ impl QuillApp {
             }
             let outcome = quill::notify::run_notification_command(&command);
             drop(slot);
-            let Some(action) = outcome.action else {
+            let quill::notify::NotificationOutcome::Picked(action) = outcome else {
                 return;
             };
             if let Ok(mut guard) = clicks.lock() {

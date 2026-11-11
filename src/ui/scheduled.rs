@@ -8,7 +8,9 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::composer::ScheduledDialog;
 use super::composer_sends::SendSlot;
+use super::danger_dark;
 use super::message_text::format_unix_date_time;
 use super::shell::DialogKind;
 use super::shell::QuillShell;
@@ -568,7 +570,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::Scheduled, |this, _, cx| {
-                this.chat_ui.scheduled_dialog_open = false;
+                this.close_scheduled_dialog();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
@@ -700,7 +702,7 @@ impl QuillApp {
                     .ghost()
                     .small()
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.chat_ui.scheduled_dialog_open = false;
+                        this.close_scheduled_dialog();
                         this.open_schedule_picker(ScheduleTarget::RescheduleSelected, window, cx);
                         this.close_kit_dialog_if_done(DialogKind::Scheduled, window, cx);
                     })),
@@ -731,6 +733,43 @@ impl QuillApp {
     /// `scheduled_dialog` — kept pure (no custom scrim/panel).
     pub(super) fn scheduled_dialog_body(&self, cx: &mut Context<Self>) -> AnyElement {
         let kind = self.schedule_kind();
+        match &self.chat_ui.scheduled_dialog {
+            // The list is on its way (or did not come): never the empty
+            // text, which says there is nothing scheduled.
+            ScheduledDialog::Loading(_) => {
+                return div()
+                    .id("scheduled-loading")
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr(keys::Q_CHAT_LOADING_SCHEDULED_MESSAGES))
+                    .into_any_element();
+            }
+            ScheduledDialog::Failed(line) => {
+                return div()
+                    .id("scheduled-failed")
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(danger_dark())
+                            .child(line.clone()),
+                    )
+                    .child(
+                        div().flex().child(
+                            Button::new("scheduled-retry")
+                                .label(tr(keys::Q_MONEY_RETRY))
+                                .small()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.open_scheduled_dialog(cx);
+                                })),
+                        ),
+                    )
+                    .into_any_element();
+            }
+            ScheduledDialog::Ready | ScheduledDialog::Closed => {}
+        }
         let messages: Vec<ParsedMessage> = self
             .session()
             .and_then(|session| {
@@ -792,7 +831,7 @@ impl QuillApp {
                         .label(tr(keys::Q_OPS_RESCHEDULE))
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.chat_ui.scheduled_dialog_open = false;
+                            this.close_scheduled_dialog();
                             this.open_schedule_picker(ScheduleTarget::Reschedule(id), window, cx);
                             this.close_kit_dialog_if_done(DialogKind::Scheduled, window, cx);
                         })),
@@ -803,7 +842,7 @@ impl QuillApp {
                         .label(tr(keys::Q_OPS_EDIT))
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.chat_ui.scheduled_dialog_open = false;
+                            this.close_scheduled_dialog();
                             this.begin_edit(edit.clone(), window, cx);
                             this.close_kit_dialog_if_done(DialogKind::Scheduled, window, cx);
                         })),
@@ -874,12 +913,12 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     Scheduled => DialogSpec::new(
         300,
-        |app| app.chat_ui.scheduled_dialog_open,
+        |app| app.chat_ui.scheduled_dialog.is_open(),
         QuillApp::build_scheduled_dialog,
     )
     .per_window()
     .close(|app, _, cx| {
-            app.chat_ui.scheduled_dialog_open = false;
+            app.close_scheduled_dialog();
             cx.notify();
         }),
 }

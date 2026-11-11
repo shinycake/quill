@@ -12,7 +12,7 @@ use crate::wake::Signal;
 use serde_json::Value;
 use std::io;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
@@ -30,6 +30,9 @@ pub(crate) struct ChannelTdlib {
     requests: mpsc::Sender<(CallId, Value)>,
     replies: mpsc::Receiver<(CallId, Value)>,
     cancelled: Arc<AtomicBool>,
+    /// The newest call that stopped waiting (it timed out); the link reads
+    /// it to free the request slot of a call nobody waits on.
+    gave_up: Arc<AtomicU64>,
     last_call: CallId,
     leftovers: Option<Leftovers>,
     /// Dropped with the worker, which tells the link it ended.
@@ -37,6 +40,12 @@ pub(crate) struct ChannelTdlib {
 }
 
 impl ChannelTdlib {
+    /// `call` stopped waiting for its answer: the link no longer holds the
+    /// request slot for it.
+    pub(crate) fn give_up(&self, call: CallId) {
+        self.gave_up.fetch_max(call, Ordering::AcqRel);
+    }
+
     #[cfg(test)]
     pub(crate) fn into_scripted(self) -> ScriptedWorker {
         ScriptedWorker {
@@ -98,6 +107,7 @@ impl Tdlib for ChannelTdlib {
                 return Err(ExportError::Cancelled);
             }
             if started.elapsed() > timeout {
+                self.give_up(call);
                 return Err(ExportError::Tdlib("the request timed out".into()));
             }
             match self.replies.recv_timeout(Duration::from_millis(100)) {
@@ -170,6 +180,8 @@ pub struct WorkerLink {
     /// Shared with the worker thread, which reads it between steps; the
     /// stop signal is the one fact both sides need at once.
     cancelled: Arc<AtomicBool>,
+    /// The worker's newest call that gave up (see [`ChannelTdlib::give_up`]).
+    gave_up: Arc<AtomicU64>,
     /// Disconnected once the worker ended.
     ended: mpsc::Receiver<()>,
 }
@@ -180,11 +192,13 @@ impl WorkerLink {
         let (request_tx, requests) = mpsc::channel();
         let (replies, reply_rx) = mpsc::channel();
         let cancelled = Arc::new(AtomicBool::new(false));
+        let gave_up = Arc::new(AtomicU64::new(UNANSWERED));
         let (alive, ended) = mpsc::channel();
         let worker = ChannelTdlib {
             requests: request_tx,
             replies: reply_rx,
             cancelled: cancelled.clone(),
+            gave_up: gave_up.clone(),
             last_call: UNANSWERED,
             leftovers,
             _alive: alive,
@@ -196,6 +210,7 @@ impl WorkerLink {
             replies,
             handoff: Handoff::Idle,
             cancelled,
+            gave_up,
             ended,
         };
         (link, worker)
@@ -210,12 +225,22 @@ impl WorkerLink {
         !self.is_cancelled() && !self.worker_ended()
     }
 
+    /// The request the driver sent and awaits, while its call still waits
+    /// for the answer: one whose call timed out holds nothing.
+    fn awaiting(&self) -> Option<(RequestId, CallId)> {
+        match self.handoff {
+            Handoff::Awaiting { request, call }
+                if call == UNANSWERED || call > self.gave_up.load(Ordering::Acquire) =>
+            {
+                Some((request, call))
+            }
+            _ => None,
+        }
+    }
+
     /// The request the driver sent and awaits an answer for.
     pub fn pending(&self) -> Option<RequestId> {
-        match self.handoff {
-            Handoff::Awaiting { request, .. } => Some(request),
-            Handoff::Idle | Handoff::Handed(_) => None,
-        }
+        self.awaiting().map(|(request, _)| request)
     }
 
     /// The driver sent the request just taken as `request`.
@@ -236,6 +261,11 @@ impl WorkerLink {
 
     /// The next request for TDLib, if the worker has one waiting.
     pub fn next_request(&mut self) -> Option<Value> {
+        // A call that timed out is not waited for: its late answer, if it
+        // ever comes, finds nobody, and the slot is free now.
+        if matches!(self.handoff, Handoff::Awaiting { .. }) && self.awaiting().is_none() {
+            self.handoff = Handoff::Idle;
+        }
         let (call, request) = self.requests.try_recv().ok()?;
         self.handoff = Handoff::Handed(call);
         Some(request)
@@ -253,8 +283,12 @@ impl WorkerLink {
         if let Handoff::Awaiting { request, call } = self.handoff
             && request == id
         {
+            // The call that gave up takes no answer; the slot is free.
+            let live = self.awaiting().is_some();
             self.handoff = Handoff::Idle;
-            let _ = self.replies.send((call, value));
+            if live {
+                let _ = self.replies.send((call, value));
+            }
         }
     }
 
@@ -458,6 +492,32 @@ mod tests {
             worker.answer().is_none(),
             "another request's answer is ignored"
         );
+    }
+
+    #[test]
+    fn a_call_that_timed_out_frees_the_request_slot() {
+        let (mut link, mut tdlib) = WorkerLink::pair(None);
+        tdlib.last_call = 1;
+        tdlib
+            .requests
+            .send((1, serde_json::json!({"@type": "getChat"})))
+            .unwrap();
+        assert!(link.next_request().is_some());
+        link.await_answer(RequestId(1));
+        assert!(!link.idle_or_cancelled(), "the answer is awaited");
+        // The worker's call stopped waiting: the next request is not held
+        // back behind an answer nobody takes.
+        tdlib.give_up(1);
+        assert!(link.idle_or_cancelled());
+        tdlib.last_call = 2;
+        tdlib
+            .requests
+            .send((2, serde_json::json!({"@type": "getChat"})))
+            .unwrap();
+        assert!(link.next_request().is_some());
+        // The late answer of the first request reaches nobody.
+        link.reply(RequestId(1), serde_json::json!({"@type": "chat"}));
+        assert!(link.pending().is_none());
     }
 
     #[test]

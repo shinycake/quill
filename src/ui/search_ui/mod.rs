@@ -510,7 +510,8 @@ impl QuillApp {
                 Err(_) => self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEARCH))),
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.search.search.filters.scope = scope;
+            let filters = session.search.search.filters;
+            session.search.search.filters = filters.in_scope(scope);
             session.apply_local_search_filter(tag);
         }
         cx.notify();
@@ -863,7 +864,7 @@ impl QuillApp {
                     StatusNote::error(user_error_for(keys::Q_NOTES_FAILED_SEARCH_FILTERS, &err)),
                 );
             }
-            if filters.scope == SearchScope::Apps {
+            if filters.scope() == SearchScope::Apps {
                 let _ = live.driver.fetch_grossing_web_app_bots();
             }
         } else if let Some(session) = self.demo_session.as_mut() {

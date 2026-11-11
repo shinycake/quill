@@ -14,7 +14,7 @@ use crate::export::json::MessageSink;
 use crate::export::loaded_files::LoadedFiles;
 use crate::export::settings::ExportSettings;
 use crate::export::worker::{
-    ChatOut, ExportError, Job, Progress, Tdlib, create_named_folder, export_chat, query,
+    ChatOut, ExportError, Job, Progress, Stage, Tdlib, create_named_folder, export_chat, query,
 };
 use crate::json_access::JsonExt;
 use serde_json::{Value, json};
@@ -31,9 +31,13 @@ pub struct AccountSummary {
     pub skipped: usize,
     /// Chosen chats left out because their content is protected.
     pub protected_chats: usize,
-    /// Chats Telegram refused to page (for example a channel that became
-    /// private); their rows say "No messages".
+    /// Chats Telegram refused to page before any message was saved (for
+    /// example a channel that became private); their rows say "No
+    /// messages".
     pub failed_chats: usize,
+    /// Chats cut short by an error after some messages were saved: their
+    /// pages and `result.json` hold those messages, and the rows count them.
+    pub partial_chats: usize,
     /// Saved phone contacts were not available; Telegram contacts stood in.
     pub contacts_partial: bool,
 }
@@ -41,14 +45,24 @@ pub struct AccountSummary {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AccountStage {
     Starting,
-    ChatsList,
+    /// Listing the chats: how many were found so far.
+    ChatsList {
+        found: usize,
+    },
     PersonalInfo,
     Userpics,
     Stories,
     ProfileMusic,
     Contacts,
     Sessions,
-    Chats,
+    /// Exporting chat `index` (0-based) of `count`; `chat` is its own
+    /// progress, whose file counts run across chats.
+    Chats {
+        index: usize,
+        count: usize,
+        name: String,
+        chat: Progress,
+    },
     Finished(AccountSummary),
     Failed(String),
     Cancelled,
@@ -57,25 +71,12 @@ pub enum AccountStage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountProgress {
     pub stage: AccountStage,
-    /// Chats found so far while listing them.
-    pub found: usize,
-    /// The chat being exported (0-based) and how many there are.
-    pub chat_index: usize,
-    pub chat_count: usize,
-    pub chat_name: String,
-    /// The running chat's own progress; its file counts run across chats.
-    pub chat: Progress,
 }
 
 impl AccountProgress {
     pub fn starting() -> Self {
         Self {
             stage: AccountStage::Starting,
-            found: 0,
-            chat_index: 0,
-            chat_count: 0,
-            chat_name: String::new(),
-            chat: Progress::starting(),
         }
     }
 
@@ -90,19 +91,16 @@ impl AccountProgress {
     pub fn label(&self) -> String {
         match &self.stage {
             AccountStage::Starting => "Initializing…".into(),
-            AccountStage::ChatsList => format!("Processing chats… {}", self.found),
+            AccountStage::ChatsList { found } => format!("Processing chats… {found}"),
             AccountStage::PersonalInfo => "Account information".into(),
             AccountStage::Userpics => "Profile photos".into(),
             AccountStage::Stories => "Story archive".into(),
             AccountStage::ProfileMusic => "Music on Profiles".into(),
             AccountStage::Contacts => "Contacts list".into(),
             AccountStage::Sessions => "Active sessions".into(),
-            AccountStage::Chats => format!(
-                "Chats: {} of {} · {}",
-                self.chat_index + 1,
-                self.chat_count,
-                self.chat_name
-            ),
+            AccountStage::Chats {
+                index, count, name, ..
+            } => format!("Chats: {} of {} · {}", index + 1, count, name),
             AccountStage::Finished(_) => "Your data was exported.".into(),
             AccountStage::Failed(reason) => format!("Export failed: {reason}"),
             AccountStage::Cancelled => "Export cancelled".into(),
@@ -112,7 +110,7 @@ impl AccountProgress {
     /// The line under it: the running chat's own step.
     pub fn detail(&self) -> Option<String> {
         match &self.stage {
-            AccountStage::Chats => Some(self.chat.label()),
+            AccountStage::Chats { chat, .. } => Some(chat.label()),
             AccountStage::Finished(summary) => Some(format!(
                 "{} chats, {} messages and {} files saved. {} files left out.",
                 summary.chats, summary.messages, summary.files, summary.skipped
@@ -123,10 +121,12 @@ impl AccountProgress {
 
     /// 0.0..=1.0 across the chats, `None` before they start.
     pub fn fraction(&self) -> Option<f32> {
-        match self.stage {
-            AccountStage::Chats if self.chat_count > 0 => {
-                let inner = self.chat.fraction().unwrap_or(0.0);
-                Some((self.chat_index as f32 + inner) / self.chat_count as f32)
+        match &self.stage {
+            AccountStage::Chats {
+                index, count, chat, ..
+            } if *count > 0 => {
+                let inner = chat.fraction().unwrap_or(0.0);
+                Some((*index as f32 + inner) / *count as f32)
             }
             AccountStage::Finished(_) => Some(1.0),
             _ => None,
@@ -235,17 +235,13 @@ fn run_inner<T: Tdlib>(
     let me_id = me.at("id").as_i64().unwrap_or(0);
 
     let (dialogs, protected_chats) = if settings.sections.any_chats() {
-        step(&mut progress, AccountStage::ChatsList);
-        let found = std::cell::Cell::new(0);
+        step(&mut progress, AccountStage::ChatsList { found: 0 });
         let report_found = |n: usize| {
-            found.set(n);
-            let mut p = progress.clone();
-            p.found = n;
-            (job.report)(p);
+            (job.report)(AccountProgress {
+                stage: AccountStage::ChatsList { found: n },
+            });
         };
-        let listed = dialogs::list(tdlib, settings, me_id, &report_found)?;
-        progress.found = found.get();
-        listed
+        dialogs::list(tdlib, settings, me_id, &report_found)?
     } else {
         (Vec::new(), 0)
     };
@@ -363,6 +359,7 @@ fn run_inner<T: Tdlib>(
         skipped: 0,
         protected_chats,
         failed_chats: 0,
+        partial_chats: 0,
         contacts_partial,
     };
     if !dialogs.is_empty() {
@@ -391,6 +388,46 @@ fn run_inner<T: Tdlib>(
         crate::export::publish_result(root)?;
     }
     Ok(summary)
+}
+
+/// How one chat ended. An error in the middle of a chat keeps what was
+/// already written: its row and the summary count those messages, and the
+/// chat is `Partial`, not `Failed`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum ChatOutcome {
+    Exported {
+        messages: usize,
+    },
+    /// Cut short by `reason` after `messages` were saved.
+    Partial {
+        messages: usize,
+        reason: String,
+    },
+    /// Nothing was saved.
+    Failed {
+        reason: String,
+    },
+}
+
+impl ChatOutcome {
+    /// The chat's export stopped on a TDLib error; `progress` says how far
+    /// it had got (only the writing step has saved messages).
+    pub(super) fn after_error(progress: &Progress, reason: String) -> Self {
+        match progress.stage {
+            Stage::Writing { done, .. } if done > 0 => Self::Partial {
+                messages: done,
+                reason,
+            },
+            _ => Self::Failed { reason },
+        }
+    }
+
+    pub(super) fn messages(&self) -> usize {
+        match self {
+            Self::Exported { messages } | Self::Partial { messages, .. } => *messages,
+            Self::Failed { .. } => 0,
+        }
+    }
 }
 
 /// The chats step's inputs.
@@ -431,12 +468,20 @@ fn export_chats<T: Tdlib>(
     if let Some(json) = writer.json.as_mut() {
         json.chats_start()?;
     }
-    progress.stage = AccountStage::Chats;
-    progress.chat_count = dialogs.len();
     let mut chat_progress = Progress::starting();
     for (index, dialog) in dialogs.iter().enumerate() {
-        progress.chat_index = index;
-        progress.chat_name = dialog.name.clone();
+        // The next chat starts from its own first step; only the file
+        // counts carry over from the one before.
+        chat_progress.stage = Stage::Starting;
+        let chat_stage = |chat: Progress| AccountProgress {
+            stage: AccountStage::Chats {
+                index,
+                count: dialogs.len(),
+                name: dialog.name.clone(),
+                chat,
+            },
+        };
+        *progress = chat_stage(chat_progress.clone());
         (job.report)(progress.clone());
         let chat_settings = ExportSettings {
             chat_id: dialog.chat_id,
@@ -449,12 +494,7 @@ fn export_chats<T: Tdlib>(
             till: 0,
             only_mine: dialog.only_my,
         };
-        let base = progress.clone();
-        let report = |p: Progress| {
-            let mut whole = base.clone();
-            whole.chat = p;
-            (job.report)(whole);
-        };
+        let report = |p: Progress| (job.report)(chat_stage(p));
         let chat_job = Job {
             settings: &chat_settings,
             files_root: job.files_root,
@@ -476,16 +516,21 @@ fn export_chats<T: Tdlib>(
             json.chat_start(dialog)?;
         }
         let sink = writer.json.as_mut().map(|j| j as &mut dyn MessageSink);
-        let messages = match export_chat(&chat_job, tdlib, &out, sink, &mut chat_progress) {
-            Ok(chat) => chat.messages,
+        let outcome = match export_chat(&chat_job, tdlib, &out, sink, &mut chat_progress) {
+            Ok(chat) => ChatOutcome::Exported {
+                messages: chat.messages,
+            },
             // One chat Telegram won't page (it became private, or the
             // account was banned there) does not end the whole export.
-            Err(ExportError::Tdlib(_)) => {
-                summary.failed_chats += 1;
-                0
-            }
+            Err(ExportError::Tdlib(reason)) => ChatOutcome::after_error(&chat_progress, reason),
             Err(other) => return Err(other),
         };
+        let messages = outcome.messages();
+        match &outcome {
+            ChatOutcome::Exported { .. } => {}
+            ChatOutcome::Partial { .. } => summary.partial_chats += 1,
+            ChatOutcome::Failed { .. } => summary.failed_chats += 1,
+        }
         if let Some(json) = writer.json.as_mut() {
             json.chat_end()?;
         }
@@ -493,7 +538,6 @@ fn export_chats<T: Tdlib>(
             file.write_all(pages::chat_row(dialog, messages).as_bytes())?;
         }
         summary.messages += messages;
-        progress.chat = chat_progress.clone();
     }
     summary.files = chat_progress.files;
     summary.skipped = chat_progress.skipped;

@@ -337,11 +337,11 @@ impl QuillApp {
         // The list belongs to the box waiting for it: a box that closed or
         // was replaced drops it, and a box whose request is no longer the
         // session's closes (nothing will answer it).
-        let held = session.calls.create_join_as.as_ref().map(|j| j.request);
+        let held = session.calls.create_join_as.as_ref().map(|j| j.request());
         let orphaned = held.is_some() && held != waiting;
         let abandoned = waiting.is_some() && held != waiting;
         let answer = match (waiting, session.calls.create_join_as.as_ref()) {
-            (Some(request), Some(join_as)) if join_as.request == request => join_as.answer.clone(),
+            (Some(request), Some(join_as)) if join_as.request() == request => join_as.answer(),
             _ => None,
         };
         if answer.is_some() || orphaned {

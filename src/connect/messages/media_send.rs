@@ -122,7 +122,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let caption = snapshot.caption();
-        let last = snapshot.album.len() - 1;
+        let last = snapshot.album().len() - 1;
         // MED4: caption-length gate (same runtime option as single
         // sends — `send_snapshot` returns here before its own check).
         self.check_caption_length(caption)?;
@@ -141,8 +141,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chats
             .get(&chat_id.0)
             .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
-        let mut contents = Vec::with_capacity(snapshot.album.len());
-        for (index, att) in snapshot.album.iter().enumerate() {
+        let mut contents = Vec::with_capacity(snapshot.album().len());
+        for (index, att) in snapshot.album().iter().enumerate() {
             let path = media_options::media_send_path(att, snapshot)
                 .ok_or(ConnectSendError::InvalidRequest)?;
             let item_caption = if index == last { caption } else { "" };

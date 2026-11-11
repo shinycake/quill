@@ -374,13 +374,13 @@ impl QuillApp {
         let before = open.state.clone();
         let effects = open.state.apply(action, env);
         let changed = open.state != before;
-        if open.state.emoji != before.emoji {
+        if open.state.emoji() != before.emoji() {
             open.swap = Some(PatternSwap {
-                previous: plain_picks(&before.emoji),
+                previous: plain_picks(before.emoji()),
                 started: now,
             });
         }
-        let gift = |state: &PeerQrBox| state.gift.as_ref().map(|gift| gift.id);
+        let gift = |state: &PeerQrBox| state.gift().map(|gift| gift.id);
         if gift(&open.state) != gift(&before) {
             open.gift_entry = now;
         }

@@ -41,7 +41,7 @@ fn brands_follow_the_bin_table() {
 
 #[test]
 fn card_number_states() {
-    let state = |number: &str| validate_card(number).state;
+    let state = |number: &str| validate_card(number).state();
     assert_eq!(state(""), ValidationState::Incomplete);
     assert_eq!(state("4242"), ValidationState::Incomplete);
     assert_eq!(state("42x2"), ValidationState::Invalid);
@@ -49,13 +49,13 @@ fn card_number_states() {
     assert_eq!(state("4242424242424241"), ValidationState::Invalid);
     assert_eq!(state("42424242424242424242"), ValidationState::Invalid);
     // Valid but not finished: only 19 digits end the field, as in tdesktop.
-    assert!(!validate_card("4242424242424242").finished);
-    assert!(validate_card("6205500000000000004").finished);
+    assert!(!validate_card("4242424242424242").is_finished());
+    assert!(validate_card("6205500000000000004").is_finished());
 }
 
 #[test]
 fn expiry_states_against_this_month() {
-    let state = |date: &str| validate_expiry(date, TODAY).state;
+    let state = |date: &str| validate_expiry(date, TODAY).state();
     assert_eq!(state(""), ValidationState::Incomplete);
     assert_eq!(state("1"), ValidationState::Incomplete);
     assert_eq!(state("13"), ValidationState::Invalid);
@@ -68,7 +68,7 @@ fn expiry_states_against_this_month() {
     assert_eq!(state("1/2/3/4/5"), ValidationState::Invalid);
     // A leading 2–9 is a one-digit month.
     assert_eq!(state("530"), ValidationState::Valid);
-    assert!(validate_expiry("10/30", TODAY).finished);
+    assert!(validate_expiry("10/30", TODAY).is_finished());
     assert_eq!(
         validate_parsed_expiry(4, 2030, TODAY),
         ValidationState::Valid
@@ -87,19 +87,16 @@ fn expiry_states_against_this_month() {
 fn cvc_length_follows_the_network() {
     let visa = "4242424242424242";
     let amex = "378282246310005";
-    assert_eq!(validate_cvc(visa, "12").state, ValidationState::Incomplete);
     assert_eq!(
-        validate_cvc(visa, "123"),
-        Validation {
-            state: ValidationState::Valid,
-            finished: true
-        }
+        validate_cvc(visa, "12").state(),
+        ValidationState::Incomplete
     );
-    assert_eq!(validate_cvc(visa, "1234").state, ValidationState::Invalid);
-    assert_eq!(validate_cvc(amex, "123").state, ValidationState::Valid);
-    assert!(!validate_cvc(amex, "123").finished);
-    assert!(validate_cvc(amex, "1234").finished);
-    assert_eq!(validate_cvc(visa, "1a3").state, ValidationState::Invalid);
+    assert_eq!(validate_cvc(visa, "123"), Validation::Finished);
+    assert_eq!(validate_cvc(visa, "1234").state(), ValidationState::Invalid);
+    assert_eq!(validate_cvc(amex, "123").state(), ValidationState::Valid);
+    assert!(!validate_cvc(amex, "123").is_finished());
+    assert!(validate_cvc(amex, "1234").is_finished());
+    assert_eq!(validate_cvc(visa, "1a3").state(), ValidationState::Invalid);
 }
 
 #[test]

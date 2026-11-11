@@ -228,7 +228,7 @@ fn received_gifts_fill_the_gifts_tab_without_touching_the_gifts_dialog() {
     assert!(!gifts.can_load_more());
     assert_eq!(session.media.chat_media_counts[&6][&COUNT_KEY_GIFTS], 2);
     // The Gifts dialog's own list is untouched.
-    assert!(session.payments.hub.gifts.is_empty());
+    assert!(session.payments.hub.received.rows.is_empty());
 }
 
 #[test]

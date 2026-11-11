@@ -266,7 +266,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         let json = remove_profile_audio(extra, file_id.0);
-        self.send_profile_request(extra, &json)
+        let sent = self.send_profile_request(extra, &json);
+        if sent.is_err() {
+            self.session.playlist_change_unsent(file_id.0);
+        }
+        sent
     }
 
     /// Move the track at `from` to `to` in your own playlist
@@ -288,7 +292,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         let json = set_profile_audio_position(extra, file_id, after);
-        self.send_profile_request(extra, &json)
+        let sent = self.send_profile_request(extra, &json);
+        if sent.is_err() {
+            self.session.playlist_change_unsent(file_id);
+        }
+        sent
     }
 
     /// "Save to... Saved Messages" for a track on someone's Playlist page:

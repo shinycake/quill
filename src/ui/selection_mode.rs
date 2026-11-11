@@ -907,9 +907,34 @@ impl QuillApp {
                     let community = community_ban
                         .filter(|_| on_ok_community.get())
                         .zip(offer.clone());
+                    let mut refused = false;
                     let _ = app.update(cx, |this, cx| {
                         // Opened for one account: a switch since cancels it.
                         if this.session().map(|s| &s.account) != account.as_ref() {
+                            return;
+                        }
+                        // Reports and "delete all" name the user's
+                        // messages, so they go out before the delete. A
+                        // send that fails keeps the box open and deletes
+                        // nothing: the admin retries (every step is
+                        // idempotent on the server).
+                        if let (true, Some(offer), Some(live)) =
+                            (picked.any(), offer.clone(), this.live.as_mut())
+                            && live
+                                .driver
+                                .moderate_message(
+                                    offer.chat_id,
+                                    &[confirm.message_id],
+                                    offer.user_id,
+                                    picked,
+                                )
+                                .is_err()
+                        {
+                            refused = true;
+                            this.set_note(StatusNote::error(tr(
+                                keys::Q_CHAT_COULD_NOT_DELETE_MESSAGES,
+                            )));
+                            cx.notify();
                             return;
                         }
                         if let Some(((community_id, _), offer)) = community {
@@ -920,22 +945,9 @@ impl QuillApp {
                                 cx,
                             );
                         }
-                        // Reports and "delete all" name the user's
-                        // messages, so they go out before the delete.
-                        if let (true, Some(offer), Some(live)) =
-                            (picked.any(), offer, this.live.as_mut())
-                        {
-                            let _ = live.driver.moderate_message(
-                                offer.chat_id,
-                                &[confirm.message_id],
-                                offer.user_id,
-                                picked,
-                            );
-                        }
-                        this.chat_ui.pending_delete = Some(confirm);
-                        this.confirm_delete(cx);
+                        this.confirm_delete(confirm, cx);
                     });
-                    true
+                    !refused
                 })
         });
     }

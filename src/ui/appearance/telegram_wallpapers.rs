@@ -27,7 +27,13 @@ impl QuillApp {
     ) -> AnyElement {
         let dark = cx.theme().is_dark();
         let session = self.session();
-        let list = session.and_then(|s| s.chats_state.installed_backgrounds.data().cloned());
+        let list = session.and_then(|s| {
+            s.chats_state
+                .installed_backgrounds
+                .theme(dark)
+                .data()
+                .cloned()
+        });
         let in_use = session
             .and_then(|s| s.chats_state.default_backgrounds.get(&dark))
             .map(|b| b.id)
@@ -36,7 +42,7 @@ impl QuillApp {
         let muted = cx.theme().muted_foreground;
         let mut grid = div().flex().flex_wrap().gap_2();
         let list_error = session
-            .and_then(|s| s.chats_state.installed_backgrounds.error())
+            .and_then(|s| s.chats_state.installed_backgrounds.theme(dark).error())
             .map(str::to_owned);
         match &list {
             None if list_error.is_some() => {
@@ -235,10 +241,11 @@ impl QuillApp {
                 }
             }
             None => {
-                if let Some(session) = self.demo_session.as_mut()
-                    && let Some(list) = session.chats_state.installed_backgrounds.data_mut()
-                {
-                    list.retain(|b| b.id != background_id);
+                if let Some(session) = self.demo_session.as_mut() {
+                    session
+                        .chats_state
+                        .installed_backgrounds
+                        .forget(background_id);
                 }
             }
         }
@@ -253,7 +260,7 @@ impl QuillApp {
                 .session
                 .chats_state
                 .installed_backgrounds
-                .clear_error();
+                .clear_errors();
         }
     }
 

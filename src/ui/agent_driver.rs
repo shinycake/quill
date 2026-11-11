@@ -544,14 +544,14 @@ fn perform_step(
     let before = app
         .update(cx, |app, _| super::agent_driver_surface::hard_open(app))
         .unwrap_or_default();
-    guard::set_injecting(true);
+    let scope = guard::Injecting::begin();
     let result = perform_step_injecting(app, cx, step, tree, send_key_mode);
     // A dialog or layer agents never use that the step opened through an
     // opener with no guard of its own: refused, and closed before it shows.
     let _ = app.update(cx, |app, _| {
         super::agent_driver_surface::block_opened_by_agent(app, &before);
     });
-    guard::set_injecting(false);
+    drop(scope);
     result
 }
 

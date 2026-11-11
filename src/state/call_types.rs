@@ -57,6 +57,9 @@ pub struct ActiveCall {
     /// The connection quality, 0 to 4 bars (tdesktop `Calls::SignalBars`),
     /// from the engine; `None` until it reports.
     pub signal_bars: Option<u8>,
+    /// Why your microphone, level tap or shared screen stopped, for the
+    /// call window. It lives and dies with the call.
+    pub media_note: Option<String>,
 }
 
 /// What `callStateReady` brought, and when.
@@ -356,6 +359,7 @@ impl ActiveCall {
             remote_audio_muted: false,
             remote_battery_low: false,
             signal_bars: None,
+            media_note: None,
         }
     }
 

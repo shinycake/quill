@@ -8,3 +8,12 @@ ActiveGroupCall::loaded_all_participants+screen_share_error TDLib's groupCall.lo
 
 MiniAppWindow::closing_confirmation the mini app's own setting (`web_app_setup_closing_behavior`: ask before closing), set and cleared by the app; not a stage of anything Quill runs
 MediaFacts::in_saved_messages the message's chat is Saved Messages: a fact about where the message lives, read once when the menu opens, not a stage of anything
+BarFacts::bot_start_pending derived on every render from the armed start parameter and the loaded-empty history (ui/bottom_action.rs); a fact about the open bot chat, never stored
+ChatSwipeFacts::is_saved the chat with yourself: a fact about the chat read when the swipe label is resolved, not a stage
+RowMenuFacts::is_saved_messages the chat is Saved Messages: a fact about the chat read once when the row menu is built, not a stage
+Checklist::others_can_mark_tasks_as_done TDLib's checklist.others_can_mark_tasks_as_done permission ("Allow Others to Mark As Done"), mirrored as is; not a stage
+ChecklistDialog::others_can_mark_tasks_as_done the dialog's "Allow Others to Mark As Done" switch, a setting of the new checklist; not a stage
+ChecklistDialog::others_can_mark_tasks_as_done+error the "Allow Others to Mark As Done" switch beside the dialog's last validation error: independent
+ChecklistDraft::others_can_mark_tasks_as_done the frozen "Allow Others to Mark As Done" setting of the new checklist; not a stage
+ChecklistSend::others_can_mark_tasks_as_done the "Allow Others to Mark As Done" setting sent with the new checklist; not a stage
+ReceivedGift::is_saved TDLib's receivedGift.is_saved: whether the gift is shown on the profile page, the server's own setting, flipped only after the server confirmed toggleGiftIsSaved; not a stage of anything Quill runs

@@ -55,9 +55,11 @@ impl QuillApp {
                 .retry_story_statistics(*chat_id, story_id, is_dark)
                 .is_err()
             {
-                self.set_note(StatusNote::error(tr(
-                    keys::Q_MEDIA_COULD_NOT_LOAD_STORY_STATISTICS,
-                )));
+                live.driver.session.story_statistics_not_sent(
+                    chat_id.0,
+                    story_id,
+                    tr(keys::Q_MEDIA_COULD_NOT_LOAD_STORY_STATISTICS).to_string(),
+                );
             }
         } else if self.demo_session.is_some() {
             self.set_note(StatusNote::silent(tr(

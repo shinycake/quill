@@ -98,7 +98,7 @@ fn reads_refused_for_money_settle_like_tdlib_errors() {
             .map(|page| page.stars.clone())
     };
     assert_eq!(gifts_status(&driver), Some(SharedMediaTabStatus::Loading));
-    assert!(matches!(stars(&driver), Some(Load::Loading)));
+    assert!(matches!(stars(&driver), Some(Load::Loading(_))));
 
     // The next poll ingests the answers: nothing is left loading or pending.
     assert!(driver.ingest_refused_answers());

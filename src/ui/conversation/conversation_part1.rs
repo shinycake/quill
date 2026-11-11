@@ -604,6 +604,10 @@ impl QuillApp {
                     let (key, rows) = self.thread_rows_input(thread, highlight_id);
                     let failed = (thread.history.older == quill::state::OlderEnd::Failed)
                         .then_some(super::older_retry::OlderRetryFor::Thread);
+                    let newer = thread
+                        .history
+                        .newer_failed()
+                        .then_some(super::older_retry::NewerRetryFor::Thread);
                     let list = self.history_message_list(
                         "thread-history",
                         rows,
@@ -615,6 +619,7 @@ impl QuillApp {
                     );
                     self.history.rows_key = Some(key);
                     let list = super::older_retry::with_older_retry(list, failed, cx);
+                    let list = super::older_retry::with_newer_retry(list, newer, cx);
                     self.thread_history_pane(list, cx)
                 } else if is_forum
                     && open_topic.is_none()
@@ -655,6 +660,9 @@ impl QuillApp {
                         let failed = topic_history
                             .is_some_and(|h| h.older == quill::state::OlderEnd::Failed)
                             .then_some(super::older_retry::OlderRetryFor::Topic);
+                        let newer = topic_history
+                            .is_some_and(|h| h.newer_failed())
+                            .then_some(super::older_retry::NewerRetryFor::Topic);
                         let list = self.history_message_list(
                             "topic-history",
                             rows,
@@ -665,7 +673,8 @@ impl QuillApp {
                             cx,
                         );
                         self.history.rows_key = Some(key);
-                        super::older_retry::with_older_retry(list, failed, cx)
+                        let list = super::older_retry::with_older_retry(list, failed, cx);
+                        super::older_retry::with_newer_retry(list, newer, cx)
                     }
                 } else if main_empty {
                     // Phase S1: an empty secret chat shows TGX's end-to-end
@@ -722,6 +731,12 @@ impl QuillApp {
                 } else {
                     let (key, rows) =
                         self.main_rows_input(open, open_topic, main_history, highlight_id);
+                    let older = main_history
+                        .is_some_and(|h| h.load_failed())
+                        .then_some(super::older_retry::OlderRetryFor::Chat);
+                    let newer = main_history
+                        .is_some_and(|h| h.newer_failed())
+                        .then_some(super::older_retry::NewerRetryFor::Chat);
                     let list = self.history_message_list(
                         "session-history",
                         rows,
@@ -732,7 +747,8 @@ impl QuillApp {
                         cx,
                     );
                     self.history.rows_key = Some(key);
-                    list
+                    let list = super::older_retry::with_older_retry(list, older, cx);
+                    super::older_retry::with_newer_retry(list, newer, cx)
                 },
             ))
     }

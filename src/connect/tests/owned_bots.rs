@@ -251,6 +251,26 @@ fn creating_a_bot_records_the_new_user() {
 }
 
 #[test]
+fn a_second_create_waits_for_the_first_answer() {
+    let (mut driver, recorder, _sink, _seq) = driver_parts();
+    driver
+        .create_managed_bot(5, "Cool", "coolbot", true, None)
+        .unwrap();
+    assert!(
+        driver
+            .create_managed_bot(5, "Other", "otherbot", true, None)
+            .is_err()
+    );
+    let creates = recorder
+        .snapshot()
+        .iter()
+        .filter(|sent| sent.contains("\"@type\":\"createBot\""))
+        .count();
+    assert_eq!(creates, 1);
+    assert!(driver.session.bots.owned.create.creating());
+}
+
+#[test]
 fn creating_from_the_keyboard_button_is_not_via_link() {
     let (mut driver, recorder, _sink, _seq) = driver_parts();
     driver

@@ -208,7 +208,7 @@ impl QuillApp {
         let pending = hub
             .gift_value
             .as_ref()
-            .is_some_and(|lookup| !lookup.is_open() && lookup.info().is_none());
+            .is_some_and(GiftValueLookup::is_pending);
         if host_shown || !pending {
             return;
         }

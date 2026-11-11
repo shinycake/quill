@@ -176,11 +176,20 @@ pub struct InviteLinkForm {
     pub facts: ChatFacts,
     pub expire: Expire,
     pub usage: Usage,
-    pub request_approval: bool,
-    /// "Require Monthly Fee" is on.
-    pub subscription: bool,
-    /// The fee of the subscription link being edited: it can't change.
-    pub locked_stars: Option<i64>,
+    /// Which of the two exclusive kinds of link the switches describe.
+    pub kind: LinkKind,
+}
+
+/// What the approval and "Require Monthly Fee" switches say: a link admins
+/// approve joiners of, or a paid one. They exclude each other, so the form
+/// holds one of them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinkKind {
+    /// An ordinary link; `approval` is "Request Admin Approval".
+    Plain { approval: bool },
+    /// "Require Monthly Fee" is on. `locked_stars` is the fee of the
+    /// subscription link being edited: it can't change.
+    Subscription { locked_stars: Option<i64> },
 }
 
 /// What a click on "Require Monthly Fee" did.
@@ -224,9 +233,7 @@ impl InviteLinkForm {
             facts,
             expire: Expire::Never,
             usage: Usage::Any,
-            request_approval: false,
-            subscription: false,
-            locked_stars: None,
+            kind: LinkKind::Plain { approval: false },
         }
     }
 
@@ -242,9 +249,30 @@ impl InviteLinkForm {
             facts,
             expire: Expire::from_date(link.expiration_date),
             usage: Usage::from_limit(link.member_limit),
-            request_approval: link.creates_join_request && locked_stars.is_none(),
-            subscription: locked_stars.is_some(),
-            locked_stars,
+            kind: match locked_stars {
+                Some(_) => LinkKind::Subscription { locked_stars },
+                None => LinkKind::Plain {
+                    approval: link.creates_join_request,
+                },
+            },
+        }
+    }
+
+    /// "Request Admin Approval" is on.
+    pub fn approving(&self) -> bool {
+        matches!(self.kind, LinkKind::Plain { approval: true })
+    }
+
+    /// "Require Monthly Fee" is on.
+    pub fn is_subscription(&self) -> bool {
+        matches!(self.kind, LinkKind::Subscription { .. })
+    }
+
+    /// The fee of the subscription link being edited: it can't change.
+    pub fn locked_stars(&self) -> Option<i64> {
+        match self.kind {
+            LinkKind::Subscription { locked_stars } => locked_stars,
+            LinkKind::Plain { .. } => None,
         }
     }
 
@@ -260,7 +288,7 @@ impl InviteLinkForm {
     pub fn offers_subscription(&self) -> bool {
         !self.facts.group
             && !self.facts.public
-            && (self.link.is_none() || self.locked_stars.is_some())
+            && (self.link.is_none() || self.locked_stars().is_some())
     }
 
     /// tdesktop `requestApprovalLocked`: a public chat that lets anyone in.
@@ -273,36 +301,40 @@ impl InviteLinkForm {
     /// carry them either, as `createChatSubscriptionInviteLink` takes no
     /// expiry or limit.
     pub fn shows_limits(&self) -> bool {
-        !self.subscription
+        !self.is_subscription()
     }
 
     /// The approval switch: every box but an existing subscription link's.
     pub fn shows_approval(&self) -> bool {
-        self.locked_stars.is_none()
+        self.locked_stars().is_none()
     }
 
     /// tdesktop `usagesSlide`: hidden while admins approve each joiner.
     pub fn shows_usage(&self) -> bool {
-        self.shows_limits() && !self.request_approval
+        self.shows_limits() && !self.approving()
     }
 
     /// tdesktop `requestApproval` click: approval and the fee exclude
     /// each other.
     pub fn toggle_approval(&mut self) {
-        if self.approval_locked() || self.locked_stars.is_some() {
+        if self.approval_locked() || self.locked_stars().is_some() {
             return;
         }
-        self.request_approval = !self.request_approval;
-        self.subscription = false;
+        self.kind = LinkKind::Plain {
+            approval: !self.approving(),
+        };
     }
 
     /// tdesktop `subscription` click.
     pub fn toggle_subscription(&mut self) -> SubscriptionToggle {
-        if self.locked_stars.is_some() || (self.link.is_some() && !self.offers_subscription()) {
+        if self.locked_stars().is_some() || (self.link.is_some() && !self.offers_subscription()) {
             return SubscriptionToggle::Locked;
         }
-        self.subscription = !self.subscription;
-        self.request_approval = false;
+        self.kind = if self.is_subscription() {
+            LinkKind::Plain { approval: false }
+        } else {
+            LinkKind::Subscription { locked_stars: None }
+        };
         SubscriptionToggle::Toggled
     }
 
@@ -312,23 +344,23 @@ impl InviteLinkForm {
     pub fn request(&self, name: &str, stars: i64, now: i64) -> InviteLinkRequest {
         let name: String = name.trim().chars().take(NAME_MAX).collect();
         if let Some(link) = &self.link
-            && self.locked_stars.is_some()
+            && self.locked_stars().is_some()
         {
             return InviteLinkRequest::EditSubscription {
                 link: link.clone(),
                 name,
             };
         }
-        if self.subscription && self.link.is_none() && stars > 0 {
+        if self.is_subscription() && self.link.is_none() && stars > 0 {
             return InviteLinkRequest::CreateSubscription {
                 name,
                 star_count: stars,
             };
         }
-        let (expiration_date, member_limit, creates_join_request) = if self.subscription {
+        let (expiration_date, member_limit, creates_join_request) = if self.is_subscription() {
             (0, 0, false)
         } else {
-            let approval = self.request_approval;
+            let approval = self.approving();
             let limit = if approval { 0 } else { self.usage.limit() };
             (self.expire.date(now), limit, approval)
         };

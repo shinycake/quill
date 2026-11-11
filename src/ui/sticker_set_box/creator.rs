@@ -434,8 +434,8 @@ impl QuillApp {
                 // A sticker not downloaded yet is fetched, and decoded
                 // when it arrives (`sticker_box_window_upkeep`).
                 if self.local_media_path(file_id).is_none() {
-                    if let Some(live) = self.live.as_mut() {
-                        let _ = live.driver.download_file(file_id, 16);
+                    if !self.ask_pick_file(file_id, cx) {
+                        return;
                     }
                     self.sticker_box.pending =
                         crate::ui::sticker_set_box::state::PickWait::Downloading(

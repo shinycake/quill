@@ -165,15 +165,27 @@ impl QuillApp {
             "inline reply typed into a notification: {} chars",
             text.chars().count()
         );
-        let sent = self.send_inline_reply(account, chat_id, &text, cx) == InlineReplyOutcome::Sent;
-        if !sent && !text.trim().is_empty() {
-            // Taken from the platform, so it must not be lost with the
-            // send: the chat that opens instead gets it in its composer.
+        let outcome = self.send_inline_reply(account, chat_id, &text, cx);
+        self.keep_unsent_reply(account, chat_id, text, outcome);
+        outcome == InlineReplyOutcome::Sent
+    }
+
+    /// Typed text that did not go out (`outcome` is not `Sent`) must not be
+    /// lost with the send, whichever path took it (the platform's reply
+    /// field or Quill's own toast): the chat that opens instead gets it in
+    /// its composer.
+    pub(in crate::ui) fn keep_unsent_reply(
+        &mut self,
+        account: &AccountKey,
+        chat_id: ChatId,
+        text: String,
+        outcome: InlineReplyOutcome,
+    ) {
+        if outcome != InlineReplyOutcome::Sent && !text.trim().is_empty() {
             self.delivery
                 .unsent_replies
                 .insert((account.clone(), chat_id), text);
         }
-        sent
     }
 
     /// The reply typed into `account`'s notification for the chat that

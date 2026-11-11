@@ -735,6 +735,7 @@ fn a_refused_rich_send_gives_the_text_back(cx: &mut TestAppContext) {
             app.chat_ui.sent_text = SentText::Sent {
                 request: RequestId(9),
                 markup: "# Title\nbody".into(),
+                slot: None,
             };
         });
     };
@@ -792,6 +793,7 @@ fn a_refused_send_drops_its_draft_clear_and_gives_back_the_text(cx: &mut TestApp
         app.chat_ui.sent_text = SentText::Sent {
             request: RequestId(9),
             markup: "rich".into(),
+            slot: None,
         };
     });
     assert!(clear_waits(&app, vcx));
@@ -807,6 +809,7 @@ fn a_refused_send_drops_its_draft_clear_and_gives_back_the_text(cx: &mut TestApp
         app.chat_ui.sent_text = SentText::InlinePick {
             request: RequestId(10),
             markup: "@bot cats".into(),
+            slot: None,
         };
     });
     vcx.update(|window, cx| {
@@ -823,31 +826,41 @@ fn a_refused_send_drops_its_draft_clear_and_gives_back_the_text(cx: &mut TestApp
 #[gpui_kit::test]
 fn an_ai_answer_applies_only_to_the_draft_it_was_asked_about(cx: &mut TestAppContext) {
     use crate::ui::composer::AiAsk;
+    use quill::ids::RequestId;
+    use quill::state::{AiAnswer, AiResult};
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     open_chat(&app, vcx, GROUP);
-    let answer = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, text: &str| {
+    let reply = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, request: u64, result| {
         app.update(vcx, |app, _| {
             if let Some(session) = app.demo_session.as_mut() {
-                session.messages.ai_composer_text = Some((None, GROUP, text.to_string()));
+                session.messages.ai_answers.push(AiAnswer {
+                    request: RequestId(request),
+                    window: None,
+                    chat: GROUP,
+                    result,
+                });
             }
         });
         vcx.update(|window, cx| app.update(cx, |app, cx| app.apply_ai_composer_answer(window, cx)));
     };
+    let answer = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, text: &str| {
+        reply(app, vcx, 1, AiResult::Text(text.to_string()));
+    };
+    let ask = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, request: u64, markup: &str| {
+        app.update(vcx, |app, _| {
+            app.chat_ui.ai_ask = AiAsk::Asked {
+                request: RequestId(request),
+                markup: markup.into(),
+            };
+        });
+    };
     set_field(&app, vcx, "teh draft");
-    app.update(vcx, |app, _| {
-        app.chat_ui.ai_ask = AiAsk::Asked {
-            markup: "teh draft".into(),
-        };
-    });
+    ask(&app, vcx, 1, "teh draft");
     answer(&app, vcx, "the draft");
     assert_eq!(field(&app, vcx), "the draft", "the asked draft is replaced");
     // Asked about "the draft", then the user typed on before the answer.
-    app.update(vcx, |app, _| {
-        app.chat_ui.ai_ask = AiAsk::Asked {
-            markup: "the draft".into(),
-        };
-    });
+    ask(&app, vcx, 1, "the draft");
     set_field(&app, vcx, "the draft and more");
     answer(&app, vcx, "better draft");
     assert_eq!(
@@ -855,6 +868,23 @@ fn an_ai_answer_applies_only_to_the_draft_it_was_asked_about(cx: &mut TestAppCon
         "the draft and more",
         "typed text survives"
     );
+    // Fix, then Rewrite on the same draft: the first answer is stale and
+    // changes nothing; the second applies.
+    set_field(&app, vcx, "teh draft");
+    ask(&app, vcx, 2, "teh draft");
+    reply(&app, vcx, 1, AiResult::Text("stale".into()));
+    assert_eq!(field(&app, vcx), "teh draft", "an older ask's answer");
+    reply(&app, vcx, 2, AiResult::Text("the draft".into()));
+    assert_eq!(field(&app, vcx), "the draft");
+    // A failed ask is over: a late answer for it never applies.
+    ask(&app, vcx, 3, "the draft");
+    reply(&app, vcx, 3, AiResult::Failed);
+    assert_eq!(
+        app.read_with(vcx, |app, _| app.chat_ui.ai_ask.clone()),
+        AiAsk::Idle
+    );
+    reply(&app, vcx, 3, AiResult::Text("late".into()));
+    assert_eq!(field(&app, vcx), "the draft");
 }
 
 /// Sweep 10-115: a window reads its own bot, not the one another window's
@@ -1044,4 +1074,113 @@ fn a_forced_reply_waits_for_its_chat(cx: &mut TestAppContext) {
         app.chat_ui.reply().map(|r| (r.chat_id, r.message_id))
     });
     assert_eq!(reply, Some((KEYBOARD_BOT, MessageId(88))));
+}
+
+/// Sweep 09-108: a forced reply that arrives while the composer already
+/// has a reply is not lost: it waits, and arms once that reply is gone.
+#[gpui_kit::test]
+fn a_forced_reply_waits_while_the_composer_replies(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat(&app, vcx, KEYBOARD_BOT);
+    app.update(vcx, |app, _| {
+        app.chat_ui
+            .set_reply(Some(ComposerReplyTo::new(KEYBOARD_BOT, MessageId(5))));
+        apply_json(
+            app,
+            r#"{"@type":"updateNewMessage","message":{"id":88,"chat_id":71,"sender_id":{"@type":"messageSenderUser","user_id":71},"is_outgoing":false,"date":1700000088,"reply_markup":{"@type":"replyMarkupForceReply","input_field_placeholder":"Name?"},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"What is your name?","entities":[]}}}}"#,
+        );
+    });
+    let waiting = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.session()
+                .is_some_and(|s| s.bots.pending_force_replies.contains_key(&KEYBOARD_BOT))
+        })
+    };
+    vcx.update(|window, cx| app.update(cx, |app, cx| app.arm_force_reply_here(window, cx)));
+    assert!(waiting(&app, vcx), "refused while a reply exists: kept");
+    app.update(vcx, |app, _| app.chat_ui.set_reply(None));
+    vcx.update(|window, cx| app.update(cx, |app, cx| app.arm_force_reply_here(window, cx)));
+    assert!(!waiting(&app, vcx), "armed once the reply is gone");
+    let reply = app.read_with(vcx, |app, _| {
+        app.chat_ui.reply().map(|r| (r.chat_id, r.message_id))
+    });
+    assert_eq!(reply, Some((KEYBOARD_BOT, MessageId(88))));
+}
+
+/// Sweep 10-092 and 10-096: a failed bot lookup goes with the trigger, and
+/// a pick with no connection leaves the typed query in the field.
+#[gpui_kit::test]
+fn inline_mode_forgets_a_failed_lookup_and_keeps_the_query_without_a_connection(
+    cx: &mut TestAppContext,
+) {
+    use quill::state::InlineBotResolve;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat(&app, vcx, GROUP);
+    app.update(vcx, |app, _| {
+        app.chat_ui.inline_bot = Some(InlineBotResolve::Failed {
+            username: "somebot".into(),
+            reason: "could not look up the bot".into(),
+        });
+    });
+    set_field(&app, vcx, "hello");
+    app.update(vcx, |app, cx| app.sync_inline_mode(cx));
+    assert!(
+        app.read_with(vcx, |app, _| app.chat_ui.inline_bot.is_none()),
+        "the trigger went away, the failure with it"
+    );
+    set_field(&app, vcx, "@somebot hi");
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.send_inline_pick(1, "r".into(), window, cx)
+        })
+    });
+    let text = app.read_with(vcx, |app, cx| app.composer.read(cx).value().to_string());
+    assert_eq!(text, "@somebot hi", "the pick had no connection to go over");
+}
+
+/// Sweep 12-A001: the render of a message edit's photo lands only while the
+/// edit still waits for it: cancelling the edit and entering it again before
+/// the render finishes leaves the new edit without the stale picture.
+#[gpui_kit::test]
+fn a_stale_render_does_not_land_in_a_new_edit_of_the_same_message(cx: &mut TestAppContext) {
+    use crate::ui::photo_editor::{EditorPurpose, PhotoEditor};
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat(&app, vcx, GROUP);
+    begin_edit(&app, vcx);
+    let (chat, message) = app.read_with(vcx, |app, _| {
+        let edit = app.chat_ui.pending_edit().expect("editing");
+        (edit.chat_id, edit.message_id)
+    });
+    let as_photo = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.update(vcx, |app, _| {
+            if let Some(edit) = app.chat_ui.pending_edit_mut() {
+                edit.media_edit.media = Some(quill::composer::EditableMedia::Photo);
+            }
+        });
+    };
+    as_photo(&app, vcx);
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            let pixels = image::RgbaImage::from_pixel(47, 13, image::Rgba([1, 2, 3, 255]));
+            app.viewer.photo_editor.open(PhotoEditor::new(
+                EditorPurpose::MessageEdit { chat, message },
+                pixels,
+            ));
+            app.save_photo_editor(window, cx);
+            app.clear_edit(window, cx);
+        });
+    });
+    begin_edit(&app, vcx);
+    as_photo(&app, vcx);
+    vcx.run_until_parked();
+    let staged = app.read_with(vcx, |app, _| {
+        app.chat_ui
+            .pending_edit()
+            .and_then(|edit| edit.media_edit.replacement.as_ref())
+            .map(|replacement| replacement.path.clone())
+    });
+    assert_eq!(staged, None, "the stale render is not the new edit's photo");
 }
