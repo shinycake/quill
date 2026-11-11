@@ -5519,6 +5519,92 @@ land and the typed form was gone.
   nobody ends `Order::Reordering` through `reorder_refused`.
   `forget_connection` uses `try_borrow_mut`.
 
+### Sweep fixes (s4-platform-1)
+
+S4 entries, each proved against the code before it was fixed.
+
+- **Agent link (01-008).** The MCP bridge's pending requests and its end are
+  one `Waiting::{Open(map), Dead}` under one lock, so a request filed after
+  the reader drained is answered at once instead of hanging (the old
+  `alive` flag and the map were two things kept in step). A failed write
+  ends the link and answers everything still waiting.
+- **Agent TDLib calls (01-015).** `PENDING` is keyed by client; the hub's
+  `Routes::unregister` (and a dead reader) calls `td::client_closed`, which
+  wakes that client's waiters as `TdError::Send` ("could not pass the
+  request") instead of at their 30 s or 300 s timeout. A call whose route is
+  already closed fails at once.
+- **Agent name (01-020).** `CallScope::drop` clears the thread's agent name.
+- **download_file copy (01-016).** The copy goes to a sibling temp file and
+  is renamed over the file `create_new` reserved; any error removes both.
+- **wait_for_message (01-017).** `target::remember_grant` caches only an
+  answer, in `wait_for_message` and in `granted_message_arrived`; a failed
+  lookup is asked again for the next message.
+- **td_call sends (01-018).** `grants.writable` runs before the user is
+  asked, so an Allow is never clicked for a send that is refused anyway.
+- **Offset tokens (01-022).** A token is bound to the account, agent and
+  method that got it (`td_offset::binding`) and refused for another.
+- **UI send (01-032, 01-033).** The composer clear after an agent send is
+  never turned away by a full bridge queue (it is the one command exempt
+  from `MAX_WAITING`), and a failed post is said in the tool's answer.
+  `UiSend` and `ComposerSent` carry the account the window showed;
+  `finish_ui_send` refuses when the active account changed, and the window
+  clears only the same account's chat.
+- **Screenshot slot (01-034, 01-058).** `shot::reserve` returns a `Slot`;
+  `Asked::give_back` and `take_screenshot` release it when the command is
+  busy, times out, is refused, or comes back without a picture.
+- **getMessage errors (01-038).** Only TDLib's "message not found" is "there
+  is no message"; other errors keep their own text, and a failed re-read after
+  a successful edit still says the edit went through.
+- **mute_chat (01-036).** The notification settings are read at the write's
+  queue turn (`change_built`) and only `mute_for` changes.
+- **Folders (01-037).** Membership is read from the lists (`Membership::
+  {Pinned, Included, Excluded, None}`): remove takes a listed chat off the
+  lists and excludes only a chat that is in by the folder's rules (as
+  Telegram Desktop does); add leaves a pinned or included chat alone.
+  `CHATLIST_INCLUDE_INVALID` is no longer reported as "folder is full".
+- **Secret codes (01-026).** On the sign-in screen a focused text field
+  (2FA password, email, name) is not fed to the code buffer and clears it.
+  The phone step still feeds it: its field takes digits only. tdesktop reads
+  the codes on the settings page of the sign-in screen, not in its fields.
+- **Launcher badge (03-069).** Linux: `Launcher::{Idle, Pending, Delivered,
+  Failed}`; the dedupe records a count only after the worker emitted it, and
+  a failed emit is asked again on the next tick. `invalidate_icon_badge`
+  (dock restart, account switch) also resets `Delivered` to `Idle`
+  (`Launcher::invalidate`), so the same count is handed over again. A failed
+  emit is still asked again every tick, not backed off: the ask is a slot
+  write and the worker's connect is the only cost.
+- **Launch lines (03-081).** macOS: the process-wide once-cells are one
+  `Slot::{Empty, Open, Forgotten}`; each account's open replaces the file to
+  write, and a log-out forgets only the account whose file is open. The
+  macOS-only code could not be built in the Linux session; the slot logic is
+  platform-neutral and tested.
+- **Tray under the lock (03-090, 07-013).** `TrayToggles::{Hidden, Shown}` is
+  the menu's toggles: left out of the SNI menu while locked, disabled in the
+  macOS/Windows menu (an item cannot be hidden there). The two tray actions
+  go through `toggle_notifications_from_tray` / `toggle_sounds_from_tray`,
+  which test `refused_while_locked`. (`main.rs` calls them; hotspot change.)
+- **Key store (04-026).** A failed `FileSecretStore::put` removes the temp
+  key file.
+- **Open-link child (04-027).** `answer_on_exit` keeps the child in a slot a
+  failed thread start can take back and hand to `wait_in_background`. When
+  that cannot start a thread either, the child is parked (`PARKED`) and
+  polled again by the next such call, not dropped as a zombie.
+- **Screen reader (04-035).** The Linux watcher is restarted by `running()`
+  after `RETRY_AFTER` once it ended (`Watch::{Idle, Watching, Ended}`; the
+  pause doubles with each watch in a row that never reached the bus, up to
+  64 times `RETRY_AFTER`, and a read resets it) and
+  clears its value when it ends.
+- **Tray registration (07-014).** The registration worker shuts a handle
+  down itself when nobody waits for it (the tray was turned off while it
+  registered); a registration lands showing what it was created with.
+- **UI driver input (07-025).** `Driver::{Idle, Running{id, waiting}}` on the
+  app: input commands run one at a time, the next starts when the running
+  one answers (every switch checked afresh).
+- **Skipped.** 04-009: a second process on the same logs folder cannot pass
+  the single-instance check (`begin_app_run` runs after it, and says so);
+  the only way past is an I/O error from the check, where TDLib's database
+  lock stops a second client as well.
+
 ### Sweep fixes (s4-media-2)
 
 - **Viewer.** A Shared Media viewer merges older pages and asks for more only
@@ -6310,7 +6396,6 @@ already fixed or cannot happen are listed at the end with the reason.
   `begin_sponsored_report`, so a second click finds no picker (test
   `a_picked_report_option_closes_the_picker_until_the_answer`).
 
-<<<<<<< HEAD
 ### Sweep fixes (s4-stories)
 
 Twenty-two S4 entries; each was proved against the code first.
@@ -6495,7 +6580,7 @@ Minor links, mini app, location and TDLib entries; each was proved first.
   fixed by 5ddbff65 (`Locating::drop` stops the manager). 09-X010's second
   half (drawing the invite box from `ChatsState::deep_link`) is left: the
   copy is only read by the box and cleared with the flow.
-=======
+
 ### Sweep fixes (s4-messages-3)
 
 Thirty-four minor entries; each was proved against the integration branch first.
@@ -6558,4 +6643,3 @@ Thirty-four minor entries; each was proved against the integration branch first.
   process-wide (`next_query_token`). 13-165: tdesktop toasts the hide at
   once (the bar is optimistic here too, with `RequestRollback`), and the
   local hidden flag is already keyed by account.
->>>>>>> origin/claude/sweep-s4-messages-3

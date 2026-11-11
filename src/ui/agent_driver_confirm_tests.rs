@@ -84,10 +84,14 @@ fn draft(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> String {
 }
 
 fn composer_sent(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, text: &str) {
+    let account = vcx
+        .update(|_, cx| app.read(cx).current_account())
+        .unwrap_or_else(AccountKey::primary);
     let reply = drive(
         app,
         vcx,
         UiCommand::ComposerSent {
+            account,
             chat_id: 11,
             text: text.into(),
         },

@@ -68,6 +68,21 @@ impl super::on_screen::Farewell for AgentUi {}
 /// Activity rows shown at first, and added by each "Show more".
 pub(super) const ACTIVITY_PAGE: usize = 50;
 
+/// Where the UI driver's input stands. Input commands run one at a time: a
+/// click of one agent landing between the characters another types would
+/// leave both answers wrong, and the app-wide refusal and send slots would
+/// be credited to the wrong command. A command that arrives while one runs
+/// waits here, in order, and starts when the running one answers (or when
+/// its task ends any other way: the next one then re-checks every switch).
+pub(crate) enum Driver {
+    Idle,
+    /// The input command with this request id runs.
+    Running {
+        id: u64,
+        waiting: std::collections::VecDeque<quill::agent::ui_driver::bridge::Pending>,
+    },
+}
+
 /// The app's side of agent access: the task that wakes the UI for agent
 /// state and requests (agents drive whichever account is on screen), how
 /// many activity rows show, and a send handed to the agent path. A
@@ -86,6 +101,8 @@ pub(crate) struct AgentBridge {
             quill::agent::ui_driver::bridge::UiSend,
         )>,
     >,
+    /// The input command that runs, and those waiting behind it.
+    pub(super) driver: Driver,
 }
 
 impl AgentBridge {
@@ -142,6 +159,7 @@ impl AgentBridge {
         Self {
             activity_shown: ACTIVITY_PAGE,
             ui_send: None,
+            driver: Driver::Idle,
         }
     }
 }

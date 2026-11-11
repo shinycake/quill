@@ -113,7 +113,7 @@ impl QuillApp {
             credentials,
             start_files: super::start_files_state::StartFilesUi::new(window, cx),
             update_pill: Default::default(),
-            agent_bridge: super::agent_state::AgentBridge::new(window, cx),
+            agent_bridge: Box::new(super::agent_state::AgentBridge::new(window, cx)),
             takeover: super::agent_takeover_state::TakeoverUi::new(window, cx),
             focus_sidebar: cx.focus_handle(),
             connect: super::connection_state::ConnectGeneration::new(),

@@ -76,6 +76,9 @@ fn trace(line: &str) {
 pub fn sync_icon_badge(session: Option<&Session>) {
     let unread = crate::notify_accounts::total_unread(session).count;
     let forced = INVALIDATED.swap(false, std::sync::atomic::Ordering::SeqCst);
+    if forced {
+        forget_pushed_badge();
+    }
     sync_with(unread, forced, push_badge);
 }
 
@@ -106,10 +109,16 @@ fn sync_with(unread: u32, forced: bool, push: impl FnOnce(u32) -> bool) {
     });
 }
 
+/// Drops the platform's own record of what it showed (Linux: the launcher
+/// worker's `Delivered` count), so a forced push is not deduped away there.
+fn forget_pushed_badge() {
+    #[cfg(all(target_os = "linux", feature = "ui"))]
+    crate::locks::lock_or_recover(&LAUNCHER).invalidate();
+}
+
 #[cfg(target_os = "linux")]
 fn push_badge(unread: u32) -> bool {
-    emit_launcher_entry(unread);
-    true
+    emit_launcher_entry(unread)
 }
 
 #[cfg(all(target_os = "macos", feature = "ui"))]
@@ -340,12 +349,73 @@ impl<T> LatestSlot<T> {
 #[cfg(all(target_os = "linux", feature = "ui"))]
 static LAUNCHER_SLOT: LatestSlot<u32> = LatestSlot::new();
 
+/// Where the count handed to the launcher worker stands. The UI's dedupe
+/// (`LAST_SENT`) may only record a count the worker emitted, so a bus that
+/// is down or a failed emit is asked again on the next tick instead of
+/// leaving the badge wrong until the count changes.
+#[cfg(any(all(target_os = "linux", feature = "ui"), test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Launcher {
+    /// Nothing handed over yet.
+    Idle,
+    /// Handed to the worker, not answered.
+    Pending(u32),
+    /// The worker emitted it.
+    Delivered(u32),
+    /// The worker could not emit it (no session bus, emit error).
+    Failed(u32),
+}
+
+#[cfg(any(all(target_os = "linux", feature = "ui"), test))]
+impl Launcher {
+    /// The UI wants `unread` shown. `Some(count)` is a count to hand to the
+    /// worker now; the answer is whether `unread` is known to be shown.
+    fn request(&mut self, unread: u32) -> (bool, Option<u32>) {
+        match *self {
+            Launcher::Delivered(shown) if shown == unread => (true, None),
+            Launcher::Pending(asked) if asked == unread => (false, None),
+            Launcher::Idle
+            | Launcher::Pending(_)
+            | Launcher::Delivered(_)
+            | Launcher::Failed(_) => {
+                *self = Launcher::Pending(unread);
+                (false, Some(unread))
+            }
+        }
+    }
+
+    /// The OS may have lost the badge: forget that anything was shown, so
+    /// the next `request` hands the count over again even if it is equal.
+    /// A count still in flight stays in flight.
+    fn invalidate(&mut self) {
+        if matches!(*self, Launcher::Delivered(_)) {
+            *self = Launcher::Idle;
+        }
+    }
+
+    /// The worker's answer for `count`; a newer request that overtook it
+    /// stays pending.
+    fn answered(&mut self, count: u32, emitted: bool) {
+        if *self == Launcher::Pending(count) {
+            *self = if emitted {
+                Launcher::Delivered(count)
+            } else {
+                Launcher::Failed(count)
+            };
+        }
+    }
+}
+
+#[cfg(all(target_os = "linux", feature = "ui"))]
+static LAUNCHER: std::sync::Mutex<Launcher> = std::sync::Mutex::new(Launcher::Idle);
+
 /// Hands the count to a worker thread that owns the session-bus connection
 /// and emits the signal, so the UI thread never waits on D-Bus. The worker
 /// starts on first use; any failure (no session bus, no listening dock) is
-/// silently ignored and retried on the next count change.
+/// ignored here and asked again on the next tick (`Launcher::Failed`).
+/// Returns whether `unread` is known to be on the dock already.
 #[cfg(target_os = "linux")]
-fn emit_launcher_entry(unread: u32) {
+fn emit_launcher_entry(unread: u32) -> bool {
     #[cfg(feature = "ui")]
     {
         use std::sync::Once;
@@ -359,7 +429,10 @@ fn emit_launcher_entry(unread: u32) {
                     if connection.is_none() {
                         connection = zbus::blocking::Connection::session().ok();
                     }
-                    let Some(conn) = &connection else { continue };
+                    let Some(conn) = &connection else {
+                        crate::locks::lock_or_recover(&LAUNCHER).answered(count, false);
+                        continue;
+                    };
                     let mut props: std::collections::HashMap<&str, zbus::zvariant::Value> =
                         std::collections::HashMap::new();
                     props.insert("count", zbus::zvariant::Value::from(i64::from(count)));
@@ -374,13 +447,21 @@ fn emit_launcher_entry(unread: u32) {
                     if sent.is_err() {
                         connection = None;
                     }
+                    crate::locks::lock_or_recover(&LAUNCHER).answered(count, sent.is_ok());
                 }
             });
         });
-        LAUNCHER_SLOT.put(unread);
+        let (shown, hand_over) = crate::locks::lock_or_recover(&LAUNCHER).request(unread);
+        if let Some(count) = hand_over {
+            LAUNCHER_SLOT.put(count);
+        }
+        shown
     }
     #[cfg(not(feature = "ui"))]
-    let _ = unread;
+    {
+        let _ = unread;
+        true
+    }
 }
 
 #[cfg(test)]
@@ -401,6 +482,46 @@ mod tests {
         assert_eq!(pushes.get(), 2, "re-activation pushes the same count again");
         sync_with(4, false, push);
         assert_eq!(pushes.get(), 2);
+    }
+
+    #[test]
+    fn a_count_is_shown_only_once_the_worker_emitted_it() {
+        let mut launcher = Launcher::Idle;
+        assert_eq!(launcher.request(3), (false, Some(3)), "handed over");
+        assert_eq!(
+            launcher.request(3),
+            (false, None),
+            "in flight: not asked twice"
+        );
+        launcher.answered(3, false);
+        assert_eq!(launcher.request(3), (false, Some(3)), "failed: asked again");
+        launcher.answered(3, true);
+        assert_eq!(launcher.request(3), (true, None), "emitted: known shown");
+        assert_eq!(
+            launcher.request(0),
+            (false, Some(0)),
+            "a new count goes out"
+        );
+    }
+
+    #[test]
+    fn an_invalidated_badge_is_handed_over_again_at_the_same_count() {
+        let mut launcher = Launcher::Idle;
+        let _ = launcher.request(3);
+        launcher.answered(3, true);
+        launcher.invalidate();
+        assert_eq!(launcher.request(3), (false, Some(3)));
+    }
+
+    #[test]
+    fn an_old_answer_does_not_settle_a_newer_request() {
+        let mut launcher = Launcher::Idle;
+        let _ = launcher.request(1);
+        let _ = launcher.request(2);
+        launcher.answered(1, true);
+        assert_eq!(launcher.request(2), (false, None), "2 is still pending");
+        launcher.answered(2, true);
+        assert_eq!(launcher.request(2), (true, None));
     }
 
     #[test]

@@ -60,6 +60,7 @@ fn a_send_left_by_an_earlier_command_is_not_the_next_ones(cx: &mut TestAppContex
             app.agent_bridge.ui_send = Some(Box::new((
                 epoch,
                 UiSend {
+                    account: quill::ids::AccountKey("a".into()),
                     chat_id: 11,
                     chat_title: "chat 11".into(),
                     text: "left behind".into(),
