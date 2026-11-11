@@ -125,3 +125,22 @@ The whole re-sweep register is `register-r2.jsonl` (1,133 entries); line numbers
 Each r2 bundle holds the S2 and confirmed S3 entries for its files. While you are in a file, also fix any other `register-r2.jsonl`
 entry for that same file when the fix is local, and list it in your table.
 Do not spawn subagents or run anything in the background except the gate command with its Monitor wait: ending your turn ends your session.
+
+## File-complete rule (round 2, owner's order)
+
+A file you touch must end with **zero findings**. Your bundle lists every `register-r2.jsonl` entry for its files, all
+severities (S2 to S4, IS, crash, rename), confirmed and plausible. For each entry: prove it false (read the readers and
+writers, say why in one line) or fix it. "Minor", "works today" and "touches many sites" are not reasons.
+
+When every entry is done, review each file in your bundle again from the top as a fresh sweep reviewer would, with the
+criteria in `RESWEEP-BRIEF.md` on branch `sweep/resweep-plan` (implicit stages, renames, answers not matched by
+RequestId, detached tasks, timers running while hidden, re-asks from render, crash risks, unconfirmed baseline lines).
+Fix anything new you find and add it to your table as `new-NN`. Your final message lists each file with "0 findings left".
+
+Lessons from round 1, where a re-sweep still found 1,133 entries:
+- 205 were renames: a bool turned into a two-variant enum that still sits beside the real stage. Fold the data into
+  the one stage value; delete the side field.
+- Crash risks count: replace `unwrap`/`expect`/indexing with `get`/`let else`, and non-test `RefCell` borrows with
+  `try_borrow` or a design that does not need the cell.
+- A timer or watcher held as a detached task cannot be cancelled: keep the `Task` in the stage that owns it.
+- Remove a field from `scripts/implicit-state-baseline.txt` when you convert it; never add one.
