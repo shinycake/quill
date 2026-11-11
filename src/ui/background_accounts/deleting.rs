@@ -312,6 +312,8 @@ impl QuillApp {
                         for key in &keys {
                             this.background.deleting.remove(key);
                         }
+                        // Work waiting to open these folders may go now.
+                        this.settle_close_waiters(cx);
                         done(this, Deletion::Done { error }, cx);
                         cx.notify();
                     });

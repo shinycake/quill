@@ -7,8 +7,7 @@ use crate::business_settings::BusinessSettingKind;
 use crate::ids::RequestId;
 use crate::state::fetch::Fetch;
 use crate::state::{
-    BotLookup, BotLookupPart, ChatLinkOp, ChatLinkSave, RequestPurpose, RequestRollback,
-    SettingsPurpose,
+    BotLookup, BotLookupPart, ChatLinkOp, RequestPurpose, RequestRollback, SettingsPurpose,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -91,7 +90,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         sent.map(|_| ())
     }
 
-    pub fn create_chat_link(&mut self, markup: &str, title: &str) -> Result<(), ConnectSendError> {
+    /// Create a link; the request whose answer the link box waits for.
+    pub fn create_chat_link(
+        &mut self,
+        markup: &str,
+        title: &str,
+    ) -> Result<RequestId, ConnectSendError> {
         let count = self
             .session
             .settings
@@ -103,14 +107,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.settings.business.error = None;
-        let extra = self.send_business_extra(
+        self.send_business_extra(
             SettingsPurpose::MutateChatLink {
                 op: ChatLinkOp::Create,
             },
             |extra| links::create_link_request(extra, markup, title),
-        )?;
-        self.session.settings.business_extra.chat_link_save = ChatLinkSave::Saving(extra);
-        Ok(())
+        )
     }
 
     pub fn edit_chat_link(
@@ -118,16 +120,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         link: &str,
         markup: &str,
         title: &str,
-    ) -> Result<(), ConnectSendError> {
+    ) -> Result<RequestId, ConnectSendError> {
         self.session.settings.business.error = None;
-        let extra = self.send_business_extra(
+        self.send_business_extra(
             SettingsPurpose::MutateChatLink {
                 op: ChatLinkOp::Edit,
             },
             |extra| links::edit_link_request(extra, link, markup, title),
-        )?;
-        self.session.settings.business_extra.chat_link_save = ChatLinkSave::Saving(extra);
-        Ok(())
+        )
     }
 
     /// Deletes a link and drops its row at once; a refused delete puts the

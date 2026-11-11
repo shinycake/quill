@@ -19,8 +19,6 @@ use quill::state::{ActiveCall, Session};
 use quill::telegram::envelope::{
     CallDiscardReason, CallState, ChatKind, MessageContent, ParsedMessage, call_entry_label,
 };
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -359,30 +357,37 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(call_id) = self.shown_call_summary_id() else {
+        let Some(summary) = self
+            .session_mut()
+            .and_then(|session| session.calls.summary.as_mut())
+            .filter(|summary| summary.rating.is_open())
+        else {
             return;
         };
-        self.dialogs.rating_detail = Some(RatingDetail {
-            call_id,
-            stars: rating,
-            problems: [false; CALL_PROBLEMS.len()],
-        });
+        summary.rating = quill::state::CallRating::Editing(quill::state::RatingDraft::new(rating));
         self.dialogs.rating_comment_input.update(cx, |input, cx| {
             input.set_value("", window, cx);
         });
         cx.notify();
     }
 
-    /// The call whose end summary is shown.
-    pub(super) fn shown_call_summary_id(&self) -> Option<i32> {
-        self.session()
-            .and_then(|session| session.calls.summary.as_ref())
-            .map(|summary| summary.call_id)
+    /// The draft of the summary shown, for the editor's edits.
+    fn shown_rating_draft_mut(&mut self) -> Option<&mut quill::state::RatingDraft> {
+        self.session_mut()
+            .and_then(|session| session.calls.summary.as_mut())
+            .and_then(|summary| summary.rating.draft_mut())
+    }
+
+    pub(super) fn set_rating_stars(&mut self, stars: i32, cx: &mut Context<Self>) {
+        if let Some(draft) = self.shown_rating_draft_mut() {
+            draft.stars = stars;
+        }
+        cx.notify();
     }
 
     pub(super) fn toggle_rating_problem(&mut self, index: usize, cx: &mut Context<Self>) {
-        if let Some(detail) = self.dialogs.rating_detail.as_mut()
-            && let Some(problem) = detail.problems.get_mut(index)
+        if let Some(draft) = self.shown_rating_draft_mut()
+            && let Some(problem) = draft.problems.get_mut(index)
         {
             *problem = !*problem;
         }
@@ -393,14 +398,15 @@ impl QuillApp {
     /// 1.8.67 :14234). Sends only from the detail editor's Submit
     /// button — `open_rating_detail` never sends on its own.
     pub(super) fn submit_call_rating(&mut self, cx: &mut Context<Self>) {
-        let detail = match self.dialogs.rating_detail.take() {
-            // Only the call it was drafted for: the summary shown may be
-            // a later call's by now.
-            Some(detail) if Some(detail.call_id) == self.shown_call_summary_id() => detail,
-            _ => {
-                cx.notify();
-                return;
-            }
+        // The draft is the shown summary's own (its rating stage), so it
+        // never submits for another call.
+        let Some(detail) = self
+            .session()
+            .and_then(|session| session.calls.summary.as_ref())
+            .and_then(|summary| summary.rating.draft().cloned())
+        else {
+            cx.notify();
+            return;
         };
         let comment = self
             .dialogs
@@ -414,17 +420,15 @@ impl QuillApp {
             .filter(|(index, _)| detail.problems.get(*index).copied().unwrap_or(false))
             .map(|(_, (constructor, _))| *constructor)
             .collect();
-        let stars = detail.stars;
         if let Some(live) = self.live.as_mut() {
             // The card says thanks once TDLib answers ok; a failure
-            // brings the card back with its error.
+            // brings the card back with its error and the draft. Not sent:
+            // the draft stays in its stage to submit again.
             if live
                 .driver
-                .send_call_rating(stars, &comment, &problems)
+                .send_call_rating(&detail, &comment, &problems)
                 .is_err()
             {
-                // Not sent: the draft is still there to submit again.
-                self.dialogs.rating_detail = Some(detail);
                 self.set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_RATING)));
             }
         } else if self.demo_session.is_some() {
@@ -485,10 +489,14 @@ impl QuillApp {
     /// Phase C1: dismiss the call-end screen (rating skipped or
     /// acknowledged).
     pub(super) fn dismiss_call_summary(&mut self, cx: &mut Context<Self>) {
-        // The rating draft was this summary's, and so was the window that
-        // pressed Call for it.
-        self.dialogs.rating_detail = None;
+        // The window that pressed Call for it was this summary's too.
         self.call_boxes.card_window = None;
+        self.drop_call_summary();
+        cx.notify();
+    }
+
+    /// The summary goes, and its rating draft with it.
+    pub(super) fn drop_call_summary(&mut self) {
         for session in self
             .live
             .as_mut()
@@ -498,7 +506,6 @@ impl QuillApp {
         {
             session.calls.summary = None;
         }
-        cx.notify();
     }
 
     /// Phase C1: dismiss a shown call-request error.
@@ -623,17 +630,6 @@ impl QuillApp {
             } else {
                 "call"
             };
-            let body = div()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tr(keys::Q_OPS_YOU_ASKED_TO_CONFIRM_BEFORE)),
-                )
-                .into_any_element();
             let footer = div()
                 .flex()
                 .justify_end()
@@ -665,16 +661,18 @@ impl QuillApp {
                     keys::Q_OPS_START_WITH,
                     &[("kind", kind), ("name", &name.to_string())],
                 )))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::scrollable_dialog_content(
+                    move |content, _, cx| {
+                        content.child(
+                            div().flex().flex_col().gap_2().child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(tr(keys::Q_OPS_YOU_ASKED_TO_CONFIRM_BEFORE)),
+                            ),
+                        )
+                    },
+                ))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -789,18 +787,6 @@ impl QuillApp {
                     .title(crate::ui::shell::dialog_title(tr(keys::CALL_INCOMING)))
                     .on_close(on_close.clone());
             };
-            let body = div()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .child(div().child(caller))
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tr(keys::Q_OPS_YOURE_ALREADY_IN_A_CALL)),
-                )
-                .into_any_element();
             let footer = div()
                 .flex()
                 .justify_end()
@@ -825,16 +811,23 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(title))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::scrollable_dialog_content(
+                    move |content, _, cx| {
+                        content.child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_2()
+                                .child(div().child(caller.clone()))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(tr(keys::Q_OPS_YOURE_ALREADY_IN_A_CALL)),
+                                ),
+                        )
+                    },
+                ))
                 .footer(footer)
                 .on_close(on_close)
         })

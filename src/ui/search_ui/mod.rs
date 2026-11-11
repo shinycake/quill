@@ -362,7 +362,7 @@ impl QuillApp {
         if self.dismiss_topmost_layer(window, cx) {
             return;
         }
-        if self.settings.open && self.preferences.keybinding.capture.waiting().is_none() {
+        if self.settings.open && self.preferences.keybinding.waiting().is_none() {
             self.settings_escape(window, cx);
         } else {
             self.escape_to_chat_list(window, cx);

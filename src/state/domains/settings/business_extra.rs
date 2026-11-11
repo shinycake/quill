@@ -26,17 +26,17 @@ pub enum ChatLinkOp {
     Delete,
 }
 
-/// The save of the link box, from the send to TDLib's answer. The box stays
-/// open on its draft until it says `Saved`; a refusal goes back to `Idle`
-/// with the error line, so the draft can be fixed and sent again.
+/// The latest answer to a link create or edit, with the request it answers.
+/// The link box that sent the request waits for exactly that id
+/// (`LinkEditDraft`), so an answer for a box that was closed matches
+/// nothing and needs no reset: the next answer replaces it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum ChatLinkSave {
+pub enum ChatLinkAnswer {
     #[default]
-    Idle,
-    /// A create or edit is out; only its own answer ends it.
-    Saving(RequestId),
-    /// The answer arrived; the box goes back to the list and resets this.
-    Saved,
+    None,
+    Saved(RequestId),
+    /// Refused; the error line is in the Business screens' error.
+    Refused(RequestId),
 }
 
 /// The bot lookup of the chatbots screen for one typed username.
@@ -80,7 +80,7 @@ pub struct BusinessExtraState {
     /// `getBusinessChatLinks`, newest first. A failed load keeps the row
     /// list it replaced and draws a Retry.
     pub chat_links: Fetch<Vec<ChatLink>>,
-    pub chat_link_save: ChatLinkSave,
+    pub chat_link_answer: ChatLinkAnswer,
     /// `getBusinessConnectedBot`: ready with `None` when no bot is
     /// connected.
     pub connected_bot: Fetch<Option<ConnectedBot>>,
@@ -136,10 +136,8 @@ impl Session {
     /// first (tdesktop `prependRow`).
     pub(crate) fn apply_chat_link(&mut self, link: ChatLink, extra: Option<RequestId>) {
         let state = &mut self.settings.business_extra;
-        if let Some(id) = extra
-            && state.chat_link_save == ChatLinkSave::Saving(id)
-        {
-            state.chat_link_save = ChatLinkSave::Saved;
+        if let Some(id) = extra {
+            state.chat_link_answer = ChatLinkAnswer::Saved(id);
         }
         state.chat_links.insert_data_if_missing(Vec::new);
         let Some(list) = state.chat_links.data_mut() else {
@@ -274,9 +272,9 @@ impl Session {
             }
             SettingsPurpose::MutateChatLink { op } => {
                 if op != ChatLinkOp::Delete
-                    && extra_id.is_some_and(|id| extra.chat_link_save == ChatLinkSave::Saving(id))
+                    && let Some(id) = extra_id
                 {
-                    extra.chat_link_save = ChatLinkSave::Idle;
+                    extra.chat_link_answer = ChatLinkAnswer::Refused(id);
                 }
                 (
                     BusinessArea::ChatLinks,

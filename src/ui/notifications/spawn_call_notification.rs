@@ -11,7 +11,7 @@ impl QuillApp {
         account: &AccountKey,
         notification: quill::notify_call::CallNotification,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         if quill::notify::current_backend() == quill::notify::NotifyBackend::Native {
             let account = account.0.as_str();
             cx.show_system_notification(SystemNotification {
@@ -27,16 +27,16 @@ impl QuillApp {
                     })
                     .collect(),
             });
-            return;
+            return true;
         }
         let Some(command) = quill::notify_call::build_call_command(&notification) else {
-            return;
+            return false;
         };
         let Some(slot) = quill::thread_guard::InflightSlot::acquire(
             &self.delivery.notify_inflight,
             MAX_OS_NOTIFICATION_THREADS,
         ) else {
-            return;
+            return false;
         };
         let clicks = self.calls.notify_clicks.clone();
         let call_id = notification.call_id;
@@ -57,7 +57,7 @@ impl QuillApp {
             }
         });
         // A thread that never started drops `slot` with its closure.
-        drop(spawn);
+        spawn.is_ok()
     }
 
     /// A notification was clicked or one of its buttons pressed. "Mark as

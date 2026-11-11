@@ -390,7 +390,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// (`callProblemEcho`, …).
     pub fn send_call_rating(
         &mut self,
-        rating: i32,
+        draft: &crate::state::RatingDraft,
         comment: &str,
         problems: &[&str],
     ) -> Result<RequestId, ConnectSendError> {
@@ -403,13 +403,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         let extra = self.session.request(RequestPurpose::SendCallRating, None);
         if let Err(err) = self.sender.send_json(&send_call_rating_detail(
-            extra, call_id, rating, comment, problems,
+            extra,
+            call_id,
+            draft.stars,
+            comment,
+            problems,
         )) {
             self.session.requests.take(extra);
             return Err(err);
         }
         if let Some(summary) = self.session.calls.summary.as_mut() {
-            summary.rating = crate::state::CallRating::Sending(extra);
+            summary.rating = crate::state::CallRating::Sending {
+                request: extra,
+                draft: draft.clone(),
+            };
         }
         Ok(extra)
     }

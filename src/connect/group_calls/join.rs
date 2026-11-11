@@ -155,6 +155,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Calls(CallsPurpose::JoinVideoChat { group_call_id }),
             None,
         );
+        if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
+            call.transport.begin_join(extra);
+        }
         self.start_group_offer(group_call_id, extra, OfferSend::Join);
         extra
     }

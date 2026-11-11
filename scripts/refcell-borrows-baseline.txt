@@ -13,8 +13,6 @@ QuillApp::arm_send_fly::source.borrow_mut 1
 QuillApp::build_add_special_dialog::body.borrow_mut 1
 QuillApp::build_archive_settings_dialog::body.borrow_mut 1
 QuillApp::build_business_dialog::content.borrow_mut 1
-QuillApp::build_call_confirm_dialog::body.borrow_mut 1
-QuillApp::build_call_swap_dialog::body.borrow_mut 1
 QuillApp::build_cancel_edit_dialog::body.borrow_mut 1
 QuillApp::build_create_sticker_dialog::body.borrow_mut 1
 QuillApp::build_direct_messages_dialog::body.borrow_mut 1
@@ -61,7 +59,6 @@ QuillApp::build_stickers_manager_dialog::body.borrow_mut 1
 QuillApp::build_suggest_price_dialog::body.borrow_mut 1
 QuillApp::build_suggest_time_dialog::body.borrow_mut 1
 QuillApp::build_text_box::body.borrow_mut 1
-QuillApp::build_theme_editor_dialog::body.borrow_mut 1
 QuillApp::build_twofa_dialog::body.borrow_mut 1
 QuillApp::build_wallet_notice_dialog::body.borrow_mut 1
 QuillApp::build_web_app_confirm_dialog::body.borrow_mut 1
@@ -98,7 +95,6 @@ RichPreview::blocks::parsed.borrow_mut 1
 RunningResize::drop::resize.borrow_mut 1
 SelectableRichText::paint::owners.borrow 1
 SelectableRichText::paint::owners.borrow_mut 1
-StreamSound::start_with::slot.borrow 1
 WindowZoom::fire_resize::resize.borrow_mut 1
 WindowZoom::register::list.borrow_mut 1
 ZoomWindow::on_resize::resize.borrow_mut 1
@@ -106,7 +102,6 @@ active::a.borrow 1
 anchor::anchors.borrow 1
 anchor::seen.borrow 1
 anchor_tracker::anchors.borrow_mut 1
-apply_custom_bindings::key_bindings.borrow 1
 arm::slot.borrow_mut 1
 begin_pass::anchors.borrow_mut 1
 build_community_hub_dialog::body.borrow_mut 1
@@ -164,14 +159,12 @@ reverse_geocode::pending.borrow_mut 1
 see::seen.borrow_mut 1
 set_display::displays.borrow_mut 1
 set_zoom::list.borrow_mut 1
-share_output_with_video::slot.borrow_mut 1
 start_sweeper::seen.borrow_mut 1
 sync::applied.borrow_mut 2
 take_text_painted::painted.borrow_mut 1
 take_unshowable::retired.borrow_mut 1
 tracker::played.borrow 1
 tracker::seen.borrow_mut 1
-video_output_ready::slot.borrow 1
 wake::retired.borrow 1
 wake::slot.borrow_mut 1
 watch_gpu_loss::slot.borrow_mut 1

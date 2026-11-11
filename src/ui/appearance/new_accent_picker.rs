@@ -2,7 +2,63 @@
 
 use super::*;
 use crate::ui::status_note::StatusNote;
+use gpui_kit::component::color_picker::ColorSelect;
 use quill::lang::{keys, tr};
+
+/// The re-reads of the link handler after "Make Quill the default", while
+/// the system's confirmation is awaited. The task is owned here: another
+/// click replaces it, leaving the System page (or closing Settings) drops
+/// it, and it ends by itself after the last re-read.
+#[derive(Default)]
+pub(in crate::ui) enum LinkHandlerRecheck {
+    #[default]
+    Idle,
+    Rechecking {
+        _task: Task<()>,
+    },
+}
+
+/// The Custom accent field. Its value follows the accent the applied theme
+/// has: a theme or accent change elsewhere (the other theme's tile, a preset
+/// circle) moves the field when it is drawn, without a change event.
+#[derive(IntoElement)]
+pub(in crate::ui) struct AccentSelect {
+    picker: Entity<ColorPickerState>,
+    accent: Option<u32>,
+    featured: Vec<Hsla>,
+}
+
+impl AccentSelect {
+    pub(in crate::ui) fn new(
+        picker: &Entity<ColorPickerState>,
+        accent: Option<u32>,
+        featured: Vec<Hsla>,
+    ) -> Self {
+        Self {
+            picker: picker.clone(),
+            accent,
+            featured,
+        }
+    }
+}
+
+impl RenderOnce for AccentSelect {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let shown = self.picker.read(cx).value().map(accent_rgb_from);
+        if shown != self.accent {
+            let accent = self.accent;
+            self.picker.update(cx, |picker, cx| match accent {
+                Some(color) => picker.set_value(Hsla::from(rgb(color)), window, cx),
+                None => picker.clear_value(window, cx),
+            });
+        }
+        ColorSelect::new(&self.picker)
+            .featured_colors(self.featured)
+            .placeholder(tr(keys::Q_MISC_CUSTOM))
+            .accessibility_label(tr(keys::Q_MISC_CUSTOM_ACCENT_COLOR))
+            .w(px(150.))
+    }
+}
 
 impl QuillApp {
     /// The custom accent field's state, showing the old single
@@ -348,6 +404,27 @@ impl QuillApp {
         self.setting_spot(&["system.launch_at_login"], row, cx)
     }
 
+    /// Re-read the handler 1, 3 and 8 s from now (so the status catches up
+    /// with the system confirmation); a second call starts over.
+    fn recheck_link_handler(&mut self, cx: &mut Context<Self>) {
+        let task = cx.spawn(async move |this, cx| {
+            for wait in [1u64, 2, 5] {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_secs(wait))
+                    .await;
+                quill::link_handler::read_now();
+                let Ok(()) = this.update(cx, |_, cx| cx.notify()) else {
+                    return;
+                };
+            }
+            let _ = this.update(cx, |this, cx| {
+                this.preferences.link_handler_recheck = LinkHandlerRecheck::Idle;
+                cx.notify();
+            });
+        });
+        self.preferences.link_handler_recheck = LinkHandlerRecheck::Rechecking { _task: task };
+    }
+
     /// The handler is read on a thread (Linux): draw again when it lands.
     fn repaint_when_link_handler_read(&mut self, cx: &mut Context<Self>) {
         let (landed, wait) = futures_channel::oneshot::channel::<()>();
@@ -408,16 +485,7 @@ impl QuillApp {
                     }
                     // The system confirmation is asynchronous: re-read the
                     // handler a few times so the status catches up.
-                    for secs in [1u64, 3, 8] {
-                        cx.spawn(async move |this, cx| {
-                            cx.background_executor()
-                                .timer(std::time::Duration::from_secs(secs))
-                                .await;
-                            link_handler::read_now();
-                            let _ = this.update(cx, |_, cx| cx.notify());
-                        })
-                        .detach();
-                    }
+                    this.recheck_link_handler(cx);
                     cx.notify();
                 }))
                 .into_any_element(),

@@ -65,6 +65,7 @@ mod history_prune_answers;
 mod history_window;
 mod inline_gif_downloads;
 mod inline_members;
+mod installed_backgrounds;
 mod invite_admin;
 mod invoice_checkout;
 mod language;

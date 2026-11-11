@@ -135,6 +135,8 @@ pub(crate) struct BackgroundAccounts {
     /// Clients sent `close` and drained a little per poll (`closing`):
     /// switching, signing out or logging out never waits on TDLib.
     pub(super) closing: ClosingSet,
+    /// The work waiting on those closes (`closing::after_closing`).
+    close_waiters: closing::CloseWaiters,
     /// When a client that died or failed to start starts again.
     restarts: restart::Restarts,
     /// The quit observer that closes every client together.
@@ -164,6 +166,7 @@ impl BackgroundAccounts {
             attention: false,
             ringing: None,
             closing: ClosingSet::new(),
+            close_waiters: Default::default(),
             restarts: restart::Restarts::default(),
             quit_close: None,
             deleting: HashSet::new(),
@@ -515,6 +518,8 @@ impl QuillApp {
                             return None;
                         }
                         let work_left = this.poll_background(cx);
+                        // A close, a start or a preparation may have ended.
+                        this.settle_close_waiters(cx);
                         if this.background.has_work() {
                             Some(PassEnd {
                                 work_left,

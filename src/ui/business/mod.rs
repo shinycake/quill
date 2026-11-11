@@ -31,8 +31,8 @@ mod tests;
 
 pub(crate) use state::{
     AwayDraft, BotLink, BotNotice, BusinessDialog, ChatbotDraft, DayRow, GreetingDraft, HoursDraft,
-    LinkEditDraft, LocationDraft, MessageKind, PickerDraft, Recipients, ScheduleChoice,
-    StartPageDraft, View,
+    LinkEditDraft, LinkSave, LocationDraft, LookupDebounce, MessageKind, PickerDraft, Recipients,
+    ScheduleChoice, StartPageDraft, View,
 };
 
 use super::app::QuillApp;
@@ -107,7 +107,6 @@ impl QuillApp {
             line: state::Line::None,
         });
         self.open_box(crate::ui::shell::DialogKind::Business);
-        self.reset_link_save();
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.business.error = None;
             let _ = live.driver.ensure_quick_reply_shortcuts();
@@ -122,9 +121,7 @@ impl QuillApp {
 
     pub(super) fn close_business(&mut self, cx: &mut Context<Self>) {
         if let Some(closed) = self.dialogs.business_dialog.take() {
-            if closed.view() == View::StickerPick {
-                self.close_start_page_stickers();
-            }
+            self.sticker_pick_left(closed.view(), None);
             cx.notify();
         }
     }
@@ -212,14 +209,9 @@ impl QuillApp {
 
     /// Show another screen, building its draft from the saved values.
     pub(super) fn business_go(&mut self, view: View, window: &mut Window, cx: &mut Context<Self>) {
-        if self.business_view() == Some(View::StickerPick) && view != View::StickerPick {
-            self.close_start_page_stickers();
-        }
         // The screen changes first: a section keeps its draft when it is
         // the one open, and a new one waits for it (`missing`).
-        if let Some(d) = self.business_mut() {
-            d.screen.go(view);
-        }
+        self.business_show(view);
         let missing = self.business_draft_missing(view);
         match view {
             View::Greeting | View::Away | View::Location | View::StartPage | View::Hours => {
@@ -253,7 +245,6 @@ impl QuillApp {
                 if let Some(d) = self.business_mut() {
                     d.screen.put_chatbot(draft);
                 }
-                self.business_bot_watch(window, cx);
             }
             _ => {}
         }
@@ -318,6 +309,9 @@ impl QuillApp {
         };
         if self.business_waits_for_info(view) && self.business_fill_draft(view, window, cx) {
             cx.notify();
+        }
+        if view == View::Chatbots {
+            self.business_bot_upkeep(cx);
         }
         self.business_link_save_upkeep(window, cx);
     }

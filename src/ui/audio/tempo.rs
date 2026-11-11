@@ -50,6 +50,65 @@ pub(super) fn clamp_speed(speed: f64) -> f32 {
     (speed as f32).clamp(MIN_SPEED, MAX_SPEED)
 }
 
+/// Where the stretcher is: whether a slice was taken yet and whether the
+/// input has ended, as one value. Every way in goes through its methods, so
+/// the two facts cannot come apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Stretch {
+    /// No slice taken yet; the input has more.
+    Starting,
+    /// No slice taken yet; the input ended (a track shorter than a slice).
+    StartingInputEnded,
+    /// The previous slice started at `prev` (input frames); the input has
+    /// more.
+    Streaming { prev: usize },
+    /// The previous slice started at `prev` and the input ended: the
+    /// remaining slices drain.
+    Draining { prev: usize },
+    /// The held-back half block was flushed: no more output.
+    Done,
+}
+
+impl Stretch {
+    fn prev(self) -> Option<usize> {
+        match self {
+            Self::Streaming { prev } | Self::Draining { prev } => Some(prev),
+            Self::Starting | Self::StartingInputEnded | Self::Done => None,
+        }
+    }
+
+    fn input_ended(self) -> bool {
+        matches!(
+            self,
+            Self::StartingInputEnded | Self::Draining { .. } | Self::Done
+        )
+    }
+
+    fn end_input(&mut self) {
+        *self = match *self {
+            Self::Starting => Self::StartingInputEnded,
+            Self::Streaming { prev } => Self::Draining { prev },
+            other => other,
+        };
+    }
+
+    /// A slice starting at `start` was taken.
+    fn took(&mut self, start: usize) {
+        *self = if self.input_ended() {
+            Self::Draining { prev: start }
+        } else {
+            Self::Streaming { prev: start }
+        };
+    }
+
+    /// The input ended and the last slice is out: the stretch is over.
+    fn finish(&mut self) {
+        if matches!(self, Self::Draining { .. }) {
+            *self = Self::Done;
+        }
+    }
+}
+
 pub(super) struct Tempo<S: Source> {
     inner: S,
     speed: SharedSpeed,
@@ -62,16 +121,15 @@ pub(super) struct Tempo<S: Source> {
     /// Interleaved input from frame `input_base` on.
     input: Vec<f32>,
     input_base: usize,
-    inner_done: bool,
     /// Overlap accumulator (`n` frames).
     acc: Vec<f32>,
     out: Vec<f32>,
     out_pos: usize,
     /// Nominal start of the next slice, in input frames.
     nominal: f64,
-    /// Start of the previous slice.
-    prev: Option<usize>,
-    done: bool,
+    /// Whether a slice was taken, where the previous one started, and
+    /// whether the input ended.
+    stretch: Stretch,
     /// Where the frames read but not yet played are told
     /// ([`Self::reporting_lag`]).
     lag: Option<Arc<AtomicU64>>,
@@ -99,13 +157,11 @@ impl<S: Source> Tempo<S> {
             window,
             input: Vec::new(),
             input_base: 0,
-            inner_done: false,
             acc: vec![0.0; n * ch],
             out: Vec::new(),
             out_pos: 0,
             nominal: 0.0,
-            prev: None,
-            done: false,
+            stretch: Stretch::Starting,
             lag: None,
             #[cfg(test)]
             tried: 0,
@@ -130,13 +186,11 @@ impl<S: Source> Tempo<S> {
     fn reset(&mut self) {
         self.input.clear();
         self.input_base = 0;
-        self.inner_done = false;
         self.acc.fill(0.0);
         self.out.clear();
         self.out_pos = 0;
         self.nominal = 0.0;
-        self.prev = None;
-        self.done = false;
+        self.stretch = Stretch::Starting;
         self.report_playing(0);
     }
 
@@ -146,20 +200,20 @@ impl<S: Source> Tempo<S> {
 
     /// Pull input until frame `frame` (exclusive) is buffered or it ends.
     fn fill_to(&mut self, frame: usize) {
-        while !self.inner_done && self.input_end() < frame {
+        while !self.stretch.input_ended() && self.input_end() < frame {
             let want = (frame - self.input_end()).max(1024) * self.ch;
             for _ in 0..want {
                 match self.inner.next() {
                     Some(sample) => self.input.push(sample),
                     None => {
-                        self.inner_done = true;
+                        self.stretch.end_input();
                         break;
                     }
                 }
             }
             // Keep whole frames.
             let extra = self.input.len() % self.ch;
-            if extra != 0 && self.inner_done {
+            if extra != 0 && self.stretch.input_ended() {
                 self.input.truncate(self.input.len() - extra);
             }
         }
@@ -193,7 +247,7 @@ impl<S: Source> Tempo<S> {
 
     /// Choose where the next slice starts.
     fn pick(&mut self, center: usize) -> usize {
-        let Some(prev) = self.prev else {
+        let Some(prev) = self.stretch.prev() else {
             return 0;
         };
         let natural = prev + self.hs;
@@ -247,22 +301,24 @@ impl<S: Source> Tempo<S> {
 
     /// Produce the next `hs` output frames into `out`; false at the end.
     fn step(&mut self) -> bool {
-        if self.done {
+        if self.stretch == Stretch::Done {
             return false;
         }
         let speed = f64::from(self.speed.get());
         let center = self.nominal.round() as usize;
         self.fill_to(center + self.n);
-        if self.prev.is_some() && self.inner_done && center >= self.input_end() {
+        if let Stretch::Draining { prev } = self.stretch
+            && center >= self.input_end()
+        {
             // Past the input: flush the held-back half block and stop.
-            self.done = true;
+            self.stretch.finish();
             self.emit_front();
-            self.report_playing(self.prev.map_or(0, |prev| prev + self.hs));
+            self.report_playing(prev + self.hs);
             return true;
         }
         let start = self.pick(center);
         self.fill_to(start + self.n);
-        let first = self.prev.is_none();
+        let first = self.stretch.prev().is_none();
         for i in 0..self.n {
             let w = if first && i < self.hs {
                 1.0
@@ -276,7 +332,7 @@ impl<S: Source> Tempo<S> {
                 }
             }
         }
-        self.prev = Some(start);
+        self.stretch.took(start);
         self.nominal += self.hs as f64 * speed;
         // Frames before the earliest next search/template position are spent.
         let keep_from =

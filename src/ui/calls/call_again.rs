@@ -1,5 +1,6 @@
 //! Methods moved out of `calls.rs` to keep files under 1000 lines.
 
+use super::dial::SummaryAfterDial;
 use super::*;
 use crate::ui::bidi_line::name_line;
 use crate::ui::chat_row::chat_avatar;
@@ -20,12 +21,12 @@ impl QuillApp {
     /// closed, or not drawn under the lock.
     pub(in crate::ui) fn redial(&mut self, user_id: i64, is_video: bool, cx: &mut Context<Self>) {
         // The summary (its rating and uploads) goes only once the dial is
-        // accepted; a refusal leaves it to be answered.
+        // accepted (`send_dial`, after the microphone prompt); a refusal
+        // leaves it to be answered.
         if self.refuse_without_call_engine(cx) || self.refuse_offline_call(cx) {
             return;
         }
-        self.dismiss_call_summary(cx);
-        self.dial_user(user_id, is_video, cx);
+        self.dial_user_with(user_id, is_video, SummaryAfterDial::Dismiss, cx);
     }
 
     /// Offline: a call cannot start, and the status line says so.

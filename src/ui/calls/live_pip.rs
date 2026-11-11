@@ -51,23 +51,26 @@ pub(crate) struct LivePipLink {
     return_to: Option<AnyWindowHandle>,
 }
 
-/// The PiP's window: it opens deferred, so the link exists first.
+/// The PiP's window: it opens deferred, so the link exists first. The
+/// deferred open is a task owned by the stage that waits for it: a PiP
+/// closed or replaced before it ran drops it, so the open never happens
+/// (and never attaches its window to a newer link).
 pub(crate) enum PipWindowStage {
-    Opening,
+    Opening { _open: Task<()> },
     Open(PipWindow),
 }
 
 impl PipWindowStage {
     pub(crate) fn window(&self) -> Option<&PipWindow> {
         match self {
-            Self::Opening => None,
+            Self::Opening { .. } => None,
             Self::Open(window) => Some(window),
         }
     }
 
     fn into_window(self) -> Option<PipWindow> {
         match self {
-            Self::Opening => None,
+            Self::Opening { .. } => None,
             Self::Open(window) => Some(window),
         }
     }
@@ -140,7 +143,7 @@ impl QuillApp {
         self.close_story_viewer(cx);
     }
 
-    pub(super) fn open_live_pip(
+    pub(in crate::ui) fn open_live_pip(
         &mut self,
         player: VideoPlayer,
         source: LivePipSource,
@@ -151,12 +154,6 @@ impl QuillApp {
         self.close_every_video_pip(cx);
         self.close_live_pip(cx);
         let account = self.session().map(|session| session.account.clone());
-        self.group_call.live_pip = Some(LivePipLink {
-            window: PipWindowStage::Opening,
-            source,
-            account,
-            return_to,
-        });
         let weak = cx.entity().downgrade();
         let display = return_to.and_then(|handle| {
             handle
@@ -172,20 +169,23 @@ impl QuillApp {
             display,
             live: Some(live_pip_controls(weak.clone(), source)),
         };
-        // Window creation draws at once: let this update finish first.
+        // Window creation draws at once: this update finishes first.
         // window-scope: the live PiP is the app's (`group_call`), no chat window's.
         // screen-scope: the live PiP belongs to the app and outlives an account switch; this opens or closes its window.
-        cx.defer(move |cx| {
-            let opened = open_pip_window(open, cx);
-            let _ = weak.update(cx, |app, cx| {
-                let pending = app.group_call.live_pip.as_mut().filter(|link| {
-                    link.source == source && matches!(link.window, PipWindowStage::Opening)
-                });
-                match (pending, opened) {
-                    (Some(link), Some(window)) => link.window = PipWindowStage::Open(window),
-                    // Closed before it opened: the window goes too.
-                    (None, Some(window)) => close_window(window, false, cx),
-                    (Some(_), None) => {
+        let task = cx.spawn(async move |this, cx| {
+            let opened = cx.update(|cx| open_pip_window(open, cx));
+            let _ = this.update(cx, |app, cx| {
+                let Some(link) = app.group_call.live_pip.as_mut() else {
+                    // The link is gone (the task would have been dropped
+                    // with it): the window goes too.
+                    if let Some(window) = opened {
+                        close_window(window, false, cx);
+                    }
+                    return;
+                };
+                match opened {
+                    Some(window) => link.window = PipWindowStage::Open(window),
+                    None => {
                         app.group_call.live_pip = None;
                         // The stream window went when PiP was pressed: it
                         // may open again.
@@ -197,12 +197,15 @@ impl QuillApp {
                         app.set_note(StatusNote::error(tr(keys::Q_MEDIA_PIP_FAILED)));
                         app.check_live_pip(cx);
                     }
-                    // Another PiP replaced this one before it failed: that
-                    // one's link stays.
-                    (None, None) => {}
                 }
                 cx.notify();
             });
+        });
+        self.group_call.live_pip = Some(LivePipLink {
+            window: PipWindowStage::Opening { _open: task },
+            source,
+            account,
+            return_to,
         });
     }
 

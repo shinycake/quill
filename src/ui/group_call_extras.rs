@@ -388,7 +388,7 @@ impl QuillApp {
     ) -> AnyElement {
         let muted = cx.theme().muted_foreground;
         let config = config.sanitized();
-        let capturing = self.preferences.keybinding.capture.push_to_talk_armed();
+        let capturing = self.preferences.keybinding.ptt_armed();
         let needs_permission = config.enabled
             && (matches!(
                 self.group_call.global_ptt.hook.state(),

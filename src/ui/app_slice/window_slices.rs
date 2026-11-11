@@ -12,6 +12,19 @@ use quill::ids::ChatId;
 use std::cell::Cell;
 use std::rc::Rc;
 
+/// What a window's render did with its conversation since the last
+/// `history_drawn`.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum ConversationFrame {
+    /// The conversation slot was not part of the render.
+    #[default]
+    Absent,
+    /// The slot was drawn from its cached slice.
+    Replayed,
+    /// The conversation slice rendered.
+    Rendered,
+}
+
 #[derive(Default)]
 pub(in crate::ui) struct WindowSlices {
     pub(super) conversation: Option<SliceParts>,
@@ -23,10 +36,8 @@ pub(in crate::ui) struct WindowSlices {
     /// is sized before its content renders, so the slot takes the measured
     /// height (a change redraws the slot next frame).
     pub(super) composer_height: Rc<Cell<Pixels>>,
-    /// The conversation slice rendered since the window's last render.
-    pub(super) conversation_rendered: Cell<bool>,
-    /// The conversation slot was part of the window's last render.
-    pub(super) conversation_shown: Cell<bool>,
+    /// What the window's last render did with the conversation.
+    conversation_frame: Cell<ConversationFrame>,
     /// A screen reader (or another accessibility client) reads this window:
     /// its history rows report the accessibility focus. Each window's
     /// frame writes its own (`per_window_upkeep`).
@@ -69,12 +80,24 @@ impl WindowSlices {
     /// from its cache still shows its clips: only one that rendered (or a
     /// frame without one) and swept no player orphans them.
     pub(in crate::ui) fn history_drawn(&self) -> bool {
-        self.conversation_rendered.replace(false) || !self.conversation_shown.replace(false)
+        self.conversation_frame.take() != ConversationFrame::Replayed
+    }
+
+    /// The window's render laid out the conversation slot.
+    pub(in crate::ui) fn mark_conversation_shown(&self) {
+        if self.conversation_frame.get() == ConversationFrame::Absent {
+            self.conversation_frame.set(ConversationFrame::Replayed);
+        }
+    }
+
+    /// The conversation slice rendered.
+    pub(in crate::ui) fn mark_conversation_rendered(&self) {
+        self.conversation_frame.set(ConversationFrame::Rendered);
     }
 
     /// Whether the window's last render showed the conversation.
     pub(in crate::ui) fn conversation_shown(&self) -> bool {
-        self.conversation_shown.get()
+        self.conversation_frame.get() != ConversationFrame::Absent
     }
 
     /// The slices that show the conversation.
@@ -93,3 +116,8 @@ impl WindowSlices {
         self.slice_ids().chain(painters)
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "window_slices_tests.rs"]
+mod tests;

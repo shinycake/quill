@@ -16,3 +16,4 @@ Checklist::others_can_mark_tasks_as_done TDLib's checklist.others_can_mark_tasks
 ChecklistDraft::others_can_mark_tasks_as_done the frozen "Allow Others to Mark As Done" setting of the new checklist; not a stage
 ChecklistSend::others_can_mark_tasks_as_done the "Allow Others to Mark As Done" setting sent with the new checklist; not a stage
 ReceivedGift::is_saved TDLib's receivedGift.is_saved: whether the gift is shown on the profile page, the server's own setting, flipped only after the server confirmed toggleGiftIsSaved; not a stage of anything Quill runs
+CallSummary::busy how the call ended, set once when the summary is made from the discard reason (an outgoing call the peer declined before it connected) and never changed; the end card and the busy tone read it, no request or stage behind it

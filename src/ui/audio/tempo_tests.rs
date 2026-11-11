@@ -286,3 +286,18 @@ fn back_at_1x_the_search_stops_within_a_block() {
         assert!(after <= 577, "{other}x then 1x scored {after}");
     }
 }
+
+/// A track that ends, even one shorter than a slice, ends the stretch once;
+/// a seek back starts it over and plays to the end again.
+#[test]
+fn a_stretch_that_ended_plays_again_after_a_seek_back() {
+    for seconds in [0.02, 0.5] {
+        let speed = SharedSpeed::new(1.0);
+        let (mut tempo, _) = stretcher((8_000, 1), seconds, &speed);
+        let first = tempo.by_ref().count();
+        assert!(first > 0, "{seconds}s played nothing");
+        assert!(tempo.next().is_none(), "{seconds}s ended for good");
+        tempo.try_seek(Duration::ZERO).unwrap();
+        assert_eq!(tempo.by_ref().count(), first, "{seconds}s replays alike");
+    }
+}

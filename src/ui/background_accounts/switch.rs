@@ -96,6 +96,7 @@ impl QuillApp {
         live.bridge.wake_with(&quill::wake::UPDATES);
         self.put_on_screen(live);
         self.reload_account_keybindings(cx);
+        self.reload_account_wallpapers(cx);
         self.spawn_poll_loop(cx);
         self.ensure_background_accounts(cx);
         cx.notify();

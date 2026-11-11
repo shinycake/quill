@@ -133,19 +133,19 @@ fn a_key_capture_does_not_take_the_passcodes_first_key(cx: &mut TestAppContext) 
     };
     let before = app.read_with(&vcx, |app, _| ptt_key(app));
     app.update(&mut vcx, |app, _| {
-        app.preferences.keybinding.capture = crate::ui::keybindings::Capture::PushToTalk;
+        app.preferences.keybinding.toggle_ptt_capture();
     });
     lock(&app, &mut vcx);
     app.read_with(&vcx, |app, _| {
         assert!(
-            !app.preferences.keybinding.capture.push_to_talk_armed()
-                && app.preferences.keybinding.capture.waiting().is_none(),
+            !app.preferences.keybinding.ptt_armed()
+                && app.preferences.keybinding.waiting().is_none(),
             "no key capture is armed"
         );
     });
     // Armed again under the lock, a key still goes to the lock screen only.
     app.update(&mut vcx, |app, _| {
-        app.preferences.keybinding.capture = crate::ui::keybindings::Capture::PushToTalk
+        app.preferences.keybinding.toggle_ptt_capture();
     });
     vcx.simulate_keystrokes("q");
     frame(&mut vcx);

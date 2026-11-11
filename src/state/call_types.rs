@@ -69,22 +69,83 @@ pub struct CallReady {
     pub since: Instant,
 }
 
+/// How many `CallProblem` constructors the rating editor offers.
+pub const CALL_PROBLEM_COUNT: usize = 9;
+
+/// The rating detail being drafted for one call: the stars and the problems
+/// picked (index-aligned with the UI's `CALL_PROBLEMS`). It lives in the
+/// call's own rating stage, so it goes with the call's summary and comes
+/// back when the send fails.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RatingDraft {
+    pub stars: i32,
+    pub problems: [bool; CALL_PROBLEM_COUNT],
+}
+
+impl RatingDraft {
+    pub fn new(stars: i32) -> Self {
+        Self {
+            stars,
+            problems: [false; CALL_PROBLEM_COUNT],
+        }
+    }
+}
+
 /// The rating card of an ended call. The card is drawn while it is
-/// `Offered` or `Failed`; `Sending` leaves on the answer to that request.
-/// `NotNeeded`: TDLib did not ask for a rating (`need_rating` false).
+/// `Offered`, `Editing` or `Failed`; `Sending` leaves on the answer to that
+/// request, with the draft it sent. `NotNeeded`: TDLib did not ask for a
+/// rating (`need_rating` false).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallRating {
     NotNeeded,
     Offered,
-    Sending(RequestId),
+    /// A star was tapped: the editor is open on this draft.
+    Editing(RatingDraft),
+    Sending {
+        request: RequestId,
+        draft: RatingDraft,
+    },
     Sent,
-    Failed(String),
+    /// The send failed: the card says why and the editor is back on the
+    /// draft that was sent.
+    Failed {
+        error: String,
+        draft: RatingDraft,
+    },
 }
 
 impl CallRating {
     /// The card still asks for a rating (nothing is in flight or done).
     pub fn is_open(&self) -> bool {
-        matches!(self, Self::Offered | Self::Failed(_))
+        matches!(self, Self::Offered | Self::Editing(_) | Self::Failed { .. })
+    }
+
+    /// The draft the editor shows.
+    pub fn draft(&self) -> Option<&RatingDraft> {
+        match self {
+            Self::Editing(draft) | Self::Failed { draft, .. } => Some(draft),
+            _ => None,
+        }
+    }
+
+    pub fn draft_mut(&mut self) -> Option<&mut RatingDraft> {
+        match self {
+            Self::Editing(draft) | Self::Failed { draft, .. } => Some(draft),
+            _ => None,
+        }
+    }
+
+    /// The error line of a failed send.
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            Self::Failed { error, .. } => Some(error),
+            _ => None,
+        }
+    }
+
+    /// Whether `request` is the send in flight.
+    pub fn sends(&self, request: RequestId) -> bool {
+        matches!(self, Self::Sending { request: sent, .. } if *sent == request)
     }
 }
 

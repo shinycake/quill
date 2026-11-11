@@ -439,18 +439,16 @@ fn leaving_the_calls_page_disarms_the_push_to_talk_capture(cx: &mut TestAppConte
     let (app, _shell, mut vcx) = new_app(cx, 1100.);
     let vcx = &mut vcx;
     let armed = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
-        app.read_with(vcx, |app, _| {
-            app.preferences.keybinding.capture.push_to_talk_armed()
-        })
+        app.read_with(vcx, |app, _| app.preferences.keybinding.ptt_armed())
     };
     app.update(vcx, |app, cx| {
         app.open_settings(Some(Page::Calls), cx);
         app.preferences.keybinding.toggle_ptt_capture();
-        app.switch_settings_page(Page::Privacy);
+        app.switch_settings_page(Page::Privacy, cx);
     });
     assert!(!armed(&app, vcx), "another page");
-    app.update(vcx, |app, _| {
-        app.switch_settings_page(Page::Calls);
+    app.update(vcx, |app, cx| {
+        app.switch_settings_page(Page::Calls, cx);
         app.preferences.keybinding.toggle_ptt_capture();
         app.close_settings();
     });

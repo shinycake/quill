@@ -5,7 +5,6 @@ AppearancePrefs::ignore_battery_saving
 
 
 BackendStatus::failed
-CallSummary::busy
 
 
 
@@ -21,9 +20,7 @@ GiveawaySummary::finished
 
 
 
-LiveInput::failed
 
-LiveInput::failed
 
 MediaMenuFacts::downloading
 
@@ -51,8 +48,6 @@ RowState::pending
 Step::started
 
 StreamFacts::transport_failed
-Tempo::done
-Tempo::inner_done
 
 
 

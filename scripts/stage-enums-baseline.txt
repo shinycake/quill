@@ -10,15 +10,12 @@ bare:Attempt::Pending 1
 bare:Attempt::Sending 1
 bare:Audience::Loading 1
 bare:BackgroundStatus::Connecting 1
-bare:BotLink::Loading 1
 bare:BoxStage::Opening 1
 bare:CalendarPaging::Loading 1
 bare:CallEnd::Running 1
 bare:CallLinkStep::Busy 1
 bare:CallPhase::Busy 1
-bare:CallRating::Sent 1
 bare:CallSound::Busy 1
-bare:CallUpload::Sent 1
 bare:CallWindow::Opening 2
 bare:CameraStage::Starting 1
 bare:CandidateStatus::Loading 1
@@ -50,7 +47,6 @@ bare:ExpandRun::Running 1
 bare:ExtractionStage::Starting 1
 bare:FeederState::Syncing 1
 bare:FieldStage::Waiting 1
-bare:Found::Loading 1
 bare:GiftsLayout::Loading 1
 bare:GoalNow::Waiting 1
 bare:GraphFetch::Loading 1
@@ -79,7 +75,6 @@ bare:PaneMode::Connecting 1
 bare:PasscodeJob::Running 1
 bare:Phase::Downloading 1
 bare:Phase::Loading 1
-bare:Phase::Opening 1
 bare:Phase::Requested 1
 bare:Phase::Waiting 1
 bare:PhoneFlow::Asking 1
@@ -87,7 +82,6 @@ bare:PhoneLookups::Asked 1
 bare:Picture::Loading 1
 bare:PictureState::Waiting 1
 bare:PinTarget::Loading 1
-bare:PipWindowStage::Opening 1
 bare:PlayHead::Waiting 1
 bare:PlayState::Opening 1
 bare:Playback::Waiting 1
@@ -151,10 +145,8 @@ unkeyed:AuctionFetch::Loading 1
 unkeyed:Beats::Running 1
 unkeyed:BotUsernameCheck::Checking 1
 unkeyed:CallLinkStage::Leaving 1
-unkeyed:CallTransport::Connecting 1
 unkeyed:CameraStage::Saving 1
 unkeyed:Cancellation::InFlight 1
-unkeyed:Capture::Waiting 1
 unkeyed:CardState::Loading 1
 unkeyed:ChatSearchPaging::Loading 1
 unkeyed:ChatStatisticsFetch::Loading 1
@@ -182,7 +174,6 @@ unkeyed:Lifecycle::Loading 1
 unkeyed:Lifecycle::Running 1
 unkeyed:Lifecycle::Waiting 1
 unkeyed:ListEdit::InFlight 1
-unkeyed:LiveOverlay::Opening 1
 unkeyed:MessageReactionsState::Loading 1
 unkeyed:Neighbour::Asking 1
 unkeyed:P2pStage::Waiting 1

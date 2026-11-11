@@ -3,6 +3,7 @@
 
 use super::early_connect::First;
 use crate::ui::status_note::StatusNote;
+use futures_channel::oneshot;
 use gpui_kit::Task;
 use quill::auth::{StartupFailure, view_for};
 use quill::connect::{
@@ -58,23 +59,66 @@ impl ConnectStage {
 }
 
 /// The workers preparing the screen's connection (`prepare_startup` creates
-/// the account's folders), each held by an `Arc` it owns while it runs:
-/// nothing deletes a folder until they are all done, also when the
-/// connection that asked for one was replaced meanwhile.
+/// the account's folders), each holding a claim while it runs: nothing
+/// deletes a folder until they are all done, also when the connection that
+/// asked for one was replaced meanwhile.
 #[derive(Default)]
-pub(super) struct ScreenWorkers(Vec<std::sync::Weak<()>>);
+pub(super) struct ScreenWorkers {
+    workers: Vec<std::sync::Weak<()>>,
+    /// One per worker: it wakes the work that waits for the folders when
+    /// its worker ends, however the worker ends.
+    watches: Vec<Task<()>>,
+}
+
+/// A screen worker's hold on the account folders. It goes when the worker
+/// ends or is dropped with its connection.
+pub(super) struct ScreenClaim {
+    // The claim is released before the end is told (fields drop in this
+    // order), so whoever is woken finds the worker gone.
+    _claim: Arc<()>,
+    _ended: oneshot::Sender<()>,
+}
 
 impl ScreenWorkers {
-    /// A worker starts: it holds the returned claim until it ends.
-    pub(super) fn begin(&mut self) -> Arc<()> {
-        self.0.retain(|worker| worker.strong_count() > 0);
+    /// A worker starts: it holds the returned claim until it ends, and the
+    /// receiver resolves once the claim is gone.
+    pub(super) fn begin(&mut self) -> (ScreenClaim, oneshot::Receiver<()>) {
+        self.workers.retain(|worker| worker.strong_count() > 0);
+        if self.workers.is_empty() {
+            self.watches.clear();
+        }
         let claim = Arc::new(());
-        self.0.push(Arc::downgrade(&claim));
-        claim
+        self.workers.push(Arc::downgrade(&claim));
+        let (ended, end) = oneshot::channel();
+        (
+            ScreenClaim {
+                _claim: claim,
+                _ended: ended,
+            },
+            end,
+        )
     }
 
     pub(super) fn running(&self) -> bool {
-        self.0.iter().any(|worker| worker.strong_count() > 0)
+        self.workers.iter().any(|worker| worker.strong_count() > 0)
+    }
+}
+
+impl QuillApp {
+    /// A worker preparing the screen's connection starts. The work that
+    /// waits for the account folders (`after_closing`) is looked at again
+    /// when the claim is released, also when the connection that asked for
+    /// the worker was replaced and no longer hears of its end.
+    pub(super) fn begin_screen_worker(&mut self, cx: &mut Context<Self>) -> ScreenClaim {
+        let (claim, end) = self.background.screen_workers.begin();
+        // screen-scope: the waiters it settles cover every account's folders, whichever account is on screen.
+        let watch = Self::spawn_app(cx, async move |this, cx| {
+            // Resolves when the claim is dropped, with or without a send.
+            let _ = end.await;
+            let _ = this.update(cx, |this, cx| this.settle_close_waiters(cx));
+        });
+        self.background.screen_workers.watches.push(watch);
+        claim
     }
 }
 
@@ -200,7 +244,7 @@ impl super::app::QuillApp {
         let secrets = self.secrets();
         // Nothing deletes a folder while this preparation (which creates
         // the account's folders) still runs.
-        let claim = self.background.screen_workers.begin();
+        let claim = self.begin_screen_worker(cx);
         let connect = cx.background_executor().spawn(async move {
             let _claim = claim;
             if let Some(early) = early
@@ -217,6 +261,8 @@ impl super::app::QuillApp {
         let task = Self::spawn_app(cx, async move |this, cx| {
             let (swept, prepared) = connect.await;
             quill::startup_trace::mark("prepare_done");
+            // A deletion that waits for this preparation is woken by the
+            // worker's claim (`begin_screen_worker`).
             let _ = this.update(cx, |this, _| {
                 if let Some((root, deleted)) = &swept {
                     this.finish_sweep(root, deleted);
@@ -328,6 +374,7 @@ impl super::app::QuillApp {
             },
         }
         self.reload_account_keybindings(cx);
+        self.reload_account_wallpapers(cx);
         if self.live.is_some() {
             self.spawn_poll_loop(cx);
             // `parity:notify-all-accounts`: the other accounts
@@ -348,9 +395,11 @@ mod tests {
     fn a_worker_holds_the_claim_until_it_ends() {
         let mut workers = ScreenWorkers::default();
         assert!(!workers.running());
-        let first = workers.begin();
-        let second = workers.begin();
+        let (first, mut first_end) = workers.begin();
+        let (second, _second_end) = workers.begin();
+        assert_eq!(first_end.try_recv(), Ok(None), "the first still runs");
         drop(first);
+        assert!(first_end.try_recv().is_err(), "its end is told");
         assert!(workers.running(), "the second still runs");
         drop(second);
         assert!(!workers.running());
