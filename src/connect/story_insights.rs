@@ -1,7 +1,7 @@
 //! Connect driver: story statistics, public forwards and public story search.
 use super::*;
 use crate::ids::{ChatId, RequestId};
-use crate::state::{RequestPurpose, StorySearchQuery, StoryStatsFetch};
+use crate::state::{ForwardsPage, RequestPurpose, StorySearchQuery, StoryStatsFetch};
 use crate::telegram::requests_story_insights::{
     get_story_public_forwards, get_story_statistics, search_public_stories_by_location,
     search_public_stories_by_tag, search_public_stories_by_venue,
@@ -41,17 +41,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             // again (they may show another story opened since), so the
             // answer lands (`insights_for`).
             self.session.begin_story_insights(chat_id.0, story_id);
-            let forwards_pending = self.session.requests.has_purpose_for_story(
-                RequestPurpose::GetStoryPublicForwards,
-                chat_id,
-                story_id,
-            );
-            if forwards_pending && let Some(state) = self.session.stories.insights.as_mut() {
-                state.forwards_loading = true;
-            }
-            // The forwards came while another story was shown, and that
-            // story's insights replaced them: ask for the first page again.
-            if !forwards_pending {
+            // The first page is asked for only when it never was for these
+            // insights: a page that answered, or one on its way, stays (a
+            // second first page would show twice). Insights another story
+            // replaced start at `NotAsked` and ask again.
+            let never_asked = self
+                .session
+                .stories
+                .insights
+                .as_ref()
+                .is_some_and(|state| state.forwards_page == ForwardsPage::NotAsked);
+            if never_asked {
                 let _ = self.fetch_story_public_forwards(chat_id, story_id, "");
             }
             return Ok(None);
@@ -84,11 +84,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.requests.has_purpose_for_story(
-            RequestPurpose::GetStoryPublicForwards,
-            chat_id,
-            story_id,
-        ) {
+        // A page of these insights is on its way: wait for it. An older
+        // request left by insights since replaced does not count (its
+        // answer is dropped, `Session::accept_public_forwards`).
+        if self.session.stories.insights.as_ref().is_some_and(|state| {
+            state.chat_id == chat_id.0 && state.story_id == story_id && state.forwards_loading()
+        }) {
             return Ok(None);
         }
         let extra = self.session.request_for_story(
@@ -100,12 +101,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra, chat_id, story_id, offset, PAGE,
         )) {
             Ok(()) => {
-                if let Some(state) = self.session.stories.insights.as_mut()
-                    && state.chat_id == chat_id.0
-                    && state.story_id == story_id
-                {
-                    state.forwards_loading = true;
-                }
+                self.session
+                    .story_forwards_loading(chat_id.0, story_id, extra, offset);
                 Ok(Some(extra))
             }
             Err(err) => {

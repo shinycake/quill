@@ -9,7 +9,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::live_state::{
-    LiveDelete, LiveJoin, LiveStarsBox, SendAction, StarsBoxMode, send_action,
+    LiveDelete, LiveJoin, LiveStarsBox, SendAction, StarsBoxMode, StarsFlow, send_action,
 };
 use super::*;
 use crate::ui::media_panel::PanelTab;
@@ -251,7 +251,7 @@ impl QuillApp {
                 }
                 let stars = if admin { 0 } else { chosen };
                 if self.session().is_some_and(|s| s.live_needs_top_up(stars)) {
-                    self.live_top_up(stars, cx);
+                    let _ = self.live_top_up(stars, cx);
                     return;
                 }
                 let sent = match self.live.as_mut() {
@@ -264,17 +264,25 @@ impl QuillApp {
                     }
                 };
                 if sent {
-                    self.stories.live.input.update(cx, |input, cx| {
-                        input.set_value("", window, cx);
-                    });
-                    // tdesktop goes back to the price of a plain comment.
-                    self.stories.live.chosen_stars = 0;
+                    self.live_comment_sent(window, cx);
                 } else {
                     self.surface_live_note();
                 }
             }
         }
         cx.notify();
+    }
+
+    /// The comment went out: the field empties and the price goes back to a
+    /// plain comment's (tdesktop does the same). Nothing is left for a
+    /// top-up to reopen on.
+    pub(super) fn live_comment_sent(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.stories.live.input.update(cx, |input, cx| {
+            input.set_value("", window, cx);
+        });
+        self.stories.live.chosen_stars = 0;
+        // box-host: forgetting the flow opens nothing
+        self.stories.live.stars = StarsFlow::Idle;
     }
 
     /// The driver's last refusal, in the status line.
@@ -301,7 +309,7 @@ impl QuillApp {
     fn add_live_stars(&mut self, stars: i64, cx: &mut Context<Self>) {
         let now = unix_ms_now();
         if self.session().is_some_and(|s| s.live_needs_top_up(stars)) {
-            self.live_top_up(stars, cx);
+            let _ = self.live_top_up(stars, cx);
             return;
         }
         if let Some(live) = self.live.as_mut() {
@@ -326,13 +334,14 @@ impl QuillApp {
     /// Needed" and Quill's Stars top-up, the Stars box with its packs open.
     /// The comment or reaction stays for another try once the balance is
     /// up.
-    fn live_top_up(&mut self, stars: i64, cx: &mut Context<Self>) {
+    /// Whether the top-up opened (it is refused for an agent's input).
+    fn live_top_up(&mut self, stars: i64, cx: &mut Context<Self>) -> bool {
         // The Stars box is a payment surface: refused for an agent's input
         // (`open_stars` would say the same), and nothing opens behind it.
         if quill::agent::ui_driver::guard::refuse_hard_if_injecting(
             quill::agent::ui_driver::guard::HardSurface::Payments,
         ) {
-            return;
+            return false;
         }
         let have = self
             .session()
@@ -354,6 +363,7 @@ impl QuillApp {
             session.payments.star_packs.open = true;
         }
         cx.notify();
+        true
     }
 
     /// The toast's Undo.
@@ -371,7 +381,8 @@ impl QuillApp {
     }
 
     /// Opens the Stars box. `min` is the least it allows (the Stars a
-    /// waiting comment needs); `then_send` sends that comment after.
+    /// waiting comment needs); `then_send` sends that comment after (only a
+    /// send that needs Stars asks for it).
     pub(super) fn open_live_stars_box(
         &mut self,
         mode: StarsBoxMode,
@@ -381,14 +392,15 @@ impl QuillApp {
     ) {
         let max = self.session().map_or(2, Session::live_max_stars);
         let min = min.clamp(1, max);
+        // A top-up the box waited on ends here; one for the same mode gives
+        // its amount back, and its waiting comment.
         let kept = self
             .stories
             .live
-            .stars_before_top_up
-            .take()
-            .filter(|(kept_mode, _)| *kept_mode == mode)
-            .map(|(_, stars)| stars);
-        let current = match kept {
+            .stars
+            .take_top_up()
+            .filter(|(kept_mode, _)| *kept_mode == mode);
+        let current = match kept.map(|(_, stars)| stars) {
             Some(stars) => stars,
             None if mode == StarsBoxMode::Comment => self.stories.live.chosen_stars,
             None => 0,
@@ -405,13 +417,13 @@ impl QuillApp {
         cx.subscribe(&slider, move |this, _, event: &SliderEvent, cx| {
             let (SliderEvent::Change(value) | SliderEvent::Release(value)) = event;
             let max = this.session().map_or(2, Session::live_max_stars);
-            if let Some(boxed) = this.stories.live.stars_box.as_mut() {
+            if let Some(boxed) = this.stories.live.stars.boxed_mut() {
                 boxed.stars = amount_for_step(value.end().round() as i64, max).max(boxed.min);
             }
             cx.notify();
         })
         .detach();
-        self.stories.live.stars_box = Some(LiveStarsBox {
+        self.stories.live.stars = StarsFlow::Box(LiveStarsBox {
             mode,
             stars,
             min,
@@ -427,14 +439,15 @@ impl QuillApp {
     }
 
     pub(super) fn close_live_stars_box(&mut self, cx: &mut Context<Self>) {
-        self.stories.live.stars_box = None;
+        // box-host: closing the flow opens nothing
+        self.stories.live.stars = StarsFlow::Idle;
         cx.notify();
     }
 
     /// The box's button: the comment gets these Stars, or they are sent
     /// as a reaction.
     pub(super) fn submit_live_stars_box(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(boxed) = self.stories.live.stars_box.take() else {
+        let Some(boxed) = self.stories.live.stars.take_box() else {
             return;
         };
         if boxed.mode != StarsBoxMode::Admin
@@ -442,11 +455,19 @@ impl QuillApp {
                 .session()
                 .is_some_and(|s| s.live_needs_top_up(boxed.stars))
         {
-            self.stories.live.stars_before_top_up = Some((boxed.mode, boxed.stars));
             if boxed.mode == StarsBoxMode::Comment {
                 self.stories.live.chosen_stars = boxed.stars;
             }
-            self.live_top_up(boxed.stars, cx);
+            // The top-up carries the waiting comment; a refused top-up (an
+            // agent's input) leaves nothing waiting.
+            if self.live_top_up(boxed.stars, cx) {
+                // box-host: the Stars box is closed; this only remembers
+                // what to reopen it on after the top-up
+                self.stories.live.stars = StarsFlow::TopUp {
+                    mode: boxed.mode,
+                    stars: boxed.stars,
+                };
+            }
             return;
         }
         match boxed.mode {
@@ -465,6 +486,8 @@ impl QuillApp {
     /// "Remove Stars" from the send button's menu.
     pub(super) fn clear_live_stars(&mut self, cx: &mut Context<Self>) {
         self.stories.live.chosen_stars = 0;
+        // box-host: forgetting the flow opens nothing
+        self.stories.live.stars = StarsFlow::Idle;
         cx.notify();
     }
 

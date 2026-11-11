@@ -118,13 +118,7 @@ impl QuillApp {
         }
         // The user moved on: a press still waiting for its story is dropped.
         self.chat_list.pending_story_open = None;
-        self.leave_story_item(cx);
-        // Another story (not the same one restarted): the reply and live
-        // comment typed for the last one are not sent to this poster
-        // (tdesktop clears the controls on every story change).
-        if prev != next {
-            self.clear_story_fields(cx);
-        }
+        self.replace_story_item(prev, next, cx);
         self.stories.video.retry();
         self.stories.playback.start(Instant::now());
         self.sync_story_video(cx);
@@ -167,6 +161,36 @@ impl QuillApp {
                 }
             });
         });
+    }
+
+    /// The viewer shows `next` where it showed `prev`: what was opened over
+    /// the story goes, and for another story (not the same one restarted)
+    /// so do the reply and live comment typed for the last one, which are
+    /// not sent to this poster (tdesktop clears the controls on every story
+    /// change). The one place a step, a jump and an open over an open
+    /// viewer all go through.
+    pub(in crate::ui) fn replace_story_item(
+        &mut self,
+        prev: Option<(ChatId, i32)>,
+        next: Option<(ChatId, i32)>,
+        cx: &mut Context<Self>,
+    ) {
+        self.leave_story_item(cx);
+        if prev != next {
+            self.clear_story_fields(cx);
+        }
+        // A Save media that finished while another story was showing says
+        // so when its story is back.
+        let done = self.stories.viewer.current().and_then(|item| {
+            match self.stories.media_saves.get(&item.key()) {
+                Some(crate::ui::stories_state::MediaSave::Done(notice)) => Some(notice.clone()),
+                _ => None,
+            }
+        });
+        if let Some(notice) = done {
+            self.stories
+                .with_viewer_ui(|open| open.notice = Some(notice));
+        }
     }
 
     pub(in crate::ui) fn leave_story_item(&mut self, cx: &mut Context<Self>) {

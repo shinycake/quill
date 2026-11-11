@@ -2,6 +2,7 @@
 //! Added to by features in this domain only; `Session::new` builds it
 //! with `new`.
 use crate::state::*;
+use crate::story_page::StoryPageOps;
 use std::time::{Duration, Instant};
 
 /// The close-friends list and the request loading it, in one value so a
@@ -147,6 +148,9 @@ pub struct StoriesState {
     /// cooldown — the schema exposes no getter, so this only ever
     /// reflects updates TDLib has pushed.
     pub stealth: StoryStealthMode,
+    /// The latest `activateStoryStealthMode` the server refused, with the
+    /// request it answers: the Stealth Mode box that asked shows why.
+    pub stealth_refusal: Option<(RequestId, String)>,
     pub stealth_periods: crate::story_stealth::StealthPeriods,
     /// Phase 9.5: chat ids from the last `getChatsToPostStories` answer —
     /// the composer's "post as" picker (channels/supergroups where the
@@ -174,7 +178,7 @@ pub struct StoriesState {
     /// story page (`Sending` at send time, `Succeeded` / `Failed` when
     /// the TDLib answer lands). The story page renders it as its status
     /// line.
-    pub page_op: Option<StoryPageOp>,
+    pub page_ops: StoryPageOps,
     /// B14: the close-friends list (`getCloseFriends` / `setCloseFriends`);
     /// `None` until loaded.
     pub close_friends: CloseFriendsList,
@@ -207,6 +211,13 @@ pub struct StoriesState {
 }
 
 impl StoriesState {
+    /// The account is going away: the story-page calls and management
+    /// calls on their way will never be answered.
+    pub fn settle_account(&mut self) {
+        self.page_ops.clear();
+        self.manage.forget_in_flight();
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             tray: HashMap::new(),
@@ -220,6 +231,7 @@ impl StoriesState {
             search: None,
             report: None,
             stealth: StoryStealthMode::default(),
+            stealth_refusal: None,
             stealth_periods: Default::default(),
             post_as_chats: Vec::new(),
             manage: StoryManageState::default(),
@@ -227,7 +239,7 @@ impl StoriesState {
             album_stories: HashMap::new(),
             chat_page_stories: HashMap::new(),
             archived_stories: HashMap::new(),
-            page_op: None,
+            page_ops: StoryPageOps::default(),
             close_friends: CloseFriendsList::NotLoaded,
             main_paging: ActiveStoriesPaging::default(),
             hidden_paging: ActiveStoriesPaging::default(),
@@ -280,6 +292,23 @@ impl StoriesState {
         self.reply_attempted.remove(&story);
     }
 
+    /// `story` arrived (an answer or `updateStory`): whatever said it was
+    /// gone or waiting no longer applies.
+    pub fn story_arrived(&mut self, story: (i64, i32)) {
+        self.missing.remove(&story);
+        self.story_retry.remove(&story);
+    }
+
+    /// The poster chat became known. TDLib refuses `getStory` with a 400
+    /// while it does not know the chat, which looks the same as a story that
+    /// is gone, so the stories of this poster marked missing are asked for
+    /// again.
+    pub fn poster_chat_known(&mut self, chat_id: i64) {
+        self.missing.retain(|(chat, _)| *chat != chat_id);
+        self.story_retry.retain(|(chat, _), _| *chat != chat_id);
+        self.reply_attempted.retain(|(chat, _)| *chat != chat_id);
+    }
+
     /// The story picker's `getCustomEmojiStickers` failed at `now`.
     pub fn custom_emoji_fetch_failed(&mut self, now: Instant) {
         self.custom_emoji_retry = Some(next_retry(self.custom_emoji_retry, now));
@@ -304,5 +333,6 @@ impl StoriesState {
         self.main_paging = ActiveStoriesPaging::default();
         self.hidden_paging = ActiveStoriesPaging::default();
         self.story_retry.clear();
+        self.missing.clear();
     }
 }

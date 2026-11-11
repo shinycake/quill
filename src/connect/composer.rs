@@ -471,7 +471,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&view_messages(extra, chat_id, &ids, source, true))
         {
             Ok(()) => {
-                self.session.begin_viewing(chat_id, &ids);
+                self.session.begin_viewing(chat_id, extra, &ids);
                 Ok(Some(extra))
             }
             Err(err) => {

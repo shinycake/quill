@@ -27,6 +27,7 @@ impl Session {
         }
         self.restore_user_notes(notes);
         self.stale_history_requests.clear();
+        self.stories.settle_account();
     }
 
     pub(super) fn take_user_notes(&self) -> UserNotes {

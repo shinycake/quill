@@ -147,11 +147,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !can_get {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.requests.has_purpose_for_story(
-            RequestPurpose::GetStoryInteractions,
-            chat_id,
-            story_id,
-        ) {
+        // A page of this panel is on its way; an older request left in the
+        // registry by a panel since closed does not hold a new panel up
+        // (its answer is dropped, `Session::accept_story_interactions`).
+        if self.session.stories.viewers.as_ref().is_some_and(|state| {
+            state.chat_id == chat_id.0 && state.story_id == story_id && state.is_loading()
+        }) {
             return Ok(None);
         }
         let extra =
@@ -160,12 +161,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = get_story_interactions_request(extra, story_id, "", offset, 50);
         match self.sender.send_json(&json) {
             Ok(()) => {
-                if let Some(state) = self.session.stories.viewers.as_mut()
-                    && state.chat_id == chat_id.0
-                    && state.story_id == story_id
-                {
-                    state.loading = true;
-                }
+                self.session
+                    .story_viewers_loading(chat_id.0, story_id, extra);
                 Ok(Some(extra))
             }
             Err(err) => {
@@ -215,16 +212,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Phase 9.5: `activateStoryStealthMode` — hides the current user's
     /// story views (Premium only; the server decides). The state arrives
     /// as `updateStoryStealthMode`. Deduped while in flight.
-    pub fn activate_story_stealth_mode(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+    pub fn activate_story_stealth_mode(&mut self) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
-        }
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::ActivateStoryStealthMode)
-        {
-            return Ok(None);
         }
         let extra = self
             .session
@@ -233,7 +223,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .sender
             .send_json(&activate_story_stealth_mode_request(extra))
         {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)
@@ -245,25 +235,15 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `schema/td_api.tl:13702`) for the given chat — the user's own
     /// story chat or an eligible channel / supergroup from
     /// `getChatsToPostStories`. The composer calls this before every
-    /// post; the answer lands in `Session::story_post.eligibility`.
+    /// post; the answer lands in `Session::story_post.check`.
     /// Deduped per chat while a check is in flight.
-    pub fn check_can_post_story(
-        &mut self,
-        chat_id: ChatId,
-    ) -> Result<Option<RequestId>, ConnectSendError> {
+    pub fn check_can_post_story(&mut self, chat_id: ChatId) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         if self.session.my_user_id.is_none() {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if self
-            .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::CheckCanPostStory, chat_id)
-        {
-            return Ok(None);
-        }
         let extra = self
             .session
             .request(RequestPurpose::CheckCanPostStory, Some(chat_id));
@@ -271,7 +251,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .sender
             .send_json(&can_post_story_request(extra, chat_id))
         {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)
