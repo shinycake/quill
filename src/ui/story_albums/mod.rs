@@ -4,6 +4,8 @@
 use super::app::QuillApp;
 use super::*;
 use crate::ui::status_note::StatusNote;
+use crate::ui::stories_state::ViewerPanel;
+use crate::ui::story_page::{AlbumDelete, AlbumView, PageWait};
 use crate::ui::user_error::{user_error_doing, user_error_for};
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
@@ -77,14 +79,18 @@ impl QuillApp {
 
     /// Phase 9.7: close the chat story page.
     pub(super) fn close_story_page(&mut self, cx: &mut Context<Self>) {
-        self.stories.page = None;
-        // A finished op's line was about this page.
+        let chat_id = self.stories.page.take().map(|page| page.chat_id.0);
+        // A finished op's line was about this page, and what it still
+        // waits on is no longer tracked.
         let session = match self.live.as_mut() {
             Some(live) => Some(&mut live.driver.session),
             None => self.demo_session.as_deref_mut(),
         };
         if let Some(session) = session {
             session.settle_story_page_op();
+            if let Some(chat_id) = chat_id {
+                session.leave_story_page(chat_id);
+            }
         }
         cx.notify();
     }
@@ -100,8 +106,7 @@ impl QuillApp {
     ) {
         let chat_id = match self.stories.page.as_mut() {
             Some(page) => {
-                page.open_album = Some(album_id);
-                page.delete_confirm = None;
+                page.view = AlbumView::album(album_id);
                 page.chat_id
             }
             None => return,
@@ -143,8 +148,7 @@ impl QuillApp {
     /// Phase 9.7: back from the opened album to the album list.
     pub(super) fn back_to_story_albums(&mut self, cx: &mut Context<Self>) {
         if let Some(page) = self.stories.page.as_mut() {
-            page.open_album = None;
-            page.delete_confirm = None;
+            page.view = AlbumView::List;
         }
         cx.notify();
     }
@@ -152,8 +156,49 @@ impl QuillApp {
     /// Phase 9.7: run a story-page mutation against the driver; demo mode
     /// shows the live-TDLib-required notice, driver rejections surface in
     /// `status_note`. The honest Sending/Succeeded/Failed states ride on
-    /// `Session::story_page_op`.
+    /// `Session::story_page_ops`. `f` pushes the id of each call it sends.
+    /// Returns the sent ids once every call went out; nothing goes while
+    /// another mutation of the page is still in flight (a second Create
+    /// would make a second album, a second pin would overwrite the first).
     pub(super) fn story_page_mutate(
+        &mut self,
+        what: &str,
+        f: impl FnOnce(
+            &mut LiveConnect,
+            &mut Vec<quill::ids::RequestId>,
+        ) -> Result<(), quill::connect::ConnectSendError>,
+        cx: &mut Context<Self>,
+    ) -> Option<Vec<quill::ids::RequestId>> {
+        let chat = self.stories.page.as_ref().map(|page| page.chat_id.0);
+        let busy = chat
+            .zip(self.session())
+            .is_some_and(|(chat, session)| session.stories.page_ops.mutating(chat));
+        if busy {
+            return None;
+        }
+        let Some(live) = self.live.as_mut() else {
+            self.set_note(StatusNote::silent(tr_with(
+                keys::Q_MEDIA_DEMO_RUNS_WITH_LIVE_TDLIB,
+                &[("what", what)],
+            )));
+            cx.notify();
+            return None;
+        };
+        let mut sent = Vec::new();
+        let result = f(live, &mut sent);
+        cx.notify();
+        match result {
+            Ok(()) => Some(sent),
+            Err(err) => {
+                self.set_note(StatusNote::error(user_error_doing(what, &err)));
+                None
+            }
+        }
+    }
+
+    /// A story-page read (paging the archive or the posted list): it only
+    /// shows as loading, so it may go while a mutation is in flight.
+    pub(super) fn story_page_read(
         &mut self,
         what: &str,
         f: impl FnOnce(&mut LiveConnect) -> Result<(), quill::connect::ConnectSendError>,
@@ -192,10 +237,23 @@ impl QuillApp {
             }
             None => return,
         };
-        if let Some(page) = self.stories.page.as_mut() {
-            page.picker = None;
-        }
         let (story_ids, skipped) = self.partition_addable_stories(chat_id, &story_ids);
+        let sent = self.story_page_mutate(
+            tr(keys::Q_MEDIA_CREATE_STORY_ALBUM),
+            |live, sent| {
+                sent.push(live.driver.create_story_album(chat_id, &name, &story_ids)?);
+                Ok(())
+            },
+            cx,
+        );
+        // The picker and the typed name stay until the album is made, so a
+        // refused or failed create loses neither (`page_wait.rs`).
+        let Some(request) = sent.and_then(|ids| ids.first().copied()) else {
+            return;
+        };
+        if let Some(page) = self.stories.page.as_mut() {
+            page.wait = PageWait::Creating(request);
+        }
         if !skipped.is_empty() {
             self.set_note(StatusNote::info(trn_with(
                 keys::Q_NOTES_STORIES_SKIPPED,
@@ -203,21 +261,12 @@ impl QuillApp {
                 &[("count", &skipped.len().to_string())],
             )));
         }
-        self.story_page_mutate(
-            tr(keys::Q_MEDIA_CREATE_STORY_ALBUM),
-            |live| {
-                live.driver
-                    .create_story_album(chat_id, &name, &story_ids)
-                    .map(|_| ())
-            },
-            cx,
-        );
     }
 
     /// Phase 9.7: rename the opened album (`setStoryAlbumName`).
     pub(super) fn rename_story_album(&mut self, cx: &mut Context<Self>) {
         let (chat_id, album_id, name) = match self.stories.page.as_ref() {
-            Some(page) => match page.open_album {
+            Some(page) => match page.view.open_album() {
                 Some(album_id) => (
                     page.chat_id,
                     album_id,
@@ -229,10 +278,9 @@ impl QuillApp {
         };
         self.story_page_mutate(
             tr(keys::Q_MEDIA_RENAME_STORY_ALBUM),
-            |live| {
-                live.driver
-                    .set_story_album_name(chat_id, album_id, &name)
-                    .map(|_| ())
+            |live, sent| {
+                sent.push(live.driver.set_story_album_name(chat_id, album_id, &name)?);
+                Ok(())
             },
             cx,
         );
@@ -242,27 +290,31 @@ impl QuillApp {
     /// second click sends `deleteStoryAlbum`.
     pub(super) fn delete_story_album(&mut self, album_id: i32, cx: &mut Context<Self>) {
         let chat_id = match self.stories.page.as_mut() {
-            Some(page) if page.delete_confirm == Some(album_id) => page.chat_id,
+            Some(page) if page.view.delete_armed(album_id) => page.chat_id,
             Some(page) => {
-                page.delete_confirm = Some(album_id);
+                if let AlbumView::Album { id, delete } = &mut page.view
+                    && *id == album_id
+                {
+                    *delete = AlbumDelete::Armed;
+                }
                 cx.notify();
                 return;
             }
             None => return,
         };
-        self.story_page_mutate(
+        let sent = self.story_page_mutate(
             tr(keys::Q_MEDIA_DELETE_STORY_ALBUM),
-            |live| {
-                live.driver
-                    .delete_story_album(chat_id, album_id)
-                    .map(|_| ())
+            |live, sent| {
+                sent.push(live.driver.delete_story_album(chat_id, album_id)?);
+                Ok(())
             },
             cx,
         );
+        // The album view stays until the server says it is deleted.
         if let Some(page) = self.stories.page.as_mut() {
-            page.delete_confirm = None;
-            if page.open_album == Some(album_id) {
-                page.open_album = None;
+            page.view.disarm();
+            if let Some(request) = sent.and_then(|ids| ids.first().copied()) {
+                page.wait = PageWait::Deleting(request);
             }
         }
     }
@@ -296,10 +348,9 @@ impl QuillApp {
         };
         self.story_page_mutate(
             tr(keys::Q_MEDIA_REORDER_STORY_ALBUMS),
-            |live| {
-                live.driver
-                    .reorder_story_albums(chat_id, &order)
-                    .map(|_| ())
+            |live, sent| {
+                sent.push(live.driver.reorder_story_albums(chat_id, &order)?);
+                Ok(())
             },
             cx,
         );
@@ -360,22 +411,29 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.close_album_picker(cx);
-        self.story_page_mutate(
+        let sent = self.story_page_mutate(
             tr(keys::Q_MEDIA_ADD_STORIES_TO_ALBUM),
-            |live| {
+            |live, sent| {
                 if !added.is_empty() {
-                    live.driver
-                        .add_story_album_stories(chat_id, album_id, &added)?;
+                    sent.push(
+                        live.driver
+                            .add_story_album_stories(chat_id, album_id, &added)?,
+                    );
                 }
                 if !removed.is_empty() {
-                    live.driver
-                        .remove_story_album_stories(chat_id, album_id, &removed)?;
+                    sent.push(
+                        live.driver
+                            .remove_story_album_stories(chat_id, album_id, &removed)?,
+                    );
                 }
                 Ok(())
             },
             cx,
         );
+        // The picker stays, with its ticks, until the changes are saved.
+        if let (Some(page), Some(requests)) = (self.stories.page.as_mut(), sent) {
+            page.wait = PageWait::SavingPicker(requests);
+        }
     }
 
     /// Phase 9.7: remove one story from the opened album
@@ -392,10 +450,13 @@ impl QuillApp {
         };
         self.story_page_mutate(
             tr(keys::Q_MEDIA_REMOVE_STORY_FROM_ALBUM),
-            |live| {
-                live.driver
-                    .remove_story_album_stories(chat_id, album_id, &[story_id])
-                    .map(|_| ())
+            |live, sent| {
+                sent.push(live.driver.remove_story_album_stories(
+                    chat_id,
+                    album_id,
+                    &[story_id],
+                )?);
+                Ok(())
             },
             cx,
         );
@@ -415,10 +476,13 @@ impl QuillApp {
         };
         self.story_page_mutate(
             tr(keys::Q_MEDIA_REORDER_ALBUM_STORIES),
-            |live| {
-                live.driver
-                    .reorder_story_album_stories(chat_id, album_id, &[story_id])
-                    .map(|_| ())
+            |live, sent| {
+                sent.push(live.driver.reorder_story_album_stories(
+                    chat_id,
+                    album_id,
+                    &[story_id],
+                )?);
+                Ok(())
             },
             cx,
         );
@@ -434,7 +498,7 @@ impl QuillApp {
             },
             None => return,
         };
-        self.story_page_mutate(
+        self.story_page_read(
             tr(keys::Q_MEDIA_LOAD_ARCHIVED_STORIES),
             |live| {
                 live.driver
@@ -458,7 +522,7 @@ impl QuillApp {
             },
             None => return,
         };
-        self.story_page_mutate(
+        self.story_page_read(
             tr(keys::Q_MEDIA_LOAD_CHAT_PAGE_STORIES),
             |live| {
                 live.driver
@@ -492,10 +556,9 @@ impl QuillApp {
         };
         self.story_page_mutate(
             tr(keys::Q_MEDIA_PIN_STORIES),
-            |live| {
-                live.driver
-                    .set_chat_pinned_stories(chat_id, &pinned)
-                    .map(|_| ())
+            |live, sent| {
+                sent.push(live.driver.set_chat_pinned_stories(chat_id, &pinned)?);
+                Ok(())
             },
             cx,
         );
@@ -543,9 +606,8 @@ impl QuillApp {
             selected_user_ids,
         });
         if let Some(open) = self.stories.viewer_ui_mut() {
+            open.close_other_panels(ViewerPanel::Privacy);
             open.privacy_edit = value;
-        }
-        if let Some(open) = self.stories.viewer_ui_mut() {
             open.privacy_request = None;
         }
         self.stories
@@ -813,6 +875,7 @@ mod demo;
 #[cfg(feature = "demo-capture")]
 mod picker_tests;
 pub(in crate::ui) use cover_strip::CoverPicker;
+mod page_wait;
 mod paging;
 mod picker;
 mod story_page_overlay;

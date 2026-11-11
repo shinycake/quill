@@ -12,6 +12,7 @@
 
 use super::app::QuillApp;
 use super::message_media::file_is_downloading;
+use super::stories_state::{MediaSave, ViewerPanel};
 use super::story_video_state::{StoryKey, StoryVideo};
 use super::video_player::{PlayState, Purpose, VideoPlayer, video_frame};
 use gpui_kit::component::button::*;
@@ -400,16 +401,49 @@ impl QuillApp {
                 })
             })
         };
-        self.set_story_notice(match source {
-            Some(path) => match quill::media_viewer::save_media_to_downloads(&path) {
-                Ok(saved) => tr_with(
-                    keys::Q_MEDIA_SAVED_TO,
-                    &[("display", &(saved.display()).to_string())],
-                ),
-                Err(err) => tr_with(keys::Q_MEDIA_COULD_NOT_SAVE, &[("err", &err.to_string())]),
-            },
-            None => tr(keys::Q_MEDIA_THE_STORY_IS_NOT_DOWNLOADED).into(),
-        });
+        let Some(path) = source else {
+            self.set_story_notice(tr(keys::Q_MEDIA_THE_STORY_IS_NOT_DOWNLOADED).into());
+            cx.notify();
+            return;
+        };
+        let key = item.key();
+        if self.stories.media_saves.get(&key) == Some(&MediaSave::Saving) {
+            return;
+        }
+        // The copy of a large clip runs off the UI thread; the notice says
+        // so meanwhile and gives the result under the story it was for.
+        self.stories.media_saves.insert(key, MediaSave::Saving);
+        self.stories
+            .with_viewer_ui(|open| open.notice = Some(tr(keys::Q_MEDIA_SAVING).into()));
+        let copy =
+            cx.background_spawn(async move { quill::media_viewer::save_media_to_downloads(&path) });
+        self.spawn_scoped(cx, async move |this, cx| {
+            let result = copy.await;
+            let _ = this.update(cx, |this, cx| {
+                let notice = match result {
+                    Ok(saved) => tr_with(
+                        keys::Q_MEDIA_SAVED_TO,
+                        &[("display", &(saved.display()).to_string())],
+                    ),
+                    Err(err) => tr_with(keys::Q_MEDIA_COULD_NOT_SAVE, &[("err", &err.to_string())]),
+                };
+                // The result waits for its story: shown now when it is the
+                // one on screen, and again when the viewer steps back to it.
+                if this.stories.viewer.is_open() {
+                    this.stories
+                        .media_saves
+                        .insert(key, MediaSave::Done(notice.clone()));
+                } else {
+                    this.stories.media_saves.remove(&key);
+                }
+                if this.stories.viewer.current().map(|item| item.key()) == Some(key) {
+                    this.stories
+                        .with_viewer_ui(|open| open.notice = Some(notice));
+                }
+                cx.notify();
+            });
+        })
+        .detach();
         cx.notify();
     }
 
@@ -417,9 +451,9 @@ impl QuillApp {
     pub(super) fn toggle_story_share(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.stories
             .with_viewer_ui(|open| open.share_open = !open.share_open);
-        self.stories
-            .with_viewer_ui(|open| open.close_friends = CloseFriendsStage::Closed);
         if self.stories.viewer_ui().share_open {
+            self.stories
+                .with_viewer_ui(|open| open.close_other_panels(ViewerPanel::Share));
             self.stories
                 .more_search
                 .update(cx, |input, cx| input.set_value("", window, cx));
@@ -462,12 +496,12 @@ impl QuillApp {
             .session()
             .and_then(|s| s.stories.close_friends.ids().cloned());
         self.stories.with_viewer_ui(|open| {
+            open.close_other_panels(ViewerPanel::CloseFriends);
             open.close_friends = CloseFriendsStage::Loading;
             if let Some(list) = &loaded {
                 open.close_friends.loaded(list);
             }
         });
-        self.stories.with_viewer_ui(|open| open.share_open = false);
         self.stories
             .more_search
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -487,9 +521,12 @@ impl QuillApp {
 
     /// Send the edited list with `setCloseFriends`.
     pub(super) fn save_close_friends(&mut self, cx: &mut Context<Self>) {
+        // Only an edit that is not being saved is saved (a second press
+        // while the first call is out does nothing).
         let CloseFriendsStage::Editing(edit) = &self.stories.viewer_ui().close_friends else {
             return;
         };
+        let edit = edit.clone();
         if !edit.changed() {
             self.stories
                 .with_viewer_ui(|open| open.close_friends = CloseFriendsStage::Closed);
@@ -500,11 +537,7 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => match live.driver.set_close_friends(&ids) {
                 Ok(request) => self.stories.with_viewer_ui(|open| {
-                    if let CloseFriendsStage::Editing(edit) =
-                        std::mem::take(&mut open.close_friends)
-                    {
-                        open.close_friends = CloseFriendsStage::Saving(edit);
-                    }
+                    open.close_friends = CloseFriendsStage::Saving { edit, request };
                     open.page_op = Some(request);
                 }),
                 Err(_) => {
@@ -536,26 +569,70 @@ impl QuillApp {
     /// off the viewer.
     pub(super) fn viewer_story_page_op(&self) -> Option<quill::story_page::StoryPageOp> {
         let request = self.stories.viewer_ui().page_op?;
-        self.session()?
-            .stories
-            .page_op
-            .clone()
-            .filter(|op| op.request == Some(request))
+        self.session()?.stories.page_ops.get(request).cloned()
     }
 
-    /// Per-tick upkeep of the editor: adopt the loaded list while the user
-    /// has not touched it, close after a confirmed save.
+    /// Per-tick upkeep of the editor: a save leaves with the answer to its
+    /// own request (closing on success, back to the edit on failure), and
+    /// the loaded list is adopted while the user has not touched it.
     pub(super) fn tick_close_friends(&mut self, cx: &mut Context<Self>) {
         let loaded = self
             .session()
             .and_then(|s| s.stories.close_friends.ids().cloned());
+        let saving = match &self.stories.viewer_ui().close_friends {
+            CloseFriendsStage::Saving { edit, request } => Some((edit.clone(), *request)),
+            _ => None,
+        };
+        if let Some((edit, request)) = saving {
+            use quill::story_page::StoryPageOpState as S;
+            let state = self
+                .session()
+                .and_then(|s| s.stories.page_ops.get(request))
+                .map(|op| op.state.clone());
+            match state {
+                Some(S::Sending | S::Checking) => {}
+                // The list is saved: the editor closes. A finished op that was
+                // settled away (the viewer stepped on) is read from the list
+                // the answer left in the session.
+                Some(S::Succeeded) => {
+                    self.stories.with_viewer_ui(|open| {
+                        open.close_friends = CloseFriendsStage::Closed;
+                        open.notice = Some(tr(keys::Q_MEDIA_CLOSE_FRIENDS_UPDATED).into());
+                    });
+                    self.refresh_story_pause(cx);
+                }
+                // The call failed (its line shows under the story): the edit
+                // is back, Save asks again.
+                Some(S::Failed(_)) => {
+                    self.stories.with_viewer_ui(|open| {
+                        open.close_friends = CloseFriendsStage::Editing(edit)
+                    });
+                }
+                // Its op is gone (the viewer stepped on and the finished op
+                // was settled away): the list the answer left in the session
+                // says whether the save landed.
+                None => {
+                    let saved = loaded
+                        .as_ref()
+                        .is_some_and(|list| CloseFriendsEdit::new(list).ids() == edit.ids());
+                    self.stories.with_viewer_ui(|open| {
+                        open.close_friends = if saved {
+                            CloseFriendsStage::Closed
+                        } else {
+                            CloseFriendsStage::Editing(edit)
+                        };
+                    });
+                    if saved {
+                        self.refresh_story_pause(cx);
+                    }
+                }
+            }
+            return;
+        }
         // The list's own load, matched to its request.
         let load_failed = self
             .session()
             .is_some_and(|s| s.stories.close_friends.failed_without_list());
-        let failed = self
-            .viewer_story_page_op()
-            .is_some_and(|op| matches!(op.state, quill::story_page::StoryPageOpState::Failed(_)));
         let Some(loaded) = loaded else {
             // No list yet: a failed request ends the wait with a retry.
             if load_failed && let Some(open) = self.stories.viewer_ui_mut() {
@@ -567,18 +644,10 @@ impl QuillApp {
             return;
         };
         match &mut open.close_friends {
-            CloseFriendsStage::Closed | CloseFriendsStage::Failed => {}
+            CloseFriendsStage::Closed
+            | CloseFriendsStage::Failed
+            | CloseFriendsStage::Saving { .. } => {}
             CloseFriendsStage::Loading => open.close_friends.loaded(&loaded),
-            CloseFriendsStage::Saving(edit) => {
-                if CloseFriendsEdit::new(&loaded).ids() == edit.ids() {
-                    open.close_friends = CloseFriendsStage::Closed;
-                    open.notice = Some(tr(keys::Q_MEDIA_CLOSE_FRIENDS_UPDATED).into());
-                    self.refresh_story_pause(cx);
-                } else if failed {
-                    let edit = edit.clone();
-                    open.close_friends = CloseFriendsStage::Editing(edit);
-                }
-            }
             CloseFriendsStage::Editing(edit) => {
                 if !edit.changed() && CloseFriendsEdit::new(&loaded) != *edit {
                     *edit = CloseFriendsEdit::new(&loaded);
@@ -776,7 +845,7 @@ impl QuillApp {
                     })),
             );
         }
-        let saving = matches!(stage, CloseFriendsStage::Saving(_));
+        let saving = self.stories.viewer_ui().close_friends.is_saving();
         div()
             .flex()
             .flex_col()

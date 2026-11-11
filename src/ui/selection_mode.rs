@@ -6,6 +6,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::chat_ui_state::A11yFocus;
 use super::motion;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::*;
@@ -86,7 +87,7 @@ impl QuillApp {
             now,
         );
         let interactive = self.selecting_in(chat_id);
-        let focused = interactive && self.chat_ui.selection_focus == Some(message_id);
+        let focused = interactive && self.chat_ui.focus.row() == Some(message_id);
         let ring_color = cx.theme().ring;
         let forward = self.selection_forward_drag(chat_id, message_id);
         let overlay = (mode > 0.).then(|| {
@@ -249,7 +250,7 @@ impl QuillApp {
         );
         self.add_to_selection(chat_id, span);
         self.chat_ui.selection_anchor = Some(message_id);
-        self.chat_ui.selection_focus = Some(message_id);
+        self.chat_ui.focus = A11yFocus::Row(message_id);
         cx.notify();
     }
 

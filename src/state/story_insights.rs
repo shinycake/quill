@@ -23,8 +23,38 @@ pub struct StoryInsightsState {
     pub forwards: Vec<PublicForwardView>,
     pub forwards_total: i32,
     pub forwards_next_offset: String,
-    pub forwards_loading: bool,
-    pub forwards_error: Option<String>,
+    /// Where the forwards page request stands.
+    pub forwards_page: ForwardsPage,
+}
+
+/// The public-forwards request of one insights panel. A page is applied
+/// only when the answer carries the id it is `Loading` for, and a first
+/// page replaces the rows instead of extending them, so a page asked for
+/// twice never shows twice.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ForwardsPage {
+    /// The first page was never asked for.
+    #[default]
+    NotAsked,
+    /// `request` asks for the page after `offset` (empty: the first).
+    Loading { request: RequestId, offset: String },
+    /// The last page landed; more come while `forwards_next_offset` is set.
+    Ready,
+    /// The last page failed; scrolling or Retry asks again.
+    Failed(String),
+}
+
+impl StoryInsightsState {
+    pub fn forwards_loading(&self) -> bool {
+        matches!(self.forwards_page, ForwardsPage::Loading { .. })
+    }
+
+    pub fn forwards_error(&self) -> Option<&str> {
+        match &self.forwards_page {
+            ForwardsPage::Failed(error) => Some(error),
+            _ => None,
+        }
+    }
 }
 
 /// What a public story search looks for.
@@ -108,6 +138,26 @@ impl Session {
         self.stories.insights = None;
     }
 
+    /// The driver sent the forwards page after `offset` as `request` for
+    /// the story's insights.
+    pub fn story_forwards_loading(
+        &mut self,
+        chat_id: i64,
+        story_id: i32,
+        request: RequestId,
+        offset: &str,
+    ) {
+        if let Some(state) = self.stories.insights.as_mut()
+            && state.chat_id == chat_id
+            && state.story_id == story_id
+        {
+            state.forwards_page = ForwardsPage::Loading {
+                request,
+                offset: offset.to_string(),
+            };
+        }
+    }
+
     fn insights_for(&mut self, pending: &PendingRequest) -> Option<&mut StoryInsightsState> {
         let (chat_id, story_id) = (pending.chat_id?, pending.story_id?);
         self.stories
@@ -131,13 +181,22 @@ impl Session {
         pending: &PendingRequest,
         view: PublicForwardsView,
     ) {
-        if let Some(state) = self.insights_for(pending) {
-            state.forwards_loading = false;
-            state.forwards_error = None;
-            state.forwards_total = view.total_count;
-            state.forwards_next_offset = view.next_offset;
-            state.forwards.extend(view.forwards);
+        let Some(state) = self.insights_for(pending) else {
+            return;
+        };
+        let ForwardsPage::Loading { request, offset } = &state.forwards_page else {
+            return;
+        };
+        if *request != pending.id {
+            return;
         }
+        if offset.is_empty() {
+            state.forwards.clear();
+        }
+        state.forwards_page = ForwardsPage::Ready;
+        state.forwards_total = view.total_count;
+        state.forwards_next_offset = view.next_offset;
+        state.forwards.extend(view.forwards);
     }
 
     /// A TDLib error on one of the two insight requests.
@@ -152,9 +211,11 @@ impl Session {
         };
         if purpose == RequestPurpose::GetStoryStatistics {
             state.statistics = StoryStatsFetch::Failed(message);
-        } else {
-            state.forwards_loading = false;
-            state.forwards_error = Some(message);
+        } else if matches!(
+            &state.forwards_page,
+            ForwardsPage::Loading { request, .. } if *request == pending.id
+        ) {
+            state.forwards_page = ForwardsPage::Failed(message);
         }
     }
 

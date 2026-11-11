@@ -12,6 +12,7 @@ use super::chat_theme::{accent, bg_canvas, border, danger, text_menu, text_muted
 use super::scroll_load::{load_due, loading_row, scrolled_near_end, watch_scroll};
 use super::statistics::format_stat_count;
 use super::statistics_graph::stat_graph_block;
+use super::stories_state::ViewerPanel;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
@@ -37,12 +38,8 @@ impl QuillApp {
             open.stats_open = !open.stats_open;
         }
         if self.stories.viewer_ui().stats_open {
-            if let Some(open) = self.stories.viewer_ui_mut() {
-                open.viewers_open = false;
-            }
-            if let Some(open) = self.stories.viewer_ui_mut() {
-                open.report_open = false;
-            }
+            self.stories
+                .with_viewer_ui(|open| open.close_other_panels(ViewerPanel::Stats));
             self.fetch_story_stats(&item.chat_id, item.story_id, cx);
         }
         cx.notify();
@@ -87,11 +84,11 @@ impl QuillApp {
             return;
         };
         if !self.stories.viewer_ui().stats_open
-            || (state.forwards_error.is_some() && !scrolled)
+            || (state.forwards_error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.stories.stats_scroll),
                 !state.forwards_next_offset.is_empty(),
-                state.forwards_loading,
+                state.forwards_loading(),
             )
             || !self
                 .stories
@@ -364,10 +361,10 @@ impl QuillApp {
                 PublicForwardKind::Story { .. } => row.into_any_element(),
             });
         }
-        if let Some(error) = state.forwards_error.clone() {
+        if let Some(error) = state.forwards_error().map(str::to_string) {
             panel = panel.child(div().text_sm().text_color(danger()).child(error));
         }
-        if state.forwards_loading {
+        if state.forwards_loading() {
             panel = panel.child(loading_row("story-forwards-loading", cx));
         } else if state.forwards.is_empty()
             && state.forwards_next_offset.is_empty()
