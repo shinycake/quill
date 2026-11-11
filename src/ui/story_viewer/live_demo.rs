@@ -310,12 +310,11 @@ fn seed_live_story(session: &mut Session, sink: &Arc<dyn DiagnosticSink>, seq: &
         .unwrap_or_default();
     let me = session.live_story_sender();
     if let Some(live) = session.stories.live.as_mut() {
-        live.donors = Some(LiveStoryDonors {
+        live.donors.succeed(LiveStoryDonors {
             total_star_count: 1_240,
             top_donors: vec![reactor(801, 500), reactor(804, 420), reactor(802, 180)],
         });
         live.comments.on_messages(&messages, me);
-        live.extras_requested = true;
     }
 }
 

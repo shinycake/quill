@@ -47,6 +47,10 @@ pub(crate) struct CallUi {
 #[derive(Default)]
 pub(crate) struct CallScreen {
     pub(super) window_closed_by_user: Option<i32>,
+    /// The call whose window could not be opened: not tried again on every
+    /// sync, not even while a second call rings (the call bar or a
+    /// notification's Open tries once more).
+    pub(super) window_open_failed: Option<i32>,
     pub(super) ended_at: Option<(i32, std::time::Instant)>,
     /// The ended call whose linger timer is running, so the syncs from the
     /// poll and every window's frame start one, not one each.
@@ -79,9 +83,6 @@ pub(crate) struct CallBoxes {
     /// The Calls tab's scroll region, read to load older calls on scroll.
     pub(super) history_scroll: ScrollHandle,
     pub(super) history_asked: super::scroll_load::Asked,
-    /// A call waiting on microphone (and camera) permission before its
-    /// `createCall`: `(user_id, is_video)`.
-    pub(super) dialing: Option<(i64, bool)>,
     /// Settings > Calls: the microphone test and its level meter
     /// (`ui::call_audio_ui`).
     pub(super) mic_test: super::call_audio_ui::MicTestRun,
@@ -106,7 +107,6 @@ impl CallBoxes {
             confirm: None,
             history_scroll: ScrollHandle::new(),
             history_asked: Default::default(),
-            dialing: None,
             mic_test: Default::default(),
             mic_test_starts: 0,
             open_mic_test: super::call_audio_ui::open_default_mic_test(),
@@ -120,7 +120,7 @@ impl CallBoxes {
 /// The microphone test's device closes with the value; the boxes hold ids
 /// and flags.
 /// The call link's leave confirm is the session's
-/// (`calls.call_link_confirm`): it is cancelled here, or it would come
+/// (`calls.call_link_stage`): it is cancelled here, or it would come
 /// back on switch-back.
 impl super::on_screen::Farewell for CallBoxes {
     fn farewell(
@@ -130,9 +130,14 @@ impl super::on_screen::Farewell for CallBoxes {
     ) {
         if app
             .session()
-            .is_some_and(|session| session.calls.call_link_confirm.is_some())
+            .is_some_and(|session| session.calls.call_link_stage.confirm().is_some())
         {
             app.cancel_call_link_leave(cx);
+        }
+        // A confirmed link waiting for its call to end is abandoned too: it
+        // must not open a join screen after switching back.
+        if let Some(live) = app.live.as_mut() {
+            live.driver.session.calls.call_link_stage = Default::default();
         }
     }
 }

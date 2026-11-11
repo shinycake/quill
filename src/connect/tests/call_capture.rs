@@ -520,3 +520,35 @@ fn a_camera_wanted_before_the_first_list_lands_is_not_refused() {
     assert_eq!(driver.camera_to_turn_on(), Ok("cam".to_string()));
     std::fs::remove_dir_all(dir).ok();
 }
+
+#[test]
+fn a_call_that_refuses_the_frames_is_not_reopened_until_the_user_acts() {
+    let (dir, mut driver, _engine, mics) = group_driver();
+    driver.session.calls.active_group_call = Some(joined_group_call(false));
+    pump_until_mic_answers(&mut driver);
+    assert_eq!(mics.opened.lock().unwrap().len(), 1);
+    // The engine refused a long run of frames: the capture ends.
+    let sink = mics.sink.lock().unwrap().clone().expect("open");
+    sink.push_event(CaptureEvent::Failed(CaptureError::Refused(
+        "The call refused the captured frames.".into(),
+    )));
+    let start = Instant::now();
+    driver.pump_call_capture(start);
+    assert_eq!(driver.call_capture().target(), None);
+    assert!(driver.group_call_level_error().is_some());
+    // Long after the retry delay, nothing reopens the microphone.
+    for minutes in 1..4 {
+        driver.pump_call_capture(start + Duration::from_secs(60 * minutes));
+    }
+    assert!(!driver.call_capture().opening());
+    assert_eq!(mics.opened.lock().unwrap().len(), 1);
+    assert!(driver.group_call_level_error().is_some());
+    // Muting is the user acting: the microphone opens again.
+    if let Some(call) = driver.session.calls.active_group_call.as_mut() {
+        call.is_muted_self = true;
+    }
+    pump_until_mic_answers(&mut driver);
+    assert_eq!(mics.opened.lock().unwrap().len(), 2);
+    assert_eq!(driver.group_call_level_error(), None);
+    std::fs::remove_dir_all(dir).ok();
+}

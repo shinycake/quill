@@ -78,6 +78,36 @@ pub struct CallScreen {
     preview_seq: u64,
     /// Why the share stopped or could not start, for the call window.
     pub error: Option<String>,
+    /// How long a chosen share has waited for the engine's frame sender.
+    engine_wait: EngineWait,
+}
+
+/// Waiting for the engine to take the shared screen: a call whose engine is
+/// gone or has not made its source yet. The wait has an end, or the share
+/// would read as live with nothing sent.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum EngineWait {
+    #[default]
+    Idle,
+    Waiting {
+        since: std::time::Instant,
+    },
+}
+
+/// How long the engine may take to offer its frame sender.
+const ENGINE_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+impl EngineWait {
+    /// Counts one more look at `now`; true once the wait is over.
+    fn expired(&mut self, now: std::time::Instant) -> bool {
+        match *self {
+            Self::Idle => {
+                *self = Self::Waiting { since: now };
+                false
+            }
+            Self::Waiting { since } => now.saturating_duration_since(since) >= ENGINE_WAIT,
+        }
+    }
 }
 
 struct ActiveScreen {
@@ -339,11 +369,11 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Start, follow and stop the shared screen. Called from the driver
     /// pump.
-    pub(crate) fn pump_call_screen(&mut self) {
+    pub(crate) fn pump_call_screen(&mut self, now: std::time::Instant) {
         if !self.call_screen.enabled() {
             return;
         }
-        self.pump_shared_screen();
+        self.pump_shared_screen(now);
         self.pump_system_audio();
     }
 
@@ -369,6 +399,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                         Some(Err(err)) => failed = Some(err.to_string()),
                         None => {}
                     }
+                } else {
+                    // The stream died while running (the output device
+                    // went away): the share goes on without the sound.
+                    failed = audio.mix.failure();
                 }
                 let mix = audio.mix.clone();
                 if failed.is_some() {
@@ -397,7 +431,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    fn pump_shared_screen(&mut self) {
+    fn pump_shared_screen(&mut self, now: std::time::Instant) {
         let wanted = self.screen_wanted();
         let chosen = self.call_screen.chosen.clone();
         // A different call or source: close the old capture first.
@@ -425,6 +459,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         }
         let Some(target) = wanted else {
+            self.call_screen.engine_wait = EngineWait::Idle;
             if let Some(call) = self.session.calls.active_group_call.as_mut() {
                 call.screen_share_paused = false;
             }
@@ -440,8 +475,18 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .filter(|engine| engine.is_available())
                 .and_then(|engine| engine.external_frame_sender(target))
             else {
+                if self.call_screen.engine_wait.expired(now) {
+                    self.call_screen.engine_wait = EngineWait::Idle;
+                    self.call_screen.chosen = None;
+                    self.call_screen.error = Some(
+                        crate::lang::tr(crate::lang::keys::Q_OPS_SCREEN_SHARING_CALL_NOT_READY)
+                            .into(),
+                    );
+                    self.stop_sharing_screen();
+                }
                 return;
             };
+            self.call_screen.engine_wait = EngineWait::Idle;
             self.call_screen.open(target, source, sender);
         }
         match self.call_screen.finish_open() {
@@ -603,5 +648,20 @@ impl<S: JsonSender> ConnectDriver<S> {
             },
             frame,
         );
+    }
+}
+
+#[cfg(test)]
+mod wait_tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn the_engine_wait_ends_after_its_limit_and_not_before() {
+        let start = Instant::now();
+        let mut wait = EngineWait::Idle;
+        assert!(!wait.expired(start), "the first look starts the wait");
+        assert!(!wait.expired(start + (ENGINE_WAIT / 2)));
+        assert!(wait.expired(start + ENGINE_WAIT));
     }
 }

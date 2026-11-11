@@ -68,6 +68,8 @@ pub struct Handle {
     run_loop: Arc<AtomicUsize>,
 }
 
+impl super::HookLife for Handle {}
+
 impl Drop for Handle {
     fn drop(&mut self) {
         self.active.store(false, Ordering::SeqCst);

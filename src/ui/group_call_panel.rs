@@ -352,7 +352,7 @@ impl QuillApp {
                     .on_click(cx.listener(|this, _, _, cx| this.dismiss_group_call_error(cx)))
                     .child(error)
             });
-        let banner = call.reconnecting().then(|| {
+        let banner = call.offers_rejoin().then(|| {
             div()
                 .id("group-call-rejoin")
                 .mx(px(16.))

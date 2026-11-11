@@ -153,7 +153,7 @@ impl QuillApp {
     ) -> AnyElement {
         let live = session.stories.live.as_ref();
         let top: Vec<MessageSender> = live
-            .and_then(|live| live.donors.as_ref())
+            .and_then(|live| live.donors.data())
             .map(|donors| {
                 donors
                     .top_donors

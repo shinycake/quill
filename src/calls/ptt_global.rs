@@ -26,6 +26,7 @@ mod platform {
     use super::*;
     #[derive(Debug)]
     pub struct Handle;
+    impl super::HookLife for Handle {}
     pub fn start(_key: &str, _sink: Sink) -> Result<Handle, StartError> {
         Err(StartError::Unsupported("No system-wide keys here.".into()))
     }
@@ -42,6 +43,14 @@ mod platform {
 
 /// Live hook; dropping it stops listening.
 pub type Handle = platform::Handle;
+
+/// A hook that can end on its own (its connection to the system broke).
+pub trait HookLife {
+    /// Why the hook thread ended without being dropped, once it has.
+    fn ended(&self) -> Option<String> {
+        None
+    }
+}
 
 /// A press or release of the configured key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,6 +102,11 @@ pub struct KeyFilter {
 }
 
 impl KeyFilter {
+    /// The key is down as far as this filter has seen.
+    pub fn is_held(&self) -> bool {
+        self.held
+    }
+
     pub fn new(target: u32) -> Self {
         KeyFilter {
             target,
@@ -339,6 +353,31 @@ impl<H> Default for Controller<H> {
     }
 }
 
+impl<H: HookLife> Controller<H> {
+    /// Brings the hook in line with `want`, as [`Self::sync`] does, and
+    /// first notices a hook thread that ended on its own: it counts as a
+    /// failed start of its key, shown in Settings, and is tried again only
+    /// after [`Controller::retry`].
+    pub fn sync(
+        &mut self,
+        want: Option<&str>,
+        start: impl FnOnce(&str) -> Result<H, StartError>,
+    ) -> bool {
+        let before = self.state.clone();
+        if let Some((key, why)) = self
+            .running
+            .as_ref()
+            .and_then(|(key, hook)| Some((key.clone(), hook.ended()?)))
+        {
+            self.running = None;
+            self.failed_for = Some(key);
+            self.state = HookState::Failed(why);
+        }
+        let moved = self.sync_wanted(want, start);
+        moved || self.state != before
+    }
+}
+
 impl<H> Controller<H> {
     pub fn state(&self) -> &HookState {
         &self.state
@@ -356,7 +395,7 @@ impl<H> Controller<H> {
 
     /// Bring the hook in line with `want` (the key while joined with
     /// push-to-talk on, else `None`). Returns whether the state changed.
-    pub fn sync(
+    fn sync_wanted(
         &mut self,
         want: Option<&str>,
         start: impl FnOnce(&str) -> Result<H, StartError>,
@@ -434,8 +473,8 @@ pub fn status_note(state: &HookState, limit: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        Controller, HookState, KeyEdge, KeyFilter, LinuxSession, StartError, function_key,
-        linux_session, mac_keycode, status_note, windows_vk, x11_keysym,
+        Controller, HookLife, HookState, KeyEdge, KeyFilter, LinuxSession, StartError,
+        function_key, linux_session, mac_keycode, status_note, windows_vk, x11_keysym,
     };
 
     #[test]
@@ -507,6 +546,46 @@ mod tests {
         assert!(ctl.sync(None, start));
         assert!(!ctl.is_active());
         assert_eq!(ctl.state(), &HookState::Off);
+        assert_eq!(starts.get(), 2);
+    }
+
+    /// A hook that ends when `ended` is set.
+    struct Ending(std::rc::Rc<std::cell::Cell<bool>>);
+
+    impl HookLife for Ending {
+        fn ended(&self) -> Option<String> {
+            self.0.get().then(|| "The X server went away.".to_string())
+        }
+    }
+
+    impl HookLife for u32 {}
+
+    #[test]
+    fn a_hook_that_ended_on_its_own_is_failed_not_active() {
+        let ended = std::rc::Rc::new(std::cell::Cell::new(false));
+        let mut ctl: Controller<Ending> = Controller::default();
+        let starts = std::cell::Cell::new(0);
+        let flag = ended.clone();
+        let start = |_: &str| {
+            starts.set(starts.get() + 1);
+            Ok(Ending(flag.clone()))
+        };
+        assert!(ctl.sync(Some("space"), start));
+        assert!(ctl.is_active());
+        ended.set(true);
+        assert!(ctl.sync(Some("space"), start), "the change is noticed");
+        assert!(!ctl.is_active());
+        assert_eq!(
+            ctl.state(),
+            &HookState::Failed("The X server went away.".into())
+        );
+        // Not restarted in a loop; Settings' retry brings it back.
+        assert!(!ctl.sync(Some("space"), start));
+        assert_eq!(starts.get(), 1);
+        ended.set(false);
+        ctl.retry();
+        assert!(ctl.sync(Some("space"), start));
+        assert!(ctl.is_active());
         assert_eq!(starts.get(), 2);
     }
 

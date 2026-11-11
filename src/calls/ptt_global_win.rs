@@ -37,6 +37,8 @@ pub struct Handle {
     thread_id: Arc<AtomicU32>,
 }
 
+impl super::HookLife for Handle {}
+
 impl Drop for Handle {
     fn drop(&mut self) {
         self.active.store(false, Ordering::SeqCst);

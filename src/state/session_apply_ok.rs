@@ -524,6 +524,14 @@ impl Session {
             summary.log_sent = true;
             summary.log_error = None;
         }
+        // `sendCallRating` confirmed: the card says thanks.
+        if let Some(RequestPurpose::SendCallRating) = pending.map(|p| p.purpose)
+            && let Some(summary) = self.calls.summary.as_mut()
+            && let Some(pending) = pending
+            && summary.rating == CallRating::Sending(pending.id)
+        {
+            summary.rating = CallRating::Sent;
+        }
         // Phase C2i: `setUserPrivacySettingRules` confirmed (the
         // new value was applied optimistically at send time).
         if matches!(

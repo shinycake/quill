@@ -395,7 +395,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let call_id = match &self.session.calls.summary {
-            Some(summary) if summary.need_rating && !summary.rating_sent => summary.call_id,
+            Some(summary) if summary.need_rating && summary.rating.is_open() => summary.call_id,
             _ => return Err(ConnectSendError::InvalidRequest),
         };
         let extra = self.session.request(RequestPurpose::SendCallRating, None);
@@ -406,7 +406,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         if let Some(summary) = self.session.calls.summary.as_mut() {
-            summary.rating_sent = true;
+            summary.rating = crate::state::CallRating::Sending(extra);
         }
         Ok(extra)
     }

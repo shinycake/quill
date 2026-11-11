@@ -5,7 +5,7 @@
 //! timestamps mapped to Unix milliseconds.
 #![deny(clippy::indexing_slicing)]
 
-use super::{AudioFrame, CaptureEvent, VideoFrame};
+use super::{AudioFrame, CaptureError, CaptureEvent, VideoFrame};
 use crate::calls::engine::{
     ExternalDevice, ExternalFrameMeta, ExternalFrameSender, external_frame_valid,
 };
@@ -252,6 +252,11 @@ impl FeederStats {
     }
 }
 
+/// This many frames in a row refused by the engine end the capture with a
+/// `Failed` event (half a second of microphone, a few seconds of screen):
+/// the source must not look live while nothing reaches the call.
+const FAILED_RUN: u32 = 50;
+
 /// Engine errors are logged at most this often.
 const ERROR_LOG_EVERY: Duration = Duration::from_secs(1);
 
@@ -327,6 +332,7 @@ fn run<T: FeedFrame>(
     let mut clock = CaptureClock::new();
     let mut bytes = Vec::new();
     let mut last_log: Option<Instant> = None;
+    let mut failed_run = 0u32;
     while !stop.load(Ordering::Acquire) {
         let Some(frame) = sink.pop_timeout(Duration::from_millis(100)) else {
             if sink.is_closed() {
@@ -351,10 +357,19 @@ fn run<T: FeedFrame>(
         match sender.send(T::DEVICE, &bytes, meta) {
             Ok(()) => {
                 stats.sent.fetch_add(1, Ordering::Relaxed);
+                // Recovered: the old error is not the current one.
+                failed_run = 0;
+                *stats.last_error.lock_or_recover() = None;
             }
             Err(err) => {
                 stats.failed.fetch_add(1, Ordering::Relaxed);
                 let text = err.to_string();
+                failed_run = failed_run.saturating_add(1);
+                if failed_run == FAILED_RUN {
+                    sink.push_event(CaptureEvent::Failed(CaptureError::Refused(format!(
+                        "The call refused the captured frames ({text})."
+                    ))));
+                }
                 if last_log.is_none_or(|at| at.elapsed() >= ERROR_LOG_EVERY) {
                     last_log = Some(Instant::now());
                     eprintln!("quill: call capture: {text}");
@@ -410,6 +425,75 @@ mod tests {
             assert!(start.elapsed() < Duration::from_secs(5), "timed out");
             std::thread::sleep(Duration::from_millis(2));
         }
+    }
+
+    /// Refuses every frame and stops the feeder after `limit` of them.
+    struct Refusing {
+        seen: AtomicU64,
+        limit: u64,
+        stop: Arc<AtomicBool>,
+    }
+
+    impl ExternalFrameSender for Refusing {
+        fn send(
+            &self,
+            _: ExternalDevice,
+            _: &[u8],
+            _: ExternalFrameMeta,
+        ) -> Result<(), EngineError> {
+            if self.seen.fetch_add(1, Ordering::Relaxed) + 1 >= self.limit {
+                self.stop.store(true, Ordering::Release);
+            }
+            Err(EngineError::Engine {
+                op: "qc_external_frame",
+                code: -1,
+            })
+        }
+    }
+
+    #[test]
+    fn a_run_of_refused_frames_is_reported_once_as_a_failure() {
+        let sink = FrameSink::new(200);
+        for value in 0..120 {
+            sink.push(audio(value));
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        let sender = Refusing {
+            seen: AtomicU64::new(0),
+            limit: 120,
+            stop: stop.clone(),
+        };
+        let stats = FeederStats::default();
+        run(&sink, &sender, &stop, &AtomicBool::new(true), &stats);
+        let events = sink.take_events();
+        assert_eq!(events.len(), 1, "one event for the whole run");
+        assert!(matches!(
+            &events[0],
+            CaptureEvent::Failed(CaptureError::Refused(_))
+        ));
+        assert_eq!(stats.failed(), 120);
+    }
+
+    #[test]
+    fn a_few_refused_frames_are_not_a_failure() {
+        let sink = FrameSink::new(200);
+        for value in 0..10 {
+            sink.push(audio(value));
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        let sender = Refusing {
+            seen: AtomicU64::new(0),
+            limit: 10,
+            stop: stop.clone(),
+        };
+        run(
+            &sink,
+            &sender,
+            &stop,
+            &AtomicBool::new(true),
+            &FeederStats::default(),
+        );
+        assert!(sink.take_events().is_empty());
     }
 
     #[test]

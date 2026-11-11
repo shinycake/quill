@@ -118,6 +118,10 @@ fn denied_note(camera: bool) -> String {
     )
 }
 
+/// What runs once access is granted: it carries what asked, so an answer
+/// to one prompt never starts another request's work.
+type AfterAccess = Box<dyn FnOnce(&mut QuillApp, &mut Context<QuillApp>)>;
+
 impl QuillApp {
     /// Run `start` once the devices a recording needs are allowed: the
     /// microphone, plus the camera for a video message. Asks for any not
@@ -125,28 +129,28 @@ impl QuillApp {
     pub(super) fn with_capture_access(
         &mut self,
         camera: bool,
-        start: fn(&mut Self, &mut Context<Self>),
+        start: impl FnOnce(&mut Self, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) {
         let devices: &'static [bool] = if camera { &[true, false] } else { &[false] };
-        self.with_device_access(devices, start, cx);
+        self.with_device_access(devices, Box::new(start), cx);
     }
 
     /// Run `start` once the camera is allowed (a call turning it on), or
     /// say why it can't be used.
     pub(super) fn with_camera_access(
         &mut self,
-        start: fn(&mut Self, &mut Context<Self>),
+        start: impl FnOnce(&mut Self, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.with_device_access(&[true], start, cx);
+        self.with_device_access(&[true], Box::new(start), cx);
     }
 
     /// `devices`: `true` for the camera, `false` for the microphone.
     fn with_device_access(
         &mut self,
         devices: &'static [bool],
-        start: fn(&mut Self, &mut Context<Self>),
+        start: AfterAccess,
         cx: &mut Context<Self>,
     ) {
         for &device in devices {

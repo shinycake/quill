@@ -52,7 +52,7 @@ src/ui/chat_window/view.rs::open_chat_window | - | a chat window draws the lock 
 src/ui/startup_failure/device_loss.rs::reopen_main_window | - | the main window, which draws the lock screen
 src/main.rs::open_main_window | - | the main window, which draws the lock screen
 src/main.rs::run_screenshot_demo | - | screenshot demo only
-src/ui/call_panel.rs::open_call_window | - | the call window shows the call, not the chats; tdesktop leaves its call panel up while locked (`closeAdditionalWindows` does not close it), so a call can be answered
+src/ui/calls/open_window.rs::open_call_window | - | the call window shows the call, not the chats; tdesktop leaves its call panel up while locked (`closeAdditionalWindows` does not close it), so a call can be answered
 src/ui/group_call_window.rs::open_group_call_window | - | as the 1:1 call window: tdesktop leaves the group call panel up while locked
 src/ui/screen_chooser.rs::open_screen_chooser_window | - | opened from a call window's Share Screen, which the lock leaves usable
 src/ui/interface_zoom/mod.rs::open_window | - | the platform wrapper every window opens through (interface zoom); a window type the lock layer does not name draws nothing while locked

@@ -64,7 +64,10 @@ struct MockInner {
     connected_chats: Vec<i64>,
     /// Test-only: the next `connect_group_call` fails with this code.
     fail_group_connect: Option<i32>,
+    camera_refused: bool,
     fail_group_video_sync: bool,
+    /// Test-only: the next `connect_screen_share` fails.
+    fail_screen_share_connect: bool,
     device_lists: usize,
     /// Device lists not answered yet, while they are held.
     held_lists: Option<Vec<std::sync::mpsc::Sender<Vec<MediaDevice>>>>,
@@ -137,6 +140,10 @@ impl MockEngine {
 
     pub fn set_devices(&self, devices: Vec<MediaDevice>) {
         self.inner.lock_or_recover().devices = devices;
+    }
+
+    pub fn set_camera_refuses(&self, busy: bool) {
+        self.inner.lock_or_recover().camera_refused = busy;
     }
 
     /// Test-only: make `set_group_muted` fail.
@@ -256,6 +263,11 @@ impl MockEngine {
     /// Test-only: the next `connect_group_call` fails with `code`.
     pub fn fail_next_group_connect(&self, code: i32) {
         self.inner.lock_or_recover().fail_group_connect = Some(code);
+    }
+
+    /// Test-only: the next `connect_screen_share` fails.
+    pub fn fail_next_screen_share_connect(&self) {
+        self.inner.lock_or_recover().fail_screen_share_connect = true;
     }
 
     /// Device lists wait for [`Self::release_device_lists`] from now on.
@@ -657,7 +669,7 @@ impl CallEngine for MockEngine {
         group_call_id: i32,
         answer_payload: &str,
         camera: Option<&str>,
-    ) -> Result<(), EngineError> {
+    ) -> Result<Option<EngineError>, EngineError> {
         let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
@@ -684,7 +696,7 @@ impl CallEngine for MockEngine {
         {
             inner.connected_chats.push(chat_id);
         }
-        Ok(())
+        Ok((camera.is_some() && inner.camera_refused).then_some(EngineError::NoCamera))
     }
 
     fn set_engine_event_callback(&mut self, callback: EngineEventCallback) {
@@ -781,6 +793,9 @@ impl CallEngine for MockEngine {
         if !inner.available {
             return Err(EngineError::Unavailable);
         }
+        if inner.camera_refused && camera.is_some() {
+            return Err(EngineError::NoCamera);
+        }
         inner
             .group_camera_changes
             .push((group_call_id, camera.map(str::to_owned)));
@@ -811,6 +826,12 @@ impl CallEngine for MockEngine {
         let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
+        }
+        if std::mem::take(&mut inner.fail_screen_share_connect) {
+            return Err(EngineError::Engine {
+                op: "qc_group_set_join_response",
+                code: -1,
+            });
         }
         inner
             .screen_share_connects

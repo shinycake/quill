@@ -387,3 +387,57 @@ fn other_discard_errors_leave_the_hang_up_alone() {
         Some(CallState::HangingUp)
     );
 }
+
+fn rated_summary(session: &mut Session, seq: &AtomicU64, sink: &Arc<MemorySink>) {
+    apply_json(session, seq, sink, &swap_active_json(77, 41));
+    apply_json(
+        session,
+        seq,
+        sink,
+        r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"97","user_id":41,"is_outgoing":false,"is_video":false,"state":{"@type":"callStateDiscarded","reason":{"@type":"callDiscardReasonHungUp"},"need_rating":true,"need_debug_information":false,"need_log":false}}}"#,
+    );
+}
+
+fn rating(session: &Session) -> Option<CallRating> {
+    Some(session.calls.summary.as_ref()?.rating.clone())
+}
+
+#[test]
+fn a_failed_rating_brings_the_card_back_and_an_ok_says_thanks() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    rated_summary(&mut session, &seq, &sink);
+    let request = session.request(RequestPurpose::SendCallRating, None);
+    session.calls.summary.as_mut().expect("summary").rating = CallRating::Sending(request);
+    apply_json(&mut session, &seq, &sink, &error_json(request));
+    let failed = rating(&session).expect("summary");
+    assert!(matches!(failed, CallRating::Failed(_)));
+    assert!(failed.is_open(), "the card is drawn again");
+    // The retry is answered ok.
+    let retry = session.request(RequestPurpose::SendCallRating, None);
+    session.calls.summary.as_mut().expect("summary").rating = CallRating::Sending(retry);
+    // An answer to the first, stale request changes nothing.
+    apply_json(&mut session, &seq, &sink, &error_json(request));
+    assert_eq!(rating(&session), Some(CallRating::Sending(retry)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, retry.as_extra()),
+    );
+    assert_eq!(rating(&session), Some(CallRating::Sent));
+}
+
+#[test]
+fn a_failed_busy_decline_does_not_blame_the_active_call() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, &swap_active_json(77, 41));
+    let decline = session.request(RequestPurpose::DiscardCall, None);
+    apply_json(&mut session, &seq, &sink, &error_json(decline));
+    assert!(session.calls.error.is_none());
+    // The active call's own hang-up still reports.
+    let request = hanging_up(&mut session, 77);
+    apply_json(&mut session, &seq, &sink, &error_json(request));
+    assert!(session.calls.error.is_some());
+}

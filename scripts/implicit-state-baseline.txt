@@ -36,7 +36,6 @@ CallSummary::busy
 CallSummary::busy+debug_information_error
 CallSummary::debug_information_sent
 CallSummary::log_sent
-CallSummary::rating_sent
 CallUi::window_opening
 CameraDraft::starting
 Ceremony::finished
@@ -132,7 +131,6 @@ Latest::wake_pending
 LayerFade::closing
 LinuxState::failed
 LiveInput::failed
-LiveStoryState::extras_requested
 LocalFileState::is_downloading_active
 LocalFileState::is_downloading_completed
 LoginState::config_requested

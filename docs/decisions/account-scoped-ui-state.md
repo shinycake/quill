@@ -4329,3 +4329,69 @@ Agent access, windows and platform code. Entries by area:
   with the pointer over its toast is not covered: no event says so.
 - **Touch Bar.** The composer observation follows the composer on screen
   (13-152); commands are refused while locked (13-157).
+
+
+### Sweep fixes (s3-calls)
+
+- **Call rating.** `CallSummary::rating` is `CallRating` (`Offered`,
+  `Sending(request)`, `Sent`, `Failed(line)`), replacing `rating_sent`. The
+  send moves it to `Sending`; only the matching `ok` reaches `Sent` (the card
+  hides, as tdesktop shows no toast after a rating) and the matching error reaches `Failed`, which draws the card
+  again with the error and its retry (02-015, 05-026, 08-081). A busy or swap
+  decline's `discardCall` error no longer lands on the active call's banner:
+  only the request that owns `HangUp` sets `calls.error` (05-035). Redial and
+  Call again check the engine and the network before they dismiss the end
+  summary (08-078). A dial carries its target in the continuation that waits
+  for microphone access (`with_capture_access` takes a closure), so a second
+  press cannot be answered by the first prompt (08-076).
+- **Group join.** `connect_group` leaves `GroupJoin::Created` for
+  `AnswerApplied` once the answer is applied and for `Connected` only after
+  the sound, mute and videos steps worked; a failed step puts it back
+  to `AnswerApplied`, so the retry redoes the steps (01-080). The camera is
+  the last step and not part of the join: `connect_group_call` answers
+  `Ok(Some(error))` for a camera that would not start, the call connects with
+  audio (the microphone starts), and the camera step after the connect
+  retries it and shows its error, as tdesktop keeps the call running when the
+  camera fails (01-080 regression, 02-101). A failed
+  `connect_group_call` spends the join answer (`join_payload` is cleared), so
+  group-call updates no longer retry it (02-101). A presentation that cannot
+  connect is ended on Telegram (02-099). A stream reply of "call left" shows a
+  failed join with its retry (02-111). Muting before your participant row
+  exists is sent for your account or your join-as (02-104).
+- **Live story extras.** The streamer, top donors and comment senders are three
+  `Fetch` fields on `LiveStoryState`, each asked while idle; a failure stays
+  failed until the next Join of the story (02-114).
+- **Call links.** One `CallLinkStage` (`Idle`, `Confirm`, `Leaving`,
+  `Offered`) replaces the three fields kept in step. `Leaving` holds the whole
+  confirm (so a live stream stays one) and the call being left. It ends with a
+  hang-up that cannot be sent, a `discardCall` TDLib answers with an error (the
+  hang-up error arm drops it for that call), another call taking the place,
+  and the call boxes' farewell; `Offered` reaches the UI so a stream opens in
+  its window (01-066, 01-067).
+- **Create video chat.** A "join as" answer is dropped when no box waits for
+  its request, and a box whose request is no longer the session's closes
+  (01-074).
+- **Windows.** A call window that fails to open is remembered per call in
+  `window_open_failed`, apart from `window_closed_by_user`: a second call
+  ringing reopens a window you closed but not one that failed, so the sync
+  does not retry and note it every time; the call bar or a notification's Open
+  tries again (08-034, 10-047). Settings > Calls redraws only when its sessions fetch went
+  out (08-033).
+- **Capture.** A run of 50 frames the engine refuses ends the capture with a
+  `Failed(Refused)` event (01-071); the microphone is then not reopened until
+  the call, the microphone or the mute changes (or the transport goes down
+  and comes back), so the error line does not flicker every 2.5 s. The screen
+  share's wait reads the pump's `now`, and the texts of the ended call, the
+  stream that would not load and the share that could not start are lang keys. A lost WASAPI output device is reported through
+  `SystemAudioMix::fail` and the driver turns the audio share off (01-063). A
+  chosen screen share waits at most `ENGINE_WAIT` for the engine's frame
+  sender, then ends with an error (02-013). A macOS start that times out stops
+  its stream (01-064). A lost microphone withdraws the speaking mark (02-009).
+  A failed output reopen is retried three times, 5 s apart (01-094). An X11
+  push-to-talk thread that ends is a failed hook (`HookLife`) and releases a
+  held key (01-086).
+- **Skipped.** 02-103: the native presentation is already stopped when the
+  end request fails, so there is no sharing stage to return to, and the error
+  already shows as "Could not stop screen sharing". The tdesktop source was
+  not available to this run to confirm that it does not revert either; the
+  smallest safe choice was to leave it.

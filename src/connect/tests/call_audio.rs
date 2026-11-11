@@ -171,6 +171,69 @@ fn speaking_is_sent_to_tdlib_and_withdrawn_on_mute() {
     std::fs::remove_dir_all(dir).ok();
 }
 
+/// A tap whose device can be lost: `lost` makes `error` report it.
+struct LosableLevel {
+    level: Mutex<Option<f32>>,
+    lost: std::sync::atomic::AtomicBool,
+}
+
+impl LevelSource for LosableLevel {
+    fn take_level(&self) -> Option<f32> {
+        self.level.lock().unwrap().take()
+    }
+
+    fn error(&self) -> Option<String> {
+        self.lost
+            .load(std::sync::atomic::Ordering::SeqCst)
+            .then(|| "The microphone was unplugged.".to_string())
+    }
+}
+
+struct SharedLosable(Arc<LosableLevel>);
+
+impl LevelSource for SharedLosable {
+    fn take_level(&self) -> Option<f32> {
+        self.0.take_level()
+    }
+
+    fn error(&self) -> Option<String> {
+        self.0.error()
+    }
+}
+
+#[test]
+fn a_lost_microphone_withdraws_the_speaking_mark() {
+    let (dir, recorder, mut driver, _seq) = group_call_test_driver();
+    let sent = || {
+        recorder
+            .snapshot()
+            .iter()
+            .map(|s| serde_json::from_str::<Value>(s).unwrap())
+            .filter(|v| v["@type"] == "setGroupCallParticipantIsSpeaking")
+            .map(|v| v["is_speaking"].as_bool().unwrap())
+            .collect::<Vec<_>>()
+    };
+    let tap = Arc::new(LosableLevel {
+        level: Mutex::new(Some(1.3)),
+        lost: Default::default(),
+    });
+    driver
+        .call_audio
+        .inject(Box::new(SharedLosable(tap.clone())));
+    driver.session.calls.active_group_call = Some(joined_unmuted_call(4242));
+    driver.pump_call_audio(std::time::Instant::now()).unwrap();
+    assert_eq!(driver.group_call_self_level(), (1.3, true));
+    assert_eq!(sent(), vec![true]);
+    // The microphone goes: the tile stops speaking and TDLib is told.
+    tap.lost.store(true, std::sync::atomic::Ordering::SeqCst);
+    driver.pump_call_audio(std::time::Instant::now()).unwrap();
+    assert!(!driver.call_audio.is_open());
+    assert_eq!(driver.group_call_self_level(), (0.0, false));
+    assert_eq!(sent(), vec![true, false]);
+    assert!(driver.group_call_level_error().is_some());
+    std::fs::remove_dir_all(dir).ok();
+}
+
 #[test]
 fn an_unknown_audio_source_sends_nothing() {
     let (dir, recorder, mut driver, _seq) = group_call_test_driver();
