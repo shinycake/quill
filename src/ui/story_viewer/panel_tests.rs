@@ -15,7 +15,10 @@ fn moving_to_another_story_closes_its_report_and_viewers_panels(cx: &mut TestApp
         }
         if let Some(session) = app.demo_session.as_mut() {
             session.begin_story_report(105, 3, quill::ids::RequestId(1));
-            session.stories.manage.error = Some("Pick at least one user".into());
+            session
+                .stories
+                .manage
+                .fail_locally(1, 2, "Pick at least one user".into());
         }
     });
     let paused = app.read_with(vcx, |app, _| app.story_playback_paused());
@@ -33,7 +36,7 @@ fn moving_to_another_story_closes_its_report_and_viewers_panels(cx: &mut TestApp
         let error = app
             .demo_session
             .as_ref()
-            .and_then(|session| session.stories.manage.error.clone());
+            .and_then(|session| session.stories.manage.error().map(str::to_string));
         assert_eq!(error, None, "an edit's failure stays with its story");
     });
 }

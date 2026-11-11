@@ -377,7 +377,7 @@ fn story_manage_state_transitions() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
     assert!(!session.stories.manage.is_pending());
-    assert_eq!(session.stories.manage.error, None);
+    assert_eq!(session.stories.manage.error(), None);
 
     let extra = session.request(RequestPurpose::EditStoryCover, None);
     session.stories.manage.start(extra, ChatId(11), 5);
@@ -391,7 +391,12 @@ fn story_manage_state_transitions() {
         ),
     );
     assert!(!session.stories.manage.is_pending());
-    let error = session.stories.manage.error.clone().expect("manage error");
+    let error = session
+        .stories
+        .manage
+        .error()
+        .map(str::to_string)
+        .expect("manage error");
     assert!(error.contains("Story update failed"), "{error}");
 
     let extra = session.request(RequestPurpose::GetChatsToPostStories, None);

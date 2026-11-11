@@ -32,9 +32,6 @@ pub struct TopicHistory {
     /// Bumped whenever the window is replaced, so the UI re-anchors its
     /// scroll.
     pub window_epoch: u64,
-    /// Page requests issued for a window end that was dropped or replaced
-    /// since: their answers would land across a gap and are dropped.
-    pub stale_pages: HashSet<u64>,
 }
 
 impl Default for TopicHistory {
@@ -49,7 +46,6 @@ impl Default for TopicHistory {
             older: OlderEnd::Open,
             latest_seen: 0,
             window_epoch: 0,
-            stale_pages: HashSet::new(),
         }
     }
 }

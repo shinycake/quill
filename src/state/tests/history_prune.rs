@@ -559,17 +559,29 @@ fn an_older_page_for_an_evicted_topic_does_not_start_it_again() {
     let (mut session, _sink) = session();
     session.topic_history_entry(ChatId(7), 1).mark_complete();
     let extra = session.request_for_topic(RequestPurpose::GetTopicHistory, Some(ChatId(7)), 1);
-    let pending = session.requests.get(extra).cloned().expect("in flight");
+    assert!(session.requests.get(extra).is_some(), "in flight");
     for topic in 2..=(CLOSED_TOPICS_MAX as i32 + 6) {
         session.topic_history_entry(ChatId(7), topic);
     }
     assert!(!session.threads.topic_histories.contains_key(&(7, 1)));
-    session.apply_topic_page(vec![live(7, 5)], 1, MessageId(0), &pending);
+    assert!(
+        session.requests.get(extra).is_none(),
+        "the request goes with the entry"
+    );
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &_sink,
+        &format!(
+            r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":1,"next_from_message_id":0,"messages":[]}}"#,
+            extra.0
+        ),
+    );
     assert!(
         !session.threads.topic_histories.contains_key(&(7, 1)),
         "an older page is not the topic's newest content"
     );
-    assert!(session.history_pruning.gone_topic_pages.is_empty());
 }
 
 #[test]

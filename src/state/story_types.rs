@@ -211,30 +211,61 @@ impl StoryStealthMode {
 /// `editStory` / `editStoryCover` / `setStoryPrivacySettings` — all `= Ok`
 /// calls, so success only clears the spinner (the edited story itself
 /// arrives via `updateStory`); failures surface the sanitized TDLib error.
-/// The slot (`pending`, `error`, `story`) is the status line of the latest
-/// call, shown under its story. Each call is also tracked by its own
-/// request (`in_flight`, `settled`): whoever sent it (the composer's Save,
-/// the cover picker, the privacy editor) reads the answer to its own
-/// request with `outcome`, whatever call took the slot after it.
+/// `line` is the status line of the latest call, shown under its story.
+/// Each call is also tracked by its own request (`calls`): whoever sent it
+/// (the composer's Save, the cover picker, the privacy editor) reads the
+/// answer to its own request with `outcome`, whatever call took the line
+/// after it.
 #[derive(Debug, Clone, Default)]
 pub struct StoryManageState {
-    pub error: Option<String>,
-    /// `(chat_id, story_id)` of the story the call or error is about.
-    pub story: Option<(i64, i32)>,
-    /// The call the slot shows.
-    pub request: Option<RequestId>,
-    /// Every call still on its way.
-    in_flight: Vec<RequestId>,
-    /// The latest calls to settle and their failures.
-    settled: Vec<(RequestId, Option<String>)>,
+    line: ManageLine,
+    /// Every call, oldest first: on its way, or the latest ones to settle
+    /// and their failures.
+    calls: Vec<ManageCall>,
+}
+
+/// The status line under a posted story.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+enum ManageLine {
+    #[default]
+    Quiet,
+    /// The call `request` for this story is on its way.
+    Pending {
+        request: RequestId,
+        chat_id: i64,
+        story_id: i32,
+    },
+    /// The latest call for this story failed (or could not be made).
+    Failed {
+        chat_id: i64,
+        story_id: i32,
+        error: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ManageCall {
+    request: RequestId,
+    state: ManageCallState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ManageCallState {
+    InFlight,
+    Saved,
+    Failed(String),
 }
 
 impl StoryManageState {
     /// The account is going away: no call still on its way will be answered,
     /// so each reads as `Lost` (its sender leaves its stage) instead of
-    /// `InFlight` for good.
+    /// `InFlight` for good, and the status line stops saying "Saving".
     pub fn forget_in_flight(&mut self) {
-        self.in_flight.clear();
+        self.calls
+            .retain(|call| call.state != ManageCallState::InFlight);
+        if matches!(self.line, ManageLine::Pending { .. }) {
+            self.line = ManageLine::Quiet;
+        }
     }
 }
 
@@ -256,76 +287,134 @@ const STORY_MANAGE_SETTLED_CAP: usize = 16;
 impl StoryManageState {
     /// A call for the story went out as `request`.
     pub fn start(&mut self, request: RequestId, chat_id: ChatId, story_id: i32) {
-        self.error = None;
-        self.story = Some((chat_id.0, story_id));
-        self.request = Some(request);
-        self.in_flight.push(request);
+        self.line = ManageLine::Pending {
+            request,
+            chat_id: chat_id.0,
+            story_id,
+        };
+        self.calls.push(ManageCall {
+            request,
+            state: ManageCallState::InFlight,
+        });
     }
 
-    /// The answer to `request` landed; `error` is its failure. The slot
+    /// The answer to `request` landed; `error` is its failure. The line
     /// follows only when it still shows that call, but the call's own
     /// sender always gets its answer.
     pub fn settle(&mut self, request: RequestId, error: Option<String>) {
-        let was_in_flight = self.in_flight.len();
-        self.in_flight.retain(|id| *id != request);
-        if self.in_flight.len() == was_in_flight {
+        let Some(call) = self
+            .calls
+            .iter_mut()
+            .find(|call| call.request == request && call.state == ManageCallState::InFlight)
+        else {
             return;
+        };
+        call.state = match &error {
+            Some(error) => ManageCallState::Failed(error.clone()),
+            None => ManageCallState::Saved,
+        };
+        let settled = self
+            .calls
+            .iter()
+            .filter(|call| call.state != ManageCallState::InFlight)
+            .count();
+        if settled > STORY_MANAGE_SETTLED_CAP
+            && let Some(oldest) = self
+                .calls
+                .iter()
+                .position(|call| call.state != ManageCallState::InFlight)
+        {
+            self.calls.remove(oldest);
         }
-        if self.settled.len() >= STORY_MANAGE_SETTLED_CAP {
-            self.settled.remove(0);
-        }
-        self.settled.push((request, error.clone()));
-        if self.request == Some(request) {
-            self.request = None;
-            self.error = error;
+        if let ManageLine::Pending {
+            request: shown,
+            chat_id,
+            story_id,
+        } = self.line
+            && shown == request
+        {
+            self.line = match error {
+                Some(error) => ManageLine::Failed {
+                    chat_id,
+                    story_id,
+                    error,
+                },
+                None => ManageLine::Quiet,
+            };
         }
     }
 
     /// What became of `request`, matched by its id: a later call's
     /// answer is never taken for it.
     pub fn outcome(&self, request: RequestId) -> StoryManageOutcome {
-        if self.in_flight.contains(&request) {
-            return StoryManageOutcome::InFlight;
-        }
-        match self.settled.iter().find(|(id, _)| *id == request) {
-            Some((_, None)) => StoryManageOutcome::Saved,
-            Some((_, Some(_))) => StoryManageOutcome::Failed,
+        match self.calls.iter().find(|call| call.request == request) {
+            Some(call) => match call.state {
+                ManageCallState::InFlight => StoryManageOutcome::InFlight,
+                ManageCallState::Saved => StoryManageOutcome::Saved,
+                ManageCallState::Failed(_) => StoryManageOutcome::Failed,
+            },
             None => StoryManageOutcome::Lost,
         }
     }
 
     /// Why `request` failed.
     pub fn failure(&self, request: RequestId) -> Option<&str> {
-        self.settled
+        self.calls
             .iter()
-            .find(|(id, _)| *id == request)
-            .and_then(|(_, error)| error.as_deref())
+            .find(|call| call.request == request)
+            .and_then(|call| match &call.state {
+                ManageCallState::Failed(error) => Some(error.as_str()),
+                _ => None,
+            })
     }
 
-    /// The story's call could not be made: `error` says why. The slot
+    /// The story's call could not be made: `error` says why. The line
     /// shows it under the story and lets go of the call it showed, so
     /// that call's answer stays off this story's line.
     pub fn fail_locally(&mut self, chat_id: i64, story_id: i32, error: String) {
-        self.request = None;
-        self.story = Some((chat_id, story_id));
-        self.error = Some(error);
+        self.line = ManageLine::Failed {
+            chat_id,
+            story_id,
+            error,
+        };
     }
 
-    /// The slot shows a call still on its way.
+    /// The failure line is read: the line goes quiet.
+    pub fn clear_error(&mut self) {
+        if matches!(self.line, ManageLine::Failed { .. }) {
+            self.line = ManageLine::Quiet;
+        }
+    }
+
+    /// The line shows a call still on its way.
     pub fn is_pending(&self) -> bool {
-        self.request.is_some()
+        matches!(self.line, ManageLine::Pending { .. })
     }
 
     /// A call for this story is in flight.
     pub fn pending_for(&self, chat_id: i64, story_id: i32) -> bool {
-        self.request.is_some() && self.story == Some((chat_id, story_id))
+        matches!(self.line, ManageLine::Pending { chat_id: c, story_id: s, .. }
+            if (c, s) == (chat_id, story_id))
+    }
+
+    /// The failure line, whatever story it is about.
+    pub fn error(&self) -> Option<&str> {
+        match &self.line {
+            ManageLine::Failed { error, .. } => Some(error),
+            _ => None,
+        }
     }
 
     /// This story's failure line.
     pub fn error_for(&self, chat_id: i64, story_id: i32) -> Option<&str> {
-        self.error
-            .as_deref()
-            .filter(|_| self.story == Some((chat_id, story_id)))
+        match &self.line {
+            ManageLine::Failed {
+                chat_id: c,
+                story_id: s,
+                error,
+            } if (*c, *s) == (chat_id, story_id) => Some(error),
+            _ => None,
+        }
     }
 }
 
