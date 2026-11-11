@@ -164,6 +164,10 @@ impl Pull {
     }
 }
 
+#[expect(
+    clippy::derivable_impls,
+    reason = "a derive would require `T: Default`"
+)]
 impl<T> Default for Gesture<T> {
     fn default() -> Self {
         Self::Idle

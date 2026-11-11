@@ -59,6 +59,10 @@ pub enum BoostState<T = ()> {
     Boosting { last_seen: Instant },
 }
 
+#[expect(
+    clippy::derivable_impls,
+    reason = "a derive would require `T: Default`"
+)]
 impl<T> Default for BoostState<T> {
     fn default() -> Self {
         Self::Idle

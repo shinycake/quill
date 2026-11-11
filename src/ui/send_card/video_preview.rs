@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 /// decoder can't read still sends, it just shows its kind).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct VideoPreview {
-    /// The first frame, upright, at most [`FRAME_SIDE`] on its long side.
+    /// The first frame, upright, at most 640 px (`FRAME_SIDE`, macOS) on its long side.
     pub(crate) frame: Option<Frame>,
     /// Whole seconds.
     pub(crate) duration: Option<i32>,
@@ -28,6 +28,7 @@ pub(crate) struct Frame {
 }
 
 /// Big enough for the largest tile on a Retina screen.
+#[cfg(target_os = "macos")]
 const FRAME_SIDE: u32 = 640;
 
 impl QuillApp {
