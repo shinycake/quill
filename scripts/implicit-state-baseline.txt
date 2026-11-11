@@ -1,5 +1,4 @@
 # Implicit-state debt (scripts/check-implicit-state.py). Only remove lines.
-AccountBoxes::age_verify_started
 ActiveGroupCall::join_as_requested
 ActiveGroupCall::loaded_all_participants
 ActiveGroupCall::loaded_all_participants+transport_error
@@ -35,7 +34,6 @@ ChatListState::archive_settings_loading
 ChatSummary::my_rights_fetched
 ChatSwipeFacts::is_saved
 ChatUi::inline_query_waiting
-ChatWindows::save_pending
 ChatWindowsState::asked
 ChatbotDraft::loaded
 Checklist::others_can_mark_tasks_as_done

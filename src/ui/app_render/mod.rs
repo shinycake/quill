@@ -72,7 +72,7 @@ impl Render for QuillApp {
         self.sync_window_title(window);
         self.sync_proxy_list_box();
         self.sync_premium_preview_files();
-        super::window_frame::sync(window, self.appearance.native_window_frame);
+        super::window_frame::sync(window, cx, self.appearance.native_window_frame);
         // Rows the history list painted last frame are what the user saw.
         self.passcode_frame(window, cx);
         self.report_visible_history(

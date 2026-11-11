@@ -5464,3 +5464,51 @@ land and the typed form was gone.
 - **Skipped.** 13-069: `AgentUi::pick_account` already resets the activity
   filter wherever `picked` changes, with a test
   (`picking_another_account_resets_the_activity_filter`).
+
+### Sweep fixes (s4-platform-2)
+
+- **Agent driver.** A send the composer hands over is stamped with the
+  screen epoch and only the command on that screen takes it; a command
+  starts by clearing a send an earlier command's deferred half left
+  (07-026). The history and the composer carry the open chat's `chat=<id>`
+  tag, so redaction follows the chat the frame drew, not the open chat of
+  the moment the agent reads (07-027). The takeover pill records the window
+  that painted it; another window's pointer is never "on the pill" (07-034).
+- **Chat windows.** Activating a window whose state is in place focuses the
+  app's compose field, not the slot's copy (08-111). A chat window that
+  fails to open gives the chat back to the main window that left it
+  (08-110). "Reopen closed window" pops its entry only once the window
+  opens; an entry whose chat is gone is dropped (08-109). An open that
+  cannot reach its window posts a note instead of vanishing with its
+  carry (08-145; the carried forward draft is not restored, tdesktop has no
+  equivalent). Places are saved from the geometry each slot recorded, so a
+  window the switch runs inside is saved too, and the OS window is removed
+  in a deferred step (08-146). `save_pending` is `SaveTimer`, whose `Due`
+  holds the timer task and its screen epoch; a timer of an older epoch no
+  longer counts (08-142). A lost "Restore chat windows?" box is asked again
+  while the stage is still `Offered` (08-144).
+- **Demo.** Every `apply_demo_*` numbers its envelope through
+  `apply_demo_json`, which catches the counter up to `session.last_seq`
+  (09-021).
+- **Notification windows.** `Shown` has one `Stage` (`Live`, `Replying`,
+  `Unlinked`): an unlinked window is not replying (11-p6-008). A
+  notification whose window cannot open goes back to the head of the queue
+  and waits for the next change (11-p6-007).
+- **Touch Bar (macOS; not built on the Linux runner, reviewed by reading).**
+  Only decoded pictures are cached (13-159). A hidden window skips the sync
+  and an unchanged bar is not applied again; Quill cannot ask AppKit
+  whether the Mac has a Touch Bar, so the model is still built on those
+  Macs (13-160). The bar is bound per main window (`Binding`), including
+  the window the GPU-loss recovery opens (13-153). A dropped pinned order
+  stays on screen as `Order::Reordering` until the model echoes it, the pins
+  change, or the request is refused (13-156). Touches carry the screen epoch
+  of the bar they came from and are dropped when stale (13-158).
+- **Platform.** The timer's update check leaves "Updated to Quill X" alone
+  (14-007). A download the disk held restarts at once when the disk is
+  healthy by then (14-008). `AccountBoxes::notice` is one `OpenNotice`
+  (`None`, `Frozen`, `AgeVerify`), closed when its condition goes away; the
+  age check is `AgeCheck` (14-010). A failed request on the cached X11
+  connection drops it (14-060). `window_frame`'s applied map loses an entry
+  with its window (14-059). The update helper waits on the launch's lock on
+  the claim, with no deadline while it is held, and falls back on the pid
+  only where the file system has no locks (14-068).

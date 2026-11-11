@@ -51,9 +51,10 @@ const WINDOW_CORNER: Pixels = px(16.);
 const WINDOW_CORNER: Pixels = px(8.);
 
 thread_local! {
-    /// Where the pill was painted last frame (window pixels), so pointer
-    /// input on it answers the pill instead of pausing the agent.
-    static PILL: Cell<Option<Bounds<Pixels>>> = const { Cell::new(None) };
+    /// Where the pill was painted last frame (pixels of the window that
+    /// painted it), so pointer input on it answers the pill instead of
+    /// pausing the agent. Another window's pointer is not on it.
+    static PILL: Cell<Option<(WindowId, Bounds<Pixels>)>> = const { Cell::new(None) };
     /// One of the agent's own prompts was open last frame: its request or
     /// confirm (`AgentRequest`) or the all-chats consent. Both are modal,
     /// so all input goes to them.
@@ -77,7 +78,9 @@ pub(super) fn note_real_input(input: RealInput, window: &Window) {
     }
     let pointer = window.mouse_position();
     let on_pill = !matches!(input, RealInput::Key)
-        && PILL.with(|pill| pill.get().is_some_and(|bounds| bounds.contains(&pointer)));
+        && PILL.with(|pill| pill.get()).is_some_and(|(id, bounds)| {
+            id == window.window_handle().window_id() && bounds.contains(&pointer)
+        });
     let on_controls = on_pill || agent_prompt_open();
     takeover::note_real_input(input, window.is_window_active(), on_controls);
 }
@@ -213,7 +216,10 @@ impl QuillApp {
             .opacity(presence)
             .child(
                 canvas(
-                    |bounds, _, _| PILL.with(|pill| pill.set(Some(bounds))),
+                    |bounds, window, _| {
+                        let id = window.window_handle().window_id();
+                        PILL.with(|pill| pill.set(Some((id, bounds))));
+                    },
                     |_, _, _, _| {},
                 )
                 .absolute()

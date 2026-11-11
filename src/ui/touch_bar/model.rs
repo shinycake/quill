@@ -127,6 +127,35 @@ impl Pin {
     }
 }
 
+/// What a pin stands for, to tell one from another across a change of order.
+pub(crate) type PinKey = (PinKind, Option<ChatId>);
+
+impl Pin {
+    pub(crate) fn key(&self) -> PinKey {
+        (self.kind.clone(), self.chat_id)
+    }
+}
+
+/// How the model's pinned order stands against the order a drop put on
+/// screen (`pinned::Order::Reordering`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Echo {
+    /// The model shows the dropped order: the server answered.
+    Caught,
+    /// The same pins in the old order: the request is still out.
+    Waiting,
+    /// Other pins: the list changed, the dropped order means nothing.
+    Gone,
+}
+
+pub(crate) fn reorder_echo(dropped: &[PinKey], shown: &[PinKey]) -> Echo {
+    if dropped == shown {
+        return Echo::Caught;
+    }
+    let same_pins = dropped.len() == shown.len() && dropped.iter().all(|key| shown.contains(key));
+    if same_pins { Echo::Waiting } else { Echo::Gone }
+}
+
 /// The pinned chats panel, left to right.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct PinnedPanel {

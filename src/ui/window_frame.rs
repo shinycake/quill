@@ -52,16 +52,23 @@ thread_local! {
 
 /// Make `window` follow the saved choice. Cheap when nothing changed, so
 /// every window calls it from its render.
-pub(crate) fn sync(window: &mut Window, native: bool) {
+pub(crate) fn sync(window: &mut Window, cx: &App, native: bool) {
     if !supported() {
         return;
     }
     set_native(native);
     let id = window.window_handle().window_id();
-    let changed = APPLIED.with(|applied| {
+    let (changed, first) = APPLIED.with(|applied| {
         let mut applied = applied.borrow_mut();
-        applied.insert(id, native) != Some(native)
+        let before = applied.insert(id, native);
+        (before != Some(native), before.is_none())
     });
+    if first {
+        // The entry goes with its window.
+        super::window_control::when_window_goes(window, cx, move |_| {
+            APPLIED.with(|applied| applied.borrow_mut().remove(&id));
+        });
+    }
     if changed {
         platform::apply(window, native);
     }

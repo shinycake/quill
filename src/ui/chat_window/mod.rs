@@ -52,6 +52,8 @@ mod saved;
 mod scoped;
 mod slot;
 #[cfg(test)]
+mod sweep_s4_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod upkeep_tests;
@@ -71,8 +73,10 @@ mod window_pick_tests;
 mod window_state_tests;
 
 use super::app::QuillApp;
+use super::on_screen::ScreenEpoch;
 use super::threads::ThreadAsker;
 use cover::WindowPlace;
+use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
@@ -105,7 +109,7 @@ pub(crate) struct ChatWindows {
     /// Which window shows each kit dialog (`dialog_hosts`).
     dialogs: dialog_hosts::DialogHosts,
     /// A write of the open windows is scheduled (`saved`).
-    save_pending: bool,
+    save: saved::SaveTimer,
     /// Windows the user closed, newest last, for "Reopen closed window"
     /// (`SavedWindows::_closed`, at most `kMaxClosedWindows`).
     closed: Vec<(ChatId, Bounds<Pixels>)>,
@@ -196,7 +200,7 @@ impl ChatWindows {
             asker: dialog_hosts::Asker::InPlace,
             thread_asker: ThreadAsker::Nobody,
             dialogs: dialog_hosts::DialogHosts::default(),
-            save_pending: false,
+            save: saved::SaveTimer::Idle,
             closed: Vec::new(),
             restore: saved::Restore::default(),
         }
@@ -216,6 +220,16 @@ impl ChatWindows {
     /// Every open chat window, as its chat and window.
     pub(super) fn open_windows(&self) -> impl Iterator<Item = (ChatId, AnyWindowHandle)> + '_ {
         self.open.iter().map(|open| (open.chat_id, open.handle))
+    }
+
+    /// Each open window's chat and its geometry as of its last render or
+    /// move (windows that never drew have none), read from the slot so a
+    /// window the caller is inside of counts too.
+    pub(super) fn open_places(&self) -> impl Iterator<Item = (ChatId, Bounds<Pixels>)> + '_ {
+        self.open.iter().filter_map(|open| {
+            let bounds = open.slot.try_borrow().ok()?.bounds?;
+            Some((open.chat_id, bounds))
+        })
     }
 
     /// Every open chat window's slot.
@@ -337,12 +351,19 @@ impl ChatWindows {
     /// Bring the window showing `chat_id` to the front, with its compose
     /// field focused (Telegram Desktop `Window::Controller::activate`).
     /// Returns whether there was one.
-    fn activate(&self, chat_id: ChatId, cx: &mut App) -> bool {
+    ///
+    /// `in_place` is the compose field the app holds: while that window's
+    /// state is in place, its slot holds the main window's field instead.
+    fn activate(&self, chat_id: ChatId, in_place: &Entity<TextareaState>, cx: &mut App) -> bool {
         let Some(open) = self.window_for(chat_id) else {
             return false;
         };
         cx.activate(true);
-        let composer = open.slot.borrow().composer.clone();
+        let composer = if self.scope == Some(chat_id) {
+            in_place.clone()
+        } else {
+            open.slot.borrow().composer.clone()
+        };
         let _ = open.handle.update(cx, |_, window, cx| {
             window.activate_window();
             composer.update(cx, |input, cx| input.focus(window, cx));
@@ -410,20 +431,33 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.windows.activate(chat_id, cx) {
-            return;
+        self.try_open_chat_window_at(chat_id, bounds, window, cx);
+    }
+
+    /// [`Self::open_chat_window_at`], saying whether the chat has a window
+    /// now or one is opening (`false`: the request was refused and nothing
+    /// changed: an unknown chat, the lock, the session's refusal).
+    pub(super) fn try_open_chat_window_at(
+        &mut self,
+        chat_id: ChatId,
+        bounds: Option<Bounds<Pixels>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.windows.activate(chat_id, &self.composer, cx) {
+            return true;
         }
         let Some(chat) = self
             .session()
             .and_then(|session| session.chats.get(&chat_id.0))
             .cloned()
         else {
-            return;
+            return false;
         };
         if !self.can_open_chat_window(&chat) {
             self.set_note(StatusNote::error(tr(keys::Q_MISC_THIS_CHAT_CANT_OPEN_IN)));
             cx.notify();
-            return;
+            return false;
         }
         // Asked from inside a chat window: the main window's view is the
         // one that lets go of the chat.
@@ -439,12 +473,13 @@ impl QuillApp {
                 )));
                 self.set_window_scope(outer);
                 cx.notify();
-                return;
+                return false;
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_window_chat(chat_id);
         }
-        if self.open_chat_id() == Some(chat_id) {
+        let from_main = self.open_chat_id() == Some(chat_id);
+        if from_main {
             self.leave_open_chat(window, cx);
         }
         self.set_window_scope(outer);
@@ -476,6 +511,11 @@ impl QuillApp {
                                 keys::Q_MISC_COULDNT_OPEN_THE_CHAT_WINDOW,
                             )));
                             app.chat_window_closed(chat_id, None, cx);
+                            // The main window let go of the chat for this
+                            // window: it shows it again.
+                            if from_main {
+                                app.reselect_in_main(chat_id, screen, cx);
+                            }
                         });
                     });
                     return;
@@ -509,6 +549,26 @@ impl QuillApp {
             });
         });
         cx.notify();
+        true
+    }
+
+    /// The main window selects `chat_id` again (a chat window that could
+    /// not open for the chat the main window had left).
+    fn reselect_in_main(&mut self, chat_id: ChatId, screen: ScreenEpoch, cx: &mut Context<Self>) {
+        let Some(main) = self.main_window.handle else {
+            return;
+        };
+        let owner = cx.entity();
+        // window-scope: `in_screen_scope` puts the main window's state in place.
+        cx.defer(move |cx| {
+            let _ = main.update(cx, |_, window, cx| {
+                owner.update(cx, |app, cx| {
+                    app.in_screen_scope(screen, cx, |app, cx| {
+                        app.select_chat_request(ChatOpen::new(chat_id), window, cx);
+                    });
+                });
+            });
+        });
     }
 
     /// Picking a chat that has its own window shows that window instead
@@ -516,7 +576,7 @@ impl QuillApp {
     /// `MainWidget::showHistoryInDifferentWindow`). Returns whether the
     /// request was taken over.
     pub(super) fn routed_to_chat_window(&self, chat_id: ChatId, cx: &mut App) -> bool {
-        self.windows.activate(chat_id, cx)
+        self.windows.activate(chat_id, &self.composer, cx)
     }
 
     /// "Reopen closed window" (`SavedWindows::reopenLastClosed`): the chat
@@ -527,11 +587,24 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some((chat_id, bounds)) = self.windows.closed.pop() else {
-            return false;
-        };
-        self.open_chat_window_at(chat_id, Some(bounds), window, cx);
-        true
+        while let Some(&(chat_id, bounds)) = self.windows.closed.last() {
+            let known = self
+                .session()
+                .is_some_and(|session| session.chats.contains_key(&chat_id.0));
+            if !known {
+                // The chat is gone: there is nothing to bring back.
+                self.windows.closed.pop();
+                continue;
+            }
+            // The entry stays until the window opens (or is opening): a
+            // refusal (the lock, the session) leaves it to reopen later.
+            if !self.try_open_chat_window_at(chat_id, Some(bounds), window, cx) {
+                return false;
+            }
+            self.windows.closed.pop();
+            return true;
+        }
+        false
     }
 
     /// The window showing `chat_id` is gone (closed by the user, or by the

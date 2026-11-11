@@ -125,6 +125,11 @@ pub(crate) fn reopen_main_window(
     cx.open_window(options, move |window, cx| {
         window.take_over(kept, cx);
         crate::ui::link_inbox::attach_main_window(window, cx, &app);
+        // The Touch Bar belongs to the window it was installed for.
+        #[cfg(target_os = "macos")]
+        app.update(cx, |_, cx| {
+            crate::ui::touch_bar::install(false, window, cx);
+        });
         if window.focused(cx).is_none() {
             window.focus(&app.focus_handle(cx), cx);
         }

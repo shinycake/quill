@@ -225,6 +225,7 @@ mod platform {
 mod platform {
     use super::*;
     use x11rb::connection::Connection;
+    use x11rb::errors::{ConnectionError, ReplyError};
     use x11rb::protocol::xproto::{
         AtomEnum, ClientMessageEvent, ConnectionExt as _, EventMask, MapState, PropMode,
         UnmapNotifyEvent,
@@ -255,6 +256,37 @@ mod platform {
             const { std::cell::RefCell::new(None) };
     }
 
+    /// A request on the cached connection failed to go out: the connection
+    /// is gone (the X server or Xwayland restarted), so the next call
+    /// connects anew instead of failing for the rest of the process.
+    fn forget_connection() {
+        CONNECTION.with(|slot| slot.borrow_mut().take());
+    }
+
+    /// `result` of sending a request; a failure drops the connection.
+    fn sent<T>(result: Result<T, ConnectionError>) -> Option<T> {
+        match result {
+            Ok(value) => Some(value),
+            Err(_) => {
+                forget_connection();
+                None
+            }
+        }
+    }
+
+    /// `result` of a request's reply; only a broken connection drops it (an
+    /// X error such as a window that is gone leaves it alone).
+    fn answered<T>(result: Result<T, ReplyError>) -> Option<T> {
+        match result {
+            Ok(value) => Some(value),
+            Err(ReplyError::ConnectionError(_)) => {
+                forget_connection();
+                None
+            }
+            Err(ReplyError::X11Error(_)) => None,
+        }
+    }
+
     fn connection() -> Option<std::rc::Rc<XConnection>> {
         if let Some(shared) = CONNECTION.with(|slot| slot.borrow().clone()) {
             return Some(shared);
@@ -278,19 +310,12 @@ mod platform {
     }
 
     fn atom(conn: &RustConnection, name: &str) -> Option<u32> {
-        Some(
-            conn.intern_atom(false, name.as_bytes())
-                .ok()?
-                .reply()
-                .ok()?
-                .atom,
-        )
+        Some(answered(sent(conn.intern_atom(false, name.as_bytes()))?.reply())?.atom)
     }
 
     fn is_mapped(conn: &RustConnection, x_window: u32) -> bool {
-        conn.get_window_attributes(x_window)
-            .ok()
-            .and_then(|cookie| cookie.reply().ok())
+        sent(conn.get_window_attributes(x_window))
+            .and_then(|cookie| answered(cookie.reply()))
             .is_some_and(|attributes| attributes.map_state == MapState::VIEWABLE)
     }
 
@@ -312,9 +337,8 @@ mod platform {
                 found
             }
         };
-        conn.get_property(false, x_window, wm_state, wm_state, 0, 1)
-            .ok()
-            .and_then(|cookie| cookie.reply().ok())
+        sent(conn.get_property(false, x_window, wm_state, wm_state, 0, 1))
+            .and_then(|cookie| answered(cookie.reply()))
             .and_then(|reply| reply.value32().and_then(|mut values| values.next()))
             == Some(ICONIC_STATE)
     }
@@ -325,24 +349,24 @@ mod platform {
         };
         let (conn, root) = (&shared.conn, shared.root);
         let ok = if visible {
-            let mapped = conn.map_window(x_window).is_ok();
+            let mapped = sent(conn.map_window(x_window)).is_some();
             // `_NET_ACTIVE_WINDOW` asks the window manager to raise and
             // focus it (source 1: a normal application).
             if let Some(active) = atom(conn, "_NET_ACTIVE_WINDOW") {
                 let message = ClientMessageEvent::new(32, x_window, active, [1, 0, 0, 0, 0]);
-                let _ = conn.send_event(
+                sent(conn.send_event(
                     false,
                     root,
                     EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY,
                     message,
-                );
+                ));
             }
             mapped
         } else {
             // ICCCM 4.1.4: unmap, then tell the window manager with a
             // synthetic UnmapNotify so the window is withdrawn (out of the
             // taskbar and the switcher), not merely iconified.
-            let unmapped = conn.unmap_window(x_window).is_ok();
+            let unmapped = sent(conn.unmap_window(x_window)).is_some();
             let notice = UnmapNotifyEvent {
                 response_type: x11rb::protocol::xproto::UNMAP_NOTIFY_EVENT,
                 sequence: 0,
@@ -350,15 +374,15 @@ mod platform {
                 window: x_window,
                 from_configure: false,
             };
-            let _ = conn.send_event(
+            sent(conn.send_event(
                 false,
                 root,
                 EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY,
                 notice,
-            );
+            ));
             unmapped
         };
-        let _ = conn.flush();
+        sent(conn.flush());
         ok
     }
 
@@ -373,26 +397,25 @@ mod platform {
         let ok = if is_mapped(conn, x_window) {
             let message =
                 ClientMessageEvent::new(32, x_window, state, net_wm_state_data(on, value));
-            conn.send_event(
+            sent(conn.send_event(
                 false,
                 root,
                 EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY,
                 message,
-            )
-            .is_ok()
+            ))
+            .is_some()
         } else {
             // The window manager reads the property when the window maps.
-            let current: Vec<u32> = conn
-                .get_property(false, x_window, state, AtomEnum::ATOM, 0, 64)
-                .ok()
-                .and_then(|cookie| cookie.reply().ok())
-                .and_then(|reply| reply.value32().map(|atoms| atoms.collect()))
-                .unwrap_or_default();
+            let current: Vec<u32> =
+                sent(conn.get_property(false, x_window, state, AtomEnum::ATOM, 0, 64))
+                    .and_then(|cookie| answered(cookie.reply()))
+                    .and_then(|reply| reply.value32().map(|atoms| atoms.collect()))
+                    .unwrap_or_default();
             let atoms = net_wm_state_property(&current, on, value);
-            conn.change_property32(PropMode::REPLACE, x_window, state, AtomEnum::ATOM, &atoms)
-                .is_ok()
+            sent(conn.change_property32(PropMode::REPLACE, x_window, state, AtomEnum::ATOM, &atoms))
+                .is_some()
         };
-        let _ = conn.flush();
+        sent(conn.flush());
         ok
     }
 

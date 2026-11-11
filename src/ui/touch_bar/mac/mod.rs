@@ -15,6 +15,7 @@ mod preview;
 use super::PickerContents;
 use super::model::{Accessory, Bar, Command};
 use crate::ui::app::QuillApp;
+use crate::ui::on_screen::ScreenEpoch;
 use gpui_kit::*;
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
@@ -32,11 +33,29 @@ const SYNC_THROTTLE: Duration = Duration::from_millis(33);
 
 thread_local! {
     static HOST: RefCell<Option<bars::Host>> = const { RefCell::new(None) };
-    /// Touches not yet run, and the task waiting for them.
-    static INBOX: RefCell<(VecDeque<Command>, Option<Waker>)> =
+    /// Touches not yet run, each with the screen of the bar it came from,
+    /// and the task waiting for them.
+    static INBOX: RefCell<(VecDeque<(ScreenEpoch, Command)>, Option<Waker>)> =
         const { RefCell::new((VecDeque::new(), None)) };
+    /// The screen the bar on the main window was built for: a touch is
+    /// that screen's, whatever is on screen by the time it runs.
+    static BAR_SCREEN: Cell<ScreenEpoch> = Cell::new(ScreenEpoch::default());
+    /// What the host was last given; an identical bar is not applied again.
+    static APPLIED: RefCell<Option<(Bar, Option<PickerContents>, super::Palette)>> =
+        const { RefCell::new(None) };
     static SYNC_SCHEDULER: RefCell<Option<Rc<dyn Fn(&mut Context<QuillApp>)>>> =
         const { RefCell::new(None) };
+    /// What mirrors the app into the bar of the main window it is bound
+    /// to. A main window opened again (the GPU was lost) binds anew.
+    static BINDING: RefCell<Option<Binding>> = const { RefCell::new(None) };
+}
+
+/// The main window the bar is bound to, with the task that runs its
+/// touches and the observers that keep it current; they go with it.
+struct Binding {
+    window: WindowId,
+    _touches: Task<()>,
+    _observers: [Subscription; 2],
 }
 
 pub(super) fn request_sync(cx: &mut Context<QuillApp>) {
@@ -52,7 +71,7 @@ pub(super) fn send(command: Command) {
         let Ok(mut inbox) = inbox.try_borrow_mut() else {
             return None;
         };
-        inbox.0.push_back(command);
+        inbox.0.push_back((BAR_SCREEN.with(Cell::get), command));
         inbox.1.take()
     });
     if let Some(waker) = waker {
@@ -61,7 +80,7 @@ pub(super) fn send(command: Command) {
 }
 
 /// The next touch, once there is one.
-async fn next_command() -> Command {
+async fn next_command() -> (ScreenEpoch, Command) {
     std::future::poll_fn(|cx| {
         INBOX.with(|inbox| {
             let Ok(mut inbox) = inbox.try_borrow_mut() else {
@@ -78,6 +97,26 @@ async fn next_command() -> Command {
         })
     })
     .await
+}
+
+/// The next sync hands the host the bar again, whatever it was given last.
+fn forget_applied() {
+    APPLIED.with(|applied| {
+        if let Ok(mut applied) = applied.try_borrow_mut() {
+            *applied = None;
+        }
+    });
+}
+
+/// The pinned order a drop asked for was refused: the panel shows the
+/// model's order again at the next sync.
+pub(super) fn reorder_refused(cx: &mut Context<QuillApp>) {
+    let host = HOST.with(|host| host.try_borrow().ok().and_then(|host| host.clone()));
+    if let Some(host) = host {
+        host.reorder_refused();
+    }
+    forget_applied();
+    request_sync(cx);
 }
 
 /// Close the picker popover (after a sticker was sent).
@@ -132,6 +171,27 @@ pub(super) fn install(demo: bool, window: &mut Window, cx: &mut Context<QuillApp
         return;
     }
     let handle = window.window_handle();
+    let id = handle.window_id();
+    let bound = BINDING.with(|binding| {
+        binding
+            .try_borrow()
+            .is_ok_and(|binding| binding.as_ref().is_some_and(|binding| binding.window == id))
+    });
+    if bound {
+        return;
+    }
+    // Another main window: the host holds the old one's NSWindow and the
+    // inbox its touches, which the new window must not inherit.
+    let old_host = HOST.with(|host| host.try_borrow_mut().ok().and_then(|mut host| host.take()));
+    if let Some(host) = old_host {
+        host.remove();
+    }
+    INBOX.with(|inbox| {
+        if let Ok(mut inbox) = inbox.try_borrow_mut() {
+            inbox.0.clear();
+        }
+    });
+    forget_applied();
     let state = Rc::new(SyncState {
         pending: Cell::new(false),
         followed_composer: Cell::new(None),
@@ -140,11 +200,16 @@ pub(super) fn install(demo: bool, window: &mut Window, cx: &mut Context<QuillApp
     // Touches run on the app in its window.
     // screen-scope: a touch bar press acts on whichever account is on screen
     // when it is pressed; it carries no state of an earlier screen
-    QuillApp::spawn_app_in(window, cx, async move |this, cx| {
+    let touches = QuillApp::spawn_app_in(window, cx, async move |this, cx| {
         loop {
-            let command = next_command().await;
+            let (screen, command) = next_command().await;
             let alive = this
                 .update_in(cx, |this, window, cx| {
+                    // A touch on the bar of an account that left the screen
+                    // is not the account on screen's.
+                    if this.screen_epoch() != screen {
+                        return;
+                    }
                     // The press is the touch bar's window's.
                     let from = this.window_scope_of(window);
                     this.as_asked_by(from, |this| this.run_touch_bar_command(command, window, cx));
@@ -154,8 +219,7 @@ pub(super) fn install(demo: bool, window: &mut Window, cx: &mut Context<QuillApp
                 break;
             }
         }
-    })
-    .detach();
+    });
     let schedule = {
         let state = state.clone();
         move |cx: &mut Context<QuillApp>| {
@@ -185,10 +249,21 @@ pub(super) fn install(demo: bool, window: &mut Window, cx: &mut Context<QuillApp
         }
     });
     let on_app = schedule.clone();
-    cx.observe_self(move |_, cx| on_app(cx)).detach();
+    let observe_app = cx.observe_self(move |_, cx| on_app(cx));
     let on_focus = schedule;
-    cx.observe_window_activation(window, move |_, _, cx| on_focus(cx))
-        .detach();
+    let observe_focus = cx.observe_window_activation(window, move |_, _, cx| on_focus(cx));
+    let binding = Binding {
+        window: id,
+        _touches: touches,
+        _observers: [observe_app, observe_focus],
+    };
+    // The old binding is let go after the slot is released.
+    let old = BINDING.with(|slot| {
+        slot.try_borrow_mut()
+            .ok()
+            .and_then(|mut slot| slot.replace(binding))
+    });
+    drop(old);
 }
 
 /// Follow the composer on screen now: a selection change in it schedules a
@@ -224,6 +299,10 @@ fn sync(app: &mut QuillApp, window: &mut Window, cx: &mut Context<QuillApp>, sta
         }
         return;
     }
+    // A window hidden to the tray shows no bar; its activation syncs again.
+    if !window.is_visible() {
+        return;
+    }
     follow_composer(app, cx, state);
     let bar = app.touch_bar_model(window, cx);
     let picker = matches!(
@@ -237,6 +316,8 @@ fn sync(app: &mut QuillApp, window: &mut Window, cx: &mut Context<QuillApp>, sta
     let palette = QuillApp::touch_bar_palette(cx);
     let created = HOST.with(|host| host.try_borrow().is_ok_and(|host| host.is_some()));
     if !created {
+        // A host made now has been given nothing yet.
+        forget_applied();
         let Some(ns_window) = ns_window(window) else {
             return;
         };
@@ -254,7 +335,26 @@ fn sync(app: &mut QuillApp, window: &mut Window, cx: &mut Context<QuillApp>, sta
     // Clone the host's handles out so no borrow is held while AppKit runs.
     let host = HOST.with(|host| host.try_borrow().ok().and_then(|host| host.clone()));
     if let Some(host) = host {
-        host.apply(&bar, picker.as_ref(), palette);
+        // The app notifies on every frame of an animation: the same bar as
+        // the last one is not handed to AppKit again.
+        let unchanged = APPLIED.with(|applied| {
+            applied.try_borrow().is_ok_and(|applied| {
+                applied
+                    .as_ref()
+                    .is_some_and(|(last_bar, last_picker, last_palette)| {
+                        *last_bar == bar && *last_picker == picker && *last_palette == palette
+                    })
+            })
+        });
+        if !unchanged || preview_requested() {
+            host.apply(&bar, picker.as_ref(), palette);
+            BAR_SCREEN.with(|screen| screen.set(app.screen_epoch()));
+            APPLIED.with(|applied| {
+                if let Ok(mut applied) = applied.try_borrow_mut() {
+                    *applied = Some((bar.clone(), picker.clone(), palette));
+                }
+            });
+        }
         #[cfg(feature = "demo-capture")]
         if let Some(path) = preview::requested() {
             preview::write(

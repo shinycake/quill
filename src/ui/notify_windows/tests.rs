@@ -85,7 +85,7 @@ fn the_count_limits_the_stack_and_the_rest_wait(cx: &mut TestAppContext) {
             windows
                 .shown
                 .iter()
-                .any(|s| s.key == (me.clone(), ChatId(4)) && !s.unlinked)
+                .any(|s| s.key == (me.clone(), ChatId(4)) && !s.unlinked())
         );
     });
 
@@ -99,7 +99,7 @@ fn the_count_limits_the_stack_and_the_rest_wait(cx: &mut TestAppContext) {
             .windows
             .shown
             .iter()
-            .filter(|s| !s.unlinked && s.key == (me.clone(), ChatId(2)))
+            .filter(|s| !s.unlinked() && s.key == (me.clone(), ChatId(2)))
             .collect();
         assert_eq!(live.len(), 1);
     });
@@ -155,7 +155,7 @@ fn shown_id(app: &QuillApp, chat: i64) -> u64 {
         .windows
         .shown
         .iter()
-        .find(|s| s.key.1 == ChatId(chat) && !s.unlinked)
+        .find(|s| s.key.1 == ChatId(chat) && !s.unlinked())
         .map(|s| s.id)
         .unwrap_or(0)
 }
@@ -183,7 +183,7 @@ fn a_new_message_keeps_the_window_being_replied_in(cx: &mut TestAppContext) {
         app.show_custom_notification(&me, message(7), None, None, false, true, cx);
         let replying = app.delivery.windows.shown.iter().find(|s| s.id == id);
         assert!(
-            replying.is_some_and(|s| s.replying && !s.unlinked && !s.popup.hiding),
+            replying.is_some_and(|s| s.replying() && !s.unlinked() && !s.popup.hiding),
             "the window being replied in stays up"
         );
         let live = app
@@ -191,7 +191,7 @@ fn a_new_message_keeps_the_window_being_replied_in(cx: &mut TestAppContext) {
             .windows
             .shown
             .iter()
-            .filter(|s| s.key.1 == ChatId(7) && !s.unlinked)
+            .filter(|s| s.key.1 == ChatId(7) && !s.unlinked())
             .count();
         assert_eq!(live, 2, "the new message shows beside it");
     });
@@ -336,5 +336,28 @@ fn the_corner_preview_ends_with_the_page_that_showed_it(cx: &mut TestAppContext)
                 .all(|(_, popup)| popup.hiding),
             "the sample windows are going"
         );
+    });
+}
+
+/// A window that was read or closed while a reply was being typed in it is
+/// fading out: it no longer holds the others' fade.
+#[gpui_kit::test]
+fn a_cleared_window_does_not_count_as_replying(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let me = app.read_with(vcx, |app, _| app.notification_account(None));
+    app.update(vcx, |app, cx| {
+        app.delivery.windows.platform = NotifyPlatform::Windows;
+        app.show_custom_notification(&me, message(7), None, None, false, true, cx);
+        let id = shown_id(app, 7);
+        app.notify_window_event(id, ViewEvent::ReplyOpened, cx);
+        assert!(app.delivery.windows.any_replying());
+        // The chat is read elsewhere.
+        app.clear_custom_notifications(&me, ChatId(7), cx);
+        assert!(!app.delivery.windows.any_replying());
+        assert!(!app.delivery.windows.held());
+        // Replying again in a window that is leaving does not hold either.
+        app.notify_window_event(id, ViewEvent::ReplyOpened, cx);
+        assert!(!app.delivery.windows.any_replying());
     });
 }

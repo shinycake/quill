@@ -7,7 +7,8 @@
 //! width, drawing the pictures itself.
 
 use super::super::model::{
-    self, CIRCLE_DIAMETER, Command, Pin, PinKind, PinTouch, TouchEnd, drop_index, index_at, pin_x,
+    self, CIRCLE_DIAMETER, Command, Echo, Pin, PinKey, PinKind, PinTouch, TouchEnd, drop_index,
+    index_at, pin_x,
 };
 use super::super::{Palette, initials, initials_colors};
 use super::draw;
@@ -83,8 +84,21 @@ struct Entry {
     online: Slide,
 }
 
+/// Where the order of the pictures comes from.
+#[derive(Default)]
+enum Order {
+    /// The model's.
+    #[default]
+    Model,
+    /// A drop put this order on screen and asked for it; the model's old
+    /// order is not drawn until it shows this one, the pins change, or the
+    /// request is refused ([`PinnedPanel::reorder_refused`]).
+    Reordering(Vec<PinKey>),
+}
+
 #[derive(Default)]
 pub(super) struct Ivars {
+    order: RefCell<Order>,
     entries: RefCell<Vec<Entry>>,
     palette: Cell<Option<Palette>>,
     touch: RefCell<Option<PinTouch>>,
@@ -151,6 +165,14 @@ impl PinnedPanel {
         let now = Instant::now();
         let mtm = MainThreadMarker::from(self);
         let active = NSApplication::sharedApplication(mtm).isActive();
+        let arranged;
+        let pins = match self.dropped_order_holds(pins) {
+            Some(local) => {
+                arranged = local;
+                arranged.as_slice()
+            }
+            None => pins,
+        };
         let same_order = {
             let Ok(entries) = self.ivars().entries.try_borrow() else {
                 return;
@@ -248,6 +270,39 @@ impl PinnedPanel {
         self.layout_drag(index, x - start_x, first, count);
     }
 
+    /// While a dropped order waits for the server, `pins` (the model's,
+    /// still in the old order) in the order on screen. `None` when the
+    /// model's order is the one to draw.
+    fn dropped_order_holds(&self, pins: &[Pin]) -> Option<Vec<Pin>> {
+        let keys: Vec<PinKey> = pins.iter().map(Pin::key).collect();
+        let mut order = self.ivars().order.try_borrow_mut().ok()?;
+        let Order::Reordering(dropped) = &*order else {
+            return None;
+        };
+        if model::reorder_echo(dropped, &keys) != Echo::Waiting {
+            *order = Order::Model;
+            return None;
+        }
+        let entries = self.ivars().entries.try_borrow().ok()?;
+        let local: Vec<Pin> = entries
+            .iter()
+            .filter_map(|entry| {
+                pins.iter()
+                    .find(|pin| pin.key() == entry.pin.key())
+                    .cloned()
+            })
+            .collect();
+        (local.len() == pins.len()).then_some(local)
+    }
+
+    /// The server refused the order a drop asked for: the model's order is
+    /// drawn again at the next sync.
+    pub(super) fn reorder_refused(&self) {
+        if let Ok(mut order) = self.ivars().order.try_borrow_mut() {
+            *order = Order::Model;
+        }
+    }
+
     /// The dragged picture follows the touch; the others step aside.
     fn layout_drag(&self, index: usize, shift: f64, first: usize, count: usize) {
         let now = Instant::now();
@@ -308,6 +363,7 @@ impl PinnedPanel {
         let target = drop_index(index, x - start_x, first, count);
         let pitch = CIRCLE_DIAMETER + model::PINNED_SPACE;
         let mut ids = None;
+        let mut dropped = None;
         if let Ok(mut entries) = self.ivars().entries.try_borrow_mut() {
             let pins: Vec<Pin> = entries.iter().map(|entry| entry.pin.clone()).collect();
             ids = model::reordered_ids(&pins, index, target);
@@ -316,6 +372,7 @@ impl PinnedPanel {
                 let landed = (x - start_x) - (target as f64 - index as f64) * pitch;
                 let moved = entries.remove(index);
                 entries.insert(target, moved);
+                dropped = Some(entries.iter().map(|entry| entry.pin.key()).collect());
                 for (i, entry) in entries.iter_mut().enumerate() {
                     if i == target {
                         entry.shift = Slide::at(landed);
@@ -331,6 +388,10 @@ impl PinnedPanel {
         NSView::setNeedsDisplay(self, true);
         self.animate_if_needed();
         if let Some(ids) = ids {
+            // The new order stays on screen until the model shows it.
+            if let (Some(keys), Ok(mut order)) = (dropped, self.ivars().order.try_borrow_mut()) {
+                *order = Order::Reordering(keys);
+            }
             super::send(Command::ReorderPinned(ids));
         }
     }

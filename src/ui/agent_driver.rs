@@ -199,6 +199,8 @@ impl QuillApp {
                 }
             };
             let mut refusals: Vec<String> = Vec::new();
+            // A send left by an earlier command's deferred half is not this one's.
+            let _ = app.update(cx, |app, _| app.agent_bridge.ui_send = None);
             let mut ui_send: Option<UiSend> = None;
             let mut stopped: Option<String> = None;
             let mut done = 0usize;
@@ -242,7 +244,13 @@ impl QuillApp {
                         Err(refusal) => Err(refusal),
                     });
                 refusals.extend(guard::take_refusals());
-                let send = app.update(cx, |app, _| app.agent_bridge.ui_send.take());
+                // Only a send built on this command's screen is its own.
+                let send = app.update(cx, |app, _| {
+                    let taken = app.agent_bridge.ui_send.take();
+                    taken
+                        .filter(|(epoch, _)| *epoch == screen)
+                        .map(|(_, send)| send)
+                });
                 match outcome {
                     Err(()) => {
                         pending.answer(UiReply::Refused(policy::window_closed()));
@@ -607,6 +615,11 @@ mod open_tests;
 #[cfg(feature = "demo-capture")]
 #[path = "agent_driver_confirm_tests.rs"]
 mod confirm_tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "agent_driver_frame_tests.rs"]
+mod frame_tests;
 
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]

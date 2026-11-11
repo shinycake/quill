@@ -640,23 +640,37 @@ impl QuillApp {
                 .h(height)
                 .child(hint)
         });
+        // The frame says which chat it drew: redaction follows this tag, not
+        // the open chat of the moment an agent reads the frame (07-027).
+        let chat = self
+            .open_chat_id()
+            .map(|chat| quill::agent::ui_driver::redact::chat_tag(chat.0));
+        let mut history = div()
+            .id("conversation-history")
+            .role(gpui_kit::Role::Group)
+            .relative()
+            .flex()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .child(parts.slice.clone().cached(full()))
+            .child(parts.painter.clone().live());
+        let mut composer = div()
+            .id("conversation-composer")
+            .role(gpui_kit::Role::Group)
+            .flex()
+            .flex_none()
+            .w_full()
+            .h(height)
+            .child(composer.clone().cached(full()));
+        if let Some(tag) = chat {
+            history = history.a11y_tag(tag.clone());
+            composer = composer.a11y_tag(tag);
+        }
         column
             .flex_col()
-            .child(
-                div()
-                    .relative()
-                    .flex()
-                    .flex_1()
-                    .min_w_0()
-                    .min_h_0()
-                    .child(parts.slice.clone().cached(full()))
-                    .child(parts.painter.clone().live()),
-            )
-            .child(
-                composer
-                    .clone()
-                    .cached(StyleRefinement::default().w_full().h(height).flex_none()),
-            )
+            .child(history)
+            .child(composer)
             .children(
                 self.media_panel_over_composer()
                     .then(|| self.panel_painter())

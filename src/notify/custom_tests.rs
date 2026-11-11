@@ -98,6 +98,23 @@ fn the_queue_releases_oldest_first_and_drops_a_read_chat() {
 }
 
 #[test]
+fn an_entry_that_could_not_open_goes_back_to_the_head() {
+    let mut queue = NotifyQueue::default();
+    queue.push(1, "a");
+    queue.push(2, "b");
+    queue.push(3, "c");
+    let mut taken = queue.take(2);
+    assert_eq!(taken, vec![(1, "a"), (2, "b")]);
+    // The first did not open: it and the rest wait, in order, ahead of
+    // what came meanwhile.
+    queue.push(4, "d");
+    while let Some((key, item)) = taken.pop() {
+        queue.push_front(key, item);
+    }
+    assert_eq!(queue.take(9), vec![(1, "a"), (2, "b"), (3, "c"), (4, "d")]);
+}
+
+#[test]
 fn helpers() {
     assert_eq!(ease_in_circ(0.0), 0.0);
     assert!((ease_in_circ(1.0) - 1.0).abs() < f32::EPSILON);

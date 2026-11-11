@@ -318,6 +318,8 @@ impl QuillApp {
                     keys::Q_NOTES_FAILED_PIN_REORDER,
                     &err,
                 )));
+                // The panel shows the order the server holds again.
+                mac::reorder_refused(cx);
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.reorder_pinned_chats(false, &ids);

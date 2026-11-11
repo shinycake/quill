@@ -23,6 +23,7 @@ mod layout;
 #[cfg(target_os = "macos")]
 mod macos;
 mod manifest;
+mod parent;
 mod staged;
 mod swap;
 
@@ -39,6 +40,10 @@ use layout::{
 #[cfg(test)]
 #[cfg(unix)]
 use layout::{trusted_dir_as, trusted_file_as};
+#[cfg(test)]
+#[cfg(unix)]
+use parent::{open_failure_means_gone, unix_process_alive};
+use parent::{wait_for_launch, wait_for_parent};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{self, OpenOptions};
@@ -700,91 +705,6 @@ fn launch_helper(plan: &Path) -> std::io::Result<()> {
     helper.spawn().map(|_| ())
 }
 
-/// `ERROR_INVALID_PARAMETER`: OpenProcess says no process has that id, so
-/// the parent is gone. Any other failure (access denied, an elevated or
-/// other-session parent) leaves the parent running.
-#[cfg(any(windows, test))]
-fn open_failure_means_gone(code: u32) -> bool {
-    code == 87
-}
-
-/// Whether process `pid` still exists. `EPERM` means it exists but belongs
-/// to someone else.
-#[cfg(unix)]
-fn unix_process_alive(pid: u32) -> bool {
-    let Ok(pid) = i32::try_from(pid) else {
-        return false;
-    };
-    // SAFETY: signal 0 only checks that the process exists and can be
-    // signalled; no signal is delivered.
-    let result = unsafe { libc::kill(pid, 0) };
-    result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-}
-
-/// Blocks until process `pid` has exited (30 s at most).
-fn wait_for_parent(pid: u32) -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        let deadline = Instant::now() + Duration::from_secs(30);
-        while unix_process_alive(pid) {
-            if Instant::now() >= deadline {
-                return Err(std::io::Error::other(
-                    "App did not exit; update was not installed",
-                ));
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        Ok(())
-    }
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, WAIT_OBJECT_0};
-        use windows_sys::Win32::System::Threading::{
-            OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
-        };
-        let deadline = Instant::now() + Duration::from_secs(30);
-        let handle = loop {
-            // SAFETY: OpenProcess takes plain integers and returns an owned
-            // handle, or null with the failure in the thread's last error.
-            let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
-            if !handle.is_null() {
-                break handle;
-            }
-            // SAFETY: reads the calling thread's last-error value.
-            let code = unsafe { GetLastError() };
-            if open_failure_means_gone(code) {
-                return Ok(());
-            }
-            if Instant::now() >= deadline {
-                return Err(std::io::Error::other(
-                    "App did not exit; update was not installed",
-                ));
-            }
-            std::thread::sleep(Duration::from_millis(200));
-        };
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        let millis = u32::try_from(remaining.as_millis()).unwrap_or(30_000);
-        // SAFETY: `handle` is a valid process handle with SYNCHRONIZE access.
-        let status = unsafe { WaitForSingleObject(handle, millis) };
-        // SAFETY: closes the handle opened above, once.
-        unsafe { CloseHandle(handle) };
-        if status == WAIT_OBJECT_0 {
-            Ok(())
-        } else {
-            Err(std::io::Error::other(
-                "App did not exit; update was not installed",
-            ))
-        }
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = pid;
-        Err(std::io::Error::other(
-            "Updates are unavailable on this platform",
-        ))
-    }
-}
-
 /// How the helper starts Quill again: the executable at `target` with
 /// `args`.
 type Starter = fn(&Path, &[String]) -> std::io::Result<()>;
@@ -925,12 +845,15 @@ fn is_temp_entry(path: &Path) -> bool {
 
 /// [`apply_update`] for the executable at `target` (the helper itself).
 fn apply_plan(
-    claim: claim::Claim,
+    mut claim: claim::Claim,
     plan: InstallPlan,
     target: PathBuf,
     start: Starter,
 ) -> std::io::Result<()> {
     let claim_dir = claim.path().parent().map(Path::to_path_buf);
+    // The app may be slow to quit (several accounts closing, a slow disk):
+    // the helper waits as long as the launch holds its lock.
+    let parent_gone = wait_for_launch(&mut claim);
     let mut claim = Some(claim);
     // The claim goes right before Quill starts, so that Quill never finds it.
     let mut relaunch = || {
@@ -939,7 +862,13 @@ fn apply_plan(
         }
         start(&target, &plan.args)
     };
-    let result = install(&plan, &target, claim_dir.as_deref(), &mut relaunch);
+    let result = install(
+        &plan,
+        &target,
+        claim_dir.as_deref(),
+        parent_gone,
+        &mut relaunch,
+    );
     if result.is_err() {
         // Written first: the restarted version reads it at once.
         let _ = write_result(receipt_for(&target), &plan.release, true);
@@ -959,6 +888,7 @@ fn install(
     plan: &InstallPlan,
     target: &Path,
     claim_dir: Option<&Path>,
+    parent_gone: bool,
     launch: impl FnOnce() -> std::io::Result<()>,
 ) -> std::io::Result<()> {
     let layout =
@@ -973,7 +903,9 @@ fn install(
     {
         return Err(std::io::Error::other("Invalid update handoff"));
     }
-    wait_for_parent(plan.parent)?;
+    if !parent_gone {
+        wait_for_parent(plan.parent)?;
+    }
     if !valid_release(&plan.release) {
         return Err(std::io::Error::other("Invalid update release"));
     }

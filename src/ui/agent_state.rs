@@ -77,7 +77,12 @@ pub(crate) struct AgentBridge {
     pub(super) activity_shown: usize,
     /// A send the composer handed to the agent path while the UI driver
     /// injected input (`agent_driver_send`), until the task picks it up.
-    pub(super) ui_send: Option<quill::agent::ui_driver::bridge::UiSend>,
+    /// The send carries the screen it was built on: a command takes it
+    /// only while that screen is still its own (07-026).
+    pub(super) ui_send: Option<(
+        super::on_screen::ScreenEpoch,
+        quill::agent::ui_driver::bridge::UiSend,
+    )>,
 }
 
 impl AgentBridge {

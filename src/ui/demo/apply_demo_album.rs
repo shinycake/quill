@@ -2,6 +2,23 @@
 
 use super::*;
 
+/// Applies one demo envelope to `session`. The envelope is numbered after
+/// the last one the session took (the seed and `QUILL_DEMO_UPDATE_STREAM`
+/// advance `last_seq` with counters of their own), so it is never dropped
+/// as out of order.
+pub(in crate::ui) fn apply_demo_json<S: DiagnosticSink + 'static>(
+    session: &mut Session,
+    seq: &AtomicU64,
+    sink: &Arc<S>,
+    json: &str,
+) {
+    seq.fetch_max(session.last_seq, std::sync::atomic::Ordering::SeqCst);
+    let sink: Arc<dyn DiagnosticSink> = sink.clone();
+    if let Some(owned) = copy_and_parse(json, seq, &sink) {
+        session.apply(owned);
+    }
+}
+
 impl QuillApp {
     pub(in crate::ui) fn apply_demo_album(
         &mut self,
@@ -15,10 +32,6 @@ impl QuillApp {
         let Some(chat_id) = session.open_chat else {
             return;
         };
-        self.demo_ui
-            .seq
-            .fetch_max(session.last_seq, std::sync::atomic::Ordering::Relaxed);
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         let caption = quill::composer::strip_barrier(text.trim());
         let caption = caption.as_str();
         // After the newest message, so albums sent one after another each
@@ -82,9 +95,7 @@ impl QuillApp {
                 ),
                 AttachmentKind::VideoNote => continue,
             };
-            if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
-                session.apply(owned);
-            }
+            apply_demo_json(session, &self.demo_ui.seq, &self.demo_ui.sink, &json);
         }
     }
 
@@ -112,12 +123,6 @@ impl QuillApp {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        // The seed applied its fixtures with its own counter; an envelope
-        // numbered below `last_seq` is dropped as out of order.
-        self.demo_ui
-            .seq
-            .fetch_max(session.last_seq, std::sync::atomic::Ordering::Relaxed);
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         // After the newest loaded message, so the send lands at the bottom
         // and repeated sends don't replace each other.
         let id = session
@@ -233,9 +238,7 @@ impl QuillApp {
             )
         });
         for json in std::iter::once(json).chain(read) {
-            if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
-                session.apply(owned);
-            }
+            apply_demo_json(session, &self.demo_ui.seq, &self.demo_ui.sink, &json);
         }
     }
 
@@ -249,7 +252,6 @@ impl QuillApp {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         let id = -(session.view_generation.0 as i64);
         let path = session
             .media
@@ -271,9 +273,7 @@ impl QuillApp {
             r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messageSticker","is_premium":false,"sticker":{{"@type":"sticker","id":"0","set_id":"0","width":512,"height":512,"emoji":{emoji},"format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatPng"}},"width":128,"height":128,"file":{file}}},"sticker":{file}}}}}{reply_json}}}}}"#,
             chat_id.0
         );
-        if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
-            session.apply(owned);
-        }
+        apply_demo_json(session, &self.demo_ui.seq, &self.demo_ui.sink, &json);
     }
 
     pub(in crate::ui) fn apply_demo_gif(
@@ -288,7 +288,6 @@ impl QuillApp {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         let id = -(session.view_generation.0 as i64);
         let path = session
             .media
@@ -309,9 +308,7 @@ impl QuillApp {
             r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messageAnimation","animation":{{"@type":"animation","duration":{duration},"width":{width},"height":{height},"file_name":"gif.mp4","mime_type":"video/mp4","has_stickers":false,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":{width},"height":{height},"file":{file}}},"animation":{file}}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}{reply_json}}}}}"#,
             chat_id.0
         );
-        if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
-            session.apply(owned);
-        }
+        apply_demo_json(session, &self.demo_ui.seq, &self.demo_ui.sink, &json);
     }
 
     pub(in crate::ui) fn apply_demo_edit(&mut self, edit: &ComposerEdit, text: &str) {
@@ -320,15 +317,12 @@ impl QuillApp {
         };
         match edit.kind {
             quill::composer::ComposerEditKind::Text => {
-                let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
                 let body = serde_json::to_string(text).unwrap_or_else(|_| "\"\"".into());
                 let json = format!(
                     r#"{{"@type":"updateMessageContent","chat_id":{},"message_id":{},"new_content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{body},"entities":[]}}}}}}"#,
                     edit.chat_id.0, edit.message_id.0
                 );
-                if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
-                    session.apply(owned);
-                }
+                apply_demo_json(session, &self.demo_ui.seq, &self.demo_ui.sink, &json);
             }
             quill::composer::ComposerEditKind::Caption => {
                 if let Some(message) = session
@@ -399,14 +393,11 @@ impl QuillApp {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         let json = format!(
             r#"{{"@type":"updateDeleteMessages","chat_id":{},"message_ids":[{}],"is_permanent":true,"from_cache":false}}"#,
             chat_id.0, message_id.0
         );
-        if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
-            session.apply(owned);
-        }
+        apply_demo_json(session, &self.demo_ui.seq, &self.demo_ui.sink, &json);
     }
 
     /// Demo "send as": apply the `updateChatMessageSender` TDLib would send
@@ -431,10 +422,7 @@ impl QuillApp {
             r#"{{"@type":"updateChatMessageSender","chat_id":{},"message_sender_id":{sender_json}}}"#,
             chat_id.0
         );
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
-        if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
-            session.apply(owned);
-        }
+        apply_demo_json(session, &self.demo_ui.seq, &self.demo_ui.sink, &json);
     }
 
     pub(in crate::ui) fn apply_demo_forward(&mut self, dest: ChatId, draft: &ForwardDraft) {
@@ -478,10 +466,7 @@ impl QuillApp {
             copies.len(),
             copies.join(",")
         );
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
-        if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
-            session.apply(owned);
-        }
+        apply_demo_json(session, &self.demo_ui.seq, &self.demo_ui.sink, &json);
     }
 
     pub(in crate::ui) fn apply_demo_reaction_toggle(
@@ -554,10 +539,7 @@ impl QuillApp {
             r#"{{"@type":"updateMessageIsPinned","chat_id":{},"message_id":{},"is_pinned":{}}}"#,
             chat_id.0, message_id.0, !currently_pinned
         );
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
-        if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
-            session.apply(owned);
-        }
+        apply_demo_json(session, &self.demo_ui.seq, &self.demo_ui.sink, &json);
     }
 
     /// Parity slice: apply arbitrary notification-settings edits to the demo
@@ -583,10 +565,7 @@ impl QuillApp {
             chat_id.0,
             notification_settings_json(&current)
         );
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
-        if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
-            session.apply(owned);
-        }
+        apply_demo_json(session, &self.demo_ui.seq, &self.demo_ui.sink, &json);
         cx.notify();
     }
 
@@ -709,12 +688,9 @@ impl QuillApp {
                 ),
             ]
         };
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         if let Some(session) = self.demo_session.as_mut() {
             for json in jsons {
-                if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
-                    session.apply(owned);
-                }
+                apply_demo_json(session, &self.demo_ui.seq, &self.demo_ui.sink, &json);
             }
         }
     }
@@ -746,10 +722,7 @@ impl QuillApp {
             r#"{{"@type":"updateChatPosition","chat_id":{},"position":{{"@type":"chatPosition","list":{{"@type":"{list}"}},"order":"{order}","is_pinned":{pin}}}}}"#,
             chat_id.0
         );
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
-        if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
-            session.apply(owned);
-        }
+        apply_demo_json(session, &self.demo_ui.seq, &self.demo_ui.sink, &json);
     }
 
     /// Slice CL1: demo mark-as-unread through the real
@@ -785,11 +758,8 @@ impl QuillApp {
                 ),
             ]
         };
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         for json in jsons {
-            if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
-                session.apply(owned);
-            }
+            apply_demo_json(session, &self.demo_ui.seq, &self.demo_ui.sink, &json);
         }
     }
 }
@@ -803,3 +773,8 @@ fn demo_send_state() -> &'static str {
         ""
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "apply_demo_album_tests.rs"]
+mod tests;

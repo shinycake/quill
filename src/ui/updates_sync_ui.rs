@@ -5,6 +5,7 @@
 //! `ShowAgeVerification`).
 #![deny(clippy::indexing_slicing)]
 
+use super::account_state::{AgeCheck, OpenNotice};
 use super::ai_compose::marked_link;
 use super::app::QuillApp;
 use crate::ui::status_note::StatusNote;
@@ -111,7 +112,7 @@ impl QuillApp {
                         .child(tr(keys::Q_OPS_CLICK_TO_VIEW_DETAILS)),
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.account_boxes.freeze_info_open = true;
+                    this.account_boxes.notice = OpenNotice::Frozen;
                     this.open_box(crate::ui::shell::DialogKind::AccountNotice);
                     cx.notify();
                 }))
@@ -262,7 +263,7 @@ impl QuillApp {
                     .label(tr(keys::CLOSE))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.account_boxes.freeze_info_open = false;
+                        this.account_boxes.notice.close();
                         cx.notify();
                     })),
             )
@@ -319,7 +320,7 @@ impl QuillApp {
                     .label(tr(keys::CLOSE))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.account_boxes.age_verify_open = false;
+                        this.account_boxes.notice.close();
                         cx.notify();
                     })),
             )
@@ -329,7 +330,7 @@ impl QuillApp {
                         .label(tr(keys::Q_OPS_VERIFY_MY_AGE))
                         .primary()
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.account_boxes.age_verify_started = true;
+                            this.account_boxes.age_check = AgeCheck::Started;
                             this.open_link(&url, cx);
                         })),
                 )
@@ -353,9 +354,9 @@ impl QuillApp {
         if quill::state::age_gate_blocks(
             on,
             needs_verification,
-            self.account_boxes.age_verify_started,
+            self.account_boxes.age_check == AgeCheck::Started,
         ) {
-            self.account_boxes.age_verify_open = true;
+            self.account_boxes.notice = OpenNotice::AgeVerify;
             self.open_box(crate::ui::shell::DialogKind::AccountNotice);
             cx.notify();
         } else {

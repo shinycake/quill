@@ -94,6 +94,9 @@ super::super::on_screen::on_screen_fields! {
     pub(super) active: bool,
     /// Where the window stood then (`cover`).
     pub(super) place: Option<super::cover::WindowPlace>,
+    /// The window's geometry at its last render or move, so the places
+    /// can be saved while the window itself is leased (`saved`).
+    pub(super) bounds: Option<Bounds<Pixels>>,
     ;
     history: HistoryUi,
     composer: Entity<TextareaState>,
@@ -259,6 +262,7 @@ impl WindowSlot {
             frame_started: Cell::new(0),
             active: false,
             place: None,
+            bounds: None,
         }
     }
 }

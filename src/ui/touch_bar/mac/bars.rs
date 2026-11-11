@@ -568,6 +568,10 @@ impl Host {
     }
 
     /// Take the bar off the window.
+    pub(super) fn reorder_refused(&self) {
+        self.pinned.reorder_refused();
+    }
+
     pub(super) fn remove(&self) {
         self.window.setTouchBar(None);
     }
