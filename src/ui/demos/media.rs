@@ -191,6 +191,7 @@ impl QuillApp {
     }
 
     fn demo_ready_downloads(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.chat_list.downloads_panel_open = true;
         // Exercise failed playback recovery without a network request.
         let audio = |message, file| PlayIntent {
             file: FileId(file),

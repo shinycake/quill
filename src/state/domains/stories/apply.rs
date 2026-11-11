@@ -197,9 +197,11 @@ impl Session {
                 {
                     // A channel post's public forwards share the answer
                     // type with a story's.
-                    self.groups
-                        .stats
-                        .accept_message_forwards(chat_id, message_id, forwards);
+                    if let Some(pending) = pending {
+                        self.groups
+                            .stats
+                            .accept_message_forwards(chat_id, message_id, pending.id, forwards);
+                    }
                 }
             }
             StoriesPayload::FoundStories { found } => {

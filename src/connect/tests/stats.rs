@@ -182,7 +182,7 @@ fn message_statistics_open_the_page_and_page_through_forwards() {
     assert_eq!(stats.page(-100), StatsPage::Message(42 << 20));
     let state = stats.message_for(-100, 42 << 20).expect("tracked");
     assert_eq!(state.statistics, MessageStatsFetch::Loading);
-    assert!(state.forwards.loading);
+    assert!(state.forwards.loading());
 
     rig.answer(
         stats_extra,
@@ -203,7 +203,7 @@ fn message_statistics_open_the_page_and_page_through_forwards() {
     assert_eq!(state.forwards.forwards.len(), 2);
     assert_eq!(state.forwards.forwards[0].view_count, 40);
     assert_eq!(state.forwards.total, 3);
-    assert!(!state.forwards.loading);
+    assert!(!state.forwards.loading());
 
     let more = rig
         .driver
@@ -430,6 +430,55 @@ fn the_open_panel_downloads_recent_post_thumbnails() {
     assert_eq!(session.stats_thumb_file_ids(), vec![FileId(55), FileId(56)]);
 }
 
+/// Sweep 06-008: a page of forwards asked before another post was shown
+/// is dropped when it lands in the reopened post's fresh list.
+#[test]
+fn a_stale_forwards_page_does_not_join_a_reopened_posts_list() {
+    let mut rig = Rig::new();
+    let (a, b) = (MessageId(42 << 20), MessageId(43 << 20));
+    rig.driver
+        .fetch_message_statistics(ChatId(-100), a, true)
+        .unwrap()
+        .unwrap();
+    let first = rig.extra_of("getMessagePublicForwards");
+    rig.answer(first, &forwards_page("p2", &[1, 2]));
+    rig.driver.load_more_message_forwards().unwrap().unwrap();
+    let stale = rig.extra_of("getMessagePublicForwards");
+    rig.driver
+        .fetch_message_statistics(ChatId(-100), b, true)
+        .unwrap();
+    rig.driver
+        .fetch_message_statistics(ChatId(-100), a, true)
+        .unwrap();
+    let again = rig.extra_of("getMessagePublicForwards");
+    assert_ne!(
+        again, stale,
+        "the reopened post asks for its own first page"
+    );
+
+    rig.answer(stale, &forwards_page("", &[3, 4]));
+    let state = rig
+        .driver
+        .session
+        .groups
+        .stats
+        .message_for(-100, a.0)
+        .unwrap();
+    assert!(state.forwards.forwards.is_empty());
+    assert!(state.forwards.loading());
+
+    rig.answer(again, &forwards_page("p2", &[1, 2]));
+    let state = rig
+        .driver
+        .session
+        .groups
+        .stats
+        .message_for(-100, a.0)
+        .unwrap();
+    assert_eq!(state.forwards.forwards.len(), 2);
+    assert_eq!(state.forwards.next_offset, "p2");
+}
+
 #[test]
 fn reopening_a_post_whose_statistics_are_out_asks_for_its_forwards_again() {
     let mut rig = Rig::new();
@@ -465,7 +514,7 @@ fn reopening_a_post_whose_statistics_are_out_asks_for_its_forwards_again() {
         .stats
         .message_for(-100, a.0)
         .unwrap();
-    assert!(state.forwards.loading);
+    assert!(state.forwards.loading());
     let forwards = rig.extra_of("getMessagePublicForwards");
     rig.answer(forwards, &forwards_page("", &[1, 2]));
     let state = rig

@@ -6,7 +6,7 @@
 //! options of its storage optimizer.
 
 use super::super::app::QuillApp;
-use super::super::index_sliders::StepSlider;
+use super::super::index_sliders::{StepSlider, StorageDrag};
 use super::data_storage::format_storage_bytes;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -411,12 +411,31 @@ impl QuillApp {
         self.apply_storage_limits(size, keep, cx);
     }
 
+    /// Leaving the page with a drag that never released: its limits go now.
+    pub(in crate::ui) fn apply_unreleased_storage_drag(&mut self) {
+        let drag = std::mem::take(&mut self.preferences.index_sliders.storage);
+        if let StorageDrag::Moved {
+            account,
+            size,
+            keep,
+        } = drag
+            && self.session().is_some_and(|s| s.account == account)
+        {
+            self.send_storage_limits(size, keep);
+        }
+    }
+
     fn apply_storage_limits(
         &mut self,
         size: Option<i64>,
         keep: Option<i64>,
         cx: &mut Context<Self>,
     ) {
+        self.send_storage_limits(size, keep);
+        cx.notify();
+    }
+
+    fn send_storage_limits(&mut self, size: Option<i64>, keep: Option<i64>) {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.set_storage_limits(size, keep);
         } else if let Some(demo) = self.demo_session.as_mut() {
@@ -432,7 +451,6 @@ impl QuillApp {
                 demo.settings.storage_limits.apply_option(name, &value);
             }
         }
-        cx.notify();
     }
 }
 

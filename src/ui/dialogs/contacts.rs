@@ -36,12 +36,33 @@ pub enum ContactSave {
 /// `parse_vcard` (telegram::requests) turns it into `ImportedContact`
 /// cards for `importContacts` (schema 1.8.67, line 14517). The box renders
 /// from `state` alone.
-#[derive(Default)]
 pub struct ImportContactsDialog {
     pub(crate) state: quill::vcard_import::VcardImport,
-    /// Which file choice the pending read belongs to; a read that lands
-    /// after another choice (or after closing) is dropped.
+    /// This box, never shared with another one (they count from one
+    /// process-wide counter): the file picker's answer lands only in the
+    /// box that asked.
+    pub(crate) id: u64,
+    /// Which file choice the pending read belongs to, counted with the
+    /// same counter; a read that lands after another choice (in this box
+    /// or the next one) or after closing is dropped.
     pub(crate) pick: u64,
+}
+
+impl ImportContactsDialog {
+    pub(crate) fn new() -> Self {
+        Self {
+            state: quill::vcard_import::VcardImport::default(),
+            id: Self::next_token(),
+            pick: 0,
+        }
+    }
+
+    /// A token no other box or choice of this process has had.
+    pub(crate) fn next_token() -> u64 {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    }
 }
 
 impl AddContactDialog {

@@ -216,6 +216,7 @@ impl QuillApp {
 
     /// Leaving the page drops an unsaved editor and any pending confirm.
     pub(crate) fn leave_data_storage(&mut self) {
+        self.apply_unreleased_storage_drag();
         self.settings.data_storage_editor = None;
         self.settings.storage_confirm = None;
         self.forget_storage_sliders();

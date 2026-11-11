@@ -163,12 +163,22 @@ impl<S: JsonSender> ConnectDriver<S> {
             chat_id: chat_id.0,
             message_id: message_id.0,
         });
-        if self.session.requests.has_purpose(purpose) {
-            // A page reopened meanwhile waits for the one on its way.
-            self.session
-                .groups
-                .stats
-                .forwards_requested(chat_id.0, message_id.0);
+        // The page this post's list waits for is on its way: wait for it.
+        // One asked for the post when it was shown before is not this
+        // list's (its answer is dropped), so a new one goes out.
+        let on_its_way = self
+            .session
+            .groups
+            .stats
+            .message_for(chat_id.0, message_id.0)
+            .is_some_and(|state| {
+                self.session
+                    .requests
+                    .ids_for_chat_where(chat_id, |p| p == purpose)
+                    .into_iter()
+                    .any(|id| state.forwards.asked(id))
+            });
+        if on_its_way {
             return Ok(None);
         }
         let extra = self.session.request(purpose, Some(chat_id));
@@ -179,7 +189,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session
             .groups
             .stats
-            .forwards_requested(chat_id.0, message_id.0);
+            .forwards_requested(chat_id.0, message_id.0, extra);
         Ok(Some(extra))
     }
 
@@ -188,7 +198,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(state) = self.session.groups.stats.message.as_ref() else {
             return Ok(None);
         };
-        if state.forwards.loading || state.forwards.next_offset.is_empty() {
+        if state.forwards.loading() || state.forwards.next_offset.is_empty() {
             return Ok(None);
         }
         let (chat_id, message_id) = (ChatId(state.chat_id), MessageId(state.message_id));

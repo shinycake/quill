@@ -5610,3 +5610,48 @@ Minor entries, each proved against the code first.
   contact box reads its own answer (`ContactSave::Failed`, test
   `the_add_contact_box_closes_on_the_answer_and_shows_a_refusal`); the contacts
   notice belongs to the settings list.
+
+### Sweep fixes (s4-misc-1)
+
+- **Lost answers settle.** `canTransferOwnership`, the later-page and
+  tab searches (`SearchMessagesMore`, `SearchPublicPosts`,
+  `SearchPublicPostsMore`, `SearchPublicMessagesByTag`) and the recommended
+  channels are sweepable lookups. A lost answer settles through the error
+  arm each already had, so the transfer box and the search tabs end in an
+  error with their retry instead of a state nothing ends (05-193, 05-202).
+- **Answers matched to what asked.** A late `isProfileAudio` answer
+  never overwrites a value a local save or remove already set: the check is
+  asked only for an unknown song, so a known value is newer (05-194). A page
+  of a post's public forwards lands only in the list that asked for it:
+  `PublicForwardsList::asking` holds the request, `loading` is derived, and
+  reopening a post whose older page is still out asks again (06-008). A
+  late relay Ack from the document before a reload is ignored by sequence
+  (`Relay::stale_through`) instead of ending the carrier (01-003). An
+  import-contacts read and the file picker's answer carry tokens counted
+  process-wide, so a closed box's read cannot land in the next box
+  (09-001). Selection check fades are keyed by chat and message (11-p4-014).
+  A purchase on its way in the marketplace box is not taken over by another
+  chat's box (10-171).
+- **Every window.** Auto-download progress of a chat a chat window draws is
+  live there (`open_chat_media_downloads` records the chat that asked,
+  05-195). Fast buttons mode rebuilds the rows of every window, from the
+  Experimental page and the bot's own switch (07-024). The device-link
+  answer is dropped with the link flow (`clear_device_qr`), so no stale
+  "Device linked" shows on the next visit (09-X015, 09-028).
+- **Owner and exits.** The Downloads panel's open flag is `ChatListUi`'s,
+  so it starts closed when an account comes back (09-053). The folder zip is
+  an `ArchiveJob` of the composer (`Idle` or `Building(slot)`), one at a
+  time; an answer for another chat is dropped and its "Preparing" note goes
+  (03-050, 09-055). The Quit's pending exit is `MainWindow::export_stop`,
+  beside the window-level alert (09-098). The window-place save timer is a
+  `StateSaveTimer` that holds its task and is `Idle` again whether or not
+  the window was still there (09-117). The experimental page reads the
+  clipboard when it opens and when the window is activated, not on every
+  render (07-023). Autoscroll's loop is a `Task` inside `Active` (08-038).
+  A refused fact check keeps its box and text (09-102). A replayed intro
+  clip ends when the app locks (09-X051). A storage slider drag whose
+  release never came is applied when the page is left (10-133).
+- **Skipped.** 05-045: the conference's `invite_results` is already cleared
+  by leaving or ending the call, by the call's own update and by logout.
+  10-165: the tick runs from each window's `per_window_upkeep`, is scoped to
+  that window, and `frame.window_active` counts chat windows.

@@ -109,6 +109,8 @@ pub(crate) struct ComposerUi {
     /// (`drop_zones`).
     pub(super) drop_paths: Vec<std::path::PathBuf>,
     pub(super) drop_state: Option<quill::drop_modes::DragState>,
+    /// The folder being zipped for "Send as archive" (`drop_zones`).
+    pub(super) archive: super::drop_zones::ArchiveJob,
     /// A demo's fixed drop-zone state (no real drag in a screenshot).
     pub(super) drop_preview: Option<quill::drop_modes::DragState>,
     /// Phase A1: the open chat whose slow-mode countdown is ticking
@@ -149,6 +151,7 @@ impl ComposerUi {
             inline_bot_alert_shown: false,
             drop_paths: Vec::new(),
             drop_state: None,
+            archive: Default::default(),
             drop_preview: None,
             slow_mode_tick_chat: None,
             send_box: super::send_box_state::SendBoxUi::new(),

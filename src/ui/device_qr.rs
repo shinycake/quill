@@ -182,9 +182,15 @@ impl QuillApp {
         });
         cx.notify();
     }
+    /// The link flow ends (the page was left, the app locked, the account
+    /// changed): the answer of a link attempt that is still out goes with
+    /// it, so the next visit does not show it as news.
     pub(super) fn clear_device_qr(&mut self) {
         self.privacy.device_qr_scanner = None;
         self.privacy.device_login_qr = None;
         self.privacy.device_link_notice = None;
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.settings.device_login_result = None;
+        }
     }
 }

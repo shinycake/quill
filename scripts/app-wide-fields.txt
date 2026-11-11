@@ -68,7 +68,8 @@ frame.sidebar * | the sidebar's dock and peek glides
 frame.main_width | the main column's width, a window preference
 frame.panels * | the right column's slide: the panels the last frame drew, kept while they slide out
 frame.surfaces * | fade-out presences of bars, toasts and corners: what the last frame drew, kept for its exit animation; nothing acts on them
-frame.window_state_save_pending | the window place save is due, for the main window
+frame.window_state_save | the window place save is due, for the main window
+frame.window_state_save.Scheduled._timer | the wait before that save fires
 frame.capture_blocked | screen capture protection is on, for the process
 frame.capture_notice_dismissed | its notice was dismissed, for the run
 frame.menu * | the window's menu focus hand-off (focus, items, open flag, focus to give back, layer focus); each chat window swaps in its own (WindowSlot::menu)
@@ -196,6 +197,7 @@ main_window.handle | the main window's handle
 main_window.place * | the main window's place
 main_window.cascade | the chat window cascade count
 main_window.dialogs_closed | the main window's dialogs were closed this switch
+main_window.export_stop | the exit a Quit left behind the Stop and quit alert, which is the window's
 main_window._key_scope | the key-scope interceptor
 first_run.Welcome * | the first-run intro's player and timings, before any account
 first_run.Highlights * | the first-run highlights' timing, before any account

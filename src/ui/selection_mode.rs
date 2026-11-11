@@ -81,6 +81,7 @@ impl QuillApp {
         }
         let now = std::time::Instant::now();
         let checked = self.frame.motion.selection.borrow_mut().check(
+            chat_id.0,
             message_id.0,
             selected,
             self.frame.window_active.get(),

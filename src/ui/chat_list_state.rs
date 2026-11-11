@@ -59,6 +59,10 @@ pub(crate) struct ChatListUi {
     /// the unfiltered list; `Unread` filters to unread chats;
     /// `Archived` shows only the archive.
     pub(super) filter: ChatListFilter,
+    /// The Downloads panel beside the conversation is open. Here, not in
+    /// the `Session`, so it starts closed when an account comes back on
+    /// screen.
+    pub(super) downloads_panel_open: bool,
     /// The Archive menu's "How does it work?" box is open.
     pub(super) archive_hint_open: bool,
     /// The main menu's My Groups (`false`) or My Channels (`true`) list is open.
@@ -100,6 +104,7 @@ impl ChatListUi {
             items: Vec::new(),
             folder_tags: Default::default(),
             swipe: Default::default(),
+            downloads_panel_open: false,
             menu: None,
             archive_menu: None,
             global,

@@ -122,6 +122,12 @@ impl RequestPurpose {
                 | RequestPurpose::SearchMessages
                 | RequestPurpose::SearchChatMessages
                 | RequestPurpose::SearchChatMessagesMore
+                | RequestPurpose::SearchMessagesMore
+                | RequestPurpose::SearchPublicPosts
+                | RequestPurpose::SearchPublicPostsMore
+                | RequestPurpose::SearchPublicMessagesByTag
+                | RequestPurpose::GetRecommendedChats
+                | RequestPurpose::CanTransferOwnership
                 | RequestPurpose::SearchChats
                 | RequestPurpose::SearchPublicChats
                 | RequestPurpose::GetSharedMedia { .. }
