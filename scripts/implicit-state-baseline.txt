@@ -1,6 +1,4 @@
-ActiveGroupCall::join_as_requested
 ActiveGroupCall::loaded_all_participants
-ActiveGroupCall::loaded_all_participants+transport_error
 AppearancePrefs::ignore_battery_saving
 Assembly::started
 AudioEngine::failed
@@ -12,11 +10,6 @@ AwardMembers::loading+error
 Backdrops::loading
 BackendStatus::failed
 BarFacts::bot_start_pending
-BotCreateDialog::submitted
-BotEditTexts::load_failed
-BotEditTexts::load_failed+error
-BusinessSettingsState::time_zones_requested
-BusinessSettingsState::time_zones_requested+error
 CallSnap::connecting
 CallSummary::busy
 CameraDraft::starting
@@ -75,9 +68,6 @@ InvoiceWatch::failed
 InvoiceWatch::pending
 InvoiceWatch::sending
 JoinedLines::started
-LanguageLinkLookup::loading
-LanguageLinkLookup::loading+error
-Latest::wake_pending
 LayerFade::closing
 LinuxState::failed
 LiveInput::failed
