@@ -296,6 +296,7 @@ fn the_direct_messages_box_takes_the_price_when_it_arrives(cx: &mut TestAppConte
 #[gpui_kit::test]
 fn another_targets_save_does_not_close_the_direct_messages_box(cx: &mut TestAppContext) {
     use crate::ui::paid_messages_state::DirectStage;
+    use quill::ids::RequestId;
     use quill::paid_messages::{PaidSave, PaidTarget};
     let (app, mut vcx) = new_app(cx, "ready-chats");
     let vcx = &mut vcx;
@@ -314,46 +315,33 @@ fn another_targets_save_does_not_close_the_direct_messages_box(cx: &mut TestAppC
             },
         );
         app.open_direct_messages(ChatId(13), cx);
-        let set = |app: &mut QuillApp, save: PaidSave| {
-            if let Some(session) = app.demo_session.as_mut() {
-                session.payments.paid_messages.save = save;
-            }
-        };
         let stage = |app: &QuillApp| app.paid_messages.direct.as_ref().map(|b| b.stage);
         if let Some(boxed) = app.paid_messages.direct.as_mut() {
             boxed.stage = DirectStage::Saving;
         }
-        for other in [
-            PaidSave::Saving {
-                target: PaidTarget::User(5),
-                request: quill::ids::RequestId(1),
-            },
-            PaidSave::Failed {
-                target: PaidTarget::User(5),
-                line: "x".into(),
-            },
-            PaidSave::Saving {
-                target: PaidTarget::Channel(14),
-                request: quill::ids::RequestId(2),
-            },
-        ] {
-            set(app, other);
-            app.direct_messages_upkeep(window, cx);
-            assert_eq!(stage(app), Some(DirectStage::Saving), "still waiting");
-        }
-        set(
-            app,
-            PaidSave::Failed {
-                target: PaidTarget::Channel(13),
-                line: "no".into(),
-            },
-        );
+        // Another target's save, however it ends, never settles this box.
+        let save = |app: &mut QuillApp, f: &dyn Fn(&mut PaidSave)| {
+            if let Some(session) = app.demo_session.as_mut() {
+                f(&mut session.payments.paid_messages.save);
+            }
+        };
+        save(app, &|s| s.begin(PaidTarget::User(5), RequestId(1)));
+        app.direct_messages_upkeep(window, cx);
+        assert_eq!(stage(app), Some(DirectStage::Saving), "still waiting");
+        save(app, &|s| s.fail(RequestId(1), "x".into()));
+        app.direct_messages_upkeep(window, cx);
+        assert_eq!(stage(app), Some(DirectStage::Saving), "a user's refusal");
+        save(app, &|s| s.begin(PaidTarget::Channel(14), RequestId(2)));
+        app.direct_messages_upkeep(window, cx);
+        assert_eq!(stage(app), Some(DirectStage::Saving), "another channel");
+        save(app, &|s| s.begin(PaidTarget::Channel(13), RequestId(3)));
+        save(app, &|s| s.fail(RequestId(3), "no".into()));
         app.direct_messages_upkeep(window, cx);
         assert_eq!(stage(app), Some(DirectStage::Editing), "its own refusal");
         if let Some(boxed) = app.paid_messages.direct.as_mut() {
             boxed.stage = DirectStage::Saving;
         }
-        set(app, PaidSave::Idle);
+        save(app, &|s| s.clear(PaidTarget::Channel(13)));
         app.direct_messages_upkeep(window, cx);
         assert!(app.paid_messages.direct.is_none(), "its own answer closes");
     });

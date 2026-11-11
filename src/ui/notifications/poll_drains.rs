@@ -353,6 +353,7 @@ impl QuillApp {
             | self.drain_wallpaper_preview(cx)
             | self.drain_chat_appearance(cx)
             | self.drain_earn(cx)
+            | self.drain_public_link_freed(cx)
             | self.drain_language(cx)
             | self.drain_peer_qr(cx)
             | self.drain_story_stealth(cx)

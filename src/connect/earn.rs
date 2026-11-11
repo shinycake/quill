@@ -725,6 +725,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 bot_user_id,
                 recipient: peer,
                 choose_recipient,
+                from: if for_box {
+                    ProgramSurface::Box
+                } else {
+                    ProgramSurface::Page
+                },
             },
             |extra| get_connected_affiliate_program(extra, affiliate, bot_user_id),
         )
@@ -754,7 +759,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             info,
             recipient: EarnPeer::User(me),
             choose_recipient: true,
-            joining: false,
+            send: BoxSend::Idle,
         };
         let earn = &mut self.session.payments.earn;
         if earn.recipients.is_loading() {
@@ -824,21 +829,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(join) = self.session.payments.earn.join_box.as_mut() else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if join.joining {
+        if join.send.is_sending() {
             return Ok(());
         }
-        join.joining = true;
         let (bot_user_id, recipient) = (join.bot_user_id, join.recipient);
         let affiliate = recipient.affiliate_json(me);
-        let result = self.send_earn(EarnPurpose::Connect { recipient }, |extra| {
+        let request = self.send_earn(EarnPurpose::Connect { recipient }, |extra| {
             connect_affiliate_program(extra, affiliate, bot_user_id)
-        });
-        if result.is_err()
-            && let Some(join) = self.session.payments.earn.join_box.as_mut()
-        {
-            join.joining = false;
+        })?;
+        if let Some(join) = self.session.payments.earn.join_box.as_mut() {
+            join.send = BoxSend::Sending(request);
         }
-        result.map(|_| ())
+        Ok(())
     }
 
     /// "Revoke Link" confirmed.
@@ -848,20 +850,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(revoke) = self.session.payments.earn.revoke.as_mut() else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if revoke.sending {
+        if revoke.send.is_sending() {
             return Ok(());
         }
-        revoke.sending = true;
         let affiliate = revoke.recipient.affiliate_json(me);
         let url = revoke.program.url.clone();
-        let result = self.send_earn(EarnPurpose::Disconnect, |extra| {
+        let request = self.send_earn(EarnPurpose::Disconnect, |extra| {
             disconnect_affiliate_program(extra, affiliate, &url)
-        });
-        if result.is_err()
-            && let Some(revoke) = self.session.payments.earn.revoke.as_mut()
-        {
-            revoke.sending = false;
+        })?;
+        if let Some(revoke) = self.session.payments.earn.revoke.as_mut() {
+            revoke.send = BoxSend::Sending(request);
         }
-        result.map(|_| ())
+        Ok(())
     }
 }

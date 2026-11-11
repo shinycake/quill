@@ -180,11 +180,11 @@ fn a_low_balance_asks_for_a_top_up_instead_of_a_toast() {
     assert!(f.driver.session.take_suggested_post_notes().is_empty());
     assert_eq!(
         f.driver.session.take_suggested_post_balance_low(),
-        Some(crate::suggested_posts::SuggestedPostPurpose::AddOffer {
+        vec![crate::suggested_posts::SuggestedPostPurpose::AddOffer {
             chat_id: CHAT.0,
             message_id: 3 << 20,
             price: Some(SuggestedPrice::Stars(900)),
-        })
+        }]
     );
 }
 

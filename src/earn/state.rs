@@ -432,6 +432,26 @@ impl JoinPage {
     }
 }
 
+/// A confirm box's request: none, or the one it waits for. An answer for
+/// another request (a closed box's, or an earlier box's) is not this box's.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BoxSend {
+    #[default]
+    Idle,
+    Sending(crate::ids::RequestId),
+}
+
+impl BoxSend {
+    pub fn is_sending(self) -> bool {
+        matches!(self, Self::Sending(_))
+    }
+
+    /// `request` is the one this box waits for.
+    pub fn waits_for(self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(self, Self::Sending(waiting) if Some(waiting) == request)
+    }
+}
+
 /// tdesktop `JoinStarRefBox`: join one bot's program.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JoinBox {
@@ -442,7 +462,7 @@ pub struct JoinBox {
     /// The user picks the recipient among their own peers (tdesktop
     /// `requireOthers`: the user's own page or "View existing programs").
     pub choose_recipient: bool,
-    pub joining: bool,
+    pub send: BoxSend,
 }
 
 /// tdesktop `StarRefLinkBox`: a joined program's link.
@@ -457,7 +477,7 @@ pub struct LinkBox {
 pub struct RevokeBox {
     pub program: ConnectedProgram,
     pub recipient: EarnPeer,
-    pub sending: bool,
+    pub send: BoxSend,
 }
 
 /// Who may receive commissions, as the two list requests settle it.
@@ -560,6 +580,21 @@ impl EarnState {
 
     pub fn note(&mut self, text: impl Into<String>) {
         self.notes.push(text.into());
+    }
+
+    /// The list a program click came from is still open: the programs box
+    /// of that setup page, or the join page of that peer.
+    pub fn program_surface_open(&self, from: ProgramSurface, recipient: EarnPeer) -> bool {
+        match from {
+            ProgramSurface::Box => {
+                self.programs_box.is_some()
+                    && self
+                        .setup
+                        .as_ref()
+                        .is_some_and(|s| EarnPeer::User(s.bot_user_id) == recipient)
+            }
+            ProgramSurface::Page => self.join.as_ref().is_some_and(|j| j.peer == recipient),
+        }
     }
 
     /// The Stars balance of `peer`, when known.

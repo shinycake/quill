@@ -394,10 +394,11 @@ impl QuillApp {
         };
         let notes = live.driver.session.take_suggested_post_notes();
         let balance_low = live.driver.session.take_suggested_post_balance_low();
-        if let Some(note) = notes.into_iter().last() {
+        // Every failure toasts, and every refused payment asks for its top-up.
+        for note in notes {
             self.set_note(StatusNote::info(note));
         }
-        if let Some(purpose) = balance_low {
+        for purpose in balance_low {
             self.ask_after_balance_error(purpose, cx);
         }
     }

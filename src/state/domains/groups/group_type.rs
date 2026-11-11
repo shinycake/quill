@@ -64,6 +64,38 @@ pub struct PublicLinkRevoke {
     pub failed: bool,
 }
 
+/// A revoke from the limit box: idle, its two requests out, or both
+/// answered and the link free. `Freed` leaves when the UI takes it
+/// ([`Session::take_public_link_freed`]) or a new revoke starts.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum PublicLinkStage {
+    #[default]
+    Idle,
+    Revoking(PublicLinkRevoke),
+    Freed,
+}
+
+impl PublicLinkStage {
+    /// The revoke whose answers are out.
+    pub fn revoking(&self) -> Option<&PublicLinkRevoke> {
+        match self {
+            Self::Revoking(revoke) => Some(revoke),
+            _ => None,
+        }
+    }
+
+    pub fn revoking_mut(&mut self) -> Option<&mut PublicLinkRevoke> {
+        match self {
+            Self::Revoking(revoke) => Some(revoke),
+            _ => None,
+        }
+    }
+
+    pub fn is_revoking(&self) -> bool {
+        matches!(self, Self::Revoking(_))
+    }
+}
+
 /// Why the usernames list could not show or hide a link (tdesktop
 /// `Api::Usernames::Error`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,7 +126,7 @@ pub struct GroupTypeState {
     /// (`PublicGroupsUnavailable`).
     pub public_unavailable: HashSet<i64>,
     pub public_chats: PublicChatsFetch,
-    pub revoke: Option<PublicLinkRevoke>,
+    pub revoke: PublicLinkStage,
     /// The usernames list's last refused toggle, by chat id.
     pub toggle_error: Option<(ChatId, UsernameToggleError)>,
     /// Saves waiting for `upgradeBasicGroupChatToSupergroupChat`, by its
@@ -110,6 +142,17 @@ fn group_type_purpose(pending: Option<&PendingRequest>) -> Option<GroupTypePurpo
 }
 
 impl Session {
+    /// A revoke freed its link since this was last asked: true once, so
+    /// the Type box checks its typed link again (tdesktop goes back to
+    /// Public and checks it).
+    pub fn take_public_link_freed(&mut self) -> bool {
+        let freed = self.groups.group_type.revoke == PublicLinkStage::Freed;
+        if freed {
+            self.groups.group_type.revoke = PublicLinkStage::Idle;
+        }
+        freed
+    }
+
     /// The newest check of exactly `username` in `chat_id` failed.
     pub fn group_username_check_failed(&self, chat_id: ChatId, username: &str) -> bool {
         matches!(
@@ -302,7 +345,7 @@ impl Session {
             return;
         };
         let state = &mut self.groups.group_type;
-        let Some(revoke) = state.revoke.as_mut() else {
+        let Some(revoke) = state.revoke.revoking_mut() else {
             return;
         };
         if !revoke.requests.contains(&pending.id) {
@@ -314,13 +357,13 @@ impl Session {
             return;
         }
         if revoke.failed {
-            state.revoke = None;
+            state.revoke = PublicLinkStage::Idle;
             state.public_chats = PublicChatsFetch::None;
             self.chats_state.chat_action_error =
                 Some(crate::lang::tr(crate::lang::keys::Q_GROUP_TYPE_REVOKE_FAILED).to_string());
             return;
         }
-        state.revoke = None;
+        state.revoke = PublicLinkStage::Freed;
         state.public_limit_reached = Some(false);
         state.public_chats = PublicChatsFetch::None;
         if self.payments.hub.limit_box.map(|(kind, _)| kind) == Some(PremiumLimitKind::PublicLinks)

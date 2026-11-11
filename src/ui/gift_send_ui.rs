@@ -9,6 +9,7 @@
 use super::app::QuillApp;
 use super::chat_theme::fill_muted;
 use super::gift_manage_ui::{hint, panel, stars};
+use super::payments_state::SendGiftInputs;
 use super::premium_ui::sticker_tile;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
@@ -67,7 +68,7 @@ impl QuillApp {
         if matches!(opened, Some(Ok(()))) {
             // Reopening for the send that is out keeps what was typed.
             if !sending {
-                self.reset_send_gift_inputs(window, cx);
+                self.reset_gift_inputs(false, window, cx);
             }
             self.open_box(DialogKind::SendGift);
         } else if sending && chat.is_some() {
@@ -103,7 +104,7 @@ impl QuillApp {
         };
         if opened {
             if !sending {
-                self.reset_send_gift_inputs(window, cx);
+                self.reset_gift_inputs(false, window, cx);
             }
             self.open_box(DialogKind::SendGift);
         } else if sending {
@@ -120,12 +121,22 @@ impl QuillApp {
             .is_some_and(|s| s.payments.gifts_manage.send.sending())
     }
 
-    fn reset_send_gift_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// A send or buy step begins: the message is emptied and the choices
+    /// beside it are replaced whole (`hide_name` preset for a gift to
+    /// oneself).
+    pub(super) fn reset_gift_inputs(
+        &mut self,
+        hide_name: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.payments
             .gift_message_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.payments.gift_hide_name = false;
-        self.payments.gift_pay_upgrade = false;
+        self.payments.gift_inputs = SendGiftInputs {
+            hide_name,
+            ..SendGiftInputs::default()
+        };
     }
 
     pub(super) fn close_send_gift_dialog(&mut self, cx: &mut Context<Self>) {
@@ -145,11 +156,7 @@ impl QuillApp {
             .session()
             .and_then(|s| s.payments.gifts_manage.send.recipient.as_ref())
             .is_some_and(|r| r.is_self);
-        self.payments
-            .gift_message_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.payments.gift_hide_name = is_self;
-        self.payments.gift_pay_upgrade = false;
+        self.reset_gift_inputs(is_self, window, cx);
         cx.notify();
     }
 
@@ -160,7 +167,10 @@ impl QuillApp {
             .read(cx)
             .value()
             .to_string();
-        let (hide, upgrade) = (self.payments.gift_hide_name, self.payments.gift_pay_upgrade);
+        let (hide, upgrade) = (
+            self.payments.gift_inputs.hide_name,
+            self.payments.gift_inputs.pay_upgrade,
+        );
         let sent = self
             .live
             .as_mut()
@@ -451,7 +461,7 @@ fn selected_gift_panel(
     let Some(recipient) = send.recipient.as_ref() else {
         return div().into_any_element();
     };
-    let pay_upgrade = this.payments.gift_pay_upgrade && gift.upgrade_star_count > 0;
+    let pay_upgrade = this.payments.gift_inputs.pay_upgrade && gift.upgrade_star_count > 0;
     let total = gift.total_cost(pay_upgrade);
     let balance = session.payments.hub.balance;
     let too_poor = balance.is_some_and(|b| b.stars < total);
@@ -505,9 +515,9 @@ fn selected_gift_panel(
     col = col.child(
         Checkbox::new("send-gift-hide-name")
             .label(tr(keys::Q_MONEY_HIDE_MY_NAME_AND_MESSAGE))
-            .checked(this.payments.gift_hide_name)
+            .checked(this.payments.gift_inputs.hide_name)
             .on_click(cx.listener(|this, &on, _, cx| {
-                this.payments.gift_hide_name = on;
+                this.payments.gift_inputs.hide_name = on;
                 cx.notify();
             })),
     );
@@ -521,7 +531,7 @@ fn selected_gift_panel(
                     ))
                     .checked(pay_upgrade)
                     .on_click(cx.listener(|this, &on, _, cx| {
-                        this.payments.gift_pay_upgrade = on;
+                        this.payments.gift_inputs.pay_upgrade = on;
                         cx.notify();
                     })),
             )
@@ -605,14 +615,14 @@ fn premium_section(this: &QuillApp, session: &Session, cx: &mut Context<QuillApp
             ));
     }
     let stars_offered = can_pay && send.premium_options.iter().any(|o| o.star_count > 0);
-    let by_stars = stars_offered && this.payments.gift_premium_by_stars;
+    let by_stars = stars_offered && this.payments.gift_inputs.by_stars;
     if stars_offered {
         col = col.child(
             Checkbox::new("premium-gift-by-stars")
                 .label(tr(keys::Q_MONEY_PAY_WITH_STARS_INSTEAD))
                 .checked(by_stars)
                 .on_click(cx.listener(|this, &on, _, cx| {
-                    this.payments.gift_premium_by_stars = on;
+                    this.payments.gift_inputs.by_stars = on;
                     cx.notify();
                 })),
         );

@@ -233,7 +233,7 @@ fn a_join_box_parked_for_a_bot_profile_goes_when_the_profile_closes() {
             info: Default::default(),
             recipient: EarnPeer::User(1),
             choose_recipient: true,
-            joining: false,
+            send: crate::earn::BoxSend::Idle,
         });
     };
     park(&mut session);

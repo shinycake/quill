@@ -13,7 +13,7 @@ use gpui_kit::{
     AppContext, Bounds, Entity, Modifiers, Pixels, TestAppContext, VisualTestContext, point, px,
     size,
 };
-use quill::earn::{LinkBox, RevokeBox, SetupConfirm};
+use quill::earn::{BoxSend, LinkBox, RevokeBox, SetupConfirm};
 
 const DEMO_NOTE: &str = "Demo mode: this needs a live session.";
 
@@ -160,7 +160,7 @@ fn leaving_asks_to_revoke_and_cancel_keeps_the_program(cx: &mut TestAppContext) 
             earn.revoke = Some(RevokeBox {
                 program,
                 recipient,
-                sending: false,
+                send: BoxSend::Idle,
             });
         }
         cx.notify();
@@ -201,9 +201,9 @@ fn setup_builds_its_sliders_and_save_asks_to_confirm(cx: &mut TestAppContext) {
     let (app, shell, mut vcx) = open_demo(cx, "ready-earn-affiliate-setup");
     let vcx = &mut vcx;
     app.read_with(vcx, |app, _| {
-        let commission = app.earn.commission.as_ref().map(|(_, stops)| stops.len());
+        let commission = app.earn.sliders.as_ref().map(|s| s.commission.1.len());
         assert!(commission.is_some_and(|n| n > 1), "commission stops");
-        let duration = app.earn.duration.as_ref().map(|(_, stops)| stops.len());
+        let duration = app.earn.sliders.as_ref().map(|s| s.duration.1.len());
         assert_eq!(duration, Some(7), "1m, 3m, 6m, 1y, 2y, 3y and forever");
     });
     click(vcx, "earn-setup-save");
@@ -292,7 +292,7 @@ fn park_a_join_box(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
             info: Default::default(),
             recipient: quill::earn::EarnPeer::User(1),
             choose_recipient: true,
-            joining: false,
+            send: BoxSend::Idle,
         });
     });
 }

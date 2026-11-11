@@ -66,7 +66,7 @@ impl QuillApp {
     }
 
     /// A listing on sale: bought for the user, then it fills a slot.
-    fn pick_craft_listing(&mut self, name: String, cx: &mut Context<Self>) {
+    fn pick_craft_listing(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
         let started = match self.live.as_mut() {
             Some(live) => {
                 let started = live.driver.start_gift_resale_buy(&name, None, true).is_ok();
@@ -101,9 +101,9 @@ impl QuillApp {
             }
         };
         if started {
-            self.payments.gift_hide_name = false;
+            self.reset_gift_inputs(false, window, cx);
             // The purchase returns to the craft box, not to this list.
-            self.gift_market.stack.pop();
+            self.gift_market.pop();
             self.gift_market.push(MarketBox::Craft);
             self.gift_market.push(MarketBox::Buy);
             self.open_box(crate::ui::shell::DialogKind::GiftMarket);
@@ -232,8 +232,8 @@ impl QuillApp {
                     .tab_index(0)
                     .role(Role::Button)
                     .aria_label(label)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.pick_craft_listing(name.clone(), cx);
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.pick_craft_listing(name.clone(), window, cx);
                     }))
                     .child(tile),
             );

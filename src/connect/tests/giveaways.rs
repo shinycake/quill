@@ -177,8 +177,8 @@ fn price_options_only_inform() {
     );
     let options = &driver.session.payments.giveaway.options;
     assert!(!options.loading());
-    assert_eq!(options.premium.len(), 1);
-    assert!(options.stars.is_empty() && options.stars_error.is_some());
+    assert_eq!(options.premium_options().len(), 1);
+    assert!(options.stars_options().is_empty() && options.stars.error().is_some());
     for ty in ["getPaymentForm", "sendPaymentForm", "launchPrepaidGiveaway"] {
         assert_eq!(count_sent(&recorder, ty), 0);
     }

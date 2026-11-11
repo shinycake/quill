@@ -169,8 +169,13 @@ impl Session {
                     bot_user_id,
                     recipient,
                     choose_recipient,
+                    from,
                 }),
             ) => {
+                // The list that asked was closed since: nothing opens.
+                if !earn.program_surface_open(from, recipient) {
+                    return;
+                }
                 // tdesktop `ListController::open`: a live link opens the
                 // link box, anything else the join box.
                 if program.bot_user_id == bot_user_id
@@ -186,7 +191,14 @@ impl Session {
             (EarnPayload::Connected(program), Some(EarnPurpose::Connect { recipient })) => {
                 // Joined: the link box replaces the join box and the
                 // program moves to "My Programs" when it was for this page.
-                earn.join_box = None;
+                // A box closed (or replaced) meanwhile stays as it is.
+                let ours = earn
+                    .join_box
+                    .as_ref()
+                    .is_some_and(|j| j.send.waits_for(pending.map(|p| p.id)));
+                if ours {
+                    earn.join_box = None;
+                }
                 if let Some(join) = earn.join.as_mut().filter(|j| j.peer == recipient) {
                     join.found
                         .programs
@@ -195,10 +207,16 @@ impl Session {
                         join.mine.programs.insert(0, program.clone());
                     }
                 }
-                earn.link_box = Some(LinkBox { program, recipient });
+                if ours {
+                    earn.link_box = Some(LinkBox { program, recipient });
+                }
             }
             (EarnPayload::Connected(program), Some(EarnPurpose::Disconnect)) => {
-                let revoked = earn.revoke.take();
+                let ours = earn
+                    .revoke
+                    .as_ref()
+                    .is_some_and(|r| r.send.waits_for(pending.map(|p| p.id)));
+                let revoked = if ours { earn.revoke.take() } else { None };
                 if let Some(join) = earn.join.as_mut() {
                     join.mine
                         .programs
@@ -260,7 +278,7 @@ impl Session {
             info,
             recipient,
             choose_recipient,
-            joining: false,
+            send: BoxSend::Idle,
         };
         if choose_recipient && earn.recipients.is_loading() {
             earn.pending_join = Some(join);
@@ -534,22 +552,26 @@ impl Session {
                 bot_user_id,
                 recipient,
                 choose_recipient,
+                from,
             } => {
                 // tdesktop `Resolve` treats a failure as "not joined".
-                self.open_join_box_after_resolve(bot_user_id, recipient, choose_recipient);
+                if earn.program_surface_open(from, recipient) {
+                    self.open_join_box_after_resolve(bot_user_id, recipient, choose_recipient);
+                }
             }
             EarnPurpose::Connect { .. } => {
-                if let Some(join) = earn.join_box.as_mut() {
-                    join.joining = false;
+                // A closed box's failure toasts over nothing.
+                if let Some(join) = earn.join_box.as_mut().filter(|j| j.send.waits_for(request)) {
+                    join.send = BoxSend::Idle;
+                    earn.note(format!("Failed: {reason}"));
                 }
-                earn.note(format!("Failed: {reason}"));
             }
             EarnPurpose::Disconnect => {
-                if let Some(revoke) = earn.revoke.as_mut() {
-                    revoke.sending = false;
+                if let Some(revoke) = earn.revoke.as_mut().filter(|r| r.send.waits_for(request)) {
+                    revoke.send = BoxSend::Idle;
+                    // tdesktop `Revoke`: "Failed: " and the error.
+                    earn.note(format!("Failed: {reason}"));
                 }
-                // tdesktop `Revoke`: "Failed: " and the error.
-                earn.note(format!("Failed: {reason}"));
             }
             EarnPurpose::RecipientChats | EarnPurpose::RecipientBots => {
                 // tdesktop treats a failed list as empty.

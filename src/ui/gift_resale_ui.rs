@@ -144,7 +144,12 @@ impl QuillApp {
         cx.notify();
     }
 
-    pub(super) fn pick_resale_listing(&mut self, name: String, cx: &mut Context<Self>) {
+    pub(super) fn pick_resale_listing(
+        &mut self,
+        name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // The send box's recipient, or none for yourself.
         let recipient = self.gift_market.recipient.clone();
         let started = match self.live.as_mut() {
@@ -184,7 +189,8 @@ impl QuillApp {
             }
         };
         if started {
-            self.payments.gift_hide_name = false;
+            // The buy step starts clean: not the send box's message.
+            self.reset_gift_inputs(false, window, cx);
             self.gift_market.push(MarketBox::Buy);
             self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         }
@@ -260,8 +266,8 @@ impl QuillApp {
                     .tab_index(0)
                     .role(Role::Button)
                     .aria_label(label)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.pick_resale_listing(name.clone(), cx);
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.pick_resale_listing(name.clone(), window, cx);
                     }))
                     .child(tile),
             );

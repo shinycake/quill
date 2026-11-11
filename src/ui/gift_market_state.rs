@@ -148,6 +148,51 @@ impl GiftMarketUi {
         }
     }
 
+    /// Closes the top box. What only a closed box owned goes with it.
+    pub(super) fn pop(&mut self) -> Option<MarketBox> {
+        let popped = self.stack.pop();
+        self.drop_orphans();
+        popped
+    }
+
+    /// Closes every box.
+    pub(super) fn clear(&mut self) {
+        self.stack.clear();
+        self.drop_orphans();
+    }
+
+    /// Closes the boxes `done` picks, wherever they sit in the stack.
+    pub(super) fn close_where(&mut self, done: impl Fn(&MarketBox) -> bool) {
+        self.stack.retain(|entry| !done(entry));
+        self.drop_orphans();
+    }
+
+    /// The bid slider and custom field belong to a bid box, and "Hide My
+    /// Name" to the send, change and bid boxes of one bid: when the last
+    /// box that owns them leaves the stack, however it left (back, replace,
+    /// clear), they go, so the next auction starts clean.
+    fn drop_orphans(&mut self) {
+        let bid = self
+            .stack
+            .iter()
+            .any(|entry| matches!(entry, MarketBox::AuctionBid { .. }));
+        if !bid {
+            self.slider = None;
+            self.custom = None;
+        }
+        let naming = self.stack.iter().any(|entry| {
+            matches!(
+                entry,
+                MarketBox::AuctionSend { .. }
+                    | MarketBox::AuctionBid { .. }
+                    | MarketBox::ChangeRecipient { .. }
+            )
+        });
+        if !naming {
+            self.hide_name = false;
+        }
+    }
+
     pub(super) fn top(&self) -> Option<&MarketBox> {
         self.stack.last()
     }

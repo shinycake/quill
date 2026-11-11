@@ -8,6 +8,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ids::{ChatId, RequestId};
+use crate::lang::{keys, tr};
 use serde_json::Value;
 
 /// A username or a phone number.
@@ -186,13 +187,22 @@ pub fn title_parts(kind: CollectibleKind) -> (&'static str, &'static str) {
     }
 }
 
-/// `lng_collectible_*_info` split around the date and the price:
-/// ("This username was bought on ", "Fragment", " on ", date, " for ").
+/// `lng_collectible_*_info` up to the date: "This username was bought on ".
 pub fn info_prefix(kind: CollectibleKind) -> &'static str {
     match kind {
-        CollectibleKind::Username => "This username was bought on ",
-        CollectibleKind::Phone => "This phone number was bought on ",
+        CollectibleKind::Username => tr(keys::Q_MONEY_COLLECTIBLE_USERNAME_BOUGHT),
+        CollectibleKind::Phone => tr(keys::Q_MONEY_COLLECTIBLE_PHONE_BOUGHT),
     }
+}
+
+/// The byte range of `word` in `sentence`, or `None` when a translation
+/// leaves it out, so a highlight never lands outside the text.
+pub fn word_range(sentence: &str, word: &str) -> Option<std::ops::Range<usize>> {
+    if word.is_empty() {
+        return None;
+    }
+    let start = sentence.find(word)?;
+    Some(start..start + word.len())
 }
 
 /// `lng_collectible_*_copy`.
@@ -246,6 +256,15 @@ mod tests {
     fn the_kind_follows_the_plus() {
         assert_eq!(CollectibleKind::detect("+8881234"), CollectibleKind::Phone);
         assert_eq!(CollectibleKind::detect("durov"), CollectibleKind::Username);
+    }
+
+    #[test]
+    fn the_highlight_is_found_in_any_template_and_dropped_when_absent() {
+        let sentence = "ça: Fragment le 5 pour";
+        let range = word_range(sentence, "Fragment").expect("present");
+        assert_eq!(sentence.get(range), Some("Fragment"));
+        assert_eq!(word_range("sans le mot", "Fragment"), None);
+        assert_eq!(word_range("x", ""), None);
     }
 
     #[test]

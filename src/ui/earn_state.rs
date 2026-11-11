@@ -7,12 +7,10 @@ use super::app::QuillApp;
 use gpui_kit::component::input::InputState;
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::*;
-use quill::earn::{EarnPeer, TonTx};
-use quill::ids::OfAccount;
+use quill::earn::{EarnPeer, ProgramInfo, TonTx};
 use quill::lang::{keys, tr};
 use quill::premium_hub::StarTx;
 use quill::state::InfoPanelTarget;
-use std::collections::HashSet;
 
 /// What a locked switch needs boosts for (tdesktop `AskBoostReason`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +27,15 @@ pub(crate) struct AskBoost {
     pub(crate) chat_id: i64,
     pub(crate) level: i32,
     pub(crate) reason: AskBoostReason,
+}
+
+/// The setup page's two sliders and the stops each moves over, for the
+/// page of `bot_user_id` as `program` stood when it opened.
+pub(crate) struct SetupSliders {
+    pub(super) bot_user_id: i64,
+    pub(super) program: Option<ProgramInfo>,
+    pub(super) commission: (Entity<SliderState>, Vec<i32>),
+    pub(super) duration: (Entity<SliderState>, Vec<i32>),
 }
 
 pub(crate) struct EarnUi {
@@ -57,11 +64,9 @@ pub(crate) struct EarnUi {
     pub(super) star_tx: Option<StarTx>,
     /// The boost box a locked switch opens.
     pub(super) ask_boost: Option<AskBoost>,
-    /// The setup page's sliders and the stops they move over.
-    pub(super) commission: Option<(Entity<SliderState>, Vec<i32>)>,
-    pub(super) duration: Option<(Entity<SliderState>, Vec<i32>)>,
-    /// Bots whose photo was asked for by a program list.
-    pub(super) photos_asked: HashSet<OfAccount<i64>>,
+    /// The setup page's sliders, built for one bot's program and rebuilt
+    /// when the page shows another.
+    pub(super) sliders: Option<SetupSliders>,
     /// The earn page's scroll; its end loads the next programs page.
     pub(super) scroll: ScrollHandle,
     /// The programs box's list.
@@ -113,9 +118,7 @@ impl EarnUi {
             ton_tx: None,
             star_tx: None,
             ask_boost: None,
-            commission: None,
-            duration: None,
-            photos_asked: HashSet::new(),
+            sliders: None,
             scroll: ScrollHandle::new(),
             box_scroll: ScrollHandle::new(),
             link_shown: None,

@@ -695,9 +695,9 @@ pub struct SuggestedPostsState {
     pub busy: HashSet<(i64, i64)>,
     /// One-shot errors the UI shows as toasts.
     pub notes: Vec<String>,
-    /// A request refused with `BALANCE_TOO_LOW`: the UI asks for a top-up
-    /// instead of a toast.
-    pub balance_low: Option<SuggestedPostPurpose>,
+    /// Requests refused with `BALANCE_TOO_LOW`: the UI asks for a top-up
+    /// for each instead of a toast.
+    pub balance_low: Vec<SuggestedPostPurpose>,
 }
 
 impl SuggestedPostsState {

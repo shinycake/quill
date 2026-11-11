@@ -6,6 +6,7 @@
 
 use super::promo::{on_brand, preview_stickers};
 use super::*;
+use crate::ui::premium_preview_state::ClipSlot;
 use crate::ui::video_player::{PlayState, Purpose, VideoPlayer, video_frame};
 use gpui_kit::assets::IconName;
 use quill::lang::{keys, tr};
@@ -64,36 +65,50 @@ impl QuillApp {
     }
 
     /// The muted looping player of the preview clip, opened once the clip
-    /// is a local sandboxed file; `None` while it is not, or if it failed.
+    /// is a local sandboxed file; `None` while it is not, or if it failed
+    /// (a clip that cannot be opened is not opened again each frame).
     fn preview_player(&self, file_id: i32, cx: &mut Context<Self>) -> Option<VideoPlayer> {
-        if self.premium_preview.file_id.get() != Some(file_id) {
+        // The slot is read and written in short borrows, never across the
+        // open; a re-entrant borrow skips this frame.
+        if self.premium_preview.slot.try_borrow().ok()?.file_id() != Some(file_id) {
             self.premium_preview.stop();
         }
-        // A re-entrant borrow skips this frame (the slot below fails too).
-        let open = self.premium_preview.video.try_borrow().ok()?.clone();
-        let video = match open {
-            Some(video) => video,
-            None => {
-                let roots = self.media_display_roots();
-                let path = self
-                    .session()?
-                    .media
-                    .files
-                    .get(&file_id)
-                    .and_then(|file| file.usable_path())
-                    .and_then(|path| sandboxed_display_path(path, &roots))?;
-                let video =
-                    VideoPlayer::open(&path, Purpose::Inline { max_edge: 720 }, None, cx).ok()?;
+        let held = self.premium_preview.slot.try_borrow().ok()?.clone();
+        match held {
+            ClipSlot::Playing { player, .. } => {
+                return (player.state() != PlayState::Failed).then_some(player);
+            }
+            ClipSlot::Failed { .. } => return None,
+            ClipSlot::Idle => {}
+        }
+        let roots = self.media_display_roots();
+        let path = self
+            .session()?
+            .media
+            .files
+            .get(&file_id)
+            .and_then(|file| file.usable_path())
+            .and_then(|path| sandboxed_display_path(path, &roots))?;
+        let opened = VideoPlayer::open(&path, Purpose::Inline { max_edge: 720 }, None, cx);
+        let slot = match opened {
+            Ok(video) => {
                 video.set_volume(0.0);
                 video.set_looping(true);
                 video.play();
                 video.watch(cx.entity_id());
-                *self.premium_preview.video.try_borrow_mut().ok()? = Some(video.clone());
-                self.premium_preview.file_id.set(Some(file_id));
-                video
+                ClipSlot::Playing {
+                    file_id,
+                    player: video,
+                }
             }
+            Err(_) => ClipSlot::Failed { file_id },
         };
-        (video.state() != PlayState::Failed).then_some(video)
+        let shown = match &slot {
+            ClipSlot::Playing { player, .. } => Some(player.clone()),
+            _ => None,
+        };
+        *self.premium_preview.slot.try_borrow_mut().ok()? = slot;
+        shown
     }
 
     /// The clip, the sticker examples, or a star over the brand gradient.

@@ -483,7 +483,7 @@ pub struct PaidMessages {
 
 /// Whom a paid-message save is for: its failure shows there only, never
 /// in another chat's bar or another channel's box.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PaidTarget {
     /// `allowUnpaidMessagesFromUser`.
     User(i64),
@@ -491,70 +491,94 @@ pub enum PaidTarget {
     Channel(i64),
 }
 
-/// The paid-message save (Remove Fee, a channel's Direct Messages).
+/// One target's save.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TargetSave {
+    /// `request` is out: only its answer settles the save.
+    Saving(crate::ids::RequestId),
+    Failed(String),
+}
+
+/// The paid-message saves (Remove Fee, a channel's Direct Messages), one
+/// per target: a target with no entry is idle. A save for one target never
+/// disables, settles or fails another's.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum PaidSave {
-    #[default]
-    Idle,
-    /// `request` is out for `target`: only its answer settles the save.
-    Saving {
-        target: PaidTarget,
-        request: crate::ids::RequestId,
-    },
-    Failed {
-        target: PaidTarget,
-        line: String,
-    },
+pub struct PaidSave {
+    by_target: HashMap<PaidTarget, TargetSave>,
 }
 
 impl PaidSave {
+    /// `request` was sent for `target`; a failure line of it is gone.
+    pub fn begin(&mut self, target: PaidTarget, request: crate::ids::RequestId) {
+        self.by_target.insert(target, TargetSave::Saving(request));
+    }
+
+    /// `target` is idle again (its send was refused).
+    pub fn clear(&mut self, target: PaidTarget) {
+        self.by_target.remove(&target);
+    }
+
+    /// A box for `target` opens: an earlier refusal is not this box's, a
+    /// save still out stays.
+    pub fn forget_failure(&mut self, target: PaidTarget) {
+        if matches!(self.by_target.get(&target), Some(TargetSave::Failed(_))) {
+            self.by_target.remove(&target);
+        }
+    }
+
+    /// Some save is out.
     pub fn is_saving(&self) -> bool {
-        matches!(self, Self::Saving { .. })
+        self.by_target
+            .values()
+            .any(|save| matches!(save, TargetSave::Saving(_)))
     }
 
-    /// The `ok` of `request`: the save is done when it is the one that
-    /// holds the slot. Another request's answer (an older save that a newer
-    /// one replaced) leaves the slot alone.
+    /// The save for `target` is out.
+    pub fn is_saving_for(&self, target: PaidTarget) -> bool {
+        matches!(self.by_target.get(&target), Some(TargetSave::Saving(_)))
+    }
+
+    /// The `ok` of `request`: the target it was for is idle.
     pub fn settle(&mut self, request: crate::ids::RequestId) {
-        if matches!(self, Self::Saving { request: held, .. } if *held == request) {
-            *self = Self::Idle;
+        self.by_target
+            .retain(|_, save| !matches!(save, TargetSave::Saving(held) if *held == request));
+    }
+
+    /// The error of `request`: the target it was for failed with `line`. An
+    /// answer of a request a newer save of that target replaced is ignored.
+    pub fn fail(&mut self, request: crate::ids::RequestId, line: String) {
+        for save in self.by_target.values_mut() {
+            if matches!(save, TargetSave::Saving(held) if *held == request) {
+                *save = TargetSave::Failed(line);
+                return;
+            }
         }
     }
 
-    /// The error of `request`, when it holds the slot: the save failed with
-    /// `line`.
-    pub fn fail(&mut self, request: crate::ids::RequestId, line: String) {
-        if let Self::Saving {
-            target,
-            request: held,
-        } = *self
-            && held == request
-        {
-            *self = Self::Failed { target, line };
-        }
+    /// The save of `target`; `None` when idle.
+    pub fn of(&self, target: PaidTarget) -> Option<&TargetSave> {
+        self.by_target.get(&target)
     }
 
     /// The failure line of a save for `target`.
     pub fn error_for(&self, target: PaidTarget) -> Option<&str> {
-        match self {
-            Self::Failed {
-                target: failed,
-                line,
-            } if *failed == target => Some(line),
+        match self.by_target.get(&target) {
+            Some(TargetSave::Failed(line)) => Some(line),
             _ => None,
         }
     }
 
     /// The failure line of a Remove Fee for any user (the privacy page's
-    /// exceptions).
+    /// exceptions); the lowest user id's when several failed.
     pub fn user_error(&self) -> Option<&str> {
-        match self {
-            Self::Failed {
-                target: PaidTarget::User(_),
-                line,
-            } => Some(line),
-            _ => None,
-        }
+        self.by_target
+            .iter()
+            .filter_map(|(target, save)| match (target, save) {
+                (PaidTarget::User(id), TargetSave::Failed(line)) => Some((*id, line.as_str())),
+                _ => None,
+            })
+            .min_by_key(|(id, _)| *id)
+            .map(|(_, line)| line)
     }
 }
 

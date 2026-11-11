@@ -332,8 +332,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 rq::place_gift_auction_bid(extra, gift_id, stars, user_id, &text, hide_name)
             })
         };
-        if result.is_ok() {
-            self.session.payments.gift_market.bidding = Some(gift_id);
+        if let Ok(request) = result {
+            self.session.payments.gift_market.bidding = Some((gift_id, request));
         }
         result
     }

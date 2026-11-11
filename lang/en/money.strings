@@ -433,6 +433,8 @@
 "qll_money_choose_when_winners_of_your" = "Choose when winners of your {place} will be randomly selected. Up to {max_days} days ahead.";
 "qll_money_collect_your_reward_using_fragment" = "Collect your reward using Fragment, a third-party platform used by advertisers to pay for ads.";
 "qll_money_collectible_gift_name_e_g" = "Collectible gift name, e.g. PlushPepe-123";
+"qll_money_collectible_phone_bought" = "This phone number was bought on ";
+"qll_money_collectible_username_bought" = "This username was bought on ";
 "qll_money_collectibles" = "Collectibles";
 "qll_money_collection_name" = "Collection name";
 "qll_money_collections" = "Collections";

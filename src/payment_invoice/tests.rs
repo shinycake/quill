@@ -7,6 +7,7 @@ use crate::payment_invoice::{
 };
 use crate::star_packs::StarPack;
 use crate::state::GiveawayOptions;
+use crate::state::fetch::Fetch;
 use crate::telegram::envelope::{
     MessageSender, OrderInfoData, PremiumGiveawayOption, StarGiveawayOption,
 };
@@ -257,7 +258,7 @@ fn premium_cannot_be_gifted_to_a_channel_or_to_yourself() {
 
 fn options() -> GiveawayOptions {
     GiveawayOptions {
-        premium: vec![
+        premium: Fetch::Ready(vec![
             PremiumGiveawayOption {
                 currency: "USD".into(),
                 amount: 1500,
@@ -270,8 +271,8 @@ fn options() -> GiveawayOptions {
                 winner_count: 5,
                 month_count: 6,
             },
-        ],
-        stars: vec![StarGiveawayOption {
+        ]),
+        stars: Fetch::Ready(vec![StarGiveawayOption {
             currency: "USD".into(),
             amount: 100,
             star_count: 1000,
@@ -279,7 +280,7 @@ fn options() -> GiveawayOptions {
             winner_counts: vec![10, 20],
             is_default: true,
             is_additional: false,
-        }],
+        }]),
         ..Default::default()
     }
 }
@@ -385,12 +386,14 @@ fn a_premium_gift_paid_with_stars_uses_the_stars_currency() {
 #[test]
 fn chosen_members_get_gift_codes_priced_per_member() {
     let mut opts = options();
-    opts.premium.push(PremiumGiveawayOption {
-        currency: "USD".into(),
-        amount: 400,
-        winner_count: 1,
-        month_count: 3,
-    });
+    if let Some(list) = opts.premium.data_mut() {
+        list.push(PremiumGiveawayOption {
+            currency: "USD".into(),
+            amount: 400,
+            winner_count: 1,
+            month_count: 3,
+        });
+    }
     let mut draft = GiveawayDraft::new(-1001, None, NOW);
     draft.premium_months = 3;
     draft.award_user_ids = vec![11, 12, 13];

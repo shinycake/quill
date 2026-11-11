@@ -131,6 +131,9 @@ pub enum EarnPurpose {
         bot_user_id: i64,
         recipient: EarnPeer,
         choose_recipient: bool,
+        /// The list the click came from; its answer opens a box only while
+        /// that list is still open.
+        from: ProgramSurface,
     },
     /// `connectAffiliateProgram` from the join box.
     Connect { recipient: EarnPeer },
@@ -140,6 +143,13 @@ pub enum EarnPurpose {
     RecipientChats,
     /// `getOwnedBots` for the recipients.
     RecipientBots,
+}
+
+/// Where a program row was clicked: the join page or the programs box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgramSurface {
+    Page,
+    Box,
 }
 
 /// TDLib errors the revenue screens tell apart (tdesktop

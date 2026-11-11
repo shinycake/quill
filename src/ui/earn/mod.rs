@@ -272,8 +272,12 @@ impl QuillApp {
             }
         }
         if let EarnPanel::Setup { .. } = panel {
-            self.earn.commission = None;
-            self.earn.duration = None;
+            self.earn.sliders = None;
+        }
+        if let EarnPanel::Revenue { .. } = panel {
+            // A reopened page shows the withdrawable maximum again, not
+            // what was typed before.
+            self.earn.prefilled = None;
         }
         self.show_earn_layer();
         self.open_info_panel_target(InfoPanelTarget::Earn(panel), window, cx);
@@ -335,7 +339,8 @@ impl QuillApp {
         let url = earn.open_url.take();
         let closed = std::mem::replace(&mut earn.setup_closed, false);
         let progressed = !notes.is_empty() || url.is_some() || closed;
-        if let Some(note) = notes.into_iter().last() {
+        // Every note toasts, one after another through the toast queue.
+        for note in notes {
             self.set_note(StatusNote::info(note));
         }
         // The revenue and affiliate pages are the main window's

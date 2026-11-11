@@ -223,7 +223,15 @@ impl Session {
                 GiftMarketPurpose::PlaceBid { gift_id }
                 | GiftMarketPurpose::IncreaseBid { gift_id },
             ) => {
-                market.bidding = None;
+                // Only the bid in flight settles it; another request's
+                // answer leaves the button waiting.
+                let id = pending.map(|p| p.id);
+                if market
+                    .bidding
+                    .is_some_and(|(_, request)| Some(request) == id)
+                {
+                    market.bidding = None;
+                }
                 let per_round = market
                     .auctions
                     .get(&gift_id)
@@ -299,7 +307,12 @@ impl Session {
                 market.notes.push(note);
             }
             GiftMarketPurpose::PlaceBid { .. } | GiftMarketPurpose::IncreaseBid { .. } => {
-                market.bidding = None;
+                if market
+                    .bidding
+                    .is_some_and(|(_, waiting)| request != 0 && waiting.0 == request)
+                {
+                    market.bidding = None;
+                }
                 if low {
                     market.balance_low = true;
                 } else {

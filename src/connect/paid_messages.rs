@@ -4,7 +4,7 @@
 //! Stars: the Stars leave only with a `sendMessage` the user confirmed.
 use super::*;
 use crate::ids::{ChatId, RequestId};
-use crate::paid_messages::{PaidSave, PaidTarget, PaidTrust};
+use crate::paid_messages::{PaidTarget, PaidTrust};
 use crate::paid_messages_guard::HeldSend;
 use crate::state::{RequestPurpose, unix_ms_now};
 use crate::telegram::envelope::CommonPayload;
@@ -238,13 +238,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request_for_user(RequestPurpose::AllowUnpaidMessages, user_id);
-        self.session.payments.paid_messages.save = PaidSave::Saving {
-            target: PaidTarget::User(user_id),
-            request: extra,
-        };
+        let target = PaidTarget::User(user_id);
+        self.session
+            .payments
+            .paid_messages
+            .save
+            .begin(target, extra);
         let json = allow_unpaid_messages_from_user(extra, user_id, refund);
         self.send_json_request(extra, &json).inspect_err(|_| {
-            self.session.payments.paid_messages.save = PaidSave::Idle;
+            self.session.payments.paid_messages.save.clear(target);
         })
     }
 
@@ -265,13 +267,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::SetDirectMessagesGroup, Some(chat_id));
-        self.session.payments.paid_messages.save = PaidSave::Saving {
-            target: PaidTarget::Channel(chat_id.0),
-            request: extra,
-        };
+        let target = PaidTarget::Channel(chat_id.0);
+        self.session
+            .payments
+            .paid_messages
+            .save
+            .begin(target, extra);
         let json = set_chat_direct_messages_group(extra, chat_id, choice.enabled, choice.stars);
         self.send_json_request(extra, &json).inspect_err(|_| {
-            self.session.payments.paid_messages.save = PaidSave::Idle;
+            self.session.payments.paid_messages.save.clear(target);
         })
     }
 }

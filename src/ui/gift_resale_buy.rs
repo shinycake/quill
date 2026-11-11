@@ -88,7 +88,7 @@ impl QuillApp {
             .read(cx)
             .value()
             .to_string();
-        let hide = self.payments.gift_hide_name;
+        let hide = self.payments.gift_inputs.hide_name;
         match self.live.as_mut() {
             Some(live) => {
                 if live.driver.buy_gift_resale(price, &text, hide).is_err() {
@@ -172,9 +172,9 @@ impl QuillApp {
                     .child(
                         Checkbox::new("resale-buy-hide-name")
                             .label(tr(keys::GIFT_SEND_ANONYMOUS))
-                            .checked(self.payments.gift_hide_name)
+                            .checked(self.payments.gift_inputs.hide_name)
                             .on_click(cx.listener(|this, &on, _, cx| {
-                                this.payments.gift_hide_name = on;
+                                this.payments.gift_inputs.hide_name = on;
                                 cx.notify();
                             })),
                     )

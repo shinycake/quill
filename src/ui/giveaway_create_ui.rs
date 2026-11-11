@@ -146,11 +146,11 @@ impl QuillApp {
         draft.limits = self.session()?.payments.giveaway.limits;
         if draft.prepaid.is_none() {
             match draft.kind {
-                GiveawayKind::Premium => settle_premium(&mut draft, &options.premium),
-                GiveawayKind::Stars => settle_stars(&mut draft, &options.stars),
+                GiveawayKind::Premium => settle_premium(&mut draft, options.premium_options()),
+                GiveawayKind::Stars => settle_stars(&mut draft, options.stars_options()),
             }
             if draft.is_specific_users() {
-                settle_gift_code_months(&mut draft, &options.premium);
+                settle_gift_code_months(&mut draft, options.premium_options());
             }
         }
         Some(draft)
@@ -170,11 +170,11 @@ impl QuillApp {
             && let Some(options) = self.session().map(|s| s.payments.giveaway.options.clone())
         {
             match draft.kind {
-                GiveawayKind::Premium => settle_premium(&mut draft, &options.premium),
-                GiveawayKind::Stars => settle_stars(&mut draft, &options.stars),
+                GiveawayKind::Premium => settle_premium(&mut draft, options.premium_options()),
+                GiveawayKind::Stars => settle_stars(&mut draft, options.stars_options()),
             }
             if draft.is_specific_users() {
-                settle_gift_code_months(&mut draft, &options.premium);
+                settle_gift_code_months(&mut draft, options.premium_options());
             }
         }
         if let Some(form) = self.giveaway.form.as_mut() {
@@ -270,7 +270,7 @@ impl QuillApp {
                 )
                 .child(about_line(tr(keys::Q_MONEY_YOU_ALREADY_PAID_FOR_THIS)));
         }
-        let have_stars = !options.stars.is_empty();
+        let have_stars = !options.stars_options().is_empty();
         if have_stars {
             section = section.child(
                 div()
@@ -298,15 +298,21 @@ impl QuillApp {
                     ),
             );
         }
-        let loading = options.loading() && options.premium.is_empty() && options.stars.is_empty();
+        let loading = options.loading()
+            && options.premium_options().is_empty()
+            && options.stars_options().is_empty();
         if loading {
             return section.child(about_line(tr(keys::Q_MONEY_LOADING_PRICES)));
         }
         if draft.kind == GiveawayKind::Premium {
-            if options.premium.is_empty() {
-                let error = options.premium_error.clone().unwrap_or_else(|| {
-                    tr(keys::Q_MONEY_PREMIUM_GIVEAWAYS_ARE_NOT_AVAILABLE).to_string()
-                });
+            if options.premium_options().is_empty() {
+                let error = options
+                    .premium
+                    .error()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| {
+                        tr(keys::Q_MONEY_PREMIUM_GIVEAWAYS_ARE_NOT_AVAILABLE).to_string()
+                    });
                 return section.child(about_line(error));
             }
             if draft.is_specific_users() {
@@ -314,7 +320,7 @@ impl QuillApp {
             }
             section = section.child(section_title(tr(keys::GIVEAWAY_QUANTITY_TITLE)));
             let mut counts = div().flex().flex_wrap().gap_1();
-            for winners in premium_winner_counts(&options.premium) {
+            for winners in premium_winner_counts(options.premium_options()) {
                 counts = counts.child(
                     choice(
                         ("giveaway-winners", winners as u64),
@@ -333,7 +339,7 @@ impl QuillApp {
                     keys::Q_MONEY_DURATION_OF_PREMIUM_SUBSCRIPTIONS,
                 )));
             let mut months = div().flex().flex_col().gap_1();
-            for option in premium_options_for(&options.premium, draft.premium_winners) {
+            for option in premium_options_for(options.premium_options(), draft.premium_winners) {
                 let month_count = option.month_count;
                 months = months.child(
                     choice(
@@ -352,16 +358,17 @@ impl QuillApp {
             }
             return section.child(months);
         }
-        if options.stars.is_empty() {
+        if options.stars_options().is_empty() {
             let error = options
-                .stars_error
-                .clone()
+                .stars
+                .error()
+                .map(str::to_string)
                 .unwrap_or_else(|| tr(keys::Q_MONEY_STARS_GIVEAWAYS_ARE_NOT_AVAILABLE).to_string());
             return section.child(about_line(error));
         }
         section = section.child(section_title(tr(keys::GIVEAWAY_CREDITS_OPTIONS_TITLE)));
         let mut rows = div().flex().flex_col().gap_1();
-        for (index, option) in options.stars.iter().enumerate() {
+        for (index, option) in options.stars_options().iter().enumerate() {
             rows = rows.child(
                 choice(
                     ("giveaway-stars", index as u64),
@@ -386,7 +393,7 @@ impl QuillApp {
             .child(section_title(tr(keys::GIVEAWAY_CREDITS_QUANTITY_TITLE)));
         let mut winners = div().flex().flex_wrap().gap_1();
         for count in options
-            .stars
+            .stars_options()
             .get(draft.star_option)
             .map(|o| o.winner_counts.clone())
             .unwrap_or_default()
@@ -417,13 +424,16 @@ impl QuillApp {
         }
         match draft.kind {
             GiveawayKind::Premium => options
-                .premium
+                .premium_options()
                 .iter()
                 .find(|o| {
                     o.winner_count == draft.premium_winners && o.month_count == draft.premium_months
                 })
                 .map(price_of_premium),
-            GiveawayKind::Stars => options.stars.get(draft.star_option).map(price_of_stars),
+            GiveawayKind::Stars => options
+                .stars_options()
+                .get(draft.star_option)
+                .map(price_of_stars),
         }
     }
 
@@ -441,7 +451,7 @@ impl QuillApp {
             .get(&draft.boosted_chat_id)
             .map(|c| c.title.clone())
             .unwrap_or_else(|| tr(keys::Q_MONEY_THIS_CHAT).into());
-        let boosts = draft.boost_count(&options.stars);
+        let boosts = draft.boost_count(options.stars_options());
 
         if giveaway.launch.is_done_for(draft.boosted_chat_id) {
             return div()

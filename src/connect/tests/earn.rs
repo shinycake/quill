@@ -526,7 +526,7 @@ fn join_page_lists_sorts_and_joins_for_a_channel() {
     p.0.session.payments.earn.revoke = Some(RevokeBox {
         program,
         recipient: page,
-        sending: false,
+        send: BoxSend::Idle,
     });
     p.0.revoke_affiliate_link().unwrap();
     let sent = sent_request(&p.1, "disconnectAffiliateProgram");

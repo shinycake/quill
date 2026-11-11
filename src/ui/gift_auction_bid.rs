@@ -296,8 +296,8 @@ impl QuillApp {
         if sent {
             // The send and change boxes are done; the bid box stays and
             // shows the new place when the update arrives.
-            self.gift_market.stack.retain(|entry| {
-                !matches!(
+            self.gift_market.close_where(|entry| {
+                matches!(
                     entry,
                     MarketBox::AuctionSend { .. } | MarketBox::ChangeRecipient { .. }
                 )
@@ -560,7 +560,11 @@ impl QuillApp {
                 &[("stars", &(stars_text(balance.stars)).to_string())],
             )));
         }
-        let bidding = session.payments.gift_market.bidding == Some(gift_id);
+        let bidding = session
+            .payments
+            .gift_market
+            .bidding
+            .is_some_and(|(gift, _)| gift == gift_id);
         let action = state.bid_action(chosen);
         let button = Button::new("auction-bid-submit")
             .label(action.label(state.my_stars()))

@@ -50,11 +50,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || boosted_chat_id == 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let options = &mut self.session.payments.giveaway.options;
-        options.premium_loading = true;
-        options.stars_loading = true;
-        options.premium_error = None;
-        options.stars_error = None;
+        self.session
+            .payments
+            .giveaway
+            .options
+            .begin(boosted_chat_id);
         let extra = self.session.request(
             RequestPurpose::GetPremiumGiveawayOptions,
             Some(crate::ids::ChatId(boosted_chat_id)),
@@ -64,14 +64,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             &get_premium_giveaway_payment_options(extra, boosted_chat_id),
         );
         if premium.is_err() {
-            self.session.payments.giveaway.options.premium_loading = false;
+            self.session.payments.giveaway.options.premium = crate::state::fetch::Fetch::Idle;
         }
         let extra = self
             .session
             .request(RequestPurpose::GetStarGiveawayOptions, None);
         let stars = self.send_json_request(extra, &get_star_giveaway_payment_options(extra));
         if stars.is_err() {
-            self.session.payments.giveaway.options.stars_loading = false;
+            self.session.payments.giveaway.options.stars = crate::state::fetch::Fetch::Idle;
         }
         premium.and(stars).map(|_| ())
     }

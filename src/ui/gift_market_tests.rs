@@ -79,7 +79,7 @@ fn a_listing_opens_the_buy_steps(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-gift-resale");
     let vcx = &mut vcx;
     vcx.run_until_parked();
-    app.update_in(vcx, |app, _, cx| {
+    app.update_in(vcx, |app, window, cx| {
         // The demo opens the resale box.
         assert_eq!(app.gift_market.top(), Some(&MarketBox::Resale));
         let name = app
@@ -88,7 +88,7 @@ fn a_listing_opens_the_buy_steps(cx: &mut TestAppContext) {
             .and_then(|search| search.listings.first())
             .map(|listing| listing.gift.name.clone())
             .unwrap_or_default();
-        app.pick_resale_listing(name, cx);
+        app.pick_resale_listing(name, window, cx);
         assert_eq!(app.gift_market.top(), Some(&MarketBox::Buy));
         let view = app.resale_buy_box(cx);
         assert_eq!(view.title.as_ref(), "Plush Pepe #1,204");
@@ -113,14 +113,14 @@ fn closing_the_buy_box_mid_purchase_keeps_the_purchase(cx: &mut TestAppContext) 
     let (app, mut vcx) = new_app(cx, "ready-gift-resale");
     let vcx = &mut vcx;
     vcx.run_until_parked();
-    app.update_in(vcx, |app, _, cx| {
+    app.update_in(vcx, |app, window, cx| {
         let name = app
             .session()
             .and_then(|s| s.payments.gift_market.resale.as_ref())
             .and_then(|search| search.listings.first())
             .map(|listing| listing.gift.name.clone())
             .unwrap_or_default();
-        app.pick_resale_listing(name, cx);
+        app.pick_resale_listing(name, window, cx);
         if let Some(buy) = app
             .demo_session
             .as_mut()

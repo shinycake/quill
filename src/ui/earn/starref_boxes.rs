@@ -583,8 +583,8 @@ impl QuillApp {
                         .label(tr(keys::Q_MONEY_JOIN_PROGRAM))
                         .primary()
                         .w_full()
-                        .loading(join.joining)
-                        .disabled(join.joining)
+                        .loading(join.send.is_sending())
+                        .disabled(join.send.is_sending())
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.earn_call(
                                 tr(keys::Q_MONEY_COULDNT_JOIN_THE_PROGRAM),
@@ -839,8 +839,8 @@ impl QuillApp {
                         .debug_selector(|| "earn-revoke-ok".into())
                         .label(tr(keys::BOX_OK))
                         .primary()
-                        .loading(revoke.sending)
-                        .disabled(revoke.sending)
+                        .loading(revoke.send.is_sending())
+                        .disabled(revoke.send.is_sending())
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.earn_call(
                                 tr(keys::Q_MONEY_COULDNT_REVOKE_THE_LINK),

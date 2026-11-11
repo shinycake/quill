@@ -6,6 +6,19 @@ use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 
+/// What the send-gift box and the resale buy step ask beside the message.
+/// One value, replaced whole when a box or step begins, so no choice of an
+/// earlier recipient or listing carries over.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct SendGiftInputs {
+    /// "Hide my name and message".
+    pub(super) hide_name: bool,
+    /// "Also pay for the upgrade".
+    pub(super) pay_upgrade: bool,
+    /// Pay a Premium gift with Stars instead of money.
+    pub(super) by_stars: bool,
+}
+
 pub(crate) struct PaymentUi {
     /// Slice P1: the payment checkout dialog's text inputs. The dialog
     /// renders from the session's `payment_form`; this holds the live
@@ -26,12 +39,9 @@ pub(crate) struct PaymentUi {
     pub(super) gift_collection_input: Entity<InputState>,
     /// The comment sent with a gift (`gift_send_ui`).
     pub(super) gift_message_input: Entity<TextareaState>,
-    /// "Hide my name and message" on the send-gift dialog.
-    pub(super) gift_hide_name: bool,
-    /// "Also pay for the upgrade" on the send-gift dialog.
-    pub(super) gift_pay_upgrade: bool,
-    /// Pay a Premium gift with Stars instead of money.
-    pub(super) gift_premium_by_stars: bool,
+    /// The choices beside that comment; replaced whole when a send or buy
+    /// step begins (`reset_gift_inputs`).
+    pub(super) gift_inputs: SendGiftInputs,
     /// The search field of the lists you pick from: contacts to gift
     /// Stars, members to award, countries (`stars_gift_ui`,
     /// `giveaway_pick_ui`).
@@ -206,9 +216,7 @@ impl PaymentUi {
                     .placeholder(tr(keys::Q_MONEY_ADD_A_MESSAGE_OPTIONAL))
                     .submit_on_enter(false)
             }),
-            gift_hide_name: false,
-            gift_pay_upgrade: false,
-            gift_premium_by_stars: false,
+            gift_inputs: SendGiftInputs::default(),
             pick_search,
             gift_recipients_open: false,
             gift_recipient_search,

@@ -107,7 +107,7 @@ impl QuillApp {
     /// Replaces the top box with `next`.
     pub(super) fn market_replace(&mut self, next: MarketBox, cx: &mut Context<Self>) {
         self.ask_info_preview(&next);
-        self.gift_market.stack.pop();
+        self.gift_market.pop();
         self.gift_market.push(next);
         self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         cx.notify();
@@ -115,7 +115,7 @@ impl QuillApp {
 
     /// Closes the top box ("Back", Escape, the close button).
     pub(super) fn market_back(&mut self, cx: &mut Context<Self>) {
-        let popped = self.gift_market.stack.pop();
+        let popped = self.gift_market.pop();
         self.after_market_pop(popped);
         cx.notify();
     }
@@ -155,17 +155,11 @@ impl QuillApp {
                     market.buy.take_if(|buy| !buy.sending);
                 }
             }
-            Some(MarketBox::AuctionBid { .. }) => {
-                self.gift_market.slider = None;
-                self.gift_market.custom = None;
-            }
             _ => {}
         }
         if self.gift_market.stack.is_empty() {
             self.gift_market.recipient = None;
             self.gift_market.auction_open = AuctionOpen::Idle;
-            // "Hide My Name" is one bid's choice, never the next auction's.
-            self.gift_market.hide_name = false;
         }
         self.after_craft_pop();
     }
@@ -297,17 +291,29 @@ impl QuillApp {
         let mut files = self.market_sticker_files();
         files.sort_unstable_by_key(|file| file.0);
         files.dedup();
-        let fresh = files != self.gift_market.requested_files;
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.follow_gift_auction(follow);
-            if fresh {
-                for file in &files {
-                    let _ = live.driver.download_file(*file, 8);
+        let asked = self.gift_market.requested_files.clone();
+        match self.live.as_mut() {
+            Some(live) => {
+                let _ = live.driver.follow_gift_auction(follow);
+                // A file counts as requested only once its request went
+                // out (or the file layer had nothing to send); a refused
+                // send is tried again at the next upkeep.
+                let sent: Vec<_> = files
+                    .iter()
+                    .copied()
+                    .filter(|file| {
+                        asked.contains(file) || live.driver.download_file(*file, 8).is_ok()
+                    })
+                    .collect();
+                if sent != asked {
+                    self.gift_market.requested_files = sent;
                 }
             }
-        }
-        if fresh {
-            self.gift_market.requested_files = files;
+            None => {
+                if files != self.gift_market.requested_files {
+                    self.gift_market.requested_files = files;
+                }
+            }
         }
     }
 
@@ -319,7 +325,8 @@ impl QuillApp {
         let notes = std::mem::take(&mut market.notes);
         let toasts = std::mem::take(&mut market.toasts);
         let low = std::mem::take(&mut market.balance_low);
-        if let Some(note) = notes.into_iter().last() {
+        // Every note toasts, one after another through the toast queue.
+        for note in notes {
             self.set_note(StatusNote::info(note));
         }
         if low {

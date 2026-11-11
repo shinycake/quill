@@ -659,7 +659,7 @@ impl QuillApp {
             .label(tr(keys::CLOSE))
             .ghost()
             .on_click(cx.listener(|this, _, window, cx| {
-                this.gift_market.stack.clear();
+                this.gift_market.clear();
                 this.after_craft_pop();
                 cx.notify();
                 this.close_kit_dialog_if_done(DialogKind::GiftMarket, window, cx);
