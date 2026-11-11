@@ -286,7 +286,10 @@ fn a_failed_tile_is_asked_again_once_the_map_rests() {
     assert_eq!(picker.tile_to_request(), None, "no re-ask every poll");
     picker.moved_to(picker.view().panned(1., 0.));
     picker.move_ended();
-    assert!(picker.tile_to_request().is_some(), "asked again after a move");
+    assert!(
+        picker.tile_to_request().is_some(),
+        "asked again after a move"
+    );
 }
 
 #[test]
@@ -297,7 +300,11 @@ fn a_failed_tile_is_asked_again_after_a_resize() {
     picker.tile_requested(key, 1);
     picker.tile_answered(1, None);
     picker.set_map_size(SIZE);
-    assert_eq!(picker.tile_to_request(), None, "same size keeps the failure");
+    assert_eq!(
+        picker.tile_to_request(),
+        None,
+        "same size keeps the failure"
+    );
     picker.set_map_size(MapSize {
         width: SIZE.width + 10,
         ..SIZE
