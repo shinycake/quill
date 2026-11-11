@@ -661,6 +661,17 @@ fn members_page_due(stage: &MembersStage, near_end: bool, scrolled: bool) -> boo
     }
 }
 
+/// The name of a country by its code, falling back to the code.
+fn country_name(session: &Session, code: &str) -> String {
+    session
+        .auth_state
+        .countries
+        .data()
+        .and_then(|list| list.iter().find(|c| c.iso == code))
+        .map(|c| c.name.clone())
+        .unwrap_or_else(|| code.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{MembersStage, members_page_due};
@@ -680,15 +691,4 @@ mod tests {
             assert!(!members_page_due(&stage, true, true));
         }
     }
-}
-
-/// The name of a country by its code, falling back to the code.
-fn country_name(session: &Session, code: &str) -> String {
-    session
-        .auth_state
-        .countries
-        .data()
-        .and_then(|list| list.iter().find(|c| c.iso == code))
-        .map(|c| c.name.clone())
-        .unwrap_or_else(|| code.to_string())
 }
