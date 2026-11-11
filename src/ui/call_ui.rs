@@ -670,7 +670,7 @@ impl QuillApp {
             );
         }
         if summary.rating.is_open() {
-            if let CallRating::Failed(error) = &summary.rating {
+            if let CallRating::Failed { error, .. } = &summary.rating {
                 card = card.child(
                     div()
                         .text_xs()
@@ -683,12 +683,7 @@ impl QuillApp {
                     .text_sm()
                     .child(tr(keys::Q_OPS_HOW_WAS_THE_CALL_QUALITY)),
             );
-            let draft = self
-                .dialogs
-                .rating_detail
-                .as_ref()
-                .filter(|detail| detail.call_id == summary.call_id);
-            match draft {
+            match summary.rating.draft() {
                 // Phase C2i: star tap opens the detail editor (problems
                 // + comment) — nothing is sent until Submit.
                 None => {
@@ -745,7 +740,7 @@ impl QuillApp {
     /// an optional comment. Nothing leaves the machine until Submit.
     pub(super) fn rating_detail_editor(
         &self,
-        detail: &RatingDetail,
+        detail: &quill::state::RatingDraft,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mut stars = div().flex().gap_2();
@@ -754,10 +749,7 @@ impl QuillApp {
                 Button::new(format!("call-rate-pick-{star}"))
                     .label(format!("{star} ★"))
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(detail) = this.dialogs.rating_detail.as_mut() {
-                            detail.stars = star;
-                        }
-                        cx.notify();
+                        this.set_rating_stars(star, cx);
                     })),
             );
         }

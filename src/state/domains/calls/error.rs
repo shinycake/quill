@@ -77,12 +77,14 @@ impl Session {
             // that is no longer the one in flight is dropped.
             Some(RequestPurpose::SendCallRating) => {
                 if let Some(summary) = self.calls.summary.as_mut()
-                    && extra.is_some_and(|extra| summary.rating == CallRating::Sending(extra))
+                    && extra.is_some_and(|extra| summary.rating.sends(extra))
+                    && let CallRating::Sending { draft, .. } =
+                        std::mem::replace(&mut summary.rating, CallRating::Sent)
                 {
-                    summary.rating = CallRating::Failed(call_request_error_line(
-                        err,
-                        "Could not send the rating",
-                    ));
+                    summary.rating = CallRating::Failed {
+                        error: call_request_error_line(err, "Could not send the rating"),
+                        draft,
+                    };
                 }
             }
             Some(RequestPurpose::SendCallDebugInformation) => {

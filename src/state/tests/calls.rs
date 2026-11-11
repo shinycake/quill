@@ -508,17 +508,27 @@ fn a_failed_rating_brings_the_card_back_and_an_ok_says_thanks() {
     let seq = AtomicU64::new(0);
     rated_summary(&mut session, &seq, &sink);
     let request = session.request(RequestPurpose::SendCallRating, None);
-    session.calls.summary.as_mut().expect("summary").rating = CallRating::Sending(request);
+    let mut draft = RatingDraft::new(3);
+    draft.problems[1] = true;
+    session.calls.summary.as_mut().expect("summary").rating = CallRating::Sending {
+        request,
+        draft: draft.clone(),
+    };
     apply_json(&mut session, &seq, &sink, &error_json(request));
     let failed = rating(&session).expect("summary");
-    assert!(matches!(failed, CallRating::Failed(_)));
+    assert!(matches!(failed, CallRating::Failed { .. }));
     assert!(failed.is_open(), "the card is drawn again");
+    assert_eq!(failed.draft(), Some(&draft), "with the draft that was sent");
     // The retry is answered ok.
     let retry = session.request(RequestPurpose::SendCallRating, None);
-    session.calls.summary.as_mut().expect("summary").rating = CallRating::Sending(retry);
+    let sending = CallRating::Sending {
+        request: retry,
+        draft: draft.clone(),
+    };
+    session.calls.summary.as_mut().expect("summary").rating = sending.clone();
     // An answer to the first, stale request changes nothing.
     apply_json(&mut session, &seq, &sink, &error_json(request));
-    assert_eq!(rating(&session), Some(CallRating::Sending(retry)));
+    assert_eq!(rating(&session), Some(sending));
     apply_json(
         &mut session,
         &seq,

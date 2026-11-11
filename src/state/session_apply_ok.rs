@@ -530,7 +530,7 @@ impl Session {
         if let Some(RequestPurpose::SendCallRating) = pending.map(|p| p.purpose)
             && let Some(summary) = self.calls.summary.as_mut()
             && let Some(pending) = pending
-            && summary.rating == CallRating::Sending(pending.id)
+            && summary.rating.sends(pending.id)
         {
             summary.rating = CallRating::Sent;
         }
