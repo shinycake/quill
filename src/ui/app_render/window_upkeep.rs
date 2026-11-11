@@ -34,6 +34,8 @@ impl QuillApp {
         // An edit TDLib answered leaves edit mode (or goes on, on an error).
         self.settle_edit_send(window, cx);
         self.settle_sent_text(window, cx);
+        // A bot's Restart sends its /start once the unblock is answered.
+        self.pump_bot_restart(cx);
         // A forced reply for the chat this window shows arms its composer.
         self.arm_force_reply_here(window, cx);
         // The histories every window still reads stay whole.

@@ -240,6 +240,8 @@ pub(crate) struct ChatUi {
     /// the stashed query is inserted on Confirm. It lives with the chat
     /// that asked, so another chat never confirms it.
     pub(super) bot_alert: super::inline_mode::BotAlert,
+    /// A bot's Restart whose unblock is out (`bottom_action`).
+    pub(super) restart: super::bottom_action::BotRestart,
     /// What the last rich send took out of the field, until TDLib answers.
     pub(super) sent_text: super::composer::SentText,
     /// The draft the last AI composer action was asked about.
@@ -577,6 +579,11 @@ impl QuillApp {
         // value's composer; its popup and subscriptions go with it.
         self.composer_ui.send_menu.open = None;
         if let Some(request) = old.edit_sending()
+            && let Some(live) = self.live.as_mut()
+        {
+            live.driver.session.acks.forget(request);
+        }
+        if let super::bottom_action::BotRestart::Unblocking { request, .. } = old.restart
             && let Some(live) = self.live.as_mut()
         {
             live.driver.session.acks.forget(request);
