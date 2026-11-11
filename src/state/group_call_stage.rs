@@ -105,13 +105,14 @@ pub enum GroupScreenShare {
     /// `startGroupCallScreenSharing` is in flight; `answer` is its `Text`
     /// answer once it arrived, for the pump to connect.
     Starting { answer: String },
-    /// The presentation transport is connected.
-    Sharing,
+    /// The presentation transport is connected. `paused` is what Telegram
+    /// was last told about the shared window (hidden or not).
+    Sharing { paused: bool },
 }
 
 impl GroupScreenShare {
     pub fn is_sharing(&self) -> bool {
-        matches!(self, Self::Sharing)
+        matches!(self, Self::Sharing { .. })
     }
 
     pub fn is_starting(&self) -> bool {
@@ -152,7 +153,21 @@ impl GroupScreenShare {
     }
 
     pub fn connected(&mut self) {
-        *self = Self::Sharing;
+        *self = Self::Sharing { paused: false };
+    }
+
+    /// Whether Telegram was told the share is paused.
+    pub fn paused(&self) -> bool {
+        matches!(self, Self::Sharing { paused: true })
+    }
+
+    /// Records the paused mark of a connected share; any other stage has
+    /// none. Returns what it was.
+    pub fn set_paused(&mut self, now: bool) -> bool {
+        match self {
+            Self::Sharing { paused } => std::mem::replace(paused, now),
+            _ => false,
+        }
     }
 
     /// Stopped, failed or reset.

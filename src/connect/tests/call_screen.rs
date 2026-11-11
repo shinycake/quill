@@ -190,7 +190,8 @@ fn a_hidden_window_pauses_once_per_edge() {
             .active_group_call
             .as_ref()
             .unwrap()
-            .screen_share_paused
+            .screen_share
+            .paused()
     );
     // Frames while paused are dropped, not sent.
     sink.push(frame(3));
@@ -242,7 +243,7 @@ fn a_refused_pause_edge_puts_the_tile_back_without_a_box_error() {
         .ingest(copy_and_parse(&json, &seq, &sink).unwrap())
         .unwrap();
     let call = driver.session.calls.active_group_call.as_ref().unwrap();
-    assert!(!call.screen_share_paused);
+    assert!(!call.screen_share.paused());
     assert_eq!(driver.session.calls.group_call_error, None);
     std::fs::remove_dir_all(dir).ok();
 }
@@ -261,7 +262,7 @@ fn a_pause_edge_that_did_not_go_out_leaves_the_call_unpaused_for_the_next_edge()
     pump_until_screen_answers(&mut driver);
     assert!(driver.call_screen().paused());
     let call = driver.session.calls.active_group_call.as_ref().unwrap();
-    assert!(!call.screen_share_paused, "Telegram never heard of it");
+    assert!(!call.screen_share.paused(), "Telegram never heard of it");
     // The window comes back and hides again: the edge goes out this time.
     driver.sender.refuse(None);
     sink.push_event(CaptureEvent::Resumed);
@@ -288,7 +289,7 @@ fn a_closed_window_ends_the_share() {
     until(|| screens.stopped.load(Ordering::SeqCst));
     assert_eq!(sent_of(&driver, "endGroupCallScreenSharing").len(), 1);
     let call = driver.session.calls.active_group_call.as_ref().unwrap();
-    assert!(!call.screen_share.is_on() && !call.screen_share_paused);
+    assert!(!call.screen_share.is_on());
     assert!(driver.call_screen().chosen().is_none());
     std::fs::remove_dir_all(dir).ok();
 }
