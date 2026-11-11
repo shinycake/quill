@@ -231,7 +231,7 @@ impl SwipeNav {
                 } else {
                     Gesture::Idle
                 };
-                (pull.ratio() >= 1.0).then_some(pull.dir)
+                pull.reached.then_some(pull.dir)
             }
             Gesture::Released { .. } => {
                 self.gesture = Gesture::Released { last_at: at };
@@ -389,6 +389,16 @@ mod tests {
         assert!(!shown.reached, "30 px back disarms it");
         assert!((shown.ratio - 0.4).abs() < 1e-4);
         assert_eq!(nav.end(last), None);
+    }
+
+    #[test]
+    fn letting_go_just_after_backing_off_steps_as_the_arrow_says() {
+        let now = Instant::now();
+        let mut nav = SwipeNav::default();
+        let last = swipe(&mut nav, now, &[-200.0, 1.0]);
+        let shown = nav.indicator().expect("still pulled in");
+        assert!(shown.reached && shown.ratio < 1.0);
+        assert_eq!(nav.end(last), Some(SwipeDir::Next));
     }
 
     #[test]

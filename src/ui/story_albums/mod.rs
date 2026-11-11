@@ -54,7 +54,7 @@ impl QuillApp {
             }
             if let Err(err) = live
                 .driver
-                .get_chat_posted_to_chat_page_stories(chat_id, 0, 50)
+                .get_chat_posted_to_chat_page_stories(chat_id, 0, 50, None)
             {
                 self.screen.connection.set_note_for(
                     &self.screen.windows,
@@ -462,7 +462,7 @@ impl QuillApp {
             tr(keys::Q_MEDIA_LOAD_CHAT_PAGE_STORIES),
             |live| {
                 live.driver
-                    .get_chat_posted_to_chat_page_stories(chat_id, from_story_id, 50)
+                    .get_chat_posted_to_chat_page_stories(chat_id, from_story_id, 50, None)
                     .map(|_| ())
             },
             cx,

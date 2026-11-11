@@ -837,6 +837,22 @@ impl RequestRegistry {
             .any(|p| p.purpose == purpose && p.chat_id == Some(chat_id))
     }
 
+    /// An in-flight request for a purpose and chat with this stamp (`None`
+    /// is the unstamped kind): a request of another stamp does not answer
+    /// for it.
+    pub fn has_stamped_purpose_for_chat(
+        &self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+        search_generation: Option<u64>,
+    ) -> bool {
+        self.pending.values().any(|p| {
+            p.purpose == purpose
+                && p.chat_id == Some(chat_id)
+                && p.search_generation == search_generation
+        })
+    }
+
     /// An in-flight request for a purpose and message (`request_for_message`).
     pub fn has_purpose_for_message(
         &self,

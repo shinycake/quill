@@ -164,6 +164,14 @@ fn frame(
     };
     clip.busy = false;
     clip.drawing = None;
+    if drawn.is_none() {
+        // Nothing came of the frame (ThorVG could not draw it, or the
+        // frame size is unknown): the clip rests, so views stop asking for
+        // a frame that never comes, and the UI is woken to see it.
+        clip.wanted.clear();
+        clip.state = ClipState::Failed("A frame could not be drawn.".to_string());
+        return true;
+    }
     let first = drawn.is_some() && !std::mem::replace(&mut clip.delivered, true);
     if let Some(draw) = timing.draw {
         clip.note_draw(draw);
