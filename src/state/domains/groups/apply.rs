@@ -738,11 +738,7 @@ impl Session {
                         .insert(chat_id, user_ids);
                 }
             }
-            // Phase 5.1: `supergroup.is_forum` via `updateSupergroup` (an
-            // update — applies whenever it arrives) or the `getSupergroup`
-            // response (gated on the pending purpose). Parity slice: the
-            // first active username is cached alongside, for the
-            // channel/supergroup header.
+            // `updateBasicGroup`: member count, the viewer's status and rights.
             GroupsPayload::UpdateBasicGroup {
                 basic_group_id,
                 member_count,
@@ -781,6 +777,8 @@ impl Session {
                     .basic_group_active
                     .insert(basic_group_id, is_active);
             }
+            // Phase 5.1: `updateSupergroup` applies whenever it arrives; the
+            // `getSupergroup` response is gated on its pending purpose.
             GroupsPayload::UpdateSupergroup {
                 supergroup_id,
                 verification,
