@@ -217,6 +217,7 @@ fn upgrade_section(
     let Some(GiftFlow::Upgrade {
         id: open,
         keep_details,
+        ..
     }) = &manage.flow
     else {
         return col.child(
@@ -232,14 +233,7 @@ fn upgrade_section(
                 .ghost()
                 .disabled(busy)
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    this.set_gift_flow(
-                        Some(GiftFlow::Upgrade {
-                            id: id.clone(),
-                            keep_details: false,
-                        }),
-                        window,
-                        cx,
-                    )
+                    this.set_gift_flow(Some(GiftFlow::upgrade(id.clone(), false)), window, cx)
                 })),
         );
     };
@@ -317,7 +311,7 @@ fn resale_section(
 ) -> Div {
     let id = gift.id.clone();
     let listed = gift.manage.listed;
-    let open = matches!(&manage.flow, Some(GiftFlow::Resale { id: open }) if *open == gift.id);
+    let open = matches!(&manage.flow, Some(GiftFlow::Resale { id: open, .. }) if *open == gift.id);
     if !open {
         let open_id = id.clone();
         let edit = Button::new("gift-resale")
@@ -329,13 +323,7 @@ fn resale_section(
             .ghost()
             .disabled(busy)
             .on_click(cx.listener(move |this, _, window, cx| {
-                this.set_gift_flow(
-                    Some(GiftFlow::Resale {
-                        id: open_id.clone(),
-                    }),
-                    window,
-                    cx,
-                )
+                this.set_gift_flow(Some(GiftFlow::resale(open_id.clone())), window, cx)
             }));
         if !listed {
             return col.child(edit);

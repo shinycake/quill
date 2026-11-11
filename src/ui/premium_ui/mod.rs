@@ -304,7 +304,7 @@ impl QuillApp {
         if let Some(manage) = self.gift_manage_mut() {
             manage.flow.take_if(|flow| match flow {
                 quill::gift_manage::GiftFlow::Upgrade { id: open, .. }
-                | quill::gift_manage::GiftFlow::Resale { id: open } => {
+                | quill::gift_manage::GiftFlow::Resale { id: open, .. } => {
                     id.as_deref() != Some(open.as_str())
                 }
                 _ => false,

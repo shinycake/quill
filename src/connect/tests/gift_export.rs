@@ -376,7 +376,7 @@ fn open_fragment_sends_the_password_less_probe_only_from_its_confirmation() {
     assert!(sent.get("password").is_none());
     assert_eq!(count(&p.1, "createTemporaryPassword"), 0);
     assert_eq!(count(&p.1, "getPasswordState"), 1);
-    assert_eq!(stage(&p), Some(TransferStage::Probing));
+    assert!(matches!(stage(&p), Some(TransferStage::Probing(_))));
     // A second click while it is out sends nothing.
     assert!(p.0.probe_gift_export().is_err());
     assert_eq!(count(&p.1, "getUpgradedGiftWithdrawalUrl"), 1);
@@ -575,7 +575,7 @@ fn a_transfer_ok_leaves_a_different_open_flow_alone() {
     );
     let extra = p.0.transfer_picked_gift().unwrap();
     // The picker is replaced by a resale form before the ok lands.
-    p.0.session.payments.gifts_manage.flow = Some(GiftFlow::Resale { id: "open".into() });
+    p.0.session.payments.gifts_manage.flow = Some(GiftFlow::resale("open".into()));
     feed(&mut p, json!({"@type": "ok", "@extra": extra.as_extra()}));
     let manage = &p.0.session.payments.gifts_manage;
     assert!(matches!(manage.flow, Some(GiftFlow::Resale { .. })));

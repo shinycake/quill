@@ -190,3 +190,99 @@ fn a_basic_group_add_that_stops_midway_counts_the_unsent_users_as_failed() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_failed_trending_page_keeps_the_list_and_a_new_ask_ends_the_failure() {
+    use crate::emoji::EmojiSetTab;
+    let mut rig = Rig::new();
+    rig.driver.open_emoji_sets().unwrap();
+    let first = rig
+        .driver
+        .select_emoji_set_tab(EmojiSetTab::Trending)
+        .unwrap()
+        .unwrap();
+    rig.ingest(&format!(
+        r#"{{"@type":"trendingStickerSets","@extra":"{}","total_count":5,"sets":[],"is_premium":false}}"#,
+        first.0
+    ));
+    let lists = &rig.driver.session.stickers.emoji.lists;
+    assert!(!lists.trending.is_loading() && lists.trending.error().is_none());
+    // Choosing the tab again asks again; that ask is refused.
+    let second = rig
+        .driver
+        .select_emoji_set_tab(EmojiSetTab::Trending)
+        .unwrap()
+        .unwrap();
+    assert!(
+        rig.driver
+            .session
+            .stickers
+            .emoji
+            .lists
+            .trending
+            .is_loading()
+    );
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":500,"message":"X"}}"#,
+        second.0
+    ));
+    assert!(
+        rig.driver
+            .session
+            .stickers
+            .emoji
+            .lists
+            .trending
+            .error()
+            .is_some()
+    );
+    // The answer of the first ask, long gone, changes nothing.
+    rig.ingest(&format!(
+        r#"{{"@type":"trendingStickerSets","@extra":"{}","total_count":5,"sets":[],"is_premium":true}}"#,
+        first.0
+    ));
+    let trending = &rig.driver.session.stickers.emoji.lists.trending;
+    assert!(trending.error().is_some() && !trending.is_premium());
+}
+
+#[test]
+fn a_keyword_search_is_settled_only_by_its_own_answer_and_a_refusal_is_not_asked_again() {
+    let mut rig = Rig::new();
+    rig.driver.search_keyword_emojis("fire").unwrap();
+    let first = rig.sent("getKeywordEmojis");
+    rig.driver.search_keyword_emojis("water").unwrap();
+    let both = rig.sent("getKeywordEmojis");
+    assert_eq!(both.len(), 2);
+    // The first search was replaced: its answer lands nowhere.
+    rig.ingest(&format!(
+        r#"{{"@type":"emojis","emojis":["🔥"],"@extra":"{}"}}"#,
+        extra_of(&first[0])
+    ));
+    let keywords = &rig.driver.session.stickers.emoji.keyword_emojis;
+    assert_eq!(keywords.query(), "water");
+    assert!(keywords.for_query("water").is_empty() && keywords.for_query("fire").is_empty());
+    // The second is refused: the query stays, so the panel does not re-ask.
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":500,"message":"X"}}"#,
+        extra_of(&both[1])
+    ));
+    let keywords = &rig.driver.session.stickers.emoji.keyword_emojis;
+    assert!(matches!(keywords, crate::emoji::KeywordEmojis::Failed { query } if query == "water"));
+}
+
+#[test]
+fn an_animated_emoji_answer_for_a_replaced_ask_is_dropped() {
+    let mut rig = Rig::new();
+    rig.driver.update_animated_emoji_suggestion("a 🔥").unwrap();
+    rig.driver.update_animated_emoji_suggestion("a 😀").unwrap();
+    let asks = rig.sent("getAnimatedEmoji");
+    assert_eq!(asks.len(), 2);
+    rig.ingest(&format!(
+        r#"{{"@type":"animatedEmoji","@extra":"{}","sticker":null,"sticker_width":0,"sticker_height":0,"fitzpatrick_type":0,"sound":null}}"#,
+        extra_of(&asks[0])
+    ));
+    assert!(matches!(
+        rig.driver.session.stickers.emoji.animated,
+        crate::emoji::AnimatedSuggestion::Asking { ref emoji, .. } if emoji == "😀"
+    ));
+}

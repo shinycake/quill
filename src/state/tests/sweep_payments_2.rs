@@ -86,7 +86,11 @@ fn collections_of_another_owner_are_dropped() {
     );
     // The channel's list is open now.
     session.payments.hub.gifts_owner = Some(channel);
-    session.payments.gifts_manage.collections_fetch = crate::gift_manage::CollectionsFetch::Loading;
+    session
+        .payments
+        .gifts_manage
+        .collections_fetch
+        .begin(second);
     let list = |extra: RequestId, id: i32| {
         format!(
             r#"{{"@type":"giftCollections","@extra":"{}","collections":[{{"@type":"giftCollection","id":{id},"name":"Mine","icon":null,"gift_count":1}}]}}"#,
