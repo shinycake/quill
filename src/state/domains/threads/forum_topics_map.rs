@@ -51,9 +51,33 @@ impl ForumTopicsMap {
             .is_some_and(|list| list.error().is_some())
     }
 
-    /// `getForumTopics` for `chat_id` went out.
-    pub fn begin(&mut self, chat_id: i64) {
-        self.lists.entry(chat_id).or_default().begin();
+    /// `getForumTopics` for `chat_id` went out as `request`: only its
+    /// answer or error settles the list.
+    pub fn begin(&mut self, chat_id: i64, request: RequestId) {
+        let list = self.lists.entry(chat_id).or_default();
+        list.begin();
+        list.sent(request);
+    }
+
+    /// `request` is the `getForumTopics` the list of `chat_id` waits for.
+    pub fn waits_for(&self, chat_id: i64, request: Option<RequestId>) -> bool {
+        request.is_some_and(|request| {
+            self.lists
+                .get(&chat_id)
+                .is_some_and(|list| list.waits_for(request))
+        })
+    }
+
+    /// `request` failed: only the list that waits for it fails.
+    pub fn failed_request(
+        &mut self,
+        chat_id: i64,
+        request: Option<RequestId>,
+        error: impl Into<String>,
+    ) {
+        if let Some(list) = self.lists.get_mut(&chat_id) {
+            list.failed(request, error, false);
+        }
     }
 
     /// `getForumTopics` for `chat_id` failed.
@@ -134,12 +158,12 @@ mod tests {
     fn a_forum_list_is_asked_answered_or_failed_as_one_value() {
         let mut map = ForumTopicsMap::default();
         assert!(!map.asked(5) && !map.failed(5) && !map.contains_key(&5));
-        map.begin(5);
+        map.begin(5, RequestId(1));
         assert!(map.asked(5) && !map.failed(5) && !map.contains_key(&5));
         map.insert(5, Vec::new());
         assert!(map.asked(5) && map.contains_key(&5));
         // A failed refetch keeps the answer and does not ask again.
-        map.begin(5);
+        map.begin(5, RequestId(2));
         map.fail(5, "flood");
         assert!(map.failed(5) && map.asked(5) && map.contains_key(&5));
         // A failed first ask is final: "No chats", never asked again.

@@ -55,6 +55,18 @@ impl CloseFriendsList {
         *self = Self::Loading { request, stale };
     }
 
+    /// The answer of `request`: only the load in flight under that id
+    /// takes it (a list saved since, or a newer load, is left alone).
+    pub fn answered(&mut self, request: Option<RequestId>, ids: Vec<i64>) -> bool {
+        if request.is_some()
+            && matches!(self, Self::Loading { request: r, .. } if Some(*r) == request)
+        {
+            *self = Self::Ready(ids);
+            return true;
+        }
+        false
+    }
+
     /// The send of the load failed, or TDLib's error for `request`
     /// arrived: only the load in flight under that id fails.
     pub fn fail_load(&mut self, request: RequestId) {

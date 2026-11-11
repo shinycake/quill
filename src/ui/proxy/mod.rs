@@ -274,8 +274,10 @@ impl QuillApp {
             return;
         };
         let session = &mut live.driver.session;
-        let in_flight = session.requests.get(request).is_some();
-        let outcome = session.users_state.saves.take_outcome(request, in_flight);
+        let outcome = session
+            .users_state
+            .saves
+            .take_outcome(request, &session.requests);
         match outcome {
             quill::state::SaveOutcome::Saving => {}
             quill::state::SaveOutcome::Saved => {

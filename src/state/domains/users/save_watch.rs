@@ -4,6 +4,7 @@
 //! watched here by its id, so an answer for another request (or an earlier
 //! box) never closes this one.
 use crate::ids::RequestId;
+use crate::state::RequestRegistry;
 
 /// What the watched request has met so far.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,10 +70,15 @@ impl SaveWatch {
     }
 
     /// Where `request` stands. Saved only on its answer: a watched request
-    /// that left flight (`in_flight` false) without one was dropped, so it
-    /// is `Unknown`, never a success. The outcome is taken: the entry goes
-    /// unless it is still saving.
-    pub fn take_outcome(&mut self, request: RequestId, in_flight: bool) -> SaveOutcome {
+    /// that left `requests` without one was dropped, so it is `Unknown`,
+    /// never a success. Whether it is in flight is read from the registry
+    /// here, not passed in. The outcome is taken: the entry goes unless it
+    /// is still saving.
+    pub fn take_outcome(&mut self, request: RequestId, requests: &RequestRegistry) -> SaveOutcome {
+        self.outcome(request, requests.get(request).is_some())
+    }
+
+    fn outcome(&mut self, request: RequestId, in_flight: bool) -> SaveOutcome {
         let Some((id, answer)) = self.entry.as_ref() else {
             return SaveOutcome::Unknown;
         };
@@ -94,24 +100,25 @@ impl SaveWatch {
 mod tests {
     use super::{SaveOutcome, SaveWatch};
     use crate::ids::RequestId;
+use crate::state::RequestRegistry;
 
     #[test]
     fn a_watched_request_saves_on_its_answer_and_fails_with_its_reason() {
         let mut watch = SaveWatch::default();
         let (first, second) = (RequestId(1), RequestId(2));
         watch.watch(first);
-        assert_eq!(watch.take_outcome(first, true), SaveOutcome::Saving);
+        assert_eq!(watch.outcome(first, true), SaveOutcome::Saving);
         // Another request's answer or refusal does not touch it.
         watch.answered(second);
         watch.failed(second, "no".into());
-        assert_eq!(watch.take_outcome(first, true), SaveOutcome::Saving);
+        assert_eq!(watch.outcome(first, true), SaveOutcome::Saving);
         watch.answered(first);
-        assert_eq!(watch.take_outcome(first, false), SaveOutcome::Saved);
-        assert_eq!(watch.take_outcome(first, false), SaveOutcome::Unknown);
+        assert_eq!(watch.outcome(first, false), SaveOutcome::Saved);
+        assert_eq!(watch.outcome(first, false), SaveOutcome::Unknown);
         watch.watch(second);
         watch.failed(second, "no".into());
         assert_eq!(
-            watch.take_outcome(second, false),
+            watch.outcome(second, false),
             SaveOutcome::Failed("no".into())
         );
     }
@@ -122,11 +129,11 @@ mod tests {
         watch.watch(RequestId(1));
         // Out of flight (a TDLib restart dropped it), never answered.
         assert_eq!(
-            watch.take_outcome(RequestId(1), false),
+            watch.outcome(RequestId(1), false),
             SaveOutcome::Unknown
         );
         assert_eq!(
-            watch.take_outcome(RequestId(1), false),
+            watch.outcome(RequestId(1), false),
             SaveOutcome::Unknown
         );
     }
@@ -140,11 +147,11 @@ mod tests {
         watch.watch(RequestId(2));
         watch.answered(RequestId(1));
         assert_eq!(
-            watch.take_outcome(RequestId(1), false),
+            watch.outcome(RequestId(1), false),
             SaveOutcome::Unknown
         );
         watch.answered(RequestId(2));
-        assert_eq!(watch.take_outcome(RequestId(2), false), SaveOutcome::Saved);
+        assert_eq!(watch.outcome(RequestId(2), false), SaveOutcome::Saved);
     }
 
     #[test]
@@ -153,13 +160,13 @@ mod tests {
         watch.failed(RequestId(9), "no".into());
         watch.answered(RequestId(9));
         assert_eq!(
-            watch.take_outcome(RequestId(9), false),
+            watch.outcome(RequestId(9), false),
             SaveOutcome::Unknown
         );
         watch.watch(RequestId(9));
         watch.forget(RequestId(9));
         assert_eq!(
-            watch.take_outcome(RequestId(9), false),
+            watch.outcome(RequestId(9), false),
             SaveOutcome::Unknown
         );
     }

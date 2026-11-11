@@ -412,7 +412,7 @@ fn add_contact_sends_imported_contact() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.users_state.contacts.data().is_none());
+    assert!(driver.session.users_state.contacts.is_outdated());
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -450,7 +450,7 @@ fn a6_remove_contact_sends_and_invalidates() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.users_state.contacts.data().is_none());
+    assert!(driver.session.users_state.contacts.is_outdated());
     assert_eq!(
         driver.session.users_state.contacts_notice.as_deref(),
         Some("Contact deleted.")

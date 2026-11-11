@@ -462,6 +462,7 @@ fn forum_with_pins(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU6
         r#"{"@type":"updateNewChat","chat":{"id":16,"title":"Forum","type":{"@type":"chatTypeSupergroup","supergroup_id":16,"is_channel":false},"unread_count":0}}"#,
     );
     let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(16)));
+    session.threads.forum_topics.begin(16, extra);
     let topic = |id: i32, pinned: bool, order: i64, mentions: i32| {
         format!(
             r#"{{"info":{{"@type":"forumTopicInfo","chat_id":16,"forum_topic_id":{id},"name":"T{id}","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"is_general":false,"is_closed":false,"is_hidden":false}},"last_message":null,"order":"{order}","is_pinned":{pinned},"unread_count":0,"last_read_inbox_message_id":0,"unread_mention_count":{mentions},"unread_reaction_count":2,"notification_settings":{{"@type":"chatNotificationSettings"}}}}"#

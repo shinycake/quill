@@ -72,6 +72,7 @@ fn forum(session: &mut Session, seq: &AtomicU64, sink: &Arc<MemorySink>) {
         r#"{"@type":"chatMemberStatusMember"}"#,
     );
     let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(16)));
+    session.threads.forum_topics.begin(16, extra);
     apply_json(
         session,
         seq,
@@ -292,6 +293,7 @@ fn topic_slots_store_and_dirty_independently() {
     );
     // A refetched topic list keeps the dirty topic's draft too.
     let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(16)));
+    session.threads.forum_topics.begin(16, extra);
     apply_json(
         &mut session,
         &seq,
@@ -329,6 +331,7 @@ fn topic_draft_preview_hides_behind_unread_and_shows_reply_only() {
         r#"{"@type":"chatTypeSupergroup","supergroup_id":16,"is_channel":false}"#,
     );
     let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(16)));
+    session.threads.forum_topics.begin(16, extra);
     let reply_only = r#"{"@type":"draftMessage","reply_to":{"@type":"inputMessageReplyToMessage","message_id":9,"quote":null,"checklist_task_id":0,"poll_option_id":""},"date":5,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null}"#;
     apply_json(
         &mut session,

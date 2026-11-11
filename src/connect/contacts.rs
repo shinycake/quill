@@ -18,7 +18,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.users_state.contacts.can_ask()
+        let contacts = &self.session.users_state.contacts;
+        if !(contacts.can_ask() || contacts.is_outdated())
             || self
                 .session
                 .requests
@@ -47,13 +48,20 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// failed waits for Retry; a send that fails ends the loading with
     /// Retry instead of leaving "Loading contacts..." up.
     pub fn refetch_invalidated_contacts(&mut self) {
-        if !self.session.users_state.contacts.is_idle() {
+        if !self.session.users_state.contacts.is_outdated() {
             return;
         }
+        // A fetch out from before the change would bring back what it
+        // removed: dropped, so the refetch below goes out.
+        drop(
+            self.session
+                .requests
+                .take_purpose(RequestPurpose::GetContacts),
+        );
         // A fetch refused before it began (the chats path is not active)
         // leaves the list idle: it ends in the error line and its Retry
         // too, not in a tab that stays on "Loading contacts...".
-        if self.fetch_contacts().is_err() && self.session.users_state.contacts.is_idle() {
+        if self.fetch_contacts().is_err() && self.session.users_state.contacts.is_outdated() {
             self.session
                 .users_state
                 .contacts

@@ -373,6 +373,7 @@ fn driver_send_text_snapshot_in_topic_addresses_message_topic_forum() {
     let extra = driver
         .session
         .request(RequestPurpose::GetForumTopics, Some(ChatId(16)));
+    driver.session.threads.forum_topics.begin(16, extra);
     let topics = [(2, "General", false), (3, "Random", true)]
             .iter()
             .map(|(id, name, closed)| {
