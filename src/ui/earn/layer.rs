@@ -36,12 +36,20 @@ pub(super) fn layer_width(width: f32) -> f32 {
     LAYER_WIDTH.min((width - 2. * LAYER_MARGIN).max(0.))
 }
 
-/// The layer's fade, whether it is on its way out, and which close it
-/// is (a timer only drops the layer for the close that started it).
-pub(crate) struct LayerFade {
-    glide: Glide,
-    closing: bool,
-    close_id: u64,
+/// The layer's fade. `closes` counts the closes started so far; the close
+/// on its way out is the latest, so a timer only drops the layer for the
+/// close that started it (a layer opened again meanwhile carries on).
+pub(crate) enum LayerFade {
+    Open { glide: Glide, closes: u64 },
+    Closing { glide: Glide, closes: u64 },
+}
+
+impl LayerFade {
+    fn glide(&self) -> &Glide {
+        match self {
+            LayerFade::Open { glide, .. } | LayerFade::Closing { glide, .. } => glide,
+        }
+    }
 }
 
 impl QuillApp {
@@ -61,20 +69,16 @@ impl QuillApp {
         }
         let now = Instant::now();
         let animate = self.frame.window_active.get();
-        match self.earn.fade.as_mut() {
-            Some(fade) if !fade.closing => {}
-            Some(fade) => {
-                fade.closing = false;
-                fade.glide.go(1., OPEN_FADE, animate, now);
+        match self.earn.fade.take() {
+            Some(open @ LayerFade::Open { .. }) => self.earn.fade = Some(open),
+            Some(LayerFade::Closing { mut glide, closes }) => {
+                glide.go(1., OPEN_FADE, animate, now);
+                self.earn.fade = Some(LayerFade::Open { glide, closes });
             }
             None => {
                 let mut glide = Glide::settled(0., now, ease_out_circ);
                 glide.go(1., OPEN_FADE, animate, now);
-                self.earn.fade = Some(LayerFade {
-                    glide,
-                    closing: false,
-                    close_id: 0,
-                });
+                self.earn.fade = Some(LayerFade::Open { glide, closes: 0 });
             }
         }
     }
@@ -85,7 +89,7 @@ impl QuillApp {
         self.earn.fade = None;
         self.earn.back.clear();
         if let Some(earn) = self.earn_mut() {
-            earn.pending_join = None;
+            earn.drop_parked_join();
         }
         let restore = self.earn.restore.take();
         if let Some(live) = self.live.as_mut() {
@@ -103,18 +107,24 @@ impl QuillApp {
     pub(in crate::ui) fn close_earn_layer(&mut self, cx: &mut Context<Self>) {
         let animate = self.frame.window_active.get();
         let now = Instant::now();
-        let Some(fade) = self.earn.fade.as_mut() else {
-            self.drop_earn_layer(cx);
-            return;
+        let (mut glide, close_id) = match self.earn.fade.take() {
+            None => {
+                self.drop_earn_layer(cx);
+                return;
+            }
+            Some(closing @ LayerFade::Closing { .. }) => {
+                self.earn.fade = Some(closing);
+                return;
+            }
+            Some(LayerFade::Open { glide, closes }) => (glide, closes.wrapping_add(1)),
         };
-        if fade.closing {
-            return;
-        }
-        fade.closing = true;
-        fade.close_id = fade.close_id.wrapping_add(1);
-        let close_id = fade.close_id;
-        fade.glide.go(0., CLOSE_FADE, animate, now);
-        if !fade.glide.animating(now) {
+        glide.go(0., CLOSE_FADE, animate, now);
+        let animating = glide.animating(now);
+        self.earn.fade = Some(LayerFade::Closing {
+            glide,
+            closes: close_id,
+        });
+        if !animating {
             self.drop_earn_layer(cx);
             return;
         }
@@ -125,7 +135,9 @@ impl QuillApp {
                     .earn
                     .fade
                     .as_ref()
-                    .is_some_and(|fade| fade.closing && fade.close_id == close_id)
+                    .is_some_and(|fade| {
+                        matches!(fade, LayerFade::Closing { closes, .. } if *closes == close_id)
+                    })
                 {
                     this.drop_earn_layer(cx);
                 }
@@ -176,12 +188,12 @@ impl QuillApp {
             .earn
             .fade
             .as_ref()
-            .map_or(1., |fade| fade.glide.value(now).clamp(0., 1.));
+            .map_or(1., |fade| fade.glide().value(now).clamp(0., 1.));
         if self
             .earn
             .fade
             .as_ref()
-            .is_some_and(|fade| fade.glide.animating(now))
+            .is_some_and(|fade| fade.glide().animating(now))
         {
             self.request_animation_tick(60, cx);
         }

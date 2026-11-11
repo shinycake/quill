@@ -189,7 +189,7 @@ impl Session {
                     && !program.is_disconnected
                 {
                     earn.link_box = Some(LinkBox { program, recipient });
-                    earn.pending_join = None;
+                    earn.drop_parked_join();
                 } else {
                     self.open_join_box_after_resolve(bot_user_id, recipient, choose_recipient);
                 }
@@ -286,8 +286,8 @@ impl Session {
             choose_recipient,
             stage: JoinStage::Open,
         };
-        if choose_recipient && earn.recipients.is_loading() {
-            earn.pending_join = Some(join);
+        if choose_recipient {
+            earn.open_or_park_join(join);
         } else {
             earn.join_box = Some(join);
         }
@@ -431,7 +431,12 @@ impl Session {
     fn add_earn_recipients(&mut self, more: Vec<EarnPeer>, request: Option<RequestId>) {
         let me = self.my_user_id;
         let earn = &mut self.payments.earn;
-        let Recipients::Loading { waiting, found } = &mut earn.recipients else {
+        let Recipients::Loading {
+            waiting,
+            found,
+            join,
+        } = &mut earn.recipients
+        else {
             return;
         };
         let Some(at) = request.and_then(|id| waiting.iter().position(|w| *w == id)) else {
@@ -451,8 +456,9 @@ impl Session {
                 list.push(peer);
             }
         }
+        let parked = join.take();
         earn.recipients = Recipients::Ready(list);
-        if let Some(join) = earn.pending_join.take() {
+        if let Some(join) = parked {
             earn.join_box = Some(join);
         }
     }

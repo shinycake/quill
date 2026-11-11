@@ -21,12 +21,58 @@ use quill::lang::{keys, tr, tr_with};
 use std::path::PathBuf;
 use std::time::Duration;
 
+/// Where the disk stands. One value, since the parts only exist in some
+/// stages: a first reading below close is `Confirming` (the stage it came
+/// from stays until the next reading decides), and a call keeping the
+/// on-screen client open is `FullHeld` (it closes at the first reading after
+/// the call ends; any reading out of Full ends it too).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Standing {
+    Healthy,
+    Low,
+    /// The last reading was below close and the next one decides; holds the
+    /// state it came from (`Healthy` or `Low`).
+    Confirming(DiskState),
+    Full,
+    /// At Full, the on-screen client stays open for its call.
+    FullHeld,
+}
+
+impl Standing {
+    fn state(self) -> DiskState {
+        match self {
+            Standing::Healthy => DiskState::Healthy,
+            Standing::Low => DiskState::Low,
+            Standing::Confirming(from) => from,
+            Standing::Full | Standing::FullHeld => DiskState::Full,
+        }
+    }
+
+    fn confirming(self) -> bool {
+        matches!(self, Standing::Confirming(_))
+    }
+
+    fn held_for_call(self) -> bool {
+        self == Standing::FullHeld
+    }
+
+    /// The standing after a reading: `after` is the state it decided on,
+    /// `confirming` whether it only armed the confirmation.
+    fn after_reading(self, after: DiskState, confirming: bool) -> Self {
+        match after {
+            _ if confirming => Standing::Confirming(after),
+            DiskState::Healthy => Standing::Healthy,
+            DiskState::Low => Standing::Low,
+            DiskState::Full if self.held_for_call() => Standing::FullHeld,
+            DiskState::Full => Standing::Full,
+        }
+    }
+}
+
 pub(crate) struct DiskUi {
-    state: DiskState,
+    standing: Standing,
     free: Option<u64>,
     floors: DiskFloors,
-    /// The last reading was below close and the next one decides.
-    confirming: bool,
     /// The wait before the last reading, to measure how fast the disk falls.
     waited: Duration,
     /// The last reading found a data folder TDLib cannot write.
@@ -35,9 +81,6 @@ pub(crate) struct DiskUi {
     /// says so, while clients already running keep going until a reading
     /// falls below close.
     screen_refused: bool,
-    /// At Full, the on-screen client stays open for its call, and closes
-    /// at the first reading after the call ends.
-    held_for_call: bool,
     /// How many times this run the full-disk screen went up, each with one
     /// system notification.
     full_notices: u32,
@@ -70,14 +113,12 @@ impl DiskUi {
             watch(root, first_frame, cx);
         }
         Self {
-            state: DiskState::default(),
+            standing: Standing::Healthy,
             free: None,
             floors: FLOORS,
-            confirming: false,
             waited: Duration::ZERO,
             unwritable: false,
             screen_refused: false,
-            held_for_call: false,
             full_notices: 0,
             cache_folder: None,
             database_bytes: None,
@@ -88,17 +129,32 @@ impl DiskUi {
     }
 
     pub(super) fn is_full(&self) -> bool {
-        self.state == DiskState::Full
+        self.standing.state() == DiskState::Full
+    }
+
+    /// At Full, a call keeps the on-screen client open.
+    pub(super) fn held_for_call(&self) -> bool {
+        self.standing.held_for_call()
+    }
+
+    /// Keep the on-screen client open for its call (or let it go); only at
+    /// Full.
+    pub(super) fn hold_for_call(&mut self, held: bool) {
+        self.standing = match (self.standing, held) {
+            (Standing::Full, true) => Standing::FullHeld,
+            (Standing::FullHeld, false) => Standing::Full,
+            (standing, _) => standing,
+        };
     }
 
     /// The full-disk screen is up: the disk is full, or the on-screen
     /// client was refused.
     pub(super) fn shows_screen(&self) -> bool {
-        (self.is_full() && !self.held_for_call) || self.screen_refused
+        (self.is_full() && !self.held_for_call()) || self.screen_refused
     }
 
     pub(super) fn holds_auto_downloads(&self) -> bool {
-        self.state != DiskState::Healthy
+        self.standing.state() != DiskState::Healthy
     }
 
     /// A client made after the last reading starts out knowing it, so a
@@ -107,7 +163,7 @@ impl DiskUi {
         &self,
         driver: &mut quill::connect::ConnectDriver<S>,
     ) {
-        let _ = driver.note_disk(self.state, self.free, &self.floors);
+        let _ = driver.note_disk(self.standing.state(), self.free, &self.floors);
     }
 
     pub(super) fn refused_start(&mut self) {
@@ -271,7 +327,7 @@ impl QuillApp {
         };
         let fall = fall_per_sec(self.disk.free, free, self.disk.waited);
         self.apply_disk_reading(free, cx);
-        let wait = if self.disk.confirming {
+        let wait = if self.disk.standing.confirming() {
             CONFIRM_READ
         } else {
             next_read_in(free, &floors, fall)
@@ -283,11 +339,11 @@ impl QuillApp {
     pub(super) fn apply_disk_reading(&mut self, free: Option<u64>, cx: &mut Context<Self>) {
         let shown = self.disk.free;
         let floors = self.disk.floors;
-        let (after, confirming) = self
-            .disk
-            .state
-            .confirmed(free, &floors, self.disk.confirming);
-        self.disk.confirming = confirming;
+        let (after, confirming) = self.disk.standing.state().confirmed(
+            free,
+            &floors,
+            self.disk.standing.confirming(),
+        );
         self.disk.free = free.or(shown);
         let mut running = false;
         let repaused = self
@@ -306,8 +362,8 @@ impl QuillApp {
         let room = free.is_some_and(|free| free >= floors.open);
         let retry_starts = self.disk.start_refused && room;
         let retry_screen = self.disk.screen_refused && room && after != DiskState::Full;
-        let screen_held = self.disk.held_for_call;
-        let before = self.enter_disk_state(after, cx);
+        let screen_held = self.disk.held_for_call();
+        let before = self.enter_disk_state(after, confirming, cx);
         let step = before.step(
             after,
             DiskClients {
@@ -357,11 +413,14 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn enter_disk_state(&mut self, after: DiskState, cx: &mut Context<Self>) -> DiskState {
-        let before = std::mem::replace(&mut self.disk.state, after);
-        if after != DiskState::Full {
-            self.disk.held_for_call = false;
-        }
+    fn enter_disk_state(
+        &mut self,
+        after: DiskState,
+        confirming: bool,
+        cx: &mut Context<Self>,
+    ) -> DiskState {
+        let before = self.disk.standing.state();
+        self.disk.standing = self.disk.standing.after_reading(after, confirming);
         if after == DiskState::Full && before != DiskState::Full && !self.disk.screen_refused {
             self.announce_full_disk(cx);
         }
@@ -399,8 +458,8 @@ impl QuillApp {
             .live
             .as_ref()
             .is_some_and(|live| live.driver.call_in_progress());
-        if held != self.disk.held_for_call {
-            self.disk.held_for_call = held;
+        if held != self.disk.held_for_call() {
+            self.disk.hold_for_call(held);
             cx.notify();
         }
         self.close_background_clients_later(cx);
@@ -515,8 +574,8 @@ impl QuillApp {
         &self,
         cx: &Context<Self>,
     ) -> Option<gpui_kit::AnyElement> {
-        let held = self.disk.is_full() && self.disk.held_for_call;
-        let low = self.disk.state == DiskState::Low && !self.disk.shows_screen();
+        let held = self.disk.is_full() && self.disk.held_for_call();
+        let low = self.disk.standing.state() == DiskState::Low && !self.disk.shows_screen();
         (low || held).then(|| {
             let message = if held {
                 tr(keys::Q_DISK_FULL_IN_CALL)

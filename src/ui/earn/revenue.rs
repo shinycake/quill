@@ -3,6 +3,7 @@
 //! rewards overview, the balances, the history and "Switch Off Ads".
 
 use super::chart::EarnChartKind;
+use crate::ui::earn_state::TxBox;
 use super::*;
 use crate::ui::chat_theme::{danger, success};
 use crate::ui::premium_ui::star_tx_row;
@@ -512,7 +513,7 @@ impl QuillApp {
                     ))
                     .tab_index(0)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.earn.ton_tx = Some(row_tx.clone());
+                        this.earn.tx_box = TxBox::Ton(row_tx.clone());
                         this.open_box(crate::ui::shell::DialogKind::EarnTonTx);
                         cx.notify();
                     }))
@@ -572,7 +573,7 @@ impl QuillApp {
                 ("earn-star-tx", ix + filter as usize * 100_000),
                 tx,
                 move |this, cx| {
-                    this.earn.star_tx = Some(row_tx.clone());
+                    this.earn.tx_box = TxBox::Star(row_tx.clone());
                     this.open_box(crate::ui::shell::DialogKind::EarnStarTx);
                     cx.notify();
                 },

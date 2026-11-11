@@ -522,14 +522,45 @@ pub enum Recipients {
     #[default]
     Unasked,
     /// The channel and bot lists are out; `found` is what answered so far.
+    /// `join` is a join box that opens once the recipients arrive; it goes
+    /// with the stage (a failure, the profile it came from closing).
     Loading {
         waiting: Vec<crate::ids::RequestId>,
         found: Vec<EarnPeer>,
+        join: Option<JoinBox>,
     },
     Ready(Vec<EarnPeer>),
     /// A send failed. Answers of the abandoned attempt are dropped and the
     /// next ask starts over.
     Failed,
+}
+
+impl EarnState {
+    /// Open `join` now, or park it on the recipients when they are still
+    /// coming (a join box that picks a recipient needs the list).
+    pub fn open_or_park_join(&mut self, join: JoinBox) {
+        match &mut self.recipients {
+            Recipients::Loading { join: parked, .. } if join.choose_recipient => {
+                *parked = Some(join);
+            }
+            _ => self.join_box = Some(join),
+        }
+    }
+
+    /// The join box waiting for the recipients, if any.
+    pub fn parked_join(&self) -> Option<&JoinBox> {
+        match &self.recipients {
+            Recipients::Loading { join, .. } => join.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Let go of the join box waiting for the recipients.
+    pub fn drop_parked_join(&mut self) {
+        if let Recipients::Loading { join, .. } = &mut self.recipients {
+            *join = None;
+        }
+    }
 }
 
 impl Recipients {
@@ -573,8 +604,6 @@ pub struct EarnState {
     /// Who may receive commissions: the user, owned public channels the
     /// user can post in, and owned bots (tdesktop `ResolveRecipients`).
     pub recipients: Recipients,
-    /// A join box that opens once the recipients arrive.
-    pub pending_join: Option<JoinBox>,
     /// Set when the setup page saved or ended the program: the UI goes
     /// back from it (tdesktop `showBackFromStack`).
     pub setup_closed: bool,

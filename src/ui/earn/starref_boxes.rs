@@ -118,7 +118,7 @@ impl QuillApp {
         // A join box still waiting for the recipients must not open later,
         // unasked, in the next account or after the layer was left.
         if let Some(earn) = self.earn_mut() {
-            earn.pending_join = None;
+            earn.drop_parked_join();
             earn.resolve = quill::earn::Resolve::Idle;
         }
         let Some(earn) = self.earn_state() else {
@@ -406,7 +406,7 @@ impl QuillApp {
     fn close_join_box(&mut self, cx: &mut Context<Self>) {
         if let Some(earn) = self.earn_mut() {
             earn.join_box = None;
-            earn.pending_join = None;
+            earn.drop_parked_join();
         }
         cx.notify();
     }
@@ -618,7 +618,21 @@ impl QuillApp {
         if let Some(earn) = self.earn_mut() {
             earn.link_box = None;
         }
+        self.earn.link_shown = None;
         cx.notify();
+    }
+
+    /// The box for `link` is being drawn: its icon plays from the first
+    /// draw of this link, and again for another link.
+    fn note_link_shown(&mut self, link: &LinkBox) {
+        if self
+            .earn
+            .link_shown
+            .as_ref()
+            .is_none_or(|(shown, _)| shown != link)
+        {
+            self.earn.link_shown = Some((link.clone(), Instant::now()));
+        }
     }
 
     fn copy_affiliate_link(&mut self, url: &str, cx: &mut Context<Self>) {
@@ -631,8 +645,8 @@ impl QuillApp {
     /// a quarter turn and settles with a small overshoot (tdesktop plays
     /// the `starref_link` animation once in `CreateLinkIcon`).
     fn link_icon_motion(&self, cx: &mut Context<Self>) -> Transformation {
-        let elapsed = self.earn.link_shown.map_or(LINK_PLAY, |since| {
-            crate::ui::motion::elapsed_since(since, Instant::now())
+        let elapsed = self.earn.link_shown.as_ref().map_or(LINK_PLAY, |(_, since)| {
+            crate::ui::motion::elapsed_since(*since, Instant::now())
         });
         let t = if crate::ui::motion::interface_animations_off() {
             1.
@@ -659,10 +673,14 @@ impl QuillApp {
                 this.close_link_box(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(session) = this.session() else {
+            let Some(link) = this
+                .session()
+                .and_then(|session| session.payments.earn.link_box.clone())
+            else {
                 return dialog.on_close(on_close);
             };
-            let Some(link) = session.payments.earn.link_box.clone() else {
+            this.note_link_shown(&link);
+            let Some(session) = this.session() else {
                 return dialog.on_close(on_close);
             };
             let bot = EarnPeer::User(link.program.bot_user_id);

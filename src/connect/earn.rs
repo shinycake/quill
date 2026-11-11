@@ -765,12 +765,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             choose_recipient: true,
             stage: JoinStage::Open,
         };
-        let earn = &mut self.session.payments.earn;
-        if earn.recipients.is_loading() {
-            earn.pending_join = Some(join);
-        } else {
-            earn.join_box = Some(join);
-        }
+        self.session.payments.earn.open_or_park_join(join);
         Ok(())
     }
 
@@ -789,6 +784,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.payments.earn.recipients = Recipients::Loading {
             waiting: Vec::new(),
             found: Vec::new(),
+            join: None,
         };
         let chats = self.send_earn_tracked(
             EarnPurpose::RecipientChats,
@@ -807,7 +803,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if bots.is_err() {
             let earn = &mut self.session.payments.earn;
             earn.recipients = Recipients::Failed;
-            earn.pending_join = None;
             return Err(ConnectSendError::InvalidRequest);
         }
         Ok(())

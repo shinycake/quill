@@ -5,7 +5,7 @@
 use super::revenue::ton_amount;
 use super::*;
 use crate::ui::chat_theme::{danger, success};
-use crate::ui::earn_state::AskBoostReason;
+use crate::ui::earn_state::{AskBoostReason, TxBox};
 use crate::ui::os_open::open_link_in;
 use crate::ui::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
@@ -176,8 +176,7 @@ impl QuillApp {
     }
 
     fn close_earn_tx(&mut self, cx: &mut Context<Self>) {
-        self.earn.ton_tx = None;
-        self.earn.star_tx = None;
+        self.earn.tx_box = TxBox::None;
         cx.notify();
     }
 
@@ -193,7 +192,7 @@ impl QuillApp {
                 this.close_earn_tx(cx);
             });
         app.update(cx, |this, cx| {
-            let (Some(tx), Some(session)) = (this.earn.ton_tx.clone(), this.session()) else {
+            let (Some(tx), Some(session)) = (this.earn.tx_box.ton().cloned(), this.session()) else {
                 return dialog.on_close(on_close);
             };
             let incoming = tx.is_incoming();
@@ -263,7 +262,7 @@ impl QuillApp {
                 this.close_earn_tx(cx);
             });
         app.update(cx, |this, cx| {
-            let (Some(tx), Some(session)) = (this.earn.star_tx.clone(), this.session()) else {
+            let (Some(tx), Some(session)) = (this.earn.tx_box.star().cloned(), this.session()) else {
                 return dialog.on_close(on_close);
             };
             let body = crate::ui::premium_ui::star_tx_facts(session, &tx, cx);
@@ -393,14 +392,14 @@ crate::ui::shell::register_dialogs! {
     /// A TON transaction's details.
     EarnTonTx => DialogSpec::new(
         7611,
-        |app| app.earn.ton_tx.is_some(),
+        |app| app.earn.tx_box.ton().is_some(),
         QuillApp::build_earn_ton_tx_dialog,
     )
     .close(|app, _, cx| app.close_earn_tx(cx)),
     /// A Stars transaction's receipt from a revenue page.
     EarnStarTx => DialogSpec::new(
         7613,
-        |app| app.earn.star_tx.is_some(),
+        |app| app.earn.tx_box.star().is_some(),
         QuillApp::build_earn_star_tx_dialog,
     )
     .close(|app, _, cx| app.close_earn_tx(cx)),
