@@ -455,9 +455,12 @@ impl QuillApp {
                 .iter()
                 .any(|f| f.id == folder_id)
         {
-            // (Same rule as `set_chat_list_view`; `live` is borrowed here.)
-            self.screen.chat_list.selected.clear();
-            self.screen.folders.tab = None;
+            // `live` is borrowed here, so go through the list's own mover
+            // (it ends the selection and a pinned drag, as `set_chat_list_view`).
+            let filter = self.screen.chat_list.filter;
+            self.screen
+                .chat_list
+                .show_view(&mut self.screen.folders.tab, filter, None);
         }
         let err = live.driver.session.auth_state.last_auth_error;
         let new_auth = live.driver.session.auth.clone();

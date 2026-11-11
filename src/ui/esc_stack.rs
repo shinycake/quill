@@ -773,8 +773,8 @@ mod dispatch_tests {
             (
                 "passcode settings",
                 // box-host: a test sets the flag directly
-                |a| a.account.passcode.open = true,
-                |a| a.account.passcode.open,
+                |a| a.account.passcode.panel = Some(Default::default()),
+                |a| a.account.passcode.is_open(),
             ),
             (
                 "file open warning",

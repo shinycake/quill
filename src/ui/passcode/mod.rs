@@ -23,14 +23,15 @@ use quill::passcode::{
 };
 use quill::platform::{MemorySecretStore, SecretStore, os_secret_store};
 use quill::settings::{list_accounts, safe_app_root};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 /// The dialog's pages (tdesktop opens a separate section per step).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub(crate) enum PasscodeView {
+    #[default]
     Status,
     Create,
     Change,
@@ -67,7 +68,7 @@ const SHAKE_MS: u64 = 420;
 /// drops it (`PasscodeUi::locked_since`), whether or not Quill is still
 /// locked when it lands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LockState {
+pub(super) enum LockState {
     Unlocked { locks: u64 },
     Locked { locks: u64 },
 }
@@ -95,6 +96,43 @@ impl LockState {
     }
 }
 
+/// Touch ID / system-prompt unlock: off, or on with the master key kept
+/// while locked so the prompt can unlock again without the passcode
+/// (tdesktop: "enter your passcode before you can use Touch ID"). The key
+/// exists only inside `On`, so it cannot outlive the switch.
+pub(crate) enum SystemUnlock {
+    Off,
+    On { held_key: Option<MasterKey> },
+}
+
+impl SystemUnlock {
+    pub(crate) fn is_on(&self) -> bool {
+        matches!(self, Self::On { .. })
+    }
+
+    fn held_key(&self) -> Option<&MasterKey> {
+        match self {
+            Self::On { held_key } => held_key.as_ref(),
+            Self::Off => None,
+        }
+    }
+
+    /// Keep `key` for the next unlock; nothing is kept while the switch is off.
+    fn hold(&mut self, key: Option<MasterKey>) {
+        if let Self::On { held_key } = self {
+            *held_key = key;
+        }
+    }
+}
+
+/// The open Settings passcode box: its page and the line it shows.
+/// Closing drops it whole, so no page or error outlives the box.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct PasscodeBox {
+    pub(crate) view: PasscodeView,
+    pub(crate) error: Option<String>,
+}
+
 pub(crate) struct PasscodeUi {
     /// A passcode is set (cached from `passcode.json`; refreshed after each
     /// change instead of read per frame).
@@ -102,7 +140,7 @@ pub(crate) struct PasscodeUi {
     /// Whether Quill is locked (every window draws only the lock screen,
     /// or nothing: `lock_layer`), with how many times it has locked. One
     /// value, written only by `QuillApp::set_locked` (`set_lock_flag`).
-    lock_state: LockState,
+    lock_state: Rc<Cell<LockState>>,
     /// The account whose connection waits for the unlock: a locked start,
     /// or a reconnect asked under the lock. The unlock connects it only if
     /// it is still the account on screen, so a switch under the lock (the
@@ -111,8 +149,8 @@ pub(crate) struct PasscodeUi {
     /// The lock screen's extra: the system prompt to offer, or the Log
     /// out confirmation.
     pub(crate) screen: lock_screen::LockScreen,
-    pub(crate) open: bool,
-    pub(crate) view: PasscodeView,
+    /// `Some` while the box is open.
+    pub(crate) panel: Option<PasscodeBox>,
     pub(crate) old: Entity<InputState>,
     pub(crate) new: Entity<InputState>,
     pub(crate) confirm: Entity<InputState>,
@@ -120,17 +158,12 @@ pub(crate) struct PasscodeUi {
     /// its slot, swapped in while that window's state is in place.
     pub(crate) lock: LockField,
     pub(crate) custom_time: Entity<InputState>,
-    pub(crate) error: Option<String>,
     pub(crate) lock_error: lock_notice::LockNotice,
     pub(crate) job: PasscodeJob,
     pub(crate) autolock_secs: u32,
-    pub(crate) system_unlock: bool,
+    pub(crate) system_unlock: SystemUnlock,
     shake_started: Option<Instant>,
     idle: IdleTracker,
-    /// Master key kept while locked so Touch ID can unlock again without the
-    /// passcode (tdesktop: "enter your passcode before you can use Touch
-    /// ID"). Only held when the user turned system unlock on.
-    system_unlock_key: Option<MasterKey>,
     /// Demo fixtures must not touch the Keychain or the real data folder.
     pub(crate) demo: bool,
     /// What was asked while locked and runs at the unlock (`unlock_intents`).
@@ -182,67 +215,99 @@ impl PasscodeUi {
         // Every window opened from now on draws through the lock layer,
         // the main window's included (its root is built after the app).
         lock_layer::register(cx);
-        lock_layer::publish(enabled, cx);
+        // The app starts locked when a passcode is set (tdesktop).
+        let lock_state = Rc::new(Cell::new(LockState::new(enabled)));
+        lock_layer::install(lock_state.clone(), cx);
         if enabled {
             quill::agent::access::set_paused_by_lock(true);
         }
         Self {
             enabled,
-            // The app starts locked when a passcode is set (tdesktop).
-            lock_state: LockState::new(enabled),
+            lock_state,
             connect_at_unlock: if enabled {
                 root.as_deref().map(quill::settings::active_account)
             } else {
                 None
             },
             screen: lock_screen::LockScreen::Entry,
-            open: false,
-            view: PasscodeView::Status,
+            panel: None,
             old,
             new,
             confirm,
             lock,
             custom_time,
-            error: None,
             lock_error: Default::default(),
             job: PasscodeJob::Idle,
             autolock_secs: config
                 .as_ref()
                 .map_or(passcode::DEFAULT_AUTOLOCK_SECS, |c| c.autolock_secs),
-            system_unlock: config.as_ref().is_some_and(|c| c.system_unlock),
+            system_unlock: if config.as_ref().is_some_and(|c| c.system_unlock) {
+                SystemUnlock::On { held_key: None }
+            } else {
+                SystemUnlock::Off
+            },
             shake_started: None,
             idle: IdleTracker::default(),
-            system_unlock_key: None,
             demo: false,
             unlock_intents: UnlockIntents::default(),
         }
     }
 
+    /// Whether the Settings passcode box is open.
+    pub(crate) fn is_open(&self) -> bool {
+        self.panel.is_some()
+    }
+
+    /// The box's page (`Status` while it is closed).
+    pub(crate) fn view(&self) -> PasscodeView {
+        self.panel
+            .as_ref()
+            .map(|panel| panel.view)
+            .unwrap_or_default()
+    }
+
+    /// The line the open box shows.
+    pub(crate) fn error(&self) -> Option<&str> {
+        self.panel.as_ref()?.error.as_deref()
+    }
+
+    /// Show `error` (or clear it) in the open box; a closed box has no line.
+    pub(crate) fn set_error(&mut self, error: Option<String>) {
+        if let Some(panel) = self.panel.as_mut() {
+            panel.error = error;
+        }
+    }
+
     /// Whether Quill is locked.
     pub(crate) fn is_locked(&self) -> bool {
-        matches!(self.lock_state, LockState::Locked { .. })
+        matches!(self.lock_state.get(), LockState::Locked { .. })
     }
 
     /// The lock count now, for something parked until later.
     pub(crate) fn lock_count(&self) -> u64 {
-        self.lock_state.locks()
+        self.lock_state.get().locks()
     }
 
     /// Quill is locked now, or locked at some point since `count` was
     /// read: what was parked then no longer applies.
     pub(crate) fn locked_since(&self, count: u64) -> bool {
-        self.is_locked() || self.lock_state.locks() != count
+        self.is_locked() || self.lock_state.get().locks() != count
     }
 
-    fn set_lock_flag(&mut self, locked: bool) {
-        self.lock_state = self.lock_state.set(locked);
+    /// Write the flag (the cell every window's lock layer reads too);
+    /// whether it changed.
+    fn set_lock_flag(&self, locked: bool) -> bool {
+        let before = self.lock_state.get();
+        let after = before.set(locked);
+        self.lock_state.set(after);
+        before != after
     }
 
     /// Set the flag alone, for tests that need a locked state without the
     /// lock's closes or the root layer.
     #[cfg(test)]
     pub(crate) fn force_locked(&mut self, locked: bool) {
-        self.set_lock_flag(locked);
+        let _ = self.set_lock_flag(locked);
     }
 
     fn shake_offset(&self) -> f32 {
@@ -306,17 +371,13 @@ impl QuillApp {
         ) {
             return;
         }
-        self.account.passcode.open = true;
+        self.account.passcode.panel = Some(PasscodeBox::default());
         self.open_box(DialogKind::Passcode);
-        self.account.passcode.view = PasscodeView::Status;
-        self.account.passcode.error = None;
         cx.notify();
     }
 
     pub(crate) fn close_passcode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.account.passcode.open = false;
-        self.account.passcode.view = PasscodeView::Status;
-        self.account.passcode.error = None;
+        self.account.passcode.panel = None;
         self.clear_passcode_fields(window, cx);
         cx.notify();
     }
@@ -337,8 +398,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.account.passcode.view = view;
-        self.account.passcode.error = None;
+        if let Some(panel) = self.account.passcode.panel.as_mut() {
+            *panel = PasscodeBox { view, error: None };
+        }
         self.clear_passcode_fields(window, cx);
         let first = match view {
             PasscodeView::Create => self.account.passcode.new.clone(),
@@ -350,10 +412,10 @@ impl QuillApp {
 
     /// Enter in any of the form fields.
     pub(crate) fn submit_passcode_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.account.passcode.job.is_running() || !self.account.passcode.open {
+        if self.account.passcode.job.is_running() || !self.account.passcode.is_open() {
             return;
         }
-        match self.account.passcode.view {
+        match self.account.passcode.view() {
             PasscodeView::Status => {}
             PasscodeView::Create => self.submit_create_passcode(window, cx),
             PasscodeView::Change => self.submit_change_passcode(window, cx),
@@ -369,12 +431,14 @@ impl QuillApp {
         let new = self.read_field(&self.account.passcode.new, cx);
         let confirm = self.read_field(&self.account.passcode.confirm, cx);
         if let Err(err) = passcode::validate_new(&new, &confirm, None) {
-            self.account.passcode.error = Some(err.to_string());
+            self.account.passcode.set_error(Some(err.to_string()));
             cx.notify();
             return;
         }
         let Some(root) = self.passcode_root() else {
-            self.account.passcode.error = Some(tr(keys::Q_PREFS_NO_APP_DATA_FOLDER_IS).into());
+            self.account
+                .passcode
+                .set_error(Some(tr(keys::Q_PREFS_NO_APP_DATA_FOLDER_IS).into()));
             cx.notify();
             return;
         };
@@ -407,7 +471,7 @@ impl QuillApp {
                         keys::Q_PREFS_LOCAL_PASSCODE_TURNED_ON,
                     )));
                 }
-                Err(err) => this.account.passcode.error = Some(error_text(&err)),
+                Err(err) => this.account.passcode.set_error(Some(error_text(&err))),
             },
             window,
             cx,
@@ -419,13 +483,14 @@ impl QuillApp {
         let new = self.read_field(&self.account.passcode.new, cx);
         let confirm = self.read_field(&self.account.passcode.confirm, cx);
         if old.is_empty() {
-            self.account.passcode.error =
-                Some(tr(keys::Q_PREFS_ENTER_YOUR_CURRENT_PASSCODE).into());
+            self.account
+                .passcode
+                .set_error(Some(tr(keys::Q_PREFS_ENTER_YOUR_CURRENT_PASSCODE).into()));
             cx.notify();
             return;
         }
         if let Err(err) = passcode::validate_new(&new, &confirm, Some(&old)) {
-            self.account.passcode.error = Some(err.to_string());
+            self.account.passcode.set_error(Some(err.to_string()));
             cx.notify();
             return;
         }
@@ -448,7 +513,7 @@ impl QuillApp {
                     this.goto_passcode_view(PasscodeView::Status, window, cx);
                     this.set_note(StatusNote::silent(tr(keys::Q_PREFS_LOCAL_PASSCODE_CHANGED)));
                 }
-                Err(err) => this.account.passcode.error = Some(error_text(&err)),
+                Err(err) => this.account.passcode.set_error(Some(error_text(&err))),
             },
             window,
             cx,
@@ -458,8 +523,9 @@ impl QuillApp {
     fn submit_remove_passcode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let old = self.read_field(&self.account.passcode.old, cx);
         if old.is_empty() {
-            self.account.passcode.error =
-                Some(tr(keys::Q_PREFS_ENTER_YOUR_CURRENT_PASSCODE).into());
+            self.account
+                .passcode
+                .set_error(Some(tr(keys::Q_PREFS_ENTER_YOUR_CURRENT_PASSCODE).into()));
             cx.notify();
             return;
         }
@@ -488,14 +554,13 @@ impl QuillApp {
                 Ok(()) => {
                     this.account.passcode.enabled = false;
                     quill::wake::PASSCODE.poke();
-                    this.account.passcode.system_unlock = false;
-                    this.account.passcode.system_unlock_key = None;
+                    this.account.passcode.system_unlock = SystemUnlock::Off;
                     this.goto_passcode_view(PasscodeView::Status, window, cx);
                     this.set_note(StatusNote::silent(tr(
                         keys::Q_PREFS_LOCAL_PASSCODE_TURNED_OFF,
                     )));
                 }
-                Err(err) => this.account.passcode.error = Some(error_text(&err)),
+                Err(err) => this.account.passcode.set_error(Some(error_text(&err))),
             },
             window,
             cx,
@@ -519,7 +584,7 @@ impl QuillApp {
         match saved {
             Ok(()) => true,
             Err(message) => {
-                self.account.passcode.error = Some(message);
+                self.account.passcode.set_error(Some(message));
                 false
             }
         }
@@ -543,11 +608,13 @@ impl QuillApp {
             .to_string();
         match passcode::parse_hhmm(&text) {
             Some(secs) => {
-                self.account.passcode.error = None;
+                self.account.passcode.set_error(None);
                 self.set_autolock_secs(secs, cx);
             }
             None => {
-                self.account.passcode.error = Some(tr(keys::Q_PREFS_ENTER_A_TIME_AS_HOURS).into());
+                self.account
+                    .passcode
+                    .set_error(Some(tr(keys::Q_PREFS_ENTER_A_TIME_AS_HOURS).into()));
                 cx.notify();
             }
         }
@@ -558,14 +625,15 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.account.passcode.system_unlock = on;
-        if !on {
-            self.account.passcode.system_unlock_key = None;
-        } else {
+        self.account.passcode.system_unlock = if on {
             // The master key is in memory while unlocked; keep it for the
             // next lock so the system prompt can unlock again.
-            self.account.passcode.system_unlock_key = global_unlock().key();
-        }
+            SystemUnlock::On {
+                held_key: global_unlock().key(),
+            }
+        } else {
+            SystemUnlock::Off
+        };
         cx.notify();
     }
 
@@ -587,16 +655,15 @@ impl QuillApp {
             return;
         }
         let state = global_unlock();
-        if self.account.passcode.system_unlock {
-            self.account.passcode.system_unlock_key = state.key();
-        }
+        self.account.passcode.system_unlock.hold(state.key());
         // The in-memory master key goes away: unlocking needs the passcode
         // (or the system prompt that still holds it for this process).
         state.clear();
         self.set_locked(true, cx);
         self.reset_lock_fields();
-        self.account.passcode.screen =
-            lock_screen::LockScreen::on_locked(self.account.passcode.system_unlock_key.is_some());
+        self.account.passcode.screen = lock_screen::LockScreen::on_locked(
+            self.account.passcode.system_unlock.held_key().is_some(),
+        );
         self.account.passcode.lock_error = Default::default();
         self.close_for_lock(cx);
         cx.notify();
@@ -613,9 +680,10 @@ impl QuillApp {
             .update(cx, |input, cx| input.set_value("", window, cx));
         // The other windows' fields empty at their next frame.
         self.clear_lock_fields();
-        if self.account.passcode.system_unlock {
-            self.account.passcode.system_unlock_key = global_unlock().key();
-        }
+        self.account
+            .passcode
+            .system_unlock
+            .hold(global_unlock().key());
         super::presence::note_input();
         self.resume_after_unlock(cx);
         cx.notify();
@@ -689,7 +757,7 @@ impl QuillApp {
 
     /// Touch ID / system password on the lock screen.
     pub(crate) fn unlock_with_system(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(master) = self.account.passcode.system_unlock_key.clone() else {
+        let Some(master) = self.account.passcode.system_unlock.held_key().cloned() else {
             self.lock_failed(tr(keys::Q_PREFS_ENTER_YOUR_PASSCODE_ONCE_BEFORE).into(), cx);
             return;
         };
@@ -813,7 +881,7 @@ impl QuillApp {
         let muted = cx.theme().muted_foreground;
         let waiting = ui.lock_error.flood_until().is_some();
         let shake = ui.shake_offset();
-        let system = ui.system_unlock && self.system_unlock_offered();
+        let system = ui.system_unlock.is_on() && self.system_unlock_offered();
         let mut column = div()
             .w(px(320.))
             .flex()
@@ -964,7 +1032,7 @@ crate::ui::shell::register_dialogs! {
     /// Local passcode settings.
     Passcode => DialogSpec::new(
         200,
-        |app| app.account.passcode.open,
+        |app| app.account.passcode.is_open(),
         QuillApp::build_passcode_dialog,
     )
     .close(|app, window, cx| app.close_passcode(window, cx)),

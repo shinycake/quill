@@ -135,6 +135,27 @@ fn another_folder_ends_a_pinned_drag_unsaved(cx: &mut TestAppContext) {
     );
 }
 
+/// The poll's fall-back when the selected folder is deleted from another
+/// device moves the view through the same mover as a tap on a tab.
+#[gpui_kit::test]
+fn a_folder_deleted_remotely_ends_a_pinned_drag_unsaved(cx: &mut TestAppContext) {
+    let (app, mut vcx, pinned) = open(cx);
+    let first = *pinned.first().expect("a pinned chat");
+    drag(&app, &mut vcx, first, 10.0);
+    drag(&app, &mut vcx, first, 200.0);
+    assert!(app.read_with(&vcx, |app, _| app.chat_list.pin.drag().is_some()));
+    app.update(&mut vcx, |app, _| {
+        let screen = &mut app.screen;
+        screen.folders.tab = Some(1);
+        let filter = screen.chat_list.filter;
+        screen
+            .chat_list
+            .show_view(&mut screen.folders.tab, filter, None);
+        assert_eq!(screen.folders.tab, None);
+    });
+    assert!(app.read_with(&vcx, |app, _| app.chat_list.pin.drag().is_none()));
+}
+
 #[gpui_kit::test]
 fn a_deactivated_window_ends_a_pinned_drag_unsaved(cx: &mut TestAppContext) {
     let (app, mut vcx, pinned) = open(cx);

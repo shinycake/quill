@@ -70,12 +70,10 @@ impl QuillApp {
     /// A pinned drag belongs to the view too: it reorders the list on
     /// screen, so another view ends it unsaved (round 18 B #4).
     pub(in crate::ui) fn set_chat_list_view(&mut self, filter: ChatListFilter, tab: Option<i32>) {
-        if self.chat_list.filter != filter || self.folders.tab != tab {
-            self.chat_list.selected.clear();
-            self.chat_list.pin.end_drag();
-        }
-        self.chat_list.filter = filter;
-        self.folders.tab = tab;
+        let screen = &mut self.screen;
+        screen
+            .chat_list
+            .show_view(&mut screen.folders.tab, filter, tab);
     }
 
     /// The view shows the pinned list `archived` names, in its own order,
