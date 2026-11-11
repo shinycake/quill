@@ -417,15 +417,31 @@ impl DirectMessagesChoice {
     }
 }
 
+/// An answer of `canSendMessageToUser`, with when it came and whether the
+/// viewer was Premium then.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Prior {
+    pub answer: CanSend,
+    pub at: u64,
+    pub viewer_premium: bool,
+}
+
+impl Prior {
+    /// The answer, unless the viewer's Premium changed since it came and it
+    /// depends on that: only "restricts new chats" and "ok" do. A price
+    /// stands whatever the viewer bought.
+    fn standing(self, viewer_premium: bool) -> Option<CanSend> {
+        let depends = matches!(self.answer, CanSend::RestrictsNewChats | CanSend::Ok);
+        (self.viewer_premium == viewer_premium || !depends).then_some(self.answer)
+    }
+}
+
 /// One user's `canSendMessageToUser`: not asked (no entry), in flight, in,
 /// or failed. The time is the caller's clock in unix milliseconds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GateFetch {
     /// In flight since `at`; the answer before it keeps gating meanwhile.
-    Asking {
-        at: u64,
-        before: Option<(CanSend, u64)>,
-    },
+    Asking { at: u64, before: Option<Prior> },
     /// The latest answer. It was given while the viewer was (not) Premium:
     /// after that changes, it is old.
     Known {
@@ -433,9 +449,9 @@ pub enum GateFetch {
         at: u64,
         viewer_premium: bool,
     },
-    /// The ask failed at `at`: the chat is ungated and the next open asks
-    /// again.
-    Failed { at: u64 },
+    /// The ask failed at `at`: the answer before it, if any, keeps gating
+    /// and the next open asks again.
+    Failed { at: u64, before: Option<Prior> },
 }
 
 /// Paid-message state of one account.
@@ -550,20 +566,23 @@ impl PaidMessages {
     }
 
     /// The answer that gates `user_id`'s chat for a viewer who is (not)
-    /// Premium: the answer given under the same Premium, or the one before
-    /// the ask in flight.
+    /// Premium: the latest answer, or the one before an ask in flight or
+    /// one that failed, while it still stands under that Premium.
     pub fn gate_answer(&self, user_id: i64, viewer_premium: bool) -> Option<CanSend> {
         match self.gates.get(&user_id)? {
             GateFetch::Known {
                 answer,
+                at,
                 viewer_premium: given,
-                ..
-            } if *given == viewer_premium => Some(*answer),
-            GateFetch::Asking {
-                before: Some((answer, _)),
-                ..
-            } => Some(*answer),
-            _ => None,
+            } => Prior {
+                answer: *answer,
+                at: *at,
+                viewer_premium: *given,
+            }
+            .standing(viewer_premium),
+            GateFetch::Asking { before, .. } | GateFetch::Failed { before, .. } => {
+                before.and_then(|prior| prior.standing(viewer_premium))
+            }
         }
     }
 
@@ -620,20 +639,35 @@ impl PaidMessages {
     }
 
     pub fn mark_asking(&mut self, user_id: i64, now_ms: u64) {
-        let before = match self.gates.get(&user_id) {
-            Some(GateFetch::Known { answer, at, .. }) => Some((*answer, *at)),
-            Some(GateFetch::Asking { before, .. }) => *before,
-            _ => None,
-        };
+        let before = self.prior(user_id);
         self.gates
             .insert(user_id, GateFetch::Asking { at: now_ms, before });
     }
 
+    /// The latest answer known for `user_id`, through asks and failures.
+    fn prior(&self, user_id: i64) -> Option<Prior> {
+        match self.gates.get(&user_id)? {
+            GateFetch::Known {
+                answer,
+                at,
+                viewer_premium,
+            } => Some(Prior {
+                answer: *answer,
+                at: *at,
+                viewer_premium: *viewer_premium,
+            }),
+            GateFetch::Asking { before, .. } | GateFetch::Failed { before, .. } => *before,
+        }
+    }
+
     /// The ask failed (the send, or the error answer): the chat stays as it
-    /// was, and the next open asks again.
+    /// was, the answer before the ask keeps gating, and the next open asks
+    /// again.
     pub fn ask_failed(&mut self, user_id: i64, now_ms: u64) {
-        if matches!(self.gates.get(&user_id), Some(GateFetch::Asking { .. })) {
-            self.gates.insert(user_id, GateFetch::Failed { at: now_ms });
+        if let Some(GateFetch::Asking { before, .. }) = self.gates.get(&user_id) {
+            let before = *before;
+            self.gates
+                .insert(user_id, GateFetch::Failed { at: now_ms, before });
         }
     }
 }
@@ -988,8 +1022,8 @@ mod tests {
             state.should_ask(6, 6, false),
             "no wait of the old ask timeout after an error"
         );
-        // A failed refresh keeps no stale answer to gate on either: the
-        // answer before it is dropped with the failure.
+        // A failed refresh keeps the answer before it: the known price
+        // does not disappear, so the next send is still confirmed.
         state.record_answer(7, CanSend::HasPaidMessages { stars: 5 }, 0, false);
         state.mark_asking(7, 10);
         assert_eq!(
@@ -998,7 +1032,55 @@ mod tests {
             "the answer before the ask keeps gating while it is out"
         );
         state.ask_failed(7, 11);
+        assert_eq!(
+            state.gate_answer(7, false),
+            Some(CanSend::HasPaidMessages { stars: 5 }),
+            "the price survives a failed refresh"
+        );
         assert!(state.should_ask(7, 12, false));
+        // And through a second failed ask.
+        state.mark_asking(7, 20);
+        state.ask_failed(7, 21);
+        assert_eq!(
+            state.gate_answer(7, false),
+            Some(CanSend::HasPaidMessages { stars: 5 })
+        );
+    }
+
+    #[test]
+    fn a_price_stands_when_the_viewer_buys_premium() {
+        let mut state = PaidMessages::default();
+        state.record_answer(5, CanSend::HasPaidMessages { stars: 7 }, 0, false);
+        state.record_answer(6, CanSend::RestrictsNewChats, 0, false);
+        assert_eq!(
+            state.gate_answer(5, true),
+            Some(CanSend::HasPaidMessages { stars: 7 }),
+            "a price is not undone by Premium"
+        );
+        assert_eq!(state.gate_answer(6, true), None, "a restriction is");
+        // The refresh under the new Premium keeps both kinds of answer
+        // while it is out or failed, each under its own rule.
+        for user in [5, 6] {
+            state.mark_asking(user, 10);
+        }
+        assert_eq!(
+            state.gate_answer(5, true),
+            Some(CanSend::HasPaidMessages { stars: 7 })
+        );
+        assert_eq!(state.gate_answer(6, true), None);
+        assert_eq!(
+            state.gate_answer(6, false),
+            Some(CanSend::RestrictsNewChats),
+            "the Asking answer keeps the Premium it was given under"
+        );
+        state.ask_failed(5, 11);
+        state.ask_failed(6, 11);
+        assert_eq!(
+            state.gate_answer(5, true),
+            Some(CanSend::HasPaidMessages { stars: 7 })
+        );
+        assert_eq!(state.gate_answer(6, true), None);
+        assert!(state.should_ask(5, 12, true), "still refreshed");
     }
 
     #[test]

@@ -690,6 +690,40 @@ mod paid_gate {
     }
 
     #[test]
+    fn a_failed_refresh_keeps_the_known_price() {
+        let mut f = fixture();
+        open_private(&mut f, 510, 511, false, false);
+        f.1.maybe_fetch_paid_messages_info().unwrap();
+        let ask = requests(&f, "canSendMessageToUser").remove(0);
+        ingest(
+            &mut f,
+            &format!(
+                r#"{{"@type":"canSendMessageToUserResultUserHasPaidMessages","outgoing_paid_message_star_count":25,"@extra":"{}"}}"#,
+                extra_of(&ask)
+            ),
+        );
+        // The viewer buys Premium: the refresh is asked and then refused.
+        ingest(
+            &mut f,
+            r#"{"@type":"updateOption","name":"is_premium","value":{"@type":"optionValueBoolean","value":true}}"#,
+        );
+        let refresh = requests(&f, "canSendMessageToUser").remove(1);
+        ingest(
+            &mut f,
+            &format!(
+                r#"{{"@type":"error","code":500,"message":"Internal","@extra":"{}"}}"#,
+                extra_of(&refresh)
+            ),
+        );
+        assert_eq!(
+            f.1.session.paid_send_price(crate::ids::ChatId(510)),
+            25,
+            "the next send still goes through the price confirm"
+        );
+        cleanup(f);
+    }
+
+    #[test]
     fn buying_premium_asks_the_open_chats_gate_again() {
         let mut f = fixture();
         open_private(&mut f, 510, 511, false, false);
@@ -710,7 +744,14 @@ mod paid_gate {
         assert_eq!(
             requests(&f, "canSendMessageToUser").len(),
             2,
-            "the answer was given under the old Premium"
+            "one ask, not two: the answer was given under the old Premium"
+        );
+        // The price is not a Premium answer: it keeps gating (and keeps
+        // the guard's price) while the refresh is out.
+        assert_eq!(
+            f.1.session.paid_send_price(crate::ids::ChatId(510)),
+            25,
+            "buying Premium does not drop a charging chat's price"
         );
         cleanup(f);
     }
