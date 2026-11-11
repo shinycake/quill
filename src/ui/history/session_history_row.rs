@@ -105,13 +105,7 @@ pub(in crate::ui) fn session_history_row(
     {
         return super::super::chat_wide_ui::wide_column(
             wide,
-            QuillApp::group_call_invitation_row(
-                message,
-                *is_active,
-                *was_missed,
-                session.is_some_and(|s| s.calls.pending_conference.is_some()),
-                cx,
-            ),
+            QuillApp::group_call_invitation_row(message, *is_active, *was_missed, session, cx),
         );
     }
     let on_fill = message.is_outgoing && !look.plain;

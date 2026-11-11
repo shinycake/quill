@@ -291,14 +291,15 @@ impl QuillApp {
     /// Anything else reads as tdesktop's group call entries ("Outgoing
     /// group call", "Missed group call", ...); TDLib updates refresh the
     /// row when it is joined or missed. While a join is on its way
-    /// (`joining`) neither button acts: the answer settles the row.
+    /// (`pending_conference`) neither button acts: the answer settles the row.
     pub(super) fn group_call_invitation_row(
         message: &HistoryMessage,
         is_active: bool,
         was_missed: bool,
-        joining: bool,
+        session: Option<&quill::state::Session>,
         cx: &mut Context<QuillApp>,
     ) -> impl IntoElement {
+        let joining = session.is_some_and(|s| s.calls.pending_conference.is_some());
         let mut inner = div().flex().flex_col().items_center().gap_2();
         if !message.is_outgoing && !is_active && !was_missed {
             let chat_id = message.chat_id;
