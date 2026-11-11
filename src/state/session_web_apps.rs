@@ -50,19 +50,26 @@ impl Session {
                 }
             }
             BotsPayload::FoundWebApp(app) => {
-                if let Some(RequestPurpose::Bots(BotsPurpose::SearchWebApp { bot_user_id })) =
-                    purpose
+                if let (Some(p), Some(RequestPurpose::Bots(BotsPurpose::SearchWebApp { .. }))) =
+                    (pending, purpose)
                 {
-                    self.bots.web_apps.found = Some((bot_user_id, Ok(app)));
+                    self.bots
+                        .web_apps
+                        .found
+                        .push(WebAnswer::new(p.id, Ok(app)));
                 }
             }
             BotsPayload::AttachmentMenuBot(bot) => {
                 self.keep_attach_bot_icons(std::slice::from_ref(&bot));
-                if let Some(RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot {
-                    bot_user_id,
-                })) = purpose
+                if let (
+                    Some(p),
+                    Some(RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot { .. })),
+                ) = (pending, purpose)
                 {
-                    self.bots.web_apps.attachment_menu_bot = Some((bot_user_id, Ok(bot)));
+                    self.bots
+                        .web_apps
+                        .attachment_menu_bot
+                        .push(WebAnswer::new(p.id, Ok(bot)));
                 }
             }
             BotsPayload::UpdateAttachmentMenuBots(bots) => {
@@ -154,23 +161,26 @@ impl Session {
                 self.bots.web_apps.write_access = pending
                     .map(|p| WriteAnswer::new(p.id, bot_user_id, WriteAccessResult::Granted));
             }
-            Some(RequestPurpose::Bots(BotsPurpose::ToggleBotEmojiStatusAccess {
-                bot_user_id,
-                ..
-            })) => {
-                self.bots.web_apps.emoji_access = Some((bot_user_id, true));
+            Some(RequestPurpose::Bots(BotsPurpose::ToggleBotEmojiStatusAccess { .. })) => {
+                if let Some(p) = pending {
+                    self.bots
+                        .web_apps
+                        .emoji_access
+                        .push(WebAnswer::new(p.id, true));
+                }
             }
             Some(RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu {
-                bot_user_id,
-                added,
+                added, ..
             })) => {
-                self.bots
-                    .web_apps
-                    .attachment_menu_toggled
-                    .push(AttachmentToggle {
-                        bot_user_id,
-                        result: Ok(added),
-                    });
+                if let Some(p) = pending {
+                    self.bots
+                        .web_apps
+                        .attachment_menu_toggled
+                        .push(AttachmentToggle {
+                            request: p.id,
+                            result: Ok(added),
+                        });
+                }
             }
             Some(RequestPurpose::SendWebAppData) => {
                 self.bots.web_apps.data_sent = Some(Ok(()));
@@ -196,13 +206,16 @@ impl Session {
                         }));
                 }
             }
-            RequestPurpose::Bots(BotsPurpose::SearchWebApp { bot_user_id }) => {
+            RequestPurpose::Bots(BotsPurpose::SearchWebApp { .. }) => {
                 let message = if err.code == 404 {
                     "This bot has no app with that name.".into()
                 } else {
                     web_app_error_text(err)
                 };
-                self.bots.web_apps.found = Some((bot_user_id, Err(message)));
+                self.bots
+                    .web_apps
+                    .found
+                    .push(WebAnswer::new(p.id, Err(message)));
             }
             RequestPurpose::Bots(BotsPurpose::CanBotSendMessages { bot_user_id }) => {
                 self.bots.web_apps.write_access = Some(WriteAnswer::new(
@@ -233,20 +246,23 @@ impl Session {
                 if let Some(Some(info)) = self.bots.bot_info.get_mut(&bot_user_id) {
                     info.can_manage_emoji_status = !allowed;
                 }
-                self.bots.web_apps.emoji_access = Some((bot_user_id, false));
+                self.bots
+                    .web_apps
+                    .emoji_access
+                    .push(WebAnswer::new(p.id, false));
             }
-            RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot { bot_user_id }) => {
-                self.bots.web_apps.attachment_menu_bot =
-                    Some((bot_user_id, Err(web_app_error_text(err))));
+            RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot { .. }) => {
+                self.bots
+                    .web_apps
+                    .attachment_menu_bot
+                    .push(WebAnswer::new(p.id, Err(web_app_error_text(err))));
             }
-            RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu {
-                bot_user_id, ..
-            }) => {
+            RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu { .. }) => {
                 self.bots
                     .web_apps
                     .attachment_menu_toggled
                     .push(AttachmentToggle {
-                        bot_user_id,
+                        request: p.id,
                         result: Err(web_app_error_text(err)),
                     });
             }

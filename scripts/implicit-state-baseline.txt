@@ -19,7 +19,6 @@ ChecklistDialog::others_can_mark_tasks_as_done
 ChecklistDialog::others_can_mark_tasks_as_done+error
 ChecklistDraft::others_can_mark_tasks_as_done
 ChecklistSend::others_can_mark_tasks_as_done
-CheckoutView::sending
 
 DestRow::saved
 DragSelect::pending
@@ -47,7 +46,6 @@ Lookup::pending
 
 MediaMenuFacts::downloading
 
-MiniAppWindow::closing_confirmation
 
 
 

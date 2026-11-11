@@ -41,6 +41,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = get_payment_form(extra, &invoice);
         let sent = self.send_json_request(extra, &json)?;
         // The checkout waits on the form only once the request is out.
+        self.session.payments.forget_outcome(&invoice);
         self.session.payments.request = Some(PaymentRequest { invoice });
         self.session.payments.checkout = crate::state::CheckoutForm::Loading { request: extra };
         Ok(sent)

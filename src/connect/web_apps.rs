@@ -181,7 +181,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Bots(BotsPurpose::SearchWebApp { bot_user_id }),
             None,
         )?;
-        self.session.bots.web_apps.found = None;
         let json = search_web_app(extra, bot_user_id, short_name);
         self.send_json_request(extra, &json)
     }
@@ -192,6 +191,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn forget_web_app_launches(&mut self) {
         let apps = &mut self.session.bots.web_apps;
         apps.pending.clear();
+        apps.found.clear();
+        apps.attachment_menu_bot.clear();
+        apps.attachment_menu_toggled.clear();
         apps.replace_open_result(None);
         self.close_dropped_web_apps();
     }
@@ -294,7 +296,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             None,
         )?;
-        self.session.bots.web_apps.emoji_access = None;
         let before = match self.session.bots.bot_info.get_mut(&bot_user_id) {
             Some(Some(info)) => Some(std::mem::replace(
                 &mut info.can_manage_emoji_status,
@@ -324,7 +325,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot { bot_user_id }),
             None,
         )?;
-        self.session.bots.web_apps.attachment_menu_bot = None;
         let json = get_attachment_menu_bot(extra, bot_user_id);
         self.send_json_request(extra, &json)
     }
@@ -340,11 +340,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu { bot_user_id, added }),
             None,
         )?;
-        self.session
-            .bots
-            .web_apps
-            .attachment_menu_toggled
-            .retain(|toggle| toggle.bot_user_id != bot_user_id);
         let json =
             toggle_bot_is_added_to_attachment_menu(extra, bot_user_id, added, allow_write_access);
         self.send_json_request(extra, &json)

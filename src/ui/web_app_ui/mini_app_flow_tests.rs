@@ -257,11 +257,37 @@ fn a_paid_checkout_reports_paid_and_closes(cx: &mut TestAppContext) {
                 product_title: "Pack".into(),
                 product_description: String::new(),
             });
+        payments.record_outcome(
+            &quill::payment_invoice::InputInvoice::Name("abc".into()),
+            quill::state::PaymentVerdict::Paid,
+        );
         app.poll_invoice(cx);
         let (event, data) = reply(&received);
         assert_eq!(event, "invoice_closed");
         assert_eq!(data["status"], "paid");
         assert!(app.payments.dialog.is_none(), "the checkout closes");
+    });
+}
+
+/// Sweep 14-016: a payment refused between two polls is recorded by the
+/// payments state, so closing the checkout afterwards reports `failed`, not
+/// `cancelled`.
+#[gpui_kit::test]
+fn a_payment_refused_between_polls_reports_failed(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let received = open_window(app, cx);
+        app.open_payment_dialog(window, cx);
+        app.mini_apps.window.as_mut().unwrap().invoice = Some(InvoiceWatch::new("abc"));
+        app.demo_session.as_mut().unwrap().payments.record_outcome(
+            &quill::payment_invoice::InputInvoice::Name("abc".into()),
+            quill::state::PaymentVerdict::Refused,
+        );
+        app.close_payment_dialog(cx);
+        app.poll_invoice(cx);
+        let (event, data) = reply(&received);
+        assert_eq!(event, "invoice_closed");
+        assert_eq!(data["status"], "failed");
     });
 }
 
@@ -278,6 +304,7 @@ fn an_account_switch_closes_the_mini_app_and_what_waits(cx: &mut TestAppContext)
             bot_id: BOT,
         };
         let awaited = Awaited {
+            request: quill::ids::RequestId(1),
             then: waiting,
             window: None,
         };

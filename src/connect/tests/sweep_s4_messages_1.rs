@@ -238,12 +238,14 @@ fn effects_are_looked_up_for_the_messages_of_every_shown_chat() {
 }
 
 #[test]
-fn an_attachment_menu_answer_names_its_bot() {
+fn an_attachment_menu_answer_names_its_request() {
     let mut t = Flaky::new();
-    t.driver
+    let first = t
+        .driver
         .toggle_bot_in_attachment_menu(43, true, false)
         .unwrap();
-    t.driver
+    let second = t
+        .driver
         .toggle_bot_in_attachment_menu(44, false, false)
         .unwrap();
     let asked = t.sender.all("toggleBotIsAddedToAttachmentMenu");
@@ -258,9 +260,9 @@ fn an_attachment_menu_answer_names_its_bot() {
         .web_apps
         .attachment_menu_toggled
         .iter()
-        .map(|toggle| (toggle.bot_user_id, toggle.result.is_ok()))
+        .map(|toggle| (toggle.request, toggle.result.is_ok()))
         .collect();
-    assert_eq!(toggles, [(44, false), (43, true)]);
+    assert_eq!(toggles, [(second, false), (first, true)]);
 }
 
 #[test]

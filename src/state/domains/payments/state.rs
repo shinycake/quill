@@ -180,6 +180,23 @@ impl CheckoutForm {
     }
 }
 
+/// How a `sendPaymentForm` for an invoice ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaymentVerdict {
+    Paid,
+    /// The payment was refused (an error, or a failed result).
+    Refused,
+    /// The answer asked for a verification step outside the checkout.
+    Verifying,
+}
+
+/// The verdict of the last finished payment of `invoice`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PaymentOutcome {
+    pub invoice: crate::payment_invoice::InputInvoice,
+    pub verdict: PaymentVerdict,
+}
+
 pub struct PaymentsState {
     /// Slice P1: the in-flight payment request context (`getPaymentForm`,
     /// `validateOrderInfo`, `sendPaymentForm`, `getPaymentReceipt`).
@@ -207,6 +224,11 @@ pub struct PaymentsState {
     /// and is disabled while one is in flight for the invoice shown
     /// ([`PaymentsState::checkout_sending`]).
     pub paying: Vec<PaymentInFlight>,
+    /// The verdict of each invoice's last finished payment, whatever
+    /// checkout was on screen, so a mini app's watcher reads how its
+    /// payment ended instead of diffing looks. A new payment or a new
+    /// checkout of the invoice starts it over; one entry per invoice.
+    pub outcomes: Vec<PaymentOutcome>,
     /// "Media Unlocked" note after a paid-media purchase, drained into the
     /// status bar by the UI poll.
     pub unlocked_notice: Option<String>,
@@ -361,6 +383,32 @@ impl PaymentsState {
         });
     }
 
+    /// `invoice`'s payment ended with `verdict`.
+    pub fn record_outcome(
+        &mut self,
+        invoice: &crate::payment_invoice::InputInvoice,
+        verdict: PaymentVerdict,
+    ) {
+        self.forget_outcome(invoice);
+        self.outcomes.push(PaymentOutcome {
+            invoice: invoice.clone(),
+            verdict,
+        });
+    }
+
+    /// A new payment or checkout of `invoice` starts over.
+    pub fn forget_outcome(&mut self, invoice: &crate::payment_invoice::InputInvoice) {
+        self.outcomes.retain(|outcome| &outcome.invoice != invoice);
+    }
+
+    /// How `invoice`'s last finished payment ended.
+    pub fn outcome_of(&self, invoice: &crate::payment_invoice::InputInvoice) -> Option<PaymentVerdict> {
+        self.outcomes
+            .iter()
+            .find(|outcome| &outcome.invoice == invoice)
+            .map(|outcome| outcome.verdict)
+    }
+
     /// The payment `request_id` answered: it leaves the in-flight list.
     pub(crate) fn take_paying(&mut self, request_id: Option<RequestId>) -> Option<PaymentInFlight> {
         let index = self
@@ -417,6 +465,7 @@ impl PaymentsState {
             note: None,
             paying: Vec::new(),
             unlocked_notice: None,
+            outcomes: Vec::new(),
             notices: Vec::new(),
             receipt_error: None,
             verification_url: None,

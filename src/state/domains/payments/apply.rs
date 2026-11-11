@@ -71,6 +71,16 @@ impl Session {
                     && let Some(paid) = self.payments.take_paying(extra)
                 {
                     let shown = self.payments.shows(&paid.invoice);
+                    self.payments.record_outcome(
+                        &paid.invoice,
+                        if result.success {
+                            PaymentVerdict::Paid
+                        } else if !result.verification_url.is_empty() {
+                            PaymentVerdict::Verifying
+                        } else {
+                            PaymentVerdict::Refused
+                        },
+                    );
                     if shown {
                         self.payments.checkout.end_verification();
                     }

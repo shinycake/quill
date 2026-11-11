@@ -1,6 +1,7 @@
 //! Mini-app state the reducer keeps for the UI: one-shot answers the UI
 //! takes on its next poll, plus the attachment menu bots.
 
+use crate::ids::RequestId;
 use crate::telegram::envelope::{AttachmentMenuBot, FoundWebApp};
 use crate::web_app::LaunchSource;
 use std::collections::HashMap;
@@ -91,10 +92,24 @@ impl PhoneShare {
     }
 }
 
+/// An answer with the request that asked for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebAnswer<T> {
+    pub request: RequestId,
+    pub result: T,
+}
+
+impl<T> WebAnswer<T> {
+    pub fn new(request: RequestId, result: T) -> Self {
+        Self { request, result }
+    }
+}
+
 /// The outcome of one `toggleBotIsAddedToAttachmentMenu`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttachmentToggle {
-    pub bot_user_id: i64,
+    /// The request this answers: the flow waiting takes only its own.
+    pub request: RequestId,
     /// Whether the bot is in the menu now, or why the change failed.
     pub result: Result<bool, String>,
 }
@@ -133,23 +148,24 @@ pub struct WebApps {
     pub dropped_launches: Vec<i64>,
     /// `updateAttachmentMenuBots`: the bots in the attachment menu.
     pub attachment_menu_bots: Vec<AttachmentMenuBot>,
-    /// One-shot: `getAttachmentMenuBot` answer (for adding a bot), or a
-    /// failure message, with the bot it was asked for: the flow waiting
-    /// takes only its own bot's answer.
-    pub attachment_menu_bot: Option<(i64, Result<AttachmentMenuBot, String>)>,
+    /// One-shot: `getAttachmentMenuBot` answers (for adding a bot), or a
+    /// failure message, each with the request it answers: the flow waiting
+    /// takes only its own.
+    pub attachment_menu_bot: Vec<WebAnswer<Result<AttachmentMenuBot, String>>>,
     /// One-shot: `toggleBotIsAddedToAttachmentMenu` outcomes, oldest
-    /// first, each with the bot it answers: the flow waiting takes only its
-    /// own bot's.
+    /// first, each with the request it answers: the flow waiting takes only
+    /// its own.
     pub attachment_menu_toggled: Vec<AttachmentToggle>,
     /// One-shot: the write-access answer, with the request it answers.
     pub write_access: Option<WriteAnswer>,
-    /// One-shot: `toggleBotCanManageEmojiStatus` outcome,
-    /// `(bot_user_id, done)`.
-    pub emoji_access: Option<(i64, bool)>,
-    /// One-shot: `searchWebApp` answer for a `t.me/bot/app` link, the app
-    /// or a failure message, with the bot it was asked for: a second link
-    /// clicked before the first answered takes only its own answer.
-    pub found: Option<(i64, Result<FoundWebApp, String>)>,
+    /// One-shot: `toggleBotCanManageEmojiStatus` outcomes (`true`: done),
+    /// each with the request it answers: the mini app waiting for a grant
+    /// takes only its own, not the bot permissions panel's.
+    pub emoji_access: Vec<WebAnswer<bool>>,
+    /// One-shot: `searchWebApp` answers for `t.me/bot/app` links, the app
+    /// or a failure message, each with the request it answers: a second
+    /// link clicked before the first answered takes only its own answer.
+    pub found: Vec<WebAnswer<Result<FoundWebApp, String>>>,
     /// `req_id`s of custom requests in flight, by `RequestId`.
     pub custom_requests: HashMap<u64, String>,
     /// One-shot: custom request answers.

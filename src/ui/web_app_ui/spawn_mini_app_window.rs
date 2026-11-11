@@ -4,6 +4,7 @@ use super::helper_pipe::{HelperWriter, Line, read_bounded_line};
 use super::*;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
+use quill::state::WebAnswer;
 
 impl QuillApp {
     pub(super) fn spawn_mini_app_window(&mut self, launch: WebAppLaunch, cx: &mut Context<Self>) {
@@ -229,9 +230,9 @@ impl QuillApp {
         let open_result = apps.open_result.take();
         let write_access = apps.write_access.take();
         let custom_replies = std::mem::take(&mut apps.custom_replies);
-        let attach_bot = apps.attachment_menu_bot.take();
+        let attach_bot = std::mem::take(&mut apps.attachment_menu_bot);
         let toggled = std::mem::take(&mut apps.attachment_menu_toggled);
-        let found = apps.found.take();
+        let found = std::mem::take(&mut apps.found);
         let data_sent = apps.data_sent.take();
 
         if let Some(result) = open_result {
@@ -281,12 +282,15 @@ impl QuillApp {
                 window.emit(reply);
             }
         }
-        // An answer for another bot than the flow waiting (a link clicked
-        // before the first one answered) is dropped: it never drives this
-        // launch, and the flow keeps waiting for its own.
-        if let Some((asked, result)) = attach_bot
-            && let Some(Awaited { then, window }) = self.mini_apps.flow.take_attach_bot_for(asked)
-        {
+        // An answer to another request than the flow waits on (a link
+        // clicked before the first one answered) is dropped: it never
+        // drives this launch, and the flow keeps waiting for its own.
+        for WebAnswer { request, result } in attach_bot {
+            let Some(Awaited { then, window, .. }) =
+                self.mini_apps.flow.take_attach_bot_for(request)
+            else {
+                continue;
+            };
             self.as_asked_by(window, |this| match result {
                 Ok(bot) if bot.is_added => this.start_web_app(then, cx),
                 Ok(bot) => {
@@ -301,11 +305,11 @@ impl QuillApp {
                 Err(message) => this.set_status_note(StatusNote::error(&message), cx),
             });
         }
-        // Each answer is for its own bot: the flow waiting for another
-        // bot's toggle goes on waiting (its launch is not started by an
-        // answer that is not its own).
+        // Each answer is for its own request: the flow waiting for another
+        // toggle goes on waiting (its launch is not started by an answer
+        // that is not its own).
         for toggle in toggled {
-            let toggled_bot = toggle.bot_user_id;
+            let request = toggle.request;
             match toggle.result {
                 Ok(added) => {
                     self.set_status_note(
@@ -316,24 +320,25 @@ impl QuillApp {
                         },
                         cx,
                     );
-                    // Only the answer for the bot being added goes on to
-                    // its launch: another app's menu change is not it.
-                    if let Some(Awaited { then, window }) =
-                        self.mini_apps.flow.take_add_for(toggled_bot)
+                    // Only the answer to the add being waited on goes on to
+                    // its launch: another menu change is not it.
+                    if let Some(Awaited { then, window, .. }) =
+                        self.mini_apps.flow.take_add_for(request)
                     {
                         self.as_asked_by(window, |this| this.request_web_app(then, false, cx));
                     }
                 }
                 Err(message) => {
-                    self.mini_apps.flow.take_add_for(toggled_bot);
+                    self.mini_apps.flow.take_add_for(request);
                     self.set_status_note(StatusNote::error(&message), cx);
                 }
             }
         }
-        if let Some((asked, result)) = found
-            && let Some(Awaited { then, window }) = self.mini_apps.flow.take_search_for(asked)
-        {
-            self.as_asked_by(window, |this| this.found_web_app_answer(then, result, cx));
+        for WebAnswer { request, result } in found {
+            if let Some(Awaited { then, window, .. }) = self.mini_apps.flow.take_search_for(request)
+            {
+                self.as_asked_by(window, |this| this.found_web_app_answer(then, result, cx));
+            }
         }
         if let Some(result) = data_sent {
             match result {

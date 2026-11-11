@@ -296,8 +296,9 @@ fn emoji_status_access_follows_the_switch_and_comes_back_on_failure() {
     assert_eq!(emoji_access(&h), Some(true), "put back");
     assert_eq!(
         h.driver.session.bots.web_apps.emoji_access,
-        Some((42, false))
+        [crate::state::WebAnswer::new(extra, false)]
     );
+    h.driver.session.bots.web_apps.emoji_access.clear();
 
     let extra = h
         .driver
@@ -310,7 +311,7 @@ fn emoji_status_access_follows_the_switch_and_comes_back_on_failure() {
     assert_eq!(emoji_access(&h), Some(false));
     assert_eq!(
         h.driver.session.bots.web_apps.emoji_access,
-        Some((42, true))
+        [crate::state::WebAnswer::new(extra, true)]
     );
 }
 
@@ -368,9 +369,10 @@ fn attachment_menu_bots_and_custom_requests_round_trip() {
         .web_apps
         .attachment_menu_bot
         .clone()
-        .unwrap()
-        .1
+        .pop()
         .unwrap();
+    assert_eq!(bot.request, extra);
+    let bot = bot.result.unwrap();
     assert_eq!(bot.bot_user_id, 43);
     assert!(!bot.is_added);
     let extra = h
@@ -387,7 +389,7 @@ fn attachment_menu_bots_and_custom_requests_round_trip() {
     assert_eq!(
         h.driver.session.bots.web_apps.attachment_menu_toggled,
         [crate::state::AttachmentToggle {
-            bot_user_id: 43,
+            request: extra,
             result: Ok(true)
         }]
     );
@@ -411,6 +413,31 @@ fn attachment_menu_bots_and_custom_requests_round_trip() {
     assert!(h.driver.session.bots.web_apps.custom_requests.is_empty());
 }
 
+/// Two searches for the same bot answered together keep both answers, each
+/// under the request that asked.
+#[test]
+fn searches_for_one_bot_keep_one_answer_per_request() {
+    let mut h = Harness::ready();
+    let first = h.driver.search_web_app(42, "one").expect("sent");
+    let second = h.driver.search_web_app(42, "two").expect("sent");
+    for extra in [second, first] {
+        h.ingest(&format!(
+            r#"{{"@type":"error","@extra":"{}","code":404,"message":"Not Found"}}"#,
+            extra.as_extra()
+        ));
+    }
+    let requests: Vec<_> = h
+        .driver
+        .session
+        .bots
+        .web_apps
+        .found
+        .iter()
+        .map(|answer| answer.request)
+        .collect();
+    assert_eq!(requests, [second, first]);
+}
+
 /// Round 17 C finding 15: a refused search names the bot it was for, so a
 /// second link clicked before the first answered is not cancelled (or
 /// launched without its consent box) by the first one's answer.
@@ -422,9 +449,9 @@ fn a_search_answer_names_its_bot_even_when_refused() {
         r#"{{"@type":"error","@extra":"{}","code":404,"message":"Not Found"}}"#,
         extra.as_extra()
     ));
-    let (bot_id, app) = h.driver.session.bots.web_apps.found.clone().unwrap();
-    assert_eq!(bot_id, 42);
-    assert!(app.is_err());
+    let answer = h.driver.session.bots.web_apps.found.clone().pop().unwrap();
+    assert_eq!(answer.request, extra);
+    assert!(answer.result.is_err());
 }
 
 /// Round 17 C finding 19: a data send keeps the mini-app poll alive until
@@ -452,9 +479,9 @@ fn named_app_links_search_first() {
         r#"{{"@type":"foundWebApp","@extra":"{}","web_app":{{"@type":"webApp","short_name":"shop","title":"Shop","description":""}},"request_write_access":true,"skip_confirmation":false}}"#,
         extra.as_extra()
     ));
-    let (bot_id, app) = h.driver.session.bots.web_apps.found.clone().unwrap();
-    let app = app.unwrap();
-    assert_eq!(bot_id, 42);
+    let answer = h.driver.session.bots.web_apps.found.clone().pop().unwrap();
+    assert_eq!(answer.request, extra);
+    let app = answer.result.unwrap();
     assert_eq!(app.title, "Shop");
     assert!(app.request_write_access);
     let theme = ThemeParams::light_default();

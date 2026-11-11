@@ -21,12 +21,13 @@ impl Session {
     /// screen: remember what it pays, so its answer goes to it.
     pub(crate) fn payment_sent(&mut self, request_id: RequestId) {
         let payments = &mut self.payments;
-        let Some(request) = payments.request.as_ref() else {
+        let Some(invoice) = payments.request.as_ref().map(|r| r.invoice.clone()) else {
             return;
         };
+        payments.forget_outcome(&invoice);
         payments.paying.push(PaymentInFlight {
             request_id,
-            invoice: request.invoice.clone(),
+            invoice,
             form: payments.checkout.form().cloned(),
         });
     }
