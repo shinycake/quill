@@ -228,7 +228,7 @@ impl QuillApp {
         menu: ChatMenuState,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        if menu.top_person {
+        if menu.kind == crate::ui::menu_states::ChatMenuKind::TopPerson {
             return self.top_person_menu_overlay(menu, cx);
         }
         let chat_id = menu.chat_id;
@@ -338,7 +338,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.chat_list.menu = None;
+                    this.chat_list.menu.close();
                     this.open_chat_in_new_window(chat_id, window, cx);
                     cx.notify();
                 }
@@ -354,7 +354,7 @@ impl QuillApp {
                 this,
                 cx,
                 {
-                    this.chat_list.menu = None;
+                    this.chat_list.menu.close();
                     if let Some(live) = this.live.as_mut() {
                         let _ = live.driver.hide_promotion(chat_id);
                     }
@@ -380,7 +380,7 @@ impl QuillApp {
                 cx,
                 {
                     this.toggle_archive(chat_id, cx);
-                    this.chat_list.menu = None;
+                    this.chat_list.menu.close();
                     cx.notify();
                 }
             );
@@ -397,7 +397,7 @@ impl QuillApp {
                 cx,
                 {
                     this.toggle_chat_pin(chat_id, cx);
-                    this.chat_list.menu = None;
+                    this.chat_list.menu.close();
                     cx.notify();
                 }
             );
@@ -422,7 +422,7 @@ impl QuillApp {
             cx,
             {
                 this.toggle_chat_marked_as_unread(chat_id, cx);
-                this.chat_list.menu = None;
+                this.chat_list.menu.close();
                 cx.notify();
             }
         );
@@ -449,7 +449,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.chat_list.menu = None;
+                    this.chat_list.menu.close();
                     if let Some(target) = this.session().and_then(|s| s.chat_info_target(chat_id)) {
                         this.open_info_panel_target(target, window, cx);
                     }
@@ -471,7 +471,7 @@ impl QuillApp {
                         quill::state::UnreadJumpKind::Mention,
                         cx,
                     );
-                    this.chat_list.menu = None;
+                    this.chat_list.menu.close();
                     cx.notify();
                 }
             );
@@ -490,7 +490,7 @@ impl QuillApp {
                         quill::state::UnreadJumpKind::Reaction,
                         cx,
                     );
-                    this.chat_list.menu = None;
+                    this.chat_list.menu.close();
                     cx.notify();
                 }
             );
@@ -509,7 +509,7 @@ impl QuillApp {
                         quill::state::UnreadJumpKind::PollVote,
                         cx,
                     );
-                    this.chat_list.menu = None;
+                    this.chat_list.menu.close();
                     cx.notify();
                 }
             );
@@ -524,7 +524,7 @@ impl QuillApp {
             cx,
             {
                 this.enter_select_mode(chat_id, cx);
-                this.chat_list.menu = None;
+                this.chat_list.menu.close();
                 cx.notify();
             }
         );
@@ -539,7 +539,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.chat_list.menu = None;
+                    this.chat_list.menu.close();
                     this.open_clear_history_box(chat_id, window, cx);
                     cx.notify();
                 }
@@ -558,7 +558,7 @@ impl QuillApp {
                 this,
                 cx,
                 {
-                    this.chat_list.menu = None;
+                    this.chat_list.menu.close();
                     this.open_message_report(chat_id, Vec::new(), cx);
                     cx.notify();
                 }
@@ -599,7 +599,7 @@ impl QuillApp {
                         },
                         cx,
                     );
-                    this.chat_list.menu = None;
+                    this.chat_list.menu.close();
                     cx.notify();
                 }
             );
@@ -614,7 +614,7 @@ impl QuillApp {
                 cx,
                 {
                     this.start_chat_export(chat_id, cx);
-                    this.chat_list.menu = None;
+                    this.chat_list.menu.close();
                     cx.notify();
                 }
             );

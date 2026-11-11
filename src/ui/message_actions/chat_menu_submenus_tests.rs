@@ -56,7 +56,7 @@ fn open(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext, ChatId
 
 fn show_menu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, chat_id: ChatId) {
     app.update(vcx, |app, cx| {
-        app.chat_list.menu = Some(ChatMenuState::at(chat_id, point(px(120.), px(200.))));
+        app.chat_list.menu.open(ChatMenuState::at(chat_id, point(px(120.), px(200.))));
         cx.notify();
     });
     frames(vcx);
@@ -87,7 +87,7 @@ fn mute_submenu_applies_the_chosen_duration(cx: &mut TestAppContext) {
             app.session()
                 .and_then(|s| s.chats.get(&chat_id.0))
                 .map(|chat| chat.notification_settings.mute_for),
-            app.chat_list.menu.is_none(),
+            !app.chat_list.menu.is_open(),
         )
     });
     assert_eq!(muted, Some(8 * 3600));
@@ -123,7 +123,7 @@ fn a_chat_muted_by_the_scope_default_offers_a_direct_unmute(cx: &mut TestAppCont
     click(vcx, "chat-menu-mute");
     // Unmute acts at once: no submenu, the menu closes, and the chat
     // becomes an unmuted exception to the scope default.
-    assert!(app.update(vcx, |app, _| app.chat_list.menu.is_none()));
+    assert!(app.update(vcx, |app, _| !app.chat_list.menu.is_open()));
     let muted_after = app.update(vcx, |app, _| {
         app.session().is_some_and(|s| {
             s.chats
@@ -209,12 +209,12 @@ fn add_to_folder_needs_a_folder_and_lists_them(cx: &mut TestAppContext) {
     assert!(present(vcx, "chat-menu-folder"));
     click(vcx, "chat-menu-folder");
     let open = app.update(vcx, |app, _| {
-        app.chat_list.menu.and_then(|menu| menu.submenu)
+        app.chat_list.menu.state().and_then(|menu| menu.submenu)
     });
     assert_eq!(open, Some(ChatMenuSubmenu::Folders));
     assert!(present(vcx, "chat-menu-folder-7"));
     click(vcx, "chat-menu-folder-7");
-    assert!(app.update(vcx, |app, _| app.chat_list.menu.is_none()));
+    assert!(app.update(vcx, |app, _| !app.chat_list.menu.is_open()));
 }
 
 #[gpui_kit::test]
@@ -319,7 +319,7 @@ fn a_promotion_shapes_the_menu_like_use_top_promotion(cx: &mut TestAppContext) {
     assert!(!present(vcx, "chat-menu-pin"));
     assert!(!present(vcx, "chat-menu-new-window"));
     click(vcx, "chat-menu-hide-promotion");
-    assert!(app.update(vcx, |app, _| app.chat_list.menu.is_none()));
+    assert!(app.update(vcx, |app, _| !app.chat_list.menu.is_open()));
 }
 
 fn set_clear_flags(
@@ -355,7 +355,7 @@ fn clear_history_is_one_item_that_asks_once(cx: &mut TestAppContext) {
         "no separate item for everyone"
     );
     click(vcx, "chat-menu-clear");
-    assert!(app.update(vcx, |app, _| app.chat_list.menu.is_none()));
+    assert!(app.update(vcx, |app, _| !app.chat_list.menu.is_open()));
     assert!(
         present(vcx, "clear-history-revoke"),
         "the box offers the checkbox where the other side can be cleared"
@@ -394,7 +394,7 @@ fn menu_and_submenu_at(
     let (app, mut vcx, chat_id) = open(cx);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.chat_list.menu = Some(ChatMenuState::at(chat_id, point(px(x), px(200.))));
+        app.chat_list.menu.open(ChatMenuState::at(chat_id, point(px(x), px(200.))));
         cx.notify();
     });
     frames(vcx);

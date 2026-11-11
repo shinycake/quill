@@ -187,7 +187,7 @@ pub(crate) struct ChatListUi {
     pub(super) row_fx: std::cell::RefCell<quill::row_fx::RowFxMap>,
     /// Slice CL1: right-click chat-row context menu target + window
     /// position.
-    pub(super) menu: Option<ChatMenuState>,
+    pub(super) menu: super::menu_states::ChatMenu,
     /// Right-click menu of the "Archived chats" row (window position).
     pub(super) archive_menu: Option<Point<Pixels>>,
     /// Contacts tab, stories menu, suggestions and search tabs.
@@ -253,7 +253,7 @@ impl ChatListUi {
             swipe: Default::default(),
             downloads_panel_open: false,
             row_fx: Default::default(),
-            menu: None,
+            menu: Default::default(),
             archive_menu: None,
             global,
             pin: PinStage::Idle,

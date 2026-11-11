@@ -663,7 +663,7 @@ impl QuillApp {
         };
         let size = window.viewport_size();
         self.chat_list.peek.close();
-        self.chat_list.menu = Some(ChatMenuState::at(
+        self.chat_list.menu.open(ChatMenuState::at(
             chat_id,
             point(size.width - px(220.), px(64.)),
         ));

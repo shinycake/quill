@@ -554,7 +554,7 @@ impl Render for QuillApp {
                 },
             )
             // Slice CL1: right-click chat-row context menu.
-            .when_some(self.chat_list.menu, |this, menu| {
+            .when_some(self.chat_list.menu.state(), |this, menu| {
                 this.child(self.chat_menu_overlay(menu, cx))
             })
             .when_some(
