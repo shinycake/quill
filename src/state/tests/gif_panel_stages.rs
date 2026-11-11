@@ -65,3 +65,17 @@ fn a_failed_save_leaves_the_list_in_place() {
     panel.saved_failure_cleared();
     assert!(panel.loaded() && !panel.failed());
 }
+
+#[test]
+fn clearing_a_failure_leaves_a_list_that_did_not_fail_alone() {
+    let mut panel = GifPanel::default();
+    panel.saved_answered(Vec::new());
+    panel.saved_failure_cleared();
+    assert!(panel.loaded() && !panel.failed());
+    let mut idle = GifPanel::default();
+    idle.saved_failure_cleared();
+    assert!(!idle.loaded());
+    idle.saved_asked();
+    idle.saved_failure_cleared();
+    assert!(idle.loading());
+}

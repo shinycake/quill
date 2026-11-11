@@ -47,7 +47,7 @@ pub(crate) enum Prefill {
 pub(crate) enum PaymentPage {
     Checkout,
     Country(crate::ui::country_box::CountryBox),
-    CardForm(crate::ui::payments::card_form::CardForm),
+    CardForm(Box<crate::ui::payments::card_form::CardForm>),
 }
 
 /// The card entered in the "New Card" form. `NeedsPassword` is the same
@@ -189,7 +189,7 @@ impl PaymentDialog {
 
     pub(crate) fn card_form(&self) -> Option<&crate::ui::payments::card_form::CardForm> {
         match &self.page {
-            PaymentPage::CardForm(form) => Some(form),
+            PaymentPage::CardForm(form) => Some(form.as_ref()),
             PaymentPage::Checkout | PaymentPage::Country(_) => None,
         }
     }
@@ -198,7 +198,7 @@ impl PaymentDialog {
         &mut self,
     ) -> Option<&mut crate::ui::payments::card_form::CardForm> {
         match &mut self.page {
-            PaymentPage::CardForm(form) => Some(form),
+            PaymentPage::CardForm(form) => Some(form.as_mut()),
             PaymentPage::Checkout | PaymentPage::Country(_) => None,
         }
     }

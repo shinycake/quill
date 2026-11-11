@@ -382,7 +382,9 @@ fn suggest_emoji_opens_the_bar_for_a_word_that_is_not_lit(cx: &mut TestAppContex
     app.update(vcx, |app, cx| {
         app.track_word_bar(gpui_kit::point(px(5.), px(5.)), cx)
     });
-    let open = app.read_with(vcx, |app, _| app.composer_ui.emoji_words.hovered().is_some());
+    let open = app.read_with(vcx, |app, _| {
+        app.composer_ui.emoji_words.hovered().is_some()
+    });
     assert!(open, "a bar asked for stays open");
     // It picks into the word.
     vcx.update(|window, cx| app.update(cx, |app, cx| app.pick_word_emoji(0, window, cx)));

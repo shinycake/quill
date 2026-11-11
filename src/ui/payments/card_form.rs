@@ -223,7 +223,7 @@ impl QuillApp {
             notice: None,
         };
         if let Some(dialog) = self.payments.dialog.as_mut() {
-            dialog.page = PaymentPage::CardForm(card_form);
+            dialog.page = PaymentPage::CardForm(Box::new(card_form));
         }
         self.focus_card_field(CardField::Number, window, cx);
         cx.notify();

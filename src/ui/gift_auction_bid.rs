@@ -150,7 +150,7 @@ impl QuillApp {
             };
             let amount = state.slider().amount_at(value.end());
             if let Some(ui) = this.gift_market.slider.as_mut() {
-                ui.from_slider(amount);
+                ui.slider_moved(amount);
             }
             cx.notify();
         })

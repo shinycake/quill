@@ -362,9 +362,10 @@ impl GifPanel {
 
     /// A new request starts clean: a failure no longer shows.
     pub fn saved_failure_cleared(&mut self) {
-        if let Fetch::Failed { stale, .. } = std::mem::take(&mut self.saved) {
-            self.saved = stale.map_or(Fetch::Idle, Fetch::Ready);
-        }
+        self.saved = match std::mem::take(&mut self.saved) {
+            Fetch::Failed { stale, .. } => stale.map_or(Fetch::Idle, Fetch::Ready),
+            other => other,
+        };
     }
 
     /// The panel was opened after a failure: it asks again from scratch.

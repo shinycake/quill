@@ -68,7 +68,7 @@ pub(crate) struct BidSliderUi {
     state: Entity<SliderState>,
     /// The amount the slider (or the custom field) chose. The slider shows
     /// it on a coarser track, so the amount is kept here and only
-    /// [`Self::from_slider`] and [`Self::choose`] write it, the second also
+    /// [`Self::slider_moved`] and [`Self::choose`] write it, the second also
     /// moving the track to match.
     chosen: i64,
     /// The `(min, max)` the track was built for; rebuilt when a new bid
@@ -101,19 +101,13 @@ impl BidSliderUi {
     }
 
     /// The person moved the track: the amount follows it.
-    pub(super) fn from_slider(&mut self, amount: i64) {
+    pub(super) fn slider_moved(&mut self, amount: i64) {
         self.chosen = amount;
     }
 
     /// Another control chose `amount` (the custom field, the minimum-bid
     /// block): the amount and the track move together, at `step`.
-    pub(super) fn choose(
-        &mut self,
-        amount: i64,
-        step: f32,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
+    pub(super) fn choose(&mut self, amount: i64, step: f32, window: &mut Window, cx: &mut App) {
         self.chosen = amount;
         self.state
             .update(cx, |slider, cx| slider.set_value(step, window, cx));

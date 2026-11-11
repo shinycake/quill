@@ -422,7 +422,9 @@ impl QuillApp {
                     base: weak(window.focused(cx)),
                 }
             }
-            (false, LayerFocus::Closed { .. }) => LayerFocus::Closed { base: weak(focused) },
+            (false, LayerFocus::Closed { .. }) => LayerFocus::Closed {
+                base: weak(focused),
+            },
         };
     }
 }

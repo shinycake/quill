@@ -137,10 +137,10 @@ impl QuillApp {
 }
 
 fn keep_editing(this: &mut QuillApp, _: &mut Window, cx: &mut Context<QuillApp>) {
-    if let Some(dialog) = this.chat_ui.poll_dialog.as_mut() {
-        if dialog.confirming_discard() {
-            dialog.show_form();
-        }
+    if let Some(dialog) = this.chat_ui.poll_dialog.as_mut()
+        && dialog.confirming_discard()
+    {
+        dialog.show_form();
     }
     cx.notify();
 }
