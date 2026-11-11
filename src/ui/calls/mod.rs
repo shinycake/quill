@@ -19,8 +19,6 @@ use quill::state::{ActiveCall, Session};
 use quill::telegram::envelope::{
     CallDiscardReason, CallState, ChatKind, MessageContent, ParsedMessage, call_entry_label,
 };
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -629,17 +627,6 @@ impl QuillApp {
             } else {
                 "call"
             };
-            let body = div()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tr(keys::Q_OPS_YOU_ASKED_TO_CONFIRM_BEFORE)),
-                )
-                .into_any_element();
             let footer = div()
                 .flex()
                 .justify_end()
@@ -671,16 +658,18 @@ impl QuillApp {
                     keys::Q_OPS_START_WITH,
                     &[("kind", kind), ("name", &name.to_string())],
                 )))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::scrollable_dialog_content(
+                    move |content, _, cx| {
+                        content.child(
+                            div().flex().flex_col().gap_2().child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(tr(keys::Q_OPS_YOU_ASKED_TO_CONFIRM_BEFORE)),
+                            ),
+                        )
+                    },
+                ))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -794,18 +783,6 @@ impl QuillApp {
                     .title(crate::ui::shell::dialog_title(tr(keys::CALL_INCOMING)))
                     .on_close(on_close.clone());
             };
-            let body = div()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .child(div().child(caller))
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tr(keys::Q_OPS_YOURE_ALREADY_IN_A_CALL)),
-                )
-                .into_any_element();
             let footer = div()
                 .flex()
                 .justify_end()
@@ -830,16 +807,23 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(title))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::scrollable_dialog_content(
+                    move |content, _, cx| {
+                        content.child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_2()
+                                .child(div().child(caller.clone()))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(tr(keys::Q_OPS_YOURE_ALREADY_IN_A_CALL)),
+                                ),
+                        )
+                    },
+                ))
                 .footer(footer)
                 .on_close(on_close)
         })

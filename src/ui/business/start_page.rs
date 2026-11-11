@@ -132,10 +132,10 @@ impl QuillApp {
             .find(|sticker| sticker.file_id == file_id)
             .cloned()
         });
-        if let Some(d) = self.business_mut() {
-            if let (Some(sticker), Some(page)) = (found, d.screen.start_page_mut()) {
-                page.sticker = Some(sticker);
-            }
+        if let Some(d) = self.business_mut()
+            && let (Some(sticker), Some(page)) = (found, d.screen.start_page_mut())
+        {
+            page.sticker = Some(sticker);
         }
         self.business_show(View::StartPage);
         cx.notify();

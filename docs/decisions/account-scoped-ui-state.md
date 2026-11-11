@@ -8043,3 +8043,35 @@ whose variants carry the data, with a way out of every stage.
 - **A refused refetch of a stale proxy list** lands in
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
+
+### Sweep fixes (r2-34)
+
+Round 2, files `window_slices`, theme editor/omarchy, appearance pickers and wallpapers, audio engine/tempo, background calls/closing, business screens, calls.
+
+| id | result |
+| --- | --- |
+| 07-055 | `ConversationFrame {Absent, Replayed, Rendered}` replaces the two `Cell<bool>`s. |
+| 07-060 | The theme editor body is built inside the dialog content closure; the `RefCell` take slot is gone (same for the call confirm and swap boxes). |
+| 07-058 | `Omarchy::Watching` exists only while following Omarchy (`sync_omarchy_watch`); the poll is allow-listed (no file-watch dependency). |
+| 07-057 | `KeybindingUi::{stop_capture, reset_row, refuse_chord}` are the only exits; `capture` is private. |
+| 07-053 | `AccentSelect` moves the Custom field to the applied theme's accent when drawn. |
+| 07-056 | `LinkHandlerRecheck::Rechecking {_task}` owns one 1/3/8 s re-read task; dropped on a new click or when System is left. |
+| 07-054 | The wallpaper delete confirm draws only for a listed, removable wallpaper, is re-checked at confirm time and cleared on leaving Appearance or switching account. |
+| 07-061 | The list is asked on arrival (`ask_for_wallpapers`), not per draw; a send that cannot leave is `Failed` ("not sent") with Retry. |
+| 08-001 | `Landing {Playing, Held}`; `set_landing` sets it and the old sound's pause together. |
+| 08-002 | `Backend::{Device, Simulated(SimRun)}` holds the simulated clock and stall stamp. |
+| 08-003 | `state()` reads `Standing::Stale` as Paused, so a seek on a track that ran out is not ended by the tick. |
+| 08-004 | The shared video output is cloned out with `try_borrow`; no borrow is held across the output's mutex. |
+| 08-005, 08-006 | `Stretch {Starting, StartingInputEnded, Streaming, Draining, Done}` replaces `done`, `inner_done`, `prev`. |
+| 08-012 | `RingPrompt` and `RingNotice` (`Posted {tag}`, set only once the system took the notification). Two independent channels, not one stage. |
+| 08-014 | `after_closing` tasks are held in `CloseWaiters` and give up as `Never` after about a minute; `closed` is capped likewise. |
+| 08-034 | The save stage is `LinkSave` in `LinkEditDraft`, matched to the request id; the session keeps only the latest answer (`ChatLinkAnswer`), so no hand resets. |
+| 08-029, 08-030 | The chatbot draft is filled by frame upkeep from the fetch (no poller, no stop on Idle); the username debounce timer is owned by the draft (`LookupDebounce`). |
+| 08-032 | The time zone screen draws a failed list with Retry. |
+| 08-035 | `business_show` / `sticker_pick_left` are the one seam that closes the start page's sticker panel. |
+| 08-051 | A redial dismisses the summary in `send_dial`, once the dial is accepted (`SummaryAfterDial`). |
+| 08-059 | `PipWindowStage::Opening {_open: Task}`: the deferred open is owned by the link, so an older open never attaches to a newer link. |
+| 08-048 | `CallTick::Ticking {_task}`. |
+| 08-052, 08-053 | The rating draft is `CallRating::{Editing, Sending{request, draft}, Failed{error, draft}}` on the summary; the comment input stays until the editor opens again. |
+| 08-058 | `LiveInput::{HostFailed, Nothing, Expected}` (touches `group_call_tiles.rs`, `live_view.rs`, `live_overlay.rs` constructors). |
+| 08-060 | `VolumePill::{Closed, Held, Closing {_timer}}` owns the close timer. |

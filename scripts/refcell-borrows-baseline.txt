@@ -70,8 +70,6 @@ QuillApp::build_bot_create_dialog::content.borrow_mut 1
 QuillApp::build_bot_edit_dialog::content.borrow_mut 1
 QuillApp::build_bot_verify_dialog::content.borrow_mut 1
 QuillApp::build_business_dialog::content.borrow_mut 1
-QuillApp::build_call_confirm_dialog::body.borrow_mut 1
-QuillApp::build_call_swap_dialog::body.borrow_mut 1
 QuillApp::build_callback_password_dialog::body.borrow_mut 1
 QuillApp::build_cancel_edit_dialog::body.borrow_mut 1
 QuillApp::build_chat_appearance_dialog::body.borrow_mut 1
