@@ -6,13 +6,12 @@ GPUI moves from the gpui-pre 0.3.11 snapshot (zed@f816e1f) to 0.3.12
 re-vendored and patched. gpui-kit stays at 0.9.0. The same round took the 24
 compatible `cargo update` bumps (#1324) and ashpd 0.14 for Linux screen sharing.
 
-**Blocked:** gpui-kit 0.9.0 pins `gpui-pre =0.3.11` (and `gpui-pre-platform`,
-`gpui-pre-macros`, `gpui-pre-web =0.3.11`), as do gpui-base and gpui-component
-0.9.0. Cargo cannot select gpui-pre 0.3.12 next to it, so `Cargo.lock` is not
-updated in this branch. On 2026-11-09 the gpui-component repository's main
-branch still pins `=0.3.11` and there is no gpui-kit release after 0.9.0. The
-work lands when a gpui-kit release pins 0.3.12: bump `gpui-kit` and the two
-vendored kit crates, run `cargo update`, gate.
+**Landed with gpui-kit 0.9.1** (2026-11-11). gpui-kit 0.9.0 pinned
+`gpui-pre =0.3.11`, so this re-vendor waited on a branch until gpui-kit 0.9.1
+moved to 0.3.12. What that release changed, and what Quill took from it, is in
+`docs/decisions/gpui-kit-0-9-1.md`. The verification below was done before
+then, in a trial with patched kit pins; the landing round was verified on the
+real lockfile.
 
 ## What tdesktop does
 
