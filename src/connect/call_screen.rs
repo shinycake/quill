@@ -553,7 +553,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return;
         }
         let extra = self.session.request(
-            RequestPurpose::Calls(CallsPurpose::ToggleGroupCallVideo { group_call_id }),
+            RequestPurpose::Calls(CallsPurpose::ToggleGroupCallScreenPaused {
+                group_call_id,
+                paused,
+            }),
             None,
         );
         if self

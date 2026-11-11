@@ -82,6 +82,31 @@ impl CallRating {
     }
 }
 
+/// One upload from the call-end card (diagnostics, call log). `Sending`
+/// leaves on the answer to that request, so an answer for another call's
+/// upload never lands here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CallUpload {
+    Idle,
+    Sending(RequestId),
+    Sent,
+    Failed(String),
+}
+
+impl CallUpload {
+    /// The button may start the upload (nothing is in flight or done).
+    pub fn can_send(&self) -> bool {
+        matches!(self, Self::Idle | Self::Failed(_))
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            Self::Failed(error) => Some(error),
+            Self::Idle | Self::Sending(_) | Self::Sent => None,
+        }
+    }
+}
+
 /// Phase C1: summary of the most recently ended call, driving the
 /// call-end screen and the optional 1–5 rating card
 /// (`callStateDiscarded.need_rating`, schema 1.8.67, line 7081).
@@ -109,12 +134,10 @@ pub struct CallSummary {
     /// The rating card's stage; one value so the card comes back when
     /// the send fails.
     pub rating: CallRating,
-    pub debug_information_sent: bool,
-    pub debug_information_error: Option<String>,
-    /// Phase C2i: `sendCallLog` upload state (`need_log` from
+    pub debug_information: CallUpload,
+    /// Phase C2i: `sendCallLog` upload stage (`need_log` from
     /// `callStateDiscarded`, schema 1.8.67 :7080).
-    pub log_sent: bool,
-    pub log_error: Option<String>,
+    pub log: CallUpload,
     pub final_transport: Option<TransportState>,
     pub reconnect_attempts: usize,
     pub muted: bool,
@@ -750,10 +773,8 @@ impl CallSummary {
             need_debug_information,
             need_log,
             rating: CallRating::Offered,
-            debug_information_sent: false,
-            debug_information_error: None,
-            log_sent: false,
-            log_error: None,
+            debug_information: CallUpload::Idle,
+            log: CallUpload::Idle,
             final_transport: None,
             reconnect_attempts: 0,
             muted: false,

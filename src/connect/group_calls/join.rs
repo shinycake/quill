@@ -233,9 +233,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(chat_id) = self.group_call_chat_id(group_call_id) else {
             return Ok(());
         };
-        if let Some(call) = self.session.calls.active_group_call.as_mut() {
-            call.join_as_requested = true;
-        }
         let extra = self.session.request(
             RequestPurpose::Calls(CallsPurpose::GetVideoChatAvailableParticipants {
                 group_call_id,
@@ -246,8 +243,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .sender
             .send_json(&get_video_chat_available_participants(extra, chat_id))
         {
+            // Not asked: the next ingest tries again.
             self.session.requests.take(extra);
             return Err(err);
+        }
+        // Asked once; an answered or failed request is not repeated (the
+        // picker is optional, so a failure just leaves it out).
+        if let Some(call) = self.session.calls.active_group_call.as_mut() {
+            call.join_as_requested = true;
         }
         Ok(())
     }

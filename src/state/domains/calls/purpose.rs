@@ -115,13 +115,18 @@ pub enum CallsPurpose {
     /// `ok`; the new flag arrives as `updateGroupCall`.
     ToggleGroupCallAreMessagesAllowed { group_call_id: i32 },
     /// Phase C3a: `toggleGroupCallIsMyVideoEnabled` /
-    /// `toggleGroupCallIsMyVideoPaused`, and
-    /// `toggleGroupCallScreenSharingIsPaused`. Response is `ok`; state
+    /// `toggleGroupCallIsMyVideoPaused`. Response is `ok`; state
     /// refreshes via `updateGroupCall` and participant updates.
     ToggleGroupCallVideo { group_call_id: i32 },
+    /// `toggleGroupCallScreenSharingIsPaused(paused)`. Response is `ok`; an
+    /// error puts your own tile back to what the server still has.
+    ToggleGroupCallScreenPaused { group_call_id: i32, paused: bool },
     /// Phase C3a: `toggleGroupCallParticipantIsMuted`. Response is
     /// `ok`; state refreshes via updates.
-    ToggleGroupCallParticipantMute { group_call_id: i32 },
+    ToggleGroupCallParticipantMute {
+        group_call_id: i32,
+        participant: MessageSender,
+    },
     /// Phase C3a: `toggleGroupCallParticipantIsHandRaised`. Response is
     /// `ok`; state refreshes via updates.
     ToggleGroupCallParticipantHand { group_call_id: i32 },

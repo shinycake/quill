@@ -92,6 +92,9 @@ pub(crate) struct GroupCallScreen {
     /// none, closes them, so a rename typed for one call cannot rename the
     /// next.
     pub(super) boxes_call: Option<i32>,
+    /// The call the composer's unsent text was typed for: another call
+    /// clears it where a window is at hand (`sync_group_call_composer`).
+    pub(super) composer_call: Option<i32>,
 }
 
 /// A stream join on its way: the call and the task that gives up on it
@@ -153,6 +156,7 @@ impl GroupCallScreen {
             stream_join: None,
             stream_joining: None,
             boxes_call: None,
+            composer_call: None,
         }
     }
 }
@@ -198,7 +202,7 @@ impl QuillApp {
             .map(|call| {
                 (
                     call.id,
-                    call.share_links.generating,
+                    call.share_links.generating(),
                     call.share_links.ready(),
                 )
             });
@@ -214,6 +218,9 @@ impl QuillApp {
             self.group_call_boxes.invite_open = false;
             self.group_call_boxes.share_open = false;
             self.group_call_boxes.share_copied = false;
+            // The in-call chat and the member levels are the last call's.
+            self.group_call.chat_shown = false;
+            self.group_call.row_levels.clear();
         }
         // The rename, Settings and screen privacy boxes are drawn in the
         // call window: with that window closed they would show nowhere.

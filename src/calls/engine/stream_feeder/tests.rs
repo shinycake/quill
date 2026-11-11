@@ -410,6 +410,28 @@ fn the_first_successful_segment_makes_the_stream_live() {
 }
 
 #[test]
+fn an_empty_stream_list_does_not_revive_a_terminal_state() {
+    let mut port = FakePort::default();
+    let mut feeder = StreamFeeder::new(555, 51, GroupCallMode::Rtmp);
+    feeder.on_time_request(engine_id(1), &mut port);
+    feeder.on_reply(
+        RequestId(port.next_id),
+        StreamReply::Error(StreamFetchError::CallLeft),
+        Instant::now(),
+        &mut port,
+    );
+    assert_eq!(feeder.state(), FeederState::Ended);
+    feeder.on_time_request(engine_id(2), &mut port);
+    feeder.on_reply(
+        RequestId(port.next_id),
+        StreamReply::Streams(&[]),
+        Instant::now(),
+        &mut port,
+    );
+    assert_eq!(feeder.state(), FeederState::Ended);
+}
+
+#[test]
 fn call_invalid_counts_as_left() {
     let mut port = FakePort::default();
     let mut feeder = feeder();

@@ -525,11 +525,19 @@ impl Session {
         }
         // Phase C2i: `sendCallLog` confirmed — the log upload for
         // the ended call succeeded.
-        if let Some(RequestPurpose::SendCallLog) = pending.map(|p| p.purpose)
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::SendCallLog
             && let Some(summary) = self.calls.summary.as_mut()
+            && summary.log == CallUpload::Sending(pending.id)
         {
-            summary.log_sent = true;
-            summary.log_error = None;
+            summary.log = CallUpload::Sent;
+        }
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::SendCallDebugInformation
+            && let Some(summary) = self.calls.summary.as_mut()
+            && summary.debug_information == CallUpload::Sending(pending.id)
+        {
+            summary.debug_information = CallUpload::Sent;
         }
         // `sendCallRating` confirmed: the card says thanks.
         if let Some(RequestPurpose::SendCallRating) = pending.map(|p| p.purpose)

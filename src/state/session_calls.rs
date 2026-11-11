@@ -87,7 +87,14 @@ impl Session {
             return;
         }
         if call.state.is_terminal() {
-            self.calls.summary = Some(CallSummary::from_terminal(call, 0, false));
+            // Another call's card still waiting for its rating stays: a
+            // call that ended untracked (a missed one) does not replace it.
+            let holds_rating = self.calls.summary.as_ref().is_some_and(|summary| {
+                summary.call_id != call.id && summary.need_rating && summary.rating.is_open()
+            });
+            if !holds_rating {
+                self.calls.summary = Some(CallSummary::from_terminal(call, 0, false));
+            }
             return;
         }
         if self.decline_call_while_invite_rings(call) {
@@ -326,8 +333,13 @@ impl Session {
         // disagrees is older than the change (a stale speaking or volume
         // update) and must not undo it, or the microphone would reopen for
         // a round trip. Once the request completed the next update settles.
+        // Only a toggle of this participant counts: muting someone else
+        // says nothing about your own row.
         let toggle_in_flight = self.requests.has_purpose(RequestPurpose::Calls(
-            CallsPurpose::ToggleGroupCallParticipantMute { group_call_id },
+            CallsPurpose::ToggleGroupCallParticipantMute {
+                group_call_id,
+                participant: participant.participant_id,
+            },
         ));
         let Some(tracked) = self.calls.group_call_mut(group_call_id) else {
             return;

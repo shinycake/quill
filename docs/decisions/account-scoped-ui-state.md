@@ -6261,3 +6261,58 @@ Twenty-two S4 entries; each was proved against the code first.
   the picker's serial after every frame, so the cutting stops within one frame.
   Minimising or pausing is not a lock; nothing private is on screen, so the cuts
   are left to finish.
+
+### Sweep fixes (s4-calls)
+
+S4 entries, each proven against the code first.
+
+- **Calls engine and capture.** A late empty stream list no longer revives a
+  `Failed` or `Ended` feeder (01-083). The macOS window monitor ends through
+  `StreamShared::end()`, which swaps `stopped` once, as the Windows one does
+  (01-065). A reaper thread that never started runs a hand-off on a thread of
+  its own, never on the caller (01-079). The Windows hook thread of a start
+  that timed out no longer installs its context over a newer hook (01-088).
+- **Invite links.** `VideoChatShareLinks` holds one `ShareLink`
+  (`Idle`/`Fetching`/`Got`) per link; "generating" is derived, so a failed
+  listener request no longer re-sends a speaker request still in flight, and
+  a listener send that fails frees the speaker request it never sent
+  (01-093).
+- **Call end card.** The diagnostics and call-log uploads are one
+  `CallUpload` each (`Idle`/`Sending(request)`/`Sent`/`Failed`) in place of
+  two bools and two errors: a second press while one is out is refused, and
+  an answer or error applies only to the summary whose request it is
+  (02-016, 05-027). A call that ends untracked no longer replaces another
+  call's open rating card (05-226). Submitting a rating puts the draft back
+  when the send is refused (08-083). The window that pressed Call is
+  forgotten when its card is dismissed and when a call comes in (08-077).
+- **Group call requests.** The screen-share pause toggle has its own purpose;
+  a refusal puts your tile back to what the server has and raises no box
+  error (02-014). An unwanted rejoin or screen offer is undone, so neither
+  waits on a request that is gone (02-105, 02-106). A failed `addPending`
+  after its commit takes the Stars off the committed total (02-116). Calls
+  waiting for their chat are a list (02-112). The "join as" request is
+  marked asked only once it was sent (05-031). `failed_creates` keeps the
+  latest eight (05-053). The own-mute guard keys the in-flight toggle by
+  participant (05-227).
+- **Call UI.** A mute or connect cue over a ringing loop leaves the loop set
+  and the ring resumes after it (08-086). Calls history keeps its loaded
+  rows when a later page fails, with Retry for that page (08-079). The live
+  PiP: a failed open restores the stream window and ignores a link that was
+  replaced; the source check compares the link's account (08-090, 08-088,
+  08-089). The story volume pill is released with its slider and with the
+  viewer (08-057). The stream key reveal is part of the Settings overlay
+  (`StreamOverlay::Settings { key_shown }`), so every way out hides it
+  (10-029). Share Invite Link refuses under the lock before asking (10-037);
+  Share to leaves a waiting deep-link open alone (10-039). The in-call chat
+  and member levels reset with the call (10-040) and so does the composer
+  text (10-052). A stream wish ends when the call fetch fails (10-050,
+  10-033). A failed rename keeps its box (10-051).
+- **Skipped.** 01-072 (PipeWire takes the fd even when the connect fails; a
+  second close would hit an unrelated fd), 01-087 (a layout switch changes
+  the XKB group, not the keycodes; only a remap does), 01-096 (the map is
+  reset per call, bounded by its participants), 02-102 (a failing engine
+  call is retried by design and its error is written once), 02-110 and
+  02-117 (tdesktop closes the box and removes the comments at once, with no
+  rollback), 02-115 (same: Undo is local), 08-056 (no dialing ticket is left;
+  `PermissionAsk` owns the wait), 10-035 (the no-photo branch already drops
+  the cached blur and its task).

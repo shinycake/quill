@@ -9,7 +9,7 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
-use quill::calls::share_links::{InviteRowAction, VideoChatShareLinks};
+use quill::calls::share_links::{InviteRowAction, ShareLink, VideoChatShareLinks};
 use quill::ids::ChatId;
 use quill::state::{ActiveGroupCall, DeepLinkAction, VideoChatInfo};
 use quill::telegram::envelope::ChatKind;
@@ -61,9 +61,8 @@ fn video_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, speaker: &str
             is_video_chat: true,
             can_be_managed: true,
             share_links: VideoChatShareLinks {
-                listener: Some(LISTENER.into()),
-                speaker: Some(speaker.into()),
-                generating: false,
+                listener: ShareLink::Got(LISTENER.into()),
+                speaker: ShareLink::Got(speaker.into()),
             },
             ..ActiveGroupCall::fresh(77)
         });
@@ -198,8 +197,11 @@ fn the_box_waits_for_the_passcode_unlock(cx: &mut TestAppContext) {
         app.account.passcode.force_locked(true);
         app.open_group_call_share_links(cx);
     });
+    // Nothing is asked for and no box opens behind the lock.
     assert!(!overlay_shown(&app, vcx));
     app.update_in(vcx, |app, _, _| app.account.passcode.force_locked(false));
+    assert!(!overlay_shown(&app, vcx));
+    app.update_in(vcx, |app, _, cx| app.open_group_call_share_links(cx));
     assert!(overlay_shown(&app, vcx));
 }
 

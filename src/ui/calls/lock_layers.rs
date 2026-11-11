@@ -24,7 +24,6 @@ impl QuillApp {
             let _ = live.driver.search_add_people("");
         }
         self.group_call.stream.overlay = None;
-        self.group_call.stream.key_shown = false;
         self.group_call_screen.title_dialog = None;
         self.group_call_screen.settings_open = false;
         self.screen_share.privacy_for = None;

@@ -103,11 +103,27 @@ fn run_hook(
         let mut msg: MSG = std::mem::zeroed();
         // Creates this thread's message queue so WM_QUIT can be posted.
         PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_NOREMOVE);
-        *crate::locks::lock_or_recover(&CONTEXT) = Some(Context {
-            filter: KeyFilter::new(target),
-            sink,
-            active: active.clone(),
-        });
+        // A start that timed out already gave up (`active` is false): its
+        // late thread must not replace the context of a newer hook.
+        let installed = {
+            let mut guard = crate::locks::lock_or_recover(&CONTEXT);
+            if active.load(Ordering::SeqCst) {
+                *guard = Some(Context {
+                    filter: KeyFilter::new(target),
+                    sink,
+                    active: active.clone(),
+                });
+                true
+            } else {
+                false
+            }
+        };
+        if !installed {
+            let _ = ready.send(Err(StartError::Failed(
+                "The key listener did not start.".into(),
+            )));
+            return;
+        }
         let module = GetModuleHandleW(std::ptr::null());
         let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(on_key), module, 0);
         if hook.is_null() {
