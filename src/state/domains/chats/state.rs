@@ -70,11 +70,12 @@ pub struct ChatsState {
     pub background_error: Option<String>,
     /// `updateChatOnlineMemberCount`, keyed by chat id.
     pub chat_online_counts: HashMap<i64, i32>,
-    /// Slice CL1: one-shot error from a refused chat-list action
+    /// Slice CL1: the errors of refused chat-list actions, oldest first, so
+    /// two that fail before the UI drains them are both shown
     /// (`toggleChatIsPinned`, `toggleChatIsMarkedAsUnread`,
     /// `deleteChatHistory`). The UI drains it into the status note so a
     /// refused action never looks like it worked.
-    pub chat_action_error: Option<String>,
+    pub chat_action_error: crate::state::Notes,
     /// Answers of the Appearance box's requests (name, profile, status
     /// and emoji pack), under the request that asked.
     pub appearance_answers: Answers<()>,
@@ -152,7 +153,7 @@ impl ChatsState {
             background_answers: Answers::default(),
             background_error: None,
             chat_online_counts: HashMap::new(),
-            chat_action_error: None,
+            chat_action_error: Default::default(),
             appearance_answers: Answers::default(),
             report_chat_outcome: None,
             chat_message_sender: HashMap::new(),

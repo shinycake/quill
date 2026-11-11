@@ -69,6 +69,9 @@ pub enum CeremonyError {
     Cancelled,
     /// No security key was found before the request timed out.
     NoDevice,
+    /// A key is plugged in but the OS does not let Quill open it (Linux
+    /// without the udev rule for security keys).
+    AccessDenied,
     /// The key has no passkey for this account (sign-in).
     NoCredentials,
     /// The key's PIN is blocked.

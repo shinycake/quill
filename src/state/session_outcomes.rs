@@ -32,7 +32,7 @@ impl Session {
         messages.flood_notice.clear();
         self.groups.community_error = None;
         self.groups.invite_link_error = None;
-        self.chats_state.chat_action_error = None;
+        self.chats_state.chat_action_error.clear();
         self.chats_state.report_chat_outcome = None;
     }
 }

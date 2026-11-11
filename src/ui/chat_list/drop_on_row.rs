@@ -69,6 +69,29 @@ impl DropOnRow {
             ..Self::default()
         };
     }
+
+    /// The drag is over (cancelled with no exit event, or dropped
+    /// elsewhere): what it showed and what was probed for it go, so the next
+    /// drag of the same paths is probed again. The running freeze timer is
+    /// left alone.
+    fn drag_ended(&mut self) {
+        let unfreeze = self.unfreeze.take();
+        self.clear();
+        self.unfreeze = unfreeze;
+    }
+
+    /// A forward drag came over the list: it replaces any file drag seen
+    /// before, with its one-second wait (forward drags never open a chat by
+    /// resting, `_dragForward`).
+    fn forward_takes_over(&mut self) {
+        if self.drag.is_some() || self.rest.is_some() || !self.paths.is_empty() {
+            self.hover = None;
+            self.position = None;
+            self.rest = None;
+            self.drag = None;
+            self.paths.clear();
+        }
+    }
 }
 
 /// A drop on this chat asks for a topic first: a forum, or the direct
@@ -104,7 +127,11 @@ impl QuillApp {
     /// The file drag left the row or the window, or ended.
     pub(in crate::ui) fn drag_left(&mut self, cx: &mut Context<Self>) {
         let state = &mut self.chat_list.drop_on_row;
-        if state.hover.is_some() || !state.frozen.is_empty() || state.rest.is_some() {
+        if state.hover.is_some()
+            || !state.frozen.is_empty()
+            || state.rest.is_some()
+            || !state.paths.is_empty()
+        {
             state.clear();
             cx.notify();
         }
@@ -189,6 +216,7 @@ impl QuillApp {
             return;
         }
         let state = &mut self.chat_list.drop_on_row;
+        state.forward_takes_over();
         if !state.forward.as_ref().is_some_and(|seen| seen.same(drag)) || state.in_list != in_list {
             state.forward = Some(drag.clone());
             state.in_list = in_list;
@@ -335,7 +363,13 @@ impl QuillApp {
             Some(self.spawn_scoped_in(window, cx, async move |this, cx| {
                 cx.background_executor().timer(FREEZE_TIMEOUT).await;
                 let _ = this.update(cx, |this, cx| {
-                    this.chat_list.drop_on_row.frozen.clear();
+                    let state = &mut this.chat_list.drop_on_row;
+                    if cx.has_active_drag() {
+                        state.frozen.clear();
+                    } else {
+                        // No drag any more and no exit event told us (Esc).
+                        state.drag_ended();
+                    }
                     cx.notify();
                 });
             }));
@@ -345,7 +379,7 @@ impl QuillApp {
     fn choose_row_by_drag(&mut self, chat_id: ChatId, window: &mut Window, cx: &mut Context<Self>) {
         let state = &mut self.chat_list.drop_on_row;
         state.rest = None;
-        if state.hover != Some(chat_id) || !cx.has_active_drag() {
+        if state.hover != Some(chat_id) || state.forward.is_some() || !cx.has_active_drag() {
             return;
         }
         self.select_listed_chat(chat_id, window, cx);
@@ -554,8 +588,39 @@ impl QuillApp {
 
 #[cfg(test)]
 mod tests {
-    use super::sort_frozen;
+    use super::{DropOnRow, sort_frozen};
+    use gpui_kit::Task;
+    use quill::drop_modes::DragState;
+    use quill::ids::ChatId;
     use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    fn over_a_file_drag() -> DropOnRow {
+        DropOnRow {
+            hover: Some(ChatId(1)),
+            paths: vec![PathBuf::from("a")],
+            drag: Some(DragState::Folder),
+            rest: Some(Task::ready(())),
+            ..DropOnRow::default()
+        }
+    }
+
+    #[test]
+    fn a_forward_drag_drops_the_file_drags_wait_and_probe() {
+        let mut state = over_a_file_drag();
+        state.forward_takes_over();
+        assert!(state.rest.is_none(), "no timer opens the chat");
+        assert!(state.drag.is_none() && state.hover.is_none());
+        assert!(state.paths.is_empty());
+    }
+
+    #[test]
+    fn a_drag_that_ended_is_probed_again_next_time() {
+        let mut state = over_a_file_drag();
+        state.drag_ended();
+        assert!(!state.same_paths(&[PathBuf::from("a")]));
+        assert!(state.drag.is_none() && state.hover.is_none() && state.rest.is_none());
+    }
 
     #[test]
     fn a_frozen_list_of_thousands_keeps_its_order_and_new_rows_go_last() {

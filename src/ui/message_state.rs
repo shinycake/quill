@@ -69,8 +69,12 @@ pub(crate) struct MessageUi {
     /// frame, with the chat painted; reported to TDLib as viewed at the next
     /// frame start (`report_visible_sponsored`) when that chat is still open.
     pub(super) rendered_sponsored: std::rc::Rc<std::cell::RefCell<Vec<(ChatId, i64)>>>,
-    /// The custom emoji card already on screen (it times itself out).
-    pub(super) custom_emoji_card_seen: Option<quill::state::CustomEmojiPreview>,
+    /// The custom emoji card already on screen, with the tap it was shown
+    /// for (it times itself out; a new tap of the same emoji starts the
+    /// timer over).
+    pub(super) custom_emoji_card_seen: Option<(quill::state::CustomEmojiPreview, u64)>,
+    /// Counts taps of custom emoji, so each one has its own card timer.
+    pub(super) custom_emoji_tap_count: u64,
     /// The custom emoji last tapped in this window: its card shows here,
     /// over the window of the tap (the session keeps one preview).
     pub(super) custom_emoji_tapped: Option<i64>,
@@ -113,6 +117,7 @@ impl MessageUi {
             sponsored_about: None,
             rendered_sponsored: Default::default(),
             custom_emoji_card_seen: None,
+            custom_emoji_tap_count: 0,
             custom_emoji_tapped: None,
             poll_voters_dialog: None,
             poll_add_option: None,
@@ -132,6 +137,7 @@ impl super::on_screen::Farewell for MessageUi {
         _: &mut gpui_kit::Window,
         cx: &mut gpui_kit::Context<super::app::QuillApp>,
     ) {
+        super::emoji_effect::forget_account_notes();
         if app
             .session()
             .is_some_and(|session| session.users_state.replies_block.is_some())

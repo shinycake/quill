@@ -232,7 +232,7 @@ impl Session {
             // UI drains `chat_action_error`); the optimistic state was
             // never changed, so nothing to roll back.
             Some(RequestPurpose::DeleteSavedOrderInfo | RequestPurpose::DeleteSavedCredentials) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not clear saved payment info (error {})",
                     err.code
                 ));

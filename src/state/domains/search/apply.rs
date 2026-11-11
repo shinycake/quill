@@ -97,7 +97,11 @@ impl Session {
                 star_count,
                 current_query_free,
             } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPublicPostSearchLimits) {
+                // Only the quota of the query on screen: an answer of an
+                // older query would price and label this one wrongly.
+                if self.search.search.matches_generation(pending)
+                    && pending.map(|p| p.purpose) == Some(RequestPurpose::GetPublicPostSearchLimits)
+                {
                     self.search.search.tabs.limits = Some(PublicPostLimits {
                         daily_free,
                         remaining_free,

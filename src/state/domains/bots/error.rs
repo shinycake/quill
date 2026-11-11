@@ -18,8 +18,9 @@ impl Session {
             // Slice B2: refused `sendBotStartMessage` / `getBotSimilarBots` —
             // a refusal is never shown as success.
             Some(RequestPurpose::SendBotStartMessage) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not start the bot (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not start the bot (error {})", err.code));
             }
             Some(RequestPurpose::GetBotSimilarBots) => {
                 // The section goes back to its button, so it can ask again
@@ -32,21 +33,23 @@ impl Session {
                 {
                     self.bots.similar_bots.remove(&bot);
                 }
-                self.chats_state.chat_action_error =
-                    Some(format!("could not load similar bots (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not load similar bots (error {})", err.code));
             }
             Some(RequestPurpose::SetMessageSenderBotVerification) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not verify the account (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not verify the account (error {})", err.code));
             }
             Some(RequestPurpose::RemoveMessageSenderBotVerification) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not remove the verification (error {})",
                     err.code
                 ));
             }
             Some(RequestPurpose::ShareWithBot) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "the bot could not receive what you shared (error {})",
                     err.code
                 ));

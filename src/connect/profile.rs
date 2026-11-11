@@ -141,12 +141,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let background_emoji_id = self
+        // Without the own user the icon is unknown: sending 0 would clear it.
+        let Some(background_emoji_id) = self
             .session
             .my_user_id
             .and_then(|me| self.session.user(me))
             .map(|u| u.profile_background_custom_emoji_id)
-            .unwrap_or(0);
+        else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
         let extra = self
             .session
             .request(RequestPurpose::SetProfileAccentColor, None);

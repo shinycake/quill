@@ -238,7 +238,7 @@ fn replay_view_messages_error_allows_retry() {
     );
     session.open_chat(quill::ids::ChatId(7));
     let extra = session.request(RequestPurpose::ViewMessages, Some(quill::ids::ChatId(7)));
-    session.begin_viewing(quill::ids::ChatId(7), &[quill::ids::MessageId(11)]);
+    session.begin_viewing(quill::ids::ChatId(7), extra, &[quill::ids::MessageId(11)]);
     assert!(
         session
             .message_ids_to_view(quill::ids::ChatId(7))

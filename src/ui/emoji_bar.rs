@@ -42,8 +42,6 @@ pub(super) struct EmojiBarUi {
     pub expanded: bool,
     pub strip: ScrollHandle,
     pub grid: ScrollHandle,
-    /// The installed emoji set list was asked for (once per session).
-    pub sets_asked: bool,
 }
 
 impl EmojiBarUi {
@@ -187,11 +185,8 @@ impl QuillApp {
         let missing = sets.len() < session.stickers.emoji.installed_sets.len()
             || session.stickers.emoji.installed_sets.is_empty();
         items.extend(custom);
-        if missing {
-            let list = !std::mem::replace(&mut self.composer_ui.suggest.bar.sets_asked, true);
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.ensure_suggestion_emoji_sets(list);
-            }
+        if missing && let Some(live) = self.live.as_mut() {
+            let _ = live.driver.ensure_suggestion_emoji_sets();
         }
         items
     }

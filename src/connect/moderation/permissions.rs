@@ -3,7 +3,7 @@
 //! boosters setting, each sent only when it changed. A basic group with
 //! slow mode or boosters set is upgraded first, as tdesktop migrates it.
 use super::*;
-use crate::permissions_box::{PermissionsSave, PermissionsSent};
+use crate::permissions_box::{PermissionsPart, PermissionsSave, PermissionsSent};
 use crate::state::AdminFollowup;
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -51,11 +51,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         if is_supergroup && self.session.chat_can_restrict_members(chat_id) {
             if self.session.chat_slow_mode_delay(chat_id) != save.slow_mode_delay {
                 differs = true;
-                sent.push(self.set_chat_slow_mode_delay(chat_id, save.slow_mode_delay)?);
+                match self.set_chat_slow_mode_delay(chat_id, save.slow_mode_delay) {
+                    Ok(id) => sent.push(id),
+                    Err(err) => return partial_or(sent, PermissionsPart::SlowMode, err),
+                }
             }
             if self.session.chat_unrestrict_boost_count(chat_id) != save.unrestrict_boost_count {
                 differs = true;
-                sent.extend(self.set_unrestrict_boost_count(chat_id, save.unrestrict_boost_count)?);
+                match self.set_unrestrict_boost_count(chat_id, save.unrestrict_boost_count) {
+                    Ok(id) => sent.extend(id),
+                    Err(err) => return partial_or(sent, PermissionsPart::Boosts, err),
+                }
             }
         }
         Ok(match (sent.is_empty(), differs) {
@@ -63,5 +69,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             (true, true) => PermissionsSent::Refused,
             (true, false) => PermissionsSent::Unchanged,
         })
+    }
+}
+
+/// A later part could not be sent: with earlier parts out the Save is
+/// partial and says which part, with none out it is the plain error.
+fn partial_or(
+    sent: Vec<RequestId>,
+    refused: PermissionsPart,
+    err: ConnectSendError,
+) -> Result<PermissionsSent, ConnectSendError> {
+    if sent.is_empty() {
+        Err(err)
+    } else {
+        Ok(PermissionsSent::Partial { sent, refused })
     }
 }

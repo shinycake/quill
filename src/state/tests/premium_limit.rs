@@ -39,7 +39,7 @@ fn pin_over_the_limit_opens_the_pins_box() {
         session.payments.hub.limit_box,
         Some((PremiumLimitKind::Pins, 0))
     );
-    assert_eq!(session.chats_state.chat_action_error, None);
+    assert!(session.chats_state.chat_action_error.is_empty());
 }
 
 #[test]
@@ -53,7 +53,7 @@ fn other_pin_errors_stay_error_lines() {
         "Chat not found",
     );
     assert_eq!(session.payments.hub.limit_box, None);
-    assert!(session.chats_state.chat_action_error.is_some());
+    assert!(!session.chats_state.chat_action_error.is_empty());
 }
 
 #[test]
@@ -167,7 +167,7 @@ fn a_saved_messages_pin_over_the_limit_opens_its_own_box() {
         session.payments.hub.limit_box,
         Some((PremiumLimitKind::SavedPins, 0))
     );
-    assert_eq!(session.chats_state.chat_action_error, None);
+    assert!(session.chats_state.chat_action_error.is_empty());
 }
 
 #[test]

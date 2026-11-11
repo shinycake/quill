@@ -27,7 +27,7 @@ impl QuillApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.dialogs.import_contacts_dialog = Some(ImportContactsDialog::default());
+        self.dialogs.import_contacts_dialog = Some(ImportContactsDialog::new());
         self.open_box(crate::ui::shell::DialogKind::ImportContacts);
         if self.live.is_none()
             && let Some(path) = std::env::var_os("QUILL_DEMO_VCF")
@@ -39,6 +39,14 @@ impl QuillApp {
 
     /// "Choose File…": the system open dialog, then the read.
     pub(super) fn choose_vcard_file(&mut self, cx: &mut Context<Self>) {
+        let Some(box_id) = self
+            .dialogs
+            .import_contacts_dialog
+            .as_ref()
+            .map(|dialog| dialog.id)
+        else {
+            return;
+        };
         let picker = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -49,7 +57,17 @@ impl QuillApp {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.into_iter().next()
             {
-                let _ = this.update(cx, |this, cx| this.read_vcard(path, cx));
+                let _ = this.update(cx, |this, cx| {
+                    // Only the box that asked reads the file.
+                    if this
+                        .dialogs
+                        .import_contacts_dialog
+                        .as_ref()
+                        .is_some_and(|dialog| dialog.id == box_id)
+                    {
+                        this.read_vcard(path, cx);
+                    }
+                });
             }
         })
         .detach();
@@ -61,8 +79,8 @@ impl QuillApp {
         let Some(dialog) = self.dialogs.import_contacts_dialog.as_mut() else {
             return;
         };
-        dialog.pick = dialog.pick.wrapping_add(1);
-        let pick = dialog.pick;
+        let pick = ImportContactsDialog::next_token();
+        dialog.pick = pick;
         dialog.state = VcardImport::Reading {
             file_name: display_name(&path),
         };

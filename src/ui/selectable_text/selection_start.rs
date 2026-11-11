@@ -32,14 +32,8 @@ impl SelectionStart {
         if selected.is_empty() {
             return 0;
         }
-        before
-            .char_indices()
-            .filter(|(at, _)| {
-                before
-                    .get(*at..)
-                    .is_some_and(|rest| rest.starts_with(selected))
-            })
-            .count()
+        // Non-overlapping, as `QuoteSource::quote_for_nth` walks them.
+        before.match_indices(selected).count()
     }
 }
 
@@ -84,6 +78,12 @@ mod tests {
         start.note(1, Some("ok. fine. ok. ".into()));
         assert_eq!(start.occurrence("ok."), 2);
         assert_eq!(start.occurrence(""), 0);
+        start.note(1, Some("aaaa".into()));
+        assert_eq!(
+            start.occurrence("aa"),
+            2,
+            "overlapping copies are not counted"
+        );
     }
 
     #[test]

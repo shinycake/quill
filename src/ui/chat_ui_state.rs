@@ -35,6 +35,10 @@ pub(super) struct EditMode {
     /// Reply that belonged to the stashed draft, restored with it on leaving.
     pub(super) stashed_reply: Option<ComposerReplyTo>,
     pub(super) confirm_cancel: bool,
+    /// B5: "Send as a document" for the replacement file while editing
+    /// media (tdesktop `EditCaptionBox::_asFile`). The edit's own choice:
+    /// another edit starts without it.
+    pub(super) replace_as_file: bool,
 }
 
 /// One edit, told apart from every other (an edit cancelled and one started
@@ -91,6 +95,37 @@ enum QuotePicker {
 }
 
 /// One view's state for the chat it shows.
+/// Where the keyboard and the screen reader rest in the open chat's history.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum A11yFocus {
+    #[default]
+    None,
+    /// The "Unread messages" bar.
+    Bar,
+    Row(MessageId),
+}
+
+impl A11yFocus {
+    /// The focused message row, if a row has it.
+    pub(crate) fn row(self) -> Option<MessageId> {
+        match self {
+            Self::Row(id) => Some(id),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn is_bar(self) -> bool {
+        self == Self::Bar
+    }
+
+    /// Selection let go of its row: the unread bar keeps its focus.
+    pub(crate) fn clear_row(&mut self) {
+        if matches!(self, Self::Row(_)) {
+            *self = Self::None;
+        }
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct ChatUi {
     /// Which value this is; new with each one made.
@@ -145,6 +180,13 @@ pub(crate) struct ChatUi {
     pub(super) sent_text: super::composer::SentText,
     /// The draft the last AI composer action was asked about.
     pub(super) ai_ask: super::composer::AiAsk,
+    /// The composer's link dialog (Cmd/Ctrl+K on a selection). It holds a
+    /// byte range of this chat's draft, so a chat change replaces it.
+    pub(super) link_dialog: Option<super::composer_shortcuts::ComposerLinkDialog>,
+    /// The composer's date box (Formatting > Date).
+    pub(super) date_dialog: Option<super::composer_date::ComposerDateDialog>,
+    /// The "Code Language" box for the fenced block under the caret.
+    pub(super) code_language: Option<super::composer_shortcuts::CodeLanguageDialog>,
     /// The rich draft's "discard" or "Remove Formatting" box: its buttons
     /// act on this chat's draft.
     pub(super) rich_draft_box: super::rich_draft::RichDraftBox,
@@ -157,8 +199,10 @@ pub(crate) struct ChatUi {
     pub(super) pending_stop_poll: Option<(ChatId, MessageId, bool)>,
     /// Last row clicked in selection mode: the Shift+click range anchor.
     pub(super) selection_anchor: Option<MessageId>,
-    /// The row keyboard selection acts on (Ctrl+Space, Up / Down).
-    pub(super) selection_focus: Option<MessageId>,
+    /// What keyboard selection and the screen reader's focus rest on in
+    /// this chat: a row (Ctrl+Space, Up / Down) or the unread bar. One
+    /// value of the chat, so another chat starts with none.
+    pub(super) focus: A11yFocus,
     /// Scheduled messages ticked in the scheduled-messages dialog (send
     /// now, reschedule or delete together).
     pub(super) scheduled_selected: Vec<MessageId>,
@@ -337,7 +381,21 @@ impl ChatUi {
             stashed_draft,
             stashed_reply,
             confirm_cancel: false,
+            replace_as_file: false,
         });
+    }
+
+    /// "Send as a document" ticked for the replacement of the edit in place.
+    pub(super) fn edit_replace_as_file(&self) -> bool {
+        self.edit_mode
+            .as_ref()
+            .is_some_and(|mode| mode.replace_as_file)
+    }
+
+    pub(super) fn set_edit_replace_as_file(&mut self, on: bool) {
+        if let Some(mode) = self.edit_mode.as_mut() {
+            mode.replace_as_file = on;
+        }
     }
 
     /// Leave edit mode (and with it the cancel box), handing back what was
@@ -479,6 +537,13 @@ impl QuillApp {
     /// topic's, and the slot's draft goes back into the field it held.
     pub(super) fn sync_chat_ui(&mut self, cx: &mut Context<Self>) {
         let Some(chat) = self.session().and_then(|session| session.open_chat) else {
+            // The reducer closed the chat (removed, left, kicked) with no
+            // goodbye of the view's own: what was open for it goes, or it
+            // came back with the chat the next time it opens.
+            if self.session().is_some() && self.chat_ui.chat.is_some() {
+                self.close_ttl_picker_of_left_chat(None);
+                self.leave_chat_ui();
+            }
             return;
         };
         let topic = self.open_topic_id(chat);

@@ -5,6 +5,18 @@ use super::*;
 use gpui_kit::*;
 use std::path::PathBuf;
 
+/// The wait before the window's place is written. It ends when it fires
+/// (the task says `Idle` again), or when its window is gone: dropping the
+/// task cancels the wait, so the next move can schedule a new one.
+#[derive(Default)]
+pub(crate) enum StateSaveTimer {
+    #[default]
+    Idle,
+    Scheduled {
+        _timer: Task<()>,
+    },
+}
+
 pub(crate) struct FrameUi {
     /// Highest frame rate animated content asked for since the last
     /// clock tick (0: nothing animated rendered); see `frame_clock`.
@@ -75,8 +87,9 @@ pub(crate) struct FrameUi {
     pub(super) surfaces: super::surface_reveal::Surfaces,
     /// The main window's content width as last drawn (`shell_layout`).
     pub(super) main_width: Pixels,
-    /// A debounced `window_state.json` save is scheduled.
-    pub(super) window_state_save_pending: bool,
+    /// The debounced `window_state.json` save: the timer that fires it,
+    /// held here so a window that goes first takes it along.
+    pub(super) window_state_save: StateSaveTimer,
     /// Whether the main window is currently excluded from screen capture.
     pub(super) capture_blocked: bool,
     /// The "screenshots can't be blocked here" note was dismissed (Linux).
@@ -97,6 +110,8 @@ impl FrameUi {
     pub(super) fn forget_native_window(&mut self) {
         self.window_title_shown.borrow_mut().clear();
         self.capture_blocked = false;
+        // The timer ran in the window that is gone; the next move asks again.
+        self.window_state_save = StateSaveTimer::Idle;
     }
 
     pub(super) fn new(cx: &mut Context<QuillApp>) -> Self {
@@ -134,7 +149,7 @@ impl FrameUi {
             panels: super::panel_reveal::PanelReveal::new(std::time::Instant::now()),
             surfaces: super::surface_reveal::Surfaces::new(std::time::Instant::now()),
             main_width: px(0.),
-            window_state_save_pending: false,
+            window_state_save: StateSaveTimer::Idle,
             capture_blocked: false,
             capture_notice_dismissed: false,
             menu: super::context_menu_keys::MenuFocus::new(cx),

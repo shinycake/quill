@@ -122,6 +122,9 @@ impl Session {
             self.stickers.stickers.suggest_for = None;
         }
         let emoji_purpose = pending.map(|p| p.purpose);
+        if emoji_purpose == Some(RequestPurpose::GetInstalledEmojiSets) {
+            self.stickers.emoji.installed.fail(error_reason(err));
+        }
         if emoji_purpose == Some(RequestPurpose::SetEmojiStatus) {
             self.stickers.emoji.pending_status_emoji = None;
         }

@@ -52,13 +52,25 @@ pub struct PublicForwardsList {
     pub forwards: Vec<crate::telegram::envelope::PublicForwardView>,
     pub total: i32,
     pub next_offset: String,
-    pub loading: bool,
+    /// The page on its way: only its answer lands here, so a page asked
+    /// for a post shown before cannot join this post's list.
+    asking: Option<RequestId>,
     pub error: Option<String>,
 }
 
 impl PublicForwardsList {
+    /// A page is on its way.
+    pub fn loading(&self) -> bool {
+        self.asking.is_some()
+    }
+
+    /// Whether `request` is the page this list is waiting for.
+    pub(crate) fn asked(&self, request: RequestId) -> bool {
+        self.asking == Some(request)
+    }
+
     fn accept(&mut self, view: PublicForwardsView) {
-        self.loading = false;
+        self.asking = None;
         self.error = None;
         self.total = view.total_count;
         self.next_offset = view.next_offset;
@@ -223,9 +235,9 @@ impl StatsState {
             .filter(|m| m.chat_id == chat_id && m.message_id == message_id)
     }
 
-    pub(crate) fn forwards_requested(&mut self, chat_id: i64, message_id: i64) {
+    pub(crate) fn forwards_requested(&mut self, chat_id: i64, message_id: i64, request: RequestId) {
         if let Some(state) = self.message_mut(chat_id, message_id) {
-            state.forwards.loading = true;
+            state.forwards.asking = Some(request);
             state.forwards.error = None;
         }
     }
@@ -245,9 +257,12 @@ impl StatsState {
         &mut self,
         chat_id: i64,
         message_id: i64,
+        request: RequestId,
         view: PublicForwardsView,
     ) {
-        if let Some(state) = self.message_mut(chat_id, message_id) {
+        if let Some(state) = self.message_mut(chat_id, message_id)
+            && state.forwards.asked(request)
+        {
             state.forwards.accept(view);
         }
     }
@@ -258,9 +273,17 @@ impl StatsState {
         }
     }
 
-    pub(crate) fn fail_message_forwards(&mut self, chat_id: i64, message_id: i64, error: String) {
-        if let Some(state) = self.message_mut(chat_id, message_id) {
-            state.forwards.loading = false;
+    pub(crate) fn fail_message_forwards(
+        &mut self,
+        chat_id: i64,
+        message_id: i64,
+        request: RequestId,
+        error: String,
+    ) {
+        if let Some(state) = self.message_mut(chat_id, message_id)
+            && state.forwards.asked(request)
+        {
+            state.forwards.asking = None;
             state.forwards.error = Some(error);
         }
     }
@@ -353,7 +376,7 @@ impl Session {
                 }
             }
             StatsPage::Overview => {
-                if let Some(ChatStatisticsFetch::Loaded(stats)) =
+                if let Some(ChatStatisticsFetch::Loaded { stats, .. }) =
                     self.groups.chat_statistics.get(&chat_id)
                     && let ChatStatistics::Channel(channel) = stats.as_ref()
                 {

@@ -55,9 +55,6 @@ pub(crate) struct ComposerUi {
     /// The chat an inline results button left, to come back to
     /// (`inline_return.rs`).
     pub(super) inline_return: Option<super::inline_return::InlineReturn>,
-    /// B5: "Send as a document" for the replacement file while editing
-    /// media (tdesktop `EditCaptionBox::_asFile`).
-    pub(super) edit_replace_as_file: bool,
     /// MED4b: the `getLinkPreview` prefetch waiting for its URL to settle:
     /// the URL and its 500 ms timer. Armed once per new URL; a frame with
     /// the same URL leaves it running (round 18 B #7: re-arming every frame
@@ -93,12 +90,6 @@ pub(crate) struct ComposerUi {
     /// What the compose field's placeholder was last built from
     /// (`sync_composer_placeholder`): the facts and the language.
     pub(super) placeholder_shown: Option<(quill::composer::PlaceholderFacts, usize)>,
-    /// The composer's link dialog (Cmd/Ctrl+K on a selection).
-    pub(super) link_dialog: Option<super::composer_shortcuts::ComposerLinkDialog>,
-    /// The composer's date box (Formatting > Date).
-    pub(super) date_dialog: Option<super::composer_date::ComposerDateDialog>,
-    /// The "Code Language" box for the fenced block under the caret.
-    pub(super) code_language: Option<super::composer_shortcuts::CodeLanguageDialog>,
     /// Cross-fade timeline of the round Send / Record / Save button.
     pub(super) send_morph: std::cell::Cell<Option<quill::send_button::SendMorph>>,
     /// Phase S2: the inline-bot warning has been confirmed once this
@@ -109,6 +100,8 @@ pub(crate) struct ComposerUi {
     /// (`drop_zones`).
     pub(super) drop_paths: Vec<std::path::PathBuf>,
     pub(super) drop_state: Option<quill::drop_modes::DragState>,
+    /// The folder being zipped for "Send as archive" (`drop_zones`).
+    pub(super) archive: super::drop_zones::ArchiveJob,
     /// A demo's fixed drop-zone state (no real drag in a screenshot).
     pub(super) drop_preview: Option<quill::drop_modes::DragState>,
     /// Phase A1: the open chat whose slow-mode countdown is ticking
@@ -130,7 +123,6 @@ impl ComposerUi {
             inline_query_token: 0,
             inline_scroll: gpui_kit::ScrollHandle::new(),
             inline_return: None,
-            edit_replace_as_file: false,
             preview_timer: None,
             prev_text: gpui_kit::SharedString::default(),
             markdown_revert: None,
@@ -142,13 +134,11 @@ impl ComposerUi {
             remote_draft_seen: 0,
             shown_draft: None,
             placeholder_shown: None,
-            link_dialog: None,
-            date_dialog: None,
-            code_language: None,
             send_morph: Default::default(),
             inline_bot_alert_shown: false,
             drop_paths: Vec::new(),
             drop_state: None,
+            archive: Default::default(),
             drop_preview: None,
             slow_mode_tick_chat: None,
             send_box: super::send_box_state::SendBoxUi::new(),

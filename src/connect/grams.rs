@@ -231,9 +231,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         });
         // Only this request's answer counts: a late answer to an earlier
         // try that was cancelled is dropped.
-        self.session.payments.hub.grams.withdraw = Some(GramWithdraw::Password {
-            request: sent.as_ref().ok().copied(),
-            error: None,
+        self.session.payments.hub.grams.withdraw = Some(match &sent {
+            Ok(request) => GramWithdraw::Password {
+                request: Some(*request),
+                error: None,
+            },
+            // Nothing went out: the box says so and Submit can try again.
+            Err(_) => {
+                GramWithdraw::idle(Some(crate::gift_manage::ExportError::Other(String::new())))
+            }
         });
         sent
     }

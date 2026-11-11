@@ -166,6 +166,12 @@ impl QuillApp {
             .overflow_hidden()
             .on_scroll(cx.listener(move |this, event: &ScrollEvent, _, cx| {
                 this.story_strip_wheel(event, max, cx);
+            }))
+            // A gesture the pointer left is over: no axis stays decided.
+            .on_hover(cx.listener(|this, hovered: &bool, _, _| {
+                if !*hovered {
+                    this.stories.strip.axis.end();
+                }
             }));
         if visible(0) {
             strip = strip.child(

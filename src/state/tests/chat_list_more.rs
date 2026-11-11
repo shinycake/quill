@@ -36,7 +36,7 @@ fn cl3_report_and_block_errors_surface() {
         ),
     );
     assert_eq!(
-        session.chats_state.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.last(),
         Some("could not report the chat (error 400)")
     );
     let extra = session.request(
@@ -53,7 +53,7 @@ fn cl3_report_and_block_errors_surface() {
         ),
     );
     assert_eq!(
-        session.chats_state.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.last(),
         Some("could not change the block state (error 403)")
     );
 }
@@ -118,7 +118,7 @@ fn cl2_pin_order_error_rolls_back_and_surfaces() {
     assert_eq!(session.chats.get(&11).expect("chat").order, 300);
     assert_eq!(session.chats.get(&12).expect("chat").order, 200);
     assert_eq!(
-        session.chats_state.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.last(),
         Some("could not reorder pinned chats (error 400)")
     );
 }
@@ -174,7 +174,7 @@ fn cl2_archive_settings_fetch_stores_and_set_rolls_back() {
     );
     assert_eq!(session.chat_list.archive_chat_list_settings, old);
     assert_eq!(
-        session.chats_state.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.last(),
         Some("could not save archive settings (error 400)")
     );
 }
@@ -196,7 +196,7 @@ fn cl2_mark_all_read_and_clear_recents_errors_surface() {
         ),
     );
     assert_eq!(
-        session.chats_state.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.last(),
         Some("could not mark all chats as read (error 500)")
     );
     let extra = session.request(RequestPurpose::ClearRecentlyFoundChats, None);
@@ -210,7 +210,7 @@ fn cl2_mark_all_read_and_clear_recents_errors_surface() {
         ),
     );
     assert_eq!(
-        session.chats_state.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.last(),
         Some("could not clear recent searches (error 500)")
     );
 }

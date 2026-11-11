@@ -214,7 +214,7 @@ impl Session {
                     .suggestions
                     .actions
                     .insert(action.to_string());
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not hide the suggestion (error {})",
                     err.code
                 ));
@@ -222,7 +222,7 @@ impl Session {
             }
             RequestPurpose::HideContactCloseBirthdays => {
                 self.chat_list.suggestions.birthdays_hidden = false;
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not hide the suggestion (error {})",
                     err.code
                 ));

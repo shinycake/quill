@@ -2,7 +2,7 @@
 use super::*;
 use crate::ids::RequestId;
 use crate::state::AuthPurpose;
-use crate::state::{PasswordOp, RequestPurpose};
+use crate::state::{PasswordOp, PasswordRecovery, RequestPurpose};
 use crate::telegram::envelope::{AuthorizationState, EmailResetState};
 use crate::telegram::requests::{
     cancel_password_reset, cancel_recovery_email_address_verification, check_authentication_code,
@@ -609,8 +609,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::RequestAuthenticationPasswordRecovery, None);
-        self.sender
-            .send_json(&request_authentication_password_recovery(extra))?;
+        if let Err(err) = self
+            .sender
+            .send_json(&request_authentication_password_recovery(extra))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        // A resend from the code step stays on it; its refusal shows as the
+        // auth error.
+        if self.session.auth_state.password_recovery == PasswordRecovery::Idle {
+            self.session.auth_state.password_recovery = PasswordRecovery::Requested(extra);
+        }
         Ok(extra)
     }
 

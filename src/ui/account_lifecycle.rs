@@ -296,6 +296,19 @@ impl QuillApp {
         true
     }
 
+    /// The Account box's Log out > Log out. The kit closes the dialog
+    /// without its `on_close`, so a sent request empties the typed password
+    /// and reason here.
+    pub(crate) fn confirm_logout_in_account_box(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.submit_logout(cx) {
+            self.close_account_lifecycle(window, cx);
+        }
+    }
+
     /// Slice A9: the Account dialog, hosted in a kit `Dialog` via
     /// `window.open_dialog` (the kit Phase 2 redo pattern). Esc /
     /// backdrop / ✕ clear state via `on_close`.
@@ -688,8 +701,8 @@ impl QuillApp {
                         Button::new("account-logout-final")
                             .label(tr(keys::Q_PREFS_LOG_OUT))
                             .danger()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.submit_logout(cx);
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.confirm_logout_in_account_box(window, cx);
                             })),
                     ),
             )

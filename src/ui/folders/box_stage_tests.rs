@@ -7,8 +7,8 @@
 
 use crate::ui::app::QuillApp;
 use crate::ui::dialogs::{
-    AddContactDialog, ContactSave, EditContactDialog, FolderEditorDialog, FolderInviteDialog,
-    FolderLoad, FolderShareDialog, InviteStage, LinkOp,
+    AddContactDialog, ContactSave, CopyMark, EditContactDialog, FolderDeleteConfirm,
+    FolderEditorDialog, FolderInviteDialog, FolderLoad, FolderShareDialog, InviteStage, LinkOp,
 };
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
@@ -310,5 +310,92 @@ fn a_save_waiting_for_the_fresh_folder_never_spins_without_a_request(cx: &mut Te
         let dialog = app.folders.editor.as_ref().expect("still open");
         assert_eq!(dialog.load, FolderLoad::Ready);
         assert!(dialog.error.is_some(), "the form says why");
+    });
+}
+
+fn shared_delete_box(app: &mut QuillApp) -> RequestId {
+    app.folders.delete_confirm = Some(FolderDeleteConfirm {
+        folder_id: 5,
+        name: "Work".into(),
+        has_links: false,
+        shared: true,
+        keep: Default::default(),
+    });
+    let request = sent(app, RequestPurpose::GetChatFolderChatsToLeave, Some(5));
+    if let Some(session) = app.demo_session.as_mut() {
+        session
+            .chat_list
+            .folder_chats_to_leave
+            .entry(5)
+            .or_default()
+            .begin();
+    }
+    request
+}
+
+#[gpui_kit::test]
+fn deleting_a_shared_folder_waits_for_the_chats_it_could_leave(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let request = shared_delete_box(app);
+        // An early click does not delete without offering the chats.
+        app.confirm_folder_delete(cx);
+        assert!(app.folders.delete_confirm.is_some(), "still waiting");
+        answer(
+            app,
+            request,
+            r#""@type":"chats","total_count":1,"chat_ids":[7]"#,
+        );
+        app.confirm_folder_delete(cx);
+        assert!(app.folders.delete_confirm.is_none(), "deleted once offered");
+    });
+}
+
+#[gpui_kit::test]
+fn a_failed_list_of_chats_to_leave_ends_in_an_error_the_box_can_delete_past(
+    cx: &mut TestAppContext,
+) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let request = shared_delete_box(app);
+        answer(app, request, REFUSED);
+        let failed = app
+            .session()
+            .and_then(|s| s.chat_list.folder_chats_to_leave.get(&5))
+            .and_then(|f| f.error().map(str::to_string));
+        assert!(failed.is_some(), "the box draws the error and a Retry");
+        app.confirm_folder_delete(cx);
+        assert!(app.folders.delete_confirm.is_none());
+    });
+}
+
+#[gpui_kit::test]
+fn joining_new_chats_sends_only_what_the_folder_still_offers(cx: &mut TestAppContext) {
+    let (_app, _vcx) = open(cx);
+    let dialog = crate::ui::folder_extras::FolderNewChatsDialog {
+        folder_id: 5,
+        selected: [1, 2, 3].into_iter().collect(),
+    };
+    assert_eq!(dialog.still_offered(&[3, 9, 1]), vec![1, 3]);
+    assert!(dialog.still_offered(&[]).is_empty());
+}
+
+#[gpui_kit::test]
+fn the_copied_check_mark_goes_back_to_the_copy_icon(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.folders.share = Some(FolderShareDialog::new(window, cx, 5));
+        app.copy_folder_link("https://t.me/addlist/a", cx);
+        let copied = app.folders.share.as_ref().map(|d| d.copied.clone());
+        assert!(matches!(copied, Some(CopyMark::Copied { .. })));
+    });
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(2100));
+    vcx.run_until_parked();
+    app.read_with(&vcx, |app, _| {
+        assert_eq!(
+            app.folders.share.as_ref().map(|d| d.copied.clone()),
+            Some(CopyMark::Idle)
+        );
     });
 }

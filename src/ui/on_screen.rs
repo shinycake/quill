@@ -195,6 +195,8 @@ on_screen_fields! {
     video_avatar: super::video_avatar::VideoAvatarUi,
     /// The `#` popup's recent hashtags, one list for every window (`ui/recent_hashtags_state.rs`).
     recent_hashtags: super::recent_hashtags_state::RecentHashtagsUi,
+    /// Empties the message effect badge registries when this screen goes (`ui/message_effect_badge.rs`).
+    _effect_notes: super::message_effect_badge::EffectNotes,
     /// The members block of the group info panel (`ui/inline_members_state.rs`).
     inline_members: super::inline_members_state::InlineMembersUi,
     /// The search field above a profile's groups in common.
@@ -323,6 +325,7 @@ impl OnScreen {
             chat_list: super::chat_list_state::ChatListUi::new(window, cx),
             composer,
             composer_ui: Box::new(super::composer_state::ComposerUi::new()),
+            _effect_notes: Default::default(),
             chat_ui: Default::default(),
             pickers: super::pickers_state::PickerUi::new(
                 window,

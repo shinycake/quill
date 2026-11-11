@@ -64,12 +64,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         token: &str,
         x: i64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        // The zoom shows only once its load was issued (or is already
+        // loaded): a refused load leaves the graph as it was.
+        let sent = self.load_stat_graph(chat_id, token, x)?;
         self.session
             .groups
             .stats
             .zoomed
             .insert(token.to_string(), x);
-        self.load_stat_graph(chat_id, token, x)
+        Ok(sent)
     }
 
     /// "Zoom Out".
@@ -117,10 +120,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             state.statistics = MessageStatsFetch::Loading;
         }
         let extra = self.session.request(purpose, Some(chat_id));
-        self.send_json_request(
+        if let Err(err) = self.send_json_request(
             extra,
             &get_message_statistics(extra, chat_id, message_id, is_dark),
-        )?;
+        ) {
+            // Nothing went out: the page offers Retry, not a spinner.
+            if let Some(state) = self.session.groups.stats.message.as_mut() {
+                state.statistics = MessageStatsFetch::Failed(
+                    crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_STATISTICS)
+                        .to_string(),
+                );
+            }
+            return Err(err);
+        }
         if !self.message_forwards_loaded(chat_id, message_id) {
             let _ = self.fetch_message_public_forwards(chat_id, message_id, "");
         }
@@ -151,12 +163,22 @@ impl<S: JsonSender> ConnectDriver<S> {
             chat_id: chat_id.0,
             message_id: message_id.0,
         });
-        if self.session.requests.has_purpose(purpose) {
-            // A page reopened meanwhile waits for the one on its way.
-            self.session
-                .groups
-                .stats
-                .forwards_requested(chat_id.0, message_id.0);
+        // The page this post's list waits for is on its way: wait for it.
+        // One asked for the post when it was shown before is not this
+        // list's (its answer is dropped), so a new one goes out.
+        let on_its_way = self
+            .session
+            .groups
+            .stats
+            .message_for(chat_id.0, message_id.0)
+            .is_some_and(|state| {
+                self.session
+                    .requests
+                    .ids_for_chat_where(chat_id, |p| p == purpose)
+                    .into_iter()
+                    .any(|id| state.forwards.asked(id))
+            });
+        if on_its_way {
             return Ok(None);
         }
         let extra = self.session.request(purpose, Some(chat_id));
@@ -167,7 +189,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session
             .groups
             .stats
-            .forwards_requested(chat_id.0, message_id.0);
+            .forwards_requested(chat_id.0, message_id.0, extra);
         Ok(Some(extra))
     }
 
@@ -176,7 +198,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(state) = self.session.groups.stats.message.as_ref() else {
             return Ok(None);
         };
-        if state.forwards.loading || state.forwards.next_offset.is_empty() {
+        if state.forwards.loading() || state.forwards.next_offset.is_empty() {
             return Ok(None);
         }
         let (chat_id, message_id) = (ChatId(state.chat_id), MessageId(state.message_id));
@@ -265,9 +287,33 @@ impl<S: JsonSender> ConnectDriver<S> {
                 extra, chat_id, message_id, is_dark,
             ),
         );
+        // A send that did not go out is a failed load the page draws with
+        // Retry, not an empty slot the next render asks for again.
         if sent.is_err() {
-            self.session.messages.poll_stats.remove(&key);
+            self.session.messages.poll_stats.insert(
+                key,
+                crate::state::PollStatsFetch::Failed(
+                    crate::lang::tr(crate::lang::keys::Q_MONEY_STATISTICS_SEND_FAILED).into(),
+                ),
+            );
         }
         sent.map(Some)
+    }
+
+    /// The Retry of a failed poll votes chart: start over.
+    pub fn retry_stats_poll_votes(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        is_dark: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        let key = (chat_id.0, message_id.0);
+        if matches!(
+            self.session.messages.poll_stats.get(&key),
+            Some(crate::state::PollStatsFetch::Failed(_))
+        ) {
+            self.session.messages.poll_stats.remove(&key);
+        }
+        self.fetch_stats_poll_votes(chat_id, message_id, is_dark)
     }
 }

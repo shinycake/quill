@@ -122,6 +122,12 @@ impl RequestPurpose {
                 | RequestPurpose::SearchMessages
                 | RequestPurpose::SearchChatMessages
                 | RequestPurpose::SearchChatMessagesMore
+                | RequestPurpose::SearchMessagesMore
+                | RequestPurpose::SearchPublicPosts
+                | RequestPurpose::SearchPublicPostsMore
+                | RequestPurpose::SearchPublicMessagesByTag
+                | RequestPurpose::GetRecommendedChats
+                | RequestPurpose::CanTransferOwnership
                 | RequestPurpose::SearchChats
                 | RequestPurpose::SearchPublicChats
                 | RequestPurpose::GetSharedMedia { .. }
@@ -150,8 +156,12 @@ impl Session {
     /// The request must already be out of the registry.
     pub(crate) fn settle_lost_request(&mut self, pending: PendingRequest) {
         let extra = pending.id;
+        self.drop_admin_followups_of_lost(extra);
         let seq = self.last_seq;
         let error = TdError::from_code(LOST_REQUEST_ERROR_CODE);
+        // An export's worker waits on its link for this answer: without it
+        // the link stays busy and no further export request goes out.
+        self.settings.fail_lost_export(pending.purpose, extra);
         self.apply_payload_in_asking_view(
             EnvelopePayload::Error(error),
             Some(&pending),
@@ -375,79 +385,6 @@ impl ForwardResult {
     }
 }
 
-/// Sponsored messages for one chat (`getChatSponsoredMessages` response).
-/// Rows render with a **Sponsored** / **Recommended** label.
-#[derive(Debug, Clone, Default)]
-pub struct ChatSponsoredMessages {
-    pub messages: Vec<SponsoredMessage>,
-    /// Schema `messages_between`: minimum number of ordinary messages between
-    /// shown sponsored rows (0 = after all ordinary messages).
-    pub messages_between: i32,
-    /// Ids already reported to TDLib as viewed (`viewMessages`): an ad is
-    /// counted once per fetched list, however often it scrolls into view.
-    pub viewed: std::collections::HashSet<i64>,
-    /// Ids the user reported or hid; never shown again for this list.
-    pub dismissed: std::collections::HashSet<i64>,
-    /// When the response arrived (tdesktop `lastReceived`): refetches inside
-    /// `SPONSORED_REFETCH_AFTER` are skipped.
-    pub fetched_at: Option<std::time::Instant>,
-    /// The ads placed in the history so far, in placement order (tdesktop
-    /// `Entry::item`): each sits after the message it was placed under and
-    /// stays there as newer messages arrive. An ad not listed here is not in
-    /// the history yet. Cleared when the chat is left (`clearItems`).
-    pub placed: Vec<SponsoredPlacement>,
-}
-
-/// tdesktop `kRequestTimeLimit`: a chat's sponsored messages are not
-/// requested again for five minutes.
-pub const SPONSORED_REFETCH_AFTER: std::time::Duration = std::time::Duration::from_secs(5 * 60);
-
-impl ChatSponsoredMessages {
-    /// Rows in TDLib's response order. The schema does not promise an order,
-    /// so the vector order is preserved verbatim.
-    pub fn ordered(&self) -> Vec<&SponsoredMessage> {
-        self.messages.iter().collect()
-    }
-}
-
-/// `reportChatSponsoredMessage` waiting on the user's option choice
-/// (`reportSponsoredResultOptionRequired`).
-#[derive(Debug, Clone)]
-pub struct SponsoredReportFlight {
-    pub extra: RequestId,
-    pub chat_id: ChatId,
-    /// int53 sponsored message id.
-    pub message_id: i64,
-    pub title: String,
-    pub options: Vec<ReportOption>,
-}
-
-/// Last `reportChatSponsoredMessage` outcome (no TDLib text is echoed).
-#[derive(Debug, Clone)]
-pub struct SponsoredReportOutcome {
-    pub chat_id: ChatId,
-    /// int53 sponsored message id.
-    pub message_id: i64,
-    pub result: ReportSponsoredResult,
-}
-
-/// Slice B2: fetch state of `getBotSimilarBots` for a bot profile. The
-/// `users` payload carries only ids (names resolve through
-/// `Session::users`); presence records "fetched" so the driver never
-/// retries, and `Loading` dedupes the request.
-#[derive(Debug, Clone, Default)]
-pub enum SimilarBotsFetch {
-    #[default]
-    Loading,
-    Loaded(Vec<i64>),
-}
-
-impl SponsoredReportOutcome {
-    pub fn user_message(&self) -> &'static str {
-        self.result.user_message()
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct PendingRequest {
     pub id: RequestId,
@@ -509,6 +446,9 @@ pub struct PendingRequest {
     /// lands in a view applies to that window's
     /// (`Session::apply_payload_in_asking_view`).
     pub window: Option<ChatId>,
+    /// Which opening of that window it was (`WindowViews::opening_of`):
+    /// a window closed and opened again for the same chat is a new one.
+    pub window_opening: u64,
     /// When the request was registered. The periodic sweep
     /// ([`RequestRegistry::sweep_stale`]) drops dedupe-guard entries whose
     /// answer never came, so a lost response cannot block a chat forever.
@@ -523,6 +463,8 @@ pub struct RequestRegistry {
     /// main window's). `Session::enter_view` keeps it; every request
     /// registered meanwhile carries it (`PendingRequest::window`).
     pub(crate) window: Option<ChatId>,
+    /// The opening of `window` ([`PendingRequest::window_opening`]).
+    pub(crate) window_opening: u64,
     /// In-flight `DownloadFile` requests per file id, so the
     /// already-downloading check does not scan `pending`.
     downloads: HashMap<i32, u32>,
@@ -573,6 +515,7 @@ impl RequestRegistry {
             invite_link: None,
             rollback: None,
             window: self.window,
+            window_opening: self.window_opening,
             created_at: Instant::now(),
         }
     }

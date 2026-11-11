@@ -76,7 +76,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self
             .session
             .requests
-            .has_purpose(RequestPurpose::AddChatWelcomeMessage)
+            .has_purpose_for_chat(RequestPurpose::AddChatWelcomeMessage, chat_id)
         {
             return Ok(None);
         }

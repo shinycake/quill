@@ -148,8 +148,30 @@ impl QuillApp {
         };
         dialog.revoked_open = !dialog.revoked_open;
         let open = dialog.revoked_open;
+        // The list opens once its request is out (or its answer is on
+        // hand): a refused send leaves it closed, with the reason, instead
+        // of loading for good.
         if open && let Some(live) = self.live.as_mut() {
-            let _ = live.driver.fetch_revoked_chat_invite_links(chat_id);
+            let sent = live.driver.fetch_revoked_chat_invite_links(chat_id);
+            let answered = live
+                .driver
+                .session
+                .groups
+                .revoked_invite_links
+                .contains_key(&chat_id.0);
+            if sent.is_err() || (matches!(sent, Ok(None)) && !answered) {
+                if let Some(dialog) = self
+                    .admin
+                    .group_settings_dialog
+                    .as_mut()
+                    .filter(|d| d.chat_id == chat_id)
+                {
+                    dialog.revoked_open = false;
+                }
+                self.set_note(StatusNote::error(tr(
+                    keys::Q_OPS_COULD_NOT_LOAD_REVOKED_INVITE_LINKS,
+                )));
+            }
         }
         cx.notify();
     }

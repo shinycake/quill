@@ -77,6 +77,9 @@ pub(super) struct Relay {
     pending_bytes: usize,
     in_flight: Option<InFlight>,
     sequence: u64,
+    /// Deliveries numbered up to here went to an earlier document; their
+    /// late acknowledgements are ignored.
+    stale_through: u64,
     /// When the current document started loading.
     load_started: Instant,
     /// When it finished loading, if it did.
@@ -103,6 +106,7 @@ impl Relay {
             pending_bytes: 0,
             in_flight: None,
             sequence: 0,
+            stale_through: 0,
             load_started: now,
             load_finished: None,
             bridge_seen: false,
@@ -123,6 +127,7 @@ impl Relay {
         self.bridge_seen = false;
         self.receiving = false;
         self.started = false;
+        self.stale_through = self.sequence;
         if let Some(lost) = self.in_flight.take() {
             self.pending_bytes = self.pending_bytes.saturating_add(lost.data.len());
             self.pending.push_front(lost.data);
@@ -149,6 +154,7 @@ impl Relay {
             }
             PageMessage::Ack(sequence) => match &self.in_flight {
                 Some(flight) if flight.sequence == *sequence => self.in_flight = None,
+                _ if *sequence <= self.stale_through => {}
                 _ => return Err(()),
             },
             PageMessage::Binary(_) | PageMessage::Text(_) => {
@@ -302,6 +308,22 @@ mod tests {
         assert_eq!(relay.next(now), Some((2, "AAAA".into())));
         relay.heard(&PageMessage::Ack(2), now).unwrap();
         assert_eq!(relay.next(now), Some((3, "BBBB".into())));
+    }
+
+    #[test]
+    fn a_late_ack_from_the_reloaded_document_is_ignored() {
+        let now = Instant::now();
+        let mut relay = ready(now);
+        assert!(relay.queue("AAAA".into()));
+        assert_eq!(relay.next(now), Some((1, "AAAA".into())));
+        relay.load_started(now);
+        relay.heard(&PageMessage::Ack(1), now).unwrap();
+        relay.heard(&PageMessage::Hello, now).unwrap();
+        relay.heard(&PageMessage::Receiving, now).unwrap();
+        assert_eq!(relay.next(now), Some((2, "AAAA".into())));
+        relay.heard(&PageMessage::Ack(1), now).unwrap();
+        assert!(relay.heard(&PageMessage::Ack(3), now).is_err());
+        relay.heard(&PageMessage::Ack(2), now).unwrap();
     }
 
     #[test]

@@ -70,23 +70,27 @@ impl Session {
             // Slice CL3: refused report / block surfaces in the
             // status note — never shown as success.
             Some(RequestPurpose::ReportChat) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not report the chat (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not report the chat (error {})", err.code));
             }
             Some(RequestPurpose::RemoveChatActionBar) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not hide the bar (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not hide the bar (error {})", err.code));
             }
             Some(RequestPurpose::ToggleBusinessBotPaused) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not change the bot (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not change the bot (error {})", err.code));
             }
             Some(RequestPurpose::RemoveBusinessBotFromChat) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not remove the bot (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not remove the bot (error {})", err.code));
             }
             Some(RequestPurpose::CreatePrivateChat) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not open Saved Messages (error {})",
                     err.code
                 ));
