@@ -69,7 +69,7 @@ src/ui/early_connect.rs FIRST | the first client, main thread only
 src/ui/location_picker/geolocation/macos.rs RUNNING | the one location request
 src/ui/location_picker/demo.rs NEXT_EXTRA | an id counter
 src/ui/platform_cursor.rs OS_PLATFORM | the platform handle
-src/ui/startup_failure.rs QUIT,GPU_GONE,QUIT_ASKED | app quit state
+src/ui/startup_failure.rs QUIT,GPU_GONE,QUIT_STAGE | app quit state
 src/ui/touch_bar/mac/mod.rs HOST,INBOX,SYNC_SCHEDULER,BAR_SCREEN,APPLIED,BINDING | the one Touch Bar, bound to the main window (BINDING names it)
 src/ui/video_player/mod.rs NEXT | an id counter
 src/ui/video_player/decoder_load.rs LOADS,REFRESHES | counters
