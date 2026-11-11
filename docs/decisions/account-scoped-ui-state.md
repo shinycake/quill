@@ -8043,3 +8043,29 @@ whose variants carry the data, with a way out of every stage.
 - **A refused refetch of a stale proxy list** lands in
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
+
+### Sweep fixes (r2-02)
+
+| Id | Fix |
+| --- | --- |
+| 05-001 | `TwofaFlow::refetch` stays set until `refresh_password_state` is sent; a refused send keeps it for the next ingest. |
+| 05-013 | `InlineQueryFetch::Loading(RequestId)`: only the first-page answer or error of the request the slot holds leaves it. The request is registered before the slot is written. |
+| 05-020 | `ChatListState::folder_paging: HashMap<folder id, ListPaging>` replaces `folder_chats_exhausted`. A failed folder page lands in `Retrying`; `chat_list_tick` asks again when the wait is over; 404 ends it; a page that goes through clears the wait. |
+| 05-048 | `ConnectDriver::refresh_story_trays` keeps a poster in `tray_refresh` until its `getChatActiveStories` is sent. |
+| 05-049, 05-050 | `LiveBursts::{Unasked, Requested(RequestId), Failed, Loaded}`. A failure is `Failed`, not asked again by the call updates of the same story; the next live story opened (`begin_live_story`) asks once more. The answer is taken only from the request the stage holds. |
+| 05-067 | Only the newest save of the inactive-session timeout and of the new-chat privacy rolls back (`*_saved_at` holds the newest request). An older save failing hands its `previous` to the newer one still in flight, so a chain of failures ends on what the server has. |
+| 06-001 | `ThreadStatus::takes_page_of`: while `LoadingHistory(r)` only request `r`'s page or error moves the thread; a `getMessageThread` error only fails a thread still `Resolving`; a newer-page error only touches a loaded thread. |
+| 06-015 | `Session::thread_upsert` resets the window through `reset_thread_window` (which stales both ends' pages in flight) before `note_live` can replace it. |
+| 06-002 | `begin_thread` marks the pages the replaced view asked for as stale in the new view. |
+| 06-017 | `StatsState::posts` holds `PostSlot::{Ready, Missing, Failed}`. Only a not-found error is `Missing`; any other failure is `Failed` and `StatsState::reset` (the panel opens) clears it so it is asked again. |
+| 06-020 | A failed first page of Stories or Gifts no longer writes a zero count; the count stays unknown and `visible_tabs` keeps a tab whose page failed, with its Retry. |
+| 06-021 | `fetch_chat_media_counts` and the gallery's extra counts ask again on every open (a count still out is not asked twice). Counts shown stay until each new answer replaces its own; a failed count stays unknown. |
+| 06-037 | `WebApps::found` holds the `RequestId` and `LaunchFlow::Searching { request, awaited }` takes only that request's answer, so two links of the same bot do not take each other's. |
+| 13-057, 06-008 | `Translation::Failed { reason, attempts }`; the pump (`needs_translation`) asks a failed message again until `TRANSLATE_PUMP_ATTEMPTS` failures. The count rides `Pending { attempts }` across the retry. |
+| 03-A008 | `forget_screen_outcomes` also drops the mini-app one-shot answers that landed while away. |
+
+Skipped in these files: 05-002/05-003/05-004/05-084/06-038 (implicit-state
+reshapes owned by the IS bundles; `refetch` is now a mark kept until sent),
+05-014 (login-URL slot: separate reshape), 05-068 (needs `Fetch<i32>` for the
+timeout; the newest-save rule above removes the overlapping case), 06-009,
+06-019, 06-025, 06-039, 06-040 (separate, not local to the fixes above).
