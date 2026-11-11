@@ -38,9 +38,9 @@ use quill::sticker_playback::player::{
     AHEAD, ClipKey, ClipState, Engine, PlayHead, PlayMode, Timeline, edge_for,
 };
 use smallvec::SmallVec;
-use std::cell::RefCell;
 #[cfg(test)]
 use std::cell::Cell;
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
