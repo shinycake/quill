@@ -127,7 +127,7 @@ crate::ui::shell::register_dialogs! {
     /// Stars balance and transaction history.
     Stars => DialogSpec::new(
         3800,
-        |app| app.session().is_some_and(|s| s.payments.hub.stars_open),
+        |app| app.session().is_some_and(|s| s.payments.hub.stars.is_open()),
         QuillApp::build_stars_dialog,
     )
     .close(|app, _, cx| app.close_stars(cx)),
@@ -135,7 +135,7 @@ crate::ui::shell::register_dialogs! {
     /// Received gifts of a user or channel.
     ReceivedGifts => DialogSpec::new(
         3900,
-        |app| app.session().is_some_and(|s| s.payments.hub.gifts_open),
+        |app| app.session().is_some_and(|s| s.payments.hub.received.is_open()),
         QuillApp::build_gifts_dialog,
     )
     .close(|app, _, cx| app.close_gifts(cx)),

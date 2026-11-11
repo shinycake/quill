@@ -35,16 +35,16 @@ fn an_older_stars_history_failure_leaves_the_live_request_loading() {
         RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { append: false }),
         None,
     );
-    session.payments.hub.tx = PageStage::Loading {
+    session.payments.hub.stars.page = PageStage::Loading {
         request: new,
         kind: PageKind::First,
     };
     fail(&mut session, old, &sink);
-    assert!(session.payments.hub.tx.is_loading());
-    assert!(session.payments.hub.tx.error().is_none());
+    assert!(session.payments.hub.stars.page.is_loading());
+    assert!(session.payments.hub.stars.page.error().is_none());
     fail(&mut session, new, &sink);
-    assert!(!session.payments.hub.tx.is_loading());
-    assert!(session.payments.hub.tx.error().is_some());
+    assert!(!session.payments.hub.stars.page.is_loading());
+    assert!(session.payments.hub.stars.page.error().is_some());
 }
 
 #[test]
@@ -58,16 +58,16 @@ fn an_older_received_gifts_failure_leaves_the_live_request_loading() {
         RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append: false }),
         None,
     );
-    session.payments.hub.gifts_page = PageStage::Loading {
+    session.payments.hub.received.page = PageStage::Loading {
         request: new,
         kind: PageKind::First,
     };
     fail(&mut session, old, &sink);
-    assert!(session.payments.hub.gifts_page.is_loading());
-    assert!(session.payments.hub.gifts_page.error().is_none());
+    assert!(session.payments.hub.received.page.is_loading());
+    assert!(session.payments.hub.received.page.error().is_none());
     fail(&mut session, new, &sink);
-    assert!(!session.payments.hub.gifts_page.is_loading());
-    assert!(session.payments.hub.gifts_page.error().is_some());
+    assert!(!session.payments.hub.received.page.is_loading());
+    assert!(session.payments.hub.received.page.error().is_some());
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn collections_of_another_owner_are_dropped() {
         None,
     );
     // The channel's list is open now.
-    session.payments.hub.gifts_owner = Some(channel);
+    session.payments.hub.received.owner = Some(channel);
     session
         .payments
         .gifts_manage
@@ -110,7 +110,7 @@ fn collections_of_another_owner_are_dropped() {
 #[test]
 fn market_failures_hit_only_the_request_that_failed() {
     let (mut session, sink) = session();
-    let search = |page| GiftMarketPurpose::SearchResale { gift_id: 5, page };
+    let search = |_page| GiftMarketPurpose::SearchResale { gift_id: 5 };
     let old = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GiftMarket(search(0))),
         None,
@@ -163,7 +163,7 @@ fn market_failures_hit_only_the_request_that_failed() {
     );
 
     // Craft candidates of a closed craft box do not fail the next one.
-    let candidates = |page| GiftMarketPurpose::GiftsForCrafting { gift_id: 5, page };
+    let candidates = |_page| GiftMarketPurpose::GiftsForCrafting { gift_id: 5 };
     let stale = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GiftMarket(candidates(0))),
         None,
@@ -202,6 +202,11 @@ fn acquired_gifts_and_preview_failures_say_so_and_can_be_asked_again() {
         )),
         None,
     );
+    let market = &mut session.payments.gift_market;
+    market.acquired.entry(8).or_default().begin();
+    market.acquired.entry(8).or_default().sent(acquired);
+    market.previews.entry(8).or_default().begin();
+    market.previews.entry(8).or_default().sent(preview);
     fail(&mut session, acquired, &sink);
     fail(&mut session, preview, &sink);
     let market = &session.payments.gift_market;
@@ -336,4 +341,26 @@ fn a_join_box_parked_for_a_bot_profile_goes_when_the_profile_closes() {
     park(&mut session);
     session.set_open_info_panel(None);
     assert!(session.payments.earn.recipients.parked().is_none());
+}
+
+#[test]
+fn an_older_acquired_gifts_failure_leaves_the_live_request_loading() {
+    let (mut session, sink) = session();
+    let purpose = || {
+        RequestPurpose::Payments(PaymentsPurpose::GiftMarket(
+            GiftMarketPurpose::AcquiredGifts { gift_id: 8 },
+        ))
+    };
+    let old = session.request(purpose(), None);
+    let live = session.request(purpose(), None);
+    let fetch = session.payments.gift_market.acquired.entry(8).or_default();
+    fetch.begin();
+    fetch.sent(live);
+    fail(&mut session, old, &sink);
+    assert!(session.payments.gift_market.acquired[&8].is_loading());
+    fail(&mut session, live, &sink);
+    assert!(matches!(
+        session.payments.gift_market.acquired.get(&8),
+        Some(Fetch::Failed { .. })
+    ));
 }

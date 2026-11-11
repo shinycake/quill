@@ -20,7 +20,6 @@ Drawn::leaving
 DestRow::saved
 DragSelect::pending
 Drawn::leaving
-FieldResult::finished
 FooterMeta::pending
 
 GiveawaySummary::finished
@@ -51,12 +50,10 @@ PasswordBox::sending+error
 PlaybackHealth::output_failed
 
 
-ReceivedGift::is_saved
 RowForum::loaded
 RowState::pending
 
 
-ReceivedGift::is_saved
 RowForum::loaded
 RowState::pending
 SettingsState::pending_attention
@@ -79,5 +76,4 @@ Tempo::inner_done
 TopPerson::saved_messages
 
 
-Validation::finished
 

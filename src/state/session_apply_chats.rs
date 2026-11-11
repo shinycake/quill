@@ -56,10 +56,11 @@ impl Session {
             self.remember_files(std::slice::from_ref(file));
         }
         self.apply_business_bot_exact(&kind, pending);
-        if pending.map(|p| p.purpose)
-            == Some(RequestPurpose::Media(MediaPurpose::LocationPicker(
-                crate::location_picker::LocationPickerPurpose::ResolveVenueBot,
-            )))
+        if let Some(pending) = pending
+            && pending.purpose
+                == RequestPurpose::Media(MediaPurpose::LocationPicker(
+                    crate::location_picker::LocationPickerPurpose::ResolveVenueBot,
+                ))
         {
             // tdesktop takes only an inline bot (`isBotInlineGeo`).
             let bot = match &kind {
@@ -70,7 +71,7 @@ impl Session {
                     .map(|_| user_id.0),
                 _ => None,
             };
-            self.location.venue_bot_resolved(bot);
+            self.location.venue_bot_resolved(pending.id.0, bot);
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ResolveGifSearchBot) {
             self.stickers.gifs.search_bot_user_id = match &kind {

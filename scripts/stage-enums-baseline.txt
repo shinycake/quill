@@ -62,7 +62,6 @@ bare:FieldStage::Waiting 1
 bare:FolderLoad::Loading 1
 bare:Found::Loading 1
 bare:GiftsLayout::Loading 1
-bare:GiftsRest::Loading 1
 bare:GoalNow::Waiting 1
 bare:GraphFetch::Loading 1
 bare:Health::Running 1
@@ -79,7 +78,7 @@ bare:Lookup::Pending 1
 bare:Lookup::Waiting 1
 bare:MediaFile::Downloading 1
 bare:MediaSave::Saving 1
-bare:MembersStage::Loading 2
+bare:MembersStage::Loading 1
 bare:MenuSend::Sent 1
 bare:MessageStatsFetch::Loading 1
 bare:MuteState::Connecting 1
@@ -158,7 +157,6 @@ bare:TransportState::Connecting 1
 bare:TypeSave::Sent 1
 bare:Unavailable::Checking 1
 bare:UserLinkFetch::Loading 1
-bare:VenueBot::Resolving 1
 bare:VenueList::Loading 1
 bare:VideoFullscreen::Leaving 1
 bare:ViewState::Opening 1
@@ -177,7 +175,6 @@ unkeyed:AuctionFetch::Loading 1
 unkeyed:AuctionOpen::Waiting 1
 unkeyed:Beats::Running 1
 unkeyed:BotUsernameCheck::Checking 1
-unkeyed:BuyPhase::Sending 1
 unkeyed:CallLinkStage::Leaving 1
 unkeyed:CallTransport::Connecting 1
 unkeyed:CameraStage::Saving 1

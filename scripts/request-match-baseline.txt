@@ -35,7 +35,6 @@ purpose:ConnectDriver::gif_request 1
 purpose:ConnectDriver::import_contacts 1
 purpose:ConnectDriver::ingest 6
 purpose:ConnectDriver::leave_live_story 1
-purpose:ConnectDriver::list_in_flight 1
 purpose:ConnectDriver::load_forum_topic_icons 1
 purpose:ConnectDriver::load_saved_tags 1
 purpose:ConnectDriver::load_saved_topics 1
@@ -145,7 +144,7 @@ unmatched:Session::apply_live_story_payload 1
 unmatched:Session::apply_messages 1
 unmatched:Session::apply_messages_payload 1
 unmatched:Session::apply_ok 2
-unmatched:Session::apply_payments_payload 4
+unmatched:Session::apply_payments_payload 2
 unmatched:Session::apply_privacy_data_payload 1
 unmatched:Session::apply_quick_replies_ok 1
 unmatched:Session::apply_saved_tags 1

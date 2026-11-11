@@ -16,12 +16,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn gifts_owner_if_mine(&self) -> Result<MessageSender, ConnectSendError> {
         let hub = &self.session.payments.hub;
         if !self.chats_path_active()
-            || hub.gifts_op.is_mutating()
+            || hub.received.op.is_mutating()
             || !hub.gifts_are_mine(self.session.my_user_id)
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        hub.gifts_owner.ok_or(ConnectSendError::InvalidRequest)
+        hub.received.owner.ok_or(ConnectSendError::InvalidRequest)
     }
 
     /// Like [`Self::gifts_owner_if_mine`], but a channel the user created
@@ -29,12 +29,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn gifts_owner_if_deletable(&self) -> Result<MessageSender, ConnectSendError> {
         let hub = &self.session.payments.hub;
         if !self.chats_path_active()
-            || hub.gifts_op.is_mutating()
+            || hub.received.op.is_mutating()
             || !self.session.gifts_deletable()
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        hub.gifts_owner.ok_or(ConnectSendError::InvalidRequest)
+        hub.received.owner.ok_or(ConnectSendError::InvalidRequest)
     }
 
     /// Lock the list, build the request with the owner and send it; the
@@ -66,11 +66,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .session
                 .request(RequestPurpose::Payments(purpose), None),
         };
-        self.session.payments.hub.gifts_op.begin(extra);
-        self.session.payments.hub.gift_notice = None;
+        self.session.payments.hub.received.op.begin(extra);
+        self.session.payments.hub.received.notice = None;
         self.session.payments.gifts_manage.note = None;
         if let Err(err) = self.send_json_request(extra, &build(extra, owner)) {
-            self.session.payments.hub.gifts_op.failed(Some(extra));
+            self.session.payments.hub.received.op.failed(Some(extra));
             return Err(err);
         }
         Ok(extra)
@@ -90,7 +90,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session
             .payments
             .hub
-            .gifts
+            .received
+            .rows
             .iter()
             .find(|g| g.id == id)
             .cloned()
@@ -157,7 +158,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        let Some(owner) = self.session.payments.hub.gifts_owner else {
+        let Some(owner) = self.session.payments.hub.received.owner else {
             return Ok(None);
         };
         // `Stale` stays until the send went out (`Loading` is set there), so a
@@ -172,7 +173,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<Option<RequestId>, ConnectSendError> {
         let manage = &self.session.payments.gifts_manage;
         if !self.chats_path_active()
-            || self.session.payments.hub.gifts_owner.is_none()
+            || self.session.payments.hub.received.owner.is_none()
             || (id != 0 && manage.collection(id).is_none())
         {
             return Err(ConnectSendError::InvalidRequest);
@@ -185,7 +186,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         manage.flow = None;
         manage.note = None;
         let hub = &mut self.session.payments.hub;
-        hub.reset_gifts_list();
+        hub.received.restart();
         self.fetch_received_gifts_page(false).map(Some)
     }
 
@@ -201,7 +202,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if manage.active_collection != 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let current = pinned_ids(&hub.gifts);
+        let current = pinned_ids(&hub.received.rows);
         let ids = match (
             gift.pin_gate(true, current.len(), manage.limits.pinned()),
             pinned,
@@ -275,7 +276,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         };
         // A second click while the first transfer is out sends nothing.
-        if self.session.payments.hub.gifts_op.is_mutating() {
+        if self.session.payments.hub.received.op.is_mutating() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let person = self
@@ -302,7 +303,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// gift of the user's own list, with nothing else in flight.
     fn export_allowed(&self, id: &str) -> Result<(), ConnectSendError> {
         if !self.chats_path_active()
-            || self.session.payments.hub.gifts_op.is_mutating()
+            || self.session.payments.hub.received.op.is_mutating()
             || self.own_gift(id)?.export_state(now_unix()) != ExportState::Ready
             || !self
                 .session

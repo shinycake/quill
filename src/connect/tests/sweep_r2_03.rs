@@ -68,7 +68,7 @@ fn a_refused_collections_send_keeps_the_stale_mark() {
     use crate::telegram::envelope::MessageSender;
     let mut t = Flaky::new();
     let hub = &mut t.driver.session.payments.hub;
-    hub.gifts_owner = Some(MessageSender::User { user_id: 7 });
+    hub.received.owner = Some(MessageSender::User { user_id: 7 });
     t.driver.session.payments.gifts_manage.collections_fetch = CollectionsFetch::Stale;
     t.sender.refuse(&["getGiftCollections"]);
     assert!(t.driver.refresh_gift_collections_if_stale().is_err());
@@ -96,12 +96,12 @@ fn closing_the_gifts_dialog_leaves_nothing_to_refetch() {
         "getReceivedGifts",
         json!({"@type":"receivedGifts","total_count":0,"gifts":[],"next_offset":""}),
     );
-    t.driver.session.payments.hub.gifts_op.mark_stale();
-    t.driver.session.payments.hub.close_gifts();
+    t.driver.session.payments.hub.received.op.mark_stale();
+    t.driver.session.payments.hub.received.close();
     let asked = t.sender.count("getReceivedGifts");
     assert_eq!(t.driver.refresh_received_gifts_if_stale().unwrap(), None);
     assert_eq!(t.sender.count("getReceivedGifts"), asked);
-    assert!(t.driver.session.payments.hub.gifts_owner.is_none());
+    assert!(t.driver.session.payments.hub.received.owner.is_none());
 }
 
 #[test]

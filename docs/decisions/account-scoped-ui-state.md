@@ -8435,3 +8435,44 @@ drivers listed below, `earn/state.rs`, `emoji/mod.rs`, `export/handle.rs`,
   stays on screen until the new one lands. A failed community fetch shows
   "Couldn't load the community info." in the community chat list instead of
   a spinner.
+
+### Sweep fixes (r2-16)
+
+Files: gift market (`mod`, `state`), giveaway (`mod`, `members`), `lang/store`,
+location picker, MPRIS (`media_session/linux`), media viewer (`transform`,
+`pip/panel`), `notify`, `passcode`, `passkeys`, `payment_card`
+(`field_edit`, `validate`), `peer_qr` (`free`, `state`, `theme`) and
+`premium_hub` (`mod`, `gift_value`).
+
+| Ids | Fix |
+| --- | --- |
+| 03-B010 | `acquired` / `previews` record their request (`Fetch::sent`) and take only that request's answer or error. |
+| 03-C015 | `ResaleSearch::page` and `CraftSession::candidates_page` are gone; the purposes lose `page`. Whether a page appends is the stage's (`PageLoad::appends(request)`). |
+| 03-C016 | `ResaleBuy` is `{ listing, recipient, pay_in_grams, stage: BuyStage, for_craft }`; `BuyStage` is `View`, `Send`, `Confirm`, `Changed(price)`, `Sending { request }`. `BuyPhase`, `step` and `price_changed` are deleted. Going Back during a purchase leaves it out; its answer still lands. `pay_in_grams` is the buyer's currency tab, kept as a choice that outlives a refusal. |
+| 03-C013 | `MembersStage::Loading { request }` replaces the generation counter; `restart` leaves the stage `Idle`, `begin_page(request)` enters it, `accept` and `fail` match it. `PaymentsPurpose::GetAwardMembers` is a unit variant. |
+| 03-C017 | Skipped: winners/months and option/winners are user selections validated against the offered options. Every edit goes through `edit_giveaway`, which settles the draft again (`settle_premium`, `settle_stars`); there is no stage and no request. |
+| 03-C018 | `LOCAL` holds `Local::{Shared, English, Pack}` instead of `Option<Option<Arc<Snapshot>>>`. |
+| 03-C009 | `VenueBot::Resolving { request }` is set by `request_sent`; `venue_bot_resolved` / `venue_bot_failed` take the request id and ignore a lookup a new picker dropped. |
+| 03-D005 | MPRIS `Shared` is `Option<Playing { info, at }>`; the seek offset from D-Bus adds saturating. |
+| 03-D004 | `flip_rgba` / `rotate_rgba_quarter_turns` check the byte count with `checked_mul` (`is_rgba_image`). |
+| 03-D009 | `PipPosition::bounded` clamps a position read from `video_pip.json` to `SAVED_LIMIT`, so the window math cannot overflow. |
+| 04-002 | `NotificationOutcome` is `Dismissed` or `Picked(action)`. |
+| 04-018 | `UnlockState` keeps the wrong-try count of the process; the larger of it and the file's count applies, so a failed write does not switch the limit off (tdesktop keeps its count in memory only). |
+| 04-012, 04-013 | The list error is `PasskeyList::Failed { error }`, the removal's is `RemoveStage::Failed`, the add's is `PasskeyAdd::Failed`; `PasskeysState::error`, `removing: Option<Removal>` and `generation` are deleted. The list answer is matched by the request in `PasskeyList::Asking`, so a look older than a removal is dropped without a counter; `list_in_flight` also checks the request is still pending. |
+| 04-022, 04-023 | `Validation` is `Invalid`, `Incomplete`, `Valid`, `Finished`; `FieldResult` holds one `FieldCheck`. Baseline lines `FieldResult::finished` and `Validation::finished` dropped. |
+| 04-020 | `FreeUi::Requesting { request, serial }`; `FreeState::begin_request` / `settle_request` / `drop_request` are the only writers. `last_serial` is an id generator. |
+| 04-019 | `PeerQrBox::theme: ThemeStage` is `Following`, `Picked { failed }`, `Saving { serial, choice }`; `chosen`, `save` and `SaveStage` are deleted. |
+| 04-021 | `GiftsStage::FirstAsking(GiftsAsk)` and `GiftsRest::{More, Loading, Waiting}` carry the serial, send time and next offset; `ThemeGifts::{serial, requested_at, offset}` are gone (`last_serial` is the generator). |
+| 04-034 | `GiftValueStage::Known(info)` / `Open(info)` replace `Ready { open }`. The upkeep that drops a lookup whose gift box is gone is the owner-gone exit, in one place. |
+| 04-024 | `stars_open` and `tx_selected` are `StarsView::{Closed, List, Detail}`; `gifts_open` is `GiftView::Closed`. The box and its selection are one value, so a closer cannot miss one. `GramsHub::open` is in `premium_hub/ton.rs`, which bundle r2-17 owns. |
+| 04-025 | `PremiumHub::received: ReceivedGifts` holds owner, rows, total, cursor, page, notice, view and op; `opened_for` / `restart` replace it whole (a change in flight keeps its lock). |
+| 04-026 | `PremiumHub::stars: StarsHistory` holds view, filter, rows, cursor and page; `switch_filter` replaces it whole. `balance` is the account's and stays on the hub. |
+| 04-027 | `premium_state: Fetch<PremiumStateInfo>`, asked with `sent`, matched and failed by request, asked again after a failure or when the Premium status changed (`is_premium` option). `premium` and `business_features` match their request too. |
+| 04-028 | A preview request not yet opened is dropped by the Payment farewell when the account leaves the screen. The main window already takes a request whose chat has no window of its own. |
+| new-01 | `PeerQrBox` kept `color`, `emoji` and `gift` beside `ThemeChoice`; it holds one `shown: ThemeChoice` with `color()`, `emoji()`, `gift()` readers. |
+| new-02 | `peer_qr` expiry arithmetic saturates. |
+
+Tests: `sweep_payments_2` (acquired gifts, both orders), `gift_market::tests`
+(buy stage), `giveaway::tests`, `sharing_tests`, `passkeys::tests`,
+`passcode::tests`, `transform`, `settings::video_pip`, `premium_hub::tests`,
+`state::tests::premium_hub`, `ui::premium_ui::preview_tests`.

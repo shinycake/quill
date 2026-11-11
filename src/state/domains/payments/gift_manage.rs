@@ -37,7 +37,7 @@ impl Session {
                 GiftManagePayload::Collections(list),
                 PaymentsPurpose::GetGiftCollections { owner },
             ) => {
-                if self.payments.hub.gifts_owner != Some(owner)
+                if self.payments.hub.received.owner != Some(owner)
                     || !self
                         .payments
                         .gifts_manage
@@ -56,7 +56,7 @@ impl Session {
                     && manage.collection(manage.active_collection).is_none()
                 {
                     manage.active_collection = 0;
-                    self.payments.hub.gifts_op.mark_stale();
+                    self.payments.hub.received.op.mark_stale();
                 }
             }
             (GiftManagePayload::Collection(_), PaymentsPurpose::ChangeGiftCollection) => {
@@ -64,15 +64,15 @@ impl Session {
                 self.payments
                     .gifts_manage
                     .close_flow_answered_by(pending.map(|p| p.id));
-                self.payments.hub.gifts_op.changed(pending.map(|p| p.id));
-                self.payments.hub.gift_notice = None;
+                self.payments.hub.received.op.changed(pending.map(|p| p.id));
+                self.payments.hub.received.notice = None;
             }
             (GiftManagePayload::Upgraded(summary), PaymentsPurpose::UpgradeGift) => {
                 let hub = &mut self.payments.hub;
-                hub.gifts_op.changed(pending.map(|p| p.id));
-                hub.gift_notice = None;
-                hub.gift_view.select(None);
-                hub.tx.invalidate();
+                hub.received.op.changed(pending.map(|p| p.id));
+                hub.received.notice = None;
+                hub.received.view.select(None);
+                hub.stars.page.invalidate();
                 let manage = &mut self.payments.gifts_manage;
                 manage.close_flow_answered_by(pending.map(|p| p.id));
                 manage.note = Some(if summary.title.is_empty() {
@@ -121,14 +121,14 @@ impl Session {
         let manage = &mut self.payments.gifts_manage;
         match purpose {
             PaymentsPurpose::SetPinnedGifts => {
-                hub.gifts_op.changed(pending.map(|p| p.id));
-                hub.gift_notice = None;
+                hub.received.op.changed(pending.map(|p| p.id));
+                hub.received.notice = None;
                 manage.note = Some("Pinned gifts updated.".into());
             }
             PaymentsPurpose::TransferGift => {
-                hub.gifts_op.changed(pending.map(|p| p.id));
-                hub.gift_notice = None;
-                hub.tx.invalidate();
+                hub.received.op.changed(pending.map(|p| p.id));
+                hub.received.notice = None;
+                hub.stars.page.invalidate();
                 // tdesktop `ShowGiftTransferredToast`, then the recipient's
                 // chat (`showPeerHistory`). Only the picker that sent this
                 // transfer closes and names its recipient; another flow
@@ -142,19 +142,19 @@ impl Session {
                 if let Some((done, gift_id)) = sent_by {
                     manage.events.push(GiftEvent::Transferred(done));
                     manage.flow = None;
-                    hub.gift_view.close_if_selected(Some(gift_id.as_str()));
+                    hub.received.view.close_if_selected(Some(gift_id.as_str()));
                 }
                 manage.note = Some("Gift transferred.".into());
             }
             PaymentsPurpose::SetGiftResalePrice => {
-                hub.gifts_op.changed(pending.map(|p| p.id));
-                hub.gift_notice = None;
+                hub.received.op.changed(pending.map(|p| p.id));
+                hub.received.notice = None;
                 manage.close_flow_answered_by(pending.map(|p| p.id));
                 manage.note = Some("Resale price updated.".into());
             }
             PaymentsPurpose::DeleteGiftCollection => {
-                hub.gifts_op.changed(pending.map(|p| p.id));
-                hub.gift_notice = None;
+                hub.received.op.changed(pending.map(|p| p.id));
+                hub.received.notice = None;
                 manage.close_flow_answered_by(pending.map(|p| p.id));
                 manage.active_collection = 0;
                 manage.collections_fetch.mark_stale();
@@ -165,7 +165,7 @@ impl Session {
             }
             PaymentsPurpose::SendStarGift => {
                 // Stars were spent whichever dialog asked.
-                hub.tx.invalidate();
+                hub.stars.page.invalidate();
                 let ours = manage.send.waits_for(pending);
                 let shown = ours && matches!(manage.send.stage, SendStage::Sending(_));
                 if ours {
@@ -196,7 +196,7 @@ impl Session {
     /// their own, or a channel they created (tdesktop `canTransferGifts`).
     pub fn gifts_deletable(&self) -> bool {
         let hub = &self.payments.hub;
-        match hub.gifts_owner {
+        match hub.received.owner {
             Some(crate::telegram::envelope::MessageSender::Chat { chat_id }) => {
                 self.chats.get(&chat_id).is_some_and(|chat| {
                     chat.is_channel()
@@ -214,15 +214,15 @@ impl Session {
     pub fn finish_gift_delete(&mut self, gift_id: Option<String>, request: Option<RequestId>) {
         let hub = &mut self.payments.hub;
         let manage = &mut self.payments.gifts_manage;
-        hub.gifts_op.changed(request);
-        hub.gift_notice = None;
+        hub.received.op.changed(request);
+        hub.received.notice = None;
         if let Some(id) = gift_id {
-            let before = hub.gifts.len();
-            hub.gifts.retain(|g| g.id != id);
-            if hub.gifts.len() < before {
-                hub.gifts_total = hub.gifts_total.saturating_sub(1);
+            let before = hub.received.rows.len();
+            hub.received.rows.retain(|g| g.id != id);
+            if hub.received.rows.len() < before {
+                hub.received.total = hub.received.total.saturating_sub(1);
             }
-            hub.gift_view.close_if_selected(Some(id.as_str()));
+            hub.received.view.close_if_selected(Some(id.as_str()));
         }
         manage.collections_fetch.mark_stale();
         manage.events.push(GiftEvent::Deleted);
@@ -352,7 +352,7 @@ impl Session {
         match purpose {
             PaymentsPurpose::GetGiftOption(_) => manage.limits_ask.fail(pending.map(|p| p.id)),
             PaymentsPurpose::GetGiftCollections { owner } => {
-                if self.payments.hub.gifts_owner == Some(owner) {
+                if self.payments.hub.received.owner == Some(owner) {
                     manage.collections_fetch.settle(pending.map(|p| p.id));
                 }
             }
@@ -372,10 +372,10 @@ impl Session {
                     picker
                         .transfer_failed(request, format!("Couldn't transfer the gift: {reason}"));
                 }
-                self.payments.hub.gifts_op.failed(pending.map(|p| p.id));
+                self.payments.hub.received.op.failed(pending.map(|p| p.id));
             }
             PaymentsPurpose::DeleteGift => {
-                self.payments.hub.gifts_op.failed(pending.map(|p| p.id));
+                self.payments.hub.received.op.failed(pending.map(|p| p.id));
                 manage.note = Some(tr_with(
                     keys::Q_MONEY_COULD_NOT_DELETE_THE_GIFT,
                     &[("reason", &reason)],
@@ -403,8 +403,9 @@ impl Session {
                 }
             }
             _ => {
-                self.payments.hub.gifts_op.failed(pending.map(|p| p.id));
-                self.payments.hub.gift_notice = Some(format!("Couldn't update the gift: {reason}"));
+                self.payments.hub.received.op.failed(pending.map(|p| p.id));
+                self.payments.hub.received.notice =
+                    Some(format!("Couldn't update the gift: {reason}"));
             }
         }
     }
