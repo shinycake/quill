@@ -138,6 +138,20 @@ impl RequestPurpose {
                 // a lost one settles as a failure they draw and ask again.
                 | RequestPurpose::GetLinkPreview
                 | RequestPurpose::Messages(MessagesPurpose::GetComposerReplyTarget { .. })
+                // Panels that draw "Loading" for these end in their error
+                // state (with Retry) when the answer is lost.
+                | RequestPurpose::Messages(MessagesPurpose::GetPollVoters { .. })
+                | RequestPurpose::Messages(MessagesPurpose::GetPollVoteStatistics { .. })
+                | RequestPurpose::GetChatStatistics
+                | RequestPurpose::GetChatInviteLinkCounts
+                | RequestPurpose::GetChatAdministrators
+                | RequestPurpose::Groups(GroupsPurpose::GetAdminRights { .. })
+                | RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers { .. })
+                | RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembersMore { .. })
+                | RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { .. })
+                | RequestPurpose::Groups(GroupsPurpose::PollChatEventLog)
+                | RequestPurpose::GetChatOwnerAfterLeaving
+                | RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults { .. })
                 | RequestPurpose::GetUserFullInfo
                 | RequestPurpose::GetSupergroupFullInfo
                 | RequestPurpose::GetBasicGroupFullInfo

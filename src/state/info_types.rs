@@ -319,9 +319,11 @@ pub enum ChatStatisticsFetch {
     WaitingForInfo {
         is_dark: bool,
     },
-    /// Asked for graphs in this theme.
+    /// Asked for graphs in this theme, as this request: only its answer or
+    /// error counts.
     Loading {
         is_dark: bool,
+        request: RequestId,
     },
     /// The graphs' colors are the theme they were asked for
     /// (`ConnectDriver::refresh_chat_statistics` asks again when the
@@ -338,7 +340,8 @@ pub enum ChatStatisticsFetch {
 /// is the in-flight guard.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PollStatsFetch {
-    Loading,
+    /// In flight as this request: only its answer or error counts.
+    Loading(RequestId),
     Loaded(crate::telegram::envelope::StatisticalGraph),
     Failed(String),
 }
@@ -420,7 +423,8 @@ pub struct JoinRequestList {
 /// B8: `getChatInviteLinkCounts` fetch state (owner only), keyed by chat.
 #[derive(Debug, Clone, PartialEq)]
 pub enum InviteLinkCountsFetch {
-    Loading,
+    /// In flight as this request: only its answer or error counts.
+    Loading(RequestId),
     Loaded(Vec<crate::telegram::envelope::ParsedChatInviteLinkCount>),
     Failed(String),
 }
@@ -461,7 +465,8 @@ pub const INVITE_ADMIN_PAGE_SIZE: i32 = 50;
 /// Drives the edit-rights dialog's loading / error states.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdminRightsFetch {
-    Loading,
+    /// In flight as this request: only its answer or error counts.
+    Loading(RequestId),
     Loaded(ChatAdminRights),
     Failed(String),
 }
@@ -472,7 +477,10 @@ pub enum AdminRightsFetch {
 /// is outstanding.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AdminListFetch {
-    Loading,
+    /// In flight as this request: only its answer or error counts, so a
+    /// refresh that drops the entry and asks again is not answered by the
+    /// request it replaced.
+    Loading(RequestId),
     Loaded(Vec<ChatAdministratorEntry>),
     Failed(String),
 }
@@ -482,7 +490,9 @@ pub enum AdminListFetch {
 /// Loading-guard convention.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SupergroupMembersFetch {
-    Loading,
+    /// The first page is in flight as this request: only its answer or
+    /// error counts (a newer search for another query replaces it).
+    Loading(RequestId),
     Loaded {
         members: Vec<ParsedChatMember>,
         total_count: i32,
@@ -501,11 +511,10 @@ pub enum MoreMembers {
     Failed,
 }
 
-/// How one member list was asked: the first-page request (`None` when the
-/// list was filled without one), the query, and the next page.
+/// How one member list was asked: the query and the next page (the first
+/// page's request is the list's own `Loading` stage).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MemberAsk {
-    pub first: Option<RequestId>,
     pub query: String,
     pub more: MoreMembers,
 }
@@ -515,7 +524,9 @@ pub struct MemberAsk {
 /// lands in `Failed`, a failed "load more" keeps the loaded page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PollVotersFetch {
-    Loading,
+    /// The first page is in flight as this request: only its answer or
+    /// error counts.
+    Loading(RequestId),
     Loaded {
         voters: Vec<MessageSender>,
         total_count: i32,
@@ -529,7 +540,9 @@ pub enum PollVotersFetch {
 /// page-next keeps the loaded page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum InlineQueryFetch {
-    Loading,
+    /// The first page is in flight as this request: only its answer or
+    /// error counts (a re-query replaces the slot, and with it the wait).
+    Loading(RequestId),
     Loaded {
         inline_query_id: i64,
         button: Option<InlineQueryResultsButton>,
@@ -583,21 +596,66 @@ pub enum InlineBotResolve {
 pub const CHAT_EVENT_LOG_PAGE_SIZE: i32 = 100;
 
 /// Phase D3c: fetch state for one chat's `getChatEventLog` result
-/// (schema 1.8.67, line 15252). Keyed by chat id. `Loading` is the
-/// in-flight guard — the driver never sends a second request while one
-/// is outstanding.
+/// (schema 1.8.67, line 15252). Keyed by chat id. The stage names the
+/// requests it waits for: only their answers fill the list, and a refresh
+/// (a new search query or filter) drops the stage and with it every
+/// request asked under the previous query. Also the in-flight guard — the
+/// driver never sends a second page while one is outstanding.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum ChatEventLogFetch {
     /// Never asked, or cleared by a refresh.
     #[default]
     Idle,
-    Loading,
-    Loaded(ChatEventLogPage),
+    /// The first page is in flight as this request.
+    Loading(crate::ids::RequestId),
+    Loaded(LoadedEventLog),
+    /// The first page failed; Retry asks again.
     Failed(String),
 }
 
+/// What a loaded log is also waiting for: an older page and the live poll,
+/// each under its request.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct LoadedEventLog {
+    pub page: ChatEventLogPage,
+    /// The next older page in flight.
+    pub older: Option<crate::ids::RequestId>,
+    /// The live poll in flight.
+    pub poll: Option<crate::ids::RequestId>,
+}
+
+impl LoadedEventLog {
+    /// A page with nothing else in flight.
+    pub fn new(page: ChatEventLogPage) -> Self {
+        Self {
+            page,
+            older: None,
+            poll: None,
+        }
+    }
+}
+
+impl std::ops::Deref for LoadedEventLog {
+    type Target = ChatEventLogPage;
+
+    fn deref(&self) -> &ChatEventLogPage {
+        &self.page
+    }
+}
+
+/// Which `getChatEventLog` request of a log was sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventLogAsk {
+    /// The first page (cursor 0).
+    First,
+    /// The next older page.
+    Older,
+    /// The live poll of the newest page.
+    Poll,
+}
+
 /// One chat's recent actions: what it is asked for (kept across
-/// refreshes), where the asking stands, and the requests it waits for.
+/// refreshes) and where the asking stands.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct EventLog {
     /// The text search (`getChatEventLog.query`); empty = no search.
@@ -607,19 +665,6 @@ pub struct EventLog {
     /// The `user_ids` filter; empty = every admin.
     pub users: Vec<i64>,
     pub fetch: ChatEventLogFetch,
-    pub wait: EventLogWait,
-}
-
-/// The `getChatEventLog` requests one chat's log waits for
-/// (`GroupsState::event_log_waits`). Only their answers fill the list: a
-/// refresh (a new search query or filter) forgets both, so a page or poll
-/// asked under the previous query is dropped when it lands.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct EventLogWait {
-    /// The first or older page in flight.
-    pub page: Option<crate::ids::RequestId>,
-    /// The live poll in flight.
-    pub poll: Option<crate::ids::RequestId>,
 }
 
 /// Phase D3c: one cached `getChatEventLog` result. Events arrive in

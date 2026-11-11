@@ -113,14 +113,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let key = (chat_id.0, message_id.0);
         if matches!(
             self.session.messages.poll_stats.get(&key),
-            Some(PollStatsFetch::Loading)
+            Some(PollStatsFetch::Loading(_))
         ) {
             return Ok(None);
         }
-        self.session
-            .messages
-            .poll_stats
-            .insert(key, PollStatsFetch::Loading);
         let result = self.send_tracked(
             RequestPurpose::Messages(MessagesPurpose::GetPollVoteStatistics {
                 chat_id,
@@ -130,7 +126,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             |extra| get_poll_vote_statistics(extra, chat_id, message_id, is_dark),
         );
         match result {
-            Ok(extra) => Ok(Some(extra)),
+            Ok(extra) => {
+                self.session
+                    .messages
+                    .poll_stats
+                    .insert(key, PollStatsFetch::Loading(extra));
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.messages.poll_stats.remove(&key);
                 Err(err)

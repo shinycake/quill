@@ -107,6 +107,7 @@ impl Session {
             }
             Some(RequestPurpose::Groups(GroupsPurpose::TransferChatOwnership { user_id })) => {
                 self.finish_ownership_transfer(
+                    pending.map(|p| p.id),
                     user_id,
                     pending.and_then(|p| p.chat_id).map(|c| c.0),
                 );

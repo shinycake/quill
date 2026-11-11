@@ -99,11 +99,7 @@ fn seed_event_log_session(sink: Arc<MemorySink>) -> Session {
     // The log only takes the page it waits for, as the driver records it.
     session
         .groups
-        .event_logs
-        .entry(CHANNEL.0)
-        .or_default()
-        .wait
-        .page = Some(extra);
+        .event_log_asked(CHANNEL.0, extra, quill::state::EventLogAsk::First);
     let json = format!(
         r#"{{"@type":"chatEvents","@extra":"{}","events":[{}]}}"#,
         extra.0,

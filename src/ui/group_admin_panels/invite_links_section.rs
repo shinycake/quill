@@ -516,7 +516,7 @@ impl QuillApp {
             );
         }
         match fetch {
-            None | Some(AdminListFetch::Loading) => {
+            None | Some(AdminListFetch::Loading(_)) => {
                 section = section.child(
                     div()
                         .flex()

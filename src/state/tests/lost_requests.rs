@@ -216,8 +216,8 @@ fn sweeping_a_widget_public_data_poll_tells_the_widget_to_poll_again() {
 #[test]
 fn sweeping_a_lost_transfer_check_lets_the_next_open_ask_again() {
     let mut session = ready_session();
-    session.begin_ownership_check();
-    session.request(RequestPurpose::CanTransferOwnership, None);
+    let request = session.request(RequestPurpose::CanTransferOwnership, None);
+    session.begin_ownership_check(request);
 
     assert!(sweep(&mut session));
 
@@ -318,5 +318,116 @@ fn sweeping_a_reply_bar_fetch_leaves_loading() {
     assert!(matches!(
         session.messages.composer_reply_fetch.get(&(7, 999)),
         Some(ComposerReplyFetch::Failed { attempts: 1, .. })
+    ));
+}
+
+/// Sweep r2-17 (05-064): a lost request of a panel that draws "Loading"
+/// ends in the panel's failed state, which draws Retry.
+#[test]
+fn sweeping_a_lost_panel_request_ends_its_loading_stage() {
+    use crate::state::{
+        AdminListFetch, AdminRightsFetch, ChatEventLogFetch, ChatStatisticsFetch,
+        InlineQueryFetch, InlineQuerySlot, InviteLinkCountsFetch, OwnerLookup, PollVotersFetch,
+    };
+    let mut session = ready_session();
+    let chat = ChatId(13);
+    let asked = |session: &mut Session, purpose| session.request(purpose, Some(chat));
+    let admins = asked(&mut session, RequestPurpose::GetChatAdministrators);
+    session
+        .groups
+        .admin_lists
+        .insert(13, AdminListFetch::Loading(admins));
+    let rights = asked(
+        &mut session,
+        RequestPurpose::Groups(GroupsPurpose::GetAdminRights { user_id: 5 }),
+    );
+    session
+        .groups
+        .admin_rights
+        .insert((13, 5), AdminRightsFetch::Loading(rights));
+    let counts = asked(&mut session, RequestPurpose::GetChatInviteLinkCounts);
+    session
+        .groups
+        .invite_link_counts
+        .insert(13, InviteLinkCountsFetch::Loading(counts));
+    let stats = asked(&mut session, RequestPurpose::GetChatStatistics);
+    session.groups.chat_statistics.insert(
+        13,
+        ChatStatisticsFetch::Loading {
+            is_dark: false,
+            request: stats,
+        },
+    );
+    let log = asked(
+        &mut session,
+        RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id: 0 }),
+    );
+    session
+        .groups
+        .event_log_asked(13, log, crate::state::EventLogAsk::First);
+    let owner = asked(&mut session, RequestPurpose::GetChatOwnerAfterLeaving);
+    session.begin_owner_lookup(13, owner);
+    let voters = asked(
+        &mut session,
+        RequestPurpose::Messages(MessagesPurpose::GetPollVoters {
+            chat_id: chat,
+            message_id: MessageId(4),
+            option_id: 1,
+            offset: 0,
+        }),
+    );
+    session
+        .messages
+        .poll_voters
+        .insert((13, 4, 1), PollVotersFetch::Loading(voters));
+    let inline = asked(
+        &mut session,
+        RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
+            chat_id: chat,
+            bot_user_id: 77,
+            first_page: true,
+        }),
+    );
+    session.bots.inline_query = Some(InlineQuerySlot {
+        chat_id: chat,
+        bot_user_id: 77,
+        query: "cats".into(),
+        fetch: InlineQueryFetch::Loading(inline),
+        more_failed: None,
+    });
+
+    assert!(sweep(&mut session));
+
+    assert!(matches!(
+        session.groups.admin_lists.get(&13),
+        Some(AdminListFetch::Failed(_))
+    ));
+    assert!(matches!(
+        session.groups.admin_rights.get(&(13, 5)),
+        Some(AdminRightsFetch::Failed(_))
+    ));
+    assert!(matches!(
+        session.groups.invite_link_counts.get(&13),
+        Some(InviteLinkCountsFetch::Failed(_))
+    ));
+    assert!(matches!(
+        session.groups.chat_statistics.get(&13),
+        Some(ChatStatisticsFetch::Failed(_))
+    ));
+    assert!(matches!(
+        session.groups.event_log_fetch(13),
+        Some(ChatEventLogFetch::Failed(_))
+    ));
+    assert!(matches!(
+        session.groups.ownership.owner_after_leaving.get(&13),
+        Some(OwnerLookup::Failed(_))
+    ));
+    assert!(matches!(
+        session.messages.poll_voters.get(&(13, 4, 1)),
+        Some(PollVotersFetch::Failed(_))
+    ));
+    assert!(matches!(
+        session.bots.inline_query.as_ref().map(|slot| &slot.fetch),
+        Some(InlineQueryFetch::Failed(_))
     ));
 }

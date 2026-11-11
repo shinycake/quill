@@ -191,13 +191,14 @@ impl Session {
                 chat_id,
                 message_id,
             })) => {
-                self.messages.poll_stats.insert(
-                    (chat_id.0, message_id.0),
-                    PollStatsFetch::Failed(call_request_error_line(
+                if let Some(slot) = self.messages.poll_stats.get_mut(&(chat_id.0, message_id.0))
+                    && matches!(slot, PollStatsFetch::Loading(asked) if Some(*asked) == pending.map(|p| p.id))
+                {
+                    *slot = PollStatsFetch::Failed(call_request_error_line(
                         err,
                         "Could not load poll stats",
-                    )),
-                );
+                    ));
+                }
             }
             // B15: poll option / checklist mutations surface their
             // failure in the status note (tdesktop shows a toast:
@@ -234,16 +235,16 @@ impl Session {
                 chat_id,
                 message_id,
                 option_id,
-                offset,
+                ..
             })) => {
-                if offset == 0
-                    || !matches!(
-                        self.messages
-                            .poll_voters
-                            .get(&(chat_id.0, message_id.0, option_id)),
-                        Some(PollVotersFetch::Loaded { .. })
-                    )
-                {
+                // Only the first page the fetch waits for fails it; a failed
+                // next page leaves the loaded one retryable.
+                if matches!(
+                    self.messages
+                        .poll_voters
+                        .get(&(chat_id.0, message_id.0, option_id)),
+                    Some(PollVotersFetch::Loading(asked)) if Some(*asked) == pending.map(|p| p.id)
+                ) {
                     self.messages.poll_voters.insert(
                         (chat_id.0, message_id.0, option_id),
                         PollVotersFetch::Failed(call_request_error_line(

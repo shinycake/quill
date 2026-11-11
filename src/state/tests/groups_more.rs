@@ -249,6 +249,10 @@ fn admin_list_fetch_caches() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
+    session
+        .groups
+        .admin_lists
+        .insert(13, AdminListFetch::Loading(extra));
 
     apply_json(
         &mut session,
@@ -324,7 +328,7 @@ fn adding_members_marks_the_member_list_stale() {
     session
         .groups
         .basic_group_members
-        .insert(13, crate::state::SupergroupMembersFetch::Loading);
+        .insert(13, crate::state::SupergroupMembersFetch::Loading(RequestId(1)));
     let extra = session.request(RequestPurpose::AddChatMember, Some(ChatId(13)));
     apply_json(
         &mut session,
@@ -344,8 +348,9 @@ fn adding_members_marks_the_member_list_stale() {
 #[test]
 fn an_ownership_transfer_marks_the_member_list_stale() {
     let (mut session, _sink) = session();
-    session.begin_ownership_transfer(13, 888, false);
-    session.finish_ownership_transfer(888, Some(13));
+    let request = session.request(RequestPurpose::Other, None);
+    session.begin_ownership_transfer(request, 13, 888, false);
+    session.finish_ownership_transfer(Some(request), 888, Some(13));
     assert_eq!(session.groups.member_list_stale, vec![13]);
 }
 
@@ -416,7 +421,7 @@ fn an_admin_list_asked_before_a_membership_change_is_dropped() {
     session
         .groups
         .admin_lists
-        .insert(13, AdminListFetch::Loading);
+        .insert(13, AdminListFetch::Loading(asked));
     apply_json(
         &mut session,
         &seq,
@@ -445,6 +450,10 @@ fn get_admin_rights_response_caches_rights() {
         RequestPurpose::Groups(GroupsPurpose::GetAdminRights { user_id: 888 }),
         Some(ChatId(13)),
     );
+    session
+        .groups
+        .admin_rights
+        .insert((13, 888), AdminRightsFetch::Loading(extra));
     apply_json(
         &mut session,
         &seq,
@@ -474,6 +483,9 @@ fn supergroup_members_fetch_caches() {
         }),
         Some(ChatId(13)),
     );
+    session
+        .groups
+        .note_member_first((13, MemberListFilter::Recent), extra, "");
     apply_json(
         &mut session,
         &seq,
@@ -1161,4 +1173,56 @@ fn the_own_restriction_is_unknown_then_one_of_two_answers() {
     assert_eq!(chat.restriction(), None);
     chat.set_my_restriction(None);
     assert_eq!(chat.my_restriction, OwnRestriction::NotRestricted);
+}
+
+/// Sweep r2-17 (05-066): ownership answers and errors land only on the stage
+/// that waits for their request.
+#[test]
+fn ownership_answers_are_matched_to_their_request() {
+    use crate::state::TransferStage;
+    let (mut session, _sink) = session();
+    let first = session.request(RequestPurpose::Other, None);
+    let second = session.request(RequestPurpose::Other, None);
+    let err = TdError::from_code(400);
+    // The dialog was reopened and Submit pressed again: the first try's late
+    // error neither fails nor ends the second.
+    session.begin_ownership_transfer(first, 13, 888, false);
+    session.begin_ownership_transfer(second, 13, 888, false);
+    session.fail_ownership_transfer(Some(first), &err);
+    assert!(session.groups.ownership.transfer.waits_for(Some(second)));
+    session.finish_ownership_transfer(Some(first), 888, Some(13));
+    assert!(
+        session.groups.ownership.transfer.waits_for(Some(second)),
+        "the other transfer in flight stays"
+    );
+    // An error with nothing waiting changes nothing (it used to overwrite
+    // Idle and Done).
+    session.finish_ownership_transfer(Some(second), 888, Some(13));
+    assert!(matches!(
+        session.groups.ownership.transfer,
+        TransferStage::Done(_)
+    ));
+    session.fail_ownership_transfer(Some(second), &err);
+    assert!(matches!(
+        session.groups.ownership.transfer,
+        TransferStage::Done(_)
+    ));
+    // The owner lookup is matched the same way.
+    session.begin_owner_lookup(13, first);
+    session.begin_owner_lookup(13, second);
+    session.accept_owner_after_leaving(13, Some(first), 5);
+    assert_eq!(
+        session.groups.ownership.owner_after_leaving.get(&13),
+        Some(&crate::state::OwnerLookup::Loading(second))
+    );
+    session.fail_owner_lookup(13, Some(first), &err);
+    assert_eq!(
+        session.groups.ownership.owner_after_leaving.get(&13),
+        Some(&crate::state::OwnerLookup::Loading(second))
+    );
+    session.accept_owner_after_leaving(13, Some(second), 5);
+    assert_eq!(
+        session.groups.ownership.owner_after_leaving.get(&13),
+        Some(&crate::state::OwnerLookup::Loaded(5))
+    );
 }

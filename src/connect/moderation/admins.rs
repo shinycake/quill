@@ -22,21 +22,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if matches!(
             self.session.groups.admin_lists.get(&chat_id.0),
-            Some(AdminListFetch::Loading | AdminListFetch::Loaded(_))
-        ) || self
-            .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::GetChatAdministrators, chat_id)
-        {
+            Some(AdminListFetch::Loading(_) | AdminListFetch::Loaded(_))
+        ) {
             return Ok(None);
         }
-        self.session
-            .groups
-            .admin_lists
-            .insert(chat_id.0, AdminListFetch::Loading);
         let extra = self
             .session
             .request(RequestPurpose::GetChatAdministrators, Some(chat_id));
+        self.session
+            .groups
+            .admin_lists
+            .insert(chat_id.0, AdminListFetch::Loading(extra));
         if let Err(err) = self
             .sender
             .send_json(&get_chat_administrators(extra, chat_id.0))
@@ -186,9 +182,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !matches!(
             self.session.groups.event_log_fetch(chat_id.0),
-            Some(ChatEventLogFetch::Loaded(_))
-        ) || self.event_log_wait(chat_id).poll.is_some()
-        {
+            Some(ChatEventLogFetch::Loaded(loaded)) if loaded.poll.is_none()
+        ) {
             return Ok(None);
         }
         self.send_chat_event_log_request(chat_id, 0, GroupsPurpose::PollChatEventLog)
@@ -200,29 +195,32 @@ impl<S: JsonSender> ConnectDriver<S> {
         from_event_id: i64,
         purpose: GroupsPurpose,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        let polling = purpose == GroupsPurpose::PollChatEventLog;
+        let ask = if purpose == GroupsPurpose::PollChatEventLog {
+            EventLogAsk::Poll
+        } else if from_event_id == 0 {
+            EventLogAsk::First
+        } else {
+            EventLogAsk::Older
+        };
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         if !self.session.chat_can_view_event_log(chat_id) {
             return Ok(None);
         }
-        if from_event_id == 0
-            && !polling
-            && matches!(
-                self.session.groups.event_log_fetch(chat_id.0),
-                Some(ChatEventLogFetch::Loading | ChatEventLogFetch::Loaded(_))
-            )
-        {
-            return Ok(None);
-        }
-        if !polling && self.event_log_wait(chat_id).page.is_some() {
-            return Ok(None);
-        }
-        if from_event_id == 0 && !polling {
-            self.session
-                .groups
-                .set_event_log_fetch(chat_id.0, ChatEventLogFetch::Loading);
+        // One first or older page at a time: a first page while the log
+        // loads or is loaded, an older page while one is out.
+        match (ask, self.session.groups.event_log_fetch(chat_id.0)) {
+            (
+                EventLogAsk::First,
+                Some(ChatEventLogFetch::Loading(_) | ChatEventLogFetch::Loaded(_)),
+            ) => return Ok(None),
+            (EventLogAsk::Older, Some(ChatEventLogFetch::Loaded(loaded)))
+                if loaded.older.is_some() =>
+            {
+                return Ok(None);
+            }
+            _ => {}
         }
         let filters = self
             .session
@@ -234,6 +232,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::Groups(purpose), Some(chat_id));
+        // The log waits for this request from the moment it is sent; a
+        // refused send ends the wait below.
+        self.session.groups.event_log_asked(chat_id.0, extra, ask);
         if let Err(err) = self.sender.send_json(&get_chat_event_log(
             extra,
             chat_id.0,
@@ -244,34 +245,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             &user_ids,
         )) {
             self.session.requests.take(extra);
-            if from_event_id == 0 && !polling {
+            if ask == EventLogAsk::First {
                 self.session.groups.reset_event_log_fetch(chat_id.0);
+            } else {
+                self.session.groups.take_event_log_wait(chat_id.0, extra);
             }
             return Err(err);
         }
-        let wait = &mut self
-            .session
-            .groups
-            .event_logs
-            .entry(chat_id.0)
-            .or_default()
-            .wait;
-        if polling {
-            wait.poll = Some(extra);
-        } else {
-            wait.page = Some(extra);
-        }
         Ok(Some(extra))
-    }
-
-    /// The requests `chat_id`'s event log waits for.
-    fn event_log_wait(&self, chat_id: ChatId) -> crate::state::EventLogWait {
-        self.session
-            .groups
-            .event_logs
-            .get(&chat_id.0)
-            .map(|log| log.wait)
-            .unwrap_or_default()
     }
 
     /// Phase D3b: shared `setChatMemberStatus` sender (TDLib 1.8.67,
@@ -371,19 +352,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if matches!(
             self.session.groups.admin_rights.get(&(chat_id.0, user_id)),
-            Some(AdminRightsFetch::Loading | AdminRightsFetch::Loaded(_))
+            Some(AdminRightsFetch::Loading(_) | AdminRightsFetch::Loaded(_))
         ) {
             return Ok(None);
         }
         let purpose = RequestPurpose::Groups(GroupsPurpose::GetAdminRights { user_id });
-        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
-            return Ok(None);
-        }
+        let extra = self.session.request(purpose, Some(chat_id));
         self.session
             .groups
             .admin_rights
-            .insert((chat_id.0, user_id), AdminRightsFetch::Loading);
-        let extra = self.session.request(purpose, Some(chat_id));
+            .insert((chat_id.0, user_id), AdminRightsFetch::Loading(extra));
         if let Err(err) = self
             .sender
             .send_json(&get_chat_member(extra, chat_id, user_id))
@@ -410,7 +388,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let key = (chat_id.0, user_id);
         if !matches!(
             self.session.groups.admin_rights.get(&key),
-            Some(AdminRightsFetch::Loading)
+            Some(AdminRightsFetch::Loading(_))
         ) {
             self.session.groups.admin_rights.remove(&key);
         }

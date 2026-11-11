@@ -27,7 +27,11 @@ impl Session {
                 (true, Some(slot)) => {
                     slot.chat_id == chat_id
                         && slot.bot_user_id == bot_user_id
-                        && matches!(slot.fetch, InlineQueryFetch::Loading)
+                        && matches!(
+                            slot.fetch,
+                            InlineQueryFetch::Loading(asked)
+                                if pending.is_some_and(|p| p.id == asked)
+                        )
                 }
                 (false, Some(slot)) => {
                     slot.chat_id == chat_id
@@ -123,21 +127,25 @@ impl Session {
         {
             let key = (chat_id.0, message_id.0, option_id);
             let page_len = voters.len();
-            let merged = if offset == 0 {
-                voters
-            } else {
-                match self.messages.poll_voters.get(&key) {
-                    Some(PollVotersFetch::Loaded { voters: old, .. }) => {
-                        let mut merged = old.clone();
-                        for voter in voters {
-                            if !merged.contains(&voter) {
-                                merged.push(voter);
-                            }
-                        }
-                        merged
-                    }
-                    _ => voters,
+            // The first page answers the fetch that waits for it; a next
+            // page joins the loaded list. Anything else (the list was asked
+            // again meanwhile) is dropped.
+            let merged = match (offset, self.messages.poll_voters.get(&key)) {
+                (0, Some(PollVotersFetch::Loading(asked)))
+                    if pending.is_some_and(|p| p.id == *asked) =>
+                {
+                    voters
                 }
+                (1.., Some(PollVotersFetch::Loaded { voters: old, .. })) => {
+                    let mut merged = old.clone();
+                    for voter in voters {
+                        if !merged.contains(&voter) {
+                            merged.push(voter);
+                        }
+                    }
+                    merged
+                }
+                _ => return,
             };
             // B4: a short page is the honest exhaustion signal —
             // `total_count` is approximate per the schema, so on a

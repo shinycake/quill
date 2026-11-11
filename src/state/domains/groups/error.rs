@@ -61,13 +61,17 @@ impl Session {
         self.apply_group_type_error(err, pending);
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::CanTransferOwnership) => {
-                self.groups.ownership.check.fail_dropping_data(format!(
-                    "Could not check whether you can transfer ownership: {}",
-                    error_reason(err)
-                ));
+                self.groups.ownership.check.failed(
+                    pending.map(|p| p.id),
+                    format!(
+                        "Could not check whether you can transfer ownership: {}",
+                        error_reason(err)
+                    ),
+                    true,
+                );
             }
             Some(RequestPurpose::Groups(GroupsPurpose::TransferChatOwnership { .. })) => {
-                self.fail_ownership_transfer(err);
+                self.fail_ownership_transfer(pending.map(|p| p.id), err);
             }
             Some(RequestPurpose::Groups(GroupsPurpose::AnswerSharingRequest { .. })) => {
                 self.chats_state
@@ -79,7 +83,7 @@ impl Session {
             }
             Some(RequestPurpose::GetChatOwnerAfterLeaving) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.fail_owner_lookup(chat_id.0, err);
+                    self.fail_owner_lookup(chat_id.0, pending.map(|p| p.id), err);
                 }
             }
             // tdesktop toasts a refused create; the box stays, and the
@@ -180,7 +184,13 @@ impl Session {
             // fetch state so the statistics panel shows an honest
             // error instead of spinning forever.
             Some(RequestPurpose::GetChatStatistics) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                if let Some(p) = pending
+                    && let Some(chat_id) = p.chat_id
+                    && matches!(
+                        self.groups.chat_statistics.get(&chat_id.0),
+                        Some(ChatStatisticsFetch::Loading { request, .. }) if *request == p.id
+                    )
+                {
                     self.groups.chat_statistics.insert(
                         chat_id.0,
                         ChatStatisticsFetch::Failed(call_request_error_line(
@@ -348,10 +358,11 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetChatInviteLinkCounts) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && !matches!(
+                if let Some(p) = pending
+                    && let Some(chat_id) = p.chat_id
+                    && matches!(
                         self.groups.invite_link_counts.get(&chat_id.0),
-                        Some(InviteLinkCountsFetch::Loaded(_))
+                        Some(InviteLinkCountsFetch::Loading(asked)) if *asked == p.id
                     )
                 {
                     self.groups.invite_link_counts.insert(
@@ -458,7 +469,13 @@ impl Session {
             // the fetch state so the panel shows an honest error
             // instead of spinning forever.
             Some(RequestPurpose::GetChatAdministrators) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                if let Some(p) = pending
+                    && let Some(chat_id) = p.chat_id
+                    && matches!(
+                        self.groups.admin_lists.get(&chat_id.0),
+                        Some(AdminListFetch::Loading(asked)) if *asked == p.id
+                    )
+                {
                     self.groups.admin_lists.insert(
                         chat_id.0,
                         AdminListFetch::Failed(call_request_error_line(
@@ -489,7 +506,13 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetBasicGroupFullInfo) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                if let Some(p) = pending
+                    && let Some(chat_id) = p.chat_id
+                    && matches!(
+                        self.groups.basic_group_members.get(&chat_id.0),
+                        Some(SupergroupMembersFetch::Loading(asked)) if *asked == p.id
+                    )
+                {
                     self.groups.basic_group_members.insert(
                         chat_id.0,
                         SupergroupMembersFetch::Failed(call_request_error_line(
@@ -548,21 +571,20 @@ impl Session {
             // already-loaded page so the button stays retryable.
             // A failed poll changes nothing shown; the next tick asks again.
             Some(RequestPurpose::Groups(GroupsPurpose::PollChatEventLog)) => {
-                if let Some(pending) = pending {
-                    self.take_event_log_wait(pending);
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                {
+                    self.groups.take_event_log_wait(chat_id.0, pending.id);
                 }
             }
-            Some(RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id })) => {
+            Some(RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { .. })) => {
                 // Only the page the log waits for; one asked under an
-                // earlier query or filter changes nothing.
-                if let Some(chat_id) = pending
-                    .filter(|pending| self.take_event_log_wait(pending))
-                    .and_then(|p| p.chat_id)
-                    && (from_event_id == 0
-                        || !matches!(
-                            self.groups.event_log_fetch(chat_id.0),
-                            Some(ChatEventLogFetch::Loaded(_))
-                        ))
+                // earlier query or filter changes nothing. A failed older
+                // page leaves the loaded one retryable.
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && self.groups.take_event_log_wait(chat_id.0, pending.id)
+                        == Some(EventLogAsk::First)
                 {
                     self.groups.set_event_log_fetch(
                         chat_id.0,
@@ -574,7 +596,13 @@ impl Session {
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::GetAdminRights { user_id })) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                if let Some(p) = pending
+                    && let Some(chat_id) = p.chat_id
+                    && matches!(
+                        self.groups.admin_rights.get(&(chat_id.0, user_id)),
+                        Some(AdminRightsFetch::Loading(asked)) if *asked == p.id
+                    )
+                {
                     self.groups.admin_rights.insert(
                         (chat_id.0, user_id),
                         AdminRightsFetch::Failed(call_request_error_line(

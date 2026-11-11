@@ -10,7 +10,9 @@ use crate::state::fetch::Fetch;
 /// Answer of `getChatOwnerAfterLeaving` for one chat.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OwnerLookup {
-    Loading,
+    /// `getChatOwnerAfterLeaving` in flight as this request: only its
+    /// answer or error counts.
+    Loading(RequestId),
     /// The user who becomes owner (or the next admin) after the viewer
     /// leaves.
     Loaded(i64),
@@ -43,8 +45,11 @@ pub struct BasicGroupOwn {
 pub enum TransferStage {
     #[default]
     Idle,
-    /// Waiting for TDLib.
-    Sending(OwnershipTransfer),
+    /// Waiting for TDLib: only the answer or error of `request` counts.
+    Sending {
+        request: RequestId,
+        transfer: OwnershipTransfer,
+    },
     /// Why the transfer failed (wrong password, flood wait). Never holds
     /// the password.
     Failed(String),
@@ -56,7 +61,7 @@ impl TransferStage {
     /// The transfer waiting for TDLib.
     pub fn sending(&self) -> Option<&OwnershipTransfer> {
         match self {
-            Self::Sending(transfer) => Some(transfer),
+            Self::Sending { transfer, .. } => Some(transfer),
             _ => None,
         }
     }
@@ -68,9 +73,14 @@ impl TransferStage {
         }
     }
 
+    /// Whether the transfer in flight is the one `request` asked.
+    pub fn waits_for(&self, request: Option<RequestId>) -> bool {
+        matches!(self, Self::Sending { request: asked, .. } if Some(*asked) == request)
+    }
+
     /// A finished transfer or its failure is forgotten; one in flight stays.
     pub fn forget_settled(&mut self) {
-        if !matches!(self, Self::Sending(_)) {
+        if !matches!(self, Self::Sending { .. }) {
             *self = Self::Idle;
         }
     }
@@ -127,40 +137,70 @@ fn wait_text(secs: i32) -> String {
 }
 
 impl Session {
-    /// A `canTransferOwnership` request went out.
-    pub fn begin_ownership_check(&mut self) {
+    /// A `canTransferOwnership` request went out as `request`.
+    pub fn begin_ownership_check(&mut self, request: RequestId) {
         self.groups.ownership.check = Fetch::Loading {
             stale: None,
-            request: None,
+            request: Some(request),
         };
     }
 
-    pub(crate) fn accept_can_transfer_ownership(&mut self, result: CanTransferOwnershipResult) {
-        self.groups.ownership.check = Fetch::Ready(result);
+    /// The answer of `request`; an older request's late answer changes
+    /// nothing.
+    pub(crate) fn accept_can_transfer_ownership(
+        &mut self,
+        request: Option<RequestId>,
+        result: CanTransferOwnershipResult,
+    ) {
+        self.groups.ownership.check.answered(request, result);
     }
 
-    /// The transfer left for TDLib; clears any earlier failure.
-    pub fn begin_ownership_transfer(&mut self, chat_id: i64, user_id: i64, leave_after: bool) {
-        self.groups.ownership.transfer = TransferStage::Sending(OwnershipTransfer {
-            chat_id,
-            user_id,
-            leave_after,
-        });
+    /// The transfer left for TDLib as `request`; clears any earlier failure.
+    pub fn begin_ownership_transfer(
+        &mut self,
+        request: RequestId,
+        chat_id: i64,
+        user_id: i64,
+        leave_after: bool,
+    ) {
+        self.groups.ownership.transfer = TransferStage::Sending {
+            request,
+            transfer: OwnershipTransfer {
+                chat_id,
+                user_id,
+                leave_after,
+            },
+        };
     }
 
-    pub(crate) fn finish_ownership_transfer(&mut self, user_id: i64, chat_id: Option<i64>) {
-        let sending = match std::mem::take(&mut self.groups.ownership.transfer) {
-            TransferStage::Sending(transfer) => Some(transfer),
+    /// `request` came back `ok`: the transfer happened. The box waiting for
+    /// it is done; with none waiting for this request (the dialog opened
+    /// again meanwhile) another transfer in flight stays, and a finished
+    /// one is recorded from the request's own chat.
+    pub(crate) fn finish_ownership_transfer(
+        &mut self,
+        request: Option<RequestId>,
+        user_id: i64,
+        chat_id: Option<i64>,
+    ) {
+        let waiting = match &self.groups.ownership.transfer {
+            TransferStage::Sending {
+                request: asked,
+                transfer,
+            } if Some(*asked) == request => Some(*transfer),
             _ => None,
         };
-        let done = sending.or_else(|| {
+        let other_in_flight = self.groups.ownership.transfer.sending().is_some() && waiting.is_none();
+        let done = waiting.or_else(|| {
             chat_id.map(|chat_id| OwnershipTransfer {
                 chat_id,
                 user_id,
                 leave_after: false,
             })
         });
-        if let Some(done) = done {
+        if let Some(done) = done
+            && !other_in_flight
+        {
             self.groups.ownership.transfer = TransferStage::Done(done);
         }
         // The viewer is now a plain admin; TDLib confirms with
@@ -177,8 +217,16 @@ impl Session {
         }
     }
 
-    pub(crate) fn fail_ownership_transfer(&mut self, err: &TdError) {
-        self.groups.ownership.transfer = TransferStage::Failed(ownership_error_line(err));
+    /// `request` failed: only the transfer waiting for it fails.
+    pub(crate) fn fail_ownership_transfer(&mut self, request: Option<RequestId>, err: &TdError) {
+        if self
+            .groups
+            .ownership
+            .transfer
+            .waits_for(request)
+        {
+            self.groups.ownership.transfer = TransferStage::Failed(ownership_error_line(err));
+        }
     }
 
     /// The admin's `deleteMessageReactionsFromSender` was confirmed: the
@@ -205,29 +253,51 @@ impl Session {
         }
     }
 
-    /// Mark the "who inherits" lookup of `chat_id` as running.
-    pub fn begin_owner_lookup(&mut self, chat_id: i64) {
+    /// Mark the "who inherits" lookup of `chat_id` as running as `request`.
+    pub fn begin_owner_lookup(&mut self, chat_id: i64, request: RequestId) {
         self.groups
             .ownership
             .owner_after_leaving
-            .insert(chat_id, OwnerLookup::Loading);
+            .insert(chat_id, OwnerLookup::Loading(request));
     }
 
-    pub(crate) fn accept_owner_after_leaving(&mut self, chat_id: i64, user_id: i64) {
-        self.groups
-            .ownership
-            .owner_after_leaving
-            .insert(chat_id, OwnerLookup::Loaded(user_id));
+    /// The lookup of `chat_id` waiting for `request`, if it still is.
+    fn owner_lookup_waits(&self, chat_id: i64, request: Option<RequestId>) -> bool {
+        matches!(
+            self.groups.ownership.owner_after_leaving.get(&chat_id),
+            Some(OwnerLookup::Loading(asked)) if Some(*asked) == request
+        )
     }
 
-    pub(crate) fn fail_owner_lookup(&mut self, chat_id: i64, err: &TdError) {
-        self.groups.ownership.owner_after_leaving.insert(
-            chat_id,
-            OwnerLookup::Failed(tr_with(
-                keys::Q_OPS_ERR_OWNER_LOOKUP_FAILED,
-                &[("reason", &error_reason(err))],
-            )),
-        );
+    pub(crate) fn accept_owner_after_leaving(
+        &mut self,
+        chat_id: i64,
+        request: Option<RequestId>,
+        user_id: i64,
+    ) {
+        if self.owner_lookup_waits(chat_id, request) {
+            self.groups
+                .ownership
+                .owner_after_leaving
+                .insert(chat_id, OwnerLookup::Loaded(user_id));
+        }
+    }
+
+    pub(crate) fn fail_owner_lookup(
+        &mut self,
+        chat_id: i64,
+        request: Option<RequestId>,
+        err: &TdError,
+    ) {
+        if self.owner_lookup_waits(chat_id, request) {
+            self.groups.ownership.owner_after_leaving.insert(
+                chat_id,
+                OwnerLookup::Failed(tr_with(
+                    keys::Q_OPS_ERR_OWNER_LOOKUP_FAILED,
+                    &[("reason", &error_reason(err))],
+                )),
+            );
+        }
     }
 }
 

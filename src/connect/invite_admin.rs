@@ -227,7 +227,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if matches!(
             self.session.groups.invite_link_counts.get(&chat_id.0),
-            Some(InviteLinkCountsFetch::Loading | InviteLinkCountsFetch::Loaded(_))
+            Some(InviteLinkCountsFetch::Loading(_) | InviteLinkCountsFetch::Loaded(_))
         ) {
             return Ok(None);
         }
@@ -237,7 +237,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session
             .groups
             .invite_link_counts
-            .insert(chat_id.0, InviteLinkCountsFetch::Loading);
+            .insert(chat_id.0, InviteLinkCountsFetch::Loading(extra));
         let sent = self.send_invite_admin(extra, &get_chat_invite_link_counts(extra, chat_id.0));
         if sent.is_err() {
             self.session.groups.invite_link_counts.remove(&chat_id.0);

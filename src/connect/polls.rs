@@ -237,7 +237,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let key = (chat_id.0, message_id.0, option_index as i32);
         if matches!(
             self.session.messages.poll_voters.get(&key),
-            Some(PollVotersFetch::Loading)
+            Some(PollVotersFetch::Loading(_))
         ) || self.session.requests.has_purpose_for_chat(
             RequestPurpose::Messages(MessagesPurpose::GetPollVoters {
                 chat_id,
@@ -258,12 +258,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        if offset == 0 {
-            self.session
-                .messages
-                .poll_voters
-                .insert(key, PollVotersFetch::Loading);
-        }
         let extra = self.session.request(
             RequestPurpose::Messages(MessagesPurpose::GetPollVoters {
                 chat_id,
@@ -282,12 +276,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             Self::POLL_VOTERS_PAGE_SIZE,
         );
         match self.sender.send_json(&json) {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                if offset == 0 {
+                    self.session
+                        .messages
+                        .poll_voters
+                        .insert(key, PollVotersFetch::Loading(extra));
+                }
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
-                if offset == 0 {
-                    self.session.messages.poll_voters.remove(&key);
-                }
                 Err(err)
             }
         }

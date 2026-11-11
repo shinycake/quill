@@ -637,15 +637,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let first_page = offset.is_empty();
-        if first_page {
-            self.session.bots.inline_query = Some(InlineQuerySlot {
-                chat_id,
-                bot_user_id,
-                query: query.to_string(),
-                fetch: InlineQueryFetch::Loading,
-                more_failed: None,
-            });
-        }
         let extra = self.session.request(
             RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
                 chat_id,
@@ -654,6 +645,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             Some(chat_id),
         );
+        if first_page {
+            self.session.bots.inline_query = Some(InlineQuerySlot {
+                chat_id,
+                bot_user_id,
+                query: query.to_string(),
+                fetch: InlineQueryFetch::Loading(extra),
+                more_failed: None,
+            });
+        }
         let json = get_inline_query_results(extra, bot_user_id, chat_id, query, offset);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(Some(extra)),

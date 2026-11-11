@@ -140,7 +140,7 @@ impl Session {
                     == Some(RequestPurpose::GetChatOwnerAfterLeaving)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
-                    self.accept_owner_after_leaving(chat_id.0, user_id);
+                    self.accept_owner_after_leaving(chat_id.0, pending.map(|p| p.id), user_id);
                 } else if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve {
                     generation,
                 })) = pending.map(|p| p.purpose)

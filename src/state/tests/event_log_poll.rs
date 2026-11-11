@@ -71,13 +71,72 @@ fn poll_answer_without_a_loaded_page_is_dropped() {
     // bring the old filter's events back.
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session
-        .groups
-        .set_event_log_fetch(13, ChatEventLogFetch::Loading);
+    let first = event_log_request(
+        &mut session,
+        GroupsPurpose::GetChatEventLog { from_event_id: 0 },
+    );
     let extra = event_log_request(&mut session, GroupsPurpose::PollChatEventLog);
     apply_json(&mut session, &seq, &sink, &page_json(extra.0, &[5, 4]));
     assert_eq!(
         session.groups.event_log_fetch(13),
-        Some(&ChatEventLogFetch::Loading)
+        Some(&ChatEventLogFetch::Loading(first))
     );
+}
+
+fn error_json(extra: u64) -> String {
+    format!(r#"{{"@type":"error","@extra":"{extra}","code":500,"message":"X"}}"#)
+}
+
+/// Sweep r2-17 (05-065): the log's request ids live in its stage. A refresh
+/// drops them with the stage, so a page asked before it lands nowhere, and
+/// an older page's or a poll's error ends only its own wait.
+#[test]
+fn the_log_waits_only_for_the_requests_its_stage_holds() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let stale_first = event_log_request(
+        &mut session,
+        GroupsPurpose::GetChatEventLog { from_event_id: 0 },
+    );
+    // A refresh: the stage goes, and a new first page is asked.
+    session.groups.reset_event_log_fetch(13);
+    let first = event_log_request(
+        &mut session,
+        GroupsPurpose::GetChatEventLog { from_event_id: 0 },
+    );
+    apply_json(&mut session, &seq, &sink, &page_json(stale_first.0, &[9]));
+    assert_eq!(
+        session.groups.event_log_fetch(13),
+        Some(&ChatEventLogFetch::Loading(first)),
+        "the older first page is dropped"
+    );
+    apply_json(&mut session, &seq, &sink, &error_json(stale_first.0));
+    assert_eq!(
+        session.groups.event_log_fetch(13),
+        Some(&ChatEventLogFetch::Loading(first)),
+        "and so is its error"
+    );
+    apply_json(&mut session, &seq, &sink, &page_json(first.0, &[8, 7]));
+    let Some(ChatEventLogFetch::Loaded(loaded)) = session.groups.event_log_fetch(13) else {
+        panic!("loaded");
+    };
+    assert_eq!((loaded.older, loaded.poll), (None, None));
+
+    // An older page and a poll in flight together; each error ends its own.
+    let older = event_log_request(
+        &mut session,
+        GroupsPurpose::GetChatEventLog { from_event_id: 7 },
+    );
+    let poll = event_log_request(&mut session, GroupsPurpose::PollChatEventLog);
+    apply_json(&mut session, &seq, &sink, &error_json(poll.0));
+    let Some(ChatEventLogFetch::Loaded(loaded)) = session.groups.event_log_fetch(13) else {
+        panic!("loaded");
+    };
+    assert_eq!((loaded.older, loaded.poll), (Some(older), None));
+    apply_json(&mut session, &seq, &sink, &error_json(older.0));
+    let Some(ChatEventLogFetch::Loaded(loaded)) = session.groups.event_log_fetch(13) else {
+        panic!("a failed older page keeps the loaded log");
+    };
+    assert_eq!((loaded.older, loaded.poll), (None, None));
+    assert_eq!(loaded.events.len(), 2);
 }

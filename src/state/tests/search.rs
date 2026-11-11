@@ -6,13 +6,6 @@ use super::*;
 fn inline_query_first_page_loads_slot() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.bots.inline_query = Some(InlineQuerySlot {
-        chat_id: ChatId(1),
-        bot_user_id: 77,
-        query: "@gif cats".to_string(),
-        more_failed: None,
-        fetch: InlineQueryFetch::Loading,
-    });
     let extra = session.request(
         RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
             chat_id: ChatId(1),
@@ -21,6 +14,13 @@ fn inline_query_first_page_loads_slot() {
         }),
         Some(ChatId(1)),
     );
+    session.bots.inline_query = Some(InlineQuerySlot {
+        chat_id: ChatId(1),
+        bot_user_id: 77,
+        query: "@gif cats".to_string(),
+        more_failed: None,
+        fetch: InlineQueryFetch::Loading(extra),
+    });
     apply_json(
         &mut session,
         &seq,
@@ -116,13 +116,6 @@ fn inline_query_pagination_appends() {
 fn inline_query_first_page_error_fails_slot() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.bots.inline_query = Some(InlineQuerySlot {
-        chat_id: ChatId(1),
-        bot_user_id: 77,
-        query: "@gif cats".to_string(),
-        more_failed: None,
-        fetch: InlineQueryFetch::Loading,
-    });
     let extra = session.request(
         RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
             chat_id: ChatId(1),
@@ -131,6 +124,13 @@ fn inline_query_first_page_error_fails_slot() {
         }),
         Some(ChatId(1)),
     );
+    session.bots.inline_query = Some(InlineQuerySlot {
+        chat_id: ChatId(1),
+        bot_user_id: 77,
+        query: "@gif cats".to_string(),
+        more_failed: None,
+        fetch: InlineQueryFetch::Loading(extra),
+    });
     apply_json(
         &mut session,
         &seq,

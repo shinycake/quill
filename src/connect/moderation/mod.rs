@@ -5,7 +5,7 @@ use crate::state::GroupsPurpose;
 use crate::state::TransferStage;
 use crate::state::fetch::Fetch;
 use crate::state::{
-    AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch, InviteLinkFetch,
+    AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch, EventLogAsk, InviteLinkFetch,
     JoinRequestFetch, MemberListFilter, MemberStatusChange, OwnerLookup, RequestPurpose,
     RequestRollback, SupergroupMembersFetch,
 };
@@ -43,10 +43,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.groups.ownership.check.is_loading() {
             return Ok(None);
         }
-        self.session.begin_ownership_check();
         let extra = self
             .session
             .request(RequestPurpose::CanTransferOwnership, None);
+        self.session.begin_ownership_check(extra);
         if let Err(err) = self.sender.send_json(&can_transfer_ownership(extra)) {
             self.session.requests.take(extra);
             self.session.groups.ownership.check.cancel();
@@ -81,12 +81,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !allowed {
             return Ok(None);
         }
-        self.session
-            .begin_ownership_transfer(chat_id.0, user_id, leave_after);
         let extra = self.session.request(
             RequestPurpose::Groups(GroupsPurpose::TransferChatOwnership { user_id }),
             Some(chat_id),
         );
+        self.session
+            .begin_ownership_transfer(extra, chat_id.0, user_id, leave_after);
         if let Err(err) = self.sender.send_json(&transfer_chat_ownership(
             extra, chat_id.0, user_id, password,
         )) {
@@ -119,14 +119,14 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .ownership
                 .owner_after_leaving
                 .get(&chat_id.0),
-            Some(OwnerLookup::Loading | OwnerLookup::Loaded(_))
+            Some(OwnerLookup::Loading(_) | OwnerLookup::Loaded(_))
         ) {
             return Ok(None);
         }
-        self.session.begin_owner_lookup(chat_id.0);
         let extra = self
             .session
             .request(RequestPurpose::GetChatOwnerAfterLeaving, Some(chat_id));
+        self.session.begin_owner_lookup(chat_id.0, extra);
         if let Err(err) = self
             .sender
             .send_json(&get_chat_owner_after_leaving(extra, chat_id.0))

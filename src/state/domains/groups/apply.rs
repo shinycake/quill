@@ -332,18 +332,22 @@ impl Session {
                     && let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
                 {
-                    // The theme is the one the request in flight asked for.
-                    let is_dark = match self.groups.chat_statistics.get(&chat_id.0) {
-                        Some(ChatStatisticsFetch::Loading { is_dark }) => *is_dark,
-                        _ => false,
-                    };
-                    self.groups.chat_statistics.insert(
-                        chat_id.0,
-                        ChatStatisticsFetch::Loaded {
-                            stats: std::sync::Arc::new(statistics),
-                            is_dark,
-                        },
-                    );
+                    // The theme is the one the request in flight asked for;
+                    // an answer of a request the fetch no longer waits for
+                    // (the theme changed and it asked again) is dropped.
+                    if let Some(ChatStatisticsFetch::Loading { is_dark, request }) =
+                        self.groups.chat_statistics.get(&chat_id.0)
+                        && *request == pending.id
+                    {
+                        let is_dark = *is_dark;
+                        self.groups.chat_statistics.insert(
+                            chat_id.0,
+                            ChatStatisticsFetch::Loaded {
+                                stats: std::sync::Arc::new(statistics),
+                                is_dark,
+                            },
+                        );
+                    }
                 }
             }
             GroupsPayload::MessageStatistics { statistics } => {
@@ -448,8 +452,13 @@ impl Session {
             }
             // B8: `getChatInviteLinkCounts` answer.
             GroupsPayload::ChatInviteLinkCounts { counts } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatInviteLinkCounts)
-                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                if let Some(p) = pending
+                    && p.purpose == RequestPurpose::GetChatInviteLinkCounts
+                    && let Some(chat_id) = p.chat_id
+                    && matches!(
+                        self.groups.invite_link_counts.get(&chat_id.0),
+                        Some(InviteLinkCountsFetch::Loading(asked)) if *asked == p.id
+                    )
                 {
                     self.groups
                         .invite_link_counts
@@ -539,6 +548,10 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatAdministrators)
                     && let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
+                    && matches!(
+                        self.groups.admin_lists.get(&chat_id.0),
+                        Some(AdminListFetch::Loading(asked)) if *asked == pending.id
+                    )
                 {
                     self.groups
                         .admin_lists
@@ -619,6 +632,15 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBasicGroupFullInfo)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
+                    // The members request in flight takes only its own answer
+                    // (a photo's full-info request may also fill the list
+                    // when none is waiting).
+                    let other_members_request = pending.is_some_and(|p| {
+                        matches!(
+                            self.groups.basic_group_members.get(&chat_id.0),
+                            Some(SupergroupMembersFetch::Loading(asked)) if *asked != p.id
+                        )
+                    });
                     self.store_chat_current_photo(chat_id, photo);
                     if let Some(chat) = self.chats.get(&chat_id.0)
                         && let ChatKind::BasicGroup { basic_group_id } = chat.kind
@@ -632,13 +654,15 @@ impl Session {
                         );
                     }
                     let total_count = members.len() as i32;
-                    self.groups.basic_group_members.insert(
-                        chat_id.0,
-                        SupergroupMembersFetch::Loaded {
-                            members,
-                            total_count,
-                        },
-                    );
+                    if !other_members_request {
+                        self.groups.basic_group_members.insert(
+                            chat_id.0,
+                            SupergroupMembersFetch::Loaded {
+                                members,
+                                total_count,
+                            },
+                        );
+                    }
                 }
             }
             GroupsPayload::UpdateBasicGroupFullInfo {
@@ -871,7 +895,7 @@ impl Session {
             }
             GroupsPayload::CanTransferOwnershipResult { result } => {
                 if pending.is_some_and(|p| p.purpose == RequestPurpose::CanTransferOwnership) {
-                    self.accept_can_transfer_ownership(result);
+                    self.accept_can_transfer_ownership(pending.map(|p| p.id), result);
                 }
             }
             GroupsPayload::ChatMember { member } => {
@@ -896,11 +920,24 @@ impl Session {
                     pending.map(|p| p.purpose)
                     && let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
-                    && let Some(rights) = member.admin_rights()
+                    && matches!(
+                        self.groups.admin_rights.get(&(chat_id.0, user_id)),
+                        Some(AdminRightsFetch::Loading(asked)) if *asked == pending.id
+                    )
                 {
-                    self.groups
-                        .admin_rights
-                        .insert((chat_id.0, user_id), AdminRightsFetch::Loaded(rights));
+                    // A member who is no administrator (any more) has no
+                    // rights block to edit: the editor says so instead of
+                    // loading for good.
+                    self.groups.admin_rights.insert(
+                        (chat_id.0, user_id),
+                        match member.admin_rights() {
+                            Some(rights) => AdminRightsFetch::Loaded(rights),
+                            None => AdminRightsFetch::Failed(
+                                crate::lang::tr(crate::lang::keys::Q_PEOPLE_COULD_NOT_LOAD_ADMIN_RIGHTS)
+                                    .to_string(),
+                            ),
+                        },
+                    );
                 }
             }
             GroupsPayload::UpdateChatMember { chat_id, member } => {

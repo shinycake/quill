@@ -380,20 +380,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         let held = self.session.groups.chat_statistics.get(&chat_id.0);
         if matches!(held, Some(ChatStatisticsFetch::Loading { .. }))
             || (!refresh && matches!(held, Some(ChatStatisticsFetch::Loaded { .. })))
-            || self
-                .session
-                .requests
-                .has_purpose_for_chat(RequestPurpose::GetChatStatistics, chat_id)
         {
             return Ok(None);
         }
-        self.session
-            .groups
-            .chat_statistics
-            .insert(chat_id.0, ChatStatisticsFetch::Loading { is_dark });
         let extra = self
             .session
             .request(RequestPurpose::GetChatStatistics, Some(chat_id));
+        self.session.groups.chat_statistics.insert(
+            chat_id.0,
+            ChatStatisticsFetch::Loading {
+                is_dark,
+                request: extra,
+            },
+        );
         if let Err(err) = self
             .sender
             .send_json(&get_chat_statistics(extra, chat_id.0, is_dark))

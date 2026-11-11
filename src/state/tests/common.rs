@@ -111,11 +111,11 @@ pub(crate) const MEMBER_STATUS: &str = r#"{"@type":"chatMemberStatusMember"}"#;
 /// then waits for it (`EventLog::wait`).
 pub(crate) fn event_log_request(session: &mut Session, purpose: GroupsPurpose) -> RequestId {
     let extra = session.request(RequestPurpose::Groups(purpose), Some(ChatId(13)));
-    let wait = &mut session.groups.event_logs.entry(13).or_default().wait;
-    if purpose == GroupsPurpose::PollChatEventLog {
-        wait.poll = Some(extra);
-    } else {
-        wait.page = Some(extra);
-    }
+    let ask = match purpose {
+        GroupsPurpose::PollChatEventLog => crate::state::EventLogAsk::Poll,
+        GroupsPurpose::GetChatEventLog { from_event_id: 0 } => crate::state::EventLogAsk::First,
+        _ => crate::state::EventLogAsk::Older,
+    };
+    session.groups.event_log_asked(13, extra, ask);
     extra
 }
