@@ -42,7 +42,10 @@ pub enum ToneTarget {
 pub enum ToneUpload {
     #[default]
     Idle,
+    /// `addSavedNotificationSound` `request` is out; only its answer (or
+    /// its error) settles the upload.
     Uploading {
+        request: crate::ids::RequestId,
         name: String,
         target: ToneTarget,
     },

@@ -142,7 +142,7 @@ impl Session {
                 }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::UploadSavedNotificationSound)
                 {
-                    self.finish_tone_upload(sounds);
+                    self.finish_tone_upload(sounds, pending.map(|p| p.id));
                 // Parity slice: `getSavedNotificationSounds` answer.
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetSavedNotificationSounds)

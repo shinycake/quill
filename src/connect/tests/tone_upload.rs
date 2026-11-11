@@ -61,7 +61,7 @@ const NEW_SOUND: &str = r#"{"@type":"notificationSound","id":"900","duration":3,
 fn a_picked_file_goes_up_as_a_local_input_file() {
     let (mut driver, recorder, _sink, _seq) = driver();
     let path = tone_file("Soft Bell.mp3", 4000);
-    driver
+    let id = driver
         .upload_notification_tone(&path, ToneTarget::Reaction)
         .unwrap();
     let request = sent_request(&recorder, "addSavedNotificationSound");
@@ -70,6 +70,7 @@ fn a_picked_file_goes_up_as_a_local_input_file() {
     assert_eq!(
         driver.session.settings.tone_upload,
         ToneUpload::Uploading {
+            request: id,
             name: "Soft Bell".into(),
             target: ToneTarget::Reaction,
         }
@@ -78,6 +79,53 @@ fn a_picked_file_goes_up_as_a_local_input_file() {
         driver.upload_notification_tone(&path, ToneTarget::Reaction),
         Err(ToneProblem::Unreadable),
         "one file at a time"
+    );
+}
+
+/// An answer settles the upload of its own request only: another request's
+/// answer or error neither fails the upload nor hands it a target.
+#[test]
+fn an_answer_for_another_request_does_not_settle_the_upload() {
+    let (mut driver, recorder, sink, seq) = driver();
+    let path = tone_file("Soft Bell.mp3", 4000);
+    driver
+        .upload_notification_tone(&path, ToneTarget::Reaction)
+        .unwrap();
+    let waiting = ToneUpload::Uploading {
+        request: crate::ids::RequestId(u64::MAX),
+        name: "Other".into(),
+        target: ToneTarget::Reaction,
+    };
+    driver.session.settings.tone_upload = waiting.clone();
+    answer(
+        &mut driver,
+        &recorder,
+        &seq,
+        &sink,
+        "addSavedNotificationSound",
+        r#"{"@type":"error","code":400,"message":"RINGTONE_SIZE_TOO_BIG"}"#,
+    );
+    assert_eq!(driver.session.settings.tone_upload, waiting, "its error");
+    let (mut driver, recorder, sink, seq) = self::driver();
+    driver
+        .upload_notification_tone(&path, ToneTarget::Reaction)
+        .unwrap();
+    driver.session.settings.tone_upload = waiting;
+    answer(
+        &mut driver,
+        &recorder,
+        &seq,
+        &sink,
+        "addSavedNotificationSound",
+        NEW_SOUND,
+    );
+    assert_eq!(
+        driver.session.settings.tone_upload,
+        ToneUpload::Added {
+            sound_id: 900,
+            target: None,
+        },
+        "the sound is saved, but another upload's picker is not its"
     );
 }
 

@@ -33,9 +33,15 @@ impl Session {
 
     /// `notificationSound`: the new sound joins the front of the list
     /// (`_list.documents.insert(begin)`) until the refetch confirms it.
-    pub(super) fn finish_tone_upload(&mut self, sounds: Vec<NotificationSound>) {
+    pub(super) fn finish_tone_upload(
+        &mut self,
+        sounds: Vec<NotificationSound>,
+        request: Option<RequestId>,
+    ) {
         let Some(sound) = sounds.into_iter().next() else {
-            self.settings.tone_upload = ToneUpload::Failed(ToneProblem::Unreadable);
+            if self.tone_upload_is(request) {
+                self.settings.tone_upload = ToneUpload::Failed(ToneProblem::Unreadable);
+            }
             return;
         };
         self.remember_files(std::slice::from_ref(&sound.sound));
@@ -46,18 +52,33 @@ impl Session {
             saved.insert(0, sound);
         }
         self.mark_saved_sounds_stale();
+        // The sound is saved whichever upload this answers; the picker it
+        // goes to is known only while this request is the one uploading.
         let target = match &self.settings.tone_upload {
-            ToneUpload::Uploading { target, .. } => Some(*target),
+            ToneUpload::Uploading {
+                request: waiting,
+                target,
+                ..
+            } if Some(*waiting) == request => Some(*target),
             _ => None,
         };
         self.settings.tone_upload = ToneUpload::Added { sound_id, target };
     }
 
+    /// The upload `request` is the one the session is waiting on.
+    fn tone_upload_is(&self, request: Option<RequestId>) -> bool {
+        matches!(
+            &self.settings.tone_upload,
+            ToneUpload::Uploading { request: waiting, .. } if Some(*waiting) == request
+        )
+    }
+
     pub(super) fn apply_tone_upload_error(
         &mut self,
         err: &TdError,
-        purpose: Option<RequestPurpose>,
+        pending: Option<(RequestId, RequestPurpose)>,
     ) -> bool {
+        let purpose = pending.map(|(_, purpose)| purpose);
         if purpose == Some(RequestPurpose::RemoveSavedNotificationSound) {
             // The sound is still saved: say so, and read the list again so
             // the row shows what the server has.
@@ -70,8 +91,10 @@ impl Session {
         if purpose != Some(RequestPurpose::UploadSavedNotificationSound) {
             return false;
         }
-        self.settings.tone_upload =
-            ToneUpload::Failed(problem_for_server_type(err.server_type.as_deref()));
+        if self.tone_upload_is(pending.map(|(id, _)| id)) {
+            self.settings.tone_upload =
+                ToneUpload::Failed(problem_for_server_type(err.server_type.as_deref()));
+        }
         true
     }
 }

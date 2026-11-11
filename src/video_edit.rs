@@ -87,11 +87,11 @@ impl Crop {
 
     /// The same part of the frame after a left-to-right mirror.
     pub fn mirrored(self) -> Self {
+        let inside = self.clamped();
         Self {
-            x: 1000 - self.x - self.w,
-            ..self
+            x: 1000u16.saturating_sub(inside.x).saturating_sub(inside.w),
+            ..inside
         }
-        .clamped()
     }
 
     /// Pixels `(x, y, w, h)` for a frame of `width` x `height`, with even
@@ -831,6 +831,33 @@ mod tests {
         );
         assert_eq!(crop.turned_cw().turned_cw().turned_cw().turned_cw(), crop);
         assert_eq!(crop.mirrored(), Crop { x: 600, ..crop });
+    }
+
+    #[test]
+    fn mirroring_a_crop_outside_the_frame_stays_inside_it() {
+        for crop in [
+            Crop {
+                x: 900,
+                y: 0,
+                w: 900,
+                h: 1000,
+            },
+            Crop {
+                x: u16::MAX,
+                y: u16::MAX,
+                w: u16::MAX,
+                h: u16::MAX,
+            },
+            Crop {
+                x: 0,
+                y: 0,
+                w: 0,
+                h: 0,
+            },
+        ] {
+            let mirrored = crop.mirrored();
+            assert_eq!(mirrored, mirrored.clamped(), "{crop:?}");
+        }
     }
 
     #[test]
