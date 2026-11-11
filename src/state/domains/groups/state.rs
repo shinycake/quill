@@ -100,12 +100,6 @@ pub struct GroupsState {
     pub invite_links: HashMap<i64, InviteLinkFetch>,
     /// Phase D3a: `getChatJoinRequests` fetch state, keyed by chat id.
     pub join_requests: HashMap<i64, JoinRequestFetch>,
-    /// B8: the search query the cached `join_requests` list was fetched
-    /// with (absent = no query), keyed by chat id.
-    pub join_request_queries: HashMap<i64, String>,
-    /// B8: newest join-request page request per chat; replies with any
-    /// other id are stale (an older search) and dropped.
-    pub join_request_latest: HashMap<i64, RequestId>,
     /// B8: `getChatInviteLinks` with `is_revoked = true`, keyed by chat id.
     pub revoked_invite_links: HashMap<i64, InviteLinkFetch>,
     /// The Invite Links section's pages for one chat: another admin's
@@ -183,10 +177,10 @@ pub struct GroupsState {
     /// / `updateChatHasWelcomeMessages` (line 10600), keyed by chat id.
     pub chat_has_welcome_messages: HashMap<i64, bool>,
     /// Slice G2: the welcome-message pack per chat
-    /// (`updateChatWelcomeMessages`, schema 1.8.67, line 10649).
-    pub welcome_messages: HashMap<i64, Vec<ParsedWelcomeMessage>>,
-    /// Slice G2: `loadChatWelcomeMessages` fetch state, keyed by chat id.
-    pub welcome_message_fetches: HashMap<i64, WelcomeMessagesFetch>,
+    /// (`loadChatWelcomeMessages`, `updateChatWelcomeMessages`, schema
+    /// 1.8.67, line 10649): asked, answered or failed, with the pack kept
+    /// beside a refetch. `Loading` is the in-flight guard.
+    pub welcome_messages: HashMap<i64, crate::state::fetch::Fetch<Vec<ParsedWelcomeMessage>>>,
     /// Slice G2: `(level, boost_count)` from `getChatBoostStatus`
     /// (schema 1.8.67, lines 13917/6943), keyed by chat id.
     pub chat_boost_status: HashMap<i64, (i32, i32)>,
@@ -361,8 +355,6 @@ impl GroupsState {
             stats: StatsState::default(),
             invite_links: HashMap::new(),
             join_requests: HashMap::new(),
-            join_request_queries: HashMap::new(),
-            join_request_latest: HashMap::new(),
             revoked_invite_links: HashMap::new(),
             invite_pages: InvitePages::default(),
             chat_boost_lists: HashMap::new(),
@@ -389,7 +381,6 @@ impl GroupsState {
             supergroup_manage_video_chats_right: HashMap::new(),
             chat_has_welcome_messages: HashMap::new(),
             welcome_messages: HashMap::new(),
-            welcome_message_fetches: HashMap::new(),
             chat_boost_status: HashMap::new(),
             chat_boost_details: HashMap::new(),
             chat_boost_features: HashMap::new(),

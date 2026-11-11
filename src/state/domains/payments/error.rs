@@ -173,7 +173,9 @@ impl Session {
                 }
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GetWearableGifts)) => {
-                self.users_state.wearable_gifts_loaded = true;
+                self.users_state
+                    .wearable_gifts
+                    .fail(error_reason(err));
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { .. })) => {
                 // Only the newest page's error counts (an older page's is

@@ -1,5 +1,6 @@
 //! State reducer tests: groups (continued from groups.rs).
 use super::common::*;
+use crate::state::fetch::Fetch;
 use super::*;
 
 #[test]
@@ -664,13 +665,14 @@ fn g2_welcome_pack_and_flag_cached() {
         .groups
         .welcome_messages
         .get(&13)
+        .and_then(|pack| pack.data())
         .expect("welcome pack");
     assert_eq!(pack.len(), 1);
     assert_eq!(pack[0].id, 7);
-    assert_eq!(
-        session.groups.welcome_message_fetches.get(&13),
-        Some(&WelcomeMessagesFetch::Loaded)
-    );
+    assert!(matches!(
+        session.groups.welcome_messages.get(&13),
+        Some(Fetch::Ready(_))
+    ));
     apply_json(
         &mut session,
         &seq,
@@ -865,8 +867,8 @@ fn g2_welcome_fetch_error_marks_failed() {
         ),
     );
     assert!(matches!(
-        session.groups.welcome_message_fetches.get(&13),
-        Some(WelcomeMessagesFetch::Failed(_))
+        session.groups.welcome_messages.get(&13),
+        Some(Fetch::Failed { .. })
     ));
 }
 
@@ -916,11 +918,10 @@ fn g2_welcome_delete_ok_drops_pack() {
     // the cached pack so the dialog refetches it.
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.groups.welcome_messages.insert(13, Vec::new());
     session
         .groups
-        .welcome_message_fetches
-        .insert(13, WelcomeMessagesFetch::Loaded);
+        .welcome_messages
+        .insert(13, Fetch::Ready(Vec::new()));
     let extra = session.request(
         RequestPurpose::Groups(GroupsPurpose::DeleteChatWelcomeMessage {
             welcome_message_id: 7,
@@ -934,7 +935,6 @@ fn g2_welcome_delete_ok_drops_pack() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
     assert!(!session.groups.welcome_messages.contains_key(&13));
-    assert!(!session.groups.welcome_message_fetches.contains_key(&13));
 }
 
 #[test]

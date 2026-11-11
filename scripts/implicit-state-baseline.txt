@@ -1,8 +1,4 @@
 # Implicit-state debt (scripts/check-implicit-state.py). Only remove lines.
-ActiveGroupCall::join_as_requested
-ActiveGroupCall::loaded_all_participants
-ActiveGroupCall::loaded_all_participants+transport_error
-ActiveGroupCall::screen_share_pending
 AppearancePrefs::ignore_battery_saving
 Assembly::started
 AudioEngine::failed
@@ -60,8 +56,6 @@ GifPanel::loaded
 GifPanel::loading
 GifPanel::search_failed
 GifPanel::search_loading
-GiftCodeLookup::loading
-GiftCodeLookup::loading+error
 GiftManageState::collections_loading
 GiftPurchase::completed
 GiftPurchase::loading
@@ -83,14 +77,10 @@ HistoryState::newer_failed
 HistoryUi::anchor_pending
 InlineMembersUi::admins_asked
 InstallResult::failed
-InviteLinkMembersState::loading
-InviteLinkMembersState::loading+error
 InvoiceWatch::failed
 InvoiceWatch::pending
 InvoiceWatch::sending
 JoinedLines::started
-LanguageLinkLookup::loading
-LanguageLinkLookup::loading+error
 Latest::wake_pending
 LayerFade::closing
 LinuxState::failed
@@ -118,8 +108,6 @@ MutedSpeechHint::done
 NewChatView::busy
 NewChatView::busy+failure
 OutputState::opening
-OwnershipState::check_in_flight
-OwnershipState::check_in_flight+check_error
 Paged::loaded
 Paged::loading
 Paged::loading+error
@@ -210,11 +198,6 @@ TopicHistory::newer_failed
 TransportMachine::loop_sent
 UiClip::failed
 UpdatePill::downloading
-UsersState::background_emoji_icons_failed
-UsersState::background_emoji_icons_failed+profile_edit_error
-UsersState::chat_photo_emoji_icons_failed
-UsersState::profile_photo_emoji_icons_failed
-UsersState::wearable_gifts_loaded
 Validation::finished
 VideoEditorDialog::busy
 WebApps::grossing_loading

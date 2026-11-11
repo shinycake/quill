@@ -120,10 +120,8 @@ fn another_admins_links_close_with_the_group_settings_box(cx: &mut TestAppContex
             CHANNEL.0,
             quill::state::AdminLinksState {
                 creator_user_id: 77,
-                active: quill::state::InviteLinkFetch::Loading,
-                revoked: quill::state::InviteLinkFetch::Loading,
-                active_request: None,
-                revoked_request: None,
+                active: quill::state::InviteLinkFetch::Loading(quill::ids::RequestId(1)),
+                revoked: quill::state::InviteLinkFetch::Loading(quill::ids::RequestId(2)),
             },
         );
         app.close_group_settings_dialog(cx);
@@ -154,10 +152,8 @@ fn the_box_for_another_chat_replaces_the_invite_pages(cx: &mut TestAppContext) {
             CHANNEL.0,
             quill::state::AdminLinksState {
                 creator_user_id: 77,
-                active: quill::state::InviteLinkFetch::Loading,
-                revoked: quill::state::InviteLinkFetch::Loading,
-                active_request: None,
-                revoked_request: None,
+                active: quill::state::InviteLinkFetch::Loading(quill::ids::RequestId(1)),
+                revoked: quill::state::InviteLinkFetch::Loading(quill::ids::RequestId(2)),
             },
         );
         // The same chat again keeps its pages.

@@ -125,7 +125,7 @@ fn join_as_answer_fills_options_and_preselects_the_saved_default() {
         ),
     );
     let call = session.calls.active_group_call.as_ref().unwrap();
-    assert_eq!(call.join_as_options.len(), 2);
+    assert_eq!(call.join_as_options.data().map(Vec::len), Some(2));
     assert_eq!(call.join_as, Some(MessageSender::Chat { chat_id: -300 }));
     // The blocked-users list is untouched by a join-as answer.
     assert!(session.settings.blocked_senders.is_idle());
@@ -583,4 +583,34 @@ fn muting_someone_else_does_not_hold_back_your_own_row() {
     apply_json(&mut session, &seq, &sink, &own_row(true));
     let call = session.calls.active_group_call.as_ref().unwrap();
     assert!(!call.is_muted_self, "held while your own toggle is out");
+}
+
+#[test]
+fn join_as_failure_leaves_the_picker_out_and_is_not_asked_again() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.calls.active_group_call = Some(ActiveGroupCall::fresh(555));
+    if let Some(call) = session.calls.active_group_call.as_mut() {
+        call.join_as_options.begin();
+    }
+    let extra = session.request(
+        RequestPurpose::Calls(CallsPurpose::GetVideoChatAvailableParticipants {
+            group_call_id: 555,
+        }),
+        None,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_ADMIN_REQUIRED"}}"#,
+            extra.0
+        ),
+    );
+    let call = session.calls.active_group_call.as_ref().unwrap();
+    assert!(!call.join_as_options.is_loading());
+    assert!(call.join_as_options.error().is_some());
+    assert!(!call.join_as_options.is_idle());
+    assert!(call.join_as_options.data().is_none());
 }

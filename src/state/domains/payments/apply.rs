@@ -258,12 +258,12 @@ impl Session {
                         .flat_map(|gift| gift.gift.files.iter().cloned())
                         .collect();
                     self.remember_files(&files);
-                    self.users_state.wearable_gifts = page
-                        .gifts
-                        .into_iter()
-                        .filter(|gift| gift.gift.colors.is_some())
-                        .collect();
-                    self.users_state.wearable_gifts_loaded = true;
+                    self.users_state.wearable_gifts.succeed(
+                        page.gifts
+                            .into_iter()
+                            .filter(|gift| gift.gift.colors.is_some())
+                            .collect(),
+                    );
                 } else if let Some(p) = pending
                     && let RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append }) =
                         p.purpose

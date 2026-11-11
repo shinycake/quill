@@ -44,11 +44,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         match step {
             CallLinkStep::Offer { group_call_id } => {
+                // The hash is kept only once the fetch went out; a failed
+                // send leaves no hash behind for a later join of that call.
+                self.fetch_group_call(group_call_id)?;
                 self.session.calls.call_link = Some(PendingCallLink {
                     group_call_id,
                     invite_hash: invite_hash.to_string(),
                 });
-                self.fetch_group_call(group_call_id)?;
             }
             CallLinkStep::Busy => {
                 let leave = if private_call {

@@ -281,7 +281,11 @@ fn driver_mutation_confirmed_refetches_dropped_cache() {
     );
     // Seed the caches the way the dialogs load them before mutating.
     driver.session.threads.forum_topics.insert(13, vec![]);
-    driver.session.groups.welcome_messages.insert(13, vec![]);
+    driver
+        .session
+        .groups
+        .welcome_messages
+        .insert(13, crate::state::fetch::Fetch::Ready(vec![]));
     driver.session.groups.chat_boost_status.insert(13, (0, 0));
     let sent_types = || {
         recorder
@@ -350,7 +354,11 @@ fn driver_mutation_confirmed_refetches_dropped_cache() {
         &mut driver,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!driver.session.groups.welcome_messages.contains_key(&13));
+    // The dropped pack is being asked for again, not kept as the answer.
+    assert!(matches!(
+        driver.session.groups.welcome_messages.get(&13),
+        Some(crate::state::fetch::Fetch::Loading { stale: None })
+    ));
     assert!(
         sent_types().iter().any(|t| t == "loadChatWelcomeMessages"),
         "welcome pack reloaded after confirmed add"

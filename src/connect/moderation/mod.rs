@@ -1,6 +1,8 @@
 //! Connect driver: members, admins, invites, join requests, event log.
 use super::*;
 use crate::ids::{ChatId, RequestId};
+use crate::state::TransferStage;
+use crate::state::fetch::Fetch;
 use crate::state::GroupsPurpose;
 use crate::state::{
     AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch, InviteLinkFetch,
@@ -38,7 +40,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.groups.ownership.check_in_flight {
+        if self.session.groups.ownership.check.is_loading() {
             return Ok(None);
         }
         self.session.begin_ownership_check();
@@ -47,7 +49,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::CanTransferOwnership, None);
         if let Err(err) = self.sender.send_json(&can_transfer_ownership(extra)) {
             self.session.requests.take(extra);
-            self.session.groups.ownership.check_in_flight = false;
+            self.session.groups.ownership.check.cancel();
             return Err(err);
         }
         Ok(Some(extra))
@@ -71,8 +73,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.chats.get(&chat_id.0).map(|c| &c.kind),
             Some(ChatKind::BasicGroup { .. } | ChatKind::Supergroup { .. })
         ) && self.session.chat_is_owner(chat_id)
-            && self.session.groups.ownership.can_transfer == Some(CanTransferOwnershipResult::Ok)
-            && self.session.groups.ownership.transfer_in_flight.is_none()
+            && self.session.groups.ownership.check == Fetch::Ready(CanTransferOwnershipResult::Ok)
+            && self.session.groups.ownership.transfer.sending().is_none()
             && !password.is_empty()
             && self.session.my_user_id != Some(user_id)
             && !self.session.is_bot_user(user_id);
@@ -89,7 +91,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra, chat_id.0, user_id, password,
         )) {
             self.session.requests.take(extra);
-            self.session.groups.ownership.transfer_in_flight = None;
+            self.session.groups.ownership.transfer = TransferStage::Idle;
             return Err(err);
         }
         Ok(Some(extra))

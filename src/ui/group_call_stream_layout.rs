@@ -254,7 +254,7 @@ impl QuillApp {
             server_known: call.rtmp_url.as_deref().is_some_and(|url| !url.is_empty()),
             recording: call.record_duration > 0,
             share_link: self.group_call_can_share_link(call),
-            transport_failed: call.transport_error.is_some(),
+            transport_failed: call.transport.error().is_some(),
         })
     }
 

@@ -3,46 +3,58 @@
 use crate::state::*;
 use crate::telegram::envelope::LanguagePackInfoData;
 
+/// Where the lookup of a linked pack stands. It leaves by the answer, the
+/// error, or the box closing (the lookup is dropped with it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LanguageLinkStage {
+    /// `getLanguagePackInfo` is out as this request; another box's answer
+    /// settles nothing here.
+    Looking(RequestId),
+    Known(LanguagePackInfoData),
+    Failed(String),
+}
+
 /// The pack a link names and the progress of looking it up.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LanguageLinkLookup {
     pub id: String,
-    /// `None` while loading or after a failed lookup.
-    pub info: Option<LanguagePackInfoData>,
-    pub loading: bool,
-    pub error: Option<String>,
-    /// The `getLanguagePackInfo` this box waits for; another box's answer
-    /// settles nothing here.
-    pub(crate) request: Option<RequestId>,
+    pub stage: LanguageLinkStage,
 }
 
 impl LanguageLinkLookup {
-    pub fn new(id: String) -> Self {
+    /// A box whose lookup went out as `request`.
+    pub(crate) fn looking_up(id: String, request: RequestId) -> Self {
         Self {
             id,
-            info: None,
-            loading: true,
-            error: None,
-            request: None,
+            stage: LanguageLinkStage::Looking(request),
         }
     }
 
-    /// The box waits for `request` to answer.
-    pub(crate) fn waiting_for(mut self, request: RequestId) -> Self {
-        self.request = Some(request);
-        self
+    pub fn loading(&self) -> bool {
+        matches!(self.stage, LanguageLinkStage::Looking(_))
     }
 
-    /// `pending` is this box's own lookup: settle it.
-    fn take_answer(&mut self, pending: Option<&PendingRequest>) -> bool {
-        let ours = pending.is_some_and(|p| {
-            p.purpose == RequestPurpose::GetLanguagePackInfo && Some(p.id) == self.request
-        });
-        if ours {
-            self.request = None;
-            self.loading = false;
+    /// The pack, once the lookup answered.
+    pub fn info(&self) -> Option<&LanguagePackInfoData> {
+        match &self.stage {
+            LanguageLinkStage::Known(info) => Some(info),
+            _ => None,
         }
-        ours
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        match &self.stage {
+            LanguageLinkStage::Failed(error) => Some(error),
+            _ => None,
+        }
+    }
+
+    /// `pending` is this box's own lookup.
+    fn is_ours(&self, pending: Option<&PendingRequest>) -> bool {
+        matches!(self.stage, LanguageLinkStage::Looking(request)
+            if pending.is_some_and(|p| {
+                p.purpose == RequestPurpose::GetLanguagePackInfo && p.id == request
+            }))
     }
 }
 
@@ -54,19 +66,17 @@ impl Session {
         pending: Option<&PendingRequest>,
     ) {
         if let Some(lookup) = self.settings.language_link.as_mut()
-            && lookup.take_answer(pending)
+            && lookup.is_ours(pending)
         {
-            lookup.error = None;
-            lookup.info = Some(info);
+            lookup.stage = LanguageLinkStage::Known(info);
         }
     }
 
     pub(crate) fn apply_language_pack_error(&mut self, pending: Option<&PendingRequest>) {
         if let Some(lookup) = self.settings.language_link.as_mut()
-            && lookup.take_answer(pending)
+            && lookup.is_ours(pending)
         {
-            lookup.info = None;
-            lookup.error = Some("This language link is not valid.".into());
+            lookup.stage = LanguageLinkStage::Failed("This language link is not valid.".into());
         }
     }
 }
