@@ -53,10 +53,8 @@ impl QuillApp {
             let source = path.clone();
             let worker = cx.background_spawn(async move {
                 match kind {
-                    AttachmentKind::Video => (check_video(&source), None),
-                    // The header is read here, off the UI thread, for the
-                    // "High quality" offer (`tray_has_large_photo`).
-                    _ => (check_photo(&source), image::image_dimensions(&source).ok()),
+                    AttachmentKind::Video => check_video(&source),
+                    _ => check_photo(&source),
                 }
             });
             let timer = cx.background_executor().timer(GIVE_UP_AFTER);
@@ -64,14 +62,14 @@ impl QuillApp {
             self.spawn_scoped(cx, async move |this, cx| {
                 timer.await;
                 let _ = this.update(cx, |this, cx| {
-                    this.finish_media_check(&waited, job, MediaCheck::FileOnly, None, cx);
+                    this.finish_media_check(&waited, job, MediaCheck::FileOnly, cx);
                 });
             })
             .detach();
             self.spawn_scoped(cx, async move |this, cx| {
-                let (check, size) = worker.await;
+                let check = worker.await;
                 let _ = this.update(cx, |this, cx| {
-                    this.finish_media_check(&path, job, check, size, cx);
+                    this.finish_media_check(&path, job, check, cx);
                 });
             })
             .detach();
@@ -91,19 +89,17 @@ impl QuillApp {
         path: &Path,
         job: u64,
         check: MediaCheck,
-        size: Option<(u32, u32)>,
         cx: &mut Context<Self>,
     ) {
         let send_box = &mut self.composer_sends.reads;
         if !send_box.media.finish(path, job, check.clone()) {
             return;
         }
-        if size.is_some() {
-            send_box.photo_sizes.insert(path.to_path_buf(), size);
-        }
         self.apply_media_check(path, &check);
-        // A file now needs its thumbnail.
+        // A file now needs its thumbnail, and a photo that became a JPEG
+        // its size (the JPEG is the picture the offer is about).
         self.prepare_tray_file_thumbnails(cx);
+        self.check_tray_photo_sizes(cx);
         cx.notify();
     }
 

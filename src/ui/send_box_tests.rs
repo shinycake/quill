@@ -155,6 +155,38 @@ fn high_quality_is_offered_for_photos_over_1280_only(cx: &mut TestAppContext) {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// 12-D008: a photo that goes out as a converted JPEG (a picture the header
+/// reader cannot open, or one with a JPEG preset) is sized by that JPEG, so
+/// the High quality offer is not lost.
+#[gpui_kit::test]
+fn high_quality_is_offered_for_a_photo_sent_as_its_converted_jpeg(cx: &mut TestAppContext) {
+    let dir = std::env::temp_dir().join(format!("quill-send-box-jpeg-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("shot.heic");
+    std::fs::write(&source, b"a picture the header reader cannot open").unwrap();
+    let converted = dir.join("shot.jpg");
+    image::RgbImage::from_pixel(1400, 300, image::Rgb([9, 9, 9]))
+        .save(&converted)
+        .unwrap();
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| {
+        let mut photo = ComposerAttachment::pick(&source, AttachmentKind::Photo).unwrap();
+        photo
+            .extras
+            .set_photo(quill::composer::PhotoPrep::Jpeg(converted.clone()));
+        app.update_pending_attachments(|tray| tray.push(photo))
+            .expect("an open chat");
+        assert!(!app.tray_has_large_photo(), "not read yet");
+        app.check_tray_videos(cx);
+    });
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, _| {
+        assert!(app.tray_has_large_photo(), "sized by the JPEG it goes as");
+    });
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[gpui_kit::test]
 fn a_soundless_mp4_becomes_a_gif_after_the_background_check(cx: &mut TestAppContext) {
     let dir = std::env::temp_dir().join(format!("quill-send-box-gif-{}", std::process::id()));

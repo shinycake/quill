@@ -88,9 +88,10 @@ impl<T> Reads<T> {
 /// started lands for all of them.
 #[derive(Default)]
 pub(crate) struct TrayReads {
-    /// Sizes read from the header of tray photos by the media check's
-    /// worker, once per file (`send_box_media_check.rs`).
-    pub(super) photo_sizes: HashMap<PathBuf, Option<(u32, u32)>>,
+    /// The size of each tray photo's picture, read from its header off the
+    /// UI thread (`send_box_options.rs`), by the photo's own path.
+    pub(super) photo_sizes: Reads<PhotoSize>,
+    pub(super) photo_size_jobs: u64,
     /// Tray videos whose sound track is being read in the background, or
     /// already read (tdesktop `hasAudio`). Each read has its own number,
     /// like the thumbnails below, so a stale read (a removed and re-added
@@ -108,13 +109,22 @@ pub(crate) struct TrayReads {
     pub(super) media_check_jobs: u64,
 }
 
+/// What reading the header of the picture a tray photo goes out as found:
+/// the file that was read (the photo's JPEG once one is made, else the file
+/// itself) and its size, `None` when the header could not be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct PhotoSize {
+    pub(super) file: PathBuf,
+    pub(super) size: Option<(u32, u32)>,
+}
+
 impl TrayReads {
     /// Files left their tray: forget what was read about them, so the same
     /// file attached again is read again. Callers pass only files no tray
     /// holds any more (`QuillApp::forget_tray_checks`).
     pub(super) fn forget<'a>(&mut self, paths: impl Iterator<Item = &'a Path>) {
         for path in paths {
-            self.photo_sizes.remove(path);
+            self.photo_sizes.forget(path);
             self.sound.forget(path);
             self.thumbnails.forget(path);
             self.media.forget(path);

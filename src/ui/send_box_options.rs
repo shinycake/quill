@@ -9,6 +9,7 @@
 
 use super::app::QuillApp;
 use super::composer_sends::{SendSlot, TrayItem};
+use super::send_box_state::PhotoSize;
 use super::send_box_thumbnails::GIVE_UP_AFTER;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
@@ -87,15 +88,80 @@ impl QuillApp {
         }
     }
 
-    /// Size from the file header, read once per photo by the media check's
-    /// worker (never on the render thread); unknown until that lands.
-    fn tray_photo_size(&self, path: &Path) -> Option<(u32, u32)> {
+    /// The size of the picture the photo goes out as (its JPEG when one was
+    /// made), read from the header off the UI thread; unknown until that
+    /// read lands for that very file.
+    fn tray_photo_size(&self, attachment: &ComposerAttachment) -> Option<(u32, u32)> {
         self.composer_sends
             .reads
             .photo_sizes
-            .get(path)
-            .copied()
-            .flatten()
+            .done(&attachment.path)
+            .filter(|read| read.file == attachment.photo_file())
+            .and_then(|read| read.size)
+    }
+
+    /// Read the header of every tray photo's picture that has not been read
+    /// (or was read as another file, before its JPEG was made), in the
+    /// background. A header that cannot be read, or a read that never
+    /// answers, ends as "unknown": the offer stays hidden, nothing waits.
+    pub(super) fn check_tray_photo_sizes(&mut self, cx: &mut Context<Self>) {
+        let wanted: Vec<(std::path::PathBuf, std::path::PathBuf)> = self
+            .composer_sends
+            .attachments()
+            .filter(|attachment| attachment.kind == AttachmentKind::Photo)
+            .map(|attachment| {
+                (
+                    attachment.path.clone(),
+                    attachment.photo_file().to_path_buf(),
+                )
+            })
+            .filter(|(path, file)| {
+                let reads = &self.composer_sends.reads.photo_sizes;
+                !reads.is_reading(path) && reads.done(path).is_none_or(|read| read.file != *file)
+            })
+            .collect();
+        for (path, file) in wanted {
+            let reads = &mut self.composer_sends.reads;
+            reads.photo_size_jobs = reads.photo_size_jobs.wrapping_add(1);
+            let job = reads.photo_size_jobs;
+            reads.photo_sizes.start(path.clone(), job);
+            let read_file = file.clone();
+            let worker =
+                cx.background_spawn(async move { image::image_dimensions(&read_file).ok() });
+            let timer = cx.background_executor().timer(GIVE_UP_AFTER);
+            let (waited, waited_file) = (path.clone(), file.clone());
+            Self::spawn_app(cx, async move |this, cx| {
+                timer.await;
+                let _ = this.update(cx, |this, cx| {
+                    let unknown = PhotoSize {
+                        file: waited_file,
+                        size: None,
+                    };
+                    if this
+                        .composer_sends
+                        .reads
+                        .photo_sizes
+                        .finish(&waited, job, unknown)
+                    {
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+            Self::spawn_app(cx, async move |this, cx| {
+                let size = worker.await;
+                let _ = this.update(cx, |this, cx| {
+                    if this.composer_sends.reads.photo_sizes.finish(
+                        &path,
+                        job,
+                        PhotoSize { file, size },
+                    ) {
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+        }
     }
 
     /// tdesktop `hasSendLargePhotosOption`: a compressed photo over 1280 px.
@@ -103,7 +169,7 @@ impl QuillApp {
         self.pending_attachments()
             .iter()
             .filter(|attachment| attachment.kind == AttachmentKind::Photo)
-            .filter_map(|attachment| self.tray_photo_size(attachment.photo_file()))
+            .filter_map(|attachment| self.tray_photo_size(attachment))
             .any(|(width, height)| can_use_high_quality(width, height))
     }
 
@@ -172,6 +238,7 @@ impl QuillApp {
             .detach();
         }
         self.prepare_tray_file_thumbnails(cx);
+        self.check_tray_photo_sizes(cx);
         self.check_tray_media(cx);
     }
 
