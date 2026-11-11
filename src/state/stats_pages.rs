@@ -376,7 +376,7 @@ impl Session {
                 }
             }
             StatsPage::Overview => {
-                if let Some(ChatStatisticsFetch::Loaded(stats)) =
+                if let Some(ChatStatisticsFetch::Loaded { stats, .. }) =
                     self.groups.chat_statistics.get(&chat_id)
                     && let ChatStatistics::Channel(channel) = stats.as_ref()
                 {

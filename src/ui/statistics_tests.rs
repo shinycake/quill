@@ -273,8 +273,10 @@ fn a_redraw_shares_the_loaded_statistics(cx: &mut TestAppContext) {
     let (app, vcx) = open_statistics(cx);
     app.read_with(&vcx, |app, _| {
         let held = &app.session().expect("session").groups.chat_statistics;
-        let (Some(ChatStatisticsFetch::Loaded(first)), Some(ChatStatisticsFetch::Loaded(second))) =
-            (held.get(&CHANNEL).cloned(), held.get(&CHANNEL).cloned())
+        let (
+            Some(ChatStatisticsFetch::Loaded { stats: first, .. }),
+            Some(ChatStatisticsFetch::Loaded { stats: second, .. }),
+        ) = (held.get(&CHANNEL).cloned(), held.get(&CHANNEL).cloned())
         else {
             panic!("the channel's statistics are loaded");
         };

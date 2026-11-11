@@ -156,6 +156,7 @@ impl Session {
     /// The request must already be out of the registry.
     pub(crate) fn settle_lost_request(&mut self, pending: PendingRequest) {
         let extra = pending.id;
+        self.drop_admin_followups_of_lost(extra);
         let seq = self.last_seq;
         let error = TdError::from_code(LOST_REQUEST_ERROR_CODE);
         // An export's worker waits on its link for this answer: without it

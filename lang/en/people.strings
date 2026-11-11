@@ -315,6 +315,9 @@
 "qll_people_could_not_update_community_permissions" = "Couldn't update community permissions";
 "qll_people_could_not_update_member_status" = "Couldn't update member status";
 "qll_people_could_not_update_permissions" = "Couldn't update permissions";
+"qll_people_permissions_partial" = "Some changes were saved, but {part} couldn't be changed";
+"qll_people_permissions_part_slow_mode" = "slow mode";
+"qll_people_permissions_part_boosts" = "the boosts needed to bypass restrictions";
 "qll_people_could_not_update_topic" = "Couldn't update topic";
 "qll_people_couldn_t_load_contacts" = "Couldn’t load contacts.";
 "qll_people_couldnt_load_channels_retry" = "Couldn't load channels. Retry";

@@ -312,6 +312,17 @@ impl QuillApp {
     /// registry forgets failures after a while, and the box must not then
     /// close as saved with the person's edits.
     pub(in crate::ui) fn settle_group_edit_box(&mut self, cx: &mut Context<Self>) {
+        // A box that saved is gone, not hidden: a later error recorded for
+        // the same chat (another Manage action) must not bring it back.
+        if self
+            .admin
+            .group_edit_box
+            .as_ref()
+            .is_some_and(|edit| edit.state(self.session()) == EditBoxState::Saved)
+        {
+            self.close_group_edit_box(cx);
+            return;
+        }
         let Some(SaveStage::Exiting(request)) =
             self.admin.group_edit_box.as_ref().map(|edit| &edit.saving)
         else {

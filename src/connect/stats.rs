@@ -287,9 +287,33 @@ impl<S: JsonSender> ConnectDriver<S> {
                 extra, chat_id, message_id, is_dark,
             ),
         );
+        // A send that did not go out is a failed load the page draws with
+        // Retry, not an empty slot the next render asks for again.
         if sent.is_err() {
-            self.session.messages.poll_stats.remove(&key);
+            self.session.messages.poll_stats.insert(
+                key,
+                crate::state::PollStatsFetch::Failed(
+                    crate::lang::tr(crate::lang::keys::Q_MONEY_STATISTICS_SEND_FAILED).into(),
+                ),
+            );
         }
         sent.map(Some)
+    }
+
+    /// The Retry of a failed poll votes chart: start over.
+    pub fn retry_stats_poll_votes(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        is_dark: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        let key = (chat_id.0, message_id.0);
+        if matches!(
+            self.session.messages.poll_stats.get(&key),
+            Some(crate::state::PollStatsFetch::Failed(_))
+        ) {
+            self.session.messages.poll_stats.remove(&key);
+        }
+        self.fetch_stats_poll_votes(chat_id, message_id, is_dark)
     }
 }

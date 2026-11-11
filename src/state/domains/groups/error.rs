@@ -214,8 +214,15 @@ impl Session {
             // Phase D3a: failed invite-link / join-request requests
             // land in the fetch state so the panel shows an honest
             // error instead of spinning forever.
+            // A list that already holds an answer (a newer request landed
+            // first) is not failed by an older request's error.
             Some(RequestPurpose::GetChatInviteLinks) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                    && !matches!(
+                        self.groups.invite_links.get(&chat_id.0),
+                        Some(InviteLinkFetch::Loaded(_))
+                    )
+                {
                     self.groups.invite_links.insert(
                         chat_id.0,
                         InviteLinkFetch::Failed(call_request_error_line(
@@ -270,7 +277,6 @@ impl Session {
                         .get(&chat_id.0)
                         .is_none_or(|latest| *latest == pending.id)
                 {
-                    self.groups.join_request_latest.remove(&chat_id.0);
                     self.groups.join_requests.insert(
                         chat_id.0,
                         JoinRequestFetch::Failed(call_request_error_line(
@@ -283,15 +289,24 @@ impl Session {
             // B8: failures of the new link/request admin calls keep the
             // last good data and surface the error line.
             Some(RequestPurpose::GetMoreChatJoinRequests) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.groups.join_request_latest.remove(&chat_id.0);
+                // A page that was superseded by a newer search says nothing:
+                // its list is gone.
+                let current = pending.is_some_and(|pending| {
+                    pending.chat_id.is_some_and(|chat_id| {
+                        self.groups
+                            .join_request_latest
+                            .get(&chat_id.0)
+                            .is_none_or(|latest| *latest == pending.id)
+                    })
+                });
+                if current {
+                    self.groups.invite_link_error = Some(call_request_error_line(
+                        err,
+                        crate::lang::tr(
+                            crate::lang::keys::Q_INVITE_LINK_COULD_NOT_LOAD_MORE_JOIN_REQUESTS,
+                        ),
+                    ));
                 }
-                self.groups.invite_link_error = Some(call_request_error_line(
-                    err,
-                    crate::lang::tr(
-                        crate::lang::keys::Q_INVITE_LINK_COULD_NOT_LOAD_MORE_JOIN_REQUESTS,
-                    ),
-                ));
             }
             Some(RequestPurpose::Groups(GroupsPurpose::ProcessAllChatJoinRequests { .. })) => {
                 self.groups.invite_link_error = Some(call_request_error_line(
@@ -300,7 +315,12 @@ impl Session {
                 ));
             }
             Some(RequestPurpose::GetRevokedChatInviteLinks) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                    && !matches!(
+                        self.groups.revoked_invite_links.get(&chat_id.0),
+                        Some(InviteLinkFetch::Loaded(_))
+                    )
+                {
                     self.groups.revoked_invite_links.insert(
                         chat_id.0,
                         InviteLinkFetch::Failed(call_request_error_line(
@@ -311,7 +331,12 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetChatInviteLinkCounts) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                    && !matches!(
+                        self.groups.invite_link_counts.get(&chat_id.0),
+                        Some(InviteLinkCountsFetch::Loaded(_))
+                    )
+                {
                     self.groups.invite_link_counts.insert(
                         chat_id.0,
                         InviteLinkCountsFetch::Failed(call_request_error_line(

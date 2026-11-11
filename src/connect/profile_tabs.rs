@@ -291,10 +291,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.settings.media_prefs.data_saver {
             return Ok(());
         }
+        // One refused download does not drop the rest of the queue.
+        let mut first_error = None;
         for file_id in due {
-            self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY)?;
+            if let Err(err) = self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY) {
+                first_error.get_or_insert(err);
+            }
         }
-        Ok(())
+        first_error.map_or(Ok(()), Err)
     }
 
     fn send_profile_request(

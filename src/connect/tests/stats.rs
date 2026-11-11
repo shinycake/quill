@@ -355,6 +355,41 @@ fn poll_votes_are_asked_once_for_a_poll_post() {
     ));
 }
 
+/// A poll votes request that did not go out is a failed chart the page
+/// draws with Retry, not an empty slot the next render asks for again
+/// (13-030).
+#[test]
+fn a_refused_poll_votes_request_fails_and_retries() {
+    let mut rig = Rig::new();
+    rig.recorder.refuse(Some("getPollVoteStatistics"));
+    let key = (-100, 3 << 20);
+    assert!(
+        rig.driver
+            .fetch_stats_poll_votes(ChatId(-100), MessageId(3 << 20), false)
+            .is_err()
+    );
+    assert!(matches!(
+        rig.driver.session.messages.poll_stats.get(&key),
+        Some(crate::state::PollStatsFetch::Failed(_))
+    ));
+    // The render's own ask finds the slot taken.
+    assert!(
+        rig.driver
+            .fetch_stats_poll_votes(ChatId(-100), MessageId(3 << 20), false)
+            .unwrap()
+            .is_none()
+    );
+    rig.recorder.refuse(None);
+    rig.driver
+        .retry_stats_poll_votes(ChatId(-100), MessageId(3 << 20), false)
+        .unwrap()
+        .expect("sent again");
+    assert!(matches!(
+        rig.driver.session.messages.poll_stats.get(&key),
+        Some(crate::state::PollStatsFetch::Loading)
+    ));
+}
+
 #[test]
 fn the_open_panel_downloads_recent_post_thumbnails() {
     use crate::ids::FileId;
@@ -407,9 +442,10 @@ fn the_open_panel_downloads_recent_post_thumbnails() {
     };
     session.groups.chat_statistics.insert(
         -100,
-        ChatStatisticsFetch::Loaded(std::sync::Arc::new(ChatStatistics::Channel(Box::new(
-            stats,
-        )))),
+        ChatStatisticsFetch::Loaded {
+            stats: std::sync::Arc::new(ChatStatistics::Channel(Box::new(stats))),
+            is_dark: false,
+        },
     );
     session.groups.stats.posts.insert(
         (-100, 9 << 20),
@@ -588,7 +624,7 @@ fn statistics_asked_before_the_full_info_wait_and_go_out_when_it_lands() {
         .unwrap();
     assert_eq!(
         rig.driver.session.groups.chat_statistics.get(&-100),
-        Some(&ChatStatisticsFetch::Loading)
+        Some(&ChatStatisticsFetch::Loading { is_dark: true })
     );
     let request = rig.last("getChatStatistics");
     assert_eq!(request["chat_id"], -100);

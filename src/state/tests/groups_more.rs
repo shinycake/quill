@@ -396,6 +396,42 @@ fn update_chat_member_invalidates_admin_list_and_own_rights() {
     assert!(chat.can_manage_admins());
 }
 
+/// An administrator list asked before a membership change must not put
+/// the old administrators back when it answers (05-079).
+#[test]
+fn an_admin_list_asked_before_a_membership_change_is_dropped() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.my_user_id = Some(777);
+    let mut channel = placeholder_chat(ChatId(13));
+    channel.kind = ChatKind::Supergroup {
+        supergroup_id: 13,
+        is_channel: true,
+    };
+    session.chats.insert(13, channel);
+    let asked = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
+    session
+        .groups
+        .admin_lists
+        .insert(13, AdminListFetch::Loading);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatMember","chat_id":13,"actor_user_id":777,"date":1,"invite_link":null,"via_join_request":false,"via_chat_folder_invite_link":false,"old_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":888},"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":true}},"new_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":888},"status":{"@type":"chatMemberStatusMember","member_until_date":0}}}"#,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"chatAdministrators","@extra":"{}","administrators":[{{"@type":"chatAdministrator","user_id":888,"custom_title":"","is_owner":false,"can_be_edited":true}}]}}"#,
+            asked.0
+        ),
+    );
+    assert!(!session.groups.admin_lists.contains_key(&13));
+}
+
 #[test]
 fn get_admin_rights_response_caches_rights() {
     // Phase D3b: `getChatMember` tagged `GetAdminRights` stores the

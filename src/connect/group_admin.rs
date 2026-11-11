@@ -497,13 +497,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         };
         if !matches!(result, Ok(true)) {
-            self.session.chats_state.chat_action_error = Some(if linking {
-                "could not link the discussion group".to_string()
-            } else {
-                "the group was upgraded, but the setting could not be applied; \
-                 open the group settings to retry"
-                    .to_string()
-            });
+            self.session.chats_state.chat_action_error =
+                Some(crate::state::admin_followup_failure_note(linking));
         }
     }
 }

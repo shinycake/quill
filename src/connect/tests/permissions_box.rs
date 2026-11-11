@@ -4,7 +4,9 @@ use super::super::*;
 use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::ChatId;
-use crate::permissions_box::{Permission, PermissionsSave, PermissionsSent, toggle};
+use crate::permissions_box::{
+    Permission, PermissionsPart, PermissionsSave, PermissionsSent, toggle,
+};
 use crate::platform::MemorySecretStore;
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::ChatPermissions;
@@ -129,6 +131,26 @@ fn a_save_sends_each_changed_setting_once() {
         boosts.first().map(|v| v["unrestrict_boost_count"].clone()),
         Some(2.into())
     );
+}
+
+/// Slow mode refused after the permissions went out: the Save is partial,
+/// names the part, and a second Save sends only what still differs
+/// (02-168, 10-065).
+#[test]
+fn a_refused_later_part_is_reported_as_partial() {
+    let mut rig = Rig::new();
+    rig.owned_supergroup();
+    rig.recorder.refuse(Some("setChatSlowModeDelay"));
+    let permissions = toggle(current(&rig), Permission::SendText, false);
+    let save = PermissionsSave::new(permissions, 30, 0);
+    let Ok(PermissionsSent::Partial { sent, refused }) =
+        rig.driver.save_permissions_box(ChatId(13), save)
+    else {
+        panic!("a partial save");
+    };
+    assert_eq!(sent.len(), 1);
+    assert_eq!(refused, PermissionsPart::SlowMode);
+    assert_eq!(rig.sent("setChatPermissions").len(), 1);
 }
 
 #[test]

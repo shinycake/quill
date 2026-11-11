@@ -144,7 +144,12 @@ impl QuillApp {
                     PopupMenuItem::new(tr(keys::GROUP_INVITE_SHARE)).on_click(move |_, _, cx| {
                         let _ = share_owner.update(cx, |this, cx| {
                             this.dismiss_profile_modal();
-                            this.share.link_text = Some(share_link.clone());
+                            // The chooser is the asking window's own: a
+                            // chat window's profile shares in that window.
+                            this.in_asking_window(cx, |this, cx| {
+                                this.share.link_text = Some(share_link.clone());
+                                cx.notify();
+                            });
                             cx.notify();
                         });
                     }),

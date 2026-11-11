@@ -34,6 +34,14 @@ impl Session {
             .map_or(0, |info| info.unrestrict_boost_count)
     }
 
+    /// A boost-count save is out for this chat: the next one waits for its
+    /// answer (the driver refuses a second send).
+    pub fn unrestrict_boost_saving(&self, chat_id: ChatId) -> bool {
+        self.groups
+            .unrestrict_boost_pending
+            .contains_key(&chat_id.0)
+    }
+
     /// The acknowledged value becomes the stored one.
     pub(crate) fn apply_boost_settings_ok(&mut self, pending: Option<&PendingRequest>) {
         let Some(pending) = pending else {
