@@ -488,7 +488,6 @@ fn an_own_send_while_newer_replies_are_unloaded_replaces_the_window() {
         assert!(!thread.history.loaded_complete());
         assert_eq!(thread.history.next_from_message_id, MessageId(0));
     }
-    assert!(session.reset_thread_window());
     apply_json(
         &mut session,
         &seq,
@@ -504,7 +503,7 @@ fn an_own_send_while_newer_replies_are_unloaded_replaces_the_window() {
         !thread.history.messages.contains_key(&42),
         "stale page dropped"
     );
-    assert_eq!(thread.history.window_epoch, 2);
+    assert_eq!(thread.history.window_epoch, 1);
     // The newest page lands in the fresh window and reaches the root.
     thread_page(
         &mut session,

@@ -337,6 +337,17 @@ impl Session {
     /// thread's rows, or hold it outside a window that stops short of the
     /// newest replies.
     pub(crate) fn thread_upsert(&mut self, row: HistoryMessage) {
+        // An own reply while newer replies are unloaded replaces the window
+        // (`note_live`): the pages still out belong to the old one.
+        let replaces_window = row.is_outgoing
+            && self
+                .threads
+                .thread
+                .as_ref()
+                .is_some_and(|thread| thread.history.has_newer());
+        if replaces_window {
+            self.reset_thread_window();
+        }
         if let Some(thread) = self.threads.thread.as_mut()
             && thread.note_live(row)
         {
