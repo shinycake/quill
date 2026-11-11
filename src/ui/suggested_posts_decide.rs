@@ -87,6 +87,11 @@ impl QuillApp {
         let Some(suggestion) = self.suggestion(chat_id, message_id) else {
             return;
         };
+        // A Publish of this post is still out: its answer settles it, and
+        // a second box would only wait on that answer.
+        if self.publish_busy(chat_id, message_id) {
+            return;
+        }
         let limits = self
             .session()
             .map(|session| session.payments.suggested_posts.limits)
@@ -116,15 +121,31 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// The Publish of `accept` was sent and its answer has not come.
-    fn accept_busy(&self, accept: &AcceptBox) -> bool {
+    /// The approve or decline of this post was sent and its answer has not
+    /// come.
+    fn publish_busy(&self, chat_id: ChatId, message_id: MessageId) -> bool {
         self.session().is_some_and(|session| {
             session
                 .payments
                 .suggested_posts
                 .busy
-                .contains(&(accept.chat_id.0, accept.message_id.0))
+                .contains(&(chat_id.0, message_id.0))
         })
+    }
+
+    /// The Accept Terms box of a post that is no longer pending (decided
+    /// or expired, here or by the other side) closes with nothing sent.
+    pub(super) fn close_decided_accept(&mut self, cx: &mut Context<Self>) {
+        let Some(accept) = self.suggested_posts.accept.as_ref() else {
+            return;
+        };
+        let (chat_id, message_id) = (accept.chat_id, accept.message_id);
+        let decided = self
+            .suggestion(chat_id, message_id)
+            .is_some_and(|s| s.info.state != SuggestedPostState::Pending);
+        if decided {
+            self.close_suggest_accept(cx);
+        }
     }
 
     /// "Publish": a member is checked against the balance first.
@@ -134,7 +155,7 @@ impl QuillApp {
         };
         // A second Publish while the first is on its way does nothing and
         // the box stays, its button waiting, until the answer settles it.
-        if self.accept_busy(&accept) {
+        if self.publish_busy(accept.chat_id, accept.message_id) {
             cx.notify();
             return;
         }
@@ -436,7 +457,7 @@ impl QuillApp {
             let Some(accept) = this.suggested_posts.accept.as_ref() else {
                 return dialog.on_close(on_close);
             };
-            let publishing = this.accept_busy(accept);
+            let publishing = this.publish_busy(accept.chat_id, accept.message_id);
             let body = div()
                 .flex()
                 .flex_col()

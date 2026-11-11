@@ -5520,8 +5520,21 @@ land and the typed form was gone.
   (13-040).
 - **Guard.** `scripts/check-drained-notes.py` fails on
   `notes.into_iter().last()` in `src/ui`.
+- **Review fixes.** A Publish in flight (the `busy` entry of the post)
+  refuses a second Accept Terms box, and the suggested-posts drain closes
+  the open box once its post is no longer Pending, so the answer of the
+  first Publish cannot leave a live Publish button that then toasts
+  "Couldn't publish the post" for a published post. The resale and craft
+  Buy steps reset only the gift choices (`reset_gift_choices`), so the
+  typed send-gift message survives Back. The Show Last Seen / Read Time
+  box waits while any save of its key is out instead of reporting "shown"
+  for an unrelated one. The join box's `BoxSend` gave way to the
+  integration branch's `JoinStage`/`Resolve` (same fix); `BoxSend` stays
+  for the revoke box.
 - **Skipped.** 10-011: both openers already call
-  `open_box(DialogKind::SendGift)`.
+  `open_box(DialogKind::SendGift)`. 13-037: handled; files handed to
+  Quill wait in the app's own `start_files`, and the test
+  `files_waiting_for_a_chat_survive_a_switch` pins it.
 
 ### Sweep fixes (s4-media-2)
 

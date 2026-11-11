@@ -172,7 +172,7 @@ impl QuillApp {
     pub(in crate::ui) fn drain_show_or_premium(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(ShowOrPremiumBox {
             kind,
-            stage: ShowStage::Saving(request),
+            stage: ShowStage::Saving(_),
             ..
         }) = self.profile_cover.show_or_premium
         else {
@@ -181,17 +181,16 @@ impl QuillApp {
         let settled = self.session().map(|session| match kind {
             ShowOrPremium::LastSeen => {
                 match session.settings.privacy.get(&PrivacySettingKey::ShowStatus) {
-                    Some(PrivacyKeyState::Saving {
-                        request: live,
-                        earlier,
-                        ..
-                    }) if *live == request || earlier.iter().any(|(id, _)| *id == request) => None,
+                    // Any save still out settles first: this box's own
+                    // answer may be behind it, and an unrelated one says
+                    // nothing about this request.
+                    Some(PrivacyKeyState::Saving { .. }) => None,
                     Some(PrivacyKeyState::SaveFailed { .. }) => Some(false),
                     _ => Some(true),
                 }
             }
             ShowOrPremium::ReadTime => match session.settings.read_date_stage {
-                ReadDateStage::Setting(id) if id == request => None,
+                ReadDateStage::Setting(_) => None,
                 ReadDateStage::Failed => Some(false),
                 _ => Some(true),
             },

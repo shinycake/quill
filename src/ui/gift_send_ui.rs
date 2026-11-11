@@ -133,6 +133,12 @@ impl QuillApp {
         self.payments
             .gift_message_input
             .update(cx, |input, cx| input.set_value("", window, cx));
+        self.reset_gift_choices(hide_name);
+    }
+
+    /// The choices beside the message are replaced whole; the typed message
+    /// stays (a buy step began from the send box and Back returns to it).
+    pub(super) fn reset_gift_choices(&mut self, hide_name: bool) {
         self.payments.gift_inputs = SendGiftInputs {
             hide_name,
             ..SendGiftInputs::default()

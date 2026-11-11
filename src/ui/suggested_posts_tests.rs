@@ -225,6 +225,54 @@ fn accepting_asks_for_the_terms_then_publishes(cx: &mut TestAppContext) {
     );
 }
 
+fn set_busy(app: &mut QuillApp, busy: bool) {
+    let Some(session) = app.demo_session.as_mut() else {
+        return;
+    };
+    let key = (CHAT, COUNTER);
+    let set = &mut session.payments.suggested_posts.busy;
+    if busy {
+        set.insert(key);
+    } else {
+        set.remove(&key);
+    }
+}
+
+#[gpui_kit::test]
+fn a_publish_in_flight_refuses_a_second_terms_box_and_a_decided_post_closes_one(
+    cx: &mut TestAppContext,
+) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        // The first Publish is out: opening the box again opens nothing.
+        set_busy(app, true);
+        app.open_suggest_accept(ChatId(CHAT), MessageId(COUNTER), 0, window, cx);
+        assert!(app.suggested_posts.accept.is_none());
+        // A box open when the send goes out waits, its button busy.
+        set_busy(app, false);
+        app.open_suggest_accept(ChatId(CHAT), MessageId(COUNTER), 0, window, cx);
+        set_busy(app, true);
+        app.confirm_suggest_accept(cx);
+        assert!(app.suggested_posts.accept.is_some(), "the box waits");
+        app.drain_suggested_post_notes(cx);
+        assert!(app.suggested_posts.accept.is_some(), "still pending");
+        // The answer: the post is published and the busy entry clears.
+        set_busy(app, false);
+        if let Some(session) = app.demo_session.as_mut() {
+            session.edit_suggested_post(ChatId(CHAT), MessageId(COUNTER), |info| {
+                if let Some(info) = info.as_mut() {
+                    info.state = SuggestedPostState::Approved;
+                }
+            });
+        }
+        app.drain_suggested_post_notes(cx);
+        assert!(
+            app.suggested_posts.accept.is_none(),
+            "the box of a published post closes"
+        );
+    });
+}
+
 #[gpui_kit::test]
 fn the_accept_terms_date_reads_the_pickers_clock(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);

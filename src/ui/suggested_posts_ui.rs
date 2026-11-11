@@ -400,6 +400,7 @@ impl QuillApp {
 
     /// Errors of approve, decline and offers become status toasts.
     pub(super) fn drain_suggested_post_notes(&mut self, cx: &mut Context<Self>) {
+        self.close_decided_accept(cx);
         let Some(live) = self.live.as_mut() else {
             return;
         };
