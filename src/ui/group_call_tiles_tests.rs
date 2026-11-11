@@ -230,9 +230,7 @@ fn crowd(app: &Entity<QuillApp>, count: i64, vcx: &mut VisualTestContext) {
                     user_id: 5_000 + person,
                 },
                 audio_source_id: 5_000 + person as i32,
-                video_enabled: false,
                 video_info: None,
-                screen_sharing_enabled: false,
                 screen_sharing_video_info: None,
                 ..listener.clone()
             });

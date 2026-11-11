@@ -46,7 +46,7 @@ impl QuillApp {
     /// answered. main-only: the story composer is the main window's overlay.
     pub(super) fn story_composer_upkeep(&mut self, cx: &mut Context<Self>) {
         match self.stories.composer.stage.clone() {
-            ComposerStage::Editing | ComposerStage::Posted => {}
+            ComposerStage::Editing | ComposerStage::Posted | ComposerStage::Failed(_) => {}
             // Phase 9.3: the composer sent `canPostStory` — once its own
             // answer lands, either post (eligible) or surface the reason.
             ComposerStage::Checking { request, target } => {
@@ -61,8 +61,9 @@ impl QuillApp {
                     // away) and nothing answers it: back to the composer,
                     // where Post asks again.
                     self.stories.composer.stage = ComposerStage::Editing;
-                    self.stories.composer.local_error =
-                        Some(tr(keys::Q_MEDIA_COULD_NOT_CHECK_POSTING_ELIGIBILITY).into());
+                    self.stories
+                        .composer
+                        .set_error(tr(keys::Q_MEDIA_COULD_NOT_CHECK_POSTING_ELIGIBILITY));
                     cx.notify();
                 }
             }
@@ -79,7 +80,7 @@ impl QuillApp {
                     }
                     Some(StoryPostOutcome::Failed { message, .. }) => {
                         self.stories.composer.stage = ComposerStage::Editing;
-                        self.stories.composer.local_error = Some(message);
+                        self.stories.composer.set_error(message);
                         cx.notify();
                     }
                     Some(StoryPostOutcome::Posting { .. }) => {}
@@ -87,8 +88,9 @@ impl QuillApp {
                     // composer is back with a way to post again.
                     None if !self.story_request_pending(request) => {
                         self.stories.composer.stage = ComposerStage::Editing;
-                        self.stories.composer.local_error =
-                            Some(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_POST).into());
+                        self.stories
+                            .composer
+                            .set_error(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_POST));
                         cx.notify();
                     }
                     None => {}
@@ -111,7 +113,10 @@ impl QuillApp {
                             .session()
                             .and_then(|s| s.stories.manage.failure(request).map(str::to_string));
                         self.stories.composer.stage = ComposerStage::Editing;
-                        self.stories.composer.local_error = reason;
+                        match reason {
+                            Some(reason) => self.stories.composer.set_error(reason),
+                            None => self.stories.composer.clear_error(),
+                        };
                         cx.notify();
                     }
                     StoryManageOutcome::Lost => {

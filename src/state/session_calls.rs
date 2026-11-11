@@ -35,11 +35,8 @@ impl Session {
             if call.state.is_terminal() {
                 self.end_active_call(call);
             } else {
-                if matches!(call.state, CallState::Ready) && active.ready_at.is_none() {
+                if call.state.is_ready() && active.ready_at.is_none() {
                     active.ready_at = Some(Instant::now());
-                }
-                if matches!(call.state, CallState::Ready) {
-                    active.ready = call.ready.clone();
                 }
                 active.is_video = call.is_video;
                 // A hang-up in flight keeps showing: the update is where
@@ -106,7 +103,6 @@ impl Session {
             call.is_outgoing,
             call.is_video,
             call.state.clone(),
-            call.ready.clone(),
         ));
         self.calls.summary = None;
         self.calls.error = None;
@@ -220,7 +216,6 @@ impl Session {
                 is_created: true,
                 is_received: false,
             },
-            None,
         ));
         self.calls.summary = None;
         self.calls.error = None;

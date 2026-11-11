@@ -141,15 +141,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(()),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session
-                    .media
-                    .shared_media
-                    .fail_more(
-                        chat_id,
-                        tab,
-                        generation,
-                        "Could not load more media".to_string(),
-                    );
+                self.session.media.shared_media.fail_more(
+                    chat_id,
+                    tab,
+                    generation,
+                    "Could not load more media".to_string(),
+                );
                 Err(err)
             }
         }

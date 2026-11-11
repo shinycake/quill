@@ -183,9 +183,9 @@ impl QuillApp {
             return false;
         };
         waiting.load_failed
-            || self.session().is_some_and(|session| {
-                session.threads.forum_topics.failed(&waiting.chat_id.0)
-            })
+            || self
+                .session()
+                .is_some_and(|session| session.threads.forum_topics.failed(&waiting.chat_id.0))
     }
 
     fn close_drop_topic(&mut self, cx: &mut Context<Self>) {

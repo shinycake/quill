@@ -167,7 +167,10 @@ fn ok_acks_refetch_and_errors_surface_without_touching_the_list() {
         json!({"@type": "error", "code": 400, "message": "PROXY_NOT_FOUND"}),
     );
     let proxy = &rig.driver.session.settings.proxy;
-    assert!(!matches!(proxy.save, crate::proxy::ProxySave::Saving { .. }));
+    assert!(!matches!(
+        proxy.save,
+        crate::proxy::ProxySave::Saving { .. }
+    ));
     assert!(
         proxy
             .error()

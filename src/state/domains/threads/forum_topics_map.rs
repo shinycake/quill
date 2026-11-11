@@ -7,7 +7,10 @@ use crate::state::*;
 /// failed. A forum with neither has no entry; it is asked for.
 #[derive(Debug)]
 enum TopicList {
-    Loaded { topics: Vec<ForumTopic>, unread: i32 },
+    Loaded {
+        topics: Vec<ForumTopic>,
+        unread: i32,
+    },
     Failed,
 }
 
@@ -65,7 +68,10 @@ impl ForumTopicsMap {
 
     pub fn insert(&mut self, chat_id: i64, topics: Vec<ForumTopic>) -> Option<Vec<ForumTopic>> {
         let unread = counted_unread(&topics);
-        match self.lists.insert(chat_id, TopicList::Loaded { topics, unread }) {
+        match self
+            .lists
+            .insert(chat_id, TopicList::Loaded { topics, unread })
+        {
             Some(TopicList::Loaded { topics, .. }) => Some(topics),
             _ => None,
         }

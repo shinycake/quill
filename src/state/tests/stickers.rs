@@ -251,8 +251,7 @@ fn message_emoji_packs_are_distinct_and_skip_unresolved_emoji() {
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,
-        requires_premium: false,
-        premium_animation: None,
+        premium: None,
     };
     session.stickers.emoji.custom_emoji_stickers =
         vec![sticker(1, 70), sticker(2, 70), sticker(3, 71)].into();

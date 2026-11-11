@@ -78,7 +78,7 @@ impl QuillApp {
         let chat_id = self.open_chat_id()?;
         let session = self.session()?;
         let topic = session.open_draft_topic(chat_id);
-        session.draft_for(chat_id, topic)?.rich.as_ref()
+        session.draft_for(chat_id, topic)?.rich()
     }
 
     /// What the composer saves for the open slot, and the reply it keeps:
@@ -215,9 +215,9 @@ impl QuillApp {
             return;
         }
         // A rich draft shows in place of the field, which it empties.
-        if draft.as_ref().is_some_and(|draft| draft.rich.is_some())
-            || draft.as_ref().map(|draft| draft.text.as_str()) != shown
-            || draft.and_then(|draft| draft.reply_to_message_id) != shown.and(reply)
+        if draft.as_ref().is_some_and(|draft| draft.rich().is_some())
+            || draft.as_ref().map(|draft| draft.text()) != shown
+            || draft.and_then(|draft| draft.reply_to_message_id()) != shown.and(reply)
         {
             self.restore_open_draft(window, cx);
         }
@@ -325,7 +325,7 @@ impl QuillApp {
                 return Some((None, None));
             }
             let draft = session.draft_for(chat_id, topic).cloned();
-            let preview = draft.as_ref().and_then(|draft| draft.reply_to_message_id);
+            let preview = draft.as_ref().and_then(|draft| draft.reply_to_message_id());
             Some((draft, preview))
         });
         let Some((draft, preview)) = restored else {
@@ -336,23 +336,20 @@ impl QuillApp {
             .map(|session| (chat_id, session.open_draft_topic(chat_id), draft.clone()));
         let text = draft
             .as_ref()
-            .map(|draft| draft.text.clone())
+            .map(|draft| draft.text().to_string())
             .unwrap_or_default();
-        let item = draft
-            .as_ref()
-            .map(|draft| draft.item.clone())
-            .unwrap_or_default();
+        let item = draft.as_ref().map(|draft| draft.item()).unwrap_or_default();
         let restored_reply = preview.map(|id| {
             // Slice G1: a draft saved with a partial quote restores the
             // quote picker state, not just the replied-to message.
-            match draft.as_ref().and_then(|draft| draft.quote.clone()) {
+            match draft.as_ref().and_then(|draft| draft.quote().cloned()) {
                 Some(quote) => ComposerReplyTo::with_quote(chat_id, id, quote),
                 None => ComposerReplyTo::new(chat_id, id),
             }
             .to_item(item)
         });
         self.chat_ui.set_reply(restored_reply);
-        if draft.as_ref().is_some_and(|draft| draft.rich.is_some()) {
+        if draft.as_ref().is_some_and(|draft| draft.rich().is_some()) {
             self.chat_ui.rich_editor_open = false;
         }
         self.set_composer_markup(&text, window, cx);
@@ -380,15 +377,5 @@ impl QuillApp {
 /// `send_draft` stores the same after `setChatDraftMessage`).
 pub(super) fn demo_draft(content: DraftContent, reply_to: Option<SendReply>) -> Option<ChatDraft> {
     let content = content.to_store(reply_to.is_some())?;
-    Some(ChatDraft {
-        text: content.text().to_string(),
-        rich: content.rich().cloned(),
-        reply_to_message_id: reply_to.as_ref().map(|reply| reply.message_id),
-        item: reply_to
-            .as_ref()
-            .map(|reply| reply.item.clone())
-            .unwrap_or_default(),
-        quote: reply_to.and_then(|reply| reply.quote),
-        suggested_post: None,
-    })
+    Some(ChatDraft::of(&content, reply_to.as_ref(), None))
 }

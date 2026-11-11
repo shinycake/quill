@@ -99,10 +99,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         build: impl FnOnce(RequestId) -> String,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.proxy_path_active()
-            || matches!(
-                self.session.settings.proxy.save,
-                ProxySave::Saving { .. }
-            )
+            || matches!(self.session.settings.proxy.save, ProxySave::Saving { .. })
         {
             return Err(ConnectSendError::InvalidRequest);
         }

@@ -236,9 +236,11 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "sponsored-report",
-        |app| app
-            .session()
-            .is_some_and(|session| session.messages.sponsored_report.picking().is_some()),
+        |app| app.session().is_some_and(|session| session
+            .messages
+            .sponsored_report
+            .picking()
+            .is_some()),
         |app, _, cx| app.dismiss_sponsored_report_ui(cx)
     ),
     layer!("send-as", |app| app.chat_ui.send_as_open, |app, _, cx| {

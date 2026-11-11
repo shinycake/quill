@@ -132,11 +132,7 @@ impl QuillApp {
                 for tab_option in &visible_tabs {
                     let is_active = *tab_option == active_tab;
                     let name = tab_option.label_in(is_channel);
-                    let label = if is_active
-                        && !searching
-                        && total_count > 0
-                        && status.is_ready()
-                    {
+                    let label = if is_active && !searching && total_count > 0 && status.is_ready() {
                         format!("{name} · {total_count}")
                     } else {
                         name.to_string()

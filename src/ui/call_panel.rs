@@ -120,7 +120,7 @@ pub(super) fn call_status(
             true,
         ),
         CallState::ExchangingKeys => (tr(keys::CALL_STATUS_EXCHANGING).into(), true),
-        CallState::Ready => match transport {
+        CallState::Ready(_) => match transport {
             Some(TransportState::Connected) => (duration_text(connected_secs), false),
             Some(TransportState::Failed) => (tr(keys::CALL_STATUS_FAILED).into(), false),
             _ => (tr(keys::CALL_STATUS_CONNECTING).into(), true),
@@ -189,7 +189,7 @@ impl QuillApp {
             call.transport.state(),
             call.connected_secs(),
         );
-        let ready = matches!(call.state, CallState::Ready);
+        let ready = call.state.is_ready();
         Some(CallSnap {
             user_id,
             is_video,
@@ -206,11 +206,7 @@ impl QuillApp {
             camera_on: call.camera_on,
             screen_sharing: call.screen_sharing,
             can_share_screen: ready && quill::calls::capture::screen::can_share(),
-            emojis: call
-                .ready
-                .as_ref()
-                .map(|r| r.emojis.clone())
-                .unwrap_or_default(),
+            emojis: call.ready().map(|r| r.emojis.clone()).unwrap_or_default(),
             remote_muted: ready && call.remote_audio_muted,
             remote_battery_low: ready && call.remote_battery_low,
             signal_bars: notices::shown_signal_bars(&call),
@@ -220,8 +216,7 @@ impl QuillApp {
             // Not under the lock (`calls::lock_layers`).
             can_add_people: !self.refused_while_locked()
                 && call
-                    .ready
-                    .as_ref()
+                    .ready()
                     .is_some_and(|ready| ready.is_group_call_supported),
             joined_line: None,
         })

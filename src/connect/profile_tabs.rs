@@ -2,9 +2,7 @@
 //! Playlist), their counts for the tab bar, and the Photos / Videos split.
 use super::*;
 use crate::ids::ChatId;
-use crate::state::{
-    MediaPurpose, RequestPurpose, SharedMediaTab, UsersPurpose,
-};
+use crate::state::{MediaPurpose, RequestPurpose, SharedMediaTab, UsersPurpose};
 use crate::telegram::envelope::{ChatKind, MessageSender};
 use crate::telegram::requests::{
     EXTRA_COUNT_FILTERS, get_user_profile_audios, is_profile_audio, remove_profile_audio,

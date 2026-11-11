@@ -530,14 +530,7 @@ fn the_composer_send_goes_to_the_agent_path_and_read_only_refuses(cx: &mut TestA
                 session.store_composer_draft(
                     ChatId(11),
                     quill::composer::DraftTopic::Chat,
-                    Some(quill::telegram::ChatDraft {
-                        text: "hi there".into(),
-                        rich: None,
-                        reply_to_message_id: None,
-                        quote: None,
-                        item: Default::default(),
-                        suggested_post: None,
-                    }),
+                    Some(quill::telegram::ChatDraft::text_only("hi there")),
                 );
             }
         })

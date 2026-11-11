@@ -156,7 +156,9 @@ fn a_story_refused_over_a_limit_opens_its_box_over_the_composer(cx: &mut TestApp
             kind.is_some(),
             "{answer:?}"
         );
-        let reason = app.read_with(vcx, |app, _| app.stories.composer.local_error.clone());
+        let reason = app.read_with(vcx, |app, _| {
+            app.stories.composer.error().map(str::to_string)
+        });
         assert_eq!(reason, Some(answer.user_message()));
     }
 }

@@ -16,13 +16,10 @@ fn live(chat: i64, id: i64) -> ParsedMessage {
         date: 0,
         is_outgoing: false,
         is_pinned: false,
-        topic_id: None,
-        thread_id: None,
         ephemeral: None,
         media_album_id: 0,
         author_signature: None,
         scheduling_state: None,
-        can_retry: false,
         send_state: Default::default(),
         content: MessageContent::Text("m".into()),
         files: Vec::new(),
@@ -955,13 +952,23 @@ fn a_translation_job_whose_request_is_gone_fails_and_frees_its_place() {
     // The first request left without an answer (a restarted client).
     session.requests.take(lost_request);
     session.fail_orphaned_translations();
-    assert!(!session.messages.translate.pending_jobs().any(|job| job == lost));
+    assert!(
+        !session
+            .messages
+            .translate
+            .pending_jobs()
+            .any(|job| job == lost)
+    );
     assert!(matches!(
         session.message_translation(ChatId(1), MessageId(5), "en"),
         Some(Translation::Failed(_))
     ));
     assert!(
-        session.messages.translate.pending_jobs().any(|job| job == live),
+        session
+            .messages
+            .translate
+            .pending_jobs()
+            .any(|job| job == live),
         "a job still asking keeps its place"
     );
 }

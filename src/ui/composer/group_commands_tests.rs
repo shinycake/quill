@@ -166,7 +166,7 @@ fn enter_sends_the_command_alone_and_keeps_the_rest_of_the_field(cx: &mut TestAp
         let topic = app.open_draft_topic(chat);
         app.session()?
             .draft_for(chat, topic)
-            .map(|d| d.text.clone())
+            .map(|d| d.text().to_string())
     });
     assert_eq!(draft.as_deref(), Some(" and more"));
     assert!(menu_commands(&app, vcx).is_empty());

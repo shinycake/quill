@@ -54,7 +54,7 @@ impl QuillApp {
         };
         let chosen = self
             .current_story()
-            .and_then(|story| story.chosen_reaction_emoji);
+            .and_then(|story| story.chosen_reaction_emoji().map(str::to_string));
         let emoji = if chosen.as_deref() == Some("❤") {
             None
         } else {
@@ -209,7 +209,7 @@ impl QuillApp {
             .collect();
         if let Some(StoryChosenExtraReaction::CustomEmoji(id)) = self
             .current_story()
-            .and_then(|story| story.chosen_reaction_extra)
+            .and_then(|story| story.chosen_reaction_extra())
         {
             ids.push(id);
         }
@@ -699,7 +699,7 @@ impl QuillApp {
             Some(quill::telegram::envelope::ChatKind::Private { user_id })
                 if session.my_user_id != Some(user_id.0)
         );
-        (is_user && !item.is_live && session.premium_possible()).then(|| {
+        (is_user && !item.is_live() && session.premium_possible()).then(|| {
             quill::story_stealth::StealthEntry::of(
                 session.my_is_premium(),
                 session.stories.stealth,

@@ -2,7 +2,6 @@
 //! that fails puts the call back with its sound, one TDLib took (its
 //! `ok` or the terminal update) hangs the engine up once.
 use super::*;
-use crate::telegram::envelope::CallState;
 
 fn answer(request: crate::ids::RequestId, json: &str) -> String {
     json.replace("EXTRA", &request.as_extra())
@@ -33,7 +32,7 @@ fn a_hang_up_that_fails_keeps_the_engine_call() {
         .active_call
         .as_ref()
         .expect("the call goes on");
-    assert!(matches!(call.state, CallState::Ready));
+    assert!(call.state.is_ready());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -112,10 +112,7 @@ pub(in crate::ui) fn seed_video_call(
         user_id: PEER,
         is_outgoing: true,
         is_video: std::env::var_os("QUILL_DEMO_VOICE").is_none(),
-        state: CallState::Ready,
-        started_at: ready_at,
-        ready_at: Some(ready_at),
-        ready: Some(ReadyParams {
+        state: CallState::Ready(ReadyParams {
             encryption_key: Vec::new(),
             library_versions: Vec::new(),
             custom_parameters: String::new(),
@@ -124,6 +121,8 @@ pub(in crate::ui) fn seed_video_call(
             emojis: ["🐙", "🌵", "🎈", "🍋"].map(String::from).to_vec(),
             is_group_call_supported: true,
         }),
+        started_at: ready_at,
+        ready_at: Some(ready_at),
         transport: quill::state::CallTransport::Connected(Default::default()),
         signaling_queue: Vec::new(),
         signaling_dropped: 0,

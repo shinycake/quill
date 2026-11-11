@@ -185,19 +185,21 @@ impl Session {
             return;
         }
         if let Some(chat) = self.chats.get_mut(&chat_id.0) {
-            chat.set_member_status(member.status, member.admin_can_post_messages);
-            chat.set_admin_can_invite_users(member.admin_can_invite_users);
-            chat.set_admin_can_promote_members(member.admin_rights.map(|r| r.can_promote_members));
-            chat.set_admin_can_restrict_members(
-                member.admin_rights.map(|r| r.can_restrict_members),
+            chat.set_member_status(member.status(), member.admin_can_post_messages());
+            chat.set_admin_can_invite_users(member.admin_can_invite_users());
+            chat.set_admin_can_promote_members(
+                member.admin_rights().map(|r| r.can_promote_members),
             );
-            chat.set_admin_can_pin_messages(member.admin_rights.map(|r| r.can_pin_messages));
-            chat.set_my_restriction(member.restriction);
+            chat.set_admin_can_restrict_members(
+                member.admin_rights().map(|r| r.can_restrict_members),
+            );
+            chat.set_admin_can_pin_messages(member.admin_rights().map(|r| r.can_pin_messages));
+            chat.set_my_restriction(member.restriction());
             // Slice G2: sign-messages + welcome-message rights for the
             // channel path.
-            chat.set_admin_can_change_info(member.admin_rights.map(|r| r.can_change_info));
+            chat.set_admin_can_change_info(member.admin_rights().map(|r| r.can_change_info));
             chat.set_admin_can_send_welcome_messages(
-                member.admin_rights.map(|r| r.can_send_welcome_messages),
+                member.admin_rights().map(|r| r.can_send_welcome_messages),
             );
         }
         self.drop_similar_strip_if_not_member(chat_id);

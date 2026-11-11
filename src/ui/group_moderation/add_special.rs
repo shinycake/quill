@@ -100,7 +100,7 @@ impl QuillApp {
         let Some(role) = self.admin.add_special.as_ref().map(|dialog| dialog.role) else {
             return;
         };
-        let step = pick_step(role, member.status, member.can_be_edited);
+        let step = pick_step(role, member.status(), member.can_be_edited());
         self.run_special_step(user_id, step, window, cx);
     }
 
@@ -267,11 +267,11 @@ impl QuillApp {
             return div().into_any_element();
         };
         let muted = cx.theme().muted_foreground;
-        let status = match member.restriction {
+        let status = match member.restriction() {
             Some(restriction) => {
                 super::super::restricted_exceptions::restricted_row_status(restriction)
             }
-            None => Self::member_status_label(member.status).to_string(),
+            None => Self::member_status_label(member.status()).to_string(),
         };
         action_row(
             SharedString::from(format!("add-special-{user_id}")),

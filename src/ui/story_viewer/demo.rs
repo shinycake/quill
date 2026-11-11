@@ -174,8 +174,8 @@ fn demo_viewers(loading: bool) -> quill::state::StoryViewersState {
     let row = |user_id: i64, minutes: i32, emoji: Option<&str>| StoryInteractionView {
         actor: MessageSender::User { user_id },
         interaction_date: now - minutes * 60,
-        reaction_emoji: emoji.map(str::to_string),
-        reaction_extra: None,
+        reaction: emoji
+            .map(|emoji| quill::telegram::envelope::StoryReaction::Emoji(emoji.to_string())),
         kind: StoryInteractionKind::View,
     };
     quill::state::StoryViewersState {

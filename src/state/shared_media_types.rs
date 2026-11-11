@@ -179,7 +179,9 @@ pub enum SharedMediaTabStatus {
     Idle,
     Loading,
     /// The first page is in; `more` is where the next page stands.
-    Ready { more: NextPage },
+    Ready {
+        more: NextPage,
+    },
     Empty,
     /// The first page failed, with the line the tab shows.
     Failed(String),

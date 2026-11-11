@@ -73,11 +73,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<RequestId, ConnectSendError> {
         let upgrade = match &self.session.calls.active_call {
             Some(call)
-                if matches!(call.state, CallState::Ready)
-                    && call
-                        .ready
-                        .as_ref()
-                        .is_some_and(|ready| ready.is_group_call_supported) =>
+                if call
+                    .ready()
+                    .is_some_and(|ready| ready.is_group_call_supported) =>
             {
                 ConferenceUpgrade {
                     call_id: call.id,

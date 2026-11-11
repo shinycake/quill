@@ -144,22 +144,20 @@ pub struct ParsedFile {
     pub id: FileId,
     pub size: i64,
     pub expected_size: i64,
-    /// `remoteFile.is_uploading_active`: the file is being sent.
-    pub uploading: bool,
     pub local: LocalFileState,
 }
 
 impl ParsedFile {
     pub fn usable_path(&self) -> Option<&str> {
-        if self.local.is_downloading_completed && !self.local.path.is_empty() {
-            Some(self.local.path.as_str())
+        if self.local.is_downloading_completed() && !self.local.path().is_empty() {
+            Some(self.local.path())
         } else {
             None
         }
     }
 
     pub fn needs_download(&self) -> bool {
-        self.usable_path().is_none() && self.local.can_be_downloaded
+        self.usable_path().is_none() && self.local.can_be_downloaded()
     }
 
     /// Download progress fraction from `local.downloaded_size` over the
@@ -170,7 +168,7 @@ impl ParsedFile {
         if total <= 0 {
             return None;
         }
-        Some((self.local.downloaded_size as f32 / total as f32).clamp(0.0, 1.0))
+        Some((self.local.downloaded_size() as f32 / total as f32).clamp(0.0, 1.0))
     }
 
     pub fn display_size(&self) -> i64 {
@@ -184,28 +182,148 @@ impl ParsedFile {
     pub fn download_left(&self) -> u64 {
         let left = self
             .display_size()
-            .saturating_sub(self.local.downloaded_size);
+            .saturating_sub(self.local.downloaded_size());
         u64::try_from(left).unwrap_or(0)
     }
 }
 
+/// Where a file's local copy stands (`file.local`, `remoteFile`). One value
+/// instead of a path with two download flags beside it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LocalFileState {
-    pub path: String,
-    pub can_be_downloaded: bool,
-    pub is_downloading_active: bool,
-    pub is_downloading_completed: bool,
-    /// Total downloaded bytes so far (schema: "can be used only for
-    /// calculating download progress"). `downloaded_prefix_size` is the
-    /// contiguous readable prefix from `download_offset`; progress uses
-    /// this total instead.
-    pub downloaded_size: i64,
+pub enum LocalFileState {
+    /// Nothing on disk; `can_download` says TDLib could fetch it.
+    Absent { can_download: bool },
+    /// Some of it is on disk and no download runs.
+    Partial {
+        path: String,
+        can_download: bool,
+        downloaded_size: i64,
+    },
+    /// A download runs.
+    Downloading {
+        path: String,
+        can_download: bool,
+        downloaded_size: i64,
+    },
+    /// Fully on disk and readable.
+    Complete { path: String, downloaded_size: i64 },
+    /// Fully on disk and being sent (`remoteFile.is_uploading_active`).
+    Uploading { path: String, downloaded_size: i64 },
+}
+
+impl Default for LocalFileState {
+    fn default() -> Self {
+        Self::Absent {
+            can_download: false,
+        }
+    }
 }
 
 impl LocalFileState {
+    /// The state `file.local` describes. `downloaded_size` is the total
+    /// downloaded bytes (schema: "can be used only for calculating download
+    /// progress"); `downloaded_prefix_size` is the contiguous readable
+    /// prefix, which progress does not use.
+    pub fn from_parts(
+        path: impl Into<String>,
+        can_be_downloaded: bool,
+        is_downloading_active: bool,
+        is_downloading_completed: bool,
+        downloaded_size: i64,
+    ) -> Self {
+        let path = path.into();
+        if is_downloading_completed {
+            Self::Complete {
+                path,
+                downloaded_size,
+            }
+        } else if is_downloading_active {
+            Self::Downloading {
+                path,
+                can_download: can_be_downloaded,
+                downloaded_size,
+            }
+        } else if path.is_empty() && downloaded_size == 0 {
+            Self::Absent {
+                can_download: can_be_downloaded,
+            }
+        } else {
+            Self::Partial {
+                path,
+                can_download: can_be_downloaded,
+                downloaded_size,
+            }
+        }
+    }
+
+    /// The file is on its way out: a complete local file being sent.
+    pub fn into_uploading(self) -> Self {
+        match self {
+            Self::Complete {
+                path,
+                downloaded_size,
+            } => Self::Uploading {
+                path,
+                downloaded_size,
+            },
+            other => other,
+        }
+    }
+
+    pub fn path(&self) -> &str {
+        match self {
+            Self::Absent { .. } => "",
+            Self::Partial { path, .. }
+            | Self::Downloading { path, .. }
+            | Self::Complete { path, .. }
+            | Self::Uploading { path, .. } => path,
+        }
+    }
+
+    pub fn can_be_downloaded(&self) -> bool {
+        match self {
+            Self::Absent { can_download }
+            | Self::Partial { can_download, .. }
+            | Self::Downloading { can_download, .. } => *can_download,
+            Self::Complete { .. } | Self::Uploading { .. } => false,
+        }
+    }
+
+    pub fn is_downloading_active(&self) -> bool {
+        matches!(self, Self::Downloading { .. })
+    }
+
+    /// Fully on disk (a file being sent is too).
+    pub fn is_downloading_completed(&self) -> bool {
+        matches!(self, Self::Complete { .. } | Self::Uploading { .. })
+    }
+
+    pub fn is_uploading(&self) -> bool {
+        matches!(self, Self::Uploading { .. })
+    }
+
+    /// Total downloaded bytes so far.
+    pub fn downloaded_size(&self) -> i64 {
+        match self {
+            Self::Absent { .. } => 0,
+            Self::Partial {
+                downloaded_size, ..
+            }
+            | Self::Downloading {
+                downloaded_size, ..
+            }
+            | Self::Complete {
+                downloaded_size, ..
+            }
+            | Self::Uploading {
+                downloaded_size, ..
+            } => *downloaded_size,
+        }
+    }
+
     /// Download is neither in flight nor finished (`file` / `updateFile` idle).
     pub fn is_idle_incomplete(&self) -> bool {
-        !self.is_downloading_active && !self.is_downloading_completed
+        matches!(self, Self::Absent { .. } | Self::Partial { .. })
     }
 }
 
@@ -386,30 +504,36 @@ pub(crate) fn parse_file(value: Option<&Value>) -> Result<ParsedFile, ParseError
         id: FileId(id),
         size: int53_or_zero(value.get("size")),
         expected_size: int53_or_zero(value.get("expected_size")),
-        uploading: value
-            .get("remote")
-            .and_then(|remote| remote.get("is_uploading_active"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-        local: LocalFileState {
-            path: local
-                .and_then(|l| l.get("path"))
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string(),
-            can_be_downloaded: local
-                .and_then(|l| l.get("can_be_downloaded"))
+        local: {
+            let state = LocalFileState::from_parts(
+                local
+                    .and_then(|l| l.get("path"))
+                    .and_then(Value::as_str)
+                    .unwrap_or(""),
+                local
+                    .and_then(|l| l.get("can_be_downloaded"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                local
+                    .and_then(|l| l.get("is_downloading_active"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                local
+                    .and_then(|l| l.get("is_downloading_completed"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                int53_or_zero(local.and_then(|l| l.get("downloaded_size"))),
+            );
+            let uploading = value
+                .get("remote")
+                .and_then(|remote| remote.get("is_uploading_active"))
                 .and_then(Value::as_bool)
-                .unwrap_or(false),
-            is_downloading_active: local
-                .and_then(|l| l.get("is_downloading_active"))
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-            is_downloading_completed: local
-                .and_then(|l| l.get("is_downloading_completed"))
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-            downloaded_size: int53_or_zero(local.and_then(|l| l.get("downloaded_size"))),
+                .unwrap_or(false);
+            if uploading {
+                state.into_uploading()
+            } else {
+                state
+            }
         },
     })
 }

@@ -62,8 +62,7 @@ fn sticker(file: i32) -> crate::telegram::envelope::StickerItem {
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,
-        requires_premium: false,
-        premium_animation: None,
+        premium: None,
     }
 }
 
@@ -336,7 +335,16 @@ fn greeting_and_attached_stickers_load() {
         sent["@extra"].as_str().unwrap()
     );
     feed(&mut driver, &seq, &sink, &body);
-    assert_eq!(driver.session.stickers.stickers.greeting.data().map(Vec::len), Some(1));
+    assert_eq!(
+        driver
+            .session
+            .stickers
+            .stickers
+            .greeting
+            .data()
+            .map(Vec::len),
+        Some(1)
+    );
 
     driver.fetch_attached_sticker_sets(FileId(42)).unwrap();
     let sent = sent_request(&recorder, "getAttachedStickerSets");

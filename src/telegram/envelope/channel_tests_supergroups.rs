@@ -384,13 +384,10 @@ fn b7_basic_group_keeps_status_and_activity() {
     .unwrap();
     match env.payload {
         EnvelopePayload::Groups(GroupsPayload::UpdateBasicGroup {
-            status,
-            can_change_info,
-            is_active,
-            ..
+            status, is_active, ..
         }) => {
-            assert_eq!(status, ChannelMemberStatus::Administrator);
-            assert_eq!(can_change_info, Some(true));
+            assert_eq!(status.kind(), ChannelMemberStatus::Administrator);
+            assert_eq!(status.rights().map(|r| r.can_change_info), Some(true));
             assert!(!is_active);
         }
         other => panic!("{other:?}"),

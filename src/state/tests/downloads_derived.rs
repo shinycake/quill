@@ -44,14 +44,7 @@ fn a_stale_request_never_shows_over_a_finished_file() {
         id: FileId(61),
         size: 100,
         expected_size: 100,
-        uploading: false,
-        local: LocalFileState {
-            path: "/tmp/derived.bin".into(),
-            can_be_downloaded: true,
-            is_downloading_active: false,
-            is_downloading_completed: true,
-            downloaded_size: 100,
-        },
+        local: LocalFileState::from_parts("/tmp/derived.bin", true, false, true, 100),
     });
     assert_eq!(status(&session, 61), DownloadStatus::Done);
 }

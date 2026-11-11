@@ -21,9 +21,9 @@ impl Session {
 
     pub fn sticker_requires_premium(&self, file_id: FileId) -> bool {
         self.panel_sticker(file_id)
-            .is_some_and(|sticker| sticker.requires_premium)
+            .is_some_and(|sticker| sticker.requires_premium())
             || self.histories.values().flat_map(|history| history.messages.values()).chain(self.threads.topic_histories.values().flat_map(|history| history.messages.values())).any(|message| {
-                matches!(&message.content, MessageContent::Sticker(sticker) if sticker.file_id == file_id && sticker.requires_premium)
+                matches!(&message.content, MessageContent::Sticker(sticker) if sticker.file_id == file_id && sticker.requires_premium())
             })
     }
 

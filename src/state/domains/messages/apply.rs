@@ -193,9 +193,9 @@ impl Session {
                 old_message_id,
             } => {
                 let chat_id = message.chat_id;
-                let topic_id = message.topic_id;
-                let thread_id = message.thread_id;
-                let direct_topic = message.extras.direct_messages_topic_id;
+                let topic_id = message.topic_id();
+                let thread_id = message.thread_id();
+                let direct_topic = message.extras.direct_messages_topic_id();
                 self.note_last_message_send_state(
                     chat_id,
                     old_message_id,
@@ -248,13 +248,14 @@ impl Session {
                     self.messages.flood_notice.push(notice);
                 }
                 let chat_id = message.chat_id;
-                let topic_id = message.topic_id;
-                self.note_last_message_send_state(
-                    chat_id,
-                    old_message_id,
-                    message.id,
-                    crate::telegram::envelope::MessageSendState::Failed,
-                );
+                let topic_id = message.topic_id();
+                let failed = crate::telegram::envelope::MessageSendState::Failed {
+                    can_retry: matches!(
+                        message.send_state,
+                        crate::telegram::envelope::MessageSendState::Failed { can_retry: true }
+                    ),
+                };
+                self.note_last_message_send_state(chat_id, old_message_id, message.id, failed);
                 self.remember_files(&message.files);
                 self.stickers
                     .effects
@@ -267,7 +268,10 @@ impl Session {
                 // separately on `can_retry` (`resendMessages` via
                 // `driver.resend_failed_message`) — not every failed send
                 // may be retried.
-                let can_retry = message.can_retry;
+                let can_retry = matches!(
+                    failed,
+                    crate::telegram::envelope::MessageSendState::Failed { can_retry: true }
+                );
                 let mut row = history_message(message, true);
                 row.send = SendState::Failed { can_retry };
                 self.index_poll(&row);
@@ -338,10 +342,12 @@ impl Session {
                     // but sends no new `self_destruct_in` with the update.
                     if let Some(sd) = message.self_destruct.as_mut()
                         && let crate::telegram::envelope::SelfDestructKind::Timer { secs } = sd.kind
-                        && sd.expires_in_ms <= 0
+                        && !sd.is_counting()
                     {
-                        sd.expires_in_ms = i64::from(secs) * 1000;
-                        sd.fetched_at_ms = now_ms;
+                        sd.clock = crate::telegram::envelope::SelfDestructClock::from_ms(
+                            i64::from(secs) * 1000,
+                            now_ms,
+                        );
                     }
                 });
             }

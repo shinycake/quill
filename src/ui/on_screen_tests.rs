@@ -198,7 +198,7 @@ fn the_chat_leave_saves_the_draft_through_the_old_client(cx: &mut TestAppContext
         assert_eq!(app.open_chat_id(), None);
         let session = app.session().expect("session");
         let draft = session.draft_for(CHAT, DraftTopic::Chat).expect("saved");
-        assert_eq!(draft.text, "meet at 5");
+        assert_eq!(draft.text(), "meet at 5");
         assert!(!session.draft_is_dirty(CHAT, DraftTopic::Chat));
     });
 }

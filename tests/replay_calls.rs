@@ -79,7 +79,7 @@ fn replay_call_signaling_lifecycle() {
         ],
     );
     let call = session.calls.active_call.as_ref().expect("call 77 ready");
-    assert!(matches!(call.state, CallState::Ready));
+    assert!(call.state.is_ready());
     assert!(call.ready_at.is_some());
     // Only the tracked call's signaling data is kept (call 78's is
     // dropped — no tracked call with that id).
@@ -199,8 +199,6 @@ fn replay_call_signaling_lifecycle() {
 /// with `is_video: true`.
 #[test]
 fn replay_video_call_signaling() {
-    use quill::telegram::envelope::CallState;
-
     let sink = Arc::new(MemorySink::new());
     let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
     let mut session = Session::new(AccountKey::primary(), dyn_sink);
@@ -242,7 +240,7 @@ fn replay_video_call_signaling() {
         ],
     );
     let call = session.calls.active_call.as_ref().expect("call 90 ready");
-    assert!(matches!(call.state, CallState::Ready));
+    assert!(call.state.is_ready());
     assert!(call.is_video);
     assert!(call.ready_at.is_some());
 

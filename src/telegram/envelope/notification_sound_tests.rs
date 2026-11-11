@@ -197,7 +197,7 @@ fn call_updates_parsed_in_every_state() {
         EnvelopePayload::Calls(CallsPayload::UpdateCall { call }) => {
             assert!(call.is_video);
             assert!(!call.is_outgoing);
-            assert!(matches!(call.state, CallState::Ready));
+            assert!(call.state.is_ready());
         }
         other => panic!("unexpected {other:?}"),
     }
@@ -276,8 +276,8 @@ fn call_ready_parses_transport_parameters_and_server_kinds() {
     else {
         panic!("expected updateCall");
     };
-    assert_eq!(call.state, CallState::Ready);
-    let ready = call.ready.expect("ready params");
+    assert!(call.state.is_ready());
+    let ready = call.ready().expect("ready params");
     assert_eq!(ready.encryption_key, vec![1, 2, 3, 4]);
     assert!(ready.allow_p2p);
     assert_eq!(ready.servers.len(), 2);

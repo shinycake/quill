@@ -229,12 +229,18 @@ fn set_busy(app: &mut QuillApp, busy: bool) {
     let Some(session) = app.demo_session.as_mut() else {
         return;
     };
-    let key = (CHAT, COUNTER);
-    let set = &mut session.payments.suggested_posts.busy;
+    use quill::state::{PaymentsPurpose, RequestPurpose};
+    use quill::suggested_posts::SuggestedPostPurpose;
+    let purpose = RequestPurpose::Payments(PaymentsPurpose::SuggestedPost(
+        SuggestedPostPurpose::Approve {
+            chat_id: CHAT,
+            message_id: COUNTER,
+        },
+    ));
     if busy {
-        set.insert(key);
+        session.request(purpose, Some(ChatId(CHAT)));
     } else {
-        set.remove(&key);
+        drop(session.requests.take_purpose(purpose));
     }
 }
 

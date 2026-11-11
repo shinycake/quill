@@ -20,7 +20,6 @@ use gpui_kit::component::{Icon, Sizable, h_flex};
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::state::{AddPeopleEmpty, AddPeopleRow, AddPeopleView};
-use quill::telegram::envelope::CallState;
 
 /// A row's userpic (tdesktop `groupCallInviteMembersList` 42 px items
 /// carry a 36 px photo).
@@ -75,7 +74,7 @@ impl QuillApp {
         let established = self
             .session()
             .and_then(|session| session.calls.active_call.as_ref())
-            .filter(|call| matches!(call.state, CallState::Ready))
+            .filter(|call| call.state.is_ready())
             .map(|call| call.id);
         let Some(call_id) = established else {
             self.set_note(StatusNote::info(tr(keys::CALL_ERROR_ADD_NOT_STARTED)));

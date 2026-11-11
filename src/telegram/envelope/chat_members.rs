@@ -32,41 +32,79 @@ impl ChannelMemberStatus {
     }
 }
 
-/// Typed `chatMember` (TDLib 1.8.67). Only `member_id` and `status` are kept;
-/// `tag` / `inviter_user_id` / `joined_chat_date` stay out of this slice.
-/// `admin_can_post_messages` carries `rights.can_post_messages` from
-/// `chatMemberStatusAdministrator` (schema 1.8.67:
-/// `chatAdministratorRights ... can_post_messages:Bool ...`), driving the
-/// channel-admin composer gate; `None` for every other status or when the
-/// rights block is absent. `admin_can_invite_users` carries
-/// `rights.can_invite_users` (schema 1.8.67, line 1092), driving the
-/// Phase D3a invite-link / join-request management gate; `None` for every
-/// other status or when the rights block is absent.
+/// A member's standing in a chat, with what only that standing has
+/// (`chatMemberStatus*`, TDLib 1.8.67).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MemberStatus {
+    Creator {
+        /// The owner posts as the group.
+        is_anonymous: bool,
+    },
+    Administrator {
+        /// Phase D3b: the full `rights` block (`chatAdministratorRights`,
+        /// schema line 1092); `None` when the block is absent. Drives the
+        /// promote/edit-rights flows, the channel-admin composer gate
+        /// (`can_post_messages`), the invite-link / join-request gate
+        /// (`can_invite_users`, Phase D3a) and the `can_promote_members` gate.
+        rights: Option<ChatAdminRights>,
+        /// Slice G1: `can_be_edited` (schema 1.8.67, line 2500).
+        /// Telegram X refuses ban/restrict/promote against the creator and
+        /// non-editable admins (`ProfileController` `YouCantBanX`); the
+        /// member dialog mirrors that gate.
+        can_be_edited: bool,
+    },
+    Member,
+    /// The member's own rights and when the restriction ends.
+    Restricted(MemberRestriction),
+    Left,
+    Banned,
+    Unknown,
+}
+
+impl MemberStatus {
+    /// The administrator's parsed rights block (`None` for every other
+    /// standing, or an absent block).
+    pub fn rights(&self) -> Option<ChatAdminRights> {
+        match self {
+            Self::Administrator { rights, .. } => *rights,
+            _ => None,
+        }
+    }
+
+    /// The standing posts as the group (`rights.is_anonymous` of an
+    /// administrator, `is_anonymous` of the owner).
+    pub fn is_anonymous(&self) -> bool {
+        match self {
+            Self::Creator { is_anonymous } => *is_anonymous,
+            Self::Administrator { rights, .. } => rights.is_some_and(|rights| rights.is_anonymous),
+            _ => false,
+        }
+    }
+
+    /// The standing without its data.
+    pub fn kind(&self) -> ChannelMemberStatus {
+        match self {
+            Self::Creator { .. } => ChannelMemberStatus::Creator,
+            Self::Administrator { .. } => ChannelMemberStatus::Administrator,
+            Self::Member => ChannelMemberStatus::Member,
+            Self::Restricted(_) => ChannelMemberStatus::Restricted,
+            Self::Left => ChannelMemberStatus::Left,
+            Self::Banned => ChannelMemberStatus::Banned,
+            Self::Unknown => ChannelMemberStatus::Unknown,
+        }
+    }
+}
+
+/// Typed `chatMember` (TDLib 1.8.67). Only `member_id` and `status` are kept
+/// besides the tag and who invited them; the administrator's rights and
+/// the restriction ride the status.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedChatMember {
     pub member_id: MessageSender,
-    pub status: ChannelMemberStatus,
-    pub admin_can_post_messages: Option<bool>,
-    pub admin_can_invite_users: Option<bool>,
-    /// Phase D3b: the full `rights` block from
-    /// `chatMemberStatusAdministrator` (TDLib 1.8.67,
-    /// `chatAdministratorRights`, schema line 1092). `Some` only for an
-    /// administrator with a parsed rights block; `None` for every other
-    /// status or an absent rights block. Drives the promote/edit-rights
-    /// flows and the `can_promote_members` gate.
-    pub admin_rights: Option<ChatAdminRights>,
+    pub standing: MemberStatus,
     /// Slice G1: `chatMember.tag` (schema 1.8.67, line 2526) — the
     /// admin custom title (set via `setChatMemberTag`, line 13598).
     pub tag: String,
-    /// Slice G1: `can_be_edited` from `chatMemberStatusAdministrator`
-    /// (schema 1.8.67, line 2500). False for every other status.
-    /// Telegram X refuses ban/restrict/promote against the creator and
-    /// non-editable admins (`ProfileController` `YouCantBanX`); the
-    /// member dialog mirrors that gate.
-    pub can_be_edited: bool,
-    /// `chatMemberStatusRestricted`: the member's own rights and when the
-    /// restriction ends. `None` for every other status.
-    pub restriction: Option<MemberRestriction>,
     /// `chatMember.inviter_user_id`: who invited, promoted or banned the
     /// member; 0 when unknown. The Exceptions and Removed users lists say
     /// "Restricted by" / "Removed by" this user.
@@ -74,6 +112,48 @@ pub struct ParsedChatMember {
     /// `chatMember.joined_chat_date`: when the member joined, was promoted
     /// or was banned (unix seconds).
     pub joined_chat_date: i32,
+}
+
+impl ParsedChatMember {
+    /// The standing without its data.
+    pub fn status(&self) -> ChannelMemberStatus {
+        self.standing.kind()
+    }
+
+    /// `rights.can_post_messages` of an administrator with a rights block.
+    pub fn admin_can_post_messages(&self) -> Option<bool> {
+        self.admin_rights().map(|rights| rights.can_post_messages)
+    }
+
+    /// `rights.can_invite_users` of an administrator with a rights block.
+    pub fn admin_can_invite_users(&self) -> Option<bool> {
+        self.admin_rights().map(|rights| rights.can_invite_users)
+    }
+
+    /// The administrator's parsed rights block.
+    pub fn admin_rights(&self) -> Option<ChatAdminRights> {
+        self.standing.rights()
+    }
+
+    /// An administrator the viewer may edit; false for every other status.
+    pub fn can_be_edited(&self) -> bool {
+        matches!(
+            self.standing,
+            MemberStatus::Administrator {
+                can_be_edited: true,
+                ..
+            }
+        )
+    }
+
+    /// `chatMemberStatusRestricted`: the member's own rights and when the
+    /// restriction ends.
+    pub fn restriction(&self) -> Option<MemberRestriction> {
+        match &self.standing {
+            MemberStatus::Restricted(restriction) => Some(*restriction),
+            _ => None,
+        }
+    }
 }
 
 /// A member's personal restriction (`chatMemberStatusRestricted`, TDLib
@@ -352,178 +432,20 @@ pub(crate) fn parse_channel_member_status(
     Some((status, admin_can_post_messages))
 }
 
-/// `rights.can_restrict_members` from a `chatMemberStatusAdministrator`
-/// block (TDLib 1.8.67, lines 2500/1092); `None` for any other status or a
-/// missing/absent rights block. `setChatSlowModeDelay` requires this
-/// right (schema line 13551).
-pub(crate) fn parse_restrict_members_right(value: Option<&Value>) -> Option<bool> {
-    let value = value?;
-    if value.get("@type").and_then(Value::as_str) != Some("chatMemberStatusAdministrator") {
-        return None;
-    }
-    value
-        .get("rights")
-        .and_then(|rights| rights.get("can_restrict_members"))
-        .and_then(Value::as_bool)
-}
-
-/// Phase D3a: `rights.can_invite_users` from a
-/// `chatMemberStatusAdministrator` block (TDLib 1.8.67,
-/// `chatAdministratorRights`, schema line 1092); `None` for any other
-/// status or a missing/absent rights block. Managing invite links and
-/// processing join requests requires this right (or creator status).
-pub(crate) fn parse_invite_users_right(value: Option<&Value>) -> Option<bool> {
-    let value = value?;
-    if value.get("@type").and_then(Value::as_str) != Some("chatMemberStatusAdministrator") {
-        return None;
-    }
-    value
-        .get("rights")
-        .and_then(|rights| rights.get("can_invite_users"))
-        .and_then(Value::as_bool)
-}
-
-/// Phase D3b: `rights.can_promote_members` from a
-/// `chatMemberStatusAdministrator` block (TDLib 1.8.67,
-/// `chatAdministratorRights`, schema line 1092); `None` for any other
-/// status or a missing/absent rights block. Promoting/demoting members
-/// and editing admin rights requires this right (or creator status).
-pub(crate) fn parse_promote_members_right(value: Option<&Value>) -> Option<bool> {
-    let value = value?;
-    if value.get("@type").and_then(Value::as_str) != Some("chatMemberStatusAdministrator") {
-        return None;
-    }
-    value
-        .get("rights")
-        .and_then(|rights| rights.get("can_promote_members"))
-        .and_then(Value::as_bool)
-}
-
-/// Slice G1: `rights.can_manage_tags` from a
-/// `chatMemberStatusAdministrator` block (TDLib 1.8.67,
-/// `chatAdministratorRights`, schema line 1092); `None` for any other
-/// status or a missing/absent rights block. Changing another member's
-/// custom title (`setChatMemberTag`, line 13598) requires this right
-/// (or creator status).
-pub(crate) fn parse_manage_tags_right(value: Option<&Value>) -> Option<bool> {
-    let value = value?;
-    if value.get("@type").and_then(Value::as_str) != Some("chatMemberStatusAdministrator") {
-        return None;
-    }
-    value
-        .get("rights")
-        .and_then(|rights| rights.get("can_manage_tags"))
-        .and_then(Value::as_bool)
-}
-
-/// Slice G2: `rights.can_manage_topics` from own
-/// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092); `None`
-/// for any other status or a missing rights block. Forum topic
-/// management requires this right (or creator status).
-pub(crate) fn parse_manage_topics_right(value: Option<&Value>) -> Option<bool> {
-    let value = value?;
-    if value.get("@type").and_then(Value::as_str) != Some("chatMemberStatusAdministrator") {
-        return None;
-    }
-    value
-        .get("rights")
-        .and_then(|rights| rights.get("can_manage_topics"))
-        .and_then(Value::as_bool)
-}
-
-/// Slice G2: `rights.can_change_info` from own
-/// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092); `None`
-/// for any other status or a missing rights block.
-/// `toggleSupergroupSignMessages` requires this right (schema 1.8.67,
-/// line 15175).
-pub(crate) fn parse_change_info_right(value: Option<&Value>) -> Option<bool> {
-    let value = value?;
-    if value.get("@type").and_then(Value::as_str) != Some("chatMemberStatusAdministrator") {
-        return None;
-    }
-    value
-        .get("rights")
-        .and_then(|rights| rights.get("can_change_info"))
-        .and_then(Value::as_bool)
-}
-
-/// `rights.can_manage_video_chats` from own `chatMemberStatusAdministrator`;
-/// `None` for any other status or a missing rights block.
-pub(crate) fn parse_manage_video_chats_right(value: Option<&Value>) -> Option<bool> {
-    let value = value?;
-    if value.get("@type").and_then(Value::as_str) != Some("chatMemberStatusAdministrator") {
-        return None;
-    }
-    value
-        .get("rights")
-        .and_then(|rights| rights.get("can_manage_video_chats"))
-        .and_then(Value::as_bool)
-}
-
-/// Slice G2: `rights.can_send_welcome_messages` from own
-/// `chatMemberStatusAdministrator` (schema 1.8.67, line 1090); `None`
-/// for any other status or a missing rights block. Welcome-message
-/// management requires this right (or creator status).
-pub(crate) fn parse_send_welcome_messages_right(value: Option<&Value>) -> Option<bool> {
-    let value = value?;
-    if value.get("@type").and_then(Value::as_str) != Some("chatMemberStatusAdministrator") {
-        return None;
-    }
-    value
-        .get("rights")
-        .and_then(|rights| rights.get("can_send_welcome_messages"))
-        .and_then(Value::as_bool)
-}
-
-/// Whether the own status posts as the group: `rights.is_anonymous` of a
-/// `chatMemberStatusAdministrator`, `is_anonymous` of a
-/// `chatMemberStatusCreator`; false for any other status.
-pub(crate) fn parse_anonymous_status(value: Option<&Value>) -> bool {
-    let Some(value) = value else {
-        return false;
-    };
-    match value.get("@type").and_then(Value::as_str) {
-        Some("chatMemberStatusAdministrator") => value
-            .get("rights")
-            .and_then(|rights| rights.get("is_anonymous"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-        Some("chatMemberStatusCreator") => value
-            .get("is_anonymous")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-        _ => false,
-    }
-}
-
 /// `chatMember` (TDLib 1.8.67). Returns `None` when `member_id` or `status`
 /// is missing or unparseable.
 pub(crate) fn parse_chat_member(value: Option<&Value>) -> Option<ParsedChatMember> {
     let value = value.filter(|v| !v.is_null())?;
     let member_id = parse_message_sender(value.get("member_id")).ok()?;
-    let (status, admin_can_post_messages) = parse_channel_member_status(value.get("status"))?;
-    let admin_rights = if status == ChannelMemberStatus::Administrator {
-        parse_chat_admin_rights(value.get("status").and_then(|s| s.get("rights")))
-    } else {
-        None
-    };
+    let standing = parse_member_status(value.get("status"))?;
     Some(ParsedChatMember {
         member_id,
-        status,
-        admin_can_post_messages,
-        admin_can_invite_users: parse_invite_users_right(value.get("status")),
-        admin_rights,
+        standing,
         tag: value
             .get("tag")
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
-        can_be_edited: value
-            .get("status")
-            .and_then(|status| status.get("can_be_edited"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-        restriction: parse_member_restriction(value.get("status")),
         inviter_user_id: value
             .get("inviter_user_id")
             .and_then(Value::as_i64)
@@ -533,6 +455,33 @@ pub(crate) fn parse_chat_member(value: Option<&Value>) -> Option<ParsedChatMembe
             .and_then(Value::as_i64)
             .and_then(|date| i32::try_from(date).ok())
             .unwrap_or(0),
+    })
+}
+
+/// A `chatMemberStatus*` value with its data.
+pub(crate) fn parse_member_status(value: Option<&Value>) -> Option<MemberStatus> {
+    let value = value?;
+    Some(match value.get("@type").and_then(Value::as_str) {
+        Some("chatMemberStatusCreator") => MemberStatus::Creator {
+            is_anonymous: value
+                .get("is_anonymous")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        },
+        Some("chatMemberStatusAdministrator") => MemberStatus::Administrator {
+            rights: parse_chat_admin_rights(value.get("rights")),
+            can_be_edited: value
+                .get("can_be_edited")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        },
+        Some("chatMemberStatusMember") => MemberStatus::Member,
+        Some("chatMemberStatusRestricted") => {
+            MemberStatus::Restricted(parse_member_restriction(Some(value))?)
+        }
+        Some("chatMemberStatusLeft") => MemberStatus::Left,
+        Some("chatMemberStatusBanned") => MemberStatus::Banned,
+        _ => MemberStatus::Unknown,
     })
 }
 

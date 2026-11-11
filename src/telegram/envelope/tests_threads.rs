@@ -67,6 +67,6 @@ fn message_thread_info_and_thread_topic_are_parsed() {
     assert_eq!(info.unread_message_count, 2);
     assert_eq!(info.reply_info.unwrap().reply_count, 3);
     assert_eq!(info.messages.len(), 1);
-    assert_eq!(info.messages[0].thread_id, Some(501));
-    assert_eq!(info.messages[0].topic_id, None, "not a forum topic");
+    assert_eq!(info.messages[0].thread_id(), Some(501));
+    assert_eq!(info.messages[0].topic_id(), None, "not a forum topic");
 }

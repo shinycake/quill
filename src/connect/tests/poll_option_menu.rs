@@ -207,7 +207,7 @@ fn a_reply_to_an_option_survives_in_the_draft() {
     );
     assert_eq!(draft["draft_message"]["reply_to"]["checklist_task_id"], 0);
     let saved = driver.session.chats.get(&7).unwrap().draft.clone().unwrap();
-    assert_eq!(saved.item, ReplyItem::PollOption("a".to_string()));
+    assert_eq!(saved.item(), ReplyItem::PollOption("a".to_string()));
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -159,7 +159,9 @@ fn a_failed_keyboard_fetch_is_not_asked_again_on_reselect() {
         None,
         "the failure ends the fetch"
     );
-    h.driver.maybe_fetch_reply_markup().expect("nothing to send");
+    h.driver
+        .maybe_fetch_reply_markup()
+        .expect("nothing to send");
     assert_eq!(
         h.recorder
             .snapshot()

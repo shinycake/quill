@@ -123,14 +123,7 @@ fn a_file_reads_its_kind_state_name_and_size() {
             id,
             size: 3 * 1024 * 1024 / 2,
             expected_size: 0,
-            uploading: false,
-            local: LocalFileState {
-                path: "/tmp/report.pdf".into(),
-                can_be_downloaded: true,
-                is_downloading_active: false,
-                is_downloading_completed: true,
-                downloaded_size: 0,
-            },
+            local: LocalFileState::from_parts("/tmp/report.pdf", true, false, true, 0),
         })
     };
     assert_eq!(

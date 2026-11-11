@@ -8,7 +8,6 @@ use gpui_kit::*;
 use quill::calls::engine::TransportState;
 use quill::lang::{keys, tr_with};
 use quill::state::ActiveCall;
-use quill::telegram::envelope::CallState;
 
 /// tdesktop `Call::kSignalBarCount`.
 const SIGNAL_BAR_COUNT: u8 = 4;
@@ -52,7 +51,7 @@ impl BarsStyle {
 /// The signal bars to show for `call`: tgcalls' count once the call is
 /// established (connected, or reconnecting after it was), nothing before.
 pub(super) fn shown_signal_bars(call: &ActiveCall) -> Option<u8> {
-    let established = matches!(call.state, CallState::Ready)
+    let established = call.state.is_ready()
         && matches!(
             call.transport.state(),
             Some(TransportState::Connected | TransportState::Reconnecting)
@@ -213,7 +212,6 @@ mod tests {
             state,
             started_at: std::time::Instant::now(),
             ready_at: None,
-            ready: None,
             transport: transport.map_or_else(Default::default, |state| {
                 CallTransport::reported(state, Default::default()).unwrap_or(
                     CallTransport::Failed {
@@ -238,7 +236,9 @@ mod tests {
     #[test]
     fn bars_show_only_once_the_call_is_established() {
         use TransportState::*;
-        let ready = |transport, bars| shown_signal_bars(&call(CallState::Ready, transport, bars));
+        let ready = |transport, bars| {
+            shown_signal_bars(&call(CallState::Ready(Default::default()), transport, bars))
+        };
         assert_eq!(ready(Some(Connected), Some(3)), Some(3));
         assert_eq!(ready(Some(Reconnecting), Some(0)), Some(0));
         assert_eq!(ready(Some(Connecting), Some(2)), None);

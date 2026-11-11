@@ -18,7 +18,9 @@ pub enum TranslateTarget {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Translation {
     /// The request of job `job` is out; its answer finds this entry.
-    Pending { job: u64 },
+    Pending {
+        job: u64,
+    },
     Done {
         text: String,
         entities: Vec<TextEntity>,

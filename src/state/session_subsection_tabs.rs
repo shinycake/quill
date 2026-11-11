@@ -460,7 +460,7 @@ impl Session {
     /// pending sends and messages read elsewhere would skew them): the
     /// driver refetches the topic from TDLib.
     pub(crate) fn note_forum_topic_message(&mut self, message: &ParsedMessage) {
-        let Some(topic_id) = message.topic_id else {
+        let Some(topic_id) = message.topic_id() else {
             return;
         };
         self.threads

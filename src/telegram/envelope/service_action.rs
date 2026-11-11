@@ -57,6 +57,16 @@ pub struct Money {
     pub amount: i64,
 }
 
+/// `giftPurchaseOfferState*` of an upgraded-gift offer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GiftOfferState {
+    Pending,
+    Accepted,
+    Rejected,
+    /// A state this schema does not know: read as still pending.
+    Unknown,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServiceAction {
     ChatCreate {
@@ -244,8 +254,7 @@ pub enum ServiceAction {
     GiftOffer {
         name: String,
         price: Money,
-        /// 0 pending, 1 accepted, 2 rejected.
-        state: u8,
+        state: GiftOfferState,
     },
     GiftOfferRejected {
         name: String,
@@ -747,9 +756,10 @@ impl ServiceAction {
                     .and_then(|s| s.get("@type"))
                     .and_then(Value::as_str)
                 {
-                    Some("giftPurchaseOfferStateAccepted") => 1,
-                    Some("giftPurchaseOfferStateRejected") => 2,
-                    _ => 0,
+                    Some("giftPurchaseOfferStatePending") => GiftOfferState::Pending,
+                    Some("giftPurchaseOfferStateAccepted") => GiftOfferState::Accepted,
+                    Some("giftPurchaseOfferStateRejected") => GiftOfferState::Rejected,
+                    _ => GiftOfferState::Unknown,
                 },
             },
             "messageUpgradedGiftPurchaseOfferRejected" => A::GiftOfferRejected {

@@ -159,9 +159,7 @@ fn listener(row: usize) -> ParsedGroupCallParticipant {
     ParsedGroupCallParticipant {
         audio_source_id: 5_000 + row as i32,
         is_speaking: false,
-        video_enabled: false,
         video_info: None,
-        screen_sharing_enabled: false,
         screen_sharing_video_info: None,
         ..participant(1_000 + row as i64, false)
     }
@@ -184,9 +182,11 @@ fn participant(user_id: i64, me: bool) -> ParsedGroupCallParticipant {
         can_unmute_self: true,
         volume_level: 10000,
         order: String::new(),
-        video_enabled: !me,
-        screen_sharing_enabled: me,
-        video_info: None,
+        video_info: (!me).then(|| GroupCallVideoInfo {
+            endpoint_id: "camera".into(),
+            is_paused: false,
+            source_groups: Vec::new(),
+        }),
         screen_sharing_video_info: me.then(|| GroupCallVideoInfo {
             endpoint_id: "screen".into(),
             is_paused: true,

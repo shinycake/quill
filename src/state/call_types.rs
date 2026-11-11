@@ -22,7 +22,6 @@ pub struct ActiveCall {
     /// When `callStateReady` arrived — the call-duration clock starts
     /// here.
     pub ready_at: Option<Instant>,
-    pub ready: Option<ReadyParams>,
     /// The media transport, its retained connect parameters and its
     /// error, as one value (see `CallTransport`).
     pub transport: CallTransport,
@@ -261,6 +260,11 @@ impl CallTransport {
 }
 
 impl ActiveCall {
+    /// The connection parameters, while the call is ready.
+    pub fn ready(&self) -> Option<&ReadyParams> {
+        self.state.ready()
+    }
+
     /// A call first seen now, in `state`: nothing exchanged yet, camera on
     /// for a video call.
     pub fn fresh(
@@ -269,7 +273,6 @@ impl ActiveCall {
         is_outgoing: bool,
         is_video: bool,
         state: CallState,
-        ready: Option<ReadyParams>,
     ) -> Self {
         Self {
             id,
@@ -279,7 +282,6 @@ impl ActiveCall {
             state,
             started_at: Instant::now(),
             ready_at: None,
-            ready,
             transport: CallTransport::default(),
             signaling_queue: Vec::new(),
             signaling_dropped: 0,

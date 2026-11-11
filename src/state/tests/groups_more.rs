@@ -493,8 +493,8 @@ fn supergroup_members_fetch_caches() {
     };
     assert_eq!(*total_count, 2);
     assert_eq!(members.len(), 2);
-    assert_eq!(members[0].status, ChannelMemberStatus::Member);
-    assert_eq!(members[1].status, ChannelMemberStatus::Administrator);
+    assert_eq!(members[0].status(), ChannelMemberStatus::Member);
+    assert_eq!(members[1].status(), ChannelMemberStatus::Administrator);
 }
 
 #[test]
@@ -522,11 +522,11 @@ fn basic_group_full_info_caches_members() {
     };
     assert_eq!(*total_count, 2);
     assert_eq!(members.len(), 2);
-    assert_eq!(members[0].status, ChannelMemberStatus::Creator);
+    assert_eq!(members[0].status(), ChannelMemberStatus::Creator);
     // Slice G1: `chatMember.tag` (schema 1.8.67, line 2526) is the
     // admin custom title.
     assert_eq!(members[0].tag, "boss");
-    assert_eq!(members[1].status, ChannelMemberStatus::Member);
+    assert_eq!(members[1].status(), ChannelMemberStatus::Member);
     assert_eq!(members[1].tag, "");
 }
 

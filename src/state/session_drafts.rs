@@ -253,7 +253,7 @@ impl ForumTopic {
             return None;
         }
         let text = draft.preview_text().replace('\n', " ").trim().to_string();
-        let reply = draft.reply_to_message_id.is_some();
+        let reply = draft.reply.is_some();
         (!text.is_empty() || reply).then_some(DraftPreview { text, reply })
     }
 }

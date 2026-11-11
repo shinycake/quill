@@ -56,7 +56,12 @@ fn replay_sponsored_report_option_required_then_ok() {
             extra.0
         )],
     );
-    let flight = session.messages.sponsored_report.picking().cloned().unwrap();
+    let flight = session
+        .messages
+        .sponsored_report
+        .picking()
+        .cloned()
+        .unwrap();
     assert_eq!(flight.chat_id, chat_id);
     assert_eq!(flight.message_id, 9001);
     assert_eq!(flight.title, "Why report?");
@@ -78,7 +83,12 @@ fn replay_sponsored_report_option_required_then_ok() {
         )],
     );
     assert!(session.messages.sponsored_report.picking().is_none());
-    let outcome = session.messages.sponsored_report.outcome().cloned().unwrap();
+    let outcome = session
+        .messages
+        .sponsored_report
+        .outcome()
+        .cloned()
+        .unwrap();
     assert_eq!(outcome.chat_id, chat_id);
     assert_eq!(outcome.message_id, 9001);
     assert_eq!(outcome.user_message(), "Report sent");
@@ -104,7 +114,12 @@ fn replay_sponsored_report_failed() {
         )],
     );
     assert!(session.messages.sponsored_report.picking().is_none());
-    let outcome = session.messages.sponsored_report.outcome().cloned().unwrap();
+    let outcome = session
+        .messages
+        .sponsored_report
+        .outcome()
+        .cloned()
+        .unwrap();
     assert_eq!(outcome.user_message(), "Could not report this message");
 }
 
@@ -127,7 +142,12 @@ fn replay_sponsored_report_ads_hidden_and_premium_required() {
         );
     };
     report(&mut session, "reportSponsoredResultAdsHidden");
-    let outcome = session.messages.sponsored_report.outcome().cloned().unwrap();
+    let outcome = session
+        .messages
+        .sponsored_report
+        .outcome()
+        .cloned()
+        .unwrap();
     assert_eq!(outcome.user_message(), "Sponsored messages hidden");
     // Premium required opens the No ads preview instead of a banner
     // (tdesktop `ShowPremiumPreviewBox(PremiumFeature::NoAds)`).

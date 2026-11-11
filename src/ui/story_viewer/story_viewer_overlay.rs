@@ -32,10 +32,6 @@ impl QuillApp {
                 caption: String::new(),
                 caption_entities: Vec::new(),
                 duration_label: None,
-                duration_secs: None,
-                video_file_id: None,
-                is_live: false,
-                live_call: None,
                 areas: Vec::new(),
             });
         let (position, total) = self.stories.viewer.position().unwrap_or((0, 0));
@@ -116,7 +112,7 @@ impl QuillApp {
                 ),
                 _ => status,
             };
-            let joinable = matches!(item.kind, StoryViewerKind::Live) && item.live_call.is_some();
+            let joinable = item.live_call().is_some();
             let body: AnyElement = if joinable {
                 let chat_id = item.chat_id;
                 let story_id = item.story_id;

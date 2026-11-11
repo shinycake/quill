@@ -23,10 +23,9 @@ pub struct StickerContent {
     pub thumb_width: i32,
     pub thumb_height: i32,
     pub is_premium: bool,
-    pub requires_premium: bool,
-    /// `full_type.premium_animation`: the TGS effect played around a Premium
-    /// sticker (tdesktop `Sticker::hasPremiumEffect`).
-    pub premium_animation: Option<FileId>,
+    /// A Premium sticker (`stickerFullTypeRegular` with a
+    /// `premium_animation`); `None` for every other sticker.
+    pub premium: Option<PremiumSticker>,
     /// `sticker.set_id` (0 when the sticker belongs to no set): feeds the
     /// message menu's "View Sticker Set" / "Add Stickers".
     pub set_id: i64,
@@ -56,8 +55,39 @@ pub struct StickerItem {
     pub thumb_file_id: Option<FileId>,
     pub thumb_width: i32,
     pub thumb_height: i32,
-    pub requires_premium: bool,
-    pub premium_animation: Option<FileId>,
+    pub premium: Option<PremiumSticker>,
+}
+
+/// What makes a sticker a Premium one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PremiumSticker {
+    /// `full_type.premium_animation`: the TGS effect played around a Premium
+    /// sticker (tdesktop `Sticker::hasPremiumEffect`).
+    pub animation: Option<FileId>,
+}
+
+impl StickerItem {
+    /// Only a Premium account sends it.
+    pub fn requires_premium(&self) -> bool {
+        self.premium.is_some()
+    }
+
+    /// The effect played around a Premium sticker.
+    pub fn premium_animation(&self) -> Option<FileId> {
+        self.premium.and_then(|premium| premium.animation)
+    }
+}
+
+impl StickerContent {
+    /// Only a Premium account sends it.
+    pub fn requires_premium(&self) -> bool {
+        self.premium.is_some()
+    }
+
+    /// The effect played around a Premium sticker.
+    pub fn premium_animation(&self) -> Option<FileId> {
+        self.premium.and_then(|premium| premium.animation)
+    }
 }
 
 impl StickerItem {
@@ -112,8 +142,7 @@ pub(crate) fn parse_message_sticker(value: &Value) -> (MessageContent, Vec<Parse
             thumb_file_id: item.thumb_file_id,
             thumb_width: item.thumb_width,
             thumb_height: item.thumb_height,
-            requires_premium: item.requires_premium,
-            premium_animation: item.premium_animation,
+            premium: item.premium,
             set_id: item.set_id,
             is_premium: value
                 .get("is_premium")
@@ -207,13 +236,17 @@ pub(crate) fn parse_sticker_value(value: Option<&Value>) -> (Option<StickerItem>
             thumb_file_id,
             thumb_width,
             thumb_height,
-            requires_premium: value.get("full_type").is_some_and(|full_type| {
-                full_type.get("@type").and_then(Value::as_str) == Some("stickerFullTypeRegular")
-                    && full_type
-                        .get("premium_animation")
-                        .is_some_and(|animation| !animation.is_null())
-            }),
-            premium_animation: premium_animation_id,
+            premium: value
+                .get("full_type")
+                .is_some_and(|full_type| {
+                    full_type.get("@type").and_then(Value::as_str) == Some("stickerFullTypeRegular")
+                        && full_type
+                            .get("premium_animation")
+                            .is_some_and(|animation| !animation.is_null())
+                })
+                .then_some(PremiumSticker {
+                    animation: premium_animation_id,
+                }),
         }),
         files,
     )
@@ -407,8 +440,8 @@ mod premium_animation_tests {
         }));
         let (item, files) = parse_sticker_value(Some(&value));
         let item = item.unwrap();
-        assert_eq!(item.premium_animation, Some(FileId(43)));
-        assert!(item.requires_premium);
+        assert_eq!(item.premium_animation(), Some(FileId(43)));
+        assert!(item.requires_premium());
         assert!(files.iter().any(|f| f.id == FileId(43)));
     }
 
@@ -418,7 +451,7 @@ mod premium_animation_tests {
             "@type": "stickerFullTypeRegular", "premium_animation": null
         }));
         let (item, files) = parse_sticker_value(Some(&regular));
-        assert_eq!(item.unwrap().premium_animation, None);
+        assert_eq!(item.unwrap().premium_animation(), None);
         assert_eq!(files.len(), 1);
         let emoji = sticker(json!({
             "@type": "stickerFullTypeCustomEmoji", "custom_emoji_id": "9",
@@ -428,7 +461,7 @@ mod premium_animation_tests {
             parse_sticker_value(Some(&emoji))
                 .0
                 .unwrap()
-                .premium_animation,
+                .premium_animation(),
             None
         );
     }

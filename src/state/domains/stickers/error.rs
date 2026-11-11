@@ -121,7 +121,10 @@ impl Session {
             self.stickers.stickers.suggest_for = SuggestFor::Nothing;
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetGreetingStickers) {
-            self.stickers.stickers.greeting.fail(sessions_error_line("load the hello stickers", err));
+            self.stickers
+                .stickers
+                .greeting
+                .fail(sessions_error_line("load the hello stickers", err));
         }
         let emoji_purpose = pending.map(|p| p.purpose);
         if emoji_purpose == Some(RequestPurpose::GetInstalledEmojiSets) {

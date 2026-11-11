@@ -364,7 +364,7 @@ impl QuillApp {
             && session
                 .as_ref()
                 .is_some_and(|s| s.media.downloads.is_paused(file_id));
-        let done = file.map_or(0, |f| f.local.downloaded_size);
+        let done = file.map_or(0, |f| f.local.downloaded_size());
         let meta = if active {
             let amount = if done > 0 && !size_label.is_empty() {
                 format!("{} of {}", format_bytes(done), size_label)

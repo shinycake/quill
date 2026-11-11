@@ -444,7 +444,8 @@ fn the_gif_tab_follows_its_windows_field(cx: &mut TestAppContext) {
         app.set_window_scope(Some(OTHER));
         app.follow_gif_field(cx);
         assert!(
-            app.session().is_some_and(|s| !s.stickers.gifs.search.is_on()),
+            app.session()
+                .is_some_and(|s| !s.stickers.gifs.search.is_on()),
             "an empty field shows the saved GIFs"
         );
     });

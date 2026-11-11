@@ -34,8 +34,7 @@ impl QuillApp {
             thumb_file_id: sticker.thumb_file_id,
             thumb_width: sticker.thumb_width,
             thumb_height: sticker.thumb_height,
-            requires_premium: sticker.requires_premium,
-            premium_animation: sticker.premium_animation,
+            premium: sticker.premium,
         };
         let kind = quill::sticker_set_box::SetKind::of(emoji);
         let mut rows = Vec::new();

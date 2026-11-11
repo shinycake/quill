@@ -38,7 +38,6 @@ ChecklistDialog::others_can_mark_tasks_as_done+error
 ChecklistDraft::others_can_mark_tasks_as_done
 ChecklistSend::others_can_mark_tasks_as_done
 CheckoutView::sending
-Clip::busy
 ComposerUi::draft_restore_pending
 ConnectDriver::parameters_sent
 CraftSession::candidates_loaded
@@ -88,7 +87,6 @@ LanguageLinkLookup::loading
 LanguageLinkLookup::loading+error
 Latest::wake_pending
 LayerFade::closing
-LinuxState::failed
 LiveInput::failed
 LocalFileState::is_downloading_active
 LocalFileState::is_downloading_completed
@@ -129,7 +127,6 @@ PaymentsState::form_loading
 PaymentsState::form_loading+receipt_error
 PaymentsState::verification_started
 PhotoSources::busy
-PlayHead::started
 PlaybackHealth::output_failed
 Playlist::loaded
 Playlist::loaded+error

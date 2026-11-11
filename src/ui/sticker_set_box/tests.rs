@@ -918,8 +918,7 @@ fn a_set_less_sticker_message_lists_the_owned_sets_to_join(cx: &mut TestAppConte
             thumb_width: 0,
             thumb_height: 0,
             is_premium: false,
-            requires_premium: false,
-            premium_animation: None,
+            premium: None,
             set_id: 0,
         });
         app.message_ui.menu = Some(crate::ui::menu_states::MessageMenuState {

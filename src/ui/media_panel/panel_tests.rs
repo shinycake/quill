@@ -58,8 +58,9 @@ fn sticker(file: i32, premium: bool) -> StickerItem {
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,
-        requires_premium: premium,
-        premium_animation: premium.then_some(FileId(900)),
+        premium: premium.then_some(quill::telegram::envelope::PremiumSticker {
+            animation: Some(FileId(900)),
+        }),
     }
 }
 
@@ -391,8 +392,7 @@ fn a_sent_sticker_flies_from_the_panel_to_its_message_and_lands(cx: &mut TestApp
             thumb_width: 0,
             thumb_height: 0,
             is_premium: false,
-            requires_premium: false,
-            premium_animation: None,
+            premium: None,
             set_id: 77,
         });
         history.messages.insert(5000, message);

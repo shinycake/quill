@@ -120,14 +120,7 @@ fn editor_with_sticker_file(
             id: file,
             size: 1,
             expected_size: 1,
-            uploading: false,
-            local: LocalFileState {
-                path,
-                can_be_downloaded: false,
-                is_downloading_active: false,
-                is_downloading_completed: true,
-                downloaded_size: 1,
-            },
+            local: LocalFileState::from_parts(path, false, false, true, 1),
         });
     });
     file

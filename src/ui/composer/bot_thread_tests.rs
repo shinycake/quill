@@ -124,7 +124,7 @@ fn a_send_from_all_opens_a_new_thread_with_the_message(cx: &mut TestAppContext) 
         let all = session.histories.get(&BOT.0).unwrap().ordered();
         let all = texts(
             all.into_iter()
-                .filter(|m| m.extras.forum_topic_id.is_none())
+                .filter(|m| m.extras.forum_topic_id().is_none())
                 .cloned(),
         );
         assert_eq!(all, in_all);

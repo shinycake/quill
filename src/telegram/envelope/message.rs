@@ -67,13 +67,63 @@ pub struct MessageExtras {
     /// `message.is_paid_star_suggested_post` or
     /// `is_paid_gram_suggested_post`: a published post someone paid for.
     pub paid_suggested_post: Option<PaidSuggestedPost>,
-    /// `direct_messages_chat_topic_id` when `message.topic_id` is
-    /// `messageTopicDirectMessages` (schema line 3317); 0 otherwise. A
-    /// reply to a suggestion goes to the same topic.
-    pub direct_messages_topic_id: i64,
-    /// `forum_topic_id` when `message.topic_id` is `messageTopicForum`: the
-    /// topic a reply to this message goes to.
-    pub forum_topic_id: Option<i32>,
+    /// Schema `message.topic_id` (TDLib 1.8.67, line 3165): where the
+    /// message sits, when it sits in a topic Quill models.
+    pub topic: Option<MessageTopic>,
+}
+
+/// `messageTopic*` (TDLib 1.8.67, lines 3001–3010). Saved-messages topics
+/// are not modelled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageTopic {
+    /// `messageTopicForum`: the `forum_topic_id` a reply goes to. Parity
+    /// slice 4 routes topic messages into the topic's history.
+    Forum(i32),
+    /// `messageTopicThread`: the `message_thread_id` of a comment / reply
+    /// thread.
+    Thread(i64),
+    /// `messageTopicDirectMessages`: `direct_messages_chat_topic_id` (schema
+    /// line 3317). A reply to a suggestion goes to the same topic.
+    DirectMessages(i64),
+}
+
+impl ParsedMessage {
+    /// The forum topic the message sits in (`None` for every other topic
+    /// and outside topics).
+    pub fn topic_id(&self) -> Option<i32> {
+        self.extras.forum_topic_id()
+    }
+
+    /// The comment / reply thread it sits in.
+    pub fn thread_id(&self) -> Option<i64> {
+        self.extras.thread_id()
+    }
+}
+
+impl MessageExtras {
+    /// The forum topic a reply to this message goes to.
+    pub fn forum_topic_id(&self) -> Option<i32> {
+        match self.topic {
+            Some(MessageTopic::Forum(id)) => Some(id),
+            _ => None,
+        }
+    }
+
+    /// The `message_thread_id` of the comment / reply thread it sits in.
+    pub fn thread_id(&self) -> Option<i64> {
+        match self.topic {
+            Some(MessageTopic::Thread(id)) => Some(id),
+            _ => None,
+        }
+    }
+
+    /// The direct messages topic; 0 for a message outside one.
+    pub fn direct_messages_topic_id(&self) -> i64 {
+        match self.topic {
+            Some(MessageTopic::DirectMessages(id)) => id,
+            _ => 0,
+        }
+    }
 }
 
 /// The currency a published suggested post was paid in.
@@ -202,7 +252,14 @@ pub enum MessageSendState {
     /// `messageSendingStatePending`.
     Pending,
     /// `messageSendingStateFailed`.
-    Failed,
+    Failed {
+        /// M1 fix-up: `message.sending_state.can_retry` (TDLib 1.8.67,
+        /// lines 3038 / 5896) — `true` means the failed send may be
+        /// retried via `resendMessages`; the reducer gates the retry
+        /// affordance on this instead of offering it on every
+        /// `updateMessageSendFailed`.
+        can_retry: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -216,15 +273,6 @@ pub struct ParsedMessage {
     pub is_outgoing: bool,
     /// Schema `message.is_pinned` (TDLib 1.8.67).
     pub is_pinned: bool,
-    /// Schema `message.topic_id` (TDLib 1.8.67, line 3165): the
-    /// `forum_topic_id` when the topic is `messageTopicForum`, `None` for
-    /// every other `MessageTopic` variant (threads, direct messages, saved
-    /// messages) and when the field is absent. Parity slice 4 routes topic
-    /// messages into the topic's history.
-    pub topic_id: Option<i32>,
-    /// `message_thread_id` when `message.topic_id` is `messageTopicThread`
-    /// (a comment / reply thread), `None` otherwise.
-    pub thread_id: Option<i64>,
     /// Schema `message.media_album_id` (int64). `0` means the message is not in an album.
     pub media_album_id: i64,
     /// Phase D2: schema `message.author_signature` (TDLib 1.8.67, lines
@@ -237,12 +285,6 @@ pub struct ParsedMessage {
     /// `Some` only on scheduled sends; the UI's scheduled list reads the
     /// planned time from here.
     pub scheduling_state: Option<MessageSchedulingState>,
-    /// M1 fix-up: `message.sending_state.can_retry` (TDLib 1.8.67, lines
-    /// 3038 / 5896) — only `messageSendingStateFailed` carries it.
-    /// `true` means the failed send may be retried via `resendMessages`;
-    /// the reducer gates the retry affordance on this instead of offering
-    /// it on every `updateMessageSendFailed`.
-    pub can_retry: bool,
     /// `message.sending_state` kind; see [`MessageSendState`].
     pub send_state: MessageSendState,
     pub content: MessageContent,
@@ -288,30 +330,79 @@ pub enum SelfDestructKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MessageSelfDestruct {
     pub kind: SelfDestructKind,
-    /// Latest `message.self_destruct_in`, converted to whole milliseconds.
-    /// `0` means the destruction isn't scheduled yet (the content hasn't
-    /// been opened; schema 1.8.67 line 3147). TDLib emits
-    /// `updateDeleteMessages` when the timer fires, so the row disappears
-    /// through the normal delete path — no special handling needed.
-    /// Whole milliseconds (not `f64` seconds) so the struct keeps the
-    /// `Eq` derive that `ParsedMessage` / `HistoryMessage` require.
-    pub expires_in_ms: i64,
-    /// Local clock (ms) when `expires_in_ms` was received, for the local
-    /// countdown decay (`slow_mode_delay_expires_in` pattern, Phase A1).
-    pub fetched_at_ms: u64,
+    pub clock: SelfDestructClock,
+}
+
+/// Where a self-destruct countdown stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelfDestructClock {
+    /// The destruction isn't scheduled yet (the content hasn't been
+    /// opened; schema 1.8.67 line 3147).
+    NotOpened,
+    /// Latest `message.self_destruct_in`, converted to whole milliseconds
+    /// (not `f64` seconds, so `ParsedMessage` / `HistoryMessage` keep their
+    /// `Eq` derive), with the local clock (ms) when it was received, for
+    /// the local countdown decay (`slow_mode_delay_expires_in` pattern,
+    /// Phase A1). TDLib emits `updateDeleteMessages` when the timer fires,
+    /// so the row disappears through the normal delete path.
+    Counting {
+        expires_in_ms: i64,
+        fetched_at_ms: u64,
+    },
+}
+
+impl SelfDestructClock {
+    /// A countdown of `expires_in_ms` received at `fetched_at_ms`; zero or
+    /// less is not scheduled.
+    pub fn from_ms(expires_in_ms: i64, fetched_at_ms: u64) -> Self {
+        if expires_in_ms > 0 {
+            Self::Counting {
+                expires_in_ms,
+                fetched_at_ms,
+            }
+        } else {
+            Self::NotOpened
+        }
+    }
 }
 
 impl MessageSelfDestruct {
+    /// Milliseconds left when the countdown was received; 0 before the
+    /// content is opened.
+    pub fn expires_in_ms(&self) -> i64 {
+        match self.clock {
+            SelfDestructClock::NotOpened => 0,
+            SelfDestructClock::Counting { expires_in_ms, .. } => expires_in_ms,
+        }
+    }
+
+    /// When the countdown was received (local ms); 0 before the content is
+    /// opened.
+    pub fn fetched_at_ms(&self) -> u64 {
+        match self.clock {
+            SelfDestructClock::NotOpened => 0,
+            SelfDestructClock::Counting { fetched_at_ms, .. } => fetched_at_ms,
+        }
+    }
+
+    /// Whether the destruction is scheduled.
+    pub fn is_counting(&self) -> bool {
+        matches!(self.clock, SelfDestructClock::Counting { .. })
+    }
+
     /// Locally decayed whole seconds left, or `None` when destruction isn't
     /// scheduled yet. The value keeps decaying to 0 (the row stays until
     /// TDLib's `updateDeleteMessages` removes it).
     pub fn remaining_secs(&self, now_ms: u64) -> Option<u64> {
-        if self.expires_in_ms <= 0 {
+        let SelfDestructClock::Counting {
+            expires_in_ms,
+            fetched_at_ms,
+        } = self.clock
+        else {
             return None;
-        }
-        let elapsed_ms =
-            i64::try_from(now_ms.saturating_sub(self.fetched_at_ms)).unwrap_or(i64::MAX);
-        let remaining_ms = self.expires_in_ms.saturating_sub(elapsed_ms);
+        };
+        let elapsed_ms = i64::try_from(now_ms.saturating_sub(fetched_at_ms)).unwrap_or(i64::MAX);
+        let remaining_ms = expires_in_ms.saturating_sub(elapsed_ms);
         Some(if remaining_ms > 0 {
             (remaining_ms.saturating_add(999) / 1000) as u64
         } else {
@@ -369,8 +460,7 @@ pub(crate) fn parse_self_destruct(
         .unwrap_or(0);
     Some(MessageSelfDestruct {
         kind,
-        expires_in_ms,
-        fetched_at_ms: now_ms(),
+        clock: SelfDestructClock::from_ms(expires_in_ms, now_ms()),
     })
 }
 
@@ -528,8 +618,6 @@ pub(crate) fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> 
         // Phase D2: `message.author_signature` (TDLib 1.8.67, lines
         // 3155/3165). Empty or absent → `None`.
         author_signature: Some(json_name_str(value, "author_signature")).filter(|s| !s.is_empty()),
-        topic_id: parse_message_topic(value.get("topic_id")),
-        thread_id: parse_message_thread_topic(value.get("topic_id")),
         content,
         ephemeral: parse_ephemeral_message_content(value.get("ephemeral_content")),
         files,
@@ -552,15 +640,15 @@ pub(crate) fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> 
             .and_then(Value::as_str)
         {
             Some("messageSendingStatePending") => MessageSendState::Pending,
-            Some("messageSendingStateFailed") => MessageSendState::Failed,
+            Some("messageSendingStateFailed") => MessageSendState::Failed {
+                can_retry: value
+                    .get("sending_state")
+                    .and_then(|s| s.get("can_retry"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            },
             _ => MessageSendState::Sent,
         },
-        can_retry: value
-            .get("sending_state")
-            .filter(|s| s.get("@type").and_then(Value::as_str) == Some("messageSendingStateFailed"))
-            .and_then(|s| s.get("can_retry"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
     })
 }
 
@@ -580,6 +668,21 @@ pub(crate) fn parse_message_topic(value: Option<&Value>) -> Option<i32> {
             .map(|id| id.sat_i32()),
         _ => None,
     }
+}
+
+/// `message.topic_id` as a [`MessageTopic`]; saved-messages topics, a
+/// missing field and null map to `None`.
+pub(crate) fn parse_topic(value: Option<&Value>) -> Option<MessageTopic> {
+    let value = value?;
+    if let Some(id) = parse_message_topic(Some(value)) {
+        return Some(MessageTopic::Forum(id));
+    }
+    if let Some(id) = parse_message_thread_topic(Some(value)) {
+        return Some(MessageTopic::Thread(id));
+    }
+    (value.get("@type").and_then(Value::as_str) == Some("messageTopicDirectMessages")).then(|| {
+        MessageTopic::DirectMessages(int53_or_zero(value.get("direct_messages_chat_topic_id")))
+    })
 }
 
 /// A `factCheck` (null or absent: none). An empty text is no fact check.
@@ -609,19 +712,12 @@ pub(crate) fn parse_message_extras(value: &Value) -> MessageExtras {
             .unwrap_or(0)
             .sat_i32(),
         via_bot_user_id: int53_or_zero(value.get("via_bot_user_id")),
-        forum_topic_id: parse_message_topic(value.get("topic_id")),
+        topic: parse_topic(value.get("topic_id")),
         effect_id: int64(value.get("effect_id")).unwrap_or(0).max(0),
         fact_check: parse_fact_check(value.get("fact_check")),
         suggested_post: crate::suggested_posts::SuggestedPostInfo::parse(
             value.get("suggested_post_info"),
         ),
-        direct_messages_topic_id: value
-            .get("topic_id")
-            .filter(|topic| {
-                topic.get("@type").and_then(Value::as_str) == Some("messageTopicDirectMessages")
-            })
-            .map(|topic| int53_or_zero(topic.get("direct_messages_chat_topic_id")))
-            .unwrap_or(0),
         paid_suggested_post: if flag(value, "is_paid_star_suggested_post") {
             Some(PaidSuggestedPost::Stars)
         } else if flag(value, "is_paid_gram_suggested_post") {

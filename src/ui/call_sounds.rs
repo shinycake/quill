@@ -237,8 +237,7 @@ impl super::app::QuillApp {
                 }
                 .or(second_rings.then_some(CallSound::Incoming));
                 sounds.keep_looping(ringing);
-                let connected =
-                    matches!(call.state, CallState::Ready) && call.transport.is_connected();
+                let connected = call.state.is_ready() && call.transport.is_connected();
                 if connected && !marks.connected {
                     marks.connected = true;
                     sounds.play_cue(CallSound::Connect);

@@ -99,7 +99,7 @@ impl QuillApp {
             .stories
             .viewer
             .current()
-            .and_then(|item| item.duration_secs)
+            .and_then(|item| item.duration_secs())
             .map(|secs| i64::from(secs) * 1000);
         let serial = NEXT_SERIAL.fetch_add(1, Ordering::Relaxed);
         let value = Some(CoverPicker {

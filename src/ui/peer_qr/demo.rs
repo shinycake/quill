@@ -179,8 +179,7 @@ fn sticker(file: i32) -> StickerContent {
         thumb_width: 0,
         thumb_height: 0,
         is_premium: false,
-        requires_premium: false,
-        premium_animation: None,
+        premium: None,
         set_id: 0,
     }
 }

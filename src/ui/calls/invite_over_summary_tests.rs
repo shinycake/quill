@@ -138,8 +138,7 @@ fn a_second_call_under_the_lock_rings_and_can_be_declined(cx: &mut TestAppContex
             12,
             true,
             false,
-            CallState::Ready,
-            None,
+            CallState::Ready(Default::default()),
         ));
         session.calls.second_call = SecondCall::Prompt {
             call_id: 6,

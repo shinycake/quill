@@ -78,7 +78,7 @@ impl QuillApp {
                 .stories
                 .viewer
                 .current()
-                .is_some_and(|item| matches!(item.kind, StoryViewerKind::Video));
+                .is_some_and(|item| item.is_video());
             if is_video {
                 let (icon, label) = if self.stories.muted {
                     (IconName::VolumeX, tr(keys::Q_MEDIA_SOUND_OFF))
@@ -171,7 +171,7 @@ impl QuillApp {
         let busy = self
             .session()
             .is_some_and(|s| s.stories.manage.pending_for(item.chat_id.0, item.story_id));
-        let is_video = matches!(item.kind, StoryViewerKind::Video);
+        let is_video = item.is_video();
         let hidden = self.story_chat_hidden(item.chat_id.0);
         let mut out = Vec::new();
         let mut add = |act, label: &str, icon, disabled| {
@@ -436,7 +436,9 @@ impl QuillApp {
         let can_reply = story.as_ref().is_some_and(|s| s.can_be_replied);
         let can_share = story.as_ref().is_some_and(can_share_story);
         let interactions = story.as_ref().is_some_and(|s| s.can_get_interactions);
-        let chosen = story.as_ref().and_then(|s| s.chosen_reaction_emoji.clone());
+        let chosen = story
+            .as_ref()
+            .and_then(|s| s.chosen_reaction_emoji().map(str::to_string));
         let mut row = div().flex().w(px(360.)).items_center().gap_1();
         let placeholder = self.story_reply_placeholder();
         if interactions {
@@ -538,7 +540,7 @@ impl QuillApp {
                         .on_click(cx.listener(|this, _, _, cx| this.quick_react_story(cx))),
                     ),
             );
-            if let Some(extra) = story.as_ref().and_then(|s| s.chosen_reaction_extra) {
+            if let Some(extra) = story.as_ref().and_then(|s| s.chosen_reaction_extra()) {
                 row = row.child(self.story_chosen_extra_badge(extra));
             }
         }

@@ -2,23 +2,35 @@ use super::*;
 use crate::ids::MessageId;
 use serde_json::Value;
 
-/// `draftMessage` text or rich message this slice restores. Voice and
-/// video note drafts are ignored. `reply_to` is same-chat
-/// `inputMessageReplyToMessage` only.
+/// What a draft holds: composer markup, or a rich message.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChatDraft {
-    /// Composer markup; empty for a rich draft.
-    pub text: String,
+pub enum DraftBody {
+    /// Composer markup (empty when the draft only replies or suggests).
+    Text(String),
     /// `draftMessageContentRichMessage`: tdesktop shows it in place of the
     /// message field (`RichDraftPreview`).
-    pub rich: Option<crate::rich::RichDraft>,
-    pub reply_to_message_id: Option<MessageId>,
+    Rich(crate::rich::RichDraft),
+}
+
+/// The message a draft replies to: `inputMessageReplyToMessage`, same chat
+/// only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DraftReply {
+    pub message_id: MessageId,
     /// Slice G1: partial-message quote carried by the draft's `reply_to`
     /// (`inputTextQuote`, schema 1.8.67 line 3056): text, formatting and
     /// `position` in UTF-16 code units.
     pub quote: Option<crate::composer::QuoteSelection>,
     /// The checklist task or poll option the draft replies to.
     pub item: crate::composer::ReplyItem,
+}
+
+/// `draftMessage` text or rich message this slice restores. Voice and
+/// video note drafts are ignored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatDraft {
+    pub body: DraftBody,
+    pub reply: Option<DraftReply>,
     /// `draftMessage.suggested_post_info`: the suggest bar's terms in a
     /// channel's direct messages.
     pub suggested_post: Option<crate::suggested_posts::SuggestTerms>,
@@ -61,12 +73,74 @@ pub enum ChatAction {
 }
 
 impl ChatDraft {
+    /// The draft `content` makes, replying to `reply_to` (what the driver
+    /// stores after `setChatDraftMessage`).
+    pub fn of(
+        content: &crate::composer::DraftContent,
+        reply_to: Option<&crate::telegram::requests::SendReply>,
+        suggested_post: Option<crate::suggested_posts::SuggestTerms>,
+    ) -> Self {
+        Self {
+            body: match content.rich() {
+                Some(rich) => DraftBody::Rich(rich.clone()),
+                None => DraftBody::Text(content.text().to_string()),
+            },
+            reply: reply_to.map(|reply| DraftReply {
+                message_id: reply.message_id,
+                quote: reply.quote.clone(),
+                item: reply.item.clone(),
+            }),
+            suggested_post,
+        }
+    }
+
+    /// A plain-text draft with no reply.
+    pub fn text_only(text: impl Into<String>) -> Self {
+        Self {
+            body: DraftBody::Text(text.into()),
+            reply: None,
+            suggested_post: None,
+        }
+    }
+
+    /// Composer markup; empty for a rich draft.
+    pub fn text(&self) -> &str {
+        match &self.body {
+            DraftBody::Text(text) => text,
+            DraftBody::Rich(_) => "",
+        }
+    }
+
+    pub fn rich(&self) -> Option<&crate::rich::RichDraft> {
+        match &self.body {
+            DraftBody::Rich(rich) => Some(rich),
+            DraftBody::Text(_) => None,
+        }
+    }
+
+    pub fn reply_to_message_id(&self) -> Option<MessageId> {
+        self.reply.as_ref().map(|reply| reply.message_id)
+    }
+
+    pub fn quote(&self) -> Option<&crate::composer::QuoteSelection> {
+        self.reply.as_ref().and_then(|reply| reply.quote.as_ref())
+    }
+
+    /// The checklist task or poll option replied to (the message itself
+    /// without one).
+    pub fn item(&self) -> crate::composer::ReplyItem {
+        self.reply
+            .as_ref()
+            .map(|reply| reply.item.clone())
+            .unwrap_or_default()
+    }
+
     /// The draft's text for a chat list row, one line per block of a rich
     /// draft (tdesktop `richMessageSummary`).
     pub fn preview_text(&self) -> String {
-        match &self.rich {
-            Some(rich) => rich.summary(),
-            None => crate::composer::parse_format_markup(&self.text).0,
+        match &self.body {
+            DraftBody::Rich(rich) => rich.summary(),
+            DraftBody::Text(text) => crate::composer::parse_format_markup(text).0,
         }
     }
 }
@@ -80,7 +154,7 @@ pub(crate) fn parse_chat_draft(value: Option<&Value>) -> Option<ChatDraft> {
         return None;
     }
     let content = value.get("content")?;
-    let (text, rich) = match content.get("@type").and_then(Value::as_str) {
+    let body = match content.get("@type").and_then(Value::as_str) {
         Some("draftMessageContentText") => {
             // Formatting comes back as composer markup, so a draft synced
             // from another client (or echoed after our own save) keeps it.
@@ -93,16 +167,19 @@ pub(crate) fn parse_chat_draft(value: Option<&Value>) -> Option<ChatDraft> {
                 plain,
                 &super::message_content::parse_text_entities(plain, formatted),
             );
-            (text, None)
+            DraftBody::Text(text)
         }
         Some("draftMessageContentRichMessage") => {
             let (blocks, _) =
                 crate::rich::parse_rich_message(content.get("message").unwrap_or(&Value::Null));
-            (String::new(), crate::rich::RichDraft::from_message(&blocks))
+            match crate::rich::RichDraft::from_message(&blocks) {
+                Some(rich) => DraftBody::Rich(rich),
+                None => DraftBody::Text(String::new()),
+            }
         }
         _ => return None,
     };
-    let (reply_to_message_id, quote, item) = match value.get("reply_to") {
+    let reply = match value.get("reply_to") {
         Some(reply)
             if reply.get("@type").and_then(Value::as_str) == Some("inputMessageReplyToMessage") =>
         {
@@ -161,25 +238,25 @@ pub(crate) fn parse_chat_draft(value: Option<&Value>) -> Option<ChatDraft> {
             } else {
                 crate::composer::ReplyItem::Message
             };
-            (id, quote, item)
+            id.map(|message_id| DraftReply {
+                message_id,
+                quote,
+                item,
+            })
         }
-        _ => (None, None, crate::composer::ReplyItem::Message),
+        _ => None,
     };
     let suggested_post =
         crate::suggested_posts::SuggestTerms::parse_input(value.get("suggested_post_info"));
-    if text.trim().is_empty()
-        && rich.is_none()
-        && reply_to_message_id.is_none()
+    if matches!(&body, DraftBody::Text(text) if text.trim().is_empty())
+        && reply.is_none()
         && suggested_post.is_none()
     {
         return None;
     }
     Some(ChatDraft {
-        text,
-        rich,
-        reply_to_message_id,
-        quote,
-        item,
+        body,
+        reply,
         suggested_post,
     })
 }
@@ -236,10 +313,10 @@ mod tests {
             }}
         });
         let draft = parse_chat_draft(Some(&value)).expect("a rich draft");
-        assert_eq!(draft.text, "");
-        assert_eq!(draft.reply_to_message_id, Some(crate::ids::MessageId(7)));
+        assert_eq!(draft.text(), "");
+        assert_eq!(draft.reply_to_message_id(), Some(crate::ids::MessageId(7)));
         assert_eq!(
-            draft.rich.as_ref().map(|rich| rich.markup()).as_deref(),
+            draft.rich().map(|rich| rich.markup()).as_deref(),
             Some("# Plan\n\nship it")
         );
         assert_eq!(draft.preview_text(), "Plan\nship it");
@@ -255,11 +332,17 @@ mod tests {
                 "poll_option_id": option
             })
         };
-        assert_eq!(draft(base(3, "")).map(|d| d.item), Some(ReplyItem::Task(3)));
         assert_eq!(
-            draft(base(0, "AQ==")).map(|d| d.item),
+            draft(base(3, "")).map(|d| d.item()),
+            Some(ReplyItem::Task(3))
+        );
+        assert_eq!(
+            draft(base(0, "AQ==")).map(|d| d.item()),
             Some(ReplyItem::PollOption("AQ==".into()))
         );
-        assert_eq!(draft(base(0, "")).map(|d| d.item), Some(ReplyItem::Message));
+        assert_eq!(
+            draft(base(0, "")).map(|d| d.item()),
+            Some(ReplyItem::Message)
+        );
     }
 }

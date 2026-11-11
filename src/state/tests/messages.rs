@@ -15,8 +15,6 @@ fn effective_preview_prefers_ephemeral_content() {
         date: 0,
         is_outgoing: false,
         is_pinned: false,
-        topic_id: None,
-        thread_id: None,
         ephemeral: Some(EphemeralMessageContent {
             content: Box::new(MessageContent::Text("secret flow".into())),
             reply_markup: None,
@@ -24,7 +22,6 @@ fn effective_preview_prefers_ephemeral_content() {
         media_album_id: 0,
         author_signature: None,
         scheduling_state: None,
-        can_retry: false,
         send_state: Default::default(),
         content: MessageContent::Text("public".into()),
         files: Vec::new(),
@@ -78,8 +75,6 @@ fn update_message_content_refreshes_scheduled_entry() {
         date: 0,
         is_outgoing: true,
         is_pinned: false,
-        topic_id: None,
-        thread_id: None,
         ephemeral: None,
         media_album_id: 0,
         author_signature: None,
@@ -87,7 +82,6 @@ fn update_message_content_refreshes_scheduled_entry() {
             send_date: 999,
             repeat_period: 0,
         }),
-        can_retry: false,
         send_state: Default::default(),
         content: MessageContent::Text("old caption".into()),
         files: Vec::new(),
@@ -267,7 +261,7 @@ fn self_destructing_photo_disappears_via_delete_update() {
     assert!(session.open_chat_has_live_self_destruct(unix_ms_now()));
     // The badge label comes from the latest `self_destruct_in`.
     let label = row
-        .self_destruct_badge(sd.fetched_at_ms)
+        .self_destruct_badge(sd.fetched_at_ms())
         .expect("badge for timer row");
     assert_eq!(label, "⏱ 43s left");
     // Timer fires server-side: the row leaves via `updateDeleteMessages`.
@@ -300,7 +294,7 @@ fn opening_a_timed_photo_starts_its_countdown() {
         r#"{"@type":"updateNewMessage","message":{"id":902,"chat_id":43,"is_outgoing":false,"content":{"@type":"messagePhoto","photo":{"@type":"photo","has_stickers":false,"sizes":[]},"caption":{"@type":"formattedText","text":"","entities":[]},"show_caption_above_media":false,"has_spoiler":false,"is_secret":true},"self_destruct_type":{"@type":"messageSelfDestructTypeTimer","self_destruct_time":10},"self_destruct_in":0}}"#,
     );
     let sd = session.histories[&43].messages[&902].self_destruct.unwrap();
-    assert_eq!(sd.expires_in_ms, 0);
+    assert_eq!(sd.expires_in_ms(), 0);
     let before = unix_ms_now();
     apply_json(
         &mut session,
@@ -309,9 +303,9 @@ fn opening_a_timed_photo_starts_its_countdown() {
         r#"{"@type":"updateMessageContentOpened","chat_id":43,"message_id":902}"#,
     );
     let sd = session.histories[&43].messages[&902].self_destruct.unwrap();
-    assert_eq!(sd.expires_in_ms, 10_000);
-    assert!(sd.fetched_at_ms >= before);
-    let ttl = crate::media_viewer::viewer_ttl(&sd, sd.fetched_at_ms + 2_500).unwrap();
+    assert_eq!(sd.expires_in_ms(), 10_000);
+    assert!(sd.fetched_at_ms() >= before);
+    let ttl = crate::media_viewer::viewer_ttl(&sd, sd.fetched_at_ms() + 2_500).unwrap();
     assert_eq!(ttl.seconds_left(), Some(8));
     // A second open does not restart a running timer.
     apply_json(
@@ -321,7 +315,7 @@ fn opening_a_timed_photo_starts_its_countdown() {
         r#"{"@type":"updateMessageContentOpened","chat_id":43,"message_id":902}"#,
     );
     let again = session.histories[&43].messages[&902].self_destruct.unwrap();
-    assert_eq!(again.fetched_at_ms, sd.fetched_at_ms);
+    assert_eq!(again.fetched_at_ms(), sd.fetched_at_ms());
 }
 
 #[test]

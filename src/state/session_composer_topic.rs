@@ -54,7 +54,7 @@ impl Session {
     pub(crate) fn topic_of_message(&self, chat_id: ChatId, message_id: MessageId) -> Option<i32> {
         if let Some(topic) = self
             .reply_target(chat_id, message_id)
-            .and_then(|message| message.extras.forum_topic_id)
+            .and_then(|message| message.extras.forum_topic_id())
         {
             return Some(topic);
         }

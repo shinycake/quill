@@ -12,8 +12,6 @@ fn test_message(chat_id: i64, id: i64, outgoing: bool, text: &str) -> ParsedMess
         media_album_id: 0,
         author_signature: None,
         ephemeral: None,
-        topic_id: None,
-        thread_id: None,
         content: MessageContent::Text(TextContent::plain(text)),
         files: Vec::new(),
         reply_to: None,
@@ -24,7 +22,6 @@ fn test_message(chat_id: i64, id: i64, outgoing: bool, text: &str) -> ParsedMess
         self_destruct: None,
         auto_delete: None,
         scheduling_state: None,
-        can_retry: false,
         send_state: Default::default(),
     }
 }

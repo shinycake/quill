@@ -172,9 +172,7 @@ impl Session {
 pub(crate) fn history_message(message: ParsedMessage, pending: bool) -> HistoryMessage {
     use crate::telegram::envelope::MessageSendState;
     let send = match message.send_state {
-        MessageSendState::Failed => SendState::Failed {
-            can_retry: message.can_retry,
-        },
+        MessageSendState::Failed { can_retry } => SendState::Failed { can_retry },
         MessageSendState::Pending => SendState::Sending,
         MessageSendState::Sent if pending => SendState::Sending,
         MessageSendState::Sent => SendState::Sent,

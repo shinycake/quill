@@ -108,7 +108,7 @@ pub struct ParsedRtcServer {
     pub peer_tag: Vec<u8>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReadyParams {
     pub encryption_key: Vec<u8>,
     pub library_versions: Vec<String>,
@@ -130,7 +130,9 @@ pub enum CallState {
         is_received: bool,
     },
     ExchangingKeys,
-    Ready,
+    /// `callStateReady`: the key, servers and the rest the media transport
+    /// connects with.
+    Ready(ReadyParams),
     HangingUp,
     Discarded {
         reason: CallDiscardReason,
@@ -144,6 +146,59 @@ pub enum CallState {
         code: i32,
     },
     Unknown(String),
+}
+
+impl ReadyParams {
+    /// A `callStateReady` value.
+    fn parse(state: &Value) -> Self {
+        Self {
+            library_versions: state
+                .get("protocol")
+                .and_then(|protocol| protocol.get("library_versions"))
+                .and_then(Value::as_array)
+                .map(|versions| {
+                    versions
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            custom_parameters: state
+                .get("custom_parameters")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            encryption_key: state
+                .get("encryption_key")
+                .and_then(Value::as_str)
+                .and_then(|key| STANDARD.decode(key).ok())
+                .unwrap_or_default(),
+            servers: state
+                .get("servers")
+                .and_then(Value::as_array)
+                .map(|servers| servers.iter().filter_map(parse_rtc_server).collect())
+                .unwrap_or_default(),
+            allow_p2p: state
+                .get("allow_p2p")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            emojis: state
+                .get("emojis")
+                .and_then(Value::as_array)
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            is_group_call_supported: state
+                .get("is_group_call_supported")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }
+    }
 }
 
 impl CallState {
@@ -165,7 +220,7 @@ impl CallState {
                     .unwrap_or(false),
             },
             "callStateExchangingKeys" => CallState::ExchangingKeys,
-            "callStateReady" => CallState::Ready,
+            "callStateReady" => CallState::Ready(ReadyParams::parse(value)),
             "callStateHangingUp" => CallState::HangingUp,
             "callStateDiscarded" => CallState::Discarded {
                 reason: CallDiscardReason::from_value(value.get("reason")),
@@ -194,6 +249,19 @@ impl CallState {
             }
             other => CallState::Unknown(other.to_string()),
         }
+    }
+
+    /// The connection parameters of a ready call.
+    pub fn ready(&self) -> Option<&ReadyParams> {
+        match self {
+            Self::Ready(params) => Some(params),
+            _ => None,
+        }
+    }
+
+    /// Whether the call is ready (keys exchanged, media may connect).
+    pub fn is_ready(&self) -> bool {
+        matches!(self, Self::Ready(_))
     }
 
     /// Terminal states end the tracked call. `Unknown` is deliberately
@@ -274,61 +342,18 @@ pub struct ParsedCall {
     pub is_outgoing: bool,
     pub is_video: bool,
     pub state: CallState,
-    pub ready: Option<ReadyParams>,
+}
+
+impl ParsedCall {
+    /// The connection parameters, once the call is ready.
+    pub fn ready(&self) -> Option<&ReadyParams> {
+        self.state.ready()
+    }
 }
 
 pub(crate) fn parse_call(value: Option<&Value>) -> Option<ParsedCall> {
     let value = value?;
     let state_value = value.get("state");
-    let ready = state_value
-        .filter(|state| state.get("@type").and_then(Value::as_str) == Some("callStateReady"))
-        .map(|state| ReadyParams {
-            library_versions: state
-                .get("protocol")
-                .and_then(|protocol| protocol.get("library_versions"))
-                .and_then(Value::as_array)
-                .map(|versions| {
-                    versions
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .map(str::to_owned)
-                        .collect()
-                })
-                .unwrap_or_default(),
-            custom_parameters: state
-                .get("custom_parameters")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned(),
-            encryption_key: state
-                .get("encryption_key")
-                .and_then(Value::as_str)
-                .and_then(|key| STANDARD.decode(key).ok())
-                .unwrap_or_default(),
-            servers: state
-                .get("servers")
-                .and_then(Value::as_array)
-                .map(|servers| servers.iter().filter_map(parse_rtc_server).collect())
-                .unwrap_or_default(),
-            allow_p2p: state
-                .get("allow_p2p")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-            emojis: state
-                .get("emojis")
-                .and_then(Value::as_array)
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(Value::as_str)
-                        .map(str::to_string)
-                        .collect()
-                })
-                .unwrap_or_default(),
-            is_group_call_supported: state
-                .get("is_group_call_supported")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-        });
     Some(ParsedCall {
         id: value
             .get("id")
@@ -346,7 +371,6 @@ pub(crate) fn parse_call(value: Option<&Value>) -> Option<ParsedCall> {
             .and_then(Value::as_bool)
             .unwrap_or(false),
         state: CallState::from_value(state_value),
-        ready,
     })
 }
 
@@ -689,15 +713,23 @@ pub struct ParsedGroupCallParticipant {
     pub can_unmute_self: bool,
     pub volume_level: i32,
     pub order: String,
-    /// Phase C3a: `video_info != null` / `screen_sharing_video_info !=
-    /// null` (schema 1.8.67, line 7184).
-    pub video_enabled: bool,
-    pub screen_sharing_enabled: bool,
     /// Phase C2g: the parsed `video_info` / `screen_sharing_video_info`
-    /// channels; `None` matches the `*_enabled` flags above. The engine
-    /// subscribes to `video_info` endpoints.
+    /// channels (schema 1.8.67, line 7184); `None` when TDLib sent null.
+    /// The engine subscribes to `video_info` endpoints.
     pub video_info: Option<GroupCallVideoInfo>,
     pub screen_sharing_video_info: Option<GroupCallVideoInfo>,
+}
+
+impl ParsedGroupCallParticipant {
+    /// Phase C3a: the participant has a camera on.
+    pub fn video_enabled(&self) -> bool {
+        self.video_info.is_some()
+    }
+
+    /// The participant shares a screen.
+    pub fn screen_sharing_enabled(&self) -> bool {
+        self.screen_sharing_video_info.is_some()
+    }
 }
 
 pub(crate) fn parse_group_call_participant(
@@ -737,10 +769,6 @@ pub(crate) fn parse_group_call_participant(
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
-        video_enabled: value.get("video_info").is_some_and(|info| !info.is_null()),
-        screen_sharing_enabled: value
-            .get("screen_sharing_video_info")
-            .is_some_and(|info| !info.is_null()),
         video_info: parse_group_call_video_info(value.get("video_info")),
         screen_sharing_video_info: parse_group_call_video_info(
             value.get("screen_sharing_video_info"),

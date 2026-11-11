@@ -285,7 +285,7 @@ impl QuillApp {
         };
         let premium_mark = self
             .session()
-            .filter(|s| sticker.requires_premium && s.premium_badges_shown())
+            .filter(|s| sticker.requires_premium() && s.premium_badges_shown())
             .map(|s| crate::ui::premium_mark::premium_mark(s.my_is_premium()));
         let cell = div()
             .id(SharedString::from(format!(
@@ -374,7 +374,16 @@ impl QuillApp {
                 }
             });
         }
-        let sticker = greeting_pick(session.stickers.stickers.greeting.data().map_or(&[][..], Vec::as_slice), chat.id.0)?.clone();
+        let sticker = greeting_pick(
+            session
+                .stickers
+                .stickers
+                .greeting
+                .data()
+                .map_or(&[][..], Vec::as_slice),
+            chat.id.0,
+        )?
+        .clone();
         if let Some(file) = sticker.display_file_id()
             && let Some(live) = self.live.as_mut()
         {

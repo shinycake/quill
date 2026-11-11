@@ -105,9 +105,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         match &sent {
             Ok(Some(_)) => self.session.stickers.stickers.greeting.begin(),
             Ok(None) => {}
-            Err(_) => self.session.stickers.stickers.greeting.fail(crate::lang::tr(
-                crate::lang::keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN,
-            )),
+            Err(_) => self
+                .session
+                .stickers
+                .stickers
+                .greeting
+                .fail(crate::lang::tr(
+                    crate::lang::keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN,
+                )),
         }
         sent
     }
@@ -634,11 +639,17 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .take_purpose(RequestPurpose::SuggestStickers),
             );
             self.session.stickers.stickers.suggestions.clear();
-            self.session.stickers.stickers.suggest_for = crate::state::SuggestFor::WaitingForSets(emoji.to_string());
+            self.session.stickers.stickers.suggest_for =
+                crate::state::SuggestFor::WaitingForSets(emoji.to_string());
             return self.refresh_installed_sticker_sets();
         }
         if self.session.stickers.stickers.suggest_for.emoji() == Some(emoji)
-            && !self.session.stickers.stickers.suggest_for.waiting_for_sets()
+            && !self
+                .session
+                .stickers
+                .stickers
+                .suggest_for
+                .waiting_for_sets()
         {
             return Ok(None);
         }
@@ -647,7 +658,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .requests
                 .take_purpose(RequestPurpose::SuggestStickers),
         );
-        self.session.stickers.stickers.suggest_for = crate::state::SuggestFor::Asked(emoji.to_string());
+        self.session.stickers.stickers.suggest_for =
+            crate::state::SuggestFor::Asked(emoji.to_string());
         let extra = self.session.request(RequestPurpose::SuggestStickers, None);
         match self
             .sender

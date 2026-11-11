@@ -177,7 +177,9 @@ fn an_edit_from_a_replaced_field_is_ignored(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     seed(&app, vcx);
     type_into_field(&app, vcx, "budget");
-    let old = app.read_with(vcx, |app, _| app.media_search.input().cloned().expect("the field"));
+    let old = app.read_with(vcx, |app, _| {
+        app.media_search.input().cloned().expect("the field")
+    });
     change_tab_in_state(&app, vcx, SharedMediaTab::Links);
     assert_ne!(
         old.entity_id(),
@@ -202,7 +204,9 @@ fn typing_focus_moves_to_the_new_field_when_the_tab_changes(cx: &mut TestAppCont
     let vcx = &mut vcx;
     seed(&app, vcx);
     set_links_count(&app, vcx, 24);
-    let old = app.read_with(vcx, |app, _| app.media_search.input().cloned().expect("the field"));
+    let old = app.read_with(vcx, |app, _| {
+        app.media_search.input().cloned().expect("the field")
+    });
     vcx.update(|window, cx| old.update(cx, |input, cx| input.focus(window, cx)));
     change_tab_in_state(&app, vcx, SharedMediaTab::Links);
     let focused = vcx.update(|window, cx| {
@@ -236,7 +240,9 @@ fn a_tab_without_a_drawn_field_takes_no_focus(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     seed(&app, vcx);
     set_links_count(&app, vcx, 3);
-    let old = app.read_with(vcx, |app, _| app.media_search.input().cloned().expect("the field"));
+    let old = app.read_with(vcx, |app, _| {
+        app.media_search.input().cloned().expect("the field")
+    });
     vcx.update(|window, cx| old.update(cx, |input, cx| input.focus(window, cx)));
     change_tab_in_state(&app, vcx, SharedMediaTab::Links);
     assert!(vcx.debug_bounds("shared-media-search").is_none());

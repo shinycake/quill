@@ -129,7 +129,7 @@ impl QuillApp {
             .filter_map(|member| match member.member_id {
                 MessageSender::User { user_id } => Some(OwnerCandidate {
                     user_id,
-                    status: member.status,
+                    status: member.status(),
                     is_bot: session.is_bot_user(user_id),
                 }),
                 MessageSender::Chat { .. } => None,

@@ -10,24 +10,24 @@ const INLINE_CLIP_MAX: i64 = 5 * 1024 * 1024;
 impl Session {
     pub(crate) fn upsert_file(&mut self, file: ParsedFile, from_file_update: bool) {
         // The file on disk changed: drop the sandbox verdicts for its path.
-        if !file.local.path.is_empty() {
-            crate::local_path::invalidate_display_path(&file.local.path);
+        if !file.local.path().is_empty() {
+            crate::local_path::invalidate_display_path(&file.local.path());
         }
         if !from_file_update
             && self.media.files.get(&file.id.0).is_some_and(|current| {
                 (current.usable_path().is_some() && file.usable_path().is_none())
-                    || (current.local.is_downloading_active && file.local.is_idle_incomplete())
+                    || (current.local.is_downloading_active() && file.local.is_idle_incomplete())
             })
         {
             return;
         }
         let id = file.id.0;
         let idle_incomplete = file.local.is_idle_incomplete();
-        if file.local.is_downloading_completed {
+        if file.local.is_downloading_completed() {
             self.record_completed_user_download(id);
             self.media.downloads.forget(id);
         }
-        if from_file_update && !file.local.is_downloading_active {
+        if from_file_update && !file.local.is_downloading_active() {
             self.media.downloads.confirm_cancel(id);
         }
         let paused = self.media.downloads.is_paused(id);
@@ -38,8 +38,8 @@ impl Session {
             // cancels are no longer requested.
             self.media.downloads.end(id);
         }
-        if file.local.is_downloading_completed
-            || !file.local.can_be_downloaded
+        if file.local.is_downloading_completed()
+            || !file.local.can_be_downloaded()
             || (from_file_update && idle_incomplete && !paused)
         {
             self.unstick_download(id);
@@ -97,8 +97,8 @@ impl Session {
             .collect();
         media.files.evict(|file| {
             let id = file.id.0;
-            file.local.is_downloading_active
-                || file.uploading
+            file.local.is_downloading_active()
+                || file.local.is_uploading()
                 || downloads.is_requested(id)
                 || downloads.is_paused(id)
                 || downloads.is_user(id)
@@ -166,7 +166,7 @@ impl Session {
             // device, a resume) is not requested a second time. After our
             // own request ended, TDLib's idle update is what clears it.
             Some(file)
-                if file.local.is_downloading_active
+                if file.local.is_downloading_active()
                     && !self.media.downloads.has_record(file_id.0) =>
             {
                 false
@@ -174,7 +174,7 @@ impl Session {
             // Cancelled, TDLib's idle update still on its way: an automatic
             // download must not undo the cancel.
             Some(file)
-                if file.local.is_downloading_active
+                if file.local.is_downloading_active()
                     && self.media.downloads.is_cancelling(file_id.0) =>
             {
                 false

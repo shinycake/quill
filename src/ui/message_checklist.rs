@@ -38,11 +38,9 @@ pub(super) fn completion_caption(
     session: Option<&Session>,
     task: &ChecklistTask,
 ) -> Option<String> {
-    if !task.is_done() {
-        return None;
-    }
-    let when = format_unix_date_time(i64::from(task.completion_date));
-    Some(match &task.completed_by {
+    let completion = task.completion.as_ref()?;
+    let when = format_unix_date_time(i64::from(completion.date));
+    Some(match &completion.by {
         Some(sender) => format!("{} · {when}", completer_name(session, sender)),
         None => when,
     })
@@ -214,8 +212,7 @@ mod tests {
         let task = ChecklistTask {
             id: 1,
             text: "Passport".into(),
-            completed_by: None,
-            completion_date: 0,
+            completion: None,
         };
         assert_eq!(completion_caption(None, &task), None);
     }
@@ -225,8 +222,10 @@ mod tests {
         let task = ChecklistTask {
             id: 1,
             text: "Passport".into(),
-            completed_by: Some(MessageSender::User { user_id: 7 }),
-            completion_date: 1_700_000_000,
+            completion: Some(quill::telegram::envelope::TaskCompletion {
+                by: Some(MessageSender::User { user_id: 7 }),
+                date: 1_700_000_000,
+            }),
         };
         let caption = completion_caption(None, &task).unwrap();
         assert!(caption.starts_with("User 7 · "), "{caption}");

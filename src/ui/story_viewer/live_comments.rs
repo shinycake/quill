@@ -260,7 +260,7 @@ impl QuillApp {
                 .filter(|file_id| {
                     file_id.0 != 0
                         && !session.media.files.get(&file_id.0).is_some_and(|file| {
-                            file.usable_path().is_some() || file.local.is_downloading_active
+                            file.usable_path().is_some() || file.local.is_downloading_active()
                         })
                 })
                 .collect();

@@ -53,9 +53,7 @@ impl QuillApp {
         let start = self
             .session()
             .and_then(|s| s.histories.get(&chat_id.0)?.messages.get(&message_id.0))
-            .is_some_and(|m| {
-                !m.is_outgoing && m.self_destruct.is_some_and(|sd| sd.expires_in_ms <= 0)
-            });
+            .is_some_and(|m| !m.is_outgoing && m.self_destruct.is_some_and(|sd| !sd.is_counting()));
         if !start {
             return;
         }

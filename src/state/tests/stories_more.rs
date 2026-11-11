@@ -872,8 +872,7 @@ fn story_custom_emoji_stickers_are_bounded() {
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,
-        requires_premium: false,
-        premium_animation: None,
+        premium: None,
     };
     let total = crate::state::STORY_CUSTOM_EMOJI_CAP as i64 * 3;
     for id in 1..=total {

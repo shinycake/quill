@@ -106,7 +106,8 @@ impl QuillApp {
         let mut built: Vec<Tile> = Vec::new();
         for participant in call.participants.iter() {
             let own_camera = participant.is_current_user && call.is_my_video_enabled;
-            if !own_camera && !participant.video_enabled && !participant.screen_sharing_enabled {
+            if !own_camera && !participant.video_enabled() && !participant.screen_sharing_enabled()
+            {
                 continue;
             }
             let name = self.group_call_participant_name(&participant.participant_id);
@@ -124,7 +125,7 @@ impl QuillApp {
                         .then_some(PictureState::LivePaused { wide: contain }),
                     own: true,
                 });
-            } else if participant.video_enabled {
+            } else if participant.video_enabled() {
                 let paused = participant
                     .video_info
                     .as_ref()
@@ -144,7 +145,7 @@ impl QuillApp {
                     });
                 }
             }
-            if participant.screen_sharing_enabled {
+            if participant.screen_sharing_enabled() {
                 // Your own hidden window shows paused at once, before the
                 // participant update.
                 let paused = participant
@@ -332,9 +333,9 @@ fn call_streams(call: &ActiveGroupCall, key: LiveKey) -> bool {
         } => call.participants.iter().any(|participant| {
             participant.participant_id == MessageSender::User { user_id }
                 && if screen {
-                    participant.screen_sharing_enabled
+                    participant.screen_sharing_enabled()
                 } else {
-                    participant.video_enabled
+                    participant.video_enabled()
                 }
         }),
     }

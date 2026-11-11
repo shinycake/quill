@@ -115,6 +115,7 @@ impl QuillApp {
         if self.demo_session.is_some() {
             return;
         }
+        quill::system_accent::refresh();
         self.preferences.system_accent = quill::system_accent::read();
         self.preferences.system_accent_probed = true;
         if quill::system_accent::pending() && self.preferences.system_accent_poll.is_none() {

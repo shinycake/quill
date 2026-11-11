@@ -16,8 +16,6 @@ fn edit_scheduled_message_refreshes_scheduled_list_not_history() {
         date: 0,
         is_outgoing: true,
         is_pinned: false,
-        topic_id: None,
-        thread_id: None,
         ephemeral: None,
         media_album_id: 0,
         author_signature: None,
@@ -25,7 +23,6 @@ fn edit_scheduled_message_refreshes_scheduled_list_not_history() {
             send_date: 999,
             repeat_period: 0,
         }),
-        can_retry: false,
         send_state: Default::default(),
         content: MessageContent::Text("scheduled draft".into()),
         files: Vec::new(),
@@ -249,8 +246,8 @@ fn private_draft_restores_and_dirty_update_is_ignored() {
     );
     assert!(session.accepts_composer_draft(ChatId(11), DraftTopic::Chat));
     let draft = session.chats.get(&11).unwrap().draft.clone().unwrap();
-    assert_eq!(draft.text, "meet at 6");
-    assert_eq!(draft.reply_to_message_id, Some(MessageId(101)));
+    assert_eq!(draft.text(), "meet at 6");
+    assert_eq!(draft.reply_to_message_id(), Some(MessageId(101)));
     assert!(
         session
             .chats
@@ -267,7 +264,14 @@ fn private_draft_restores_and_dirty_update_is_ignored() {
         r#"{"@type":"updateChatDraftMessage","chat_id":11,"draft_message":{"@type":"draftMessage","reply_to":null,"date":2,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"stale","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null},"positions":[]}"#,
     );
     assert_eq!(
-        session.chats.get(&11).unwrap().draft.as_ref().unwrap().text,
+        session
+            .chats
+            .get(&11)
+            .unwrap()
+            .draft
+            .as_ref()
+            .unwrap()
+            .text(),
         "meet at 6"
     );
     apply_json(
@@ -604,8 +608,7 @@ fn update_story_deleted_removes_cache_and_tray() {
             content: crate::telegram::envelope::StoryContentView::Unsupported,
             caption: String::new(),
             caption_entities: Vec::new(),
-            chosen_reaction_emoji: None,
-            chosen_reaction_extra: None,
+            chosen_reaction: None,
             interaction_info: None,
             can_be_deleted: false,
             can_be_replied: false,

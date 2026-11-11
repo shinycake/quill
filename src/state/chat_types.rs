@@ -597,7 +597,7 @@ impl ChatSummary {
             return None;
         }
         let text = draft.preview_text().replace('\n', " ").trim().to_string();
-        let reply = draft.reply_to_message_id.is_some();
+        let reply = draft.reply.is_some();
         (!text.is_empty() || reply).then_some(DraftPreview { text, reply })
     }
 
@@ -644,7 +644,7 @@ impl ChatSummary {
         }
         match last.send_state {
             MessageSendState::Pending => RowStatus::Sending,
-            MessageSendState::Failed => RowStatus::Failed,
+            MessageSendState::Failed { .. } => RowStatus::Failed,
             MessageSendState::Sent => match self.last_message_receipt() {
                 OutboxReceipt::Read => RowStatus::Read,
                 OutboxReceipt::Sent => RowStatus::Sent,

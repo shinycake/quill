@@ -30,7 +30,7 @@ impl QuillApp {
         members
             .iter()
             .find(|m| m.member_id == MessageSender::User { user_id })
-            .and_then(|m| m.restriction)
+            .and_then(|m| m.restriction())
     }
 }
 

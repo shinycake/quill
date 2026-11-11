@@ -470,8 +470,7 @@ mod tests {
         let sd = |kind| {
             Some(MessageSelfDestruct {
                 kind,
-                expires_in_ms: 0,
-                fetched_at_ms: 0,
+                clock: crate::telegram::envelope::SelfDestructClock::from_ms(0, 0),
             })
         };
         let mut photo = photo_message(7, 5, vec![(70, 100, 100)], "");

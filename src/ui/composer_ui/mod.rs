@@ -104,8 +104,7 @@ pub(super) fn apply_ready_sticker_playback(
                 thumb_file_id: None,
                 thumb_width: 0,
                 thumb_height: 0,
-                requires_premium: false,
-                premium_animation: None,
+                premium: None,
             });
     }
     for id in [101, 102, 103, 401] {

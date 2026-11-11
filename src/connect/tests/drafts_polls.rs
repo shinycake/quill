@@ -218,8 +218,8 @@ fn private_draft_debounces_then_flushes_and_skips_channels() {
             )
             .unwrap();
     let restored = driver.session.chats.get(&7).unwrap().draft.clone().unwrap();
-    assert_eq!(restored.text, "meet at 6");
-    assert_eq!(restored.reply_to_message_id, Some(MessageId(3)));
+    assert_eq!(restored.text(), "meet at 6");
+    assert_eq!(restored.reply_to_message_id(), Some(MessageId(3)));
     let outcome = driver
         .note_composer_draft(ChatId(7), "meet at 6!", None, 1_000, true)
         .unwrap();
@@ -248,7 +248,7 @@ fn private_draft_debounces_then_flushes_and_skips_channels() {
             .draft
             .as_ref()
             .unwrap()
-            .text,
+            .text(),
         "meet at 6!"
     );
     let flushed = driver
@@ -391,10 +391,10 @@ fn quoted_draft_round_trips_input_text_quote() {
     assert!(draft_json.contains("\"inputTextQuote\""));
     assert!(draft_json.contains("meet at"));
     let saved = driver.session.chats.get(&7).unwrap().draft.clone().unwrap();
-    assert_eq!(saved.text, "sounds good");
-    assert_eq!(saved.reply_to_message_id, Some(MessageId(3)));
+    assert_eq!(saved.text(), "sounds good");
+    assert_eq!(saved.reply_to_message_id(), Some(MessageId(3)));
     assert_eq!(
-        saved.quote,
+        saved.quote().cloned(),
         Some(crate::composer::QuoteSelection::plain("meet at", 0))
     );
     assert!(!sink.rendered().contains("CANARY"));
@@ -486,8 +486,8 @@ fn search_open_flushes_leaving_draft_and_media_send_drops_reply() {
         .unwrap();
     assert_eq!(driver.session.open_chat, Some(ChatId(8)));
     let saved = driver.session.chats.get(&7).unwrap().draft.clone().unwrap();
-    assert_eq!(saved.text, "hello");
-    assert_eq!(saved.reply_to_message_id, Some(MessageId(3)));
+    assert_eq!(saved.text(), "hello");
+    assert_eq!(saved.reply_to_message_id(), Some(MessageId(3)));
     let sent = recorder.snapshot();
     assert!(sent.iter().any(|json| {
         json.contains("setChatDraftMessage")
@@ -509,8 +509,8 @@ fn search_open_flushes_leaving_draft_and_media_send_drops_reply() {
         .note_composer_draft(ChatId(7), "caption", None, 2_100, false)
         .unwrap();
     let after = driver.session.chats.get(&7).unwrap().draft.clone().unwrap();
-    assert_eq!(after.text, "caption");
-    assert_eq!(after.reply_to_message_id, None);
+    assert_eq!(after.text(), "caption");
+    assert_eq!(after.reply_to_message_id(), None);
     driver
         .note_composer_draft(
             ChatId(7),

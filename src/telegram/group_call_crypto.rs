@@ -25,7 +25,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -254,14 +254,23 @@ enum Outcome {
 /// nothing without a call id.
 pub struct GroupCallCrypto {
     link: Arc<dyn CryptoLink>,
-    /// TDLib's group call id; 0 while there is none.
-    group_call_id: AtomicI32,
+    /// Whether the call is bound; a bound call has TDLib's request log
+    /// hidden.
+    stage: Mutex<CryptoStage>,
     timeout: Duration,
     /// This call's requests waiting for TDLib, so unbinding wakes them.
     in_flight: Mutex<HashSet<u64>>,
-    /// The request log is hidden for this call.
-    hiding_log: AtomicBool,
     stats: Stats,
+}
+
+/// Where the call's encryption stands.
+#[derive(Clone, Copy)]
+enum CryptoStage {
+    /// No call id: every frame is dropped.
+    Unbound,
+    /// TDLib's group call id, with the request log hidden until the call
+    /// is unbound.
+    Bound { group_call_id: i32 },
 }
 
 impl GroupCallCrypto {
@@ -272,10 +281,9 @@ impl GroupCallCrypto {
     pub fn with_timeout(link: Arc<dyn CryptoLink>, timeout: Duration) -> Self {
         Self {
             link,
-            group_call_id: AtomicI32::new(0),
+            stage: Mutex::new(CryptoStage::Unbound),
             timeout,
             in_flight: Mutex::new(HashSet::new()),
-            hiding_log: AtomicBool::new(false),
             stats: Stats::default(),
         }
     }
@@ -284,17 +292,24 @@ impl GroupCallCrypto {
     /// answered with it (tdesktop `setCallId`). TDLib's request log stops
     /// writing frames first.
     pub fn bind(&self, group_call_id: i32) {
-        if !self.hiding_log.swap(true, Ordering::SeqCst) {
+        let first = matches!(
+            *crate::locks::lock_or_recover(&self.stage),
+            CryptoStage::Unbound
+        );
+        if first {
             self.link.hide_request_log(true);
         }
-        self.group_call_id.store(group_call_id, Ordering::SeqCst);
+        *crate::locks::lock_or_recover(&self.stage) = CryptoStage::Bound { group_call_id };
     }
 
     /// The call is over (tdesktop `clearCallId`): frames still waiting on
     /// TDLib are dropped at once, later ones without asking, and the
     /// call's round trips go to the calls log.
     pub fn unbind(&self) {
-        let was = self.group_call_id.swap(0, Ordering::SeqCst);
+        let was = std::mem::replace(
+            &mut *crate::locks::lock_or_recover(&self.stage),
+            CryptoStage::Unbound,
+        );
         let waiting: Vec<u64> = crate::locks::lock_or_recover(&self.in_flight)
             .drain()
             .collect();
@@ -304,13 +319,13 @@ impl GroupCallCrypto {
                 pending.remove(&id);
             }
         }
-        if self.hiding_log.swap(false, Ordering::SeqCst) {
+        if let CryptoStage::Bound { group_call_id } = was {
             self.link.hide_request_log(false);
-        }
-        if was != 0 {
-            let stats = self.stats.take();
-            if stats.round_trips > 0 {
-                crate::advanced::debug_mode::call_log(&stats.log_line(was));
+            if group_call_id != 0 {
+                let stats = self.stats.take();
+                if stats.round_trips > 0 {
+                    crate::advanced::debug_mode::call_log(&stats.log_line(group_call_id));
+                }
             }
         }
     }
@@ -322,9 +337,9 @@ impl GroupCallCrypto {
     }
 
     pub fn group_call_id(&self) -> Option<i32> {
-        match self.group_call_id.load(Ordering::SeqCst) {
-            0 => None,
-            id => Some(id),
+        match *crate::locks::lock_or_recover(&self.stage) {
+            CryptoStage::Bound { group_call_id } if group_call_id != 0 => Some(group_call_id),
+            _ => None,
         }
     }
 
@@ -375,7 +390,8 @@ impl GroupCallCrypto {
 
 impl Drop for GroupCallCrypto {
     fn drop(&mut self) {
-        if self.hiding_log.swap(false, Ordering::SeqCst) {
+        let stage = *crate::locks::lock_or_recover(&self.stage);
+        if let CryptoStage::Bound { .. } = stage {
             self.link.hide_request_log(false);
         }
     }

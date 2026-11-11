@@ -23,7 +23,6 @@ use quill::local_path::sandboxed_display_path;
 use quill::story_extras::{
     CloseFriendsEdit, CloseFriendsStage, can_save_story, story_link, video_finished, video_progress,
 };
-use quill::story_viewer::StoryViewerKind;
 use quill::telegram::envelope::{ChatKind, StoryListView};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -56,7 +55,7 @@ impl QuillApp {
     /// The current video story's clip, once it is a local sandboxed file.
     pub(in crate::ui) fn story_video_path(&self) -> Option<PathBuf> {
         let item = self.stories.viewer.current()?;
-        let file_id = item.video_file_id?;
+        let file_id = item.video_file_id()?;
         let roots = self.media_display_roots();
         self.session()?
             .media
@@ -79,8 +78,8 @@ impl QuillApp {
         let Some(item) = self.stories.viewer.current() else {
             return false;
         };
-        item.kind == StoryViewerKind::Video
-            && item.video_file_id.is_some()
+        item.is_video()
+            && item.video_file_id().is_some()
             && super::video_player::supported()
             && !self.stories.video.failed_for(self.story_key())
     }
@@ -118,7 +117,7 @@ impl QuillApp {
                 .stories
                 .viewer
                 .current()
-                .and_then(|item| item.duration_secs)
+                .and_then(|item| item.duration_secs())
                 .map(f64::from);
             match VideoPlayer::open(&path, Purpose::Story, duration, cx) {
                 Ok(player) => {
@@ -146,7 +145,7 @@ impl QuillApp {
             self.stories
                 .viewer
                 .current()
-                .and_then(|item| item.video_file_id)
+                .and_then(|item| item.video_file_id())
                 .is_some_and(|id| {
                     file_is_downloading(id, &session.media.files, &session.media.downloads)
                 })
@@ -201,7 +200,7 @@ impl QuillApp {
                     self.stories
                         .viewer
                         .current()
-                        .and_then(|item| item.duration_secs)
+                        .and_then(|item| item.duration_secs())
                         .map(f64::from)
                 })
                 .unwrap_or(0.0);
@@ -227,7 +226,7 @@ impl QuillApp {
                     self.stories
                         .viewer
                         .current()
-                        .and_then(|item| item.duration_secs)
+                        .and_then(|item| item.duration_secs())
                         .map(f64::from)
                 })
                 .unwrap_or(0.0);
@@ -387,7 +386,7 @@ impl QuillApp {
         let source = {
             let session = self.session();
             let ids = item
-                .video_file_id
+                .video_file_id()
                 .into_iter()
                 .chain(item.display_file_ids.iter().copied());
             session.and_then(|session| {

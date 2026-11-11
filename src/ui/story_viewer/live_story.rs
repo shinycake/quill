@@ -26,7 +26,7 @@ use quill::telegram::envelope::StoryContentView;
 /// The live story under the viewer: `(poster, story)` when the current
 /// item is one.
 pub(super) fn live_item(item: Option<&StoryViewerItem>) -> Option<(ChatId, i32)> {
-    item.filter(|item| item.kind == StoryViewerKind::Live && item.live_call.is_some())
+    item.filter(|item| item.live_call().is_some())
         .map(|item| (item.chat_id, item.story_id))
 }
 

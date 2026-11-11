@@ -275,7 +275,7 @@ fn replay_supergroup_members_picker_cache() {
     assert_eq!(page.len(), 2);
     assert_eq!(member_user_id(&page[0]), 5);
     assert_eq!(member_user_id(&page[1]), 6);
-    assert!(page[1].admin_rights.is_some());
+    assert!(page[1].admin_rights().is_some());
 
     // A TDLib error records a failed fetch with the action label.
     let retry_extra = session.request(

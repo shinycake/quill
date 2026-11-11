@@ -151,18 +151,16 @@ pub enum ReportStoryResult {
 pub struct StoryInteractionView {
     pub actor: MessageSender,
     pub interaction_date: i32,
-    pub reaction_emoji: Option<String>,
-    /// Phase 9.2+: the non-emoji half of the viewer's chosen reaction
-    /// (`reactionTypeCustomEmoji` / `reactionTypePaid`) — same split as
-    /// `ParsedStory::chosen_reaction_extra`.
-    pub reaction_extra: Option<StoryChosenExtraReaction>,
+    /// The viewer's chosen reaction, if any (same as
+    /// `ParsedStory::chosen_reaction`).
+    pub reaction: Option<StoryReaction>,
     pub kind: StoryInteractionKind,
 }
 
 impl StoryInteractionView {
     /// Short row suffix: the chosen reaction, or the interaction kind.
     pub fn kind_label(&self) -> String {
-        if let Some(emoji) = self.reaction_emoji.as_deref() {
+        if let Some(emoji) = StoryReaction::emoji(&self.reaction) {
             return emoji.to_string();
         }
         match self.kind {
@@ -349,7 +347,7 @@ pub(crate) fn parse_story_interactions(value: &Value) -> StoryInteractionsView {
                 continue;
             };
             let interaction_type = entry.get("type");
-            let (kind, (reaction_emoji, reaction_extra)) = match interaction_type
+            let (kind, reaction) = match interaction_type
                 .and_then(|t| t.get("@type"))
                 .and_then(Value::as_str)
             {
@@ -359,10 +357,8 @@ pub(crate) fn parse_story_interactions(value: &Value) -> StoryInteractionsView {
                         interaction_type.and_then(|t| t.get("chosen_reaction_type")),
                     ),
                 ),
-                Some("storyInteractionTypeForward") => {
-                    (StoryInteractionKind::Forward, (None, None))
-                }
-                Some("storyInteractionTypeRepost") => (StoryInteractionKind::Repost, (None, None)),
+                Some("storyInteractionTypeForward") => (StoryInteractionKind::Forward, None),
+                Some("storyInteractionTypeRepost") => (StoryInteractionKind::Repost, None),
                 _ => continue,
             };
             interactions.push(StoryInteractionView {
@@ -372,8 +368,7 @@ pub(crate) fn parse_story_interactions(value: &Value) -> StoryInteractionsView {
                     .and_then(Value::as_i64)
                     .unwrap_or(0)
                     .sat_i32(),
-                reaction_emoji,
-                reaction_extra,
+                reaction,
                 kind,
             });
         }

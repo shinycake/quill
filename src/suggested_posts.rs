@@ -15,7 +15,7 @@
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::local_time::{CivilTime, hhmm, month_name};
 use serde_json::{Value, json};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Nano-Grams in one Gram cent (TDLib prices Grams in 1/100 Gram).
 const NANOS_PER_GRAM_CENT: i64 = 10_000_000;
@@ -715,8 +715,6 @@ pub struct SuggestedPostsState {
     pub bars: HashMap<i64, SuggestBar>,
     /// `updateOwnedGramCount`: the account's Grams in nano-Grams.
     pub gram_balance: Option<i64>,
-    /// Suggestions with an approve or decline in flight.
-    pub busy: HashSet<(i64, i64)>,
     /// One-shot errors the UI shows as toasts.
     pub notes: Vec<String>,
     /// Requests refused with `BALANCE_TOO_LOW`: the UI asks for a top-up
@@ -725,17 +723,6 @@ pub struct SuggestedPostsState {
 }
 
 impl SuggestedPostsState {
-    /// An approve or decline answered (or failed): its post is free again.
-    /// An offer's answer is not that request's.
-    pub fn settle_busy(&mut self, purpose: SuggestedPostPurpose) {
-        if matches!(
-            purpose,
-            SuggestedPostPurpose::Approve { .. } | SuggestedPostPurpose::Decline { .. }
-        ) {
-            self.busy.remove(&purpose.key());
-        }
-    }
-
     pub fn bar(&self, chat_id: ChatId) -> Option<&SuggestBar> {
         self.bars.get(&chat_id.0)
     }

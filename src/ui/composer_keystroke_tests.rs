@@ -64,7 +64,7 @@ fn a_keystroke_leaves_the_text_the_previous_text_and_the_draft_in_step(cx: &mut 
                 app.composer_ui.prev_text.clone(),
                 app.session()
                     .and_then(|session| session.draft_for(OPEN, Default::default()))
-                    .map(|draft| draft.text.clone()),
+                    .map(|draft| draft.text().to_string()),
             )
         });
         assert_eq!(prev, expected, "the previous text follows the field");

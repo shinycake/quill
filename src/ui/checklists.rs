@@ -237,13 +237,14 @@ impl QuillApp {
             return;
         }
         if let Some(task) = content.list.tasks.iter_mut().find(|t| t.id == task_id) {
-            if task.is_done() {
-                task.completion_date = 0;
-                task.completed_by = None;
+            task.completion = if task.is_done() {
+                None
             } else {
-                task.completion_date = quill::local_time::now_unix() as i32;
-                task.completed_by = me.map(|user_id| MessageSender::User { user_id });
-            }
+                Some(quill::telegram::envelope::TaskCompletion {
+                    by: me.map(|user_id| MessageSender::User { user_id }),
+                    date: quill::local_time::now_unix() as i32,
+                })
+            };
         }
     }
 
@@ -277,8 +278,7 @@ impl QuillApp {
                 .push(quill::telegram::envelope::ChecklistTask {
                     id,
                     text,
-                    completed_by: None,
-                    completion_date: 0,
+                    completion: None,
                 });
         }
     }

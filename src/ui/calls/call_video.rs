@@ -27,7 +27,6 @@ use gpui_kit::*;
 use quill::calls::engine::RemoteVideoState;
 use quill::calls::live_video::{LiveKey, LiveSink};
 use quill::state::ActiveCall;
-use quill::telegram::envelope::CallState;
 use std::cell::Cell;
 use std::sync::Arc;
 
@@ -61,7 +60,7 @@ pub(crate) fn call_picture_key(
     let (local, screen) = match picture {
         CallPicture::Local => (true, false),
         CallPicture::Remote => {
-            if !matches!(call.state, CallState::Ready) {
+            if !call.state.is_ready() {
                 return None;
             }
             if call.remote_screen == RemoteVideoState::Active {
@@ -371,6 +370,7 @@ impl Render for CallWindowRoot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use quill::telegram::envelope::CallState;
     // `gpui_kit::*` above brings its own `test` attribute; these are plain.
     use core::prelude::v1::test;
     use quill::calls::engine::RemoteVideoState::{Active, Inactive, Paused};
@@ -389,7 +389,6 @@ mod tests {
             state,
             started_at: Instant::now(),
             ready_at: None,
-            ready: None,
             transport: Default::default(),
             signaling_queue: Vec::new(),
             signaling_dropped: 0,
@@ -416,7 +415,7 @@ mod tests {
     fn the_peer_shows_their_screen_before_their_camera() {
         let remote = |video, screen| {
             call_picture_key(
-                &call(CallState::Ready, video, screen),
+                &call(CallState::Ready(Default::default()), video, screen),
                 CallPicture::Remote,
                 true,
             )
@@ -443,7 +442,7 @@ mod tests {
 
     #[test]
     fn your_preview_follows_the_camera() {
-        let ready = call(CallState::Ready, Inactive, Inactive);
+        let ready = call(CallState::Ready(Default::default()), Inactive, Inactive);
         assert_eq!(
             call_picture_key(&ready, CallPicture::Local, true),
             key(true, false)

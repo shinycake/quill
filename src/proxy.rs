@@ -707,9 +707,9 @@ impl ProxyList {
         match self {
             Self::Unasked => None,
             Self::Fresh(list) => Some(list),
-            Self::Loading { known, .. }
-            | Self::Stale(known)
-            | Self::Failed { known, .. } => known.as_deref(),
+            Self::Loading { known, .. } | Self::Stale(known) | Self::Failed { known, .. } => {
+                known.as_deref()
+            }
         }
     }
 
@@ -717,9 +717,7 @@ impl ProxyList {
         match std::mem::take(self) {
             Self::Unasked => None,
             Self::Fresh(list) => Some(list),
-            Self::Loading { known, .. }
-            | Self::Stale(known)
-            | Self::Failed { known, .. } => known,
+            Self::Loading { known, .. } | Self::Stale(known) | Self::Failed { known, .. } => known,
         }
     }
 
@@ -839,10 +837,7 @@ impl ProxyState {
         match &self.save {
             ProxySave::Failed(error) => Some(error),
             ProxySave::Saving { kept_error, .. } => kept_error.as_deref(),
-            ProxySave::Idle => self
-                .list
-                .error()
-                .or(self.ipv6_error.as_deref()),
+            ProxySave::Idle => self.list.error().or(self.ipv6_error.as_deref()),
         }
     }
 

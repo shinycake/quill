@@ -160,7 +160,7 @@ fn decline_sends_the_reason_and_an_error_becomes_a_note() {
         notes,
         vec!["Couldn't decline the post: invalid request.".to_string()]
     );
-    assert!(f.driver.session.payments.suggested_posts.busy.is_empty());
+    assert!(!f.driver.session.suggested_post_busy(CHAT.0, 6 << 20));
 }
 
 #[test]
