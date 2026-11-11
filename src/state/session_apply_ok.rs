@@ -801,16 +801,14 @@ impl Session {
             // Phase 6: the new contact arrives via `updateUser`
             // (`is_contact` flips); invalidate the list so the
             // contacts tab refetches it.
-            self.users_state.contacts = None;
-            self.users_state.contacts_error = false;
+            self.users_state.contacts = crate::state::fetch::Fetch::Idle;
         }
         // Slice A6: a contacts mutation landed — never optimistic:
         // the new list arrives via the `getContacts` refetch the
         // tab triggers.
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::RemoveContact) => {
-                self.users_state.contacts = None;
-                self.users_state.contacts_error = false;
+                self.users_state.contacts = crate::state::fetch::Fetch::Idle;
                 // The delete-synced-contacts batch remove shares
                 // this purpose but carries no user_id — its notice
                 // must not read as a single delete (or overwrite
@@ -844,13 +842,11 @@ impl Session {
                 }
             }
             Some(RequestPurpose::ImportContacts) => {
-                self.users_state.contacts = None;
-                self.users_state.contacts_error = false;
+                self.users_state.contacts = crate::state::fetch::Fetch::Idle;
                 self.users_state.contacts_notice = Some("Contacts imported.".to_string());
             }
             Some(RequestPurpose::ClearImportedContacts) => {
-                self.users_state.contacts = None;
-                self.users_state.contacts_error = false;
+                self.users_state.contacts = crate::state::fetch::Fetch::Idle;
                 self.users_state.contacts_notice =
                     Some("Synced contacts deleted from the servers.".to_string());
             }

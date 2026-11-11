@@ -26,11 +26,10 @@ pub struct UsersState {
     /// A group or channel's photo history, by chat id. Dropped on
     /// `updateChatPhoto`.
     pub chat_photo_history: HashMap<i64, ChatPhotosFetch>,
-    /// Phase 6: `getContacts` result — user ids, in server order. `None`
-    /// until the first `users` response; `contacts_error` records a failed
-    /// fetch so the UI can offer a retry.
-    pub contacts: Option<Vec<i64>>,
-    pub contacts_error: bool,
+    /// Phase 6: `getContacts` result — user ids, in server order. Idle
+    /// until asked (and again after a contact change invalidates it); a
+    /// failed fetch is `Failed` so the UI can offer a retry.
+    pub contacts: crate::state::fetch::Fetch<Vec<i64>>,
     /// Slice A6: outcome line for contacts mutations (`removeContacts`,
     /// `importContacts`, `clearImportedContacts`) — set on ok and on
     /// error, cleared by the next mutation; shown in the contacts
@@ -165,8 +164,7 @@ impl UsersState {
             user_profile_photos: HashMap::new(),
             chat_current_photos: HashMap::new(),
             chat_photo_history: HashMap::new(),
-            contacts: None,
-            contacts_error: false,
+            contacts: crate::state::fetch::Fetch::Idle,
             contacts_notice: None,
             replies_block: None,
             replies_blocked: Vec::new(),

@@ -18,7 +18,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.users_state.contacts.is_some()
+        if !self.session.users_state.contacts.can_ask()
             || self
                 .session
                 .requests
@@ -26,13 +26,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.session.users_state.contacts_error = false;
+        self.session.users_state.contacts.begin();
         let extra = self.session.request(RequestPurpose::GetContacts, None);
         if let Err(err) = self.sender.send_json(&get_contacts(extra)) {
             self.session.requests.take(extra);
             // Nothing is in flight: the tab shows the error and its Retry,
             // not "Loading contacts...".
-            self.session.users_state.contacts_error = true;
+            self.session
+                .users_state
+                .contacts
+                .fail_dropping_data("could not send the request");
             return Err(err);
         }
         Ok(Some(extra))
@@ -43,13 +46,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// failed waits for Retry; a send that fails ends the loading with
     /// Retry instead of leaving "Loading contacts..." up.
     pub fn refetch_invalidated_contacts(&mut self) {
-        let users = &self.session.users_state;
-        if users.contacts.is_some() || users.contacts_error {
+        if !self.session.users_state.contacts.is_idle() {
             return;
         }
-        if self.fetch_contacts().is_err() {
-            self.session.users_state.contacts_error = true;
-        }
+        let _ = self.fetch_contacts();
     }
 
     /// Phase 6: user-scoped `getUserFullInfo` for the user info panel
@@ -389,7 +389,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         sent += 1;
-        if let Some(ids) = self.session.users_state.contacts.clone()
+        if let Some(ids) = self.session.users_state.contacts.data().cloned()
             && !ids.is_empty()
         {
             let extra = self.session.request(RequestPurpose::RemoveContact, None);

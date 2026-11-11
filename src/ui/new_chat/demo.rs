@@ -90,7 +90,7 @@ impl QuillApp {
         self.demo_ingest(&updates);
         let ids: Vec<i64> = CONTACTS.iter().map(|(id, ..)| *id).collect();
         if let Some(session) = self.demo_session.as_mut() {
-            session.users_state.contacts = Some(ids.clone());
+            session.users_state.contacts = quill::state::fetch::Fetch::Ready(ids.clone());
         }
         ids.into_iter().take(picked).collect()
     }

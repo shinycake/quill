@@ -233,7 +233,8 @@ impl QuillApp {
                 let mut people: Vec<(i64, String)> = session
                     .users_state
                     .contacts
-                    .iter()
+                    .data()
+                    .into_iter()
                     .flatten()
                     .filter_map(|id| eligible(*id))
                     .filter(|(id, name)| {

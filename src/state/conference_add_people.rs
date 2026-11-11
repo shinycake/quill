@@ -154,7 +154,7 @@ impl Session {
         }
         let empty = match (rows.is_empty() && global.is_empty(), query.is_empty()) {
             (false, _) => None,
-            (true, true) if self.users_state.contacts.is_some() => Some(AddPeopleEmpty::NoContacts),
+            (true, true) if self.users_state.contacts.data().is_some() => Some(AddPeopleEmpty::NoContacts),
             (true, true) => Some(AddPeopleEmpty::ContactsLoading),
             (true, false) if search.query == query && search.is_searching() => {
                 Some(AddPeopleEmpty::SearchLoading)

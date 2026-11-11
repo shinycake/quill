@@ -180,7 +180,6 @@ fn each_saved_view_has_its_own_history_key(cx: &mut TestAppContext) {
                         emoji: emoji.to_string(),
                     },
                     history: TopicHistory::default(),
-                    loaded: true,
                     page: quill::state::SavedPage::Idle,
                 });
             }

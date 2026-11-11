@@ -55,8 +55,7 @@ impl Session {
                 } else if self.apply_web_app_users(&user_ids, pending) {
                     // Apps tab: `getGrossingWebAppBots`.
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetContacts) {
-                    self.users_state.contacts = Some(user_ids);
-                    self.users_state.contacts_error = false;
+                    self.users_state.contacts.succeed(user_ids);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCloseFriends) {
                     // B14: `getCloseFriends` answer.
                     self.stories.close_friends = CloseFriendsList::Ready(user_ids);
@@ -253,8 +252,7 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::AddContactByPhone) {
                     // tdesktop `AddContactBox::save`: a user id means the
                     // phone is on Telegram (open the chat), 0 means not.
-                    self.users_state.contacts = None;
-                    self.users_state.contacts_error = false;
+                    self.users_state.contacts = crate::state::fetch::Fetch::Idle;
                     // A box closed before its answer opens nothing.
                     let id = pending.map(|p| p.id);
                     if id.is_none() || self.users_state.new_contact_request != id {
@@ -270,8 +268,7 @@ impl Session {
                     };
                     self.users_state.new_contact_outcome = pending.map(|p| (p.id, outcome));
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::ImportContacts) {
-                    self.users_state.contacts = None;
-                    self.users_state.contacts_error = false;
+                    self.users_state.contacts = crate::state::fetch::Fetch::Idle;
                     self.users_state.contacts_notice = Some("Contacts imported.".to_string());
                 }
             }
