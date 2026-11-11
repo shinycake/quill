@@ -82,6 +82,7 @@ impl PollDialog {
     }
 
     /// The rows marked as right answers, by index.
+    #[cfg(test)]
     pub(crate) fn correct_rows(&self) -> Vec<usize> {
         self.rows
             .iter()

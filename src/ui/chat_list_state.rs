@@ -274,6 +274,26 @@ impl ChatListUi {
 /// Nothing to say: its state is the account's only app-side.
 impl super::on_screen::Farewell for ChatListUi {}
 
+impl ChatListUi {
+    /// Move the list to another category or folder tab: the one place the
+    /// view changes (also when the selected folder is deleted remotely).
+    /// The multi-select and a pinned drag belong to the view they were made
+    /// in, so a change ends both unsaved (tdesktop `changeOpenedFolder`).
+    pub(super) fn show_view(
+        &mut self,
+        folder_tab: &mut Option<i32>,
+        filter: ChatListFilter,
+        tab: Option<i32>,
+    ) {
+        if self.filter != filter || *folder_tab != tab {
+            self.selected.clear();
+            self.pin.end_drag();
+        }
+        self.filter = filter;
+        *folder_tab = tab;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -334,25 +354,5 @@ mod tests {
         assert_eq!(pin.take_press(4), Some(30.));
         assert!(matches!(pin, PinStage::Idle));
         assert!(!pin.end_drag());
-    }
-}
-
-impl ChatListUi {
-    /// Move the list to another category or folder tab: the one place the
-    /// view changes (also when the selected folder is deleted remotely).
-    /// The multi-select and a pinned drag belong to the view they were made
-    /// in, so a change ends both unsaved (tdesktop `changeOpenedFolder`).
-    pub(super) fn show_view(
-        &mut self,
-        folder_tab: &mut Option<i32>,
-        filter: ChatListFilter,
-        tab: Option<i32>,
-    ) {
-        if self.filter != filter || *folder_tab != tab {
-            self.selected.clear();
-            self.pin.end_drag();
-        }
-        self.filter = filter;
-        *folder_tab = tab;
     }
 }
