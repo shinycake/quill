@@ -70,7 +70,7 @@ fn presets_and_a_custom_date_make_the_request(cx: &mut TestAppContext) {
     vcx.update(|window, cx| window.click("invite-link-approval", cx));
     frames(vcx);
     let approving = form(&app, vcx).expect("box");
-    assert!(approving.request_approval);
+    assert!(approving.approving());
     assert!(
         vcx.update(|window, _| window.try_find("invite-link-usage"))
             .is_none()
@@ -78,7 +78,7 @@ fn presets_and_a_custom_date_make_the_request(cx: &mut TestAppContext) {
     vcx.update(|window, cx| window.click("invite-link-subscription", cx));
     frames(vcx);
     let paid = form(&app, vcx).expect("box");
-    assert!(paid.subscription && !paid.request_approval);
+    assert!(paid.is_subscription() && !paid.approving());
     assert!(
         vcx.update(|window, _| window.try_find("invite-link-expire"))
             .is_none()

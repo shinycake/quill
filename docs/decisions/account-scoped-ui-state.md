@@ -8160,3 +8160,33 @@ Outside the bundle's files, the smallest changes: `src/ui/agent_driver.rs`,
 revoke, stream tile width and the login URL, and the tests that built the old
 shapes. `connect/messages/media_send.rs` still takes `album().len() - 1`
 unguarded; it belongs to another bundle.
+
+### Sweep fixes (r2-09)
+
+Round-2 re-sweep of 20 files (archive_mute, battery_signal, chat_bottom_bar,
+chat_swipe, chatlist_menu, chatlist_suggestions, checklist, child_reap,
+collectible_info, corner_buttons, data_settings, icon_badge,
+invite_link_form, launch_lines, launch_prewarm, local_path, local_time,
+main, marketplace, media_capture). Every file ends with no entry open.
+
+| id | result |
+| --- | --- |
+| 01-024 | `ArchiveReload` is `Idle`, `Suggested`, `Reloading(RequestId)`, `Failed`. `note_settings` and `note_reload_failed` take the request, so a fetch that predates the suggestion does not end the wait; a suggestion sends a fresh fetch even while an older one is in flight (the older answer no longer matches the `Fetch` stage). |
+| 01-025 | The listener's end runs from a drop guard (`ListenerEnd`), so a panic that `spawn_guarded` catches also returns `STATE` to not listening and the watcher polls again. |
+| 01-043, 01-042, 02-009, 02-010 | Not stages: a fact derived per render (`bot_start_pending`), facts about the chat (`is_saved`, `is_saved_messages`) and a TDLib permission (`others_can_mark_tasks_as_done`, five structs). Moved from the baseline to `implicit-state-allow.txt` with the reason. |
+| 01-041 | `Gesture::key` and `Gesture::action` are one `target: Option<(K, A)>`. |
+| 02-007 | `PhoneSuggestion { Absent, Asking, NotMine }` replaces `PhonePrompt` beside the `actions` set: the phone action carries its own stage and `answer_phone_no()` is the only way to `NotMine`. |
+| 02-011 | A child no thread could reap is parked with its notice sender; every call into `child_reap` polls the parked ones, and the notice goes out only after the child is reaped (it used to disconnect at once, read as "helper gone"). |
+| 02-006 | `LookupStage::Unsent` is gone: the UI builds a `LookupSpec`, and `request_collectible_info` constructs `CollectibleLookup` as `Loading(request)`. |
+| 03-A001 | `FastShareFacts::sent` is `send: SendState` (a local id counts as `Sending`). |
+| 03-A002, 03-A003 | `Seed` is `Unseeded`/`Seeded` only (the persisted bool). The presets request is the `Fetch` stage `auto_download_presets` (`sent(request)`, answered by its request id, failed by its error arm), which the UI reads for "loading"; the page also gets a Retry. A refused storage-limit option leaves the seed `Unseeded`, so the next Ready sends the (idempotent) options again. |
+| 03-C003, 03-C004, 03-C024 | One `BadgeStage` (`Idle`, `Pending`, `Delivered`, `Failed`) replaces `LAST_SENT`, `INVALIDATED` and `Launcher` on every platform. The Linux worker handle is held in a static and restarted when it finished or could not be spawned; its end (drop guard) hands a pending count back. The Windows overlay uses `try_borrow_mut`. The slot test uses a channel handshake, not a sleep. |
+| 03-C014 | `InviteLinkForm::kind: LinkKind { Plain { approval }, Subscription { locked_stars } }` replaces `request_approval`, `subscription` and `locked_stars`. |
+| 03-C006 | The line-layout slot writes only the first account that opened; a second account (`Mixed`) or a logged-out one (`Forgotten`) ends the write for the launch, so two accounts' chat names never share a file. |
+| 03-C005 | `GlyphSave { Pending, Saving, Saved }`; a writer that cannot be started goes back to `Pending` and the next drawn frame tries again. |
+| 03-C007 | The webm sticker worker and the file-thumbnail worker read their scratch folder before they are spawned; `sweep_account_media_cache` takes the account that logs out. The on-screen scope stays for UI-thread producers. |
+| 03-C008, 03-C023 | A display check that began before a sweep keeps no verdict (`SWEEP_GENERATION`); the sweep test joins the sweep thread. |
+| 03-C019 | `utc_offset_at` uses `try_borrow_mut` and asks the OS directly when the cell is taken. |
+| 03-C025 | The start-in-tray reveal is `tray_reveal::StartupWatch` held by the tray's chrome loop (one pass per look, a 100 ms due while it waits), not a second detached polling task. |
+| 03-C002 | `accept_result` and `fail` act only in the stages they leave. |
+| 03-C020, 03-C021, 03-C022 | A device listing that did not come back is an error ("Couldn't list the cameras and microphones"), not an empty list; the audio backend is cached only after a probe answered; the probe test injects `Patience` instead of a real timeout. The probe still runs on the thread that starts the capture, bounded by its 3 s limit. |

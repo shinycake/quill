@@ -59,11 +59,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.settings.data_storage.seeded != Seed::Unseeded
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetAutoDownloadSettingsPresets)
+        if self.session.settings.data_storage.seeded.is_seeded()
+            || self.session.settings.auto_download_presets.is_loading()
         {
             return Ok(());
         }
@@ -82,7 +79,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .fail("Couldn't load auto-download settings.");
             return Err(err);
         }
-        self.session.settings.data_storage.seeded = Seed::InFlight;
+        self.session.settings.auto_download_presets.sent(extra);
         Ok(())
     }
 
@@ -222,10 +219,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// later "No limit" is never overwritten. The flag is saved only once
     /// TDLib holds limits ([`Self::note_storage_limits_seeded`]): a process
     /// that dies first, or an option TDLib refuses, sends them again on
-    /// the next Ready.
+    /// the next Ready (the options are idempotent).
     pub(crate) fn maybe_seed_storage_limits(&mut self) -> Result<(), ConnectSendError> {
         let settings = &self.session.settings;
-        if settings.data_storage.storage_limits_seeded != Seed::Unseeded {
+        if settings.data_storage.storage_limits_seeded.is_seeded() {
             return Ok(());
         }
         if !settings.storage_limits.chosen() {
@@ -233,7 +230,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Some(crate::storage_limits::DEFAULT_SIZE),
                 Some(crate::storage_limits::DEFAULT_KEEP),
             )?;
-            self.session.settings.data_storage.storage_limits_seeded = Seed::InFlight;
         }
         self.note_storage_limits_seeded();
         Ok(())

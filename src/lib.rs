@@ -296,6 +296,7 @@ pub mod translate;
 pub mod tray;
 #[cfg(all(target_os = "macos", feature = "ui"))]
 pub mod tray_mac;
+pub mod tray_reveal;
 #[cfg(all(target_os = "linux", feature = "ui"))]
 pub mod tray_sni;
 pub mod update_install;

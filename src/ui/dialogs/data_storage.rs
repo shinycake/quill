@@ -20,6 +20,7 @@ use crate::ui::settings_window::rows::{detail_row, group, switch_row};
 use gpui_kit::component::button::*;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::data_settings::{
     AutoDownloadNetSettings, CapKind, DataStoragePrefs, NO_LIMIT_SIZE_CAP, NetworkKind,
@@ -103,7 +104,7 @@ impl QuillApp {
     ) {
         let settled = self
             .session()
-            .is_none_or(|session| !session.settings.data_storage.seeded.is_in_flight());
+            .is_none_or(|session| !session.settings.auto_download_presets.is_loading());
         let scroll = &mut self.settings.storage_scroll;
         let offset = scroll.page.offset().y;
         let user_moved = match &scroll.stage {
@@ -323,7 +324,9 @@ impl QuillApp {
         let prefs = session.as_ref().map(|s| &s.settings.data_storage);
         let mut downloads: Vec<AnyElement> = Vec::new();
         if !prefs.is_some_and(|p| p.seeded.is_seeded()) {
-            let loading = prefs.is_some_and(|p| p.seeded.is_in_flight());
+            let loading = session
+                .as_ref()
+                .is_some_and(|s| s.settings.auto_download_presets.is_loading());
             downloads.push(
                 self.setting_spot(
                     &[
@@ -333,6 +336,10 @@ impl QuillApp {
                         "data.less_data_calls",
                     ],
                     div()
+                        .flex()
+                        .flex_col()
+                        .items_start()
+                        .gap_1()
                         .px_3()
                         .py_2()
                         .text_xs()
@@ -341,6 +348,19 @@ impl QuillApp {
                             tr(keys::Q_OPS_LOADING_DOWNLOAD_SETTINGS)
                         } else {
                             tr(keys::Q_OPS_DOWNLOAD_SETTINGS_UNAVAILABLE)
+                        })
+                        .when(!loading, |this| {
+                            this.child(
+                                Button::new("data-storage-presets-retry")
+                                    .label(tr(keys::Q_MONEY_RETRY))
+                                    .small()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        if let Some(live) = this.live.as_mut() {
+                                            let _ = live.driver.fetch_auto_download_presets();
+                                        }
+                                        cx.notify();
+                                    })),
+                            )
                         }),
                     cx,
                 ),

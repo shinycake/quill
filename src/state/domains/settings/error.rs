@@ -67,13 +67,16 @@ impl Session {
                 );
             }
             Some(RequestPurpose::GetAutoDownloadSettingsPresets) => {
-                if self.settings.data_storage.seeded.is_in_flight() {
-                    self.settings.data_storage.seeded = crate::data_settings::Seed::Unseeded;
-                }
-                self.settings.auto_download_presets.fail(format!(
-                    "Couldn't load auto-download settings: {}",
-                    error_reason(err)
-                ));
+                // Only the fetch that waits for this request fails; the next
+                // open asks again.
+                self.settings.auto_download_presets.failed(
+                    pending.map(|p| p.id),
+                    format!(
+                        "Couldn't load auto-download settings: {}",
+                        error_reason(err)
+                    ),
+                    false,
+                );
             }
             // Slice S3: privacy-screen request failures surface
             // on the Privacy screen (the UI reads the state),
