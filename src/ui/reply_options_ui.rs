@@ -156,7 +156,7 @@ impl QuillApp {
         self.chat_ui.close_quote_picker();
         // One stage with the forward box: that box closes as this opens.
         self.share.forward.open_reply_chooser();
-        self.share.focus_search = true;
+        self.share.search_mount = super::mount::Mount::Mounting;
         self.share
             .search_input
             .update(cx, |input, cx| input.set_value("", window, cx));

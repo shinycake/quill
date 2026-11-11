@@ -23,8 +23,17 @@ pub(in crate::ui) struct SettingsSearch {
     /// The highlighted result (or recent pick).
     selected: usize,
     recent: Option<RecentSearches>,
-    /// A result just opened: clear the field on the next render.
-    pending_clear: bool,
+    field: Field,
+}
+
+/// Whether the field still holds the text of a search that is over.
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum Field {
+    #[default]
+    Settled,
+    /// A result opened or Settings closed: clear the field on the next
+    /// render (it needs the window).
+    ClearOnNextRender,
 }
 
 /// What the results area lists.
@@ -36,7 +45,7 @@ enum Listing {
 impl SettingsSearch {
     /// Settings closed: the next open starts with an empty field.
     pub(super) fn close(&mut self) {
-        self.pending_clear = true;
+        self.field = Field::ClearOnNextRender;
     }
 
     #[cfg(test)]
@@ -175,7 +184,7 @@ impl QuillApp {
         recent.record(target.id());
         let recent = recent.clone();
         quill::settings::save_settings_search_recent(&QuillApp::appearance_paths(), &recent);
-        self.settings.search.pending_clear = true;
+        self.settings.search.field = Field::ClearOnNextRender;
         // A screen of the page may be covering the row.
         // Leaving and arriving are one reset: the page's drafts go and its
         // visit asks again, though the page itself does not change.
@@ -225,7 +234,7 @@ impl QuillApp {
 
     /// Clears the field after a result opened (needs the window).
     pub(super) fn settle_settings_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if std::mem::take(&mut self.settings.search.pending_clear) {
+        if std::mem::take(&mut self.settings.search.field) == Field::ClearOnNextRender {
             self.clear_settings_search(window, cx);
         }
     }

@@ -114,9 +114,8 @@ impl QuillApp {
                     phone: shown,
                     back: Box::new(back),
                 };
-                self.auth_ui.signin.code_clock = None;
-                self.auth_ui.signin.error_clock = None;
-                self.auth_ui.signin.banned_dismissed = false;
+                self.auth_ui.signin.step_clock.restart_code();
+                self.auth_ui.signin.error_clock.clear();
                 self.set_note(StatusNote::silent(tr(keys::Q_NOTES_PHONE_SUBMITTED)));
             }
             Err(_) => {
@@ -206,7 +205,7 @@ impl QuillApp {
         }
         match live.driver.resend_code() {
             Ok(_) => {
-                self.auth_ui.signin.code_clock = None;
+                self.auth_ui.signin.step_clock.restart_code();
                 self.set_note(StatusNote::silent(tr(keys::Q_NOTES_CODE_RESENT)));
             }
             Err(_) => {

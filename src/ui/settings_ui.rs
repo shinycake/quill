@@ -99,7 +99,13 @@ impl QuillApp {
     /// kit Phase 6: write the requested value (was: flip the bit).
     pub(super) fn set_archive_setting(&mut self, index: usize, on: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            let Some(mut settings) = live.driver.session.chat_list.archive_chat_list_settings
+            let Some(mut settings) = live
+                .driver
+                .session
+                .chat_list
+                .archive_settings
+                .data()
+                .copied()
             else {
                 self.set_note(StatusNote::silent(tr(
                     keys::Q_PREFS_ARCHIVE_SETTINGS_STILL_LOADING,
@@ -115,11 +121,11 @@ impl QuillApp {
                 )));
             }
         } else if let Some(session) = self.demo_session.as_mut()
-            && let Some(mut settings) = session.chat_list.archive_chat_list_settings
+            && let Some(mut settings) = session.chat_list.archive_settings.data().copied()
         {
             archive_setting_set(&mut settings, index, on);
             // box-host: a setting of the open archive box; it does not ask for the suggestion box
-            session.chat_list.archive_chat_list_settings = Some(settings);
+            session.chat_list.archive_settings.succeed(settings);
         }
         cx.notify();
     }
@@ -149,10 +155,10 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let settings = this
                 .session()
-                .and_then(|s| s.chat_list.archive_chat_list_settings);
+                .and_then(|s| s.chat_list.archive_settings.data().copied());
             let loading = this
                 .session()
-                .is_some_and(|s| s.chat_list.archive_settings_loading);
+                .is_some_and(|s| s.chat_list.archive_settings.is_loading() && settings.is_none());
             let mut body = div().flex().flex_col().gap_3();
             if loading {
                 body = body.child(
@@ -852,8 +858,9 @@ impl QuillApp {
     /// including the one for chats from folders, inline.
     pub(crate) fn archive_privacy_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
-        let settings = session.and_then(|s| s.chat_list.archive_chat_list_settings);
-        let loading = session.is_some_and(|s| s.chat_list.archive_settings_loading);
+        let settings = session.and_then(|s| s.chat_list.archive_settings.data().copied());
+        let loading = session
+            .is_some_and(|s| s.chat_list.archive_settings.is_loading() && settings.is_none());
         let mut section = div().flex().flex_col().gap_1().child(
             div()
                 .text_sm()

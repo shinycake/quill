@@ -82,9 +82,10 @@ impl Session {
             }
             // Slice CL2: drop the refused archive-settings flip;
             // the panel re-fetches the truth on next open.
-            Some(RequestRollback::ArchiveChatListSettings { previous }) => {
-                self.chat_list.archive_chat_list_settings = previous;
-            }
+            Some(RequestRollback::ArchiveChatListSettings { previous }) => match previous {
+                Some(previous) => self.chat_list.archive_settings.succeed(previous),
+                None => self.chat_list.archive_settings = Default::default(),
+            },
             Some(
                 rollback @ (RequestRollback::JoinByRequest { .. }
                 | RequestRollback::SupergroupUsername { .. }

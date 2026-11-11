@@ -19,7 +19,7 @@ pub(crate) struct ShareUi {
     pub(super) search_input: Entity<TextareaState>,
     /// The forward box just opened: its search field takes focus once the
     /// dialog has mounted (the dialog focuses itself as it opens).
-    pub(super) focus_search: bool,
+    pub(super) search_mount: super::mount::Mount,
     /// Last successful (or failed) `forwardMessages` result.
     pub(super) forward_result: Option<ForwardResult>,
     /// Text of a share link while its chat chooser is open.
@@ -43,7 +43,7 @@ impl ShareUi {
             selection: quill::share_box::ShareSelection::default(),
             comment_input: share_comment_input,
             search_input: forward_search_input,
-            focus_search: false,
+            search_mount: super::mount::Mount::Shown,
             forward_result: None,
             link_text: None,
         }

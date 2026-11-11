@@ -379,7 +379,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.chat_list.archive_chat_list_settings.is_some() {
+        if self.session.chat_list.archive_settings.data().is_some() {
             return Ok(None);
         }
         self.reload_archive_chat_list_settings()
@@ -409,8 +409,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         // A cached copy stays on screen while it reloads.
-        let chat_list = &mut self.session.chat_list;
-        chat_list.archive_settings_loading = chat_list.archive_chat_list_settings.is_none();
+        self.session.chat_list.archive_settings.begin();
         Ok(Some(extra))
     }
 
@@ -429,7 +428,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.has_purpose(purpose) {
             return Ok(None);
         }
-        let Some(current) = self.session.chat_list.archive_chat_list_settings else {
+        let Some(current) = self.session.chat_list.archive_settings.data().copied() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         if current == settings {
@@ -443,7 +442,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.chat_list.archive_chat_list_settings = Some(settings);
+        if let Some(held) = self.session.chat_list.archive_settings.data_mut() {
+            *held = settings;
+        }
         if let Some(pending) = self.session.requests.pending_mut(extra) {
             pending.rollback = Some(RequestRollback::ArchiveChatListSettings {
                 previous: Some(current),

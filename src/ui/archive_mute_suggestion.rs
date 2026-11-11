@@ -21,7 +21,7 @@ impl QuillApp {
         self.session().is_some_and(|s| {
             s.chat_list.archive_mute.suggestion_due(
                 &s.chat_list.suggestions.actions,
-                s.chat_list.archive_chat_list_settings.as_ref(),
+                s.chat_list.archive_settings.data(),
             )
         })
     }
@@ -127,7 +127,7 @@ crate::ui::screenshot_demo::register_demos![
                     .actions
                     .insert(ACTION.to_string());
                 // box-host: demo
-                demo.chat_list.archive_chat_list_settings = Some(Default::default());
+                demo.chat_list.archive_settings.succeed(Default::default());
             }
         }
     ),
