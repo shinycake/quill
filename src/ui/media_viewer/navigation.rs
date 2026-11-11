@@ -161,6 +161,15 @@ impl QuillApp {
         }
         let tab = self.viewer.extra.shared_tab;
         let seen = self.viewer.extra.shared_seen;
+        // The panel may now list another chat's media; its pages are not
+        // this viewer's.
+        let viewer_chat = self.viewer.state.current().map(|item| item.chat_id);
+        let same_chat = self
+            .session()
+            .is_some_and(|session| session.media.shared_media.chat_id == viewer_chat);
+        if !same_chat {
+            return;
+        }
         let grown = self.session().and_then(|session| {
             let state = session.media.shared_media.tabs.get(tab.index())?;
             (state.items.len() != seen).then(|| {

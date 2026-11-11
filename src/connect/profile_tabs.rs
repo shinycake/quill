@@ -190,6 +190,40 @@ impl<S: JsonSender> ConnectDriver<S> {
         sent
     }
 
+    /// The Playlist page opens: ask for the user's playlist. When nothing
+    /// can go out (offline, no user) the page shows a failure with Retry,
+    /// not Loading for good.
+    pub fn open_playlist(&mut self, user_id: i64) {
+        if self.fetch_playlist(user_id, false).is_err() {
+            let empty = self
+                .session
+                .media
+                .playlists
+                .get(&user_id)
+                .is_none_or(|playlist| playlist.error.is_none() && playlist.tracks.is_empty());
+            if empty {
+                self.session
+                    .fail_profile_audios(user_id, "Could not send the request.".to_string());
+            }
+        }
+    }
+
+    /// Retry after the first page failed: forget the failure and ask again.
+    /// When nothing goes out the failure and its Retry stay.
+    pub fn retry_playlist(&mut self, user_id: i64) {
+        let failed = match self.session.media.playlists.get(&user_id) {
+            Some(playlist) if playlist.error.is_some() && playlist.tracks.is_empty() => {
+                self.session.media.playlists.remove(&user_id)
+            }
+            _ => None,
+        };
+        if self.fetch_playlist(user_id, false).is_err()
+            && let Some(failed) = failed
+        {
+            self.session.media.playlists.insert(user_id, failed);
+        }
+    }
+
     /// Ask whether a song is in the saved music (`isProfileAudio`), once, so
     /// the "Save to..." menu knows whether to offer the profile. A song's
     /// answer is kept; 404 means it is not saved.

@@ -9,7 +9,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use std::ops::Range;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Where playback is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,7 +29,25 @@ pub(crate) enum PlayState {
     Failed,
 }
 
+/// A paused seek or step waits this long for its picture at most.
+const AWAIT_PICTURE: Duration = Duration::from_secs(2);
+/// A player still opening asks for a frame at every vsync this long; an
+/// open that never reports (a stuck item, a hung decoder) then stops
+/// asking, and the open poll redraws the watchers when it does end.
+const OPEN_FRAME_WAIT: Duration = Duration::from_secs(10);
+
 impl PlayState {
+    /// Whether a picture awaited for `waited` is still worth a frame
+    /// request.
+    pub(crate) fn awaits_picture(self, waited: Duration) -> bool {
+        waited
+            < if self == PlayState::Opening {
+                OPEN_FRAME_WAIT
+            } else {
+                AWAIT_PICTURE
+            }
+    }
+
     /// The picture moves (or should): frames are requested every vsync.
     pub(crate) fn animates(self) -> bool {
         matches!(self, PlayState::Playing | PlayState::Buffering)
