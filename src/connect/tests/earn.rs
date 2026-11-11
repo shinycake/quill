@@ -660,6 +660,14 @@ fn a_closed_join_boxs_answer_leaves_the_box_open_now_alone() {
     }
 }
 
+/// The user leaves the join page: its list goes and a click still being
+/// resolved is dropped with it.
+fn leave_the_page(p: &mut Parts, to: i64) {
+    p.0.session.payments.earn.join = None;
+    p.0.session
+        .set_open_info_panel(Some(crate::state::InfoPanelTarget::User(to)));
+}
+
 /// Sweep s4-payments-2, 09-X035: a program click answered after the list it
 /// came from closed opens nothing.
 #[test]
@@ -669,13 +677,13 @@ fn a_program_click_answered_after_its_list_closed_opens_nothing() {
     p.0.open_starref_join(page).unwrap();
     answer(&mut p, "searchAffiliatePrograms", found(&[BOT]));
     p.0.open_affiliate_program(BOT, false).unwrap();
-    p.0.session.payments.earn.join = None;
+    leave_the_page(&mut p, BOT);
     error(&mut p, "getConnectedAffiliateProgram", "NOT_FOUND");
     assert!(p.0.session.payments.earn.join_box.is_none());
     p.0.open_starref_join(page).unwrap();
     answer(&mut p, "searchAffiliatePrograms", found(&[BOT]));
     p.0.open_affiliate_program(BOT, false).unwrap();
-    p.0.session.payments.earn.join = None;
+    leave_the_page(&mut p, BOT + 1);
     answer(
         &mut p,
         "getConnectedAffiliateProgram",

@@ -86,12 +86,12 @@ impl QuillApp {
         );
         let duration_slider =
             self.setup_slider(Knob::Duration, duration.len(), duration_at, window, cx);
-        self.earn.sliders = Some(SetupSliders {
+        self.earn.sliders = Some(Box::new(SetupSliders {
             bot_user_id,
             program,
             commission: (commission_slider, commission),
             duration: (duration_slider, duration),
-        });
+        }));
     }
 
     fn setup_slider(

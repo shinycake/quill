@@ -66,7 +66,7 @@ pub(crate) struct EarnUi {
     pub(super) ask_boost: Option<AskBoost>,
     /// The setup page's sliders, built for one bot's program and rebuilt
     /// when the page shows another.
-    pub(super) sliders: Option<SetupSliders>,
+    pub(super) sliders: Option<Box<SetupSliders>>,
     /// The earn page's scroll; its end loads the next programs page.
     pub(super) scroll: ScrollHandle,
     /// The programs box's list.
