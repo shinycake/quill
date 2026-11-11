@@ -406,7 +406,7 @@ impl Session {
             // name itself arrives via `updateCommunity`.
             Some(RequestPurpose::SetCommunityName) => {
                 if let Some(community_id) = pending.and_then(|p| p.community_id) {
-                    self.groups.community_full_infos.remove(&community_id);
+                    self.groups.community_full_infos.outdate(community_id);
                 }
             }
             // TDLib 1.8.68: a deleted community is gone for everyone —

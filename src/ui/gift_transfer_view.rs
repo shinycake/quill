@@ -88,7 +88,7 @@ pub(super) fn stage_view(app: &QuillApp, cx: &mut Context<QuillApp>) -> Option<S
         } => confirm_peer_view(app, session, gift, &name, *user_id, to, None, cx),
         TransferStage::Locked { hours } => locked_view(*hours, cx),
         TransferStage::ConfirmExport => confirm_export_view(&name, false, cx),
-        TransferStage::Probing => confirm_export_view(&name, true, cx),
+        TransferStage::Probing(_) => confirm_export_view(&name, true, cx),
         TransferStage::Password { send, error } => {
             password_view(app, session, send.is_out(), error.as_ref(), cx)
         }

@@ -8395,3 +8395,43 @@ Round 2, bundle 10: the files `media_tools`, `message_effect_watch`,
   while the first is out sends nothing. After a failed or refused Star
   commit, the next tap on that message shows (and commits) the held Stars
   with the new ones.
+
+### Sweep fixes (r2-15)
+
+Files: the connect groups, settings, stories, messages and moderation
+drivers listed below, `earn/state.rs`, `emoji/mod.rs`, `export/handle.rs`,
+`export/loaded_files.rs`, `gift_manage/state.rs`, `gift_manage/transfer.rs`.
+
+| id | result |
+| --- | --- |
+| 02-078 | `GroupsState::community_full_infos` is `CommunityFullInfos`, one `Fetch` per community: the pack, its request and its failure are one value. `CommunitiesState::full_info_failed` and the in-flight purpose probe are gone. A refetch after `setCommunityName` keeps the old pack on screen (`Outdated`); the community chat list shows a failure line when the fetch failed. |
+| 02-076 | `refresh_forum_topics` marks the list `Outdated` (an ask in flight predates the change) and asks again; `ForumTopicsMap` takes an answer or error only from the ask that waits for it. |
+| 02-077 | The `getMe` fallback is `UsersState::my_id_probe: Fetch<()>`: asked once, a failure or a refused send is final for the session, so the poll pump does not re-send it. |
+| 02-079 | `NewChatCreation` is one `CreationStage` (`Out`, `OutClosed`, `Made`, `MadeClosed`, `Settled`); the photo travels inside the stage, `CreationAsker` and `outcome` are gone. |
+| 02-082 | The full-rich-message load holds its `RequestId` from the send; the answer or error of an older ask no longer ends or fails a newer load. |
+| 02-085 | A basic-group add that stops midway counts the unsent users in `add_members_failed`. |
+| 02-104 | `PrivacyKeyState::Loading` and `Failed` carry the rule held before; a refused refetch keeps it (`fail_privacy_load`). |
+| 02-102 | A refused send of the exceptions fetch leaves the scope `Failed` (not removed), so the page does not ask again from render; answers and errors are matched by request. |
+| 02-097 | `DeviceLogin` holds its request: `InFlight(request)`, then `Done { request, result }`, which the screen that sent it takes once (`take_result_for`). The integration branch keeps this shape from the earlier merge instead of this branch's `device_login_result`. |
+| 02-103 | A refused `getActiveSessions` send fails the list instead of returning it to `Idle`, so the calls section does not ask again from render. |
+| 02-098 | `ToneUpload::Uploading` holds its `RequestId`; only that request's answer or error ends it. |
+| 02-106 | Skipped: not a bug. The box holds its press while its own request is out (`StealthPress::Wait`) and a box opened after a closed one asks for its own answer (a test pins it); the doc comment that claimed a dedupe was wrong and is corrected. |
+| 03-A004 | `Load::Loading` holds its `RequestId`; TON and Stars stats answers and errors are matched by it. `Load` stays apart from `Fetch` for its fifth outcome, `Unavailable`. |
+| 03-A005 | `WithdrawStep::Checking` holds the request; `Withdraw::request` is gone. |
+| 03-A006, 09-079 | `SetupPage` is one `SetupStage` (`Editing`, `Confirming`, `SavingInBox`, `Saving`); `confirm` and `saving` are gone. |
+| 03-A010 | The trending emoji sets are `TrendingSets` (`Idle`, `Loading{from, request, shown}`, `Ready`, `Stale`, `Failed`); the four paging fields and the `Fetch<()>` are gone. |
+| 03-A011 | `KeywordEmojis` and `AnimatedSuggestion` are stages holding the request that asked; a replaced ask's answer lands nowhere, a refused search is `Failed` so the panel does not ask again. A failed `getAnimatedEmoji` ends its own `Asking` in `Failed { emoji }`: nothing is suggested and the same emoji is not asked for on every keystroke. |
+| 03-A012 | Skipped: `EmojiPanel::open` is the visibility of the box (section 8, 03-032); the host registry holds only which window shows it. |
+| 03-B001 | Skipped: `ExportView` is what the person chose for the progress box (Hide), independent of the export's stage (every stage can be shown or hidden); only the Hide button writes it. |
+| 03-B002 | A worker call that times out tells the link (`gave_up`), which frees the request slot instead of waiting for an answer nobody takes. |
+| 03-B005 | `LoadedFiles` uses a poison-recovering `Mutex`, not a `RefCell`. |
+| 02-047 | `CollectionsFetch` holds the request (`Loading`, `LoadingStale`); only its own answer settles it and applies the list. |
+| 03-B007 | `GiftFlow` forms hold `FlowAsk::Sent(request)`; a form closes only on the answer of the request it sent, and a refusal puts it back to editing. |
+| 03-B008 | `GiftManageState::deleting` is gone: the `deleteGift` request carries the gift id (`subject_id`). |
+| 03-B009, 05-037 | `SendGiftState::open` is gone: `SendStage` is `Closed`, `Idle`, `Sending`, `SendingClosed`, `Sent`, `Failed`, so a send in flight with its box closed is one stage. |
+| 03-B006 | `TransferStage::Probing` holds the probe's request; its answer or error moves the picker only when it matches. |
+
+- **Behaviour that changed.** A community pack refetched after a rename
+  stays on screen until the new one lands. A failed community fetch shows
+  "Couldn't load the community info." in the community chat list instead of
+  a spinner.

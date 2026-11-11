@@ -151,8 +151,9 @@ impl QuillApp {
             }
             // The demo has no connection: straight to the password box.
             None => self.edit_transfer(cx, |picker| {
-                picker.open_fragment();
-                picker.probe_failed(ProbeOutcome::Other, None);
+                let probe = quill::ids::RequestId(0);
+                picker.open_fragment(probe);
+                picker.probe_failed(Some(probe), ProbeOutcome::Other, None);
             }),
         }
     }

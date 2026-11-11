@@ -292,9 +292,11 @@ fn a_cancelled_withdrawals_answer_opens_nothing() {
     );
     let earn = &p.0.session.payments.earn;
     assert_eq!(earn.open_url, None, "Fragment does not open after Cancel");
-    assert_eq!(
-        earn.withdraw.as_ref().map(|w| &w.step),
-        Some(&WithdrawStep::Checking),
+    assert!(
+        matches!(
+            earn.withdraw.as_ref().map(|w| &w.step),
+            Some(WithdrawStep::Checking(_))
+        ),
         "the new attempt goes on"
     );
     // Cancel the new attempt from its password box; its wrong-password
@@ -309,10 +311,10 @@ fn a_cancelled_withdrawals_answer_opens_nothing() {
         json!({"@type": "error", "code": 400, "message": "PASSWORD_HASH_INVALID",
             "@extra": cancelled}),
     );
-    assert_eq!(
+    assert!(matches!(
         p.0.session.payments.earn.withdraw.as_ref().map(|w| &w.step),
-        Some(&WithdrawStep::Checking)
-    );
+        Some(WithdrawStep::Checking(_))
+    ));
 }
 
 #[test]
@@ -474,7 +476,13 @@ fn a_reopened_setup_page_stays_open_for_an_earlier_save() {
     p.0.session.payments.earn.setup = None;
     p.0.open_starref_setup(BOT).unwrap();
     p.0.save_starref_program().unwrap();
-    let waiting = p.0.session.payments.earn.setup.as_ref().map(|s| s.saving);
+    let waiting =
+        p.0.session
+            .payments
+            .earn
+            .setup
+            .as_ref()
+            .map(|s| s.saving_request());
     // The end (sent second to last) fails late: the new save still waits.
     let end =
         p.1.snapshot()
@@ -488,7 +496,7 @@ fn a_reopened_setup_page_stays_open_for_an_earlier_save() {
     feed(&mut p, refused);
     let setup = p.0.session.payments.earn.setup.as_ref().unwrap();
     assert!(setup.is_saving());
-    assert_eq!(Some(setup.saving), waiting);
+    assert_eq!(setup.saving_request(), waiting.flatten());
 }
 
 #[test]

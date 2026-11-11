@@ -182,9 +182,9 @@ pub struct GroupsState {
     pub communities: HashMap<i64, ParsedCommunity>,
     /// Slice (communities backend core): `communityFullInfo` cache, keyed
     /// by community id, fed by the `getCommunityFullInfo` answer and
-    /// `updateCommunityFullInfo` (TDLib 1.8.68). Presence records
-    /// "fetched".
-    pub community_full_infos: HashMap<i64, ParsedCommunityFullInfo>,
+    /// `updateCommunityFullInfo` (TDLib 1.8.68); one fetch per community
+    /// holds the stage, its request and the pack.
+    pub community_full_infos: CommunityFullInfos,
     /// TDLib 1.8.68 community management: one-shot; set when
     /// `setCommunityName` / `setCommunityPhoto` / `setCommunityPermissions`
     /// / `deleteCommunity` errors. The UI drains it into the status note.
@@ -426,7 +426,7 @@ impl GroupsState {
             invite_link_error: None,
             supergroup_full_infos: HashMap::new(),
             communities: HashMap::new(),
-            community_full_infos: HashMap::new(),
+            community_full_infos: CommunityFullInfos::default(),
             community_error: None,
             chat_statistics: HashMap::new(),
             stats: StatsState::default(),

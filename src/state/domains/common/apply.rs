@@ -290,7 +290,7 @@ impl Session {
                 {
                     // The password-less probe: the URL is dropped unread.
                     drop(url);
-                    self.apply_gift_export_probe_answer();
+                    self.apply_gift_export_probe_answer(pending.map(|p| p.id));
                 } else if let Some(pending) = pending
                     && let RequestPurpose::Calls(CallsPurpose::GetVideoChatInviteLink {
                         group_call_id,

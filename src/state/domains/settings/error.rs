@@ -15,7 +15,7 @@ impl Session {
             || self.apply_business_error(err, pending.map(|p| p.purpose))
             || self.apply_business_extra_error(err, pending.map(|p| p.purpose), extra)
             || self.apply_passkeys_error(err, pending.map(|p| (p.id, p.purpose)))
-            || self.apply_tone_upload_error(err, pending.map(|p| p.purpose))
+            || self.apply_tone_upload_error(err, pending)
         {
             return;
         }
@@ -94,13 +94,7 @@ impl Session {
             Some(RequestPurpose::Settings(SettingsPurpose::GetPrivacyRules { key })) => {
                 // Only the key's live load fails it; a save or an update
                 // since then already settled the key.
-                let live = matches!(
-                    self.settings.privacy.get(&key),
-                    Some(PrivacyKeyState::Loading(id)) if Some(*id) == pending.map(|p| p.id)
-                );
-                if live {
-                    self.settings.privacy.insert(key, PrivacyKeyState::Failed);
-                }
+                self.settings.fail_privacy_load(key, pending.map(|p| p.id));
             }
             // A refused save puts back what the server kept (and the call
             // rules mirrored from it) and says why in the editor.
@@ -311,12 +305,9 @@ impl Session {
         // again by itself.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatNotificationSettingsExceptions)
             && let Some(scope) = pending.and_then(|p| p.scope)
+            && let Some(list) = self.settings.notification_exceptions.get_mut(&scope)
         {
-            self.settings
-                .notification_exceptions
-                .entry(scope)
-                .or_default()
-                .fail(error_reason(err));
+            list.failed(pending.map(|p| p.id), error_reason(err), false);
         }
     }
 }

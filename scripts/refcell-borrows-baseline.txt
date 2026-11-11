@@ -44,8 +44,6 @@ Layer::plan::items.borrow 1
 Layer::prepaint::items.borrow 1
 Layer::register::items.borrow_mut 1
 Layered::paint::items.borrow 1
-LoadedFiles::find::_.borrow 1
-LoadedFiles::save::_.borrow_mut 1
 MotionState::cancel_reveal::reveal.borrow_mut 1
 MotionState::reveal_now::reveal.borrow_mut 1
 MotionState::reveal_probe::reveal.borrow 1

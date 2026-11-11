@@ -45,18 +45,27 @@ impl<S: JsonSender> ConnectDriver<S> {
         build: impl FnOnce(RequestId, MessageSender) -> String,
     ) -> Result<RequestId, ConnectSendError> {
         let owner = self.gifts_owner_if_mine()?;
-        self.send_gift_mutation(owner, purpose, build)
+        let extra = self.send_gift_mutation(owner, purpose, None, build)?;
+        // The open form that sent it is the one its answer closes.
+        self.session.payments.gifts_manage.flow_sent(purpose, extra);
+        Ok(extra)
     }
 
     fn send_gift_mutation(
         &mut self,
         owner: MessageSender,
         purpose: PaymentsPurpose,
+        subject: Option<&str>,
         build: impl FnOnce(RequestId, MessageSender) -> String,
     ) -> Result<RequestId, ConnectSendError> {
-        let extra = self
-            .session
-            .request(RequestPurpose::Payments(purpose), None);
+        let extra = match subject {
+            Some(subject) => self
+                .session
+                .request_for_subject(RequestPurpose::Payments(purpose), subject),
+            None => self
+                .session
+                .request(RequestPurpose::Payments(purpose), None),
+        };
         self.session.payments.hub.gifts_op.begin(extra);
         self.session.payments.hub.gift_notice = None;
         self.session.payments.gifts_manage.note = None;
@@ -127,7 +136,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         self.send_json_request(extra, &rq::get_gift_collections(extra, owner))?;
-        self.session.payments.gifts_manage.collections_fetch = CollectionsFetch::Loading;
+        self.session
+            .payments
+            .gifts_manage
+            .collections_fetch
+            .begin(extra);
         Ok(extra)
     }
 
@@ -329,7 +342,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         if let Some(picker) = self.session.payments.gifts_manage.transfer_mut() {
-            picker.open_fragment();
+            picker.open_fragment(extra);
         }
         let json = rq::get_upgraded_gift_withdrawal_url(extra, &id);
         if let Err(err) = self.send_json_request(extra, &json) {
@@ -482,11 +495,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !gift.can_delete(true) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self.send_gift_mutation(owner, PaymentsPurpose::DeleteGift, |extra, _| {
+        // The request carries the gift: its answer removes it.
+        self.send_gift_mutation(owner, PaymentsPurpose::DeleteGift, Some(id), |extra, _| {
             rq::delete_gift(extra, id)
-        })?;
-        self.session.payments.gifts_manage.deleting = Some(id.to_string());
-        Ok(extra)
+        })
     }
 
     /// Add a gift to a collection, or remove it from one.
@@ -547,11 +559,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 return Err(ConnectSendError::InvalidRequest);
             }
             // box-host: the UI's open names the window (`open_send_gift*`)
-            send.open = true;
+            send.reopen();
             return Ok(());
         }
         *send = SendGiftState {
-            open: true,
+            stage: SendStage::Idle,
             recipient: Some(recipient),
             ..Default::default()
         };
@@ -596,12 +608,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     pub fn close_send_gift(&mut self) {
-        let send = &mut self.session.payments.gifts_manage.send;
-        send.open = false;
-        send.selected = None;
-        if !send.sending() {
-            send.stage = SendStage::Idle;
-        }
+        self.session.payments.gifts_manage.send.close();
     }
 
     pub fn select_send_gift(&mut self, id: Option<i64>) {
@@ -610,7 +617,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             return;
         }
         send.selected = id.filter(|id| send.gifts.iter().any(|g| g.id == *id));
-        send.stage = SendStage::Idle;
+        if send.is_open() {
+            send.stage = SendStage::Idle;
+        }
     }
 
     /// `sendGift`: pays the gift's Star price (plus the prepaid upgrade)
@@ -635,7 +644,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let text = text.trim();
         let upgrade_ok = gift.upgrade_star_count > 0 && !recipient.is_self;
         if !self.chats_path_active()
-            || !send.open
+            || !send.is_open()
             || send.sending()
             || gift.gate(&recipient, premium, now_unix()) != SendGate::Ready
             || (pay_for_upgrade && !upgrade_ok)

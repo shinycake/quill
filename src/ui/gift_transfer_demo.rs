@@ -113,13 +113,14 @@ impl QuillApp {
             "locked" | "confirm" => picker.tap_export(export),
             "password" => {
                 picker.tap_export(export);
-                picker.open_fragment();
-                picker.probe_failed(ProbeOutcome::Other, Some(true));
+                let probe = quill::ids::RequestId(0);
+                picker.open_fragment(probe);
+                picker.probe_failed(Some(probe), ProbeOutcome::Other, Some(true));
             }
             // The password-less probe after "Open Fragment" is out.
             "probing" => {
                 picker.tap_export(export);
-                picker.open_fragment();
+                picker.open_fragment(quill::ids::RequestId(0));
             }
             "peer" => picker.choose(502, "Maya Chen"),
             _ => {}

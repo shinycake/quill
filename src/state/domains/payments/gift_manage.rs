@@ -3,8 +3,8 @@
 //! lists stale and the connect driver refetches them from the server.
 use crate::earn::EarnErrorHint;
 use crate::gift_manage::{
-    CollectionsFetch, ExportError, ExportSend, GiftEvent, GiftListFetch, GiftManagePayload,
-    GiftManageState, ProbeOutcome, SendStage, TransferStage,
+    ExportError, ExportSend, GiftEvent, GiftListFetch, GiftManagePayload, GiftManageState,
+    ProbeOutcome, SendStage, TransferStage,
 };
 use crate::lang::{keys, tr_with};
 use crate::state::*;
@@ -37,14 +37,20 @@ impl Session {
                 GiftManagePayload::Collections(list),
                 PaymentsPurpose::GetGiftCollections { owner },
             ) => {
-                if self.payments.hub.gifts_owner != Some(owner) {
+                if self.payments.hub.gifts_owner != Some(owner)
+                    || !self
+                        .payments
+                        .gifts_manage
+                        .collections_fetch
+                        .waits_for(pending.map(|p| p.id))
+                {
                     return;
                 }
                 let files: Vec<ParsedFile> =
                     list.iter().flat_map(|c| c.files.iter().cloned()).collect();
                 self.remember_files(&files);
                 let manage = &mut self.payments.gifts_manage;
-                manage.collections_fetch.settle();
+                manage.collections_fetch.settle(pending.map(|p| p.id));
                 manage.collections = list;
                 if manage.active_collection != 0
                     && manage.collection(manage.active_collection).is_none()
@@ -54,10 +60,10 @@ impl Session {
                 }
             }
             (GiftManagePayload::Collection(_), PaymentsPurpose::ChangeGiftCollection) => {
-                self.payments.gifts_manage.collections_fetch = CollectionsFetch::Stale;
+                self.payments.gifts_manage.collections_fetch.mark_stale();
                 self.payments
                     .gifts_manage
-                    .close_flow_answered_by(PaymentsPurpose::ChangeGiftCollection);
+                    .close_flow_answered_by(pending.map(|p| p.id));
                 self.payments.hub.gifts_op.changed(pending.map(|p| p.id));
                 self.payments.hub.gift_notice = None;
             }
@@ -68,7 +74,7 @@ impl Session {
                 hub.gift_view.select(None);
                 hub.tx.invalidate();
                 let manage = &mut self.payments.gifts_manage;
-                manage.close_flow_answered_by(PaymentsPurpose::UpgradeGift);
+                manage.close_flow_answered_by(pending.map(|p| p.id));
                 manage.note = Some(if summary.title.is_empty() {
                     "Gift upgraded.".to_string()
                 } else {
@@ -143,28 +149,35 @@ impl Session {
             PaymentsPurpose::SetGiftResalePrice => {
                 hub.gifts_op.changed(pending.map(|p| p.id));
                 hub.gift_notice = None;
-                manage.close_flow_answered_by(PaymentsPurpose::SetGiftResalePrice);
+                manage.close_flow_answered_by(pending.map(|p| p.id));
                 manage.note = Some("Resale price updated.".into());
             }
             PaymentsPurpose::DeleteGiftCollection => {
                 hub.gifts_op.changed(pending.map(|p| p.id));
                 hub.gift_notice = None;
-                manage.close_flow_answered_by(PaymentsPurpose::DeleteGiftCollection);
+                manage.close_flow_answered_by(pending.map(|p| p.id));
                 manage.active_collection = 0;
-                manage.collections_fetch = CollectionsFetch::Stale;
+                manage.collections_fetch.mark_stale();
                 manage.note = Some("Collection deleted.".into());
             }
-            PaymentsPurpose::DeleteGift => self.finish_gift_delete(request),
+            PaymentsPurpose::DeleteGift => {
+                self.finish_gift_delete(pending.and_then(|p| p.subject_id.clone()), request)
+            }
             PaymentsPurpose::SendStarGift => {
                 // Stars were spent whichever dialog asked.
                 hub.tx.invalidate();
                 let ours = manage.send.waits_for(pending);
+                let shown = ours && matches!(manage.send.stage, SendStage::Sending(_));
                 if ours {
-                    manage.send.stage = SendStage::Idle;
+                    manage.send.stage = if shown {
+                        SendStage::Idle
+                    } else {
+                        SendStage::Closed
+                    };
                 }
                 // A box closed or rebuilt for another recipient while it was
                 // out has nobody to show it: Stars moved, so say so.
-                if !ours || !manage.send.open {
+                if !shown {
                     self.payments.notices.push(PaymentNotice::new(
                         NoticeKind::Info,
                         crate::lang::tr(crate::lang::keys::Q_MONEY_GIFT_SENT),
@@ -198,12 +211,12 @@ impl Session {
     /// `deleteGift` succeeded. tdesktop `DeleteStarGift`:
     /// `notifyGiftUpdate(Delete)` drops the gift from the grid and the
     /// box, then the toast.
-    pub fn finish_gift_delete(&mut self, request: Option<RequestId>) {
+    pub fn finish_gift_delete(&mut self, gift_id: Option<String>, request: Option<RequestId>) {
         let hub = &mut self.payments.hub;
         let manage = &mut self.payments.gifts_manage;
         hub.gifts_op.changed(request);
         hub.gift_notice = None;
-        if let Some(id) = manage.deleting.take() {
+        if let Some(id) = gift_id {
             let before = hub.gifts.len();
             hub.gifts.retain(|g| g.id != id);
             if hub.gifts.len() < before {
@@ -211,7 +224,7 @@ impl Session {
             }
             hub.gift_view.close_if_selected(Some(id.as_str()));
         }
-        manage.collections_fetch = CollectionsFetch::Stale;
+        manage.collections_fetch.mark_stale();
         manage.events.push(GiftEvent::Deleted);
     }
 
@@ -259,9 +272,9 @@ impl Session {
 
     /// The password-less probe returned a URL. It is never opened: the
     /// password box opens as after any other answer.
-    pub(crate) fn apply_gift_export_probe_answer(&mut self) {
+    pub(crate) fn apply_gift_export_probe_answer(&mut self, request: Option<RequestId>) {
         if let Some(picker) = self.payments.gifts_manage.transfer_mut() {
-            picker.probe_answered();
+            picker.probe_answered(request);
         }
     }
 
@@ -275,7 +288,7 @@ impl Session {
 
     /// tdesktop `ExportOnBlockchain`'s probe failure: `PrePasswordErrorBox`
     /// or the password box.
-    fn apply_gift_export_probe_error(&mut self, err: &TdError) {
+    fn apply_gift_export_probe_error(&mut self, err: &TdError, request: Option<RequestId>) {
         let outcome = match err.earn_hint {
             Some(EarnErrorHint::PasswordMissing) => ProbeOutcome::NoPassword,
             Some(EarnErrorHint::TooFresh) => ProbeOutcome::TooFresh,
@@ -292,7 +305,7 @@ impl Session {
             })
             .flatten();
         if let Some(picker) = self.payments.gifts_manage.transfer_mut() {
-            picker.probe_failed(outcome, has_password);
+            picker.probe_failed(request, outcome, has_password);
         }
     }
 
@@ -335,11 +348,12 @@ impl Session {
     ) {
         let reason = error_reason(err);
         let manage = &mut self.payments.gifts_manage;
+        manage.flow_refused(pending.map(|p| p.id));
         match purpose {
             PaymentsPurpose::GetGiftOption(_) => manage.limits_ask.fail(pending.map(|p| p.id)),
             PaymentsPurpose::GetGiftCollections { owner } => {
                 if self.payments.hub.gifts_owner == Some(owner) {
-                    manage.collections_fetch.settle();
+                    manage.collections_fetch.settle(pending.map(|p| p.id));
                 }
             }
             PaymentsPurpose::GetAvailableGifts if !manage.send.asked_gifts(pending) => {}
@@ -361,7 +375,6 @@ impl Session {
                 self.payments.hub.gifts_op.failed(pending.map(|p| p.id));
             }
             PaymentsPurpose::DeleteGift => {
-                manage.deleting = None;
                 self.payments.hub.gifts_op.failed(pending.map(|p| p.id));
                 manage.note = Some(tr_with(
                     keys::Q_MONEY_COULD_NOT_DELETE_THE_GIFT,
@@ -371,14 +384,17 @@ impl Session {
             PaymentsPurpose::GiftExportTempPassword | PaymentsPurpose::GiftExportUrl => {
                 Self::apply_gift_export_error(manage, err, &reason, pending.map(|p| p.id))
             }
-            PaymentsPurpose::GiftExportProbe => self.apply_gift_export_probe_error(err),
+            PaymentsPurpose::GiftExportProbe => {
+                self.apply_gift_export_probe_error(err, pending.map(|p| p.id))
+            }
             PaymentsPurpose::SendStarGift => {
                 let ours = manage.send.waits_for(pending);
-                if ours {
-                    manage.send.stage = SendStage::Idle;
+                let shown = ours && matches!(manage.send.stage, SendStage::Sending(_));
+                if ours && !shown {
+                    manage.send.stage = SendStage::Closed;
                 }
                 let text = format!("Couldn't send the gift: {reason}. The gift may be sold out.");
-                if ours && manage.send.open {
+                if shown {
                     manage.send.stage = SendStage::Failed(text);
                 } else {
                     self.payments

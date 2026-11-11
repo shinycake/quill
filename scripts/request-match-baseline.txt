@@ -17,7 +17,6 @@ purpose:ConnectDriver::earn_in_flight 1
 purpose:ConnectDriver::emoji_set_request 1
 purpose:ConnectDriver::enable_private_sharing 1
 purpose:ConnectDriver::ensure_earn_app_config 1
-purpose:ConnectDriver::fail_earn_page_loads 2
 purpose:ConnectDriver::fetch_archived_stickers 1
 purpose:ConnectDriver::fetch_boosts_per_gift 1
 purpose:ConnectDriver::fetch_contacts 1
@@ -59,7 +58,6 @@ purpose:ConnectDriver::maybe_load_selected_sticker_set 1
 purpose:ConnectDriver::maybe_probe_channel_membership 1
 purpose:ConnectDriver::maybe_refresh_saved_animations 1
 purpose:ConnectDriver::maybe_search_gifs 2
-purpose:ConnectDriver::more_trending_emoji_packs 1
 purpose:ConnectDriver::open_chat_appearance 1
 purpose:ConnectDriver::open_media_panel 3
 purpose:ConnectDriver::open_send_gift_to 1
@@ -133,12 +131,11 @@ unmatched:Session::accept_installed_mask_sets 1
 unmatched:Session::accept_installed_sticker_sets 1
 unmatched:Session::accept_mask_set 1
 unmatched:Session::accept_profile_photo_emoji_icons 1
-unmatched:Session::accept_trending_emoji_sets 1
 unmatched:Session::apply_auth_payload 1
 unmatched:Session::apply_business_extra_error 1
 unmatched:Session::apply_chat_links 1
 unmatched:Session::apply_chat_list_payload 2
-unmatched:Session::apply_chats 4
+unmatched:Session::apply_chats 3
 unmatched:Session::apply_connected_bot 1
 unmatched:Session::apply_found_chat_messages 1
 unmatched:Session::apply_grams 1

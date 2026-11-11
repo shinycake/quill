@@ -153,11 +153,12 @@ impl Session {
                 if let Some(photo) = &community.photo {
                     self.remember_files(std::slice::from_ref(photo));
                 }
-                self.communities.full_info_failed.remove(&community.id);
+                let infos = &mut self.groups.community_full_infos;
+                infos.forget_failure(community.id);
                 // A community the user lost access to (deleted, or left):
                 // its chats no longer belong to it or follow its mute.
                 if !community.have_access {
-                    self.groups.community_full_infos.remove(&community.id);
+                    infos.remove(&community.id);
                 }
                 self.groups.communities.insert(community.id, community);
             }
@@ -169,10 +170,8 @@ impl Session {
                 community_id,
                 full_info,
             } => {
-                self.communities.full_info_failed.remove(&community_id);
-                self.groups
-                    .community_full_infos
-                    .insert(community_id, full_info);
+                let infos = &mut self.groups.community_full_infos;
+                infos.insert(community_id, full_info);
             }
             // TDLib 1.8.68: the direct `getCommunityFullInfo` answer has
             // no community id; the pending request carries it.
@@ -181,10 +180,8 @@ impl Session {
                     && pending.purpose == RequestPurpose::GetCommunityFullInfo
                     && let Some(community_id) = pending.community_id
                 {
-                    self.communities.full_info_failed.remove(&community_id);
-                    self.groups
-                        .community_full_infos
-                        .insert(community_id, full_info);
+                    let infos = &mut self.groups.community_full_infos;
+                    infos.answered(community_id, Some(pending.id), full_info);
                 }
             }
             // Slice G2: welcome-message pack (`updateChatWelcomeMessages`,

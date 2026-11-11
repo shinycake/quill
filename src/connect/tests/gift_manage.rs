@@ -423,7 +423,6 @@ fn a_failed_delete_keeps_the_gift_and_says_why() {
     let hub = &p.0.session.payments.hub;
     assert!(!hub.gifts_op.is_mutating());
     assert_eq!(hub.gifts.len(), 1);
-    assert_eq!(p.0.session.payments.gifts_manage.deleting, None);
     assert!(
         p.0.session
             .payments
@@ -498,7 +497,7 @@ fn sending_a_gift_needs_an_open_dialog_a_sendable_gift_and_enough_stars() {
 
     open_send_dialog(&mut p);
     let send = &p.0.session.payments.gifts_manage.send;
-    assert!(send.open && send.gifts_fetch == GiftListFetch::Answered && send.gifts.len() == 2);
+    assert!(send.is_open() && send.gifts_fetch == GiftListFetch::Answered && send.gifts.len() == 2);
     assert_eq!(count(&p.1, "getPremiumGiftPaymentOptions"), 1);
     // A sold-out gift and an unknown gift are refused.
     assert!(p.0.send_star_gift(56, "", false, false).is_err());
@@ -621,7 +620,10 @@ fn reopening_the_send_dialog_keeps_the_send_that_is_out() {
     p.0.close_send_gift();
     p.0.open_send_gift(ChatId(21)).unwrap();
     let send = &p.0.session.payments.gifts_manage.send;
-    assert!(send.open && send.sending(), "the same send, shown again");
+    assert!(
+        send.is_open() && send.sending(),
+        "the same send, shown again"
+    );
     assert!(
         p.0.send_star_gift(55, "", false, false).is_err(),
         "Send stays disabled: no double purchase"
