@@ -80,17 +80,21 @@ impl NewCardStage {
 
     /// Let go of the password ask; the card stays.
     pub(crate) fn drop_password_prompt(&mut self) {
-        if let NewCardStage::NeedsPassword(card) = std::mem::replace(self, NewCardStage::None) {
-            *self = NewCardStage::Ready(card);
-        }
+        *self = match std::mem::replace(self, NewCardStage::None) {
+            NewCardStage::NeedsPassword(card) => NewCardStage::Ready(card),
+            other => other,
+        };
     }
 
     /// Ask for a password (when `ask`) before the card can be saved.
     pub(crate) fn ask_password(&mut self, ask: bool) {
-        self.drop_password_prompt();
-        if ask && let NewCardStage::Ready(card) = std::mem::replace(self, NewCardStage::None) {
-            *self = NewCardStage::NeedsPassword(card);
-        }
+        *self = match std::mem::replace(self, NewCardStage::None) {
+            NewCardStage::Ready(card) | NewCardStage::NeedsPassword(card) if ask => {
+                NewCardStage::NeedsPassword(card)
+            }
+            NewCardStage::NeedsPassword(card) => NewCardStage::Ready(card),
+            other => other,
+        };
     }
 }
 
@@ -229,5 +233,39 @@ impl PaymentDialog {
                 postal_code: value(&self.postal_input),
             },
         }
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod tests {
+    use super::{NewCard, NewCardStage};
+    use quill::payment_card::NewCredentials;
+
+    fn card() -> NewCard {
+        NewCard {
+            credentials: NewCredentials::new("visa *4242".into(), "{}".into()),
+            save: true,
+        }
+    }
+
+    #[test]
+    fn asking_for_a_password_keeps_the_card_and_every_exit_gives_it_back() {
+        let mut stage = NewCardStage::Ready(card());
+        stage.ask_password(true);
+        assert!(stage.needs_password() && stage.card().is_some());
+        // Dismissed, or another method chosen: the card stays, the ask goes.
+        stage.drop_password_prompt();
+        assert!(!stage.needs_password() && stage.card().is_some());
+        stage.ask_password(true);
+        stage.ask_password(false);
+        assert!(!stage.needs_password() && stage.card().is_some());
+    }
+
+    #[test]
+    fn there_is_nothing_to_ask_a_password_for_without_a_card() {
+        let mut stage = NewCardStage::None;
+        stage.ask_password(true);
+        assert!(stage.is_none() && !stage.needs_password());
     }
 }

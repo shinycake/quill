@@ -54,13 +54,23 @@ pub(super) fn section_header(title: &'static str) -> impl IntoElement {
         .child(title)
 }
 
+/// Whether the page is to scroll to the usage rows. A scroll leaves its
+/// stage at the next frame: spent, or kept until the rows above the list
+/// stop loading.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ScrollStage {
+    Idle,
+    /// Asked: the next frame scrolls.
+    Requested,
+    /// The rows above the list were still loading at the last scroll: it
+    /// goes again once they arrive, unless the user scrolled meanwhile.
+    UntilSettled,
+}
+
 pub(crate) struct StorageScroll {
     pub(in crate::ui) page: ScrollHandle,
     usage: ScrollAnchor,
-    pending: bool,
-    /// The rows above the list were still loading at the last scroll: it
-    /// goes again once they arrive, unless the user scrolled meanwhile.
-    until_settled: bool,
+    stage: ScrollStage,
     /// The page's vertical offset the last scroll left.
     placed: Rc<Cell<Option<Pixels>>>,
 }
@@ -72,8 +82,7 @@ impl StorageScroll {
         Self {
             page,
             usage,
-            pending: false,
-            until_settled: false,
+            stage: ScrollStage::Idle,
             placed: Rc::default(),
         }
     }
@@ -82,7 +91,7 @@ impl StorageScroll {
 impl QuillApp {
     pub(crate) fn open_local_storage(&mut self, cx: &mut Context<Self>) {
         self.open_data_storage(cx);
-        self.settings.storage_scroll.pending = true;
+        self.settings.storage_scroll.stage = ScrollStage::Requested;
     }
 
     pub(in crate::ui) fn ensure_storage_scroll(
@@ -98,12 +107,20 @@ impl QuillApp {
             .placed
             .get()
             .is_some_and(|placed| placed != scroll.page.offset().y);
-        if user_moved {
-            scroll.until_settled = false;
+        if user_moved && scroll.stage == ScrollStage::UntilSettled {
+            scroll.stage = ScrollStage::Idle;
         }
-        let again = scroll.until_settled && settled;
-        if std::mem::take(&mut scroll.pending) || again {
-            scroll.until_settled = !settled;
+        let go = match scroll.stage {
+            ScrollStage::Requested => true,
+            ScrollStage::UntilSettled => settled,
+            ScrollStage::Idle => false,
+        };
+        if go {
+            scroll.stage = if settled {
+                ScrollStage::Idle
+            } else {
+                ScrollStage::UntilSettled
+            };
             scroll.usage.scroll_to(window, cx);
             let (placed, page) = (scroll.placed.clone(), scroll.page.clone());
             // Runs after the anchor's own next-frame scroll. The new offset

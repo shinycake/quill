@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::composer_state::DraftRestore;
 use super::draft_timer::DraftTimerStep;
 use gpui_kit::*;
 use quill::composer::{ComposerReplyTo, DraftContent, DraftTopic, draft_text_to_store};
@@ -151,12 +152,14 @@ impl QuillApp {
     /// frame (the input needs `&mut Window`, which topic and thread
     /// switches triggered from menus don't have).
     pub(super) fn request_draft_restore(&mut self) {
-        self.composer_ui.draft_restore_pending = true;
+        self.composer_ui.draft_restore = DraftRestore::Requested;
     }
 
     /// Frame upkeep: run a requested restore.
     pub(super) fn restore_draft_if_pending(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if std::mem::take(&mut self.composer_ui.draft_restore_pending) {
+        if std::mem::replace(&mut self.composer_ui.draft_restore, DraftRestore::Idle)
+            == DraftRestore::Requested
+        {
             self.restore_open_draft(window, cx);
         }
     }

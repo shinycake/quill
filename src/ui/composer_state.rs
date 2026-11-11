@@ -41,6 +41,14 @@ impl DraftClear {
     }
 }
 
+/// A restore of the open slot's draft, asked for from code that has no
+/// window; the next frame runs it once and the request is spent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum DraftRestore {
+    Idle,
+    Requested,
+}
+
 pub(crate) struct ComposerUi {
     /// Highlighted row of the composer's `@` suggestions.
     pub(super) mention_selected: usize,
@@ -79,7 +87,7 @@ pub(crate) struct ComposerUi {
     pub(super) rich_draft: super::rich_draft::RichDraftUi,
     /// A topic or thread switch asked for the new slot's draft to be put
     /// in the composer on the next frame (`restore_draft_if_pending`).
-    pub(super) draft_restore_pending: bool,
+    pub(super) draft_restore: DraftRestore,
     /// The session's remote draft revision this composer last checked
     /// (`QuillApp::adopt_remote_draft`).
     pub(super) remote_draft_seen: u64,
@@ -126,7 +134,7 @@ impl ComposerUi {
             send_effect_once: 0,
             send_menu: Default::default(),
             rich_draft: Default::default(),
-            draft_restore_pending: false,
+            draft_restore: DraftRestore::Idle,
             remote_draft_seen: 0,
             shown_draft: None,
             placeholder_shown: None,

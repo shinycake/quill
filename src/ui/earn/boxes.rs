@@ -176,6 +176,7 @@ impl QuillApp {
     }
 
     fn close_earn_tx(&mut self, cx: &mut Context<Self>) {
+        // box-host: closes both history boxes; nothing opens.
         self.earn.tx_box = TxBox::None;
         cx.notify();
     }

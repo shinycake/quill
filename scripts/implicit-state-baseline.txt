@@ -39,7 +39,6 @@ ChecklistDraft::others_can_mark_tasks_as_done
 ChecklistSend::others_can_mark_tasks_as_done
 CheckoutView::sending
 Clip::busy
-ComposerUi::draft_restore_pending
 ConnectDriver::parameters_sent
 CraftSession::candidates_loaded
 CraftSession::candidates_loading
@@ -84,7 +83,6 @@ JoinedLines::started
 LanguageLinkLookup::loading
 LanguageLinkLookup::loading+error
 Latest::wake_pending
-LayerFade::closing
 LinuxState::failed
 LiveInput::failed
 LocalFileState::is_downloading_active
@@ -189,7 +187,6 @@ StickerPanel::greeting_loaded
 StickerPanel::installed_loaded
 StickerPanel::suggest_waiting_for_sets
 StickerSetView::files_requested
-StorageScroll::pending
 StreamFacts::transport_failed
 StyleExamples::loading
 Tempo::done

@@ -58,7 +58,7 @@ frame.title_badge | the unread badge image cache, by count
 frame.media_roots_frame | the media folders read this frame, rebuilt every frame
 frame.frame_started | when this frame began
 frame.tick_view | the view that drives the frame tick
-frame.frame_clock_running | the frame clock runs
+frame.frame_clock * | the frame clock's loop: stopped, or running with its task
 frame.clock_timing | the display refresh timing
 frame.main_refresh | the main window's refresh interval
 frame.layers_drawn | which layers drew this frame, reset each frame
@@ -91,14 +91,12 @@ agent_bridge.driver | the UI driver runs agents' input commands one at a time fo
 takeover.wake_at | when the takeover banner next redraws
 connect.generation | which prepared connection may open
 connect.closed_noted | the generation whose close was noted
-disk.state | the disk space level, for the data folder
+disk.standing * | the disk space level with its confirmation and the call hold, for the data folder
 disk.free | the free space last read
 disk.floors | the floors for that level
-disk.confirming | the space warning is being confirmed
 disk.waited | how long the disk has been short
 disk.unwritable | the data folder cannot be written
 disk.screen_refused | the on-screen client was refused for space; `disk.on_screen` names it
-disk.held_for_call | the on-screen client is held open for its call; checked at every reading against `disk.on_screen`
 disk.full_notices | how many full-disk notices were shown
 disk.cache_folder | the cache folder measured
 disk.database_bytes | the database size measured
@@ -154,15 +152,11 @@ slices.image_cache | the bounded image cache, keyed by image source
 slices.idle_trim | the idle cache trim task
 slices.scope | the view being drawn
 group_call.window | the video chat window, opened and closed by the sync with the session on screen; the call ends with the client (`retire_live_to_background`)
-group_call.window_opening | that window is opening
 group_call.chat_shown | the window's chat column is open, a layout preference
 group_call.ptt | push-to-talk key settings
 group_call.ptt_clock | the push-to-talk clock
 group_call.ptt_capture | the push-to-talk key is being recorded
-group_call.global_ptt | the OS-wide push-to-talk listener
-group_call.global_ptt_polling | it is polled
-group_call.global_ptt_listener_stop | its stop flag
-group_call.window_visible | the window is visible
+group_call.global_ptt * | the OS-wide push-to-talk hook with its listener and permission re-check tasks
 group_call.level_anim | the own voice level animation
 group_call.level_seen | the level last drawn
 group_call.row_levels | participant voice level animations by source id; pruned to the call's participants every sync
@@ -172,8 +166,7 @@ group_call.players | tile players by `LiveKey`; the sync drops every one whose c
 group_call.tile_overlays * | tile control fades by `LiveKey`, pruned with the players
 group_call.stage_volume | the stage tile's volume popover
 group_call.stage_volume.sender | the stage's speaker: the popover is cleared whenever no stage is drawn, and the pin that keeps a stage drawn is the screen's (GroupCallScreen)
-group_call.stage_volume.level | the popover's volume, as stage_volume.sender
-group_call.stage_volume.dragging | the slider is being dragged, as stage_volume.sender
+group_call.stage_volume.stage * | the slider's level and drag, as stage_volume.sender
 group_call.stage_volume.slider | the popover's slider, as stage_volume.sender
 group_call.stage_volume._events | the slider's subscription, as stage_volume.sender
 group_call.stream * | the stream window's player, photo, controls and overlay; `clear` runs when the call shown is no stream; the join wait is the screen's (`group_call_screen.stream_joining`)

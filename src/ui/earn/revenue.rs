@@ -513,6 +513,7 @@ impl QuillApp {
                     ))
                     .tab_index(0)
                     .on_click(cx.listener(move |this, _, _, cx| {
+                        // box-host: opens EarnTonTx just below; the Stars kind stays shut.
                         this.earn.tx_box = TxBox::Ton(row_tx.clone());
                         this.open_box(crate::ui::shell::DialogKind::EarnTonTx);
                         cx.notify();
@@ -573,6 +574,7 @@ impl QuillApp {
                 ("earn-star-tx", ix + filter as usize * 100_000),
                 tx,
                 move |this, cx| {
+                    // box-host: opens EarnStarTx just below; the TON kind stays shut.
                     this.earn.tx_box = TxBox::Star(row_tx.clone());
                     this.open_box(crate::ui::shell::DialogKind::EarnStarTx);
                     cx.notify();
