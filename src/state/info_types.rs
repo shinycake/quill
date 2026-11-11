@@ -487,6 +487,26 @@ pub enum SupergroupMembersFetch {
     Failed(String),
 }
 
+/// Where the next page of a member list stands.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MoreMembers {
+    #[default]
+    Idle,
+    /// A next page is out as this request.
+    Asking(RequestId),
+    /// The last next page failed; the panel asks again at its next scroll.
+    Failed,
+}
+
+/// How one member list was asked: the first-page request (`None` when the
+/// list was filled without one), the query, and the next page.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MemberAsk {
+    pub first: Option<RequestId>,
+    pub query: String,
+    pub more: MoreMembers,
+}
+
 /// B4: one `getPollVoters` page (schema 1.8.67, line 12941) backing the
 /// poll-voters dialog. Same Loading-guard convention; a failed first page
 /// lands in `Failed`, a failed "load more" keeps the loaded page.
@@ -563,11 +583,28 @@ pub const CHAT_EVENT_LOG_PAGE_SIZE: i32 = 100;
 /// (schema 1.8.67, line 15252). Keyed by chat id. `Loading` is the
 /// in-flight guard — the driver never sends a second request while one
 /// is outstanding.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum ChatEventLogFetch {
+    /// Never asked, or cleared by a refresh.
+    #[default]
+    Idle,
     Loading,
     Loaded(ChatEventLogPage),
     Failed(String),
+}
+
+/// One chat's recent actions: what it is asked for (kept across
+/// refreshes), where the asking stands, and the requests it waits for.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct EventLog {
+    /// The text search (`getChatEventLog.query`); empty = no search.
+    pub query: String,
+    /// The event-type filter (`chatEventLogFilters`); `None` = every type.
+    pub filter: Option<ChatEventLogFilterSet>,
+    /// The `user_ids` filter; empty = every admin.
+    pub users: Vec<i64>,
+    pub fetch: ChatEventLogFetch,
+    pub wait: EventLogWait,
 }
 
 /// The `getChatEventLog` requests one chat's log waits for

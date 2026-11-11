@@ -96,7 +96,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         GroupsPurpose::GetChatEventLog { from_event_id: 0 },
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &[300, 299]));
-    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
     else {
         panic!("expected loaded event log");
     };
@@ -114,7 +114,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         GroupsPurpose::GetChatEventLog { from_event_id: 299 },
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &full));
-    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
     else {
         panic!("expected loaded event log");
     };
@@ -130,7 +130,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         GroupsPurpose::GetChatEventLog { from_event_id: 200 },
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &[199]));
-    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
     else {
         panic!("expected loaded event log");
     };
@@ -143,7 +143,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         GroupsPurpose::GetChatEventLog { from_event_id: 0 },
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &[500]));
-    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
     else {
         panic!("expected loaded event log");
     };
@@ -174,7 +174,7 @@ fn event_log_failure_states() {
         ),
     );
     let ChatEventLogFetch::Failed(message) =
-        session.groups.event_logs.get(&13).expect("log failed")
+        session.groups.event_log_fetch(13).expect("log failed")
     else {
         panic!("expected failed event log");
     };
@@ -207,7 +207,7 @@ fn event_log_failure_states() {
             extra.0
         ),
     );
-    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
     else {
         panic!("expected loaded event log");
     };

@@ -5,6 +5,48 @@ use crate::state::*;
 use crate::telegram::envelope::{ParsedBoostFeatures, ParsedBoostStatus};
 
 impl GroupsState {
+    /// Where `chat`'s event log fetch stands; `None` until it was asked.
+    pub fn event_log_fetch(&self, chat: i64) -> Option<&ChatEventLogFetch> {
+        self.event_logs
+            .get(&chat)
+            .map(|log| &log.fetch)
+            .filter(|fetch| !matches!(fetch, ChatEventLogFetch::Idle))
+    }
+
+    /// The text search `chat`'s event log is asked with.
+    pub fn event_log_query(&self, chat: i64) -> &str {
+        self.event_logs.get(&chat).map_or("", |log| &log.query)
+    }
+
+    /// `chat`'s event-type filter; `None` = every type.
+    pub fn event_log_filter(&self, chat: i64) -> Option<ChatEventLogFilterSet> {
+        self.event_logs.get(&chat).and_then(|log| log.filter)
+    }
+
+    /// The admins `chat`'s event log is filtered to; empty = everyone.
+    pub fn event_log_users(&self, chat: i64) -> &[i64] {
+        self.event_logs.get(&chat).map_or(&[], |log| &log.users)
+    }
+
+    /// `chat`'s event log has a filter or an admin filter set.
+    pub fn event_log_filtered(&self, chat: i64) -> bool {
+        self.event_log_filter(chat).is_some() || !self.event_log_users(chat).is_empty()
+    }
+
+    /// `chat`'s log forgets its fetch and the requests it waits for (a
+    /// refresh): what it is asked with stays.
+    pub(crate) fn reset_event_log_fetch(&mut self, chat: i64) {
+        if let Some(log) = self.event_logs.get_mut(&chat) {
+            log.fetch = ChatEventLogFetch::Idle;
+            log.wait = EventLogWait::default();
+        }
+    }
+
+    /// `chat`'s event log is asked for, settled by `fetch`.
+    pub(crate) fn set_event_log_fetch(&mut self, chat: i64, fetch: ChatEventLogFetch) {
+        self.event_logs.entry(chat).or_default().fetch = fetch;
+    }
+
     /// `chat`'s member and admin caches were dropped: the UI refetches
     /// what it shows of them (`member_list_stale`, drained by the poll).
     pub(crate) fn mark_member_list_stale(&mut self, chat: i64) {
@@ -24,9 +66,40 @@ impl GroupsState {
     /// The query the member list `key` was asked with ("" for one asked
     /// before queries were kept, or filled elsewhere).
     pub fn member_query(&self, key: (i64, MemberListFilter)) -> &str {
-        self.supergroup_member_queries
+        self.member_asks
             .get(&key)
-            .map_or("", |(_, query)| query.as_str())
+            .map_or("", |ask| ask.query.as_str())
+    }
+
+    /// A first page for `key` was sent as `request` with `query`: it
+    /// replaces how the list was asked, and drops a next page of the old one.
+    pub(crate) fn note_member_first(
+        &mut self,
+        key: (i64, MemberListFilter),
+        request: RequestId,
+        query: &str,
+    ) {
+        self.member_asks.insert(
+            key,
+            MemberAsk {
+                first: Some(request),
+                query: query.to_string(),
+                more: MoreMembers::Idle,
+            },
+        );
+    }
+
+    /// The members panel of `chat` takes the failed next pages: each goes
+    /// back to idle so the next scroll asks again. Whether any failed.
+    pub fn take_member_more_failures(&mut self, chat: i64) -> bool {
+        let mut any = false;
+        for (_, ask) in self.member_asks.iter_mut().filter(|(key, _)| key.0 == chat) {
+            if ask.more == MoreMembers::Failed {
+                ask.more = MoreMembers::Idle;
+                any = true;
+            }
+        }
+        any
     }
 
     /// Whether `pending` is the latest first-page request for `key`, the
@@ -36,16 +109,16 @@ impl GroupsState {
         key: (i64, MemberListFilter),
         pending: &PendingRequest,
     ) -> bool {
-        self.supergroup_member_queries
+        self.member_asks
             .get(&key)
-            .is_none_or(|(id, _)| *id == pending.id)
+            .and_then(|ask| ask.first)
+            .is_none_or(|id| id == pending.id)
     }
 
     /// A next-page request for `key` was sent: it extends the list the
     /// latest first page filled.
     pub(crate) fn note_member_more(&mut self, key: (i64, MemberListFilter), more: RequestId) {
-        let base = self.supergroup_member_queries.get(&key).map(|(id, _)| *id);
-        self.member_more_bases.insert(more, base);
+        self.member_asks.entry(key).or_default().more = MoreMembers::Asking(more);
     }
 
     /// Settle the next page `pending`: whether it extends the list `key`
@@ -56,10 +129,14 @@ impl GroupsState {
         key: (i64, MemberListFilter),
         pending: &PendingRequest,
     ) -> bool {
-        let Some(base) = self.member_more_bases.remove(&pending.id) else {
+        let Some(ask) = self.member_asks.get_mut(&key) else {
             return false;
         };
-        base == self.supergroup_member_queries.get(&key).map(|(id, _)| *id)
+        if ask.more != MoreMembers::Asking(pending.id) {
+            return false;
+        }
+        ask.more = MoreMembers::Idle;
+        true
     }
 }
 
@@ -128,20 +205,10 @@ pub struct GroupsState {
     /// Batch 8: `chatJoinRequestsInfo.user_ids` (the newest requesters)
     /// from the same update, for the requests bar's avatars.
     pub pending_join_request_users: HashMap<i64, Vec<i64>>,
-    /// Phase D3c: `getChatEventLog` fetch state, keyed by chat id.
-    pub event_logs: HashMap<i64, ChatEventLogFetch>,
-    /// The requests each chat's event log waits for, by chat id.
-    pub event_log_waits: HashMap<i64, EventLogWait>,
-    /// Slice G2: per-chat event-log filters (`chatEventLogFilters`,
-    /// schema 1.8.67, line 7956). Absent = all event types (the schema's
-    /// `null`).
-    pub event_log_filters: HashMap<i64, ChatEventLogFilterSet>,
-    /// Slice G2: per-chat event-log text search (the `query` parameter of
-    /// `getChatEventLog`, schema 1.8.67, line 15252). Absent = no search.
-    pub event_log_queries: HashMap<i64, String>,
-    /// Per-chat admin filter: the `user_ids` of `getChatEventLog` (the server
-    /// filters, so the admin list stays complete). Empty or absent = everyone.
-    pub event_log_users: HashMap<i64, Vec<i64>>,
+    /// Phase D3c: each chat's `getChatEventLog` state, keyed by chat id: the
+    /// search, the filters (schema 1.8.67, lines 7956 and 15252), the fetch
+    /// stage and the page and poll requests it waits for.
+    pub event_logs: HashMap<i64, EventLog>,
     /// Slice G2: `supergroup.sign_messages` (schema 1.8.67, line 2746),
     /// keyed by supergroup id. Drives the channel "Sign messages" toggle.
     pub supergroup_sign_messages: HashMap<i64, bool>,
@@ -251,17 +318,11 @@ pub struct GroupsState {
     /// promote member picker and the member-management dialog, keyed by
     /// (chat id, filter). One page per filter.
     pub supergroup_members: HashMap<(i64, MemberListFilter), SupergroupMembersFetch>,
-    /// The first-page `getSupergroupMembers` each entry of
-    /// `supergroup_members` comes from, and the query it asked with. A
-    /// search for another query sends a new request; only the latest one's
-    /// answer or error fills the entry.
-    pub supergroup_member_queries: HashMap<(i64, MemberListFilter), (RequestId, String)>,
-    /// Each next-page request in flight and the first-page request whose
-    /// list it extends (`None`: a list filled without one).
-    pub(crate) member_more_bases: HashMap<RequestId, Option<RequestId>>,
-    /// Lists whose last next-page request failed. The members panel takes
-    /// the mark and asks for that page again at its next scroll.
-    pub member_more_failed: HashSet<(i64, MemberListFilter)>,
+    /// How each entry of `supergroup_members` was asked: its first-page
+    /// request, its query and its next page. A search for another query
+    /// replaces the entry; only the latest first page's answer or error
+    /// fills the list, and a next page of an older query finds itself gone.
+    pub member_asks: HashMap<(i64, MemberListFilter), MemberAsk>,
     /// Slice G1: `getBasicGroupFullInfo` fetch state (the member list for
     /// basic groups), keyed by chat id. Reuses `SupergroupMembersFetch`
     /// (Loading / Loaded / Failed).
@@ -366,10 +427,6 @@ impl GroupsState {
             pending_join_request_counts: HashMap::new(),
             pending_join_request_users: HashMap::new(),
             event_logs: HashMap::new(),
-            event_log_waits: HashMap::new(),
-            event_log_filters: HashMap::new(),
-            event_log_queries: HashMap::new(),
-            event_log_users: HashMap::new(),
             supergroup_sign_messages: HashMap::new(),
             supergroup_show_message_sender: HashMap::new(),
             supergroup_anti_spam_enabled: HashMap::new(),
@@ -402,9 +459,7 @@ impl GroupsState {
             supergroup_invite_right: HashMap::new(),
             admin_lists: HashMap::new(),
             supergroup_members: HashMap::new(),
-            supergroup_member_queries: HashMap::new(),
-            member_more_bases: HashMap::new(),
-            member_more_failed: HashSet::new(),
+            member_asks: HashMap::new(),
             basic_group_members: HashMap::new(),
             basic_group_descriptions: HashMap::new(),
             info_edit_errors: HashMap::new(),

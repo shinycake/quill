@@ -515,7 +515,7 @@ impl Session {
             .supergroup_members
             .retain(|(chat, _), _| *chat != chat_id.0);
         groups
-            .supergroup_member_queries
+            .member_asks
             .retain(|(chat, _), _| *chat != chat_id.0);
         let dropped = groups.basic_group_members.remove(&chat_id.0).is_some()
             || groups.supergroup_members.len() != members;

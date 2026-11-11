@@ -512,7 +512,8 @@ impl Session {
                     && let Some(chat_id) = pending.chat_id
                     && self.groups.take_member_more((chat_id.0, filter), pending)
                 {
-                    self.groups.member_more_failed.insert((chat_id.0, filter));
+                    self.groups.member_asks.entry((chat_id.0, filter)).or_default().more =
+                        MoreMembers::Failed;
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers { filter })) => {
@@ -549,11 +550,11 @@ impl Session {
                     .and_then(|p| p.chat_id)
                     && (from_event_id == 0
                         || !matches!(
-                            self.groups.event_logs.get(&chat_id.0),
+                            self.groups.event_log_fetch(chat_id.0),
                             Some(ChatEventLogFetch::Loaded(_))
                         ))
                 {
-                    self.groups.event_logs.insert(
+                    self.groups.set_event_log_fetch(
                         chat_id.0,
                         ChatEventLogFetch::Failed(call_request_error_line(
                             err,
