@@ -379,15 +379,24 @@ impl QuillApp {
         {
             return followed;
         }
-        let mut scan = self.translate.pump.remove(&chat_id.0).unwrap_or_default();
+        // A scan that is new is a chat shown again: what failed before is
+        // asked for once more (not on every pass, which would hammer a
+        // connection that is down).
+        let removed = self.translate.pump.remove(&chat_id.0);
+        let reopened = removed.is_none();
+        let mut scan = removed.unwrap_or_default();
+        let retried = reopened
+            && self
+                .session_mut()
+                .is_some_and(|session| session.retry_failed_translations(chat_id));
         let wanted: Vec<MessageId> = {
             let Some(session) = self.session() else {
                 self.translate.pump.insert(chat_id.0, scan);
-                return followed;
+                return followed || retried;
             };
             let Some(history) = session.histories.get(&chat_id.0) else {
                 self.translate.pump.insert(chat_id.0, scan);
-                return followed;
+                return followed || retried;
             };
             let room = MAX_IN_FLIGHT.saturating_sub(session.messages.translate.in_flight());
             let key = PumpKey {
@@ -442,13 +451,13 @@ impl QuillApp {
             self.translate
                 .asked
                 .extend(wanted.into_iter().map(|id| (id, model.to)));
-            return followed;
+            return followed || retried;
         };
         let mut sent = false;
         for id in wanted {
             sent |= live.driver.translate_message(chat_id, id, model.to).is_ok();
         }
-        followed || sent
+        followed || sent || retried
     }
 
     /// Settings → Translation: Show Translate Button, Translate Entire Chats
