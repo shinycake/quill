@@ -51,6 +51,62 @@ pub(in crate::ui) struct LiveStarsBox {
     pub(super) then_send: bool,
 }
 
+/// The Stars flow of the comment field, as one value: closed, the box open,
+/// or the viewer sent off to top up. Each leaves with the box's button, its
+/// close, the box opening again, a refused top-up, or the viewer closing
+/// (`LiveStoryUi::reset`).
+pub(in crate::ui) enum StarsFlow {
+    Idle,
+    Box(LiveStarsBox),
+    /// The box sent the viewer to top up with `stars`: the box opens on
+    /// them again. A comment that waited sends only when the box reopens
+    /// from a send that needs Stars (`SendAction::NeedsStars`), never from a
+    /// price edit.
+    TopUp {
+        mode: StarsBoxMode,
+        stars: i64,
+    },
+}
+
+impl StarsFlow {
+    pub(in crate::ui) fn boxed(&self) -> Option<&LiveStarsBox> {
+        match self {
+            Self::Box(boxed) => Some(boxed),
+            _ => None,
+        }
+    }
+
+    pub(super) fn boxed_mut(&mut self) -> Option<&mut LiveStarsBox> {
+        match self {
+            Self::Box(boxed) => Some(boxed),
+            _ => None,
+        }
+    }
+
+    /// The open box, leaving the flow idle.
+    pub(super) fn take_box(&mut self) -> Option<LiveStarsBox> {
+        match std::mem::replace(self, Self::Idle) {
+            Self::Box(boxed) => Some(boxed),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+
+    /// The amount a top-up waits to reopen the box on, leaving the flow
+    /// idle.
+    pub(super) fn take_top_up(&mut self) -> Option<(StarsBoxMode, i64)> {
+        match std::mem::replace(self, Self::Idle) {
+            Self::TopUp { mode, stars } => Some((mode, stars)),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+}
+
 /// The delete box of one comment (tdesktop `Messages::deleteConfirmed`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::ui) struct LiveDelete {
@@ -161,11 +217,8 @@ pub(in crate::ui) struct LiveStoryUi {
     pub(in crate::ui) join: LiveJoin,
     /// Stars the next comment carries (0 = free; tdesktop `_starsToSend`).
     pub(super) chosen_stars: i64,
-    pub(super) stars_box: Option<LiveStarsBox>,
+    pub(super) stars: StarsFlow,
     pub(super) delete: Option<LiveDelete>,
-    /// The Stars box's amount when it sent the viewer to top up, so the
-    /// box opens on it again.
-    pub(super) stars_before_top_up: Option<(StarsBoxMode, i64)>,
     pub(super) flying: Vec<FlyingStars>,
     /// The comments list; it follows new comments while at the bottom.
     pub(super) scroll: ScrollHandle,
@@ -213,9 +266,8 @@ impl LiveStoryUi {
             player: None,
             join: LiveJoin::Idle,
             chosen_stars: 0,
-            stars_box: None,
+            stars: StarsFlow::Idle,
             delete: None,
-            stars_before_top_up: None,
             flying: Vec::new(),
             scroll: ScrollHandle::new(),
             last_comment: None,
@@ -243,9 +295,8 @@ impl LiveStoryUi {
     pub(super) fn reset(&mut self) {
         self.join = LiveJoin::Idle;
         self.chosen_stars = 0;
-        self.stars_box = None;
+        self.stars = StarsFlow::Idle;
         self.delete = None;
-        self.stars_before_top_up = None;
         self.flying.clear();
         self.last_comment = None;
         self.overlay = Default::default();

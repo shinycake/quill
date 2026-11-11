@@ -41,6 +41,7 @@ impl QuillApp {
             AlbumPickerTarget::NewAlbum => Vec::new(),
         };
         if let Some(page) = self.stories.page.as_mut() {
+            page.view.disarm();
             page.picker = Some(AlbumPicker::new(target, initial));
         }
         self.request_picker_thumbs(cx);

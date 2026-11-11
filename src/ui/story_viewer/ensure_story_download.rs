@@ -380,10 +380,10 @@ impl QuillApp {
                     ),
             );
         }
-        if let Some(error) = state.error.clone() {
+        if let Some(error) = state.error().map(str::to_string) {
             panel = panel.child(div().text_sm().text_color(danger()).child(error));
         }
-        if state.error.is_some() && !state.loading && !state.next_offset.is_empty() {
+        if state.error().is_some() && !state.next_offset.is_empty() {
             // A failed page waits for this button; scrolling does not re-ask.
             panel = panel.child(
                 div().flex().justify_center().py_2().child(
@@ -393,7 +393,7 @@ impl QuillApp {
                         .on_click(cx.listener(|this, _, _, cx| this.load_more_story_viewers(cx))),
                 ),
             );
-        } else if state.loading || !state.next_offset.is_empty() {
+        } else if state.is_loading() || !state.next_offset.is_empty() {
             panel = panel.child(
                 div()
                     .id("story-viewers-loading-more")
@@ -407,7 +407,7 @@ impl QuillApp {
                     .child(gpui_kit::component::spinner::Spinner::new().small())
                     .child(tr(keys::Q_MEDIA_LOADING_VIEWERS)),
             );
-        } else if state.rows.is_empty() && !state.loading {
+        } else if state.rows.is_empty() && !state.is_loading() {
             panel = panel.child(
                 div()
                     .text_sm()
@@ -445,7 +445,7 @@ impl QuillApp {
                 .into_any_element();
         };
         match flow.stage {
-            StoryReportStage::Checking | StoryReportStage::Sending => {
+            StoryReportStage::Checking { .. } | StoryReportStage::Sending { .. } => {
                 panel = panel.child(
                     div()
                         .text_sm()
