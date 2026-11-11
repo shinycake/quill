@@ -15,12 +15,20 @@ use quill::telegram::envelope::{ChannelMemberStatus, SupergroupFullAdmin};
 use std::path::PathBuf;
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+    new_app_sized(cx, 1100.)
+}
+
+/// The demo app in a window `width` points wide, with a chat open.
+pub(in crate::ui) fn new_app_sized(
+    cx: &mut TestAppContext,
+    width: f32,
+) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
     let demo = ScreenshotDemo::named("ready-chats");
-    let handle = cx.open_window(size(px(1100.), px(700.)), move |window, cx| {
+    let handle = cx.open_window(size(px(width), px(700.)), move |window, cx| {
         let view = cx.new(|cx| QuillApp::new_with_demo(window, cx, None, Some(demo)));
         *slot_in.borrow_mut() = Some(view.clone());
         let shell = cx.new(|_| QuillShell::new(view));
@@ -31,7 +39,7 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     (app, vcx)
 }
 
-fn fixture(name: &str) -> PathBuf {
+pub(in crate::ui) fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("docs/screenshots/fixtures")
         .join(name)
@@ -39,7 +47,7 @@ fn fixture(name: &str) -> PathBuf {
 
 /// Chat 13 is the demo channel; make it one the account owns that allows
 /// paid media.
-fn own_paid_channel(app: &mut QuillApp, allowed: bool) {
+pub(in crate::ui) fn own_paid_channel(app: &mut QuillApp, allowed: bool) {
     let session = app.demo_session.as_mut().expect("demo session");
     session.open_chat(ChatId(13));
     let supergroup = session.chat_supergroup(ChatId(13)).expect("channel");
@@ -60,7 +68,7 @@ fn own_paid_channel(app: &mut QuillApp, allowed: bool) {
         .assume_member_status(Some(ChannelMemberStatus::Creator));
 }
 
-fn tray(app: &mut QuillApp, files: &[(&str, AttachmentKind)]) {
+pub(in crate::ui) fn tray(app: &mut QuillApp, files: &[(&str, AttachmentKind)]) {
     let files: Vec<_> = files
         .iter()
         .map(|(name, kind)| ComposerAttachment::pick(&fixture(name), *kind).unwrap())

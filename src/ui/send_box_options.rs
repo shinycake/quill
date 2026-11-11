@@ -19,7 +19,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::composer::{
     AttachmentKind, MediaSendOptions, PriceInput, can_use_high_quality, cover_send_path,
-    paid_media_fits, parse_paid_price, session_allows_paid_media,
+    media_kind_for, paid_media_fits, parse_paid_price, session_allows_paid_media,
 };
 use quill::lang::{keys, tr, tr_with};
 use std::cell::RefCell;
@@ -95,12 +95,23 @@ impl QuillApp {
             .or_insert_with(|| image::image_dimensions(path).ok())
     }
 
-    /// tdesktop `hasSendLargePhotosOption`: a compressed photo over 1280 px.
+    /// tdesktop `hasSendLargePhotosOption`: a picture over 1280 px, whether
+    /// it goes as a photo or as a file right now (the quality choices stay
+    /// put when "File" is picked).
     pub(super) fn tray_has_large_photo(&self) -> bool {
         self.pending_attachments()
             .iter()
-            .filter(|attachment| attachment.kind == AttachmentKind::Photo)
-            .filter_map(|attachment| self.tray_photo_size(attachment.photo_file()))
+            .filter_map(|attachment| match attachment.kind {
+                AttachmentKind::Photo => Some(attachment.photo_file()),
+                AttachmentKind::Document
+                    if !attachment.extras.file_only()
+                        && media_kind_for(&attachment.path) == Some(AttachmentKind::Photo) =>
+                {
+                    Some(attachment.path.as_path())
+                }
+                _ => None,
+            })
+            .filter_map(|path| self.tray_photo_size(path))
             .any(|(width, height)| can_use_high_quality(width, height))
     }
 

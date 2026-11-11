@@ -258,7 +258,6 @@
 "lng_scheduled_messages" = "Scheduled Messages";
 "lng_scheduled_send_until_online" = "Send when online";
 "lng_select_next_owner_box_empty_list" = "There are no eligible participants to appoint as owner.";
-"lng_send_high_quality" = "High Quality";
 "lng_settings_call_camera" = "Camera";
 "lng_settings_call_device_default" = "Default";
 "lng_settings_call_section_input" = "Microphone";
@@ -378,7 +377,6 @@
 "qll_ops_change" = "Change…";
 "qll_ops_change_owner" = "Change owner";
 "qll_ops_change_recipient" = "Change recipient";
-"qll_ops_change_the_price" = "Change the price";
 "qll_ops_changed_s_restrictions" = "changed {name}'s restrictions";
 "qll_ops_changed_s_role" = "changed {name}'s role";
 "qll_ops_changed_the_chat_photo" = "changed the chat photo";

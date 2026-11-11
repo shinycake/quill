@@ -137,6 +137,7 @@
 "qll_chat_ai_rewriting" = "AI rewriting…";
 "qll_chat_ai_rewriting_the_blocks" = "AI rewriting the blocks…";
 "qll_chat_ai_tools_unavailable_here" = "AI tools unavailable here";
+"qll_chat_album" = "Album";
 "qll_chat_all" = "All {total}";
 "qll_chat_all_chats" = "✓ All chats";
 "qll_chat_also_delete_for" = "Also delete for {first_name}";
@@ -158,7 +159,9 @@
 "qll_chat_cancel_editing" = "Cancel editing";
 "qll_chat_cancel_reply" = "Cancel reply";
 "qll_chat_cancel_upload" = "Cancel Upload";
+"qll_chat_caption_above" = "Above";
 "qll_chat_caption_above_media" = "Caption above media";
+"qll_chat_caption_below" = "Below";
 "qll_chat_channels_you_joined" = "Channels you joined";
 "qll_chat_chat" = "Chat";
 "qll_chat_chat_actions" = "Chat actions";
@@ -415,6 +418,9 @@
 "qll_chat_widget_failed" = "This widget couldn't start.";
 "lng_tgw_stopped" = "Widget stopped";
 "lng_tgw_copied" = "Copied: {text}";
+"qll_chat_quality" = "Quality";
+"qll_chat_quality_compressed" = "Compressed";
+"qll_chat_quality_hd" = "HD";
 "qll_chat_quill_cannot_display_this_message" = "Quill cannot display this message. A newer release may support it.";
 "qll_chat_quote" = "Quote";
 "qll_chat_quote_reply" = "Quote & Reply";
@@ -504,12 +510,10 @@
 "qll_chat_self_destruct_timer" = "Self-destruct timer";
 "qll_chat_self_destruct_view_once" = "Self-destruct: view once";
 "qll_chat_send_a_gift" = "Send a gift";
-"qll_chat_send_as_album" = "Send as album";
-"qll_chat_send_options" = "Send options";
-"qll_chat_send_separately" = "Separate messages";
+"qll_chat_send_separately" = "Separately";
+"qll_chat_send_together" = "Together";
+"qll_chat_send_as" = "Send as";
 "qll_chat_send_with_sound" = "Send with sound";
-"qll_chat_send_without_compression" = "Send without compression";
-"qll_chat_turn_off_option" = "Turn off: {option}";
 "qll_chat_sending" = "sending…";
 "qll_chat_sending_gif" = "Sending GIF";
 "qll_chat_shared_media" = "Shared media";
@@ -545,6 +549,7 @@
 "qll_chat_the_text_changed_open_code" = "The text changed. Open Code Language again.";
 "qll_chat_the_text_changed_select_it" = "The text changed; select it again to add the date";
 "qll_chat_the_text_changed_select_it_2" = "The text changed; select it again to add the link";
+"qll_chat_timer" = "Timer";
 "qll_chat_this_chat_type_is_not" = "This chat type is not supported yet";
 "qll_chat_this_chat_was_added_to" = "This chat was added to community \"{name}\"";
 "qll_chat_this_chat_was_added_to_2" = "This chat was added to community";
