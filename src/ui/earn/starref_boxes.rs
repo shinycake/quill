@@ -118,7 +118,7 @@ impl QuillApp {
         // A join box still waiting for the recipients must not open later,
         // unasked, in the next account or after the layer was left.
         if let Some(earn) = self.earn_mut() {
-            earn.pending_join = None;
+            earn.drop_parked_join();
             earn.resolve = quill::earn::Resolve::Idle;
         }
         let Some(earn) = self.earn_state() else {
@@ -406,7 +406,7 @@ impl QuillApp {
     fn close_join_box(&mut self, cx: &mut Context<Self>) {
         if let Some(earn) = self.earn_mut() {
             earn.join_box = None;
-            earn.pending_join = None;
+            earn.drop_parked_join();
         }
         cx.notify();
     }

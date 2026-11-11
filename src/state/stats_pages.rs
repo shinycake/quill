@@ -351,11 +351,10 @@ impl Session {
             earn.resolve = crate::earn::Resolve::Idle;
         }
         if earn
-            .pending_join
-            .as_ref()
+            .parked_join()
             .is_some_and(|join| target != Some(InfoPanelTarget::User(join.bot_user_id)))
         {
-            earn.pending_join = None;
+            earn.drop_parked_join();
         }
         self.users_state.open_info_panel = target;
     }

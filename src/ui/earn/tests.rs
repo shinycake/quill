@@ -287,7 +287,12 @@ fn park_a_join_box(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
         let Some(session) = app.demo_session.as_mut() else {
             return;
         };
-        session.payments.earn.pending_join = Some(quill::earn::JoinBox {
+        session.payments.earn.recipients = quill::earn::Recipients::Loading {
+            waiting: Vec::new(),
+            found: Vec::new(),
+            join: None,
+        };
+        session.payments.earn.open_join_box(quill::earn::JoinBox {
             bot_user_id: 5,
             info: Default::default(),
             recipient: quill::earn::EarnPeer::User(1),
@@ -301,7 +306,7 @@ fn parked_join_box(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool 
     app.read_with(vcx, |app, _| {
         app.demo_session
             .as_ref()
-            .is_some_and(|s| s.payments.earn.pending_join.is_some())
+            .is_some_and(|s| s.payments.earn.parked_join().is_some())
     })
 }
 

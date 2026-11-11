@@ -525,6 +525,9 @@ pub enum Recipients {
     Loading {
         waiting: Vec<crate::ids::RequestId>,
         found: Vec<EarnPeer>,
+        /// A join box that opens once the lists arrive. It goes with this
+        /// attempt: a failed send, a page left or a switch drops it.
+        join: Option<Box<JoinBox>>,
     },
     Ready(Vec<EarnPeer>),
     /// A send failed. Answers of the abandoned attempt are dropped and the
@@ -573,8 +576,6 @@ pub struct EarnState {
     /// Who may receive commissions: the user, owned public channels the
     /// user can post in, and owned bots (tdesktop `ResolveRecipients`).
     pub recipients: Recipients,
-    /// A join box that opens once the recipients arrive.
-    pub pending_join: Option<JoinBox>,
     /// Set when the setup page saved or ended the program: the UI goes
     /// back from it (tdesktop `showBackFromStack`).
     pub setup_closed: bool,
@@ -588,6 +589,33 @@ pub struct EarnState {
 }
 
 impl EarnState {
+    /// Show `join` now, or park it in the recipients' wait when the user
+    /// picks the recipient and the lists are still on their way.
+    pub fn open_join_box(&mut self, join: JoinBox) {
+        match &mut self.recipients {
+            Recipients::Loading { join: parked, .. } if join.choose_recipient => {
+                *parked = Some(Box::new(join));
+            }
+            _ => self.join_box = Some(join),
+        }
+    }
+
+    /// The join box waiting for the recipients, if any.
+    pub fn parked_join(&self) -> Option<&JoinBox> {
+        match &self.recipients {
+            Recipients::Loading { join, .. } => join.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// A join box still waiting for the recipients must not open later,
+    /// unasked.
+    pub fn drop_parked_join(&mut self) {
+        if let Recipients::Loading { join, .. } = &mut self.recipients {
+            *join = None;
+        }
+    }
+
     /// A Collect or Withdraw whose first request has not answered.
     pub fn is_checking_withdrawal(&self) -> bool {
         self.withdraw

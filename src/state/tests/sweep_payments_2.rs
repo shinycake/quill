@@ -235,7 +235,12 @@ fn a_join_box_parked_for_a_bot_profile_goes_when_the_profile_closes() {
     use crate::state::InfoPanelTarget;
     let (mut session, _sink) = session();
     let park = |session: &mut Session| {
-        session.payments.earn.pending_join = Some(JoinBox {
+        session.payments.earn.recipients = crate::earn::Recipients::Loading {
+            waiting: Vec::new(),
+            found: Vec::new(),
+            join: None,
+        };
+        session.payments.earn.open_join_box(JoinBox {
             bot_user_id: 5,
             info: Default::default(),
             recipient: EarnPeer::User(1),
@@ -246,11 +251,11 @@ fn a_join_box_parked_for_a_bot_profile_goes_when_the_profile_closes() {
     park(&mut session);
     // The same bot's profile staying open keeps it.
     session.set_open_info_panel(Some(InfoPanelTarget::User(5)));
-    assert!(session.payments.earn.pending_join.is_some());
+    assert!(session.payments.earn.parked_join().is_some());
     // Another panel, or none, drops it.
     session.set_open_info_panel(Some(InfoPanelTarget::User(6)));
-    assert!(session.payments.earn.pending_join.is_none());
+    assert!(session.payments.earn.parked_join().is_none());
     park(&mut session);
     session.set_open_info_panel(None);
-    assert!(session.payments.earn.pending_join.is_none());
+    assert!(session.payments.earn.parked_join().is_none());
 }
