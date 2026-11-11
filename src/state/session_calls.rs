@@ -230,8 +230,10 @@ impl Session {
     /// (`story_stream`); any other live story is not tracked.
     pub(crate) fn accept_group_call_update(&mut self, group_call: &ParsedGroupCall) {
         // TDLib confirms the leave: later joined updates are real again.
-        if !group_call.is_joined && self.calls.left_group_call == Some(group_call.id) {
-            self.calls.left_group_call = None;
+        if !group_call.is_joined
+            && let Some(call) = self.calls.group_call_mut(group_call.id)
+        {
+            call.rejoin.leave_over();
         }
         let watched = self.stories.live.as_ref().map(|live| live.group_call_id);
         if watched == Some(group_call.id) {
@@ -514,7 +516,7 @@ impl Session {
     /// tracked either.
     fn group_call_update_may_take_slot(&self, group_call: &ParsedGroupCall) -> bool {
         if group_call.is_joined {
-            return self.calls.left_group_call != Some(group_call.id);
+            return !self.calls.group_call_left(group_call.id);
         }
         match self.calls.active_group_call.as_ref() {
             Some(tracked) => tracked.id == group_call.id || !tracked.is_joined,
@@ -597,7 +599,6 @@ fn apply_group_call_fields(tracked: &mut ActiveGroupCall, group_call: &ParsedGro
     tracked.scheduled_start_date = 0;
     let was_joined = tracked.is_joined;
     tracked.is_joined = group_call.is_joined;
-    tracked.need_rejoin = group_call.need_rejoin;
     tracked.can_be_managed = group_call.can_be_managed;
     tracked.is_owned = group_call.is_owned;
     tracked.participant_count = group_call.participant_count;

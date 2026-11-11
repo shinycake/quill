@@ -167,7 +167,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn feed_source(&self, key: LiveKey) -> Option<LiveSource> {
         let calls = &self.session.calls;
         let tracked = key.call_id().is_some_and(|call_id| {
-            calls.left_group_call != Some(call_id)
+            !calls.group_call_left(call_id)
                 && calls
                     .group_call(call_id)
                     .is_some_and(|call| call_has_video(call, key))
@@ -237,7 +237,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let calls = &self.session.calls;
         let call = calls
             .group_call(group_call_id)
-            .filter(|call| calls.left_group_call != Some(call.id));
+            .filter(|call| !call.rejoin.is_left());
         let inputs = call.map(FeedInputs::of);
         let seen = self.group_seen.entry(group_call_id).or_default();
         if inputs.is_some() && seen.feeds == inputs {

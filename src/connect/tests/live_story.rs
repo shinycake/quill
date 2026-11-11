@@ -635,7 +635,14 @@ fn a_late_joined_update_for_the_call_just_left_does_not_return() {
     assert_eq!(current_id(&h), None);
     // TDLib confirms the leave; the call counts as any other again.
     h.ingest(&LIVE_CALL.replace("JOINED", "false"));
-    assert_eq!(h.driver.session.calls.left_group_call, None);
+    let calls = &h.driver.session.calls;
+    assert!(
+        calls
+            .group_call_ids()
+            .into_iter()
+            .flatten()
+            .all(|id| !calls.group_call_left(id))
+    );
 }
 
 #[test]

@@ -245,12 +245,19 @@ fn an_unwanted_rejoin_offer_is_not_left_in_flight() {
         tracked(&driver).rejoin,
         crate::state::GroupCallRejoin::InFlight { .. }
     ));
-    driver.session.calls.left_group_call = Some(555);
+    driver
+        .session
+        .calls
+        .group_call_mut(555)
+        .expect("tracked call")
+        .rejoin
+        .leave();
     land(&mut driver, &handle);
     assert_eq!(sent_count(&recorder, "joinVideoChat"), 0);
     assert_eq!(
         tracked(&driver).rejoin,
-        crate::state::GroupCallRejoin::Wanted { attempts: 0 }
+        crate::state::GroupCallRejoin::Left,
+        "leaving ends the rejoin"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

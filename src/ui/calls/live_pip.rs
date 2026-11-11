@@ -341,7 +341,7 @@ impl QuillApp {
                 calls.active_group_call.as_ref().is_some_and(|call| {
                     call.id == call_id
                         && (call.is_joined || call.rejoining())
-                        && calls.left_group_call != Some(call_id)
+                        && !call.rejoin.is_left()
                         && call.stream != StreamState::Ended
                 })
             }

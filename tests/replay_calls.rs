@@ -493,7 +493,6 @@ fn replay_group_call_signaling() {
         &[&group_call_json(true, true, true)],
     );
     let call = session.calls.active_group_call.as_ref().expect("rejoining");
-    assert!(call.need_rejoin);
     assert!(call.reconnecting());
     session.clear_group_call_reconnecting();
     assert!(
@@ -504,6 +503,34 @@ fn replay_group_call_signaling() {
             .expect("call")
             .reconnecting()
     );
+
+    // The user leaves: a late joined update must not rejoin or re-arm the
+    // call, and TDLib's not-joined update ends the leave.
+    let id = session.calls.active_group_call.as_ref().expect("call").id;
+    session
+        .calls
+        .group_call_mut(id)
+        .expect("call")
+        .rejoin
+        .leave();
+    assert!(!session.calls.group_call(id).expect("call").reconnecting());
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&group_call_json(true, true, true)],
+    );
+    assert!(
+        session.calls.group_call_left(id),
+        "a late update changes nothing"
+    );
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&group_call_json(false, false, true)],
+    );
+    assert!(!session.calls.group_call_left(id));
 
     // Call ends → tracked call cleared.
     apply_all_seq(

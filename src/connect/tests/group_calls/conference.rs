@@ -642,7 +642,10 @@ fn the_invite_toast_goes_with_its_conference_and_the_account() {
     assert_eq!(harness.1.session.calls.invite_results, None);
     // The server ending the call drops it.
     invited_into(&mut harness, 600);
-    harness.1.session.calls.left_group_call = None;
+    // (TDLib has confirmed the leave by now.)
+    if let Some(call) = harness.1.session.calls.group_call_mut(600) {
+        call.rejoin.leave_over();
+    }
     feed(
         &mut harness,
         &conference_update(600, "https://t.me/call/xyz", false)

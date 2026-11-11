@@ -165,9 +165,6 @@ impl Session {
                 migrated_from: None,
                 link_open: false,
             });
-            if self.calls.left_group_call == Some(group_call_id) {
-                self.calls.left_group_call = None;
-            }
         }
         if !self.calls.group_call_fetch_queue.contains(&group_call_id) {
             self.calls.group_call_fetch_queue.push(group_call_id);

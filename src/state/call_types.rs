@@ -328,8 +328,6 @@ pub struct ActiveGroupCall {
     pub is_video_chat: bool,
     pub is_live_story: bool,
     pub is_joined: bool,
-    /// `need_rejoin` arrived (kicked by network loss).
-    pub need_rejoin: bool,
     /// Where Quill's own rejoin after a network loss stands (the
     /// C2d 1:1 reconnect discipline, at most
     /// `MAX_GROUP_CALL_REJOIN_ATTEMPTS`). Reset by a joined
@@ -435,9 +433,11 @@ pub struct ActiveGroupCall {
 }
 
 /// Quill's own rejoin of a group call that TDLib (or a stream feeder)
-/// says needs one. One value, so "a rejoin is due" and "the banner shows"
-/// cannot drift apart: the driver sends a rejoin only from `Wanted`, and
-/// a repeated `need_rejoin` while one is `InFlight` changes nothing.
+/// says needs one, and the leave that ends it. One value, so "a rejoin is
+/// due", "the banner shows" and "the user left" cannot drift apart: the
+/// driver sends a rejoin only from `Wanted`, a repeated `need_rejoin`
+/// while one is `InFlight` changes nothing, and a call the user left
+/// never rejoins.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GroupCallRejoin {
     /// Joined, or never dropped.
@@ -450,9 +450,32 @@ pub enum GroupCallRejoin {
     InFlight { request: RequestId, attempt: usize },
     /// Every attempt failed; only the manual Rejoin is left.
     GaveUp,
+    /// The user left (or ended) the call with `leaveGroupCall` and TDLib
+    /// has not said it is no longer joined: a late joined update must not
+    /// take the slot back, and no rejoin is due. Any in-flight rejoin
+    /// ends here.
+    Left,
 }
 
 impl GroupCallRejoin {
+    /// The user left the call.
+    pub fn leave(&mut self) {
+        *self = GroupCallRejoin::Left;
+    }
+
+    /// The call was left and TDLib said so, or the user joins it again:
+    /// joined updates count once more.
+    pub fn leave_over(&mut self) {
+        if *self == GroupCallRejoin::Left {
+            *self = GroupCallRejoin::Idle;
+        }
+    }
+
+    /// The user left the call and TDLib has not confirmed it yet.
+    pub fn is_left(&self) -> bool {
+        *self == GroupCallRejoin::Left
+    }
+
     /// TDLib's `need_rejoin` (or a stream's own rejoin): a drop starts
     /// one rejoin series, and a series already under way goes on.
     pub fn want(&mut self) {
@@ -484,7 +507,7 @@ impl GroupCallRejoin {
         match *self {
             GroupCallRejoin::Wanted { .. } => self.next_attempt().is_some(),
             GroupCallRejoin::InFlight { .. } => true,
-            GroupCallRejoin::Idle | GroupCallRejoin::GaveUp => false,
+            GroupCallRejoin::Idle | GroupCallRejoin::GaveUp | GroupCallRejoin::Left => false,
         }
     }
 
@@ -573,7 +596,7 @@ impl ActiveGroupCall {
     /// `need_rejoin` until the rejoined `updateGroupCall`, the spent
     /// state included (the banner is the manual Rejoin).
     pub fn reconnecting(&self) -> bool {
-        self.rejoin != GroupCallRejoin::Idle
+        !matches!(self.rejoin, GroupCallRejoin::Idle | GroupCallRejoin::Left)
     }
 
     /// The join or its transport failed, or the rejoins are spent: only a
@@ -597,7 +620,6 @@ impl ActiveGroupCall {
             is_video_chat: false,
             is_live_story: false,
             is_joined: false,
-            need_rejoin: false,
             rejoin: GroupCallRejoin::Idle,
             can_be_managed: false,
             is_owned: false,
