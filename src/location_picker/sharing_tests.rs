@@ -93,10 +93,12 @@ fn a_failed_bot_lookup_is_asked_again_by_the_next_picker() {
         sharing.next_requests().is_empty(),
         "not again in this picker"
     );
-    assert!(matches!(
+    assert_eq!(
         sharing.picker().map(|p| p.venues().clone()),
-        Some(VenueList::NothingFound { .. })
-    ));
+        Some(VenueList::Failed)
+    );
+    sharing.retry_venues();
+    assert_eq!(sharing.next_requests(), vec![resolve()], "Retry looks again");
     sharing.close();
     sharing.open(ChatId(3), None);
     sharing.geolocated(GeoOutcome::Found(point(10., 21.)));
@@ -124,10 +126,10 @@ fn unsent_requests_roll_back() {
     sharing.geolocated(GeoOutcome::Found(point(10., 20.)));
     let resolve = sharing.next_requests();
     sharing.request_unsent(&resolve[0]);
-    assert!(matches!(
+    assert_eq!(
         sharing.picker().map(|p| p.venues().clone()),
-        Some(VenueList::NothingFound { .. })
-    ));
+        Some(VenueList::Failed)
+    );
     if let Some(picker) = sharing.picker_mut() {
         picker.set_map_size(super::MapSize::new(364., 220., 2.));
     }

@@ -195,9 +195,8 @@ impl LocationSharing {
                     });
                 }
                 VenueBot::Resolving => {}
-                VenueBot::Unknown | VenueBot::Missing | VenueBot::Failed => {
-                    picker.venues_failed(generation)
-                }
+                VenueBot::Unknown | VenueBot::Missing => picker.venues_unavailable(generation),
+                VenueBot::Failed => picker.venues_failed(generation),
             }
         }
         if let Some(key) = picker.tile_to_request() {
@@ -239,7 +238,7 @@ impl LocationSharing {
         match request {
             PickerRequest::ResolveVenueBot { .. } => {
                 self.venue_bot = VenueBot::Unknown;
-                self.fail_current_venues();
+                self.settle_current_venues(true);
             }
             PickerRequest::Venues { generation, .. } => {
                 if let Some(picker) = self.picker.as_mut() {
@@ -257,11 +256,28 @@ impl LocationSharing {
         }
     }
 
-    fn fail_current_venues(&mut self) {
+    /// The unsent venue query cannot go out: `failed` when the bot lookup
+    /// went wrong (a retry may work), else there is no bot.
+    fn settle_current_venues(&mut self, failed: bool) {
         if let Some(picker) = self.picker.as_mut()
             && let Some((generation, ..)) = picker.venue_query_to_send()
         {
-            picker.venues_failed(generation);
+            if failed {
+                picker.venues_failed(generation);
+            } else {
+                picker.venues_unavailable(generation);
+            }
+        }
+    }
+
+    /// The Retry under a failed venue list: look the bot up again if that
+    /// was what failed, then ask for the same places again.
+    pub fn retry_venues(&mut self) {
+        if self.venue_bot == VenueBot::Failed {
+            self.venue_bot = VenueBot::Unknown;
+        }
+        if let Some(picker) = self.picker.as_mut() {
+            picker.retry_venues();
         }
     }
 
@@ -269,7 +285,7 @@ impl LocationSharing {
     pub fn venue_bot_resolved(&mut self, bot_user_id: Option<i64>) {
         self.venue_bot = bot_user_id.map_or(VenueBot::Missing, VenueBot::Found);
         if self.venue_bot == VenueBot::Missing {
-            self.fail_current_venues();
+            self.settle_current_venues(false);
         }
     }
 
@@ -277,7 +293,7 @@ impl LocationSharing {
     /// again instead of showing no venues for the session.
     pub fn venue_bot_failed(&mut self) {
         self.venue_bot = VenueBot::Failed;
-        self.fail_current_venues();
+        self.settle_current_venues(true);
     }
 
     pub fn venues_answered(&mut self, generation: u64, venues: Vec<Venue>) {
