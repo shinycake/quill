@@ -36,10 +36,9 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPaymentForm)
                     && extra.is_some()
                     && self.payments.checkout.waits_for(extra)
+                    && let CheckoutForm::Loading { invoice, .. } = &self.payments.checkout
                 {
-                    if let CheckoutForm::Loading { invoice, .. } = &self.payments.checkout {
-                        self.payments.checkout = CheckoutForm::ready(form, invoice.clone());
-                    }
+                    self.payments.checkout = CheckoutForm::ready(form, invoice.clone());
                 }
             }
             PaymentsPayload::ValidatedOrderInfo(validated) => {
