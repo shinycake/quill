@@ -203,15 +203,6 @@ impl LiveStoryUi {
             self.join = LiveJoin::Joined(target);
         }
     }
-
-    pub(super) fn forget_call_seen(&mut self) {
-        if let LiveJoin::Joined(target) = self.join {
-            self.join = LiveJoin::Joining {
-                target,
-                request: None,
-            };
-        }
-    }
 }
 
 /// One Stars effect on screen.

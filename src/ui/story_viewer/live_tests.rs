@@ -490,8 +490,11 @@ fn a_story_that_ends_before_its_call_closes_the_viewer(cx: &mut TestAppContext) 
     let (app, mut vcx) = open_live(cx, "ready-live-story");
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.stories.live.forget_call_seen();
+        // The join is out again and its call was not seen yet.
         let watched = app.stories.live.watching();
+        if let Some(target) = watched {
+            app.stories.live.start_watching(target, None);
+        }
         if let Some(session) = app.demo_session.as_mut() {
             session.calls.story_stream = None;
             if let Some((chat_id, story_id)) = watched
@@ -840,8 +843,6 @@ fn burst_sticker(file: FileId) -> StickerItem {
     }
 }
 
-/// A refused live join is one stage with the join itself: it stays for the
-/// story that was refused (the "Join live" button starts it again) and is
 /// A join waits on its `getGroupCall` request; refusing or seeing the call
 /// ends that wait (r2-05, 13-043).
 #[gpui_kit::test]
@@ -863,6 +864,8 @@ fn a_join_waits_on_its_request_until_refused_or_seen(cx: &mut TestAppContext) {
     });
 }
 
+/// A refused live join is one stage with the join itself: it stays for the
+/// story that was refused (the "Join live" button starts it again) and is
 /// gone once another story, or none, is shown (sweep 13-089).
 #[gpui_kit::test]
 fn a_refused_join_is_a_stage_that_another_story_clears(cx: &mut TestAppContext) {

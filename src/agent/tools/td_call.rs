@@ -330,8 +330,10 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
             grants.require(&named, Scope::ReadWrite)?;
             let target = grants.writable(first_chat)?;
             confirm(&ctx, &target, &request)?;
-            take_write_turn(&ctx, target.chat_id)?;
-            td::call(&ctx.client, request).map_err(write_error(&ctx))
+            let turn = take_write_turn(&ctx, target.chat_id)?;
+            let answer = td::call(&ctx.client, request).map_err(write_error(&ctx));
+            common::settle_turn(turn, &answer);
+            answer
         }
         Class::Send => {
             grants.require(&named, Scope::ReadWrite)?;

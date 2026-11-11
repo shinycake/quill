@@ -624,9 +624,10 @@ impl QuillApp {
     /// The live overlay's Retry: join the watched story's call again.
     pub(super) fn retry_live_story(&mut self, cx: &mut Context<Self>) {
         if let Some((chat_id, story_id)) = self.stories.live.watching() {
-            // The failed slot is left and joined afresh: until the new
-            // one shows, its absence is not the stream's end.
-            self.stories.live.forget_call_seen();
+            // The failed slot is left and joined afresh: the join waits
+            // on its new request, so until the new call shows, its
+            // absence is not the stream's end; a join that is refused
+            // shows "Join live".
             self.join_live_story_from_viewer(chat_id, story_id, cx);
         }
     }

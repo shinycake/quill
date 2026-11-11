@@ -57,6 +57,9 @@ struct Booking {
     /// The chat's slot before this turn, and the one this turn set.
     previous: Option<Instant>,
     set: Instant,
+    /// The any-chat slot before this turn, and the one this turn set.
+    any_previous: Option<Instant>,
+    any_set: Instant,
     /// When this turn's first message to a new person was booked.
     new_peer: Option<Instant>,
 }
@@ -116,7 +119,9 @@ impl State {
             return Err(Refusal::Busy);
         }
         let spread = ANY_GAP.saturating_mul(count.max(1));
-        self.next_any = Some(start + spread);
+        let any_previous = self.next_any;
+        let any_set = start + spread;
+        self.next_any = Some(any_set);
         let set = start + SAME_CHAT_GAP.max(spread);
         self.next_in_chat.insert(key, set);
         if new_peer {
@@ -128,16 +133,35 @@ impl State {
                 key,
                 previous,
                 set,
+                any_previous,
+                any_set,
                 new_peer: new_peer.then_some(start),
             },
         ))
     }
 
+    fn flood(&mut self, now: Instant, account: &AccountKey, seconds: u64) {
+        let until = now + Duration::from_secs(seconds.min(24 * 60 * 60));
+        self.flood_until
+            .entry(account.clone())
+            .and_modify(|old| *old = (*old).max(until))
+            .or_insert(until);
+    }
+
+    fn forget_account(&mut self, account: &AccountKey) {
+        self.flood_until.remove(account);
+    }
+
+    /// Give back what `booking` took. A slot a later turn already moved
+    /// on from is left alone: that turn queued behind this one.
     fn release(&mut self, booking: Booking) {
         if let Some(start) = booking.new_peer
             && let Some(at) = self.new_peers.iter().position(|sent| *sent == start)
         {
             self.new_peers.remove(at);
+        }
+        if self.next_any == Some(booking.any_set) {
+            self.next_any = booking.any_previous;
         }
         if self.next_in_chat.get(&booking.key) == Some(&booking.set) {
             match booking.previous {
@@ -162,37 +186,46 @@ pub fn take_turn(
     count: u32,
     new_peer: bool,
 ) -> Result<Turn, Refusal> {
-    let (wait, booking) = {
-        let mut guard = crate::locks::lock_or_recover(&STATE);
-        let state = guard.get_or_insert_with(State::default);
-        state.reserve(Instant::now(), account, (client, chat_id), count, new_peer)?
-    };
-    let turn = Turn {
-        booking: Some(booking),
-    };
+    let (wait, turn) = book(Instant::now(), account, (client, chat_id), count, new_peer)?;
     if !wait.is_zero() {
         std::thread::sleep(wait);
     }
     Ok(turn)
 }
 
-/// Telegram answered a send from `account` with a flood wait of `seconds`.
-pub fn flood(account: &AccountKey, seconds: u64) {
-    let until = Instant::now() + Duration::from_secs(seconds.min(24 * 60 * 60));
+/// Book a turn in the process-wide queue at `now`: the turn and how long
+/// to wait before using it. [`take_turn`] without the wait.
+fn book(
+    now: Instant,
+    account: &AccountKey,
+    key: (i32, i64),
+    count: u32,
+    new_peer: bool,
+) -> Result<(Duration, Turn), Refusal> {
     let mut guard = crate::locks::lock_or_recover(&STATE);
     let state = guard.get_or_insert_with(State::default);
-    state
-        .flood_until
-        .entry(account.clone())
-        .and_modify(|old| *old = (*old).max(until))
-        .or_insert(until);
+    let (wait, booking) = state.reserve(now, account, key, count, new_peer)?;
+    Ok((
+        wait,
+        Turn {
+            booking: Some(booking),
+        },
+    ))
+}
+
+/// Telegram answered a send from `account` with a flood wait of `seconds`.
+pub fn flood(account: &AccountKey, seconds: u64) {
+    let mut guard = crate::locks::lock_or_recover(&STATE);
+    guard
+        .get_or_insert_with(State::default)
+        .flood(Instant::now(), account, seconds);
 }
 
 /// `account` logged out or was removed: its flood wait goes with it, so
 /// whoever signs in next under the same key is not held to it.
 pub fn forget_account(account: &AccountKey) {
     if let Some(state) = crate::locks::lock_or_recover(&STATE).as_mut() {
-        state.flood_until.remove(account);
+        state.forget_account(account);
     }
 }
 
@@ -217,15 +250,10 @@ pub fn flood_seconds(message: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ANY_GAP, NEW_PEERS_PER_DAY, Refusal, SAME_CHAT_GAP, State, flood, flood_seconds,
-        forget_account, take_turn,
+        ANY_GAP, NEW_PEERS_PER_DAY, Refusal, SAME_CHAT_GAP, STATE, State, book, flood_seconds,
     };
     use crate::ids::AccountKey;
     use std::time::{Duration, Instant};
-
-    /// The queue's state is process-wide: the tests that use it must not
-    /// run at once.
-    static FLOOD_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn flood_errors_name_their_seconds() {
@@ -253,51 +281,81 @@ mod tests {
         let account = AccountKey("refused".into());
         let now = Instant::now();
         for _ in 0..NEW_PEERS_PER_DAY * 3 {
-            let (_, booking) = state.reserve(now, &account, (1, 7), 1, true).unwrap();
+            let (wait, booking) = state.reserve(now, &account, (1, 7), 1, true).unwrap();
+            assert_eq!(wait, Duration::ZERO, "a refused send delays nobody");
             state.release(booking);
         }
         assert!(state.new_peers.is_empty(), "no first message went out");
         assert!(!state.next_in_chat.contains_key(&(1, 7)));
+        assert_eq!(state.next_any, None);
         state.reserve(now, &account, (1, 7), 1, true).unwrap();
         assert_eq!(state.new_peers.len(), 1, "a send that went out is kept");
         assert!(state.next_in_chat.contains_key(&(1, 7)));
     }
 
+    /// A turn released after a later one queued behind it leaves the later
+    /// turn's slots alone.
+    #[test]
+    fn a_release_does_not_undo_a_later_turn() {
+        let mut state = State::default();
+        let account = AccountKey("order".into());
+        let now = Instant::now();
+        let (_, first) = state.reserve(now, &account, (1, 7), 1, false).unwrap();
+        let (wait, _second) = state.reserve(now, &account, (1, 7), 1, false).unwrap();
+        assert_eq!(wait, SAME_CHAT_GAP);
+        let (any, chat) = (state.next_any, state.next_in_chat.get(&(1, 7)).copied());
+        state.release(first);
+        assert_eq!(state.next_any, any);
+        assert_eq!(state.next_in_chat.get(&(1, 7)).copied(), chat);
+    }
+
+    /// The process-wide queue, through the `Turn` guard. Each key here is
+    /// used by this test only, and nothing waits.
     #[test]
     fn a_dropped_turn_is_released_and_a_committed_one_is_kept() {
-        let _guard = crate::locks::lock_or_recover(&FLOOD_TEST);
         let account = AccountKey("turn-drop".into());
-        let count = || {
-            crate::locks::lock_or_recover(&super::STATE)
+        let slot = |key: (i32, i64)| {
+            crate::locks::lock_or_recover(&STATE)
                 .as_ref()
-                .map_or(0, |s| s.new_peers.len())
+                .and_then(|s| s.next_in_chat.get(&key).copied())
         };
-        let before = count();
-        match take_turn(&account, 9010, 10, 1, true) {
-            Ok(turn) => drop(turn),
-            Err(_) => return,
-        }
-        assert_eq!(count(), before, "dropped without commit");
-        if let Ok(turn) = take_turn(&account, 9011, 11, 1, true) {
-            turn.commit();
-            assert_eq!(count(), before + 1, "committed");
-        }
+        let now = Instant::now();
+        let (_, turn) = book(now, &account, (9010, 10), 1, false).unwrap();
+        assert!(slot((9010, 10)).is_some(), "booked");
+        drop(turn);
+        assert_eq!(slot((9010, 10)), None, "dropped without commit");
+        let (_, turn) = book(now, &account, (9010, 10), 1, false).unwrap();
+        turn.commit();
+        assert!(slot((9010, 10)).is_some(), "committed");
     }
 
     #[test]
     fn a_flood_wait_refuses_that_accounts_sends_until_it_passes() {
-        let _flood = crate::locks::lock_or_recover(&FLOOD_TEST);
+        let mut state = State::default();
+        let now = Instant::now();
         let a = AccountKey("flood-a".into());
         let b = AccountKey("flood-b".into());
-        flood(&a, 30);
-        assert!(matches!(take_turn(&a, 9002, 2, 1, false), Err(Refusal::Flood(s)) if s > 0));
+        state.flood(now, &a, 30);
+        assert!(matches!(
+            state.reserve(now, &a, (2, 2), 1, false),
+            Err(Refusal::Flood(30))
+        ));
         assert!(
-            take_turn(&b, 9003, 3, 1, false).is_ok(),
+            state.reserve(now, &b, (3, 3), 1, false).is_ok(),
             "another account's sends are not held to it"
         );
-        forget_account(&a);
         assert!(
-            take_turn(&a, 9004, 4, 1, false).is_ok(),
+            state
+                .reserve(now + Duration::from_secs(31), &a, (2, 2), 1, false)
+                .is_ok(),
+            "the wait passes"
+        );
+        state.flood(now + Duration::from_secs(40), &a, 30);
+        state.forget_account(&a);
+        assert!(
+            state
+                .reserve(now + Duration::from_secs(41), &a, (4, 4), 1, false)
+                .is_ok(),
             "a log-out clears the account's flood wait"
         );
     }

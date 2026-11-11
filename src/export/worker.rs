@@ -345,7 +345,11 @@ pub(crate) fn fetch_file<T: Tdlib>(
         && answer.at("size").as_i64().unwrap_or(0) > limit
     {
         match (only_for_export, &path) {
-            (true, Some(path)) => release_if_untouched(tdlib, file, path)?,
+            (true, Some(path)) => match release_if_untouched(tdlib, file, path) {
+                // Unanswered: the copy stays listed as a leftover.
+                Ok(()) | Err(ExportError::Tdlib(_)) => {}
+                Err(other) => return Err(other),
+            },
             _ => drop_entry(tdlib),
         }
         return Ok(Err(Skip::TooLarge));
@@ -440,7 +444,13 @@ fn save_once<T: Tdlib>(
     };
     let path = name(&source);
     let placed = place_into(tdlib, out.folder, &path, &source);
-    source.release(tdlib)?;
+    // The file is in the export by now. A release that TDLib does not
+    // answer leaves the cache copy listed as a leftover for the next
+    // cleanup; it does not cost the chat its messages.
+    match source.release(tdlib) {
+        Ok(()) | Err(ExportError::Tdlib(_)) => {}
+        Err(other) => return Err(other),
+    }
     placed?;
     job.loaded.save(file_id, out.root_path(&path));
     Ok(Ok(path))
@@ -577,43 +587,55 @@ fn write_chat<T: Tdlib>(
     let mut buffer: Vec<(ExportMessage, Option<Outcome>)> = Vec::new();
     let mut result = ChatResult::default();
     let mut page = 0;
-    for chunk in (0..chunks).rev() {
-        for msg in read_chunk(out.spool, chunk)? {
-            let outcome = match &msg.body {
-                Body::Media(media) => {
-                    let outcome = save_file(job, tdlib, &mut namer, out, media, msg.date)?;
-                    match outcome {
-                        Outcome::Saved { .. } => result.files += 1,
-                        Outcome::Skipped(_) => result.skipped += 1,
+    let mut write_all = || -> Result<(), ExportError> {
+        for chunk in (0..chunks).rev() {
+            for msg in read_chunk(out.spool, chunk)? {
+                let outcome = match &msg.body {
+                    Body::Media(media) => {
+                        let outcome = save_file(job, tdlib, &mut namer, out, media, msg.date)?;
+                        match outcome {
+                            Outcome::Saved { .. } => result.files += 1,
+                            Outcome::Skipped(_) => result.skipped += 1,
+                        }
+                        Some(outcome)
                     }
-                    Some(outcome)
+                    _ => None,
+                };
+                if let Some(sink) = json.as_mut() {
+                    let offset = (job.offset_at)(i64::from(msg.date));
+                    let rooted = rooted_outcome(outcome.as_ref(), out);
+                    sink.push_message(&json::message_json(&msg, rooted.as_ref(), offset))?;
                 }
-                _ => None,
-            };
-            if let Some(sink) = json.as_mut() {
-                let offset = (job.offset_at)(i64::from(msg.date));
-                let rooted = rooted_outcome(outcome.as_ref(), out);
-                sink.push_message(&json::message_json(&msg, rooted.as_ref(), offset))?;
-            }
-            buffer.push((msg, outcome));
-            progress.wrote_one();
-            progress.files += usize::from(matches!(
-                buffer.last(),
-                Some((_, Some(Outcome::Saved { .. })))
-            ));
-            progress.skipped += usize::from(matches!(
-                buffer.last(),
-                Some((_, Some(Outcome::Skipped(_))))
-            ));
-            (job.report)(progress.clone());
-            if buffer.len() == MESSAGES_PER_FILE {
-                if wants_html {
-                    flush_page(job, out, page, pages, &buffer, &ids)?;
+                buffer.push((msg, outcome));
+                progress.wrote_one();
+                progress.files += usize::from(matches!(
+                    buffer.last(),
+                    Some((_, Some(Outcome::Saved { .. })))
+                ));
+                progress.skipped += usize::from(matches!(
+                    buffer.last(),
+                    Some((_, Some(Outcome::Skipped(_))))
+                ));
+                (job.report)(progress.clone());
+                if buffer.len() == MESSAGES_PER_FILE {
+                    if wants_html {
+                        flush_page(job, out, page, pages, &buffer, &ids)?;
+                    }
+                    buffer.clear();
+                    page += 1;
                 }
-                buffer.clear();
-                page += 1;
             }
         }
+        Ok(())
+    };
+    if let Err(err) = write_all() {
+        // A chat cut short by TDLib keeps what it saved (the caller counts
+        // it as partial): the messages already in the JSON get their page
+        // too, as the last one, so the pages and the count agree.
+        if matches!(err, ExportError::Tdlib(_)) && wants_html && !buffer.is_empty() {
+            flush_page(job, out, page, page + 1, &buffer, &ids)?;
+        }
+        return Err(err);
     }
     let write_last = !buffer.is_empty() || (total == 0 && out.page_when_empty);
     if wants_html && write_last {

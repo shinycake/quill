@@ -22,8 +22,8 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// [`Self::fetch_supergroup_members`]; `refresh` sends even when the
     /// same list for the same query is loaded or loading. A send that is
-    /// refused leaves the page that was there (a refresh keeps showing it),
-    /// or, when there was none, records `Failed` so the list draws its
+    /// refused leaves what was there (a refresh keeps showing its page),
+    /// or, when there was nothing, records `Failed` so the list draws its
     /// Retry instead of a spinner nobody answers.
     fn send_supergroup_members(
         &mut self,
@@ -83,21 +83,26 @@ impl<S: JsonSender> ConnectDriver<S> {
             200,
         )) {
             self.session.requests.take(extra);
+            // What was there comes back, with how it was asked: a page
+            // stays shown, a list still loading keeps waiting for its own
+            // request, a failed one keeps its Retry. Only a list that had
+            // nothing becomes `Failed`, under the query that was refused,
+            // so the box that asked draws Retry instead of "Loading".
             let groups = &mut self.session.groups;
-            match (previous, previous_ask) {
-                (Some(page @ SupergroupMembersFetch::Loaded { .. }), ask) => {
+            match previous {
+                Some(page) => {
                     groups.supergroup_members.insert(key, page);
-                    match ask {
+                    match previous_ask {
                         Some(ask) => groups.member_asks.insert(key, ask),
                         None => groups.member_asks.remove(&key),
                     };
                 }
-                _ => {
+                None => {
                     groups.supergroup_members.insert(
                         key,
                         SupergroupMembersFetch::Failed(send_failed_line("Could not load members")),
                     );
-                    groups.member_asks.remove(&key);
+                    groups.note_member_refused(key, query);
                 }
             }
             return Err(err);

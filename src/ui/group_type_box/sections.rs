@@ -293,10 +293,12 @@ impl QuillApp {
                             ),
                     )
                     .into_any_element(),
-                Some(InviteLinkFetch::Loaded(_)) => block
+                // Nothing was asked (no right to invite, no connection):
+                // there is no link to wait for either.
+                None | Some(InviteLinkFetch::Loaded(_)) => block
                     .child(about(tr(keys::Q_PEOPLE_NO_INVITE_LINKS), cx))
                     .into_any_element(),
-                None | Some(InviteLinkFetch::Loading(_)) => block
+                Some(InviteLinkFetch::Loading(_)) => block
                     .child(about(tr(keys::Q_PEOPLE_LOADING), cx))
                     .into_any_element(),
             };

@@ -291,12 +291,13 @@ impl Session {
                     // The password-less probe: the URL is dropped unread.
                     drop(url);
                     self.apply_gift_export_probe_answer();
-                } else if let Some(RequestPurpose::Calls(CallsPurpose::GetVideoChatInviteLink {
-                    group_call_id,
-                    can_self_unmute,
-                })) = pending.map(|p| p.purpose)
+                } else if let Some(pending) = pending
+                    && let RequestPurpose::Calls(CallsPurpose::GetVideoChatInviteLink {
+                        group_call_id,
+                        ..
+                    }) = pending.purpose
                 {
-                    self.set_group_call_invite_link(group_call_id, can_self_unmute, url);
+                    self.set_group_call_invite_link(group_call_id, pending.id, url);
                 // B1: `getLoginUrl` returns `httpUrl` too (schema 1.8.67,
                 // line 7458) — the authorized URL after consent.
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetLoginUrl) {

@@ -197,6 +197,23 @@ fn a_refused_member_send_fails_the_list_or_keeps_its_page() {
     driver
         .ingest(copy_and_parse(&members_json(1..4, 3, &first.as_extra()), &seq, &sink).unwrap())
         .unwrap();
+    // A search nobody could send is `Failed` under its own query, and a
+    // refused retry of it leaves that as it is: the box that asked draws
+    // Retry, never "Loading" for a request that is not out.
+    let search = (13, MemberListFilter::Search);
+    recorder.refuse_sends(true);
+    for _ in 0..2 {
+        assert!(
+            driver
+                .refresh_supergroup_members(ChatId(13), MemberListFilter::Search, "bob")
+                .is_err()
+        );
+        assert!(matches!(
+            driver.session.groups.supergroup_members.get(&search),
+            Some(SupergroupMembersFetch::Failed(_))
+        ));
+        assert_eq!(driver.session.groups.member_query(search), "bob");
+    }
     // A refused refresh leaves the page that was shown.
     recorder.refuse_sends(true);
     assert!(

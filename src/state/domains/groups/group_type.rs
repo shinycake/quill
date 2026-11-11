@@ -241,13 +241,14 @@ impl Session {
         }
     }
 
-    /// The count of active invite links could not be read (the request
-    /// failed or was refused). Unlike a chat that has none, Save cannot
-    /// tell whether to ask about applying to existing links.
-    pub fn chat_invite_link_count_failed(&self, chat_id: ChatId) -> bool {
+    /// The count of active invite links was asked for and is not in yet:
+    /// Save of a changed join approval waits for it. A count that failed
+    /// reads as none, as in tdesktop (`requestInviteLinksCount`'s `fail`
+    /// is `done(0)`).
+    pub fn chat_invite_link_count_loading(&self, chat_id: ChatId) -> bool {
         matches!(
             self.groups.invite_link_counts.get(&chat_id.0),
-            Some(InviteLinkCountsFetch::Failed(_))
+            Some(InviteLinkCountsFetch::Loading)
         )
     }
 

@@ -416,7 +416,8 @@ fn a_refused_check_send_is_recorded_as_failed() {
 }
 
 /// r2-05 (10-068): a link count that could not be asked for is `Failed`,
-/// which Save tells apart from a chat with no links.
+/// not a count that is still on its way: Save does not wait for it, and
+/// the next open of the box asks again.
 #[test]
 fn a_refused_link_count_send_is_a_failed_count() {
     let mut rig = Rig::new();
@@ -426,7 +427,19 @@ fn a_refused_link_count_send_is_a_failed_count() {
             .fetch_chat_invite_link_counts(ChatId(13))
             .is_err()
     );
-    assert!(rig.driver.session.chat_invite_link_count_failed(ChatId(13)));
+    assert!(matches!(
+        rig.driver.session.groups.invite_link_counts.get(&13),
+        Some(crate::state::InviteLinkCountsFetch::Failed(_))
+    ));
+    assert!(
+        !rig.driver
+            .session
+            .chat_invite_link_count_loading(ChatId(13))
+    );
+    assert_eq!(
+        rig.driver.session.chat_active_invite_link_count(ChatId(13)),
+        0
+    );
     rig.recorder.refuse_sends(false);
     assert!(
         rig.driver
@@ -434,5 +447,9 @@ fn a_refused_link_count_send_is_a_failed_count() {
             .unwrap()
             .is_some()
     );
-    assert!(!rig.driver.session.chat_invite_link_count_failed(ChatId(13)));
+    assert!(
+        rig.driver
+            .session
+            .chat_invite_link_count_loading(ChatId(13))
+    );
 }
