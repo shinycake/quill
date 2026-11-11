@@ -7,8 +7,6 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-pub(crate) use stages::{PasscodeBox, SystemUnlock};
-use stages::LockState;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -25,6 +23,8 @@ use quill::passcode::{
 };
 use quill::platform::{MemorySecretStore, SecretStore, os_secret_store};
 use quill::settings::{list_accounts, safe_app_root};
+use stages::LockState;
+pub(crate) use stages::{PasscodeBox, SystemUnlock};
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
