@@ -27,7 +27,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chain(&stickers.stickers.trending)
             .chain(&stickers.stickers.archived)
             .chain(stickers.masks.installed.items())
-            .chain(stickers.masks.archived.items())
+            .chain(stickers.masks.archived_sets())
         {
             if stickers.manager.covers_requested.contains(&set.id) || asked.contains(&set.id) {
                 continue;
@@ -159,7 +159,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return match sent {
                 Ok(Some(id)) => {
                     if let Some(front) = self.session.stickers.manager.commits.front_mut() {
-                        front.sent = Some(id);
+                        front.stage = crate::state::CommitStage::Sent(id);
                     }
                     Ok(())
                 }
@@ -180,9 +180,8 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Called after every answer: thumbnails and the saved changes.
     pub(crate) fn pump_sticker_manager(&mut self) {
-        if self.advance_manager_commit().is_err() {
-            self.session.stickers.manager.note_send_failure();
-        }
+        // A send that fails has noted its failure in `advance_manager_commit`.
+        let _ = self.advance_manager_commit();
         if self.session.stickers.manager.open {
             let _ = self.ensure_manager_covers();
         }

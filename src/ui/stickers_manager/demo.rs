@@ -77,9 +77,10 @@ impl QuillApp {
         stickers.masks.installed = quill::state::fetch::Fetch::Ready(
             stickers.stickers.sets.iter().take(3).cloned().collect(),
         );
-        stickers.masks.archived = quill::state::fetch::Fetch::Ready(
-            stickers.stickers.archived.iter().take(1).cloned().collect(),
-        );
+        stickers.masks.archived = quill::state::fetch::Fetch::Ready(quill::state::ArchivedMasks {
+            sets: stickers.stickers.archived.iter().take(1).cloned().collect(),
+            next_offset: None,
+        });
         stickers.masks.set_dialog_open(true);
         self.settings
             .set_box(crate::ui::settings_state::SettingsBox::Stickers, false);

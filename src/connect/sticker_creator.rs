@@ -211,24 +211,22 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// lists again so the "Add to … Set" menus and the panel's "edit" badge
     /// follow the server (tdesktop `notifyUpdated` after `feedSetFull`).
     fn refetch_installed_sets_after_edit(&mut self) -> Result<(), ConnectSendError> {
-        if !self.session.stickers.creator_refetch_sets || !self.chats_path_active() {
+        if !self.session.stickers.stickers.lists.installed.is_outdated() || !self.chats_path_active()
+        {
             return Ok(());
         }
-        self.session.take_sticker_set_refetch();
-        if !self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetInstalledStickerSets)
-        {
-            self.sticker_request(
-                RequestPurpose::GetInstalledStickerSets,
-                crate::telegram::requests::get_installed_sticker_sets,
-            )
-            .inspect_err(|_| {
-                // Try again on the next poll.
-                self.session.stickers.creator_refetch_sets = true;
-            })?;
-        }
+        // The list stays `Outdated` until the refetch goes out; a request
+        // out from before the edit is dropped.
+        drop(
+            self.session
+                .requests
+                .take_purpose(RequestPurpose::GetInstalledStickerSets),
+        );
+        self.sticker_request(
+            RequestPurpose::GetInstalledStickerSets,
+            crate::telegram::requests::get_installed_sticker_sets,
+        )
+        .inspect_err(|_| self.session.stickers.stickers.lists.installed.outdate())?;
         if !self
             .session
             .requests
@@ -238,7 +236,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 RequestPurpose::GetInstalledEmojiSets,
                 crate::telegram::requests_emoji::get_installed_emoji_sets,
             )
-            .inspect_err(|_| self.session.stickers.creator_refetch_sets = true)?;
+            ?;
         }
         Ok(())
     }

@@ -905,7 +905,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.gifs.stale);
+    assert!(driver.session.stickers.gifs.saved_is_outdated());
     assert!(driver.open_gif_panel().unwrap().is_some());
     let failed_fetch = sent_request(&recorder, "getSavedAnimations")["@extra"].clone();
     driver

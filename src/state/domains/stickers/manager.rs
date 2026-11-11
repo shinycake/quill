@@ -17,9 +17,21 @@ pub struct ManagerCommit {
     /// The steps still to send, oldest first: the removals one request at a
     /// time, then the order of the sets that stay.
     pub steps: VecDeque<CommitStep>,
-    /// The request of the step on its way: only its failure is this
-    /// change's (a set box's `changeStickerSet` that fails is not).
-    pub sent: Option<RequestId>,
+    /// Whether a step is on its way.
+    pub stage: CommitStage,
+}
+
+/// Where the oldest saved change's current step stands. `Sent` leaves on
+/// the step's own failure (`note_commit_failure`) or when the next step
+/// goes out; a set box's `changeStickerSet` that fails is not this
+/// change's.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CommitStage {
+    /// No step of this change is out.
+    #[default]
+    Queued,
+    /// The step is on its way as this request.
+    Sent(RequestId),
 }
 
 /// What the manager box needs from the driver.
@@ -33,7 +45,7 @@ pub struct StickersManager {
     pub commits: VecDeque<ManagerCommit>,
     /// A step of a saved change that did not go through (a refused
     /// request, a client that could not send): the box is closed by then,
-    /// so the UI says so once.
+    /// so the UI polls this and says so once (`take_failure`).
     pub failure: Option<CommitFailure>,
 }
 
@@ -49,13 +61,19 @@ impl StickersManager {
     /// the oldest saved change only when it was that change's own step.
     /// True when it was (the failure is then reported by the manager).
     pub fn note_commit_failure(&mut self, failed: RequestId) -> bool {
-        if let Some(front) = self.commits.front()
-            && front.sent == Some(failed)
+        if let Some(front) = self.commits.front_mut()
+            && front.stage == CommitStage::Sent(failed)
         {
+            front.stage = CommitStage::Queued;
             self.failure = Some(CommitFailure { masks: front.masks });
             return true;
         }
         false
+    }
+
+    /// The failure to tell the user about, once.
+    pub fn take_failure(&mut self) -> Option<CommitFailure> {
+        self.failure.take()
     }
 
     /// A step of the oldest saved change could not go out at all.
@@ -90,7 +108,7 @@ impl ManagerCommit {
         Self {
             masks,
             steps,
-            sent: None,
+            stage: CommitStage::Queued,
         }
     }
 
