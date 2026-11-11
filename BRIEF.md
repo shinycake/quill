@@ -130,7 +130,7 @@ Do not spawn subagents or run anything in the background except the gate command
 
 A file you touch must end with **zero findings**. Your bundle lists every `register-r2.jsonl` entry for its files, all
 severities (S2 to S4, IS, crash, rename), confirmed and plausible. For each entry: prove it false (read the readers and
-writers, say why in one line) or fix it. "Minor", "works today" and "touches many sites" are not reasons.
+writers, say why in one line) or fix it. "Minor", "works today", "touches many sites", "shared pattern", "owned by another bundle", "not local" and "needs a live call" are not reasons. Every bundle owns its files outright: no other bundle will fix them.
 
 When every entry is done, review each file in your bundle again from the top as a fresh sweep reviewer would, with the
 criteria in `RESWEEP-BRIEF.md` on branch `sweep/resweep-plan` (implicit stages, renames, answers not matched by
@@ -144,3 +144,8 @@ Lessons from round 1, where a re-sweep still found 1,133 entries:
   `try_borrow` or a design that does not need the cell.
 - A timer or watcher held as a detached task cannot be cancelled: keep the `Task` in the stage that owns it.
 - Remove a field from `scripts/implicit-state-baseline.txt` when you convert it; never add one.
+
+Reviews of the first round-2 bundles still caught: a newest-request-wins rollback that broke when the newest failed first
+(test both orders of two in-flight requests), a locally refused send stored as the same Failed value as a server refusal
+(keep them apart when the UI treats them differently), a dropped `Result` from a fetch call leaving a box on "Loading" forever,
+and a fix that added an `Option<RequestId>` side field beside the value it guards (put the request inside the stage instead).
