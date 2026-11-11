@@ -66,6 +66,8 @@ pub enum QrAction {
     PickGift(Box<ThemeGift>),
     /// The gifts panel scrolled near its end.
     MoreGifts,
+    /// Retry on the gifts panel's failure: the first page again.
+    RetryGifts,
     /// The peer's saved theme, as the session now knows it.
     Served(ThemeChoice),
     /// A `setProfileShareTheme` came back: the theme it saved, or the
@@ -246,6 +248,11 @@ impl PeerQrBox {
             QrAction::MoreGifts => {
                 if styling && self.panel == Some(QrPanel::Gifts) {
                     return vec![QrEffect::LoadGifts { more: true }];
+                }
+            }
+            QrAction::RetryGifts => {
+                if styling && self.panel == Some(QrPanel::Gifts) {
+                    return vec![QrEffect::LoadGifts { more: false }];
                 }
             }
             QrAction::Served(choice) => self.served(choice),

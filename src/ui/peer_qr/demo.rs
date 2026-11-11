@@ -28,7 +28,9 @@ use quill::peer_qr::appearance::{ShareThemeBackdrop, SwatchKey};
 use quill::peer_qr::color::Rgb;
 use quill::peer_qr::free::FreeMode;
 use quill::peer_qr::state::{QrAction, QrPanel, QrPeer, QrSubject};
-use quill::peer_qr::theme::{Backdrops, ShareTheme, ThemeEmoji, ThemeGift, ThemeGifts, ThemeOwner};
+use quill::peer_qr::theme::{
+    Backdrops, GiftsRest, GiftsStage, ShareTheme, ThemeEmoji, ThemeGift, ThemeGifts, ThemeOwner,
+};
 use quill::privacy::{NewChatPrivacy, NewChatPrivacyState};
 use quill::state::Session;
 use quill::telegram::client::copy_and_parse;
@@ -124,9 +126,12 @@ pub(super) fn seed_peer_qr_session(sink: Arc<MemorySink>) -> Session {
     session.users_state.peer_qr.gifts = ThemeGifts {
         owner: Some(ThemeOwner::User(ME)),
         list,
-        complete: offset.is_empty(),
+        stage: GiftsStage::Listed(if offset.is_empty() {
+            GiftsRest::Complete
+        } else {
+            GiftsRest::More
+        }),
         offset,
-        loaded: true,
         ..ThemeGifts::default()
     };
     let theme = match std::env::var("QUILL_DEMO_PEER_QR_THEME").as_deref() {

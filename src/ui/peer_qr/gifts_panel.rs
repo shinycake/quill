@@ -108,6 +108,32 @@ impl QuillApp {
                 .justify_center()
                 .child(Spinner::new().color(foreground))
                 .into_any_element(),
+            GiftsLayout::Failed => div()
+                .debug_selector(|| "peer-qr-gifts-failed".into())
+                .size_full()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .items_center()
+                .justify_center()
+                .text_color(foreground)
+                .child(
+                    div()
+                        .text_size(px(13.))
+                        .child(tr(keys::Q_QR_BOX_GIFTS_FAILED)),
+                )
+                .child(
+                    div().debug_selector(|| "peer-qr-gifts-retry".into()).child(
+                        Button::new("peer-qr-gifts-retry")
+                            .primary()
+                            .rounded_full()
+                            .label(tr(keys::Q_MISC_RETRY))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.qr_act(QrAction::RetryGifts, cx);
+                            })),
+                    ),
+                )
+                .into_any_element(),
             GiftsLayout::Empty => self.qr_gifts_empty(view, width, cx).into_any_element(),
             GiftsLayout::Wide(_) => div()
                 .relative()

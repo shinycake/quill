@@ -559,8 +559,15 @@ impl QuillApp {
                         // The notice goes once the logout is on its way; a
                         // logout that could not be sent leaves it, with the
                         // reason, so the user can press again.
+                        // An account that is no longer signed in (already
+                        // logging out, closed) has nothing to log out of:
+                        // the notice goes, or it could never be dismissed.
                         let sent = this.live.as_mut().map(|live| {
-                            let sent = live.driver.request_logout();
+                            if !matches!(live.driver.session.auth, AuthorizationState::Ready) {
+                                live.driver.session.dismiss_service_notice();
+                                return Ok(());
+                            }
+                            let sent = live.driver.request_logout().map(|_| ());
                             if sent.is_ok() {
                                 live.driver.session.dismiss_service_notice();
                             }

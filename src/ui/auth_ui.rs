@@ -64,6 +64,14 @@ impl QuillApp {
                 email.update(cx, |input, cx| input.set_value("", window, cx));
             }
         }
+        let recovering = ui.recovery_mode && matches!(auth, AuthorizationState::WaitPassword { .. });
+        if !recovering {
+            let code = ui.recovery_code_input.clone();
+            if !code.read(cx).value().is_empty() {
+                code.update(cx, |input, cx| input.set_value("", window, cx));
+            }
+        }
+        let ui = &self.screen.auth_ui;
         if !matches!(auth, AuthorizationState::WaitRegistration { .. }) {
             for input in [
                 ui.registration_first_input.clone(),
