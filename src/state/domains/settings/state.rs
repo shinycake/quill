@@ -171,21 +171,25 @@ impl ListEdit {
 pub enum DeviceLogin {
     #[default]
     Idle,
-    /// The confirmation is in flight.
-    InFlight,
-    /// It ended; the screen takes the result once.
-    Done(crate::auth::DeviceLoginResult),
+    /// The confirmation this request carries is in flight.
+    InFlight(RequestId),
+    /// That request ended; the screen that sent it takes the result once.
+    Done {
+        request: RequestId,
+        result: crate::auth::DeviceLoginResult,
+    },
 }
 
 impl DeviceLogin {
     pub fn in_flight(self) -> bool {
-        self == Self::InFlight
+        matches!(self, Self::InFlight(_))
     }
 
-    /// The result, once: the stage returns to `Idle`.
-    pub fn take_result(&mut self) -> Option<crate::auth::DeviceLoginResult> {
+    /// The result of the confirmation `asked` sent, once: the stage returns
+    /// to `Idle`. A result for another request is not this asker's.
+    pub fn take_result_for(&mut self, asked: RequestId) -> Option<crate::auth::DeviceLoginResult> {
         match *self {
-            Self::Done(result) => {
+            Self::Done { request, result } if request == asked => {
                 *self = Self::Idle;
                 Some(result)
             }

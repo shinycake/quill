@@ -764,7 +764,7 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
     assert!(driver.session.settings.sessions_op.is_mutating());
     assert_eq!(
         driver.session.settings.device_login,
-        crate::state::DeviceLogin::InFlight
+        crate::state::DeviceLogin::InFlight(request)
     );
     driver
         .ingest(response(
@@ -774,7 +774,10 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         .unwrap();
     assert_eq!(
         driver.session.settings.device_login,
-        crate::state::DeviceLogin::Done(crate::auth::DeviceLoginResult::Linked)
+        crate::state::DeviceLogin::Done {
+            request,
+            result: crate::auth::DeviceLoginResult::Linked
+        }
     );
     assert!(!driver.session.settings.sessions_op.is_mutating());
     assert!(
@@ -790,7 +793,10 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         driver.ingest(response(request, body)).unwrap();
         assert_eq!(
             driver.session.settings.device_login,
-            crate::state::DeviceLogin::Done(crate::auth::DeviceLoginResult::Failed)
+            crate::state::DeviceLogin::Done {
+                request,
+                result: crate::auth::DeviceLoginResult::Failed
+            }
         );
         assert!(!driver.session.settings.sessions_op.is_mutating());
     }
@@ -803,7 +809,27 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         .unwrap();
     assert_eq!(
         driver.session.settings.device_login,
-        crate::state::DeviceLogin::Done(crate::auth::DeviceLoginResult::PasswordRequired)
+        crate::state::DeviceLogin::Done {
+            request,
+            result: crate::auth::DeviceLoginResult::PasswordRequired
+        }
+    );
+    assert_eq!(
+        driver
+            .session
+            .settings
+            .device_login
+            .take_result_for(crate::ids::RequestId(request.0 + 1)),
+        None,
+        "another request's result is not this asker's"
+    );
+    assert_eq!(
+        driver
+            .session
+            .settings
+            .device_login
+            .take_result_for(request),
+        Some(crate::auth::DeviceLoginResult::PasswordRequired)
     );
     driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
     assert!(driver.confirm_device_login(link).is_err());

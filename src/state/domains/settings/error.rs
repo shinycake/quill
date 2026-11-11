@@ -149,8 +149,12 @@ impl Session {
             // flood state worsens; retry is user-driven via the
             // Refresh button. The old cache stays visible.
             Some(RequestPurpose::ConfirmDeviceLogin) => {
-                self.settings.device_login =
-                    DeviceLogin::Done(crate::auth::DeviceLoginResult::Failed);
+                if let Some(asked) = pending {
+                    self.settings.device_login = DeviceLogin::Done {
+                        request: asked.id,
+                        result: crate::auth::DeviceLoginResult::Failed,
+                    };
+                }
                 self.settings.sessions_op.failed(pending.map(|p| p.id));
                 self.settings
                     .sessions
