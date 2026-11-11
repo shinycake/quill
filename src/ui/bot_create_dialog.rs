@@ -130,13 +130,20 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         // An earlier createBot may still be in flight (its box was closed
-        // while "Creating..."): resetting would bump the generation and its
-        // answer would no longer match, so it is never reported. The new box
-        // adopts that stage and `drain_bot_create` reports the answer.
+        // while "Creating..."). Resetting would bump the generation and its
+        // answer would no longer match, so it is never reported; a new box
+        // would adopt that submission and its own share would never be
+        // answered. So a second press waits: `drain_bot_create` reports the
+        // first answer, and the press says so.
         let creating = self
             .session()
             .is_some_and(|session| session.bots.owned.create.creating());
-        if !creating && let Some(live) = self.live.as_mut() {
+        if creating {
+            self.set_note(StatusNote::info(tr(keys::Q_MEDIA_STILL_CREATING_A_BOT)));
+            cx.notify();
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
             live.driver.reset_create_bot();
         }
         let name = cx.new(|cx| {
@@ -506,3 +513,8 @@ crate::ui::shell::register_dialogs! {
     )
     .close(|app, _, cx| app.close_bot_create(cx)),
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "bot_create_tests.rs"]
+mod tests;

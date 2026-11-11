@@ -45,3 +45,38 @@ fn a_check_leaves_the_updated_notice_for_the_user(cx: &mut TestAppContext) {
         ));
     });
 }
+
+/// The 4-hour timer must not turn a failed download back into Available:
+/// that would retry it silently and lose the failure message.
+#[gpui_kit::test]
+fn the_timer_leaves_a_failed_download_for_the_button(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update(&mut vcx, |app, cx| {
+        app.preferences.update_state = UpdateState::DownloadFailed(release(), "stopped");
+        app.recheck_for_updates(cx);
+        assert!(matches!(
+            app.preferences.update_state,
+            UpdateState::DownloadFailed(..)
+        ));
+        app.preferences.update_state = UpdateState::InstallFailed(release(), "no");
+        app.recheck_for_updates(cx);
+        assert!(matches!(
+            app.preferences.update_state,
+            UpdateState::InstallFailed(..)
+        ));
+    });
+}
+
+/// A quit that never ends the process must not leave "Installing" for good.
+#[gpui_kit::test]
+fn a_quit_that_never_lands_ends_in_install_failed(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update(&mut vcx, |app, cx| {
+        app.preferences.update_state = UpdateState::Installing(release(), Default::default());
+        app.restart_did_not_land(cx);
+        assert!(matches!(
+            app.preferences.update_state,
+            UpdateState::InstallFailed(..)
+        ));
+    });
+}

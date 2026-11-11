@@ -4,6 +4,7 @@
 use super::app::QuillApp;
 use super::dismiss_layer::DismissLayer;
 use super::pressable::PressableDiv;
+use super::status_note::StatusNote;
 use super::*;
 use gpui_kit::TestSupportExt;
 use gpui_kit::component::button::*;
@@ -124,6 +125,10 @@ impl QuillApp {
     /// reports a failed post or edit (`story_composer_upkeep`).
     pub(super) fn close_story_composer(&mut self, cx: &mut Context<Self>) {
         if self.stories.composer.stage.in_flight() {
+            // Not silent: the status line says what it waits on, and the
+            // press says why the box stays.
+            self.set_note(StatusNote::info(tr(keys::Q_MEDIA_STILL_POSTING_STORY)));
+            cx.notify();
             return;
         }
         self.end_story_composer(cx);
@@ -354,6 +359,9 @@ impl QuillApp {
     /// "Choose a file": the native file dialog for the story's photo or
     /// video.
     pub(super) fn choose_story_media(&mut self, cx: &mut Context<Self>) {
+        // The pick belongs to the composer that asked: another one opened
+        // meanwhile (or none) does not take it.
+        let asked = self.stories.composer.id;
         let picker = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -364,10 +372,25 @@ impl QuillApp {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.into_iter().next()
             {
-                let _ = this.update(cx, |this, cx| this.take_story_media(&[path], cx));
+                let _ = this.update(cx, |this, cx| {
+                    this.take_story_media_asked_by(asked, &[path], cx);
+                });
             }
         })
         .detach();
+    }
+
+    /// A pick the composer `asked` (its id) opened the dialog for: dropped
+    /// when that composer is gone.
+    pub(super) fn take_story_media_asked_by(
+        &mut self,
+        asked: u64,
+        paths: &[std::path::PathBuf],
+        cx: &mut Context<Self>,
+    ) {
+        if self.stories.composer.id == asked {
+            self.take_story_media(paths, cx);
+        }
     }
 
     /// A pick or a drop: the first photo or video among `paths` becomes

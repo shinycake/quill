@@ -89,7 +89,7 @@ impl QuillApp {
             UpdateDemo::Downloading => {
                 let progress = quill::updater::DownloadProgress::default();
                 progress.add(19 * 1024 * 1024);
-                quill::updater::UpdateState::Downloading(release, progress)
+                quill::updater::UpdateState::Downloading(release, progress, Default::default())
             }
             UpdateDemo::Staged => quill::updater::UpdateState::Staged(
                 quill::updater::ReleaseInfo {

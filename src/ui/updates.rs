@@ -17,11 +17,14 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
 use quill::updater::{
-    ChangelogBanner, DownloadProgress, UpdateControl, UpdateState, check_latest_release,
+    ChangelogBanner, DownloadProgress, Job, UpdateControl, UpdateState, check_latest_release,
 };
 use std::time::Duration;
 
 /// How often a running Quill looks for a new release.
+/// How long Quill waits for its own quit after handing the update over.
+const RESTART_GIVE_UP: Duration = Duration::from_secs(30);
+
 const RECHECK_EVERY: Duration = Duration::from_secs(4 * 60 * 60);
 
 impl QuillApp {
@@ -30,9 +33,6 @@ impl QuillApp {
     /// the banner would come back at the next launch. So no check, from the
     /// button or the timer, starts over it.
     pub(super) fn check_for_updates(&mut self, cx: &mut Context<Self>) {
-        if matches!(self.preferences.update_state, UpdateState::Installed(..)) {
-            return;
-        }
         if !matches!(
             self.update_control(),
             UpdateControl::Check { busy: false }
@@ -41,16 +41,29 @@ impl QuillApp {
         ) {
             return;
         }
-        self.preferences.update_state = UpdateState::Checking;
         let check = cx
             .background_executor()
             .spawn(async move { check_latest_release() });
-        cx.spawn(async move |this, cx| {
+        // The stage holds the task: replacing the stage cancels the check.
+        let task = cx.spawn(async move |this, cx| {
             let state = check.await;
             let _ = this.update(cx, |this, cx| this.apply_check_result(state, cx));
-        })
-        .detach();
+        });
+        self.preferences.update_state = UpdateState::Checking(Job::hold(task));
         cx.notify();
+    }
+
+    /// The timer's check. A failed download or hand-off waits for the
+    /// button (`UpdateControl::auto_download`): a check would turn it back
+    /// into Available, retry it silently and lose the failure message.
+    pub(super) fn recheck_for_updates(&mut self, cx: &mut Context<Self>) {
+        if matches!(
+            self.preferences.update_state,
+            UpdateState::DownloadFailed(..) | UpdateState::InstallFailed(..)
+        ) {
+            return;
+        }
+        self.check_for_updates(cx);
     }
 
     /// Checks at launch, then every few hours while Quill runs (tdesktop's
@@ -65,7 +78,7 @@ impl QuillApp {
             loop {
                 cx.background_executor().timer(RECHECK_EVERY).await;
                 if this
-                    .update(cx, |this, cx| this.check_for_updates(cx))
+                    .update(cx, |this, cx| this.recheck_for_updates(cx))
                     .is_err()
                 {
                     break;
@@ -126,7 +139,7 @@ impl QuillApp {
     /// The disk went low or full: an update download already running stops,
     /// as one about to start waits (`auto_download_update`).
     pub(super) fn hold_update_download(&mut self) {
-        if let UpdateState::Downloading(_, progress) = &self.preferences.update_state {
+        if let UpdateState::Downloading(_, progress, _) = &self.preferences.update_state {
             progress.hold();
         }
     }
@@ -155,6 +168,7 @@ impl QuillApp {
             }
             UpdateControl::OpenRelease(url) => self.open_link(&url, cx),
             UpdateControl::Check { busy: true }
+            | UpdateControl::ChangelogPending
             | UpdateControl::Downloading { .. }
             | UpdateControl::Restarting => {}
         }
@@ -166,47 +180,38 @@ impl QuillApp {
     fn download_update(&mut self, release: quill::updater::ReleaseInfo, cx: &mut Context<Self>) {
         if matches!(
             self.preferences.update_state,
-            UpdateState::Downloading(..) | UpdateState::Installing(_) | UpdateState::Staged(..)
+            UpdateState::Downloading(..) | UpdateState::Installing(..) | UpdateState::Staged(..)
         ) {
             return;
         }
         let progress = DownloadProgress::default();
-        self.preferences.update_state = UpdateState::Downloading(release.clone(), progress.clone());
         let download_release = release.clone();
         let download_progress = progress.clone();
         let download = cx.background_executor().spawn(async move {
             quill::update_install::download_and_stage(&download_release, &download_progress)
         });
         let held = progress.clone();
-        cx.spawn(async move |this, cx| {
+        let stage_release = release.clone();
+        let finish = cx.spawn(async move |this, cx| {
             let result = download.await;
             let _ = this.update(cx, |this, cx| {
                 this.finish_update_download(release, &held, result, cx);
             });
-        })
-        .detach();
-        // The progress lives in the download; redraw while it runs.
-        cx.spawn(async move |this, cx| {
+        });
+        // The progress lives in the download; redraw while it runs. The
+        // stage holds both tasks, so leaving the stage ends the redraw.
+        let redraw = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(250))
                     .await;
-                let running = this.update(cx, |this, cx| {
-                    let running = matches!(
-                        &this.preferences.update_state,
-                        UpdateState::Downloading(_, current) if *current == progress
-                    );
-                    if running {
-                        cx.notify();
-                    }
-                    running
-                });
-                if !matches!(running, Ok(true)) {
+                if this.update(cx, |_, cx| cx.notify()).is_err() {
                     break;
                 }
             }
-        })
-        .detach();
+        });
+        self.preferences.update_state =
+            UpdateState::Downloading(stage_release, progress, Job::hold((finish, redraw)));
         cx.notify();
     }
 
@@ -219,7 +224,13 @@ impl QuillApp {
         let release = release.clone();
         match quill::update_install::hand_off(plan) {
             Ok(()) => {
-                self.preferences.update_state = UpdateState::Installing(release);
+                // A quit that never lands must not leave the button hidden
+                // for good: the watch ends the stage in InstallFailed.
+                let watch = cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(RESTART_GIVE_UP).await;
+                    let _ = this.update(cx, |this, cx| this.restart_did_not_land(cx));
+                });
+                self.preferences.update_state = UpdateState::Installing(release, Job::hold(watch));
                 cx.quit();
             }
             Err(_) => {
@@ -230,10 +241,22 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The quit after the hand-off did not end the process in time.
+    pub(super) fn restart_did_not_land(&mut self, cx: &mut Context<Self>) {
+        let UpdateState::Installing(release, _) = &self.preferences.update_state else {
+            return;
+        };
+        self.preferences.update_state =
+            UpdateState::InstallFailed(release.clone(), tr(keys::Q_OPS_COULD_NOT_START_THE_UPDATE));
+        cx.notify();
+    }
+
     /// The text of the update button.
     pub(super) fn update_control_label(control: &UpdateControl) -> SharedString {
         match control {
-            UpdateControl::Check { .. } => tr(keys::Q_OPS_CHECK_FOR_UPDATES).into(),
+            UpdateControl::Check { .. } | UpdateControl::ChangelogPending => {
+                tr(keys::Q_OPS_CHECK_FOR_UPDATES).into()
+            }
             UpdateControl::Install(_) => tr(keys::Q_OPS_UPDATE_QUILL).into(),
             UpdateControl::Downloading { progress, total } => tr_with(
                 keys::Q_OPS_DOWNLOADING_UPDATE,
@@ -263,6 +286,7 @@ impl QuillApp {
             .disabled(matches!(
                 control,
                 UpdateControl::Check { busy: true }
+                    | UpdateControl::ChangelogPending
                     | UpdateControl::Downloading { .. }
                     | UpdateControl::Restarting
             ))
@@ -371,14 +395,14 @@ impl QuillApp {
     fn known_release(&self) -> Option<&quill::updater::ReleaseInfo> {
         match &self.preferences.update_state {
             UpdateState::Available(release)
-            | UpdateState::Downloading(release, _)
+            | UpdateState::Downloading(release, ..)
             | UpdateState::DownloadFailed(release, _)
             | UpdateState::InstallFailed(release, _)
             | UpdateState::Staged(release, _)
-            | UpdateState::Installing(release)
+            | UpdateState::Installing(release, _)
             | UpdateState::Installed(release, _) => Some(release),
             UpdateState::Idle
-            | UpdateState::Checking
+            | UpdateState::Checking(_)
             | UpdateState::UpToDate
             | UpdateState::NoRelease
             | UpdateState::Failed(_) => None,

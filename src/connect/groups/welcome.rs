@@ -9,14 +9,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.chats_path_active() {
-            self.fail_welcome_load_send(chat_id);
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        if !matches!(
+        let supergroup = matches!(
             self.session.chats.get(&chat_id.0).map(|chat| &chat.kind),
             Some(ChatKind::Supergroup { .. })
-        ) {
+        );
+        if !self.chats_path_active() {
+            // Only a chat that has welcome messages gets a pack to retry.
+            if supergroup {
+                self.fail_welcome_load_send(chat_id);
+            }
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !supergroup {
             return Ok(None);
         }
         if self

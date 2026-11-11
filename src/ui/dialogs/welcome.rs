@@ -58,6 +58,29 @@ impl WelcomeEdit {
         }
     }
 
+    /// Cancel on the open row. Refused (`false`) while its Save is out.
+    pub(crate) fn cancel(&mut self, requests: Option<&quill::state::RequestRegistry>) -> bool {
+        if self.is_saving(requests) {
+            return false;
+        }
+        *self = Self::Idle;
+        true
+    }
+
+    /// Edit on a row. Refused (`false`) while a Save is out: its answer
+    /// would have nothing to report to.
+    pub(crate) fn open(
+        &mut self,
+        welcome_id: i32,
+        requests: Option<&quill::state::RequestRegistry>,
+    ) -> bool {
+        if self.is_saving(requests) {
+            return false;
+        }
+        *self = Self::row(welcome_id);
+        true
+    }
+
     /// Whether the open row's Save is out on `requests`.
     pub(crate) fn is_saving(&self, requests: Option<&quill::state::RequestRegistry>) -> bool {
         self.save().is_some_and(|save| save.is_sending(requests))
@@ -85,5 +108,37 @@ impl WelcomeDialog {
             edit_input,
             add: Default::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WelcomeEdit;
+    use quill::state::{RequestPurpose, RequestRegistry, Submit};
+
+    /// 10-071: Cancel and Edit on another row leave a Save that is out
+    /// alone; once it answered they work again.
+    #[test]
+    fn a_row_whose_save_is_out_is_neither_cancelled_nor_swapped() {
+        let mut registry = RequestRegistry::default();
+        let id = registry.register(
+            quill::ids::AccountGeneration::default(),
+            RequestPurpose::SetChatTitle,
+            None,
+            None,
+        );
+        let mut edit = WelcomeEdit::Row {
+            welcome_id: 1,
+            save: Submit::sent(vec![id]),
+        };
+        assert!(edit.is_saving(Some(&registry)));
+        assert!(!edit.cancel(Some(&registry)), "Cancel is refused");
+        assert!(!edit.open(2, Some(&registry)), "so is another row");
+        assert_eq!(edit.welcome_id(), Some(1));
+        registry.take(id);
+        assert!(edit.open(2, Some(&registry)), "answered: free again");
+        assert_eq!(edit.welcome_id(), Some(2));
+        assert!(edit.cancel(Some(&registry)));
+        assert_eq!(edit.welcome_id(), None);
     }
 }

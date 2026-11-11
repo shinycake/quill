@@ -206,3 +206,68 @@ fn a_collectible_answer_of_a_replaced_lookup_is_not_taken_by_the_new_one() {
     let lookup = driver.session.payments.hub.collectible.clone().unwrap();
     assert!(lookup.is_loading(), "the first error is not the second's");
 }
+
+/// A tap on a collectible lookup that is still out asks again, so a lost
+/// answer does not block every later tap; only the newest request's answer
+/// is taken.
+#[test]
+fn a_second_tap_on_a_loading_collectible_asks_again() {
+    use crate::collectible_info::CollectibleLookup;
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+
+    let lookup = || CollectibleLookup::new("durov", "P", None, String::new());
+    driver.request_collectible_info(lookup()).unwrap();
+    let first = sent_request(&recorder, "getCollectibleItemInfo");
+    driver.request_collectible_info(lookup()).unwrap();
+    let second = sent_request(&recorder, "getCollectibleItemInfo");
+    assert_ne!(first["@extra"], second["@extra"]);
+
+    let answer = |extra: &serde_json::Value, url: &str| {
+        json!({
+            "@type": "collectibleItemInfo", "@extra": extra,
+            "purchase_date": 1, "currency": "USD", "amount": 1,
+            "cryptocurrency": "TON", "cryptocurrency_amount": 1, "url": url,
+        })
+        .to_string()
+    };
+    driver
+        .ingest(copy_and_parse(&answer(&first["@extra"], "https://old"), &seq, &sink).unwrap())
+        .unwrap();
+    assert!(
+        driver
+            .session
+            .payments
+            .hub
+            .collectible
+            .as_ref()
+            .is_some_and(|l| l.is_loading()),
+        "the first request's answer is dropped"
+    );
+    driver
+        .ingest(copy_and_parse(&answer(&second["@extra"], "https://new"), &seq, &sink).unwrap())
+        .unwrap();
+    let lookup = driver.session.payments.hub.collectible.clone().unwrap();
+    assert_eq!(lookup.info().map(|i| i.url.as_str()), Some("https://new"));
+}
+
+/// A lookup the sender refuses (the chats path is not active) is an error
+/// the UI turns into a note, and no lookup is left behind to open a box.
+#[test]
+fn a_refused_collectible_lookup_is_an_error_and_stores_nothing() {
+    use crate::collectible_info::CollectibleLookup;
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
+    let lookup = CollectibleLookup::new("durov", "P", None, String::new());
+    assert!(driver.request_collectible_info(lookup).is_err());
+    assert!(driver.session.payments.hub.collectible.is_none());
+}

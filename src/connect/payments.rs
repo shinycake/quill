@@ -301,25 +301,18 @@ impl<S: JsonSender> ConnectDriver<S> {
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Look up a tapped collectible username or phone number
-    /// (`getCollectibleItemInfo`). The same item is not asked twice while
-    /// its lookup is running (tdesktop `resolveCollectible`).
+    /// (`getCollectibleItemInfo`). A tap on a lookup still out asks again:
+    /// the newest request is the one answered.
     pub fn request_collectible_info(
         &mut self,
         mut lookup: crate::collectible_info::CollectibleLookup,
-    ) -> Result<Option<RequestId>, ConnectSendError> {
+    ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let running = self
-            .session
-            .payments
-            .hub
-            .collectible
-            .as_ref()
-            .is_some_and(|open| open.is_loading() && open.entity == lookup.entity);
-        if running {
-            return Ok(None);
-        }
+        // A tap on a lookup that is still out asks again: the newer request
+        // replaces it, the older answer no longer matches, and a lookup
+        // whose answer was lost does not block every later tap.
         let (kind, entity) = (lookup.kind, lookup.entity.clone());
         let extra = self
             .session
@@ -331,6 +324,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.payments.hub.collectible = None;
             return Err(err);
         }
-        Ok(Some(extra))
+        Ok(extra)
     }
 }

@@ -263,6 +263,10 @@ pub enum ComposerMode {
 /// syncs them into this before posting.
 #[derive(Debug, Clone, Default)]
 pub struct StoryComposer {
+    /// Which opening of the composer this is (0 while closed): an answer
+    /// that was asked by an earlier composer (the file dialog) finds a
+    /// different id and is dropped.
+    pub id: u64,
     /// Picked with the native file dialog or dropped on the composer. In
     /// edit mode `None` keeps the story's current media.
     pub media: Option<StoryMedia>,
@@ -286,9 +290,16 @@ pub struct StoryComposer {
     pub as_chat_id: Option<i64>,
 }
 
+/// The next opening's id: never 0, never repeated.
+fn next_composer_id() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 impl StoryComposer {
     pub fn open() -> Self {
         Self {
+            id: next_composer_id(),
             mode: ComposerMode::New,
             ..Default::default()
         }
@@ -302,6 +313,7 @@ impl StoryComposer {
     /// Phase 9.5: open the composer in edit mode for a posted story.
     pub fn open_edit(poster_chat_id: i64, story_id: i32) -> Self {
         Self {
+            id: next_composer_id(),
             mode: ComposerMode::Edit(poster_chat_id, story_id),
             ..Default::default()
         }
@@ -310,6 +322,7 @@ impl StoryComposer {
     /// Phase 9.5: open the composer in repost mode for a source story.
     pub fn open_repost(poster_chat_id: i64, story_id: i32) -> Self {
         Self {
+            id: next_composer_id(),
             mode: ComposerMode::Repost(poster_chat_id, story_id),
             ..Default::default()
         }

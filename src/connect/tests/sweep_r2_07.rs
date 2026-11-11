@@ -99,6 +99,16 @@ fn a_welcome_load_that_cannot_be_sent_is_failed_not_empty() {
     );
 }
 
+/// A chat that has no welcome messages (not a supergroup) gets no `Failed`
+/// pack when the load cannot be sent: nothing would ever clear it.
+#[test]
+fn a_refused_welcome_load_for_a_plain_chat_stores_no_pack() {
+    let (_dir, mut driver, sender, _sink, _seq) = toggle_driver();
+    sender.refuse(true);
+    assert!(driver.load_chat_welcome_messages(ChatId(77)).is_ok());
+    assert!(driver.session.groups.welcome_messages.get(&77).is_none());
+}
+
 /// 10-022: the giveaway price lists whose send fails are `Failed` (the form
 /// says why and offers Retry), not `Idle` ("not available").
 #[test]
