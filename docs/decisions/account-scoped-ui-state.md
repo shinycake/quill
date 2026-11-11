@@ -5495,7 +5495,9 @@ land and the typed form was gone.
   story opener (its note says when it could not load) (13-086). The Playlist
   page closes back to the gallery under it, Esc included (13-085); its rows
   count as playing only for the chat the track plays for (13-088); it asks for
-  its playlist as it opens and a failed first page draws Retry (13-087).
+  its playlist as it opens and a failed first page draws Retry (13-087); offline
+  (nothing can go out) `open_playlist` marks the playlist failed, and
+  `retry_playlist` puts the removed Failed entry back, so Retry stays.
 - **Keys.** The sender status head is keyed by `ChatMessage` (13-016). A
   switch of account ends the spoiler reveal fades, which last 200 ms (13-042).
 - **Players.** A speed drag cut off by the clip ending is cleared with the
@@ -5507,7 +5509,8 @@ land and the typed form was gone.
   12-056: `SliderState::set_value` emits no event, so syncing the controls
   cannot feed back. 14-061: a failed clip is `Failed` for good by design
   (`transport.rs`, "Failed stays failed"), so the decode error left after a
-  seek is never read.
+  seek is never read. 14-004's stale-cover drop has no cheap test: it needs a
+  decoded video in the editor.
 
 ### Sweep fixes (s3-stories)
 

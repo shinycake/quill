@@ -322,7 +322,7 @@ impl QuillApp {
         // (deduped while one is loading or loaded); a failure shows with
         // a Retry.
         if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.fetch_playlist(user_id, false);
+            live.driver.open_playlist(user_id);
         }
         cx.notify();
     }
@@ -330,17 +330,7 @@ impl QuillApp {
     /// Retry on the Playlist page after its first page failed.
     fn retry_playlist(&mut self, user_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            let failed = live
-                .driver
-                .session
-                .media
-                .playlists
-                .get(&user_id)
-                .is_some_and(|playlist| playlist.error.is_some() && playlist.tracks.is_empty());
-            if failed {
-                live.driver.session.media.playlists.remove(&user_id);
-            }
-            let _ = live.driver.fetch_playlist(user_id, false);
+            live.driver.retry_playlist(user_id);
         }
         cx.notify();
     }
