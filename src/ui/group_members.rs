@@ -87,9 +87,11 @@ impl QuillApp {
             return;
         };
         let query = dialog.search_input.read(cx).value().trim().to_string();
-        dialog.searched = query.clone();
         let (chat_id, is_basic_group, tab) = (dialog.chat_id, dialog.is_basic_group, dialog.tab);
         let Some(live) = self.live.as_mut() else {
+            if let Some(dialog) = self.admin.member_dialog.as_mut() {
+                dialog.searched = query;
+            }
             return;
         };
         let result = if is_basic_group {
@@ -104,8 +106,15 @@ impl QuillApp {
                 .refresh_supergroup_members(chat_id, filter, &query)
                 .map(|_| ())
         };
-        if result.is_err() {
-            self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_LOAD_MEMBERS)));
+        // The list follows the query once it was asked for; a send that
+        // failed leaves the last asked query's list on screen.
+        match result {
+            Ok(()) => {
+                if let Some(dialog) = self.admin.member_dialog.as_mut() {
+                    dialog.searched = query;
+                }
+            }
+            Err(_) => self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_LOAD_MEMBERS))),
         }
         cx.notify();
     }

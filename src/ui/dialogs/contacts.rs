@@ -11,29 +11,37 @@ pub struct AddContactDialog {
     pub(crate) phone_input: Entity<TextareaState>,
     pub(crate) first_name_input: Entity<TextareaState>,
     pub(crate) last_name_input: Entity<TextareaState>,
-    /// New Contact box (`user_id == 0`): where its import stands.
-    pub(crate) stage: NewContactStage,
-    /// Add Contact box (`user_id != 0`): the `addContact` it waits on.
-    pub(crate) save: ContactSave,
+    /// Where the box stands: the New Contact import (`user_id == 0`) or the
+    /// Add Contact save (`user_id != 0`).
+    pub(crate) stage: AddContactStage,
 }
 
-/// Where the New Contact box (`user_id == 0`) stands. Every stage has a way
-/// out: the import's answer, "Try another contact", or closing the box.
+/// Where the add-contact box stands. Every stage has a way out: the
+/// request's answer (closed, or `NotJoined` / `Failed` with the form back),
+/// "Try another contact", or closing the box. The two boxes share it; the
+/// New Contact one uses `Importing` / `NotJoined`, the Add Contact one
+/// `Saving` / `Failed`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NewContactStage {
+pub enum AddContactStage {
     /// The form is filled in.
     Form,
-    /// The import it sent, whose answer it applies, and the first name it
-    /// was sent with.
-    Sending {
+    /// New Contact: the import it sent, whose answer it applies, and the
+    /// first name it was sent with.
+    Importing {
         request: quill::ids::RequestId,
         name: String,
     },
-    /// The phone is not on Telegram (tdesktop's `_retrying` state).
+    /// New Contact: the phone is not on Telegram (tdesktop's `_retrying`
+    /// state).
     NotJoined { name: String },
+    /// Add Contact: the `addContact` it waits on; the box closes on its own
+    /// answer.
+    Saving(quill::ids::RequestId),
+    /// Add Contact: the refusal to show above the form.
+    Failed(String),
 }
 
-/// Where the Add Contact box's save stands: the box closes on the answer
+/// Where the Edit Contact box's save stands: the box closes on the answer
 /// to its own request, and shows the refusal when there is one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContactSave {
@@ -113,8 +121,7 @@ impl AddContactDialog {
             phone_input,
             first_name_input,
             last_name_input,
-            stage: NewContactStage::Form,
-            save: ContactSave::Idle,
+            stage: AddContactStage::Form,
         }
     }
 

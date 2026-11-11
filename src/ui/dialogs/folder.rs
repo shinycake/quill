@@ -14,7 +14,12 @@ use std::collections::HashSet;
 pub enum FolderLoad {
     Loading,
     Failed(String),
-    Ready,
+    /// The form is editable. `error` is the line a refused Save (or a
+    /// failed fetch of the fresh folder) left, drawn above the form; the
+    /// next Save leaves this stage and so takes it away.
+    Ready {
+        error: Option<String>,
+    },
     /// Save found the folder changed since the form opened: the fresh
     /// folder is being fetched so the person's edits go onto it, not over
     /// it (`FolderEditor::merged_onto`). A failed fetch is back in `Ready`
@@ -23,6 +28,32 @@ pub enum FolderLoad {
     /// Save went out: the box closes on the answer to this request and
     /// shows the error (back in `Ready`) when it fails.
     Saving(RequestId),
+}
+
+impl FolderLoad {
+    /// An editable form with nothing to complain about.
+    pub(crate) fn ready() -> Self {
+        FolderLoad::Ready { error: None }
+    }
+
+    /// An editable form with the reason its last Save was refused.
+    pub(crate) fn refused(line: impl Into<String>) -> Self {
+        FolderLoad::Ready {
+            error: Some(line.into()),
+        }
+    }
+
+    pub(crate) fn is_ready(&self) -> bool {
+        matches!(self, FolderLoad::Ready { .. })
+    }
+
+    /// The line to draw above the form.
+    pub(crate) fn error(&self) -> Option<&str> {
+        match self {
+            FolderLoad::Ready { error } => error.as_deref(),
+            _ => None,
+        }
+    }
 }
 
 /// Parity slice: create/edit chat-folder dialog. The editable folder model
@@ -38,7 +69,6 @@ pub struct FolderEditorDialog {
     pub(crate) name_input: Entity<TextareaState>,
     /// Edit flow: `getChatFolder` before the editor prefills.
     pub(crate) load: FolderLoad,
-    pub(crate) error: Option<String>,
     /// The chat picker is showing for this list (`None` = the form).
     pub(crate) picker: Option<PickerMode>,
     pub(crate) picker_search: Entity<TextareaState>,
@@ -77,9 +107,8 @@ impl FolderEditorDialog {
             load: if folder_id.is_some() {
                 FolderLoad::Loading
             } else {
-                FolderLoad::Ready
+                FolderLoad::ready()
             },
-            error: None,
             picker: None,
             picker_search,
         }
@@ -94,8 +123,7 @@ impl FolderEditorDialog {
     ) {
         self.editor = FolderEditor::from_spec(spec);
         self.base = spec.clone();
-        self.load = FolderLoad::Ready;
-        self.error = None;
+        self.load = FolderLoad::ready();
         let name = spec.name.clone();
         self.name_input.update(cx, |input, cx| {
             input.set_value(name, window, cx);
@@ -108,7 +136,6 @@ impl FolderEditorDialog {
 }
 
 /// What the Share Folder dialog shows.
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FolderShareView {
     /// The folder's invite links; `confirm_delete` is the link whose delete
     /// is waiting for confirmation, `copied` the link last copied to the
@@ -118,8 +145,41 @@ pub enum FolderShareView {
         confirm_delete: Option<String>,
         copied: CopyMark,
     },
-    /// Naming a link and choosing its chats; `None` creates a new link.
-    Edit { link: Option<String> },
+    /// Naming a link and choosing its chats; `link: None` creates a new
+    /// link. The form's fields live and die with this view.
+    Edit {
+        link: Option<String>,
+        form: LinkForm,
+    },
+}
+
+/// The create / edit form of one invite link.
+pub struct LinkForm {
+    pub(crate) name_input: Entity<TextareaState>,
+    /// Chats ticked in the form.
+    pub(crate) selected: HashSet<i64>,
+}
+
+impl LinkForm {
+    pub(crate) fn new(
+        window: &mut Window,
+        cx: &mut Context<QuillApp>,
+        name: String,
+        selected: HashSet<i64>,
+    ) -> Self {
+        let name_input = cx.new(|cx| {
+            let mut state = TextareaState::new(window, cx)
+                .placeholder(tr(keys::Q_OPS_LINK_NAME_OPTIONAL))
+                .auto_grow(1, 1)
+                .submit_on_enter(false);
+            state.set_value(name, window, cx);
+            state
+        });
+        Self {
+            name_input,
+            selected,
+        }
+    }
 }
 
 impl FolderShareView {
@@ -158,27 +218,31 @@ impl LinkOp {
 pub struct FolderShareDialog {
     pub(crate) folder_id: i32,
     pub(crate) view: FolderShareView,
-    pub(crate) name_input: Entity<TextareaState>,
-    /// Chats ticked in the create / edit form.
-    pub(crate) selected: HashSet<i64>,
     /// The create / edit / delete request the box waits on.
     pub(crate) op: LinkOp,
 }
 
 impl FolderShareDialog {
-    pub(crate) fn new(window: &mut Window, cx: &mut Context<QuillApp>, folder_id: i32) -> Self {
-        let name_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder(tr(keys::Q_OPS_LINK_NAME_OPTIONAL))
-                .auto_grow(1, 1)
-                .submit_on_enter(false)
-        });
+    pub(crate) fn new(folder_id: i32) -> Self {
         Self {
             folder_id,
             view: FolderShareView::list(),
-            name_input,
-            selected: HashSet::new(),
             op: LinkOp::Idle,
+        }
+    }
+
+    /// The create / edit form, while it is the view.
+    pub(crate) fn form(&self) -> Option<&LinkForm> {
+        match &self.view {
+            FolderShareView::Edit { form, .. } => Some(form),
+            FolderShareView::List { .. } => None,
+        }
+    }
+
+    pub(crate) fn form_mut(&mut self) -> Option<&mut LinkForm> {
+        match &mut self.view {
+            FolderShareView::Edit { form, .. } => Some(form),
+            FolderShareView::List { .. } => None,
         }
     }
 
@@ -190,7 +254,8 @@ impl FolderShareDialog {
         }
     }
 
-    /// Mark a link copied; the form has no copy buttons, so it keeps none.
+    /// Mark a link copied; the form has no copy buttons, so it keeps none
+    /// (and the mark's timer is dropped with it).
     pub(crate) fn mark_copied(&mut self, mark: CopyMark) {
         if let FolderShareView::List { copied, .. } = &mut self.view {
             *copied = mark;
@@ -198,15 +263,16 @@ impl FolderShareDialog {
     }
 }
 
-/// The copy button's check mark. A timer clears it by the time of its copy,
-/// so a second copy of the same link keeps its own full time.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+/// The copy button's check mark. It owns the timer that clears it: a
+/// second copy replaces the mark and so drops the first timer, and leaving
+/// the list or closing the box cancels it.
+#[derive(Default)]
 pub enum CopyMark {
     #[default]
     Idle,
     Copied {
         link: String,
-        at: std::time::Instant,
+        _timer: Task<()>,
     },
 }
 

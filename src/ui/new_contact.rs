@@ -8,7 +8,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::dialogs::contacts::{AddContactDialog, NewContactStage};
+use super::dialogs::contacts::{AddContactDialog, AddContactStage};
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
@@ -66,7 +66,7 @@ impl QuillApp {
         };
         // A second press while this box's import is out waits for its
         // answer: the box keeps the request it applies.
-        if matches!(dialog.stage, NewContactStage::Sending { .. }) {
+        if matches!(dialog.stage, AddContactStage::Importing { .. }) {
             return;
         }
         let first = dialog.first_name_input.read(cx).value().to_string();
@@ -94,11 +94,11 @@ impl QuillApp {
                     && (request.is_some() || demo)
                 {
                     dialog.stage = match request {
-                        Some(request) => NewContactStage::Sending {
+                        Some(request) => AddContactStage::Importing {
                             request,
                             name: first,
                         },
-                        None => NewContactStage::NotJoined { name: first },
+                        None => AddContactStage::NotJoined { name: first },
                     };
                 }
             }
@@ -119,7 +119,7 @@ impl QuillApp {
             .add_contact_dialog
             .as_ref()
             .and_then(|dialog| match dialog.stage {
-                NewContactStage::Sending { request, .. } => Some(request),
+                AddContactStage::Importing { request, .. } => Some(request),
                 _ => None,
             });
         let outcome = self
@@ -134,7 +134,7 @@ impl QuillApp {
             .add_contact_dialog
             .as_mut()
             .filter(|_| outcome.is_some())
-            .map(|dialog| std::mem::replace(&mut dialog.stage, NewContactStage::Form));
+            .map(|dialog| std::mem::replace(&mut dialog.stage, AddContactStage::Form));
         match outcome {
             None => {}
             Some(NewContactOutcome::Joined(_)) => {
@@ -143,9 +143,9 @@ impl QuillApp {
             }
             Some(NewContactOutcome::NotJoined) => {
                 if let Some(dialog) = self.dialogs.add_contact_dialog.as_mut()
-                    && let Some(NewContactStage::Sending { name, .. }) = answered
+                    && let Some(AddContactStage::Importing { name, .. }) = answered
                 {
-                    dialog.stage = NewContactStage::NotJoined { name };
+                    dialog.stage = AddContactStage::NotJoined { name };
                 }
                 cx.notify();
             }
@@ -188,7 +188,7 @@ impl QuillApp {
                     .child(div().text_xs().text_color(muted).child(label))
                     .child(Textarea::new(input).aria_label(label).h(px(40.)))
             };
-            let (body, footer) = if let NewContactStage::NotJoined { name } = &state.stage {
+            let (body, footer) = if let AddContactStage::NotJoined { name } = &state.stage {
                 let name = name.clone();
                 let body = div()
                     .id("new-contact-not-joined")
@@ -201,7 +201,7 @@ impl QuillApp {
                         .label(tr(keys::TRY_OTHER_CONTACT))
                         .on_click(cx.listener(|this, _, _, cx| {
                             if let Some(dialog) = this.dialogs.add_contact_dialog.as_mut() {
-                                dialog.stage = NewContactStage::Form;
+                                dialog.stage = AddContactStage::Form;
                             }
                             cx.notify();
                         })),

@@ -25,22 +25,25 @@ use std::rc::Rc;
 /// the final "delete" warning).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TermsStage {
-    /// The terms text; the age line is ticked, or asked for after a press
-    /// without it.
-    Terms {
-        age_ok: bool,
-        age_error: bool,
-    },
+    /// The terms text, with where its age line stands.
+    Terms(AgeLine),
     DeclineSorry,
     DeleteWarning,
 }
 
+/// The "I confirm that I am at least N" line of the terms text.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum AgeLine {
+    #[default]
+    Unticked,
+    Ticked,
+    /// Agree was pressed without the tick: the line asks for it.
+    Missing,
+}
+
 impl Default for TermsStage {
     fn default() -> Self {
-        Self::Terms {
-            age_ok: false,
-            age_error: false,
-        }
+        Self::Terms(AgeLine::default())
     }
 }
 
@@ -355,7 +358,7 @@ impl QuillApp {
             .as_ref()
             .and_then(|s| s.settings.account_error().map(str::to_string));
         match self.terms_stage(&terms.id) {
-            TermsStage::Terms { age_ok, age_error } => {
+            TermsStage::Terms(age) => {
                 let min_age = terms.min_user_age;
                 let mut body = div().flex().flex_col().gap_3().child(
                     div()
@@ -372,22 +375,23 @@ impl QuillApp {
                                 keys::Q_OPS_I_CONFIRM_THAT_I_AM,
                                 &[("min_age", &min_age.to_string())],
                             ))
-                            .checked(age_ok)
+                            .checked(age == AgeLine::Ticked)
                             .on_click({
                                 let terms_id = terms_id.clone();
                                 cx.listener(move |this, &on: &bool, _, cx| {
                                     this.set_terms_stage(
                                         &terms_id,
-                                        TermsStage::Terms {
-                                            age_ok: on,
-                                            age_error: false,
-                                        },
+                                        TermsStage::Terms(if on {
+                                            AgeLine::Ticked
+                                        } else {
+                                            AgeLine::Unticked
+                                        }),
                                     );
                                     cx.notify();
                                 })
                             }),
                     );
-                    if age_error {
+                    if age == AgeLine::Missing {
                         body = body.child(
                             div()
                                 .text_xs()
@@ -428,13 +432,10 @@ impl QuillApp {
                             .on_click({
                                 let terms_id = terms_id.clone();
                                 cx.listener(move |this, _, _, cx| {
-                                    if min_age > 0 && !age_ok {
+                                    if min_age > 0 && age != AgeLine::Ticked {
                                         this.set_terms_stage(
                                             &terms_id,
-                                            TermsStage::Terms {
-                                                age_ok,
-                                                age_error: true,
-                                            },
+                                            TermsStage::Terms(AgeLine::Missing),
                                         );
                                     } else if let Some(live) = this.live.as_mut() {
                                         // A failed send lands in `terms`,

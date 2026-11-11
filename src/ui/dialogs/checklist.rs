@@ -1,5 +1,5 @@
 use super::super::app::QuillApp;
-use gpui_kit::component::input::TextareaState;
+use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::*;
 use quill::checklist::{CHECKLIST_TASKS_MAX, ChecklistDraft};
 use quill::ids::{ChatId, MessageId};
@@ -16,12 +16,22 @@ pub struct ChecklistDialog {
     pub(crate) add_to: Option<(ChatId, MessageId)>,
     pub(crate) title_input: Entity<TextareaState>,
     pub(crate) task_inputs: Vec<Entity<TextareaState>>,
-    pub(crate) others_can_add_tasks: bool,
-    pub(crate) others_can_mark_tasks_as_done: bool,
+    pub(crate) others: OthersMay,
+    /// The last refused Create, drawn under the fields; any edit to the
+    /// title or a task clears it (see `watch`).
     pub(crate) error: Option<&'static str>,
+    /// One per text area; dropping the dialog drops them.
+    watchers: Vec<Subscription>,
     /// The field to focus once the dialog has mounted (the kit dialog
     /// takes focus when it opens, so focusing at open time is lost).
     pub(crate) focus_on_mount: Option<Entity<TextareaState>>,
+}
+
+/// What other members may do with the list: the two switches, one value.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct OthersMay {
+    pub(crate) add_tasks: bool,
+    pub(crate) mark_tasks: bool,
 }
 
 impl ChecklistDialog {
@@ -37,15 +47,35 @@ impl ChecklistDialog {
         } else {
             Some(title_input.clone())
         };
-        Self {
+        let mut dialog = Self {
             add_to,
             title_input,
             task_inputs,
             focus_on_mount,
-            others_can_add_tasks: false,
-            others_can_mark_tasks_as_done: false,
+            others: OthersMay::default(),
             error: None,
-        }
+            watchers: Vec::new(),
+        };
+        dialog.watch_all(cx);
+        dialog
+    }
+
+    /// Clear the shown refusal when the user edits a field, so a corrected
+    /// list is not still marked wrong.
+    fn watch(input: &Entity<TextareaState>, cx: &mut Context<QuillApp>) -> Subscription {
+        cx.subscribe(input, |app, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change)
+                && let Some(dialog) = app.chat_ui.checklist_dialog.as_mut()
+                && dialog.error.take().is_some()
+            {
+                cx.notify();
+            }
+        })
+    }
+
+    fn watch_all(&mut self, cx: &mut Context<QuillApp>) {
+        let inputs = std::iter::once(&self.title_input).chain(self.task_inputs.iter());
+        self.watchers = inputs.map(|input| Self::watch(input, cx)).collect();
     }
 
     fn textarea(
@@ -64,8 +94,9 @@ impl ChecklistDialog {
     /// One more empty task row (until the 30-task limit).
     pub(crate) fn push_task_row(&mut self, window: &mut Window, cx: &mut Context<QuillApp>) {
         if self.task_inputs.len() < CHECKLIST_TASKS_MAX {
-            self.task_inputs
-                .push(Self::textarea(window, cx, tr(keys::Q_MEDIA_ADD_A_TASK)));
+            let row = Self::textarea(window, cx, tr(keys::Q_MEDIA_ADD_A_TASK));
+            self.watchers.push(Self::watch(&row, cx));
+            self.task_inputs.push(row);
         }
     }
 
@@ -81,8 +112,8 @@ impl ChecklistDialog {
         ChecklistDraft {
             title: self.title_input.read(cx).value().to_string(),
             tasks: self.task_texts(cx),
-            others_can_add_tasks: self.others_can_add_tasks,
-            others_can_mark_tasks_as_done: self.others_can_mark_tasks_as_done,
+            others_can_add_tasks: self.others.add_tasks,
+            others_can_mark_tasks_as_done: self.others.mark_tasks,
         }
     }
 }

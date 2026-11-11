@@ -306,7 +306,6 @@ impl QuillApp {
     pub(super) fn pick_restrict_until(&mut self, until: RestrictUntil, cx: &mut Context<Self>) {
         if let Some(dialog) = self.admin.restrict_dialog.as_mut() {
             dialog.until = until;
-            dialog.error = None;
             cx.notify();
         }
     }
@@ -332,8 +331,12 @@ impl QuillApp {
             {
                 Ok(unix) => RestrictUntil::Custom(unix).until_date(now),
                 Err(err) => {
+                    let picked = picked_unix(&dialog.custom, MIN_RESTRICT_SECS, cx);
                     if let Some(dialog) = self.admin.restrict_dialog.as_mut() {
-                        dialog.error = Some(err.message());
+                        dialog.error = Some(TimeRefusal {
+                            picked,
+                            reason: err.message(),
+                        });
                     }
                     cx.notify();
                     return;
@@ -367,7 +370,6 @@ impl QuillApp {
         match sent {
             Ok(id) => {
                 if let Some(dialog) = self.admin.restrict_dialog.as_mut() {
-                    dialog.error = None;
                     dialog.submit = quill::state::Submit::sent(vec![id]);
                 }
             }
@@ -560,13 +562,15 @@ impl QuillApp {
                         .child(line),
                 );
             }
-            if let Some(error) = dialog_state.error {
+            if let Some(refusal) = dialog_state.error
+                && refusal.picked == picked_unix(&dialog_state.custom, MIN_RESTRICT_SECS, cx)
+            {
                 body = body.child(
                     div()
                         .id("g1-restrict-error")
                         .text_xs()
                         .text_color(cx.theme().danger)
-                        .child(error),
+                        .child(refusal.reason),
                 );
             }
             if let quill::state::Submit::Failed(reason) = &dialog_state.submit {

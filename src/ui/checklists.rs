@@ -388,22 +388,22 @@ impl QuillApp {
             panel = panel
                 .child(
                     Checkbox::new("checklist-others-add")
-                        .checked(dialog.others_can_add_tasks)
+                        .checked(dialog.others.add_tasks)
                         .label(tr(keys::TODO_CREATE_ALLOW_ADD))
                         .on_click(cx.listener(|this, &on, _, cx| {
                             if let Some(dialog) = this.chat_ui.checklist_dialog.as_mut() {
-                                dialog.others_can_add_tasks = on;
+                                dialog.others.add_tasks = on;
                             }
                             cx.notify();
                         })),
                 )
                 .child(
                     Checkbox::new("checklist-others-mark")
-                        .checked(dialog.others_can_mark_tasks_as_done)
+                        .checked(dialog.others.mark_tasks)
                         .label(tr(keys::TODO_CREATE_ALLOW_MARK))
                         .on_click(cx.listener(|this, &on, _, cx| {
                             if let Some(dialog) = this.chat_ui.checklist_dialog.as_mut() {
-                                dialog.others_can_mark_tasks_as_done = on;
+                                dialog.others.mark_tasks = on;
                             }
                             cx.notify();
                         })),

@@ -47,7 +47,7 @@ impl QuillApp {
             let loading = this.folders.editor.as_ref().is_some_and(|d| {
                 !matches!(
                     d.load,
-                    FolderLoad::Ready | FolderLoad::Merging | FolderLoad::Saving(_)
+                    FolderLoad::Ready { .. } | FolderLoad::Merging | FolderLoad::Saving(_)
                 )
             });
             let saving = this
@@ -617,7 +617,7 @@ impl QuillApp {
         panel = panel.child(
             Textarea::new(&dialog.name_input).aria_label(tr(keys::Q_CHATLIST_CHAT_FOLDER_NAME)),
         );
-        if let Some(error) = dialog.error.clone() {
+        if let Some(error) = dialog.load.error().map(str::to_string) {
             panel = panel.child(
                 div()
                     .id("folder-editor-error")
@@ -627,7 +627,7 @@ impl QuillApp {
             );
         }
         match &dialog.load {
-            FolderLoad::Ready | FolderLoad::Merging | FolderLoad::Saving(_) => {}
+            FolderLoad::Ready { .. } | FolderLoad::Merging | FolderLoad::Saving(_) => {}
             FolderLoad::Loading => {
                 return panel
                     .child(

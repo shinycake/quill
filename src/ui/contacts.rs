@@ -7,7 +7,7 @@ use super::pressable::PressableDiv;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::chat_list_state::SidebarTab;
-use crate::ui::dialogs::ContactSave;
+use crate::ui::dialogs::AddContactStage;
 use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
@@ -187,10 +187,10 @@ impl QuillApp {
                     cx,
                 ))
                 .into_any_element();
-            let save = dialog_state.save.clone();
-            let saving = matches!(save, ContactSave::Saving(_));
-            let body = match save {
-                ContactSave::Failed(line) => div()
+            let stage = dialog_state.stage.clone();
+            let saving = matches!(stage, AddContactStage::Saving(_));
+            let body = match stage {
+                AddContactStage::Failed(line) => div()
                     .flex()
                     .flex_col()
                     .gap_2()
@@ -528,11 +528,11 @@ impl QuillApp {
     /// Poll-loop half: the Add Contact box's request answered. The box
     /// closes when the contact is added and shows the refusal when it is not.
     pub(super) fn settle_add_contact(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(ContactSave::Saving(request)) = self
+        let Some(AddContactStage::Saving(request)) = self
             .dialogs
             .add_contact_dialog
             .as_ref()
-            .map(|d| d.save.clone())
+            .map(|d| d.stage.clone())
         else {
             return false;
         };
@@ -545,7 +545,7 @@ impl QuillApp {
         match answer {
             quill::state::DialogAnswer::Failed(line) => {
                 if let Some(dialog) = self.dialogs.add_contact_dialog.as_mut() {
-                    dialog.save = ContactSave::Failed(line);
+                    dialog.stage = AddContactStage::Failed(line);
                 }
             }
             quill::state::DialogAnswer::Done
@@ -586,7 +586,7 @@ impl QuillApp {
             return;
         };
         if let Some(dialog) = self.dialogs.add_contact_dialog.as_ref()
-            && matches!(dialog.save, ContactSave::Saving(_))
+            && matches!(dialog.stage, AddContactStage::Saving(_))
         {
             // The first Add is still waiting for its answer.
             return;
@@ -596,7 +596,7 @@ impl QuillApp {
                 // The box stays until its own request answers.
                 Ok(Some(request)) => {
                     if let Some(dialog) = self.dialogs.add_contact_dialog.as_mut() {
-                        dialog.save = ContactSave::Saving(request);
+                        dialog.stage = AddContactStage::Saving(request);
                     }
                 }
                 Ok(None) => {
