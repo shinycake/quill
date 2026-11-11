@@ -564,28 +564,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Slice msg-richtext-ai-tools: stash AI answers for the composer
         // drain. A late answer for a chat the user has since left is
         // dropped by the UI (chat-id check), never applied blindly.
-        // The newest ask of a window wins: an older request's answer never
-        // overwrites a newer one not yet applied.
-        if let Some((request, window, chat_id, text)) = ai_text_answer
-            && !self
-                .session
-                .messages
-                .ai_composer_text
-                .as_ref()
-                .is_some_and(|(held, held_window, ..)| *held_window == window && held.0 > request.0)
-        {
-            self.session.messages.ai_composer_text = Some((request, window, chat_id, text));
-        }
-        if let Some((request, window, chat_id, rich, note)) = ai_rich_answer
-            && !self
-                .session
-                .messages
-                .ai_composer_blocks
-                .as_ref()
-                .is_some_and(|(held, held_window, ..)| *held_window == window && held.0 > request.0)
-        {
-            self.session.messages.ai_composer_blocks = Some((request, window, chat_id, rich, note));
-        }
+        self.session
+            .store_ai_answers(ai_text_answer, ai_rich_answer);
         // A5: stash the `checkChatUsername` verdict for the
         // edit-profile dialog.
         if let Some((request, result)) = username_check_answer {

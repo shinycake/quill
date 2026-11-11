@@ -8043,3 +8043,38 @@ whose variants carry the data, with a way out of every stage.
 - **A refused refetch of a stale proxy list** lands in
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
+
+### Sweep fixes (r2-04)
+
+| id | result |
+| --- | --- |
+| 03-D001 | The Shared Media viewer asks the older page only while the tab can load more on its own (`can_load_more`: `NextPage::Idle`); a failed page waits for the panel's Load more row. |
+| 03-D002 | `PhotoPage::Failed(error)`: a failed profile or group photo page is not asked again from the poll. A step in the viewer (`PhotoPage::retry`) lets it ask once more. |
+| 09-014 | `fetch_history_for` stops on `OlderLoad::Failed` for a window with rows too. The main history draws the older Retry strip (`OlderRetryFor::Chat`) that calls `retry_history`. |
+| 09-015 | The newer end gets its own Retry strip (`NewerRetryFor` Chat, Thread, Topic) calling `retry_history_newer`, `retry_thread_newer`, `retry_topic_newer`. `TopicHistory::retry_newer` has its caller. |
+| 09-030 | The per-network editor draws the auto-download failure. |
+| 09-031 | `data_storage_save` is `StorageSaveFailures`: one failure line per kind of save (auto-download, limits, statistics reset). An `ok` clears nothing; a new save of the kind, or arriving on the page, does. |
+| 09-035 | `DataStoragePrefs::seeded` is `PresetsSeed` (`Unseeded`, `Loading(RequestId)`, `Failed(why)`, `Seeded`); `Seed::InFlight`, `auto_download_presets` and the `has_purpose` check are gone. The page draws the failure with Retry. |
+| 09-036 | `auto_download_answer` is `AutoDownloadAnswers`: the editor takes the answer of its own request, and answers of several saves in flight no longer overwrite each other. |
+| 09-034 | `leave_data_storage` resets the scroll stage; `open_local_storage` asks for the scroll only once the page is up. |
+| 09-109, 09-110, 09-111 | `FolderShareView::List` and `Edit` each carry their `LinkOp`. Edit and delete wait while a link request is out. The form's Cancel and a new form drop the stage with the view. |
+| 09-112 | `CopyMark::Copied` owns its timer task; replacing or dropping the mark cancels it. |
+| 09-115 | A folder fetch refused before any request (`chats_path_active`) ends in the error the Share, Delete and Add to folder boxes draw with Retry. |
+| 08-113 | A rich send whose chat view is replaced moves to `ComposerSends` (`LeftSend`, per account, with its slot). Its refusal puts the text in that slot's draft; its ack no longer leaks. |
+| 08-114 | `AiAsk::Asked { request, markup }`; AI answers carry the `RequestId`, and the window applies only its own ask's answer. A newer ask drops the older answer, and an error (`ai_failed`) ends the wait. |
+| 08-115 | `ScheduledDialog` (`Closed`, `Loading(RequestId)`, `Ready`, `Failed`) replaces `scheduled_dialog_open`; the dialog draws loading, failure and Retry. |
+| 14-067 | `PhoneFlow::Unblocking { since, request }`, finished by that request's answer or error (the 15 s timer stays as the backstop). |
+| 14-076 | One `close_refused_launch` for every early return of `spawn_mini_app_window`. |
+| 14-077 | `custom_requests` and `CustomRequestReply` carry the launch id; a window takes only its own launch's answers, and closing a window forgets its entries. |
+| 14-082 | `closing_confirmation` is a mini app setting (allow list); its baseline line is dropped. |
+| 09-017 | The swipe-reply press is cleared when the button is released outside its row. |
+
+- **Not changed, on purpose.** 08-116: tdesktop removes a scheduled message
+  from its list as the delete goes out, as Quill does. 14-078: the answers
+  are per bot and the flows wait for one bot each; a repeat answer for the
+  same bot is the same content. 14-086: the 30 ms poll stops by itself when
+  no window or flow is left; a wake from the helper's reader thread is a
+  separate redesign.
+- **No new CI guard.** The shapes (a failed page asked again from render, a
+  stage matched by bot id) are about which state a function reads; the
+  tests walk each exit instead.

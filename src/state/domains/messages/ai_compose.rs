@@ -503,3 +503,39 @@ mod keep_newest_tests {
         assert_eq!(slot.map(|held| held.token), Some(3));
     }
 }
+
+impl Session {
+    /// Hold an AI answer for the composer drain. The newest ask of a window
+    /// wins: an older request's answer never overwrites a newer one not yet
+    /// applied.
+    pub fn store_ai_answers(
+        &mut self,
+        text: Option<(RequestId, Option<ChatId>, ChatId, String)>,
+        rich: Option<(
+            RequestId,
+            Option<ChatId>,
+            ChatId,
+            RichMessageContent,
+            &'static str,
+        )>,
+    ) {
+        if let Some((request, window, chat_id, text)) = text
+            && !self
+                .messages
+                .ai_composer_text
+                .as_ref()
+                .is_some_and(|(held, held_window, ..)| *held_window == window && held.0 > request.0)
+        {
+            self.messages.ai_composer_text = Some((request, window, chat_id, text));
+        }
+        if let Some((request, window, chat_id, rich, note)) = rich
+            && !self
+                .messages
+                .ai_composer_blocks
+                .as_ref()
+                .is_some_and(|(held, held_window, ..)| *held_window == window && held.0 > request.0)
+        {
+            self.messages.ai_composer_blocks = Some((request, window, chat_id, rich, note));
+        }
+    }
+}
