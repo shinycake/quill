@@ -70,7 +70,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = RequestPurpose::Communities(CommunitiesPurpose::GetJoined);
         let extra = self.session.request(purpose, None);
         let stale = self.session.communities.joined.take_data();
-        self.session.communities.joined = Fetch::Loading { stale, request: None };
+        self.session.communities.joined = Fetch::Loading {
+            stale,
+            request: None,
+        };
         match self.send_json_request(extra, &get_joined_communities(extra)) {
             Ok(extra) => Ok(Some(extra)),
             Err(err) => {
@@ -138,7 +141,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = RequestPurpose::Communities(CommunitiesPurpose::GetOwnedBots);
         let extra = self.session.request(purpose, None);
         let stale = self.session.communities.owned_bots.take_data();
-        self.session.communities.owned_bots = Fetch::Loading { stale, request: None };
+        self.session.communities.owned_bots = Fetch::Loading {
+            stale,
+            request: None,
+        };
         match self.send_json_request(extra, &get_owned_bots(extra)) {
             Ok(extra) => Ok(Some(extra)),
             Err(err) => {
@@ -249,7 +255,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .entry(community_id)
                 .or_default();
             let stale = fetch.take_data();
-            *fetch = Fetch::Loading { stale, request: None };
+            *fetch = Fetch::Loading {
+                stale,
+                request: None,
+            };
         }
         Ok(sent)
     }
@@ -366,10 +375,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             |extra| get_community_member_chats(extra, community_id, member),
         )?;
         if sent.is_some() {
-            self.session
-                .communities
-                .member_chats
-                .insert((community_id, member), Fetch::Loading { stale: None, request: None });
+            self.session.communities.member_chats.insert(
+                (community_id, member),
+                Fetch::Loading {
+                    stale: None,
+                    request: None,
+                },
+            );
         }
         Ok(sent)
     }

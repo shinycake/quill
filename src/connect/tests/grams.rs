@@ -188,7 +188,12 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
     assert!(grams.error().is_some());
     // The same tab again after the failure asks again (a failed list is
     // not a complete one).
-    assert!(driver.set_grams_filter(TxFilter::Outgoing).unwrap().is_some());
+    assert!(
+        driver
+            .set_grams_filter(TxFilter::Outgoing)
+            .unwrap()
+            .is_some()
+    );
     let retry = sent_request(&recorder, "getTonTransactions");
     assert_eq!(retry["direction"]["@type"], "transactionDirectionOutgoing");
     assert!(driver.session.payments.hub.grams.is_loading());

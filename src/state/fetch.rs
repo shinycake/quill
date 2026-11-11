@@ -355,7 +355,10 @@ mod tests {
         };
         bare.clear_error();
         assert!(bare.is_idle());
-        let mut loading: Fetch<i32> = Fetch::Loading { stale: None, request: None };
+        let mut loading: Fetch<i32> = Fetch::Loading {
+            stale: None,
+            request: None,
+        };
         loading.clear_error();
         assert!(loading.is_loading());
     }
@@ -367,7 +370,10 @@ mod tests {
         idle.data_mut().into_iter().for_each(|list| list.push(1));
         assert_eq!(idle, Fetch::Ready(vec![1]));
 
-        let mut loading: Fetch<Vec<i32>> = Fetch::Loading { stale: None, request: None };
+        let mut loading: Fetch<Vec<i32>> = Fetch::Loading {
+            stale: None,
+            request: None,
+        };
         loading.insert_data_if_missing(Vec::new);
         loading.data_mut().into_iter().for_each(|list| list.push(2));
         assert_eq!(

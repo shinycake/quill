@@ -362,8 +362,10 @@ impl Session {
                     && let Some(state) = self.groups.invite_pages.members_mut(chat_id.0)
                     && state.stage.waits_for(pending.id)
                 {
-                    state.stage =
-                        ListPageStage::Failed(call_request_error_line(err, "Could not load members"));
+                    state.stage = ListPageStage::Failed(call_request_error_line(
+                        err,
+                        "Could not load members",
+                    ));
                 }
             }
             Some(RequestPurpose::GetAdminChatInviteLinks { revoked }) => {
@@ -409,8 +411,10 @@ impl Session {
                     && let Some(state) = self.groups.chat_boost_lists.get_mut(&chat_id.0)
                     && state.waits_for(pending.id)
                 {
-                    state.stage =
-                        ListPageStage::Failed(call_request_error_line(err, "Could not load boosts"));
+                    state.stage = ListPageStage::Failed(call_request_error_line(
+                        err,
+                        "Could not load boosts",
+                    ));
                 }
             }
             Some(RequestPurpose::GetChatBoostLink) => {

@@ -160,12 +160,15 @@ impl Session {
                         }
                         _ => (String::new(), false),
                     };
-                    self.chats_state.deep_link.begin(from_agent, DeepLinkState::Ui(
-                        crate::deep_link_types::DeepLinkUi::Browser { url },
-                    ));
+                    self.chats_state.deep_link.begin(
+                        from_agent,
+                        DeepLinkState::Ui(crate::deep_link_types::DeepLinkUi::Browser { url }),
+                    );
                 } else if !stale {
                     let text = deep_link_error_text(self.chats_state.deep_link.state(), err.code);
-                    self.chats_state.deep_link.set(DeepLinkState::ShowText(text));
+                    self.chats_state
+                        .deep_link
+                        .set(DeepLinkState::ShowText(text));
                 }
             }
             _ => {}

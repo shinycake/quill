@@ -836,8 +836,7 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
             archive_and_mute_new_chats_from_unknown_users: true,
             keep_unmuted_chats_archived: false,
             keep_chats_from_folders_archived: true,
-        },
-    );
+        });
     session.calls.privacy_allow_calls = Some(PrivacyWho::Contacts);
     session.calls.privacy_p2p = Some(PrivacyWho::Everybody);
     session.settings.blocked_senders = Fetch::Ready(vec![63]);

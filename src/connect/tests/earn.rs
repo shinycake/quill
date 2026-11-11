@@ -278,7 +278,10 @@ fn a_cancelled_withdrawals_answer_opens_nothing() {
         json!({"@type": "httpUrl", "url": "https://fragment.com/w", "@extra": cancelled}),
     );
     let earn = &p.0.session.payments.earn;
-    assert!(earn.open_urls().is_empty(), "Fragment does not open after Cancel");
+    assert!(
+        earn.open_urls().is_empty(),
+        "Fragment does not open after Cancel"
+    );
     assert_eq!(
         earn.withdraw.as_ref().map(|w| &w.step),
         Some(&WithdrawStep::Checking),

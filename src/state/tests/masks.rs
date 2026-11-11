@@ -119,11 +119,13 @@ fn a_confirmed_change_drops_both_lists_and_an_error_marks_failure() {
     session.stickers.masks.installed = Fetch::Ready(Vec::new());
     session.stickers.masks.archived = Fetch::Ready(Vec::new());
     session.stickers.masks.archived_has_more = true;
-    session
-        .stickers
-        .masks
-        .sets
-        .insert(11, Fetch::Loading { stale: None, request: None });
+    session.stickers.masks.sets.insert(
+        11,
+        Fetch::Loading {
+            stale: None,
+            request: None,
+        },
+    );
 
     let extra = session.request(
         StickersPurpose::ChangeMaskSet {

@@ -133,13 +133,25 @@ fn learn_more_spins_while_loading_and_reopens_a_known_value(cx: &mut TestAppCont
     assert!(vcx.debug_bounds("gift-value-row").is_some());
     assert!(vcx.debug_bounds("gift-value-box").is_none());
 
-    // Nothing known: the pill loads, the box stays closed.
+    // Nothing known and nobody to ask (no live account): the lookup does
+    // not spin for good, it says it could not load; the box stays closed.
     click(vcx, "gift-value-learn-more");
     let lookup = lookup_of(&app, vcx).expect("lookup");
-    assert!(lookup.is_loading() && !lookup.is_open());
+    assert!(!lookup.is_loading() && !lookup.is_open());
+    assert!(lookup.error().is_some());
     assert_eq!(lookup.name, "PlushPepe-1204");
-    assert!(vcx.debug_bounds("gift-value-spinner").is_some());
+    assert!(vcx.debug_bounds("gift-value-spinner").is_none());
     assert!(vcx.debug_bounds("gift-value-box").is_none());
+
+    // A lookup in flight spins.
+    set_lookup(&app, vcx, |lookup| {
+        Some(GiftValueLookup {
+            stage: GiftValueStage::Loading(7),
+            ..lookup
+        })
+    });
+    assert!(lookup_of(&app, vcx).is_some_and(|lookup| lookup.is_loading()));
+    assert!(vcx.debug_bounds("gift-value-spinner").is_some());
 
     // Known and closed: the click opens the box again.
     set_lookup(&app, vcx, with_info(fixture(AVERAGE), false));
@@ -216,8 +228,13 @@ fn a_look_alike_fragment_address_asks_before_opening(cx: &mut TestAppContext) {
 fn a_lookup_asked_from_a_box_that_is_gone_does_not_open_later(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
-    set_lookup(&app, vcx, |_| None);
-    click(vcx, "gift-value-learn-more");
+    // A lookup in flight, as a live account's "learn more" leaves it.
+    set_lookup(&app, vcx, |lookup| {
+        Some(GiftValueLookup {
+            stage: GiftValueStage::Loading(7),
+            ..lookup
+        })
+    });
     assert!(lookup_of(&app, vcx).is_some_and(|lookup| lookup.is_loading()));
     // The gift box is left before the answer lands.
     app.update_in(vcx, |app, _, cx| {
@@ -240,8 +257,13 @@ fn a_lookup_asked_from_a_box_that_is_gone_does_not_open_later(cx: &mut TestAppCo
 fn a_lookup_for_one_gift_is_dropped_when_the_box_shows_another(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
-    set_lookup(&app, vcx, |_| None);
-    click(vcx, "gift-value-learn-more");
+    // A lookup in flight, as a live account's "learn more" leaves it.
+    set_lookup(&app, vcx, |lookup| {
+        Some(GiftValueLookup {
+            stage: GiftValueStage::Loading(7),
+            ..lookup
+        })
+    });
     assert!(lookup_of(&app, vcx).is_some_and(|lookup| lookup.is_loading()));
     app.update_in(vcx, |app, _, cx| {
         if let Some(session) = app.demo_session.as_mut() {

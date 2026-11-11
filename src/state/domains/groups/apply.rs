@@ -982,14 +982,16 @@ impl Session {
                     }) = self.chats_state.deep_link.state().cloned()
                     && slot == generation
                 {
-                    self.chats_state.deep_link.set(DeepLinkState::InvitePreview {
-                        hash,
-                        title,
-                        member_count,
-                        creates_join_request,
-                        is_channel,
-                        generation,
-                    });
+                    self.chats_state
+                        .deep_link
+                        .set(DeepLinkState::InvitePreview {
+                            hash,
+                            title,
+                            member_count,
+                            creates_join_request,
+                            is_channel,
+                            generation,
+                        });
                 }
             }
         }

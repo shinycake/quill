@@ -338,7 +338,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.chats_state.deep_link.set(DeepLinkState::ShowText("Couldn't reach Telegram.".into()));
+                self.session
+                    .chats_state
+                    .deep_link
+                    .set(DeepLinkState::ShowText("Couldn't reach Telegram.".into()));
                 Err(err)
             }
         }
@@ -379,7 +382,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.chats_state.deep_link.set(DeepLinkState::ShowText("Couldn't reach Telegram.".into()));
+                self.session
+                    .chats_state
+                    .deep_link
+                    .set(DeepLinkState::ShowText("Couldn't reach Telegram.".into()));
                 Err(err)
             }
         }
@@ -451,15 +457,18 @@ impl<S: JsonSender> ConnectDriver<S> {
                 get_chat(extra, ChatId::from_supergroup(*channel_id))
             }
         };
-        self.session
-            .chats_state
-            .deep_link
-            .begin(from_agent, DeepLinkState::ResolvingChat { action, generation });
+        self.session.chats_state.deep_link.begin(
+            from_agent,
+            DeepLinkState::ResolvingChat { action, generation },
+        );
         match self.sender.send_json(&json) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.chats_state.deep_link.set(DeepLinkState::ShowText("Couldn't reach Telegram.".into()));
+                self.session
+                    .chats_state
+                    .deep_link
+                    .set(DeepLinkState::ShowText("Couldn't reach Telegram.".into()));
                 Err(err)
             }
         }

@@ -500,7 +500,12 @@ impl QuillApp {
                         .child(tr(keys::Q_MONEY_LOADING)),
                 );
             }
-            Some(Fetch::Ready(list) | Fetch::Loading { stale: Some(list), .. }) => {
+            Some(
+                Fetch::Ready(list)
+                | Fetch::Loading {
+                    stale: Some(list), ..
+                },
+            ) => {
                 for gift in list {
                     let heading = if gift.number > 0 {
                         format!("{title} #{}", group_digits(i64::from(gift.number)))

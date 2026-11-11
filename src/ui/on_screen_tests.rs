@@ -234,14 +234,17 @@ fn a_switch_ends_the_link_flow_the_account_was_running(cx: &mut TestAppContext) 
     frames(&mut vcx);
     app.update(&mut vcx, |app, _| {
         let session = app.demo_session.as_mut().expect("a demo session");
-        session.chats_state.deep_link.begin(true, DeepLinkState::InvitePreview {
-            hash: "AbCd".into(),
-            title: "Book club".into(),
-            member_count: 12,
-            creates_join_request: false,
-            is_channel: false,
-            generation: 3,
-        });
+        session.chats_state.deep_link.begin(
+            true,
+            DeepLinkState::InvitePreview {
+                hash: "AbCd".into(),
+                title: "Book club".into(),
+                member_count: 12,
+                creates_join_request: false,
+                is_channel: false,
+                generation: 3,
+            },
+        );
     });
     switch(&app, &mut vcx, "other");
     frames(&mut vcx);

@@ -31,7 +31,11 @@ fn a_new_launch_link_replaces_a_finished_flow_but_not_one_in_flight() {
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
     let _keep = dir;
 
-    driver.session.chats_state.deep_link.set(DeepLinkState::ShowText("old".into()));
+    driver
+        .session
+        .chats_state
+        .deep_link
+        .set(DeepLinkState::ShowText("old".into()));
     let sent = driver.request_deep_link_info("https://t.me/durov").unwrap();
     assert!(sent.is_some(), "an unconsumed ShowText does not block");
     assert!(matches!(
@@ -562,7 +566,10 @@ fn typed_links_route_through_get_internal_link_type() {
             link: "tg://nope".into()
         })
     );
-    driver.request_deep_link_text("tg://nope", false).unwrap().unwrap();
+    driver
+        .request_deep_link_text("tg://nope", false)
+        .unwrap()
+        .unwrap();
     assert_eq!(
         sent_request(&recorder, "getDeepLinkInfo")["link"],
         "tg://nope"

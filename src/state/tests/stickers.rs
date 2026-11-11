@@ -419,5 +419,9 @@ fn a_gif_search_page_or_saved_list_of_another_request_changes_nothing() {
     assert!(gifs.saved.answered(Some(RequestId(8))));
     assert_eq!(gifs.saved, SavedGifs::Loaded);
     gifs.saved.fetch_failed(Some(RequestId(8)));
-    assert_eq!(gifs.saved, SavedGifs::Loaded, "a settled fetch has no error to take");
+    assert_eq!(
+        gifs.saved,
+        SavedGifs::Loaded,
+        "a settled fetch has no error to take"
+    );
 }

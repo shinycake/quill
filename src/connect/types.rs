@@ -458,7 +458,12 @@ impl DraftSave {
             Self::Idle { .. } => return None,
             Self::Waiting { pending, .. } | Self::Failed { pending } => pending.token,
         };
-        match std::mem::replace(self, Self::Idle { last_token: pending }) {
+        match std::mem::replace(
+            self,
+            Self::Idle {
+                last_token: pending,
+            },
+        ) {
             Self::Waiting { pending, .. } | Self::Failed { pending } => Some(*pending),
             Self::Idle { .. } => None,
         }

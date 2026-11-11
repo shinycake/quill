@@ -43,14 +43,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             (m.chat_id, m.query.clone(), m.offset)
         };
         let fail = |this: &mut Self, err| {
-            this.session
-                .payments
-                .giveaway
-                .award_members
-                .fail(
-                    generation,
-                    crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_MEMBERS).to_string(),
-                );
+            this.session.payments.giveaway.award_members.fail(
+                generation,
+                crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_MEMBERS).to_string(),
+            );
             Err(err)
         };
         let supergroup_id = match self.session.chats.get(&chat_id).map(|c| &c.kind) {

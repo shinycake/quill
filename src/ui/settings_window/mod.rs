@@ -454,7 +454,10 @@ impl QuillApp {
             }
             ids.push(id);
         }
-        session.settings.blocked_senders = Fetch::Loading { stale: Some(ids), request: None };
+        session.settings.blocked_senders = Fetch::Loading {
+            stale: Some(ids),
+            request: None,
+        };
         session.settings.blocked_total = 120;
         self.demo_ui.seq.store(
             seq.load(std::sync::atomic::Ordering::SeqCst),

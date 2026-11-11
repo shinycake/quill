@@ -232,7 +232,10 @@ impl Session {
             .entry(chat_id.0)
             .or_default();
         let stale = std::mem::take(slot).take_data();
-        *slot = crate::state::fetch::Fetch::Loading { stale, request: None };
+        *slot = crate::state::fetch::Fetch::Loading {
+            stale,
+            request: None,
+        };
     }
 
     /// The request for the list failed: the picker offers Retry.
