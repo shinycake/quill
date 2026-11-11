@@ -288,26 +288,26 @@ fn a_blocked_dialog_waits_for_the_shell_of_its_window(cx: &mut TestAppContext) {
     let _presence = activity::connect("Test agent");
     settle(vcx);
     let message_id = add_star_reaction(&app, vcx);
-    app.update_in(vcx, |app, _, cx| {
-        app.agent_step(true, |app| {
+    // No frame draws in between, so the shell has not yet closed it.
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
             app.open_paid_box(
                 quill::ids::ChatId(11),
                 quill::ids::MessageId(message_id),
                 cx,
             );
+            crate::ui::agent_driver_surface::block_opened_by_agent(app, &[]);
         });
+        // Another window's shell finds nothing of its own.
+        let other = Some(quill::ids::ChatId(99));
+        let taken =
+            crate::ui::agent_driver_surface::take_blocked_closing_layers(&app, other, window, cx);
+        assert!(taken.is_empty(), "{taken:?}");
+        // The window the step ran in (the main one) takes it.
+        let taken =
+            crate::ui::agent_driver_surface::take_blocked_closing_layers(&app, None, window, cx);
+        assert_eq!(taken, vec!["PaidReaction"]);
     });
-    // Another window's shell finds nothing of its own.
-    let other = Some(quill::ids::ChatId(99));
-    let taken = vcx.update(|window, cx| {
-        crate::ui::agent_driver_surface::take_blocked_closing_layers(&app, other, window, cx)
-    });
-    assert!(taken.is_empty());
-    // The window the step ran in (the main one) takes it.
-    let taken = vcx.update(|window, cx| {
-        crate::ui::agent_driver_surface::take_blocked_closing_layers(&app, None, window, cx)
-    });
-    assert_eq!(taken, vec!["PaidReaction"]);
     app.update(vcx, |app, cx| {
         app.paid_reaction.boxed = None;
         cx.notify();
