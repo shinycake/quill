@@ -704,7 +704,8 @@ fn driver_community_management_rights_and_delete() {
         .session
         .groups
         .community_error
-        .take()
+        .take_all()
+        .pop()
         .expect("error surfaced");
     assert!(
         err.starts_with("Could not change the community permissions"),

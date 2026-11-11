@@ -127,7 +127,9 @@ impl Session {
                     }
                     _ => "Could not delete the community",
                 };
-                self.groups.community_error = Some(format!("{action}: {}", error_reason(err)));
+                self.groups
+                    .community_error
+                    .push(format!("{action}: {}", error_reason(err)));
             }
             // Switching ads off needs a boost level; say so for the usual
             // refusal (TDLib's message text is not kept, see `TdError`).
@@ -264,21 +266,24 @@ impl Session {
                 // Slice G1 fix-up: a failed mutation must not wipe
                 // the previously loaded list — surface the error in
                 // the status note and keep the last good data.
-                self.groups.invite_link_error =
-                    Some(call_request_error_line(err, "Could not create invite link"));
+                self.groups
+                    .invite_link_error
+                    .push(call_request_error_line(err, "Could not create invite link"));
             }
             Some(RequestPurpose::EditChatInviteLink) => {
-                self.groups.invite_link_error =
-                    Some(call_request_error_line(err, "Could not edit invite link"));
+                self.groups
+                    .invite_link_error
+                    .push(call_request_error_line(err, "Could not edit invite link"));
             }
             Some(RequestPurpose::RevokeChatInviteLink) => {
-                self.groups.invite_link_error =
-                    Some(call_request_error_line(err, "Could not revoke invite link"));
+                self.groups
+                    .invite_link_error
+                    .push(call_request_error_line(err, "Could not revoke invite link"));
             }
             // Slice G1: failed primary-link replacement — keep the
             // last good list, surface the error in the note.
             Some(RequestPurpose::ReplacePrimaryChatInviteLink) => {
-                self.groups.invite_link_error = Some(call_request_error_line(
+                self.groups.invite_link_error.push(call_request_error_line(
                     err,
                     "Could not replace primary invite link",
                 ));
@@ -333,7 +338,7 @@ impl Session {
                     {
                         fetch.forget_page_in_flight();
                     }
-                    self.groups.invite_link_error = Some(call_request_error_line(
+                    self.groups.invite_link_error.push(call_request_error_line(
                         err,
                         crate::lang::tr(
                             crate::lang::keys::Q_INVITE_LINK_COULD_NOT_LOAD_MORE_JOIN_REQUESTS,
@@ -342,7 +347,7 @@ impl Session {
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::ProcessAllChatJoinRequests { .. })) => {
-                self.groups.invite_link_error = Some(call_request_error_line(
+                self.groups.invite_link_error.push(call_request_error_line(
                     err,
                     "Could not process join requests",
                 ));
@@ -417,7 +422,7 @@ impl Session {
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::ProcessLinkJoinRequests { .. })) => {
-                self.groups.invite_link_error = Some(call_request_error_line(
+                self.groups.invite_link_error.push(call_request_error_line(
                     err,
                     "Could not process join requests",
                 ));
@@ -452,11 +457,12 @@ impl Session {
                 if let Some(pending) = pending {
                     self.groups.revoked_link_deletions.remove(&pending.id);
                 }
-                self.groups.invite_link_error =
-                    Some(call_request_error_line(err, "Could not delete invite link"));
+                self.groups
+                    .invite_link_error
+                    .push(call_request_error_line(err, "Could not delete invite link"));
             }
             Some(RequestPurpose::DeleteAllRevokedChatInviteLinks) => {
-                self.groups.invite_link_error = Some(call_request_error_line(
+                self.groups.invite_link_error.push(call_request_error_line(
                     err,
                     "Could not delete revoked links",
                 ));

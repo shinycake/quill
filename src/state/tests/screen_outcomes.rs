@@ -26,7 +26,7 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
     session.messages.message_action_note.push("banned".into());
     session.chats_state.chat_action_error.push("pin".into());
     session.chats_state.report_chat_outcome = Some("chat reported".into());
-    session.groups.invite_link_error = Some("link".into());
+    session.groups.invite_link_error.push("link".into());
     session.payments.earn.notes.push("Failed: x".into());
     session.payments.earn.open_url = Some("https://fragment.example".into());
     session
@@ -79,7 +79,7 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
     assert!(session.messages.message_action_note.is_empty());
     assert!(session.chats_state.chat_action_error.is_empty());
     assert!(session.chats_state.report_chat_outcome.is_none());
-    assert!(session.groups.invite_link_error.is_none());
+    assert!(session.groups.invite_link_error.is_empty());
     assert!(session.payments.earn.notes.is_empty());
     assert!(session.payments.earn.open_url.is_none());
     assert!(session.payments.earn.effects.is_empty());

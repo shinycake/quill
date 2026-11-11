@@ -214,7 +214,7 @@ fn invite_link_replace_failure_surfaces_and_broadcast_rolls_back() {
         session
             .groups
             .invite_link_error
-            .as_ref()
+            .last()
             .is_some_and(|m| m.contains("Could not replace primary invite link"))
     );
 

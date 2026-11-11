@@ -281,11 +281,11 @@ impl Session {
                     .map(|message| history_message(message, false))
                     .collect();
                 rows.sort_by_key(|row| std::cmp::Reverse(row.id.0));
-                self.messages
-                    .pinned_messages
-                    .entry(chat_id.0)
-                    .or_default()
-                    .succeed(rows);
+                // Only the request the bar waits for lands: an older one,
+                // answered after a newer fetch began, is dropped.
+                if let Some(fetch) = self.messages.pinned_messages.get_mut(&chat_id.0) {
+                    fetch.answered(pending.map(|p| p.id), rows);
+                }
             }
             return;
         }

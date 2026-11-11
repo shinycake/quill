@@ -156,10 +156,11 @@ pub struct GroupsState {
     /// header's fallback before full info loads), keyed by group id.
     pub supergroup_member_counts: HashMap<i64, i32>,
     pub basic_group_member_counts: HashMap<i64, i32>,
-    /// Slice G1 fix-up: one-shot; set when an invite-link mutation
-    /// (create/edit/revoke/replace-primary) errors. The UI drains it into
-    /// the status note — the previously loaded list is kept, not wiped.
-    pub invite_link_error: Option<String>,
+    /// Slice G1 fix-up: set when an invite-link mutation
+    /// (create/edit/revoke/replace-primary) errors. A queue: two failures
+    /// between two polls are both shown. The UI drains it into the status
+    /// note — the previously loaded list is kept, not wiped.
+    pub invite_link_error: crate::state::Notes,
     /// Phase 6: cached `getSupergroupFullInfo`, keyed by supergroup id.
     /// Presence records "fetched".
     pub supergroup_full_infos: HashMap<i64, SupergroupFullInfoData>,
@@ -172,10 +173,11 @@ pub struct GroupsState {
     /// `updateCommunityFullInfo` (TDLib 1.8.68). Presence records
     /// "fetched".
     pub community_full_infos: HashMap<i64, ParsedCommunityFullInfo>,
-    /// TDLib 1.8.68 community management: one-shot; set when
+    /// TDLib 1.8.68 community management: set when
     /// `setCommunityName` / `setCommunityPhoto` / `setCommunityPermissions`
-    /// / `deleteCommunity` errors. The UI drains it into the status note.
-    pub community_error: Option<String>,
+    /// / `deleteCommunity` errors. A queue like `invite_link_error`; the UI
+    /// drains it into the status note.
+    pub community_error: crate::state::Notes,
     /// Phase D2: `getChatStatistics` fetch state, keyed by chat id.
     pub chat_statistics: HashMap<i64, ChatStatisticsFetch>,
     /// Async and zoomed graphs, message statistics and the panel's page.
@@ -406,11 +408,11 @@ impl GroupsState {
             basic_group_own: HashMap::new(),
             supergroup_member_counts: HashMap::new(),
             basic_group_member_counts: HashMap::new(),
-            invite_link_error: None,
+            invite_link_error: Default::default(),
             supergroup_full_infos: HashMap::new(),
             communities: HashMap::new(),
             community_full_infos: HashMap::new(),
-            community_error: None,
+            community_error: Default::default(),
             chat_statistics: HashMap::new(),
             stats: StatsState::default(),
             invite_links: HashMap::new(),

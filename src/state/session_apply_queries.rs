@@ -123,7 +123,17 @@ impl Session {
         {
             let key = (chat_id.0, message_id.0, option_id);
             let page_len = voters.len();
+            // A first page lands only in the dialog that waits for it; a
+            // later page only extends the list it was asked for.
             let merged = if offset == 0 {
+                let waiting = matches!(
+                    (self.messages.poll_voters.get(&key), pending),
+                    (Some(PollVotersFetch::Loading(waiting)), Some(pending))
+                        if *waiting == pending.id
+                );
+                if !waiting {
+                    return;
+                }
                 voters
             } else {
                 match self.messages.poll_voters.get(&key) {
@@ -136,7 +146,7 @@ impl Session {
                         }
                         merged
                     }
-                    _ => voters,
+                    _ => return,
                 }
             };
             // B4: a short page is the honest exhaustion signal —
