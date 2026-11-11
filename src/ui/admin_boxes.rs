@@ -6,7 +6,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::confirm_boxes::{Ask, confirm_box};
+use super::confirm_boxes::{Ask, confirm_box_sending};
 use super::dialog_focus::focus_after_mount;
 use super::dialogs::{AdminDialog, AdminDialogKind};
 use super::shell::{DialogKind, QuillShell};
@@ -224,13 +224,19 @@ impl QuillApp {
             },
             confirm: tr(keys::Q_PEOPLE_DEMOTE_2).into(),
         };
-        confirm_box(
+        let sending = this.admin.admin_dialog.as_ref().is_some_and(|dialog| {
+            dialog
+                .submit
+                .is_sending(this.session().map(|s| &s.requests))
+        });
+        confirm_box_sending(
             app,
             shell,
             dialog,
             DialogKind::AdminDemote,
             ask,
             (Self::close_admin_dialog, Self::submit_admin_dialog),
+            sending,
             cx,
         )
     }

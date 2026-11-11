@@ -132,12 +132,12 @@ fn a_picked_photo_opens_the_crop_and_lands_on_the_new_group(cx: &mut TestAppCont
 }
 
 #[gpui_kit::test]
-fn cancel_does_nothing_while_the_create_request_is_out(cx: &mut TestAppContext) {
+fn cancel_closes_the_box_while_the_create_request_is_out(cx: &mut TestAppContext) {
     use quill::new_chat::{NewChatBack, NewChatStage};
     use quill::state::RequestPurpose;
-    let (app, _shell, mut vcx) = open_demo(cx, "ready-new-channel");
+    let (app, shell, mut vcx) = open_demo(cx, "ready-new-channel");
     let vcx = &mut vcx;
-    app.update(vcx, |app, cx| {
+    app.update(vcx, |app, _| {
         let request = app
             .demo_session
             .as_mut()
@@ -150,13 +150,10 @@ fn cancel_does_nothing_while_the_create_request_is_out(cx: &mut TestAppContext) 
             };
         }
         assert!(app.new_chat_view().is_some_and(|view| view.busy));
-        app.cancel_new_chat(cx);
-        assert!(app.admin.create_chat_dialog.is_some(), "the request is out");
-        // The answer came (an error): Cancel works again.
-        if let Some(session) = app.demo_session.as_mut() {
-            session.requests.take(request);
-        }
-        app.cancel_new_chat(cx);
-        assert!(app.admin.create_chat_dialog.is_none());
     });
+    frames(vcx);
+    // Offline, the request never answers: Cancel must still work.
+    click(vcx, "new-chat-cancel");
+    assert_eq!(step(&app, vcx), None);
+    assert!(shell.read_with(vcx, |s, _| s.open_dialog != Some(DialogKind::CreateChat)));
 }

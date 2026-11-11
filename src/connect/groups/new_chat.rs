@@ -61,6 +61,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(Some(extra))
     }
 
+    /// The box was closed with `extra` still out: its answer opens the new
+    /// chat, a channel too, as no step is left to walk.
+    pub fn detach_new_chat(&mut self, extra: RequestId) {
+        if let Some(creation) = self.session.groups.new_chats.creations.get_mut(&extra) {
+            creation.open_when_created = true;
+        }
+    }
+
     /// Before `apply` takes the pending request: how one of our creates
     /// ended. The id comes back when the chat exists, for
     /// [`Self::run_new_chat_created`].

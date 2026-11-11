@@ -10,10 +10,14 @@ use quill::state::{InfoPanelTarget, MemberListFilter};
 use quill::telegram::envelope::ChatKind;
 
 fn demo(cx: &mut TestAppContext) -> Entity<QuillApp> {
+    demo_window(cx).0
+}
+
+fn demo_window(cx: &mut TestAppContext) -> (Entity<QuillApp>, gpui_kit::WindowHandle<Root>) {
     cx.update(gpui_kit::init);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
-    cx.open_window(size(px(1100.), px(700.)), move |window, cx| {
+    let handle = cx.open_window(size(px(1100.), px(700.)), move |window, cx| {
         let view = cx.new(|cx| {
             QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named("ready-chats")))
         });
@@ -21,7 +25,8 @@ fn demo(cx: &mut TestAppContext) -> Entity<QuillApp> {
         Root::new(view, window, cx)
     });
     cx.run_until_parked();
-    slot.take().expect("the window builder fills the slot")
+    let app = slot.take().expect("the window builder fills the slot");
+    (app, handle)
 }
 
 /// Opens the info panel of the demo's first supergroup or channel;
@@ -106,24 +111,40 @@ fn the_administrators_fallback_is_asked_once_until_retry(cx: &mut TestAppContext
 /// of the same group opens again, and closing the panel drops the block.
 #[gpui_kit::test]
 fn the_block_starts_over_each_time_the_panel_opens(cx: &mut TestAppContext) {
-    let app = demo(cx);
+    let (app, window) = demo_window(cx);
     open_group_panel(&app, cx);
     let target = app.read_with(cx, |app, _| {
         app.session().and_then(|s| s.users_state.open_info_panel)
     });
     let target = target.expect("the open group panel");
-    app.update(cx, |app, _| {
-        app.inline_members.paging = Paging::Failed { offset: 40 };
-        app.inline_members.admins_asked = true;
-        app.inline_members.shown = 120;
-    });
+    let stale = |app: &Entity<QuillApp>, cx: &mut TestAppContext| {
+        app.update(cx, |app, _| {
+            app.inline_members.paging = Paging::Failed { offset: 40 };
+            app.inline_members.admins_asked = true;
+            app.inline_members.shown = 120;
+        });
+    };
+    let fresh = |app: &Entity<QuillApp>, cx: &mut TestAppContext| {
+        app.read_with(cx, |app, _| {
+            assert_eq!(app.inline_members.paging, Paging::Idle);
+            assert!(!app.inline_members.admins_asked);
+            assert_eq!(app.inline_members.shown, quill::inline_members::ROWS_STEP);
+        });
+    };
+    stale(&app, cx);
     app.update(cx, |app, cx| {
         app.close_info_panel(cx);
     });
-    app.read_with(cx, |app, _| {
-        assert_eq!(app.inline_members.paging, Paging::Idle);
-        assert!(!app.inline_members.admins_asked);
-        assert_eq!(app.inline_members.chat, None);
-    });
-    let _ = target;
+    fresh(&app, cx);
+    app.read_with(cx, |app, _| assert_eq!(app.inline_members.chat, None));
+
+    // Opening the same panel again starts over too.
+    stale(&app, cx);
+    window
+        .update(cx, |_, window, cx| {
+            app.update(cx, |app, cx| app.inline_members_opened(target, window, cx))
+        })
+        .expect("the window is open");
+    fresh(&app, cx);
+    app.read_with(cx, |app, _| assert!(app.inline_members.chat.is_some()));
 }

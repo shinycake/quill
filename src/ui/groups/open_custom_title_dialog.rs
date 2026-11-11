@@ -6,6 +6,20 @@ use quill::lang::{keys, tr, tr_with, trn_with};
 use quill::state::{Submit, SubmitView};
 
 impl QuillApp {
+    /// "Leaving group…" or "Leaving channel…", by the chat's kind.
+    pub(in crate::ui) fn leaving_line(&self, chat_id: ChatId) -> String {
+        let channel = self
+            .session()
+            .and_then(|session| session.chats.get(&chat_id.0))
+            .is_none_or(|chat| chat.is_channel());
+        tr(if channel {
+            keys::Q_PEOPLE_LEAVING_CHANNEL
+        } else {
+            keys::Q_PEOPLE_LEAVING_GROUP
+        })
+        .to_string()
+    }
+
     /// Slice G1: admin custom-title prompt (`setChatMemberTag`, schema
     /// 1.8.67, line 13598 — the setter Telegram X's `EditRightsController`
     /// drives for "Custom title"). Basic groups and supergroups only.
@@ -234,7 +248,7 @@ impl QuillApp {
                     GroupConfirmAction::LeaveChat => {
                         live.driver.leave_channel(dialog.chat_id).map(|id| {
                             exit_request = Some(id);
-                            tr(keys::Q_PEOPLE_LEAVING_CHANNEL).to_string()
+                            self.leaving_line(dialog.chat_id)
                         })
                     }
                     // Handled above; never reaches the driver.

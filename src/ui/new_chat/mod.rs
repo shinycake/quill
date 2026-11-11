@@ -215,19 +215,27 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Closing the box with the create request out detaches it: TDLib
+    /// makes the chat either way, and its answer opens the chat (tdesktop
+    /// `GroupInfoBox` keeps Cancel live) instead of trapping the person
+    /// in a box that waits for the network.
     pub(in crate::ui) fn close_new_chat(&mut self, cx: &mut Context<Self>) {
+        let out = match self.admin.create_chat_dialog.as_ref().map(|d| &d.stage) {
+            Some(NewChatStage::Creating { request, .. }) => Some(*request),
+            _ => None,
+        };
+        if let Some(request) = out
+            && let Some(live) = self.live.as_mut()
+        {
+            live.driver.detach_new_chat(request);
+        }
         self.admin.create_chat_dialog = None;
         cx.notify();
     }
 
-    /// Cancel, Escape and the close button of the first step: nothing
-    /// while the create request is out, as it cannot be taken back (the
-    /// chat is made either way, so the flow stays to finish it).
+    /// Cancel, Escape and the close button of the first step: always
+    /// closes, also while the create request is out.
     pub(in crate::ui) fn cancel_new_chat(&mut self, cx: &mut Context<Self>) {
-        if self.new_chat_view().is_some_and(|view| view.busy) {
-            cx.notify();
-            return;
-        }
         self.close_new_chat(cx);
     }
 
@@ -313,7 +321,10 @@ impl QuillApp {
             Ok(Some(request)) => {
                 self.set_new_chat_stage(NewChatStage::Creating { request, back }, cx);
             }
-            Ok(None) => {}
+            Ok(None) => {
+                self.set_note(StatusNote::info(tr(keys::Q_NEW_CHAT_STILL_CREATING)));
+                cx.notify();
+            }
             Err(err) => {
                 self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NEW_CHAT_FAILED,

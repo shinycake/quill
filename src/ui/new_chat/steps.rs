@@ -177,12 +177,9 @@ impl QuillApp {
         let row = h_flex().w_full().justify_end().gap_2();
         let row = match view.step {
             NewChatStep::Info | NewChatStep::Done(_) => row
-                .child(
-                    ghost("new-chat-cancel", keys::CANCEL, cx, |this, _, cx| {
-                        this.cancel_new_chat(cx)
-                    })
-                    .disabled(busy),
-                )
+                .child(ghost("new-chat-cancel", keys::CANCEL, cx, |this, _, cx| {
+                    this.cancel_new_chat(cx)
+                }))
                 .child(primary(
                     "new-chat-confirm",
                     dialog.kind.info_confirm(),

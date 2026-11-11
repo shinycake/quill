@@ -524,7 +524,7 @@ impl QuillApp {
             self.screen.connection.set_note_for(
                 &self.screen.windows,
                 match live.driver.leave_channel(chat_id) {
-                    Ok(_) => StatusNote::silent(tr(keys::Q_PEOPLE_LEAVING_CHANNEL)),
+                    Ok(_) => StatusNote::silent(self.leaving_line(chat_id)),
                     Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_LEAVE_CHANNEL)),
                 },
             );

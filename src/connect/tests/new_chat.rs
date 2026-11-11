@@ -212,3 +212,23 @@ fn an_invalid_photo_is_refused_before_sending() {
     assert!(rig.driver.create_new_chat(&request, Some(photo)).is_err());
     assert!(rig.sent("createNewSupergroupChat").is_empty());
 }
+
+#[test]
+fn a_create_whose_box_was_closed_still_opens_the_chat_when_it_is_answered() {
+    let mut rig = Rig::new();
+    let extra = rig.create(NewChatKind::Channel, &[], None);
+    // The box was closed while the create waited for the network.
+    rig.driver.detach_new_chat(extra);
+    // Reopening and creating again is refused while the first is out.
+    let again = plan_new_chat(NewChatKind::Channel, "Again", "", &[], None, 0).unwrap();
+    assert_eq!(rig.driver.create_new_chat(&again, None).unwrap(), None);
+    assert_ne!(rig.driver.session.open_chat, Some(ChatId(CHANNEL)));
+
+    rig.answer_channel(extra);
+    assert_eq!(
+        rig.driver.session.open_chat,
+        Some(ChatId(CHANNEL)),
+        "the late answer opens the chat, as tdesktop does"
+    );
+    assert_eq!(rig.sent("createNewSupergroupChat").len(), 1);
+}

@@ -15,3 +15,4 @@
 "lng_cant_invite_not_contact" = "Sorry, you can only add mutual contacts\nto groups at the moment.\n{more_info}";
 "qll_new_chat_failed" = "Couldn't create the chat: {reason}";
 "qll_new_chat_photo_failed" = "The chat was created, but its photo could not be set.";
+"qll_new_chat_still_creating" = "The chat is still being created.";

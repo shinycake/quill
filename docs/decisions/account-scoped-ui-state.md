@@ -4109,9 +4109,15 @@ land and the typed form was gone.
   Delete and Leave) now fails the box through the registry; a link that
   needs Premium or an unknown username problem records a Username error
   too. A refused photo has no box to show it (it uploads after the box
-  closes, as in tdesktop): it is the action error toast. Delete and Leave
-  keep the Edit box open until TDLib answers (`track_chat_exit`), and it
-  stays when they are refused.
+  closes, as in tdesktop): it is the action error toast, worded with a lang
+  key and the normal error reason. Delete and Leave keep the Edit box open
+  until TDLib answers (`track_chat_exit`, `SaveStage::Exiting`): an earlier
+  refused Save no longer decides their outcome (10-088), and a refusal is
+  copied into `SaveStage::Refused` by `settle_group_edit_box` so the
+  registry forgetting it cannot close the box as saved. Leaving a group says
+  "Leaving group…", a channel "Leaving channel…". The demote box shows its
+  button busy while the request is out; the welcome box's two refusal
+  lines have distinct ids.
 - **Promote search** (10-079): `searched` follows the query the session
   recorded as asked, and the page is drawn only when its recorded query is
   the one in `searched`.
@@ -4133,8 +4139,12 @@ land and the typed form was gone.
   the members request is out; the Delete-all alerts hold the screen they
   were opened on (`screen_app`: nothing happens after an account switch) and
   the admin they were opened for (`delete_all_revoked_admin_links` takes it).
-- **New Group/Channel** (11-p5-002): Cancel, Escape and the close button do
-  nothing while the create request is out (it cannot be taken back).
+- **New Group/Channel** (11-p5-002): Cancel, Escape and the close button
+  always close the box (tdesktop `GroupInfoBox` keeps Cancel live; TDLib
+  holds the create while offline, so a box that waited would trap the
+  person). A create still out is detached (`detach_new_chat`): its answer
+  opens the new chat, a channel too. A second create while one is out is
+  refused with a note ("The chat is still being created.").
 - **Sharing request** (12-045): the box is cleared only when the request was
   sent; a refused send keeps it and does not open the chat.
 - **Statistics** (13-023, 13-026, 13-028, 13-029): the loaded statistics are
@@ -4144,7 +4154,8 @@ land and the typed form was gone.
   retry says so.
 - **Topic icons** (10-070): downloaded when the editor opens and when the
   icon list lands (`ingest`), not on every build of the dialog.
-- Not tdesktop-visible: tdesktop closes its boxes on send and shows an
-  error toast later. Quill keeps them open until the answer, which is the
+- Not tdesktop-visible: most of tdesktop's boxes close on send and show an
+  error toast later; Quill keeps them open until the answer, which is the
   smallest way to meet the register's "a refusal must be shown in the box"
-  without a new look.
+  without a new look. The exception is the admin-rights box, which tdesktop
+  also keeps open until the answer, so Quill matches it there.

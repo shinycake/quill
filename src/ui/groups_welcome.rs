@@ -274,18 +274,14 @@ impl QuillApp {
                             })),
                     ),
             );
-            for submit in [&dialog_state.add, &dialog_state.save] {
+            for (id, submit) in [
+                ("g2-welcome-add-refused", &dialog_state.add),
+                ("g2-welcome-save-refused", &dialog_state.save),
+            ] {
                 if let Submit::Failed(reason) = submit {
-                    body = body.child(
-                        div()
-                            .id("g2-welcome-refused")
-                            .text_xs()
-                            .text_color(cx.theme().danger)
-                            .child(tr_with(
-                                keys::Q_PEOPLE_COULDNT_SAVE_REASON,
-                                &[("reason", reason)],
-                            )),
-                    );
+                    body = body.child(div().id(id).text_xs().text_color(cx.theme().danger).child(
+                        tr_with(keys::Q_PEOPLE_COULDNT_SAVE_REASON, &[("reason", reason)]),
+                    ));
                 }
             }
             match fetch {

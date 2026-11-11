@@ -429,6 +429,8 @@
 "qll_people_leave_chat" = "Leave chat";
 "qll_people_leave_this_chat_you_can" = "Leave this chat? You can rejoin with an invite link.";
 "qll_people_leaving_channel" = "Leaving channel…";
+"qll_people_leaving_group" = "Leaving group…";
+"qll_people_could_not_change_photo" = "Couldn't change the photo: {reason}";
 "qll_people_left_channel_demo" = "Left channel (demo)";
 "qll_people_level" = "Level {level} · {boost_count_title}";
 "qll_people_level_boosts#one" = "Level {level} · {count} boost";
