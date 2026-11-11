@@ -46,7 +46,6 @@ pub(super) fn seed_gift_delete_session(sink: Arc<MemorySink>) -> Session {
     seed_channels(&mut session, &sink);
     let channel = std::env::var("QUILL_DEMO_GIFT_DELETE").ok();
     let hub = &mut session.payments.hub;
-    hub.gifts_open = true;
     hub.gifts_owner = Some(match channel.as_deref() {
         Some("channel") => MessageSender::Chat { chat_id: CHANNEL },
         Some("admin") => MessageSender::Chat {

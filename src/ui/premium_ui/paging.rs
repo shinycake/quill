@@ -16,8 +16,8 @@ impl QuillApp {
         let Some(hub) = self.session().map(|s| &s.payments.hub) else {
             return;
         };
-        if !hub.stars_open
-            || hub.tx_selected.is_some()
+        if !hub.stars.is_open()
+            || hub.stars.selected().is_some()
             || (hub.tx.error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.payments.stars_scroll),
@@ -45,7 +45,7 @@ impl QuillApp {
         let Some(hub) = self.session().map(|s| &s.payments.hub) else {
             return;
         };
-        if !hub.gifts_open
+        if hub.gifts_owner.is_none()
             || hub.gift_view.selected().is_some()
             || ((hub.gifts_page.error().is_some() || hub.gift_notice.is_some()) && !scrolled)
             || !load_due(

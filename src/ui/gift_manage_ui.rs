@@ -225,7 +225,10 @@ impl QuillApp {
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             // The demo has no connection: answer as the server would.
-            session.payments.gifts_manage.deleting = Some(id.to_string());
+            session.payments.hub.gifts_op.begin_with(
+                quill::ids::RequestId(0),
+                quill::premium_hub::gift_op::GiftMutation::Delete(id.to_string()),
+            );
             session.finish_gift_delete(None);
         }
         cx.notify();

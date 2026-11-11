@@ -83,7 +83,6 @@ pub(super) fn seed_gift_transfer_session(sink: Arc<MemorySink>) -> Session {
     session.users_state.contacts = quill::state::fetch::Fetch::Ready(CONTACTS.to_vec());
     session.ton_wallet.set_can_use(mode == "wallet");
     let hub = &mut session.payments.hub;
-    hub.gifts_open = true;
     hub.gifts_owner = Some(MessageSender::User { user_id: ME });
     hub.gifts = parse_received_gift(&own_received_gift(
         export_date(&mode, now),

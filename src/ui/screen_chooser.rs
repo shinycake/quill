@@ -593,7 +593,6 @@ impl QuillApp {
                     } else {
                         call.screen_share.stop();
                     }
-                    call.screen_share_paused = false;
                 }
             }
             ScreenFor::Private(_) => {

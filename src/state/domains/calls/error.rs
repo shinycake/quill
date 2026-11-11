@@ -263,9 +263,9 @@ impl Session {
             })) => {
                 if let Some(tracked) = self.calls.active_group_call.as_mut()
                     && tracked.id == group_call_id
-                    && tracked.screen_share_paused == paused
+                    && tracked.screen_share.paused() == paused
                 {
-                    tracked.screen_share_paused = !paused;
+                    tracked.screen_share.set_paused(!paused);
                 }
             }
             Some(

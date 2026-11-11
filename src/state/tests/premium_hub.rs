@@ -87,7 +87,7 @@ fn gift_mutation_ok_marks_the_list_stale_and_errors_release_the_lock() {
         RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { saved: false }),
         None,
     );
-    session.payments.hub.gifts_op = crate::state::fetch::ListOp::Mutating(extra);
+    session.payments.hub.gifts_op = crate::state::fetch::ListOp::Mutating(extra, Default::default());
     apply_json(
         &mut session,
         &seq,
@@ -104,7 +104,7 @@ fn gift_mutation_ok_marks_the_list_stale_and_errors_release_the_lock() {
         .gift_view
         .confirm_convert(Some("g1".into()));
     let extra = session.request(RequestPurpose::SellGift, None);
-    session.payments.hub.gifts_op = crate::state::fetch::ListOp::Mutating(extra);
+    session.payments.hub.gifts_op = crate::state::fetch::ListOp::Mutating(extra, Default::default());
     apply_json(
         &mut session,
         &seq,
@@ -129,7 +129,7 @@ fn another_requests_answer_does_not_free_a_gift_mutation() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let busy = session.request(RequestPurpose::SellGift, None);
-    session.payments.hub.gifts_op = crate::state::fetch::ListOp::Mutating(busy);
+    session.payments.hub.gifts_op = crate::state::fetch::ListOp::Mutating(busy, Default::default());
     let other = session.request(
         RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { saved: true }),
         None,
@@ -248,7 +248,7 @@ fn a_late_answer_of_an_older_gift_change_leaves_the_newer_one_locked() {
         None,
     );
     let new = session.request(RequestPurpose::SellGift, None);
-    session.payments.hub.gifts_op = crate::state::fetch::ListOp::Mutating(new);
+    session.payments.hub.gifts_op = crate::state::fetch::ListOp::Mutating(new, Default::default());
     apply_json(
         &mut session,
         &seq,

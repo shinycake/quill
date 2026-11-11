@@ -392,7 +392,7 @@ crate::ui::shell::register_dialogs! {
         3870,
         |app| {
             app.session().is_some_and(|s| {
-                s.payments.hub.gifts_open && s.payments.gifts_manage.transfer().is_some()
+                s.payments.hub.gifts_owner.is_some() && s.payments.gifts_manage.transfer().is_some()
             })
         },
         QuillApp::build_gift_transfer_dialog,

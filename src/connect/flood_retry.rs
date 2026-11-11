@@ -186,6 +186,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Your own level's next read while the tap is open.
         let level = self.call_audio_deadline(now);
         let microphone = self.call_capture.until_reopen(now);
+        let tap_retry = self.call_audio_reopen_deadline(now);
         let screen_wait = self.call_screen.wait_deadline(now);
         let paid = self
             .session
@@ -215,6 +216,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             hint,
             level,
             microphone,
+            tap_retry,
             screen_wait,
             paid,
             live_stars,

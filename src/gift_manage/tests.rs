@@ -395,12 +395,49 @@ fn a_gift_list_failure_leaves_a_send_in_flight_alone() {
 fn a_mutation_answer_without_a_request_frees_the_lock() {
     use crate::ids::RequestId;
     use crate::state::fetch::ListOp;
-    let mut lock = ListOp::Mutating(RequestId(3));
+    let mut lock = ListOp::<()>::Mutating(RequestId(3), ());
     lock.failed(Some(RequestId(4)));
     assert!(lock.is_mutating(), "another request's answer keeps it");
     lock.failed(None);
     assert!(!lock.is_mutating());
-    let mut lock = ListOp::Mutating(RequestId(3));
+    let mut lock = ListOp::<()>::Mutating(RequestId(3), ());
     lock.changed(None);
     assert!(lock.is_stale(), "an answer naming no request frees it too");
+}
+
+#[test]
+fn a_list_change_answer_names_the_gift_it_changed() {
+    use crate::ids::RequestId;
+    use crate::premium_hub::gift_op::GiftMutation;
+    use crate::state::fetch::ListOp;
+    let mut op = ListOp::<GiftMutation>::Idle;
+    op.begin_with(RequestId(5), GiftMutation::Delete("g".into()));
+    assert_eq!(op.changed(Some(RequestId(6))), None, "another request's");
+    assert!(op.is_mutating());
+    assert_eq!(
+        op.changed(Some(RequestId(5))),
+        Some(GiftMutation::Delete("g".into()))
+    );
+    assert!(op.is_stale() && !op.is_mutating());
+    op.begin_with(RequestId(7), GiftMutation::Delete("h".into()));
+    op.failed(Some(RequestId(7)));
+    assert_eq!(op.changed(None), None, "a refused delete names nothing");
+}
+
+#[test]
+fn the_stars_box_keeps_its_selection_only_while_open() {
+    use crate::premium_hub::stars_box::StarsBox;
+    let mut stars = StarsBox::default();
+    stars.select(Some("a".into()));
+    assert!(!stars.is_open(), "a closed box stays closed");
+    stars.open();
+    stars.select(Some("a".into()));
+    assert_eq!(stars.selected(), Some("a"));
+    stars.open();
+    assert_eq!(stars.selected(), Some("a"), "opening again keeps the view");
+    stars.select(None);
+    assert!(stars.is_open() && stars.selected().is_none());
+    stars.select(Some("b".into()));
+    stars.close();
+    assert!(!stars.is_open() && stars.selected().is_none());
 }

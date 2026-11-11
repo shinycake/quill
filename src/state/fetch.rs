@@ -11,32 +11,38 @@
 /// else moved the list). Only that request's answer or error ends the
 /// change; an older request's late answer leaves a newer one waiting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ListOp {
+pub enum ListOp<K = ()> {
     #[default]
     Idle,
     /// A change is in flight under this request; its controls stay disabled.
-    Mutating(crate::ids::RequestId),
+    /// `kind` is what the change is, for the answer to act on.
+    Mutating(crate::ids::RequestId, K),
     /// A change is in flight and something else moved the list meanwhile:
     /// the list is fetched again whether the change lands or is refused.
-    MutatingStale(crate::ids::RequestId),
+    MutatingStale(crate::ids::RequestId, K),
     /// The list is kept for display and fetched again before it is trusted.
     Stale,
 }
 
-impl ListOp {
-    pub fn is_mutating(self) -> bool {
-        matches!(self, Self::Mutating(_) | Self::MutatingStale(_))
+impl<K: Default> ListOp<K> {
+    pub fn is_mutating(&self) -> bool {
+        matches!(self, Self::Mutating(..) | Self::MutatingStale(..))
     }
 
-    pub fn is_stale(self) -> bool {
-        self == Self::Stale
+    pub fn is_stale(&self) -> bool {
+        matches!(self, Self::Stale)
     }
 
     /// A change goes out under `request`.
     pub fn begin(&mut self, request: crate::ids::RequestId) {
-        *self = match *self {
-            Self::Stale | Self::MutatingStale(_) => Self::MutatingStale(request),
-            _ => Self::Mutating(request),
+        self.begin_with(request, K::default());
+    }
+
+    /// A change of this `kind` goes out under `request`.
+    pub fn begin_with(&mut self, request: crate::ids::RequestId, kind: K) {
+        *self = match self {
+            Self::Stale | Self::MutatingStale(..) => Self::MutatingStale(request, kind),
+            _ => Self::Mutating(request, kind),
         };
     }
 
@@ -45,9 +51,11 @@ impl ListOp {
     /// that names no request (its entry is gone) frees the list, or it
     /// would stay locked for good.
     pub fn failed(&mut self, request: Option<crate::ids::RequestId>) {
-        match *self {
-            Self::Mutating(waiting) if request.is_none_or(|id| id == waiting) => *self = Self::Idle,
-            Self::MutatingStale(waiting) if request.is_none_or(|id| id == waiting) => {
+        match self {
+            Self::Mutating(waiting, _) if request.is_none_or(|id| id == *waiting) => {
+                *self = Self::Idle;
+            }
+            Self::MutatingStale(waiting, _) if request.is_none_or(|id| id == *waiting) => {
                 *self = Self::Stale;
             }
             _ => {}
@@ -56,31 +64,41 @@ impl ListOp {
 
     /// `request` changed the list on the server: it is fetched again. A
     /// newer change in flight keeps its place and marks the list when it
-    /// lands.
-    pub fn changed(&mut self, request: Option<crate::ids::RequestId>) {
-        match *self {
-            Self::Mutating(waiting) | Self::MutatingStale(waiting)
+    /// lands. Gives the kind of the change that landed, when it is the one
+    /// in flight.
+    pub fn changed(&mut self, request: Option<crate::ids::RequestId>) -> Option<K> {
+        match std::mem::take(self) {
+            Self::Mutating(waiting, kind) | Self::MutatingStale(waiting, kind)
                 if request.is_some_and(|id| id != waiting) =>
             {
-                *self = Self::MutatingStale(waiting);
+                *self = Self::MutatingStale(waiting, kind);
+                None
             }
-            _ => *self = Self::Stale,
+            Self::Mutating(_, kind) | Self::MutatingStale(_, kind) => {
+                *self = Self::Stale;
+                Some(kind)
+            }
+            Self::Idle | Self::Stale => {
+                *self = Self::Stale;
+                None
+            }
         }
     }
 
     /// Something else moved the list (not a change of ours): fetch it
     /// again, unless a change is in flight (its landing marks the list).
     pub fn mark_stale(&mut self) {
-        match *self {
-            Self::Idle => *self = Self::Stale,
-            Self::Mutating(request) => *self = Self::MutatingStale(request),
-            Self::Stale | Self::MutatingStale(_) => {}
-        }
+        *self = match std::mem::take(self) {
+            Self::Idle | Self::Stale => Self::Stale,
+            Self::Mutating(request, kind) | Self::MutatingStale(request, kind) => {
+                Self::MutatingStale(request, kind)
+            }
+        };
     }
 
     /// The refetch went out, was answered or failed: no longer waiting.
     pub fn refetched(&mut self) {
-        if *self == Self::Stale {
+        if self.is_stale() {
             *self = Self::Idle;
         }
     }

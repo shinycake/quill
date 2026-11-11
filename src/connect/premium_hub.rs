@@ -70,7 +70,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         hub.filter = filter;
         hub.transactions.clear();
         hub.tx_offset.clear();
-        hub.tx_selected = None;
+        hub.stars.select(None);
         hub.tx = PageStage::Idle;
         self.fetch_star_transactions_page(false).map(Some)
     }
@@ -122,10 +122,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        self.session.payments.hub.gifts_owner = Some(owner);
+        self.session.restart_gifts_list(0);
         let hub = &mut self.session.payments.hub;
-        hub.gifts_open = true;
-        hub.gifts_owner = Some(owner);
-        hub.reset_gifts_list();
         // The `Mutating` view is not reset: a toggle or sale still out keeps its
         // lock until its own answer (another request would pay twice).
         hub.gifts_op.refetched();

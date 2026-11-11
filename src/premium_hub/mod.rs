@@ -668,6 +668,7 @@ fn limit_title(constructor: &str) -> Option<&'static str> {
 
 pub mod feature;
 pub mod fragment;
+pub mod gift_op;
 pub mod gift_value;
 pub mod gift_view;
 pub mod limit_notice;
@@ -683,6 +684,7 @@ pub struct PromoRequest {
     pub chat_id: crate::ids::ChatId,
 }
 pub mod purchase;
+pub mod stars_box;
 pub mod ton;
 pub mod upgraded;
 
@@ -762,7 +764,7 @@ pub struct PremiumAutoStart {
 #[derive(Debug, Clone, Default)]
 pub struct PremiumHub {
     // Stars.
-    pub stars_open: bool,
+    pub stars: stars_box::StarsBox,
     pub balance: Option<StarAmount>,
     pub filter: TxFilter,
     pub transactions: Vec<StarTx>,
@@ -770,10 +772,8 @@ pub struct PremiumHub {
     /// The history request: only the newest one's answer counts (a filter
     /// switched mid-flight drops older ones).
     pub tx: page_stage::PageStage,
-    /// Transaction whose details box is showing.
-    pub tx_selected: Option<String>,
     // Gifts.
-    pub gifts_open: bool,
+    /// Whose gifts the open list shows; `None` while the dialog is closed.
     pub gifts_owner: Option<MessageSender>,
     pub gifts: Vec<ReceivedGift>,
     pub gifts_total: i32,
@@ -786,7 +786,7 @@ pub struct PremiumHub {
     pub gift_view: gift_view::GiftView,
     /// The gifts list's changes: one mutation in flight under its request
     /// (the controls stay off), or the list marked to be fetched again.
-    pub gifts_op: crate::state::fetch::ListOp,
+    pub gifts_op: crate::state::fetch::ListOp<gift_op::GiftMutation>,
     // Premium.
     /// The Premium dialog, while it is open.
     pub premium_box: Option<premium_box::PremiumBox>,
@@ -840,7 +840,6 @@ impl PremiumHub {
     /// flight keeps its lock until its own answer (its late `changed` mark is
     /// dropped by the next open).
     pub fn close_gifts(&mut self) {
-        self.gifts_open = false;
         self.gifts_owner = None;
         self.reset_gifts_list();
         self.gifts_op.refetched();
@@ -948,7 +947,7 @@ impl PremiumHub {
     }
 
     pub fn selected_tx(&self) -> Option<&StarTx> {
-        let id = self.tx_selected.as_deref()?;
+        let id = self.stars.selected()?;
         self.transactions.iter().find(|tx| tx.id == id)
     }
 

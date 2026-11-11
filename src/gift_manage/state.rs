@@ -159,8 +159,6 @@ pub struct GiftManageState {
     /// The collection tab that is open; 0 = all gifts.
     pub active_collection: i32,
     pub flow: Option<GiftFlow>,
-    /// The gift whose `deleteGift` is in flight; the answer removes it.
-    pub deleting: Option<String>,
     /// A one-line result of the last action ("Pinned", "Upgraded to ...").
     pub note: Option<String>,
     pub send: SendGiftState,
@@ -272,14 +270,20 @@ impl GiftManageState {
         self.collections.iter().find(|c| c.id == id)
     }
 
+    /// The list shows collection `id` (`0` = all gifts): what belonged to
+    /// the previous tab goes. The one place that knows which of this state
+    /// is per list.
+    pub(crate) fn show_collection(&mut self, id: i32) {
+        self.active_collection = id;
+        self.flow = None;
+        self.note = None;
+    }
+
     /// Forget the per-owner state when another gifts list opens.
     pub fn reset_for_owner(&mut self) {
         self.collections.clear();
         self.collections_fetch = CollectionsFetch::Idle;
-        self.active_collection = 0;
-        self.flow = None;
-        self.deleting = None;
-        self.note = None;
+        self.show_collection(0);
         // A result nobody took belongs to the list that was closed.
         self.events.clear();
     }

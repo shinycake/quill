@@ -45,19 +45,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         build: impl FnOnce(RequestId, MessageSender) -> String,
     ) -> Result<RequestId, ConnectSendError> {
         let owner = self.gifts_owner_if_mine()?;
-        self.send_gift_mutation(owner, purpose, build)
+        self.send_gift_mutation(owner, purpose, Default::default(), build)
     }
 
     fn send_gift_mutation(
         &mut self,
         owner: MessageSender,
         purpose: PaymentsPurpose,
+        kind: crate::premium_hub::gift_op::GiftMutation,
         build: impl FnOnce(RequestId, MessageSender) -> String,
     ) -> Result<RequestId, ConnectSendError> {
         let extra = self
             .session
             .request(RequestPurpose::Payments(purpose), None);
-        self.session.payments.hub.gifts_op.begin(extra);
+        self.session.payments.hub.gifts_op.begin_with(extra, kind);
         self.session.payments.hub.gift_notice = None;
         self.session.payments.gifts_manage.note = None;
         if let Err(err) = self.send_json_request(extra, &build(extra, owner)) {
@@ -167,12 +168,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if manage.active_collection == id {
             return Ok(None);
         }
-        let manage = &mut self.session.payments.gifts_manage;
-        manage.active_collection = id;
-        manage.flow = None;
-        manage.note = None;
-        let hub = &mut self.session.payments.hub;
-        hub.reset_gifts_list();
+        self.session.restart_gifts_list(id);
         self.fetch_received_gifts_page(false).map(Some)
     }
 
@@ -482,11 +478,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !gift.can_delete(true) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self.send_gift_mutation(owner, PaymentsPurpose::DeleteGift, |extra, _| {
+        let kind = crate::premium_hub::gift_op::GiftMutation::Delete(id.to_string());
+        self.send_gift_mutation(owner, PaymentsPurpose::DeleteGift, kind, |extra, _| {
             rq::delete_gift(extra, id)
-        })?;
-        self.session.payments.gifts_manage.deleting = Some(id.to_string());
-        Ok(extra)
+        })
     }
 
     /// Add a gift to a collection, or remove it from one.
@@ -598,8 +593,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn close_send_gift(&mut self) {
         let send = &mut self.session.payments.gifts_manage.send;
         send.open = false;
-        send.selected = None;
+        // A `sendGift` still out keeps its gift: reopening for the same
+        // recipient shows that send, not a grid with nothing picked.
         if !send.sending() {
+            send.selected = None;
             send.stage = SendStage::Idle;
         }
     }

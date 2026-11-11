@@ -11,6 +11,14 @@ use crate::state::*;
 use crate::telegram::envelope::ParsedFile;
 
 impl Session {
+    /// The gifts list starts over on collection `collection`: the hub's list
+    /// and the management state that belongs to it go together, so opening
+    /// an owner and switching tabs cannot reset different subsets.
+    pub fn restart_gifts_list(&mut self, collection: i32) {
+        self.payments.hub.reset_gifts_list();
+        self.payments.gifts_manage.show_collection(collection);
+    }
+
     /// A `getOption` answer for one of the gift limits.
     pub(crate) fn apply_gift_option(&mut self, value: i64, pending: Option<&PendingRequest>) {
         if let Some(RequestPurpose::Payments(PaymentsPurpose::GetGiftOption(option))) =
@@ -201,9 +209,9 @@ impl Session {
     pub fn finish_gift_delete(&mut self, request: Option<RequestId>) {
         let hub = &mut self.payments.hub;
         let manage = &mut self.payments.gifts_manage;
-        hub.gifts_op.changed(request);
+        let deleted = hub.gifts_op.changed(request);
         hub.gift_notice = None;
-        if let Some(id) = manage.deleting.take() {
+        if let Some(crate::premium_hub::gift_op::GiftMutation::Delete(id)) = deleted {
             let before = hub.gifts.len();
             hub.gifts.retain(|g| g.id != id);
             if hub.gifts.len() < before {
@@ -361,7 +369,6 @@ impl Session {
                 self.payments.hub.gifts_op.failed(pending.map(|p| p.id));
             }
             PaymentsPurpose::DeleteGift => {
-                manage.deleting = None;
                 self.payments.hub.gifts_op.failed(pending.map(|p| p.id));
                 manage.note = Some(tr_with(
                     keys::Q_MONEY_COULD_NOT_DELETE_THE_GIFT,

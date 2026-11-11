@@ -218,7 +218,8 @@ fn hub_pages_append_and_replace() {
     );
     assert_eq!(hub.transactions.len(), 2);
     assert!(hub.tx_offset.is_empty());
-    hub.tx_selected = Some("b".into());
+    hub.stars.open();
+    hub.stars.select(Some("b".into()));
     assert_eq!(hub.selected_tx().map(|t| t.id.as_str()), Some("b"));
     hub.apply_transactions(StarTxPage::default(), false);
     assert!(hub.transactions.is_empty());

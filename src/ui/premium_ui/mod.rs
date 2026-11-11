@@ -113,7 +113,7 @@ impl QuillApp {
             return;
         }
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.payments.hub.stars_open = true;
+            live.driver.session.payments.hub.stars.open();
             // "View Statistics" and "Earn Stars from Mini Apps" gates.
             let _ = live.driver.probe_self_star_stats();
             let _ = live.driver.ensure_earn_app_config();
@@ -128,8 +128,7 @@ impl QuillApp {
 
     pub(super) fn close_stars(&mut self, cx: &mut Context<Self>) {
         if let Some(hub) = self.hub_mut() {
-            hub.stars_open = false;
-            hub.tx_selected = None;
+            hub.stars.close();
         }
         // "Buy more Stars" starts folded the next time.
         if let Some(packs) = self.packs_mut() {
@@ -149,7 +148,7 @@ impl QuillApp {
 
     fn select_tx(&mut self, id: Option<String>, cx: &mut Context<Self>) {
         if let Some(hub) = self.hub_mut() {
-            hub.tx_selected = id;
+            hub.stars.select(id);
         }
         cx.notify();
     }

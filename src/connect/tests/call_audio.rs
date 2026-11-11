@@ -235,6 +235,13 @@ fn a_lost_microphone_withdraws_the_speaking_mark() {
     assert_eq!(driver.group_call_self_level(), (0.0, false));
     assert_eq!(sent(), vec![true, false]);
     assert!(driver.group_call_level_error().is_some());
+    // The poll loop wakes for the reopen, and stops asking once it is due.
+    let now = std::time::Instant::now();
+    assert!(driver.call_audio_reopen_deadline(now).is_some());
+    assert_eq!(
+        driver.call_audio_reopen_deadline(now + std::time::Duration::from_secs(6)),
+        None
+    );
     std::fs::remove_dir_all(dir).ok();
 }
 

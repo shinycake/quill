@@ -423,7 +423,6 @@ fn a_failed_delete_keeps_the_gift_and_says_why() {
     let hub = &p.0.session.payments.hub;
     assert!(!hub.gifts_op.is_mutating());
     assert_eq!(hub.gifts.len(), 1);
-    assert_eq!(p.0.session.payments.gifts_manage.deleting, None);
     assert!(
         p.0.session
             .payments
@@ -617,11 +616,13 @@ fn reopening_the_send_dialog_keeps_the_send_that_is_out() {
         nanos: 0,
     });
     open_send_dialog(&mut p);
+    p.0.select_send_gift(Some(55));
     let first = p.0.send_star_gift(55, "", false, false).unwrap();
     p.0.close_send_gift();
     p.0.open_send_gift(ChatId(21)).unwrap();
     let send = &p.0.session.payments.gifts_manage.send;
     assert!(send.open && send.sending(), "the same send, shown again");
+    assert_eq!(send.selected, Some(55), "with the gift it sends");
     assert!(
         p.0.send_star_gift(55, "", false, false).is_err(),
         "Send stays disabled: no double purchase"
