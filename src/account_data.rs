@@ -172,10 +172,32 @@ fn read_owner(file: &Path) -> Previous {
 /// Whether something the last user could have left is on disk for `key`
 /// (what [`forget`] drops from the folder and the app root).
 fn has_leftovers(app_root: &Path, paths: &AccountPaths, account: &str) -> bool {
-    paths.root.join(RECENT_HASHTAGS).exists()
+    has_recent_hashtags(&paths.root.join(RECENT_HASHTAGS))
         || paths.root.join(crate::connect::PAID_TRUST_FILE).exists()
         || widget_dir(app_root, account).exists()
         || webview_dir(app_root, account).exists()
+}
+
+/// Whether the recent hashtags file holds a tag. The empty list that
+/// [`forget`] writes is not a leftover, so a wipe whose owner write fails
+/// does not find "leftovers" again at the next start.
+fn has_recent_hashtags(file: &Path) -> bool {
+    std::fs::read(file)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<crate::suggest::RecentHashtags>(&bytes).ok())
+        .is_some_and(|list| !list.tags.is_empty())
+}
+
+/// How this run's client got to be signed in.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SignInOrigin {
+    /// TDLib resumed a session it already had: whose it is was settled
+    /// when it signed in, possibly by a release that kept no `owner.json`.
+    #[default]
+    Resumed,
+    /// This process took the user through a phone, code, QR or password
+    /// step: a person just signed in, and may not be who the folder held.
+    Fresh,
 }
 
 /// What [`claim`] did.
@@ -191,8 +213,10 @@ pub struct Claimed {
 /// A client of `key` learned it is signed in as `user_id`. When the folder
 /// was last signed in as someone else, what they left is dropped first. An
 /// owner that cannot be read (no file, a corrupt one) with leftovers in the
-/// folder counts as someone else: nothing proves they are the same user.
-pub fn claim(app_root: &Path, key: &AccountKey, user_id: i64) -> Claimed {
+/// folder counts as someone else only after a [`SignInOrigin::Fresh`]
+/// sign-in; a resumed session is the folder's own account (an older release
+/// kept no owner file), so its data stays and the owner is written.
+pub fn claim(app_root: &Path, key: &AccountKey, user_id: i64, origin: SignInOrigin) -> Claimed {
     let paths = AccountPaths::for_root(app_root, key);
     let file = paths.root.join(OWNER_FILE);
     let someone_else = match read_owner(&file) {
@@ -203,7 +227,9 @@ pub fn claim(app_root: &Path, key: &AccountKey, user_id: i64) -> Claimed {
             };
         }
         Previous::Known(_) => true,
-        Previous::Unknown => has_leftovers(app_root, &paths, key.0.as_str()),
+        Previous::Unknown => {
+            origin == SignInOrigin::Fresh && has_leftovers(app_root, &paths, key.0.as_str())
+        }
     };
     if someone_else {
         forget(app_root, key);

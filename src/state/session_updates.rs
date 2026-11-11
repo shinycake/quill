@@ -64,6 +64,20 @@ impl Session {
         if matches!(state, AuthorizationState::Closing) {
             self.shutdown = ShutdownPhase::WaitingClosed;
         }
+        if matches!(
+            state,
+            AuthorizationState::WaitPhoneNumber
+                | AuthorizationState::WaitPremiumPurchase { .. }
+                | AuthorizationState::WaitEmailAddress
+                | AuthorizationState::WaitEmailCode { .. }
+                | AuthorizationState::WaitCode { .. }
+                | AuthorizationState::WaitOtherDeviceConfirmation { .. }
+                | AuthorizationState::WaitRegistration { .. }
+                | AuthorizationState::WaitPassword { .. }
+        ) {
+            // TDLib asks for these only of a client that is not signed in.
+            self.sign_in_origin = crate::account_data::SignInOrigin::Fresh;
+        }
         self.auth = state;
         self.auth_view = view_for(&self.auth);
         self.auth_state.last_auth_error = None;

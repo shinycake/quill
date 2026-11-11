@@ -8,6 +8,11 @@ use std::collections::BTreeSet;
 /// writer (the UI thread); these tests take turns at it the same way.
 static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// A claim by a client that signed in in this process.
+fn claim_as(root: &Path, key: &AccountKey, user_id: i64) -> Claimed {
+    claim(root, key, user_id, SignInOrigin::Fresh)
+}
+
 fn root() -> PathBuf {
     crate::settings::safe_app_root().unwrap_or_else(|| panic!("a test app root"))
 }
@@ -158,19 +163,19 @@ fn a_new_user_in_a_reused_slot_inherits_nothing() {
     let root = root();
     let key = AccountKey::new("account-933").unwrap();
     assert!(
-        !claim(&root, &key, 100).dropped,
+        !claim_as(&root, &key, 100).dropped,
         "first sign-in: nothing to drop"
     );
     fill(&root, &key);
     assert!(
-        !claim(&root, &key, 100).dropped,
+        !claim_as(&root, &key, 100).dropped,
         "the same user again keeps it"
     );
     assert_eq!(left_behind(&root, &key).len(), 10);
-    assert!(claim(&root, &key, 200).dropped, "another user");
+    assert!(claim_as(&root, &key, 200).dropped, "another user");
     crate::settings::flush_deferred_writes();
     assert_eq!(left_behind(&root, &key), Vec::<&str>::new());
-    assert!(!claim(&root, &key, 200).dropped);
+    assert!(!claim_as(&root, &key, 200).dropped);
 }
 
 /// No readable owner.json (never written, deleted, corrupt) with leftovers
@@ -180,17 +185,17 @@ fn an_unreadable_owner_with_leftovers_counts_as_someone_else() {
     let _serial = crate::locks::lock_or_recover(&SERIAL);
     let root = root();
     let key = AccountKey::new("account-937").unwrap();
-    assert!(!claim(&root, &key, 100).dropped);
+    assert!(!claim_as(&root, &key, 100).dropped);
     fill(&root, &key);
     let owner = AccountPaths::for_root(&root, &key).root.join(OWNER_FILE);
     std::fs::write(&owner, b"{ not json").unwrap();
-    assert!(claim(&root, &key, 100).dropped, "corrupt owner");
+    assert!(claim_as(&root, &key, 100).dropped, "corrupt owner");
     crate::settings::flush_deferred_writes();
     assert_eq!(left_behind(&root, &key), Vec::<&str>::new());
     fill(&root, &key);
     std::fs::remove_file(&owner).unwrap();
-    assert!(claim(&root, &key, 100).dropped, "deleted owner");
-    assert!(!claim(&root, &key, 100).dropped, "now known");
+    assert!(claim_as(&root, &key, 100).dropped, "deleted owner");
+    assert!(!claim_as(&root, &key, 100).dropped, "now known");
 }
 
 /// The macOS mini app store lives outside Quill's folder, so its id must
@@ -215,12 +220,12 @@ fn a_reused_slot_opens_other_mini_app_stores() {
     );
     forget(&root, &key);
     // The next user is known before any mini app opens.
-    assert!(!claim(&root, &key, 300).dropped);
+    assert!(!claim_as(&root, &key, 300).dropped);
     let after_logout = id(42);
     assert_ne!(after_logout, first, "a log-out drops the store");
-    assert!(!claim(&root, &key, 300).dropped);
+    assert!(!claim_as(&root, &key, 300).dropped);
     assert_eq!(id(42), after_logout);
-    assert!(claim(&root, &key, 400).dropped, "another user");
+    assert!(claim_as(&root, &key, 400).dropped, "another user");
     assert_ne!(id(42), after_logout, "another user gets other stores");
     assert_ne!(
         webview_store_id(None, account, 42),
@@ -441,4 +446,62 @@ fn every_store_is_classified() {
         unclassified.is_empty(),
         "classify these in account_data_tests.rs (DROPPED, and drop them in `forget`, or KEPT with a reason): {unclassified:?}"
     );
+}
+
+/// A user who updated from a release without owner.json resumes their own
+/// session: nothing signed in, so the leftovers are theirs. Keep them and
+/// write the owner.
+#[test]
+fn a_resumed_session_without_an_owner_file_keeps_its_data() {
+    let _serial = crate::locks::lock_or_recover(&SERIAL);
+    let root = root();
+    let key = AccountKey::new("account-951").unwrap();
+    fill(&root, &key);
+    let owner = AccountPaths::for_root(&root, &key).root.join(OWNER_FILE);
+    let _ = std::fs::remove_file(&owner);
+    let claimed = claim(&root, &key, 100, SignInOrigin::Resumed);
+    assert!(!claimed.dropped);
+    assert!(claimed.owner_error.is_none());
+    assert_eq!(left_behind(&root, &key).len(), 10, "nothing was dropped");
+    assert!(owner.exists(), "the owner is written");
+    assert!(!claim_as(&root, &key, 100).dropped, "now known");
+    forget(&root, &key);
+}
+
+/// A fresh sign-in as someone else than the folder's last user, with no
+/// owner file to say who that was, drops what is there.
+#[test]
+fn a_fresh_sign_in_without_an_owner_file_drops_leftovers() {
+    let _serial = crate::locks::lock_or_recover(&SERIAL);
+    let root = root();
+    let key = AccountKey::new("account-952").unwrap();
+    fill(&root, &key);
+    let owner = AccountPaths::for_root(&root, &key).root.join(OWNER_FILE);
+    let _ = std::fs::remove_file(&owner);
+    assert!(claim(&root, &key, 100, SignInOrigin::Fresh).dropped);
+    crate::settings::flush_deferred_writes();
+    assert_eq!(left_behind(&root, &key), Vec::<&str>::new());
+}
+
+/// When the owner cannot be written, the wipe's own empty hashtags file
+/// must not look like leftovers at the next start.
+#[test]
+fn a_failing_owner_write_does_not_wipe_twice() {
+    let _serial = crate::locks::lock_or_recover(&SERIAL);
+    let root = root();
+    let key = AccountKey::new("account-953").unwrap();
+    fill(&root, &key);
+    let paths = AccountPaths::for_root(&root, &key);
+    let owner = paths.root.join(OWNER_FILE);
+    let _ = std::fs::remove_file(&owner);
+    // A directory where the file goes makes every owner write fail.
+    std::fs::create_dir_all(&owner).unwrap();
+    let first = claim(&root, &key, 100, SignInOrigin::Fresh);
+    assert!(first.dropped);
+    assert!(first.owner_error.is_some());
+    crate::settings::flush_deferred_writes();
+    let second = claim(&root, &key, 100, SignInOrigin::Fresh);
+    assert!(!second.dropped, "no leftovers of the first wipe");
+    std::fs::remove_dir_all(&owner).unwrap();
+    forget(&root, &key);
 }

@@ -24,6 +24,9 @@ pub struct Session {
     pub account: AccountKey,
     pub account_generation: AccountGeneration,
     pub auth: AuthorizationState,
+    /// Resumed from TDLib's database, or signed in by a step taken in this
+    /// process (`set_auth`); `account_data::claim` tells them apart.
+    pub sign_in_origin: crate::account_data::SignInOrigin,
     pub auth_view: AuthView,
     pub connection: ConnectionState,
     pub chats: HashMap<i64, ChatSummary>,
