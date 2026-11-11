@@ -59,22 +59,18 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// The info panel's media counts plus the gallery's extra filters
-    /// (`EXTRA_COUNT_FILTERS`), once per chat per session.
+    /// (`EXTRA_COUNT_FILTERS`), on every gallery open: the counts shown stay
+    /// until their new answers replace them.
     fn fetch_gallery_counts(&mut self, chat_id: ChatId) -> Result<(), ConnectSendError> {
-        let first_time = !self
-            .session
-            .media
-            .chat_media_counts
-            .contains_key(&chat_id.0);
         self.fetch_chat_media_counts(chat_id)?;
-        if !first_time {
-            return Ok(());
-        }
         let base = crate::telegram::requests::MEDIA_COUNT_FILTERS.len() as u8;
         for (index, filter) in EXTRA_COUNT_FILTERS.iter().enumerate() {
             let purpose = RequestPurpose::Users(UsersPurpose::GetChatMessageCount {
                 filter: base + index as u8,
             });
+            if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+                continue;
+            }
             let extra = self.session.request(purpose, Some(chat_id));
             let json = crate::telegram::requests::get_chat_message_count(extra, chat_id, filter);
             if let Err(err) = self.sender.send_json(&json) {

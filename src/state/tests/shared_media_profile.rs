@@ -277,7 +277,7 @@ fn a_late_gifts_page_for_another_chat_leaves_the_open_gallerys_offset() {
 }
 
 #[test]
-fn chat_page_stories_fill_the_stories_tab_and_failures_hide_it() {
+fn chat_page_stories_fill_the_stories_tab_and_a_failure_keeps_it_for_retry() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(1);
     open_user_gallery(&mut session, &seq, &sink);
@@ -312,7 +312,8 @@ fn chat_page_stories_fill_the_stories_tab_and_failures_hide_it() {
     );
 
     // A failed refetch keeps the loaded stories; a failed first fetch
-    // shows the error and hides the tab.
+    // shows the error, leaves the count unknown and keeps the tab for its
+    // Retry.
     session
         .media
         .shared_media
@@ -336,9 +337,12 @@ fn chat_page_stories_fill_the_stories_tab_and_failures_hide_it() {
     let gifts = tab(&session, SharedMediaTab::Gifts);
     assert!(gifts.status.is_failed());
     assert!(!gifts.error().is_empty());
-    assert_eq!(session.media.chat_media_counts[&6][&COUNT_KEY_GIFTS], 0);
     assert!(
-        !session
+        !session.media.chat_media_counts[&6].contains_key(&COUNT_KEY_GIFTS),
+        "no zero written for a failed page"
+    );
+    assert!(
+        session
             .shared_media_visible_tabs()
             .contains(&SharedMediaTab::Gifts)
     );

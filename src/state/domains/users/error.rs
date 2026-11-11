@@ -56,13 +56,10 @@ impl Session {
                         .fail(user, error_reason(err));
                 }
             }
-            // One filter's count failed: drop the chat's entry so the next
-            // open asks for all of them again, not a zero for good.
-            Some(RequestPurpose::Users(UsersPurpose::GetChatMessageCount { .. })) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.media.chat_media_counts.remove(&chat_id.0);
-                }
-            }
+            // One filter's count failed: its count stays unknown (or the
+            // older one stays shown) and the next open asks for all of
+            // them again, never a zero for good.
+            Some(RequestPurpose::Users(UsersPurpose::GetChatMessageCount { .. })) => {}
             Some(RequestPurpose::GetProfilePhotoEmojiIcons) => {
                 self.users_state
                     .profile_photo_emoji_icons
