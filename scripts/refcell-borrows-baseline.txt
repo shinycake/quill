@@ -292,7 +292,6 @@ forget_reveals::reveals.borrow_mut 1
 forget_waiting::waiting.borrow_mut 1
 forget_window::slices.borrow_mut 1
 forget_window::whole.borrow_mut 1
-gpu_gone::slot.borrow 1
 hide_until_mouse_moves::slot.borrow 1
 image_of::sheets.borrow 1
 image_tile::tile.borrow_mut 1
@@ -329,8 +328,6 @@ push_premium::active.borrow_mut 1
 release_media_tile::tile.borrow_mut 1
 release_unshown::cache.borrow_mut 1
 remember::slot.borrow_mut 1
-remember_gpu_gone::gone.borrow_mut 1
-report_gpu_gone::gone.borrow_mut 1
 request::sheets.borrow_mut 2
 retain_community_chats::chat.borrow 1
 retire_all::retired.borrow_mut 1
@@ -377,6 +374,5 @@ video_request_done::answered.borrow_mut 1
 video_request_done::asks.borrow 1
 wake::retired.borrow 1
 wake::slot.borrow_mut 1
-watch_gpu_loss::slot.borrow_mut 1
 whole_of::whole.borrow 1
 with_layer::current.borrow_mut 1

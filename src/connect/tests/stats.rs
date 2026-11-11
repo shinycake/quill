@@ -739,3 +739,44 @@ fn a_zoom_whose_load_is_refused_is_not_recorded() {
     assert!(rig.driver.zoom_stat_graph(ChatId(-100), "zoom", 5).is_err());
     assert!(rig.driver.session.groups.stats.zoomed.is_empty());
 }
+
+/// A graph whose load is refused is failed, not absent: the section shows
+/// Retry and drawing does not ask again.
+#[test]
+fn a_graph_whose_load_is_refused_is_failed_and_not_asked_again() {
+    let mut rig = Rig::new();
+    rig.recorder.refuse_sends(true);
+    assert!(rig.driver.load_stat_graph(ChatId(-100), "tok", 0).is_err());
+    assert!(matches!(
+        rig.driver.session.groups.stats.graph(-100, "tok", 0),
+        Some(crate::state::GraphFetch::Failed(_))
+    ));
+    rig.recorder.refuse_sends(false);
+    let asked = rig.sent().len();
+    assert!(
+        rig.driver
+            .load_stat_graph(ChatId(-100), "tok", 0)
+            .unwrap()
+            .is_some(),
+        "Retry sends again"
+    );
+    assert_eq!(rig.sent().len(), asked + 1);
+}
+
+/// A refresh that cannot go (the client is not ready) leaves the panel
+/// failed, not `Loaded` in the old theme, so the poll that checks the theme
+/// does not ask on every pass.
+#[test]
+fn a_statistics_refresh_that_cannot_go_ends_in_failed() {
+    let mut rig = Rig::new();
+    rig.driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
+    assert!(
+        rig.driver
+            .refresh_chat_statistics(ChatId(-100), true)
+            .is_err()
+    );
+    assert!(matches!(
+        rig.driver.session.groups.chat_statistics.get(&-100),
+        Some(ChatStatisticsFetch::Failed(_))
+    ));
+}

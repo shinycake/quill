@@ -228,10 +228,12 @@ impl StatsState {
         self.graph_requests.insert(extra, key);
     }
 
-    /// Forget a request that could not be sent.
+    /// A request that could not be sent: the graph is failed, not absent,
+    /// so the section shows Retry and drawing never asks again.
     pub(crate) fn graph_unsent(&mut self, extra: RequestId) {
         if let Some(key) = self.graph_requests.remove(&extra) {
-            self.graphs.remove(&key);
+            self.graphs
+                .insert(key, GraphFetch::Failed("not sent".to_string()));
         }
     }
 
