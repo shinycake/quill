@@ -186,17 +186,18 @@ fn the_log_holds_exactly_its_size_in_removals() {
 /// updates of chats it never replies to walk none of its messages.
 #[test]
 fn replies_follow_inserts_edits_and_removals() {
-    use crate::telegram::envelope::MessageReplyTo;
-    let reply = |chat: i64, id: i64| MessageReplyTo {
-        chat_id: ChatId(chat),
-        message_id: MessageId(id),
-        quote_text: None,
-        quote_entities: Vec::new(),
-        content_preview: None,
-        origin: None,
-        origin_send_date: 0,
-        content: None,
-        story_id: 0,
+    use crate::telegram::envelope::{MessageReplyTo, ReplyToMessage};
+    let reply = |chat: i64, id: i64| {
+        MessageReplyTo::Message(ReplyToMessage {
+            chat_id: ChatId(chat),
+            message_id: MessageId(id),
+            quote_text: None,
+            quote_entities: Vec::new(),
+            content_preview: None,
+            origin: None,
+            origin_send_date: 0,
+            content: None,
+        })
     };
     let mut messages = three();
     assert!(!messages.replies_to(8, 30));

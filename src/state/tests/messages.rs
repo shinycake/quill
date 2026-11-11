@@ -692,7 +692,7 @@ fn reply_to_message_preview_and_jump() {
         .get(&104)
         .unwrap();
     assert_eq!(
-        reply.reply_to.as_ref().map(|r| r.message_id),
+        reply.reply_to.as_ref().map(|r| r.message_id()),
         Some(MessageId(101))
     );
     assert_eq!(
@@ -700,7 +700,7 @@ fn reply_to_message_preview_and_jump() {
         Some("Hello from injected JSON.")
     );
     assert_eq!(
-        session.begin_chat_search_jump(reply.reply_to.as_ref().unwrap().message_id),
+        session.begin_chat_search_jump(reply.reply_to.as_ref().unwrap().message_id()),
         ChatSearchJumpNeed::AlreadyReady
     );
     assert_eq!(

@@ -388,7 +388,7 @@ impl HistoryMessages {
                 .map
                 .values()
                 .filter_map(|message| message.reply_to.as_ref())
-                .map(|reply| (reply.chat_id.0, reply.message_id.0))
+                .map(|reply| (reply.chat_id().0, reply.message_id().0))
                 .collect();
             replies.0 = self.revision;
         }

@@ -172,10 +172,23 @@ pub struct MessageForwardInfo {
     pub psa_type: String,
 }
 
-/// Same-chat / known-chat reply metadata from `message.reply_to`.
-/// Stories and unknown `MessageReplyTo` variants are dropped (out of scope).
+/// Same-chat / known-chat reply metadata from `message.reply_to`: a reply
+/// to a message, or to a story. Unknown `MessageReplyTo` variants are
+/// dropped (out of scope).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MessageReplyTo {
+pub enum MessageReplyTo {
+    /// `messageReplyToMessage`.
+    Message(ReplyToMessage),
+    /// `messageReplyToStory`: the poster's chat and the story.
+    Story {
+        poster_chat_id: ChatId,
+        story_id: i32,
+    },
+}
+
+/// `messageReplyToMessage`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplyToMessage {
     pub chat_id: ChatId,
     pub message_id: MessageId,
     pub quote_text: Option<String>,
@@ -191,14 +204,70 @@ pub struct MessageReplyTo {
     /// `messageReplyToMessage.content`: the media of an other-chat reply
     /// (null for same-chat replies and replies without media).
     pub content: Option<Box<MessageContent>>,
-    /// `messageReplyToStory.story_id`; 0 for a reply to a message. A story
-    /// reply has `chat_id` = the poster's chat and `message_id` 0.
-    pub story_id: i32,
 }
 
 impl MessageReplyTo {
+    fn message(&self) -> Option<&ReplyToMessage> {
+        match self {
+            Self::Message(reply) => Some(reply),
+            Self::Story { .. } => None,
+        }
+    }
+
+    /// The replied message's chat (0 for the open chat), or the story
+    /// poster's chat.
+    pub fn chat_id(&self) -> ChatId {
+        match self {
+            Self::Message(reply) => reply.chat_id,
+            Self::Story { poster_chat_id, .. } => *poster_chat_id,
+        }
+    }
+
+    /// The replied message; `MessageId(0)` for a story.
+    pub fn message_id(&self) -> MessageId {
+        self.message()
+            .map_or(MessageId(0), |reply| reply.message_id)
+    }
+
+    /// The replied story; 0 for a message.
+    pub fn story_id(&self) -> i32 {
+        match self {
+            Self::Story { story_id, .. } => *story_id,
+            Self::Message(_) => 0,
+        }
+    }
+
+    pub fn is_story(&self) -> bool {
+        matches!(self, Self::Story { .. })
+    }
+
+    pub fn quote_text(&self) -> &Option<String> {
+        self.message().map_or(&None, |reply| &reply.quote_text)
+    }
+
+    pub fn quote_entities(&self) -> &[crate::text::TextEntity] {
+        self.message()
+            .map_or(&[], |reply| reply.quote_entities.as_slice())
+    }
+
+    pub fn content_preview(&self) -> &Option<String> {
+        self.message().map_or(&None, |reply| &reply.content_preview)
+    }
+
+    pub fn origin(&self) -> &Option<MessageOrigin> {
+        self.message().map_or(&None, |reply| &reply.origin)
+    }
+
+    pub fn origin_send_date(&self) -> i32 {
+        self.message().map_or(0, |reply| reply.origin_send_date)
+    }
+
+    pub fn content(&self) -> &Option<Box<MessageContent>> {
+        self.message().map_or(&None, |reply| &reply.content)
+    }
+
     pub fn is_same_chat(&self, open_chat: ChatId) -> bool {
-        self.chat_id.0 == 0 || self.chat_id == open_chat
+        self.chat_id().0 == 0 || self.chat_id() == open_chat
     }
 }
 
@@ -846,7 +915,7 @@ pub(crate) fn parse_reply_to(value: Option<&Value>) -> Option<MessageReplyTo> {
                 .get("content")
                 .filter(|content| !content.is_null())
                 .map(|content| Box::new(parse_content(Some(content)).0));
-            Some(MessageReplyTo {
+            Some(MessageReplyTo::Message(ReplyToMessage {
                 chat_id: ChatId(int53_or_zero(value.get("chat_id"))),
                 message_id: MessageId(message_id),
                 quote_text,
@@ -859,8 +928,7 @@ pub(crate) fn parse_reply_to(value: Option<&Value>) -> Option<MessageReplyTo> {
                     .unwrap_or(0)
                     .sat_i32(),
                 content: reply_content,
-                story_id: 0,
-            })
+            }))
         }
         Some("messageReplyToStory") => {
             let story_id = value
@@ -868,15 +936,8 @@ pub(crate) fn parse_reply_to(value: Option<&Value>) -> Option<MessageReplyTo> {
                 .and_then(Value::as_i64)
                 .and_then(|id| i32::try_from(id).ok())
                 .filter(|id| *id > 0)?;
-            Some(MessageReplyTo {
-                chat_id: ChatId(int53_or_zero(value.get("story_poster_chat_id"))),
-                message_id: MessageId(0),
-                quote_text: None,
-                quote_entities: Vec::new(),
-                content_preview: None,
-                origin: None,
-                origin_send_date: 0,
-                content: None,
+            Some(MessageReplyTo::Story {
+                poster_chat_id: ChatId(int53_or_zero(value.get("story_poster_chat_id"))),
                 story_id,
             })
         }

@@ -314,10 +314,10 @@ fn message_reply_to_message_is_typed() {
     match env.payload {
         EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             let reply = message.reply_to.expect("reply_to");
-            assert_eq!(reply.chat_id.0, 11);
-            assert_eq!(reply.message_id.0, 101);
+            assert_eq!(reply.chat_id().0, 11);
+            assert_eq!(reply.message_id().0, 101);
             assert_eq!(
-                reply.quote_text.as_deref(),
+                reply.quote_text().as_deref(),
                 Some("Hello from injected JSON.")
             );
             assert!(reply.is_same_chat(ChatId(11)));
@@ -332,8 +332,8 @@ fn message_reply_to_message_is_typed() {
         EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             // A story reply keeps the poster's chat and the story id.
             let reply = message.reply_to.expect("story reply");
-            assert_eq!((reply.chat_id, reply.story_id), (ChatId(11), 3));
-            assert_eq!(reply.message_id.0, 0);
+            assert_eq!((reply.chat_id(), reply.story_id()), (ChatId(11), 3));
+            assert_eq!(reply.message_id().0, 0);
         }
         other => panic!("{other:?}"),
     }

@@ -150,13 +150,13 @@ impl ThreadView {
         message.thread_id() == Some(self.thread_id)
             || message.reply_to.as_ref().is_some_and(|reply| {
                 reply.is_same_chat(self.chat_id)
-                    && (reply.message_id.0 == self.thread_id
+                    && (reply.message_id().0 == self.thread_id
                         // A reply to a reply stays in the thread (forum
                         // topics tag their messages with the topic, not the
                         // thread).
                         || (self.forum_topic_id.is_some()
                             && message.topic_id() == self.forum_topic_id
-                            && self.history.messages.contains_key(&reply.message_id.0)))
+                            && self.history.messages.contains_key(&reply.message_id().0)))
             })
     }
 

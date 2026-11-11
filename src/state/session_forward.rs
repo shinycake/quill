@@ -80,27 +80,27 @@ impl Session {
 
     pub fn resolve_reply_preview(&self, reply: &MessageReplyTo, fallback_chat: ChatId) -> String {
         if let Some(quote) = reply
-            .quote_text
+            .quote_text()
             .as_ref()
             .map(|text| text.trim())
             .filter(|text| !text.is_empty())
         {
             return quote.to_string();
         }
-        let chat_id = if reply.chat_id.0 != 0 {
-            reply.chat_id
+        let chat_id = if reply.chat_id().0 != 0 {
+            reply.chat_id()
         } else {
             fallback_chat
         };
         if let Some(original) = self
             .histories
             .get(&chat_id.0)
-            .and_then(|history| history.messages.get(&reply.message_id.0))
+            .and_then(|history| history.messages.get(&reply.message_id().0))
         {
             return effective_preview(original);
         }
         reply
-            .content_preview
+            .content_preview()
             .clone()
             .unwrap_or_else(|| "Message".into())
     }
