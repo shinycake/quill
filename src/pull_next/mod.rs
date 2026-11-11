@@ -307,8 +307,6 @@ impl Default for Reach {
 struct Pull {
     /// How far the edge is stretched.
     amount: f32,
-    /// The pointer was down at the last overscroll (`_holding`).
-    holding: bool,
     reach: Reach,
     /// The UI found a next channel or topic.
     has_next: bool,
@@ -668,7 +666,6 @@ impl PullMachine {
             }
         };
         pull.amount = amount;
-        pull.holding = movement == Movement::Progress;
         let past = amount >= PULL_THRESHOLD;
         match pull.reach {
             Reach::Ready { peak } => {
@@ -805,7 +802,7 @@ impl PullMachine {
             }
         }
         // HintOverlay::setData.
-        let visible = pull.holding && pull.amount > 0.;
+        let visible = self.edge == Edge::Held && pull.amount > 0.;
         self.toggle_hint(visible && pull.has_next, now);
         if self.hint_ready() != ready {
             let from = self.hint_release.value(now);

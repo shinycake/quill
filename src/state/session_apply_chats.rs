@@ -662,7 +662,10 @@ impl Session {
                 .folder_chats_to_leave
                 .entry(folder_id)
                 .or_default()
-                .succeed(chat_ids.iter().map(|id| id.0).collect());
+                .answered(
+                    pending.map(|p| p.id),
+                    chat_ids.iter().map(|id| id.0).collect(),
+                );
         }
         // `getChatFolderNewChats` answer: the "N new chats" bar.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatFolderNewChats)
@@ -689,7 +692,10 @@ impl Session {
                 .entry(folder_id)
                 .or_default()
                 .chats
-                .succeed(chat_ids.iter().map(|id| id.0).collect());
+                .answered(
+                    pending.map(|p| p.id),
+                    chat_ids.iter().map(|id| id.0).collect(),
+                );
         }
         // B10: profile panel lists (groups in common, similar channels,
         // personal channel candidates).
@@ -702,9 +708,10 @@ impl Session {
         // composer's "post as" picker options. Runs before the
         // search branch below consumes `chat_ids`.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatsToPostStories) {
-            self.stories
-                .post_as
-                .succeed(chat_ids.iter().map(|id| id.0).collect());
+            self.stories.post_as.answered(
+                pending.map(|p| p.id),
+                chat_ids.iter().map(|id| id.0).collect(),
+            );
         }
         // Parity slice: `getChatNotificationSettingsExceptions`
         // answer — the scope is correlated via `pending.scope`

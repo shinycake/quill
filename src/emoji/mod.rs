@@ -325,7 +325,14 @@ impl Session {
     }
 
     /// Slice S10: store the installed emoji sets.
-    pub fn accept_installed_emoji_sets(&mut self, sets: Vec<StickerSetInfo>) {
+    pub fn accept_installed_emoji_sets(
+        &mut self,
+        request: Option<crate::ids::RequestId>,
+        sets: Vec<StickerSetInfo>,
+    ) {
+        if !self.stickers.emoji.lists.installed.answered(request, ()) {
+            return;
+        }
         self.remember_cover_files(&sets);
         let installed: std::collections::HashSet<_> = sets.iter().map(|set| set.id).collect();
         for set in self
@@ -337,7 +344,6 @@ impl Session {
         {
             set.is_installed = installed.contains(&set.id);
         }
-        self.stickers.emoji.lists.installed.succeed(());
         self.stickers.emoji.installed_sets = sets;
     }
 
@@ -370,9 +376,15 @@ impl Session {
     }
 
     /// Slice S10: store a `searchStickerSets` answer (emoji type).
-    pub fn accept_found_emoji_sets(&mut self, sets: Vec<StickerSetInfo>) {
+    pub fn accept_found_emoji_sets(
+        &mut self,
+        request: Option<crate::ids::RequestId>,
+        sets: Vec<StickerSetInfo>,
+    ) {
+        if !self.stickers.emoji.lists.search.answered(request, ()) {
+            return;
+        }
         self.remember_cover_files(&sets);
-        self.stickers.emoji.lists.search.succeed(());
         self.stickers.emoji.found_sets = sets;
     }
 
@@ -411,7 +423,7 @@ impl Session {
                 }
             }
             EnvelopePayload::Stickers(StickersPayload::EmojiCategories { categories, files }) => {
-                self.accept_emoji_categories(purpose, categories, files);
+                self.accept_emoji_categories(purpose, request, categories, files);
             }
             _ => {}
         }
@@ -464,15 +476,21 @@ impl Session {
     pub fn accept_emoji_categories(
         &mut self,
         purpose: Option<RequestPurpose>,
+        request: Option<crate::ids::RequestId>,
         categories: Vec<EmojiCategory>,
         files: Vec<ParsedFile>,
     ) {
         if purpose == Some(RequestPurpose::GetEmojiCategories) {
             self.remember_files(&files);
             self.stickers.emoji.categories = categories;
-        } else if purpose == Some(RequestPurpose::GetStickerCategories) {
+        } else if purpose == Some(RequestPurpose::GetStickerCategories)
+            && self
+                .stickers
+                .emoji
+                .sticker_categories
+                .answered(request, categories)
+        {
             self.remember_files(&files);
-            self.stickers.emoji.sticker_categories.succeed(categories);
         }
     }
 

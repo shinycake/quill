@@ -170,7 +170,7 @@ fn the_admin_sees_the_server_hint_and_an_ended_stream_closes(cx: &mut TestAppCon
     app.update(&mut main, |app, cx| {
         let session = app.demo_session.as_mut().expect("demo");
         if let Some(active) = session.calls.active_group_call.as_mut() {
-            active.stream = StreamState::Ended;
+            active.media.set_stream_state(StreamState::Ended);
         }
         // Outside a draw: the test platform draws every dirty window in
         // one pass and cannot lose one in the middle of it.

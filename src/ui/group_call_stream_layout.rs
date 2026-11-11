@@ -246,7 +246,7 @@ impl QuillApp {
             id: call.id,
             chat,
             title,
-            stream: call.stream,
+            stream: call.media.stream_state(),
             joined: call.is_joined,
             manager: call.can_be_managed,
             viewers: call.viewer_count,

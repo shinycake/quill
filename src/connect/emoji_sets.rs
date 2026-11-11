@@ -318,6 +318,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if let Some(list) = self.session.stickers.emoji.lists.for_purpose(purpose) {
             list.begin();
+            list.sent(extra);
         }
         Ok(Some(extra))
     }

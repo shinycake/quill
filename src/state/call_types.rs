@@ -15,19 +15,17 @@ pub struct ActiveCall {
     pub user_id: i64,
     pub is_outgoing: bool,
     pub is_video: bool,
-    /// TDLib's phase of the call as its last `updateCall` said; read
-    /// through [`Self::phase`], which says `HangingUp` while a hang-up is in
-    /// flight.
-    pub state: CallState,
+    /// How far the call got and TDLib's last word on it, as one value:
+    /// `callStateReady`'s record exists exactly from the Ready update on.
+    /// Read the state through [`Self::state`] and the phase to show through
+    /// [`Self::phase`], which says `HangingUp` while a hang-up is in flight.
+    pub progress: CallProgress,
     /// What this side did to the call: answered it, or hung it up (the
     /// `discardCall` in flight owns the `HangingUp` phase).
     pub action: CallAction,
     /// When the call was created (outgoing) or first rang (incoming) —
     /// drives the "ringing" time on the overlay.
     pub started_at: Instant,
-    /// The call is ready (`callStateReady`): what it carried and when it
-    /// arrived, where the call-duration clock starts. `None` before.
-    pub ready: Option<CallReady>,
     /// The media transport, its retained connect parameters and its
     /// error, as one value (see `CallTransport`).
     pub transport: CallTransport,
@@ -66,13 +64,6 @@ pub struct ActiveCall {
     /// Why your microphone, level tap or shared screen stopped, for the
     /// call window. It lives and dies with the call.
     pub media_note: Option<String>,
-}
-
-/// What `callStateReady` brought, and when.
-#[derive(Debug, Clone)]
-pub struct CallReady {
-    pub params: Option<ReadyParams>,
-    pub since: Instant,
 }
 
 /// How a call ended, from its terminal update.
@@ -295,11 +286,7 @@ impl ActiveCall {
             user_id,
             is_outgoing,
             is_video,
-            ready: matches!(state, CallState::Ready).then(|| CallReady {
-                params: ready,
-                since: Instant::now(),
-            }),
-            state,
+            progress: CallProgress::first(state, ready, Instant::now()),
             action: CallAction::Idle,
             started_at: Instant::now(),
             transport: CallTransport::default(),
@@ -326,7 +313,7 @@ impl ActiveCall {
         if self.action.hang_up().is_some() {
             CallState::HangingUp
         } else {
-            self.state.clone()
+            self.state().clone()
         }
     }
 
@@ -362,8 +349,8 @@ impl ActiveCall {
 
     /// Seconds since `callStateReady` (the billable call duration).
     pub fn connected_secs(&self) -> i64 {
-        self.ready
-            .as_ref()
+        self.progress
+            .ready()
             .map(|ready| ready.since.elapsed().as_secs() as i64)
             .unwrap_or(0)
     }
@@ -371,7 +358,15 @@ impl ActiveCall {
     /// The parameters `callStateReady` carried (the key emojis, the group
     /// call support).
     pub fn ready_params(&self) -> Option<&ReadyParams> {
-        self.ready.as_ref().and_then(|ready| ready.params.as_ref())
+        self.progress
+            .ready()
+            .and_then(|ready| ready.params.as_ref())
+    }
+
+    /// TDLib's last state of the call (the phase to show is
+    /// [`Self::phase`]).
+    pub fn state(&self) -> &CallState {
+        self.progress.state()
     }
 }
 
@@ -526,14 +521,12 @@ pub struct ActiveGroupCall {
     pub join_as_options: crate::state::fetch::Fetch<Vec<MessageSender>>,
     /// The identity the next join uses; `None` joins as yourself.
     pub join_as: Option<MessageSender>,
-    /// How the joined call carries media, from the engine after the
-    /// native connect (`CallEngine::group_call_mode`). Stream modes get their
-    /// segments from TDLib (`calls::engine::StreamFeeder`).
-    pub stream_mode: crate::calls::engine::GroupCallMode,
-    /// What a stream-mode call shows: connecting, nobody broadcasting,
-    /// live, ended or not playable on this build. Meaningful only while
-    /// `stream_mode` is a stream mode.
-    pub stream: crate::calls::engine::StreamState,
+    /// How the joined call carries media, from the engine after the native
+    /// connect (`CallEngine::group_call_mode`), and for a stream mode what
+    /// the call shows: connecting, nobody broadcasting, live, ended or not
+    /// playable on this build. Stream modes get their segments from TDLib
+    /// (`calls::engine::StreamFeeder`).
+    pub media: crate::state::GroupMedia,
     /// `participant_count` as the stream's "{count} viewers" (tdesktop
     /// shows no listener rows for RTMP streams).
     pub viewer_count: u32,
@@ -768,8 +761,7 @@ impl ActiveGroupCall {
             is_video_recorded: false,
             join_as_options: Default::default(),
             join_as: None,
-            stream_mode: Default::default(),
-            stream: Default::default(),
+            media: Default::default(),
             viewer_count: 0,
             paid_message_star_count: 0,
             message_sender_id: None,

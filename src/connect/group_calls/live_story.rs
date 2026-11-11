@@ -601,7 +601,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn live_story_live_key(&self) -> Option<LiveKey> {
         let live = self.session.stories.live.as_ref()?;
         let call = self.watched_live_call()?;
-        if call.stream_mode.is_stream() {
+        if call.media.is_stream() {
             return Some(LiveKey::Stream {
                 chat_id: live.chat_id,
             });

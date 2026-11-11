@@ -282,7 +282,11 @@ impl Session {
             }
             // The next look at the sticker preview asks again.
             Some(RequestPurpose::GetPremiumStickerExamples) => {
-                self.payments.hub.premium_stickers.fail(error_reason(err));
+                self.payments.hub.premium_stickers.failed(
+                    pending.map(|p| p.id),
+                    error_reason(err),
+                    false,
+                );
             }
             _ => {}
         }

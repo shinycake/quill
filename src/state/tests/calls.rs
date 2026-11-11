@@ -442,7 +442,11 @@ fn other_discard_errors_leave_the_hang_up_alone() {
     // TDLib's own hanging-up update is kept as the phase to go back to.
     apply_json(&mut session, &seq, &sink, &hanging_up_update_json(77, 41));
     assert_eq!(
-        session.calls.active_call.as_ref().map(|c| c.state.clone()),
+        session
+            .calls
+            .active_call
+            .as_ref()
+            .map(|c| c.state().clone()),
         Some(CallState::HangingUp)
     );
     assert!(session.calls.hang_up().is_some());

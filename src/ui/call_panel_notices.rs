@@ -210,10 +210,9 @@ mod tests {
             user_id: 11,
             is_outgoing: true,
             is_video: false,
-            state,
+            progress: quill::state::CallProgress::first(state, None, std::time::Instant::now()),
             started_at: std::time::Instant::now(),
             action: quill::state::CallAction::Idle,
-            ready: None,
             transport: transport.map_or_else(Default::default, |state| {
                 CallTransport::reported(state, Default::default()).unwrap_or(
                     CallTransport::Failed {

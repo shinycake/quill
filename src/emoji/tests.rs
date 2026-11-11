@@ -508,7 +508,10 @@ fn a_chat_windows_custom_emoji_count_as_shown() {
 fn an_empty_installed_list_is_loaded_only_after_its_answer() {
     let (mut session, _) = session();
     assert!(session.stickers.emoji.lists.installed.can_ask());
-    session.accept_installed_emoji_sets(Vec::new());
+    let request = session.request(RequestPurpose::GetInstalledEmojiSets, None);
+    session.stickers.emoji.lists.installed.begin();
+    session.stickers.emoji.lists.installed.sent(request);
+    session.accept_installed_emoji_sets(Some(request), Vec::new());
     assert!(!session.stickers.emoji.lists.installed.can_ask());
     session.invalidate_installed_emoji_sets();
     assert!(session.stickers.emoji.lists.installed.can_ask());

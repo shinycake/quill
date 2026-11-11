@@ -7,7 +7,7 @@ use super::*;
 use crate::calls::engine::{
     BroadcastPartAnswer, BroadcastPartStatus, BroadcastRequestId, CallEngine, EngineEvent,
     GroupCallMode, ReplyOutcome, SegmentFetch, StreamFeeder, StreamFetchError, StreamPort,
-    StreamQuality, StreamReply, StreamState,
+    StreamQuality, StreamReply,
 };
 use crate::calls::speaker_levels::LevelGate;
 use crate::calls::stream_audio::gain::clamp_volume;
@@ -231,7 +231,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .session
                 .calls
                 .group_call(group_call_id)
-                .map(|call| call.stream)
+                .map(|call| call.media.stream_state())
                 .unwrap_or_default();
             let watch = self
                 .group_call_streams
@@ -328,8 +328,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .and_then(|engine| engine.group_call_mode(chat_id))
             .unwrap_or_default();
         if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
-            call.stream_mode = mode;
-            call.stream = StreamState::Connecting;
+            call.media = crate::state::GroupMedia::connected(mode);
         }
         if !mode.is_stream() {
             return;
@@ -579,7 +578,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             let Some(call) = self.session.calls.group_call_mut(group_call_id) else {
                 continue;
             };
-            if !call.stream_mode.is_stream() {
+            if !call.media.is_stream() {
                 continue;
             }
             let Some(feeder) = self
@@ -590,8 +589,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             else {
                 continue;
             };
-            call.stream = feeder.stream_state();
-            let (chat_id, state) = (feeder.chat_id(), call.stream);
+            call.media.set_stream_state(feeder.stream_state());
+            let (chat_id, state) = (feeder.chat_id(), call.media.stream_state());
             self.sync_stream_feed(chat_id, state);
         }
     }

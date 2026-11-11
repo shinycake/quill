@@ -586,7 +586,9 @@ impl Session {
             }
             MessagesPayload::MessageAutoDeleteTime { seconds } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetDefaultAutoDelete) {
-                    self.settings.default_auto_delete.succeed(seconds);
+                    self.settings
+                        .default_auto_delete
+                        .answered(pending.map(|p| p.id), seconds);
                 }
             }
             // M1: `getMessageLink` returns `messageLink`. The driver

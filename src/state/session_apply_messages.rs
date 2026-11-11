@@ -87,7 +87,7 @@ impl Session {
                 .chat_preview_fetch
                 .entry(chat_id)
                 .or_default()
-                .succeed(messages.to_vec());
+                .answered(Some(pending.id), messages.to_vec());
             return;
         }
         if let Some(pending) = pending
@@ -285,7 +285,7 @@ impl Session {
                     .pinned_messages
                     .entry(chat_id.0)
                     .or_default()
-                    .succeed(rows);
+                    .answered(pending.map(|p| p.id), rows);
             }
             return;
         }

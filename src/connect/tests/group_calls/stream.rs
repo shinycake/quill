@@ -91,7 +91,7 @@ fn stream_state(driver: &ConnectDriver<Arc<RecordingSender>>) -> (GroupCallMode,
         .active_group_call
         .as_ref()
         .expect("tracked call");
-    (call.stream_mode, call.stream)
+    (call.media.mode(), call.media.stream_state())
 }
 
 #[test]
@@ -631,7 +631,7 @@ fn a_refused_stream_connect_is_a_join_error_not_a_crash() {
         .expect("call");
     assert!(!call.transport.is_connected());
     assert!(call.transport.error().is_some());
-    assert_ne!(call.stream, StreamState::Live);
+    assert_ne!(call.media.stream_state(), StreamState::Live);
     // The spent answer is not tried again by the next update: the engine
     // would accept it now, and the call must still be failed.
     assert!(call.transport.answer().is_empty());

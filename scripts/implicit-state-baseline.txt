@@ -1,7 +1,6 @@
 
 # Implicit-state debt (scripts/check-implicit-state.py). Only remove lines.
 
-ActiveGroupCall::loaded_all_participants
 
 
 BackendStatus::failed
@@ -65,7 +64,6 @@ SettingsState::pending_attention
 
 
 State::started
-Step::started
 
 StreamFacts::transport_failed
 Tempo::done

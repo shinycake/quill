@@ -1,3 +1,6 @@
 # Purpose checks and unmatched answers that need no RequestId (scripts/check-request-match.py).
 # One per line: <rule>:<Type::function> <reason>
 unmatched:Session::apply_earn the own account's "has Stars statistics" fact (EarnState::self_stats, a Fetch<()>): any getStarRevenueStatistics answer for the own account proves it, the probe's or the open page's, so it is not tied to one request. The page's own data in the same arm is matched by waits_for
+unmatched:ConnectDriver::ingest an accepted unpinAllChatMessages empties the chat's pinned list by definition: a local effect of the mutation's own ok, with no fetch request to answer (a getPinnedMessages still in flight is dropped by its own, now matched, answer)
+unmatched:LiveStoryState::set_donors the `None` arm is the pushed updateLiveStoryTopDonors, which names no request; the answer to our own getLiveStoryTopDonors is matched by `answered(Some(asked))` in the other arm
+unmatched:Session::apply_groups_payload updateChatWelcomeMessages is a pushed update (no request exists to match); every answer in this function is taken by `answered`

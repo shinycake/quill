@@ -14,15 +14,16 @@ impl Session {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::EmojiAnimations) => self.stickers.animations.failed(),
             Some(RequestPurpose::GetStickerCategories) => {
-                self.stickers
-                    .emoji
-                    .sticker_categories
-                    .fail(call_request_error_line(
+                self.stickers.emoji.sticker_categories.failed(
+                    pending.map(|p| p.id),
+                    call_request_error_line(
                         err,
                         crate::lang::tr(
                             crate::lang::keys::Q_MEDIA_COULD_NOT_LOAD_STICKER_CATEGORIES,
                         ),
-                    ));
+                    ),
+                    false,
+                );
             }
             Some(RequestPurpose::GetGreetingStickers) => {
                 self.stickers.stickers.greeting.failed(
@@ -134,9 +135,6 @@ impl Session {
             self.stickers.stickers.suggest_for = SuggestFor::Nothing;
         }
         let emoji_purpose = pending.map(|p| p.purpose);
-        if emoji_purpose == Some(RequestPurpose::GetInstalledEmojiSets) {
-            self.stickers.emoji.lists.installed.fail(error_reason(err));
-        }
         if emoji_purpose == Some(RequestPurpose::SetEmojiStatus)
             && matches!(
                 self.stickers.emoji.status_change,
@@ -165,9 +163,11 @@ impl Session {
                 .failed_request(pending.map(|p| p.id));
         }
         if let Some(list) = emoji_purpose.and_then(|p| self.stickers.emoji.lists.for_purpose(p)) {
-            list.fail(crate::lang::tr(
-                crate::lang::keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS,
-            ));
+            list.failed(
+                pending.map(|p| p.id),
+                crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS),
+                false,
+            );
         }
         if matches!(
             pending.map(|p| p.purpose),

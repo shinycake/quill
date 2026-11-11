@@ -369,6 +369,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             Ok(()) => {
                 self.session.stories.post_as.begin();
+                self.session.stories.post_as.sent(extra);
                 Ok(Some(extra))
             }
             Err(err) => {

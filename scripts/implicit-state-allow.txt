@@ -18,3 +18,4 @@ ChecklistDialog::others_can_mark_tasks_as_done+error the "Allow Others to Mark A
 ChecklistDraft::others_can_mark_tasks_as_done the frozen "Allow Others to Mark As Done" setting of the new checklist; not a stage
 ChecklistSend::others_can_mark_tasks_as_done the "Allow Others to Mark As Done" setting sent with the new checklist; not a stage
 ReceivedGift::is_saved TDLib's receivedGift.is_saved: whether the gift is shown on the profile page, the server's own setting, flipped only after the server confirmed toggleGiftIsSaved; not a stage of anything Quill runs
+Step::started the one-shot answer of a wheel call (a pull began this call): returned to the caller, merged per call, never stored, so it is no stage

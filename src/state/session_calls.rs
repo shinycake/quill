@@ -35,21 +35,12 @@ impl Session {
             if call.state.is_terminal() {
                 self.end_active_call(call);
             } else {
-                if matches!(call.state, CallState::Ready) {
-                    match active.ready.as_mut() {
-                        Some(ready) => ready.params = call.ready.clone(),
-                        None => {
-                            active.ready = Some(CallReady {
-                                params: call.ready.clone(),
-                                since: Instant::now(),
-                            })
-                        }
-                    }
-                }
                 active.is_video = call.is_video;
                 // A hang-up in flight keeps showing ([`ActiveCall::phase`]);
                 // the update is where the call stands if it fails.
-                active.state = call.state.clone();
+                active
+                    .progress
+                    .update(call.state.clone(), call.ready.clone(), Instant::now());
             }
             return;
         }
@@ -473,6 +464,7 @@ impl Session {
     pub(crate) fn set_group_call_join_as_options(
         &mut self,
         group_call_id: i32,
+        request: Option<RequestId>,
         senders: Vec<MessageSender>,
     ) {
         let default = self.chats.values().find_map(|chat| {
@@ -483,19 +475,25 @@ impl Session {
         });
         if let Some(tracked) = self.calls.active_group_call.as_mut()
             && tracked.id == group_call_id
+            && request.is_some_and(|request| tracked.join_as_options.waits_for(request))
         {
             tracked.join_as = pick_join_as(&senders, tracked.join_as, default);
-            tracked.join_as_options.succeed(senders);
+            tracked.join_as_options.answered(request, senders);
         }
     }
 
     /// `getVideoChatAvailableParticipants` failed: the picker is optional,
     /// so the call keeps no list and the join goes ahead as yourself.
-    pub(crate) fn fail_group_call_join_as_options(&mut self, group_call_id: i32, error: &str) {
+    pub(crate) fn fail_group_call_join_as_options(
+        &mut self,
+        group_call_id: i32,
+        request: Option<RequestId>,
+        error: &str,
+    ) {
         if let Some(tracked) = self.calls.active_group_call.as_mut()
             && tracked.id == group_call_id
         {
-            tracked.join_as_options.fail(error);
+            tracked.join_as_options.failed(request, error, false);
         }
     }
 

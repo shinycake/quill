@@ -521,8 +521,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if previews.len() >= 8 {
             previews.clear();
         }
-        previews.entry(chat_id).or_default().begin();
         let extra = self.session.request(purpose, Some(chat_id));
+        let preview = self
+            .session
+            .chat_list
+            .chat_preview_fetch
+            .entry(chat_id)
+            .or_default();
+        preview.begin();
+        preview.sent(extra);
         if let Err(err) = self.sender.send_json(&get_chat_history(
             extra,
             chat_id,

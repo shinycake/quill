@@ -4,6 +4,7 @@
 //! `screen_share_answer`, which were kept in step by hand and could say two
 //! things at once (ready and failed, pending and sharing).
 
+use crate::calls::engine::{GroupCallMode, StreamState};
 use crate::ids::RequestId;
 
 /// Where the call's native transport stands.
@@ -96,6 +97,63 @@ impl GroupTransport {
     /// and error are gone.
     pub fn reset(&mut self) {
         *self = Self::NoTransport;
+    }
+}
+
+/// How a joined group call carries its media, with what the call window
+/// shows for a stream: the state exists only for a stream mode, so a WebRTC
+/// call has none to read stale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GroupMedia {
+    /// WebRTC, or not connected yet.
+    #[default]
+    Rtc,
+    /// Segments come from TDLib: an MTProto stream or an RTMP feed (`mode`
+    /// is never `Rtc`), and what the window shows for it.
+    Stream {
+        mode: GroupCallMode,
+        state: StreamState,
+    },
+}
+
+impl GroupMedia {
+    /// The engine's mode after the native connect; a stream mode starts
+    /// connecting.
+    pub fn connected(mode: GroupCallMode) -> Self {
+        if mode.is_stream() {
+            Self::Stream {
+                mode,
+                state: StreamState::Connecting,
+            }
+        } else {
+            Self::Rtc
+        }
+    }
+
+    pub fn mode(&self) -> GroupCallMode {
+        match self {
+            Self::Rtc => GroupCallMode::Rtc,
+            Self::Stream { mode, .. } => *mode,
+        }
+    }
+
+    pub fn is_stream(&self) -> bool {
+        matches!(self, Self::Stream { .. })
+    }
+
+    /// The stream's state; a call without a stream reads `Connecting`.
+    pub fn stream_state(&self) -> StreamState {
+        match self {
+            Self::Rtc => StreamState::Connecting,
+            Self::Stream { state, .. } => *state,
+        }
+    }
+
+    /// The feeder's state; a call without a stream has none to take it.
+    pub fn set_stream_state(&mut self, next: StreamState) {
+        if let Self::Stream { state, .. } = self {
+            *state = next;
+        }
     }
 }
 

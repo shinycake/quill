@@ -8057,7 +8057,7 @@ Round 2, file-complete bundle: `premium_hub/ton.rs`, `ton_withdraw.rs`,
 | 04-029, 04-030 | `GramsHub::peers: BTreeMap<PeerKey, PeerAsk>`; `PeerAsk::Asked(RequestId)` / `Missing`. The four sets and the `ChatId(user_id)` smuggled in the pending request are gone; a refusal marks only the peer its own request asked. The rows and their peers cursor are one `TxRows`, so a cleared list restarts the cursor by construction. |
 | 04-031 | The balance probe holds its `RequestId` in `Fetch::Loading` and takes only that answer. A failed probe is asked again on the next Settings open (`settings_closed` from the tick, never a re-send from the tick while Settings is open); a probe that never left is a failure, not a re-send every poll. |
 | 04-032, 04-033, 02-063 | `GramWithdraw::{Password{error}, Sending(RequestId), SecurityCheck, Finished(WithdrawOutcome)}`: one value for the box and its outcome. The window takes the outcome once (`take_withdraw_outcome`); `GramsHub::close` drops an outcome nobody acted on. |
-| 04-046, 04-047, 04-048 | Pull gesture: `Stage::{Idle, Pulling, Released, Jumping}`; `Reach::{Stretching{dwell_due}, Ready{peak}}` inside the pull, so the dwell timer and the peak live and die with their stage; `Expand::{Settled, Running(Tween)}` replaces `ExpandRun` beside the tween. |
+| 04-046, 04-047, 04-048 | Pull gesture: `Stage::{Idle, Pulling, Released, Jumping}`; `Reach::{Stretching{dwell_due}, Ready{peak}}` inside the pull, so the dwell timer and the peak live and die with their stage; `Expand::{Settled, Running(Tween)}` replaces `ExpandRun` beside the tween. Review round: `Pull::holding` is deleted: the indicator reads `PullMachine::edge == Edge::Held` (the stage of the edge) instead of a copy written in `handle()`. `Step::started` is the one-shot answer of a wheel call (a pull began in this call), returned and merged per call, never stored: it moved from the baseline to `implicit-state-allow.txt` with that reason. |
 | 04-051 | `rename_account` goes through `update_registry` like every other writer. |
 | 04-055 | `ignore_battery_saving` is tdesktop's own user setting (keep animations while the battery saver is on), independent of `power_saving`; moved to `implicit-state-allow.txt` with that reason. |
 | 04-056 | `WallpaperSource::{Theme, Color(rgb), Telegram}` in the prefs; the file keeps `wallpaper_rgb` and `telegram_wallpaper` through a serde adapter (Telegram wins when both are set, as before). |
@@ -8068,14 +8068,14 @@ Round 2, file-complete bundle: `premium_hub/ton.rs`, `ton_withdraw.rs`,
 | 05-006 | `GroupScreenShare::{Off, Starting{request, answer}, Sharing, Paused}`: pause exists only on a connected share and ends with it; `screen_share_paused` is deleted. |
 | 05-007 | `ActiveGroupCall::my_video: MyVideo::{Off, On, Paused}`. |
 | 05-008 | `ActiveGroupCall::rtmp: Option<RtmpInfo>`. |
-| 05-009 | The `HangingUp` copy is gone: the hang-up lives in the call as `CallAction::{Idle, Answered, HangingUp(HangUp)}` (replaces `CallProgress`, so it ends with its call), and `ActiveCall::phase()` says `HangingUp` while it is in flight; `ActiveCall::state` is always TDLib's last phase and `HangUp::resume` is deleted. `ready` stays: it is the Ready phase's payload and clock start, written at the one transition into Ready and kept through a hang-up; `transport` is the engine's own stage enum with its own exits. |
+| 05-009 | The `HangingUp` copy is gone: the hang-up lives in the call as `CallAction::{Idle, Answered, HangingUp(HangUp)}` (replaces `CallProgress`'s old hang-up copy, so it ends with its call), and `ActiveCall::phase()` says `HangingUp` while it is in flight; `HangUp::resume` is deleted. Review round: `ActiveCall::{state, ready}` are one value, `progress: CallProgress::{Signaling(CallState), Ready{ready, state}}` (`state/call_progress.rs`): the Ready record (key parameters, clock start) exists exactly from the Ready update on, is kept through a later hang-up state, and a state without its record (or the reverse) cannot be built; `update` is the only writer. `transport` stays a field of its own, by its writers and readers: it is the engine's report (`pump_call_engine`, `record_start_error`), written before Ready (a failed start) and after TDLib's terminal update (the engine closing), and read only through `started()` / `state()` / `error()`; no reader combines it with the TDLib state, so no combination of the two is invalid. |
 | 05-010 | `ChatSummary::last: Option<LastPreview>` built by one constructor; the preview, style, sender, thumbnail and message identity cannot disagree. |
 | 05-011 | `LinkPreviewFetch::Asked(RequestId)`, settled in the reducer (`settle_composer_link_preview`) by the request: the side map `composer_preview_urls` and the connect-core captures are deleted. A swept request settles the chip as `Failed`. |
 | 05-012 | `ComposerReplyFetch::Loading{request, attempts}`; answers, errors and sweeps match the request. |
 | 05-061 | `GroupScreenShare::Starting{request, ..}`; `store_answer` and `fail_start` take only that request. |
-| 05-062 | Sticker lists, greeting stickers, emoji icon lists (profile, chat, background) and live story extras (streamer, donors, senders) record their request (`begin` + `sent`) and take `answered` / `failed` with it. The other ~290 `succeed` / `fail` callers are not migrated in this bundle: each needs its sender to record its request. `scripts/check-fetch-answers.py` freezes them per file (`fetch-unmatched-baseline.txt`) and fails a new one. |
-| 05-064 | `Loading(RequestId)` in `PollStatsFetch`, `InviteLinkCountsFetch`, `AdminRightsFetch`, `AdminListFetch`, `SupergroupMembersFetch`, `PollVotersFetch`, `InlineQueryFetch`; `ChatStatisticsFetch::Loading{is_dark, request}`; `ChatEventLogFetch::Loading(RequestId)`. Every answer and error is applied only to the stage that waits for its request. |
-| 05-065 | `ChatEventLogFetch::{Idle, Loading(request), Loaded(LoadedEventLog{page, older, poll}), Failed}`; `EventLogWait` is deleted. A refresh drops the stage and every request asked under the old query. |
+| 05-062 | **Open (partly fixed).** Sticker lists, greeting stickers, emoji icon lists, live story extras, and in this review round the emoji installed and search lists, the sticker category strip, the Premium sticker preview, the default auto-delete timer, the account TTL, saved sounds, storage statistics, active sessions, connected websites, the chat peek preview, the pinned list, the "Post as" list, the folder leave and folder-share chat lists, the "join as" list, the earn app config and the TON explorer URL record their request (`begin` + `sent`) and take `answered` / `failed` with it, in every file the bundle owns or touched; each family has a both-orders test (`state/tests/matched_answers.rs`). Three calls in those files take no request on purpose and are in `request-match-allow.txt` with the reason (the unpin-all local effect, the pushed live-story donors, the pushed welcome messages). The callers in other bundles' files stay in `request-match-baseline.txt` (the guard's own count, which only shrinks): the entry stays open for them. This branch's second guard (`check-fetch-answers.py`, `fetch-unmatched-baseline.txt`) is deleted; `check-request-match.py` counts the same callers. |
+| 05-064 | `Loading(RequestId)` in `PollStatsFetch`, `InviteLinkCountsFetch`, `AdminRightsFetch`, `AdminListFetch`, `PollVotersFetch`; `ChatStatisticsFetch::Loading{is_dark, request}`. Every answer and error is applied only to the stage that waits for its request. `SupergroupMembersFetch`, `InlineQueryFetch` and `ChatEventLogFetch` keep the shapes of `claude/sweep-r2-followup` (merged in, which rebuilt the member list, inline query and event log: `MemberAsk`, `InlineMore`, `EventLogWait`, `OlderEvents`); the request of their first page lives there. `InlineBotResolve::Resolving` keeps its `generation` ticket (the request carries the same one in `ResolveInlineBot`), in `stage-enums-allow.txt`. |
+| 05-065 | **Open after the merge.** The event log is the follow-up's shape (`ChatEventLogFetch::Loading` beside `EventLog::wait: EventLogWait`, `OlderEvents` in the page); this bundle's own `LoadedEventLog` was dropped for it, as the reviewer's note says. The first page's request is still in `EventLogWait::page` beside the bare `Loading`: left as the follow-up built it (its bundle owns the rebuild); `bare:ChatEventLogFetch::Loading` and `bare:SupergroupMembersFetch::Loading` stay in the stage-enum baseline. |
 | 05-066 | `TransferStage::Sending{request, transfer}`, `OwnerLookup::Loading(RequestId)`, the check in `Fetch::Loading{request}`; `fail_ownership_transfer` ends only the transfer waiting for its request (it overwrote `Idle` and `Done`). |
 
 **Found on the second read (new-NN).**
@@ -8102,15 +8102,34 @@ Round 2, file-complete bundle: `premium_hub/ton.rs`, `ton_withdraw.rs`,
   request, so a refresh that drops it and asks again is not answered by the
   request it replaced.
 
-**Left as they are, with the reason.**
+**Review round (r2-17).**
 
-- `ActiveGroupCall::stream_mode` and `stream`: `stream` is written only by
-  the stream feeder while the call is in a stream mode; it is meaningful only
-  then. They do not change together (the mode is set once after the native
-  connect). Folding them is a change to the engine's `GroupCallMode`, which
-  this bundle does not own.
-- `ActiveGroupCall::is_joined` is TDLib's flag; `rejoin` is Quill's own
-  stage beside it and is reset by the joined update.
+- `ActiveGroupCall::stream_mode` and `stream` are one value now:
+  `media: GroupMedia::{Rtc, Stream{mode, state}}` (`state/group_call_stage.rs`).
+  A WebRTC call has no stream state to read stale (`stream_state()` reads
+  `Connecting`, as the default did); the feeder's state is written only into a
+  stream (`set_stream_state`), and the mode is set once after the native
+  connect (`GroupMedia::connected`). `GroupCallMode` itself is unchanged.
+- `ActiveGroupCall::is_joined` and `rejoin` are independent, by their writers:
+  `is_joined` is written only from TDLib's `groupCall.is_joined`
+  (`apply_group_call_fields`; the screenshot demos set it directly), and
+  `rejoin` is Quill's own series (`want`, `attempt_*`, `leave`, `rejoined`),
+  which reads `is_joined` only as the not-joined to joined edge at the update.
+  Every combination is meaningful: `is_joined` with `Left` is "the user left
+  and TDLib has not said so yet", `Wanted` with `is_joined` is a drop TDLib
+  reports with `need_rejoin`. `loaded_all_participants` is TDLib's own report
+  mirrored as is (the allow file has the line; the baseline line is dropped).
+- `ActiveCall::ready` is folded into `progress` (05-009 above).
+- The stage-enum baseline lines of the bundle's files that are no stage have
+  reasons in `stage-enums-allow.txt` (derived marks, answered markers, the
+  engine's own transport report, the TDLib withdrawal state, the
+  `InlineBotResolve` ticket); the member list and event log ones stay in the
+  baseline with the follow-up's shapes (05-065 above).
+- Merge overlaps with `claude/sweep-r2-followup`: the event log, member
+  lists and inline query take its shapes; the request-carrying `Loading`
+  stages of the other families, the ownership stages and the `GroupScreenShare`
+  pause stay; `begin_ownership_check` is called after its request exists.
+
 ### Sweep fixes (r2-05)
 
 | id | what changed |

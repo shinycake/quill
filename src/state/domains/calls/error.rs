@@ -335,6 +335,7 @@ impl Session {
                 group_call_id,
             })) => self.fail_group_call_join_as_options(
                 group_call_id,
+                pending.map(|p| p.id),
                 &call_request_error_line(err, "Couldn't load who you can join as"),
             ),
             // A failed "Add People" search ends it with what the other

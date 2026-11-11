@@ -66,14 +66,14 @@ impl Session {
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetInstalledEmojiSets)
                 {
                     // Slice S10: emoji `stickerSets` land in the emoji panel (see emoji.rs).
-                    self.accept_installed_emoji_sets(sets);
+                    self.accept_installed_emoji_sets(pending.map(|p| p.id), sets);
                 } else if let Some(RequestPurpose::Stickers(
                     StickersPurpose::GetArchivedEmojiSets { first_page },
                 )) = pending.map(|p| p.purpose)
                 {
                     self.accept_archived_emoji_sets(sets, first_page);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SearchEmojiSets) {
-                    self.accept_found_emoji_sets(sets);
+                    self.accept_found_emoji_sets(pending.map(|p| p.id), sets);
                 }
             }
             // Slice S15: `updateInstalledStickerSets` — TDLib's authoritative
@@ -165,7 +165,10 @@ impl Session {
                 } else if purpose == Some(RequestPurpose::GetRecentStickers) {
                     self.accept_recent_stickers(stickers);
                 } else if purpose == Some(RequestPurpose::GetPremiumStickerExamples) {
-                    self.payments.hub.premium_stickers.succeed(stickers);
+                    self.payments
+                        .hub
+                        .premium_stickers
+                        .answered(pending.map(|p| p.id), stickers);
                 } else if purpose == Some(RequestPurpose::GetGreetingStickers) {
                     self.stickers
                         .stickers
