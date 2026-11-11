@@ -9,7 +9,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::live_state::{
-    LiveDelete, LiveJoin, LiveStarsBox, SendAction, StarsBoxMode, StarsFlow, send_action,
+    AfterStars, LiveDelete, LiveJoin, LiveStarsBox, SendAction, StarsBoxMode, StarsFlow,
+    send_action,
 };
 use super::*;
 use crate::ui::media_panel::PanelTab;
@@ -233,10 +234,15 @@ impl QuillApp {
         let chosen = self.stories.live.chosen_stars;
         match send_action(&levels, &text, chosen, price, admin) {
             SendAction::EditPrice => {
-                self.open_live_stars_box(StarsBoxMode::Comment, 0, false, cx);
+                self.open_live_stars_box(StarsBoxMode::Comment, 0, AfterStars::Nothing, cx);
             }
             SendAction::NeedsStars(required) => {
-                self.open_live_stars_box(StarsBoxMode::Comment, required, true, cx);
+                self.open_live_stars_box(
+                    StarsBoxMode::Comment,
+                    required,
+                    AfterStars::SendComment,
+                    cx,
+                );
             }
             SendAction::Send => {
                 if text.trim().is_empty() {
@@ -293,7 +299,7 @@ impl QuillApp {
     /// your own live story it opens the box (tdesktop `Reply::paidReact`).
     pub(super) fn tap_live_stars(&mut self, cx: &mut Context<Self>) {
         if self.live_story_admin() {
-            self.open_live_stars_box(StarsBoxMode::Admin, 0, false, cx);
+            self.open_live_stars_box(StarsBoxMode::Admin, 0, AfterStars::Nothing, cx);
             return;
         }
         self.add_live_stars(QUICK_STARS, cx);
@@ -374,13 +380,13 @@ impl QuillApp {
     }
 
     /// Opens the Stars box. `min` is the least it allows (the Stars a
-    /// waiting comment needs); `then_send` sends that comment after (only a
+    /// waiting comment needs); `then` sends that comment after (only a
     /// send that needs Stars asks for it).
     pub(super) fn open_live_stars_box(
         &mut self,
         mode: StarsBoxMode,
         min: i64,
-        then_send: bool,
+        then: AfterStars,
         cx: &mut Context<Self>,
     ) {
         let max = self.session().map_or(2, Session::live_max_stars);
@@ -421,7 +427,7 @@ impl QuillApp {
             stars,
             min,
             slider,
-            then_send,
+            then,
         });
         self.open_box(crate::ui::shell::DialogKind::LiveStoryStars);
         if let Some(live) = self.live.as_mut() {
@@ -468,7 +474,7 @@ impl QuillApp {
             StarsBoxMode::Reaction => self.add_live_stars(boxed.stars, cx),
             StarsBoxMode::Comment => {
                 self.stories.live.chosen_stars = boxed.stars;
-                if boxed.then_send {
+                if boxed.then == AfterStars::SendComment {
                     self.send_live_comment(window, cx);
                 }
             }

@@ -47,8 +47,17 @@ pub(in crate::ui) struct LiveStarsBox {
     pub(super) stars: i64,
     pub(super) min: i64,
     pub(super) slider: Entity<SliderState>,
-    /// The comment waiting for these Stars (a send that needed more).
-    pub(super) then_send: bool,
+    /// What the box's button does besides adding the Stars.
+    pub(super) then: AfterStars,
+}
+
+/// What confirming the Stars box does after setting the Stars.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::ui) enum AfterStars {
+    /// Only set them.
+    Nothing,
+    /// Send the comment that waited for them (a send that needed more).
+    SendComment,
 }
 
 /// The Stars flow of the comment field, as one value: closed, the box open,
@@ -127,12 +136,11 @@ pub(in crate::ui) type LiveTarget = (ChatId, i32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::ui) enum LiveJoin {
     Idle,
-    /// Joined (or joining). `seen_call`: the call was seen tracked since
-    /// the join, so its end is noticed.
-    Watching {
-        target: LiveTarget,
-        seen_call: bool,
-    },
+    /// The join is out; the call is not seen tracked yet.
+    Joining(LiveTarget),
+    /// Joined: the call was seen tracked since the join, so its end is
+    /// noticed.
+    Joined(LiveTarget),
     /// The join was refused: the viewer's upkeep does not join it again,
     /// only the "Join live" button; another story (or none) clears it.
     Refused(LiveTarget),
@@ -142,7 +150,7 @@ impl LiveStoryUi {
     /// The live story the viewer joined.
     pub(in crate::ui) fn watching(&self) -> Option<LiveTarget> {
         match self.join {
-            LiveJoin::Watching { target, .. } => Some(target),
+            LiveJoin::Joining(target) | LiveJoin::Joined(target) => Some(target),
             _ => None,
         }
     }
@@ -155,20 +163,11 @@ impl LiveStoryUi {
     }
 
     pub(super) fn seen_call(&self) -> bool {
-        matches!(
-            self.join,
-            LiveJoin::Watching {
-                seen_call: true,
-                ..
-            }
-        )
+        matches!(self.join, LiveJoin::Joined(_))
     }
 
     pub(in crate::ui) fn start_watching(&mut self, target: LiveTarget) {
-        self.join = LiveJoin::Watching {
-            target,
-            seen_call: false,
-        };
+        self.join = LiveJoin::Joining(target);
     }
 
     pub(super) fn refuse(&mut self, target: LiveTarget) {
@@ -183,14 +182,14 @@ impl LiveStoryUi {
     }
 
     pub(super) fn mark_call_seen(&mut self) {
-        if let LiveJoin::Watching { seen_call, .. } = &mut self.join {
-            *seen_call = true;
+        if let LiveJoin::Joining(target) = self.join {
+            self.join = LiveJoin::Joined(target);
         }
     }
 
     pub(super) fn forget_call_seen(&mut self) {
-        if let LiveJoin::Watching { seen_call, .. } = &mut self.join {
-            *seen_call = false;
+        if let LiveJoin::Joined(target) = self.join {
+            self.join = LiveJoin::Joining(target);
         }
     }
 }

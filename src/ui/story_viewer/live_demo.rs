@@ -10,7 +10,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::live_effects::star_burst;
-use super::live_state::{EFFECT_DURATION, FlyingStars, StarsBoxMode};
+use super::live_state::{AfterStars, EFFECT_DURATION, FlyingStars, StarsBoxMode};
 use crate::ui::app::QuillApp;
 use crate::ui::calls::demo_feed::{DemoFeed, demo_feed};
 use crate::ui::demo::{demo_file_json, demo_media_allowlist};
@@ -169,7 +169,7 @@ impl QuillApp {
     fn demo_live_story_box(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         self.seed_demo_live_story(cx);
         self.stories.live.chosen_stars = 50;
-        self.open_live_stars_box(StarsBoxMode::Comment, 50, false, cx);
+        self.open_live_stars_box(StarsBoxMode::Comment, 50, AfterStars::Nothing, cx);
     }
 
     fn demo_live_story_portrait(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
