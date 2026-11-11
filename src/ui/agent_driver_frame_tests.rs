@@ -6,7 +6,7 @@ use gpui_kit::TestAppContext;
 use quill::agent::activity;
 use quill::agent::grants::Scope;
 use quill::agent::ui_driver::bridge::{Target, UiReply, UiSend};
-use quill::agent::ui_driver::redact::{self, chat_tag};
+use quill::agent::ui_driver::redact;
 use quill::agent::ui_driver::surface::DriverScope;
 use serde_json::Value;
 
