@@ -244,10 +244,12 @@ fn a_typed_link_opens_its_box_in_the_window_it_was_clicked_in(cx: &mut TestAppCo
     h.app.update(cx, |app, _| {
         app.note_window_pointer(None);
         app.set_window_scope(None);
-        app.links.pending_deep_link_ui = Some(quill::deep_link_types::DeepLinkUi::ConferenceCall {
-            link: "https://t.me/call/abc".into(),
-        });
-        app.links.pending_flow_window = Some(OTHER);
+        app.links.resolved = Some(crate::ui::links_state::ResolvedLink::ui(
+            quill::deep_link_types::DeepLinkUi::ConferenceCall {
+                link: "https://t.me/call/abc".into(),
+            },
+            Some(OTHER),
+        ));
     });
     let app = h.app.clone();
     cx.update_window(h.main, |_, window, cx| {

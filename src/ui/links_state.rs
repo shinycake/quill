@@ -67,23 +67,114 @@ impl QueuedLink {
     }
 }
 
+/// What a resolved link waits for the frame to do.
+pub(super) enum ResolvedStep {
+    /// `parity:platform-deep-links`: resolved chat + action waiting for
+    /// render (which owns the `Window`) to open it.
+    Open(PendingOpen),
+    /// A typed link that needs the `Window` (`deep_link_routes`).
+    Ui(quill::deep_link_types::DeepLinkUi),
+}
+
+/// A resolved link waiting for render, with the chat window it was clicked
+/// in (`None`: the main window): the boxes it opens belong to it. One value,
+/// so a link never waits with another's window, and a newer one replaces it
+/// whole.
+pub(super) struct ResolvedLink {
+    pub(super) window: Option<ChatId>,
+    pub(super) step: ResolvedStep,
+}
+
+#[cfg(test)]
+impl ResolvedLink {
+    pub(super) fn open(open: PendingOpen, window: Option<ChatId>) -> Self {
+        Self {
+            window,
+            step: ResolvedStep::Open(open),
+        }
+    }
+
+    pub(super) fn ui(ui: quill::deep_link_types::DeepLinkUi, window: Option<ChatId>) -> Self {
+        Self {
+            window,
+            step: ResolvedStep::Ui(ui),
+        }
+    }
+}
+
+/// Where the deep-link flow in progress stands in this window's UI, with the
+/// chat window it was asked from (`None`: the main window).
+#[derive(Default)]
+pub(super) enum LinkFlow {
+    #[default]
+    Idle,
+    /// The session resolves the link. The origin is taken with the flow's
+    /// state at each pump and put back only while the flow goes on, so every
+    /// terminal state leaves none behind.
+    Running { from: Option<ChatId> },
+    /// An invite preview waits for the user's answer (`DeepLinkInvite`).
+    Asking { invite: quill::state::DeepLinkState },
+}
+
+impl LinkFlow {
+    /// A flow asked from `from` starts; an unanswered invite gives way to it.
+    pub(super) fn start(&mut self, from: Option<ChatId>) {
+        *self = Self::Running { from };
+    }
+
+    /// The origin of the running flow, which is no longer running: a step
+    /// that goes on puts it back with [`Self::resume`].
+    pub(super) fn take_origin(&mut self) -> Option<ChatId> {
+        match self {
+            Self::Running { from } => {
+                let from = *from;
+                *self = Self::Idle;
+                from
+            }
+            Self::Idle | Self::Asking { .. } => None,
+        }
+    }
+
+    /// The flow goes on from `from`; an invite being asked stays.
+    pub(super) fn resume(&mut self, from: Option<ChatId>) {
+        if !matches!(self, Self::Asking { .. }) {
+            *self = Self::Running { from };
+        }
+    }
+
+    /// The invite preview the user is asked about.
+    pub(super) fn invite(&self) -> Option<&quill::state::DeepLinkState> {
+        match self {
+            Self::Asking { invite } => Some(invite),
+            Self::Idle | Self::Running { .. } => None,
+        }
+    }
+
+    pub(super) fn ask(&mut self, invite: quill::state::DeepLinkState) {
+        *self = Self::Asking { invite };
+    }
+
+    /// The invite is answered or dropped.
+    pub(super) fn take_invite(&mut self) -> Option<quill::state::DeepLinkState> {
+        match std::mem::take(self) {
+            Self::Asking { invite } => Some(invite),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+}
+
 pub(crate) struct LinkUi {
     /// `parity:platform-deep-links`: TDLib's info / error text for the
     /// deep link, shown in a dialog (`DialogKind::DeepLinkInfo`).
     pub(super) deep_link_dialog: Option<String>,
-    pub(super) deep_link_invite: Option<quill::state::DeepLinkState>,
-    /// A typed link that needs the `Window` (`deep_link_routes`).
-    pub(super) pending_deep_link_ui: Option<quill::deep_link_types::DeepLinkUi>,
-    /// `parity:platform-deep-links`: resolved chat + action waiting for
-    /// render (which owns the `Window`) to open it.
-    pub(super) pending_deep_link_open: Option<PendingOpen>,
-    /// The chat window the link flow in progress was asked from. Taken
-    /// with the flow's state at each step, as the agent origin is.
-    pub(super) flow_window: Option<ChatId>,
-    /// The chat window the resolved link waiting for render
-    /// (`pending_deep_link_ui`, `pending_deep_link_open`) was clicked in:
-    /// the boxes it opens belong to it.
-    pub(super) pending_flow_window: Option<ChatId>,
+    /// The deep-link flow in progress: its origin window, or the invite
+    /// preview it asks about.
+    pub(super) flow: LinkFlow,
+    /// A resolved link waiting for the frame of its window to run it.
+    pub(super) resolved: Option<ResolvedLink>,
     /// B1: password prompt for `inlineKeyboardButtonTypeCallbackWithPassword`.
     pub(super) callback_password_dialog: Option<CallbackPasswordDialog>,
     /// B1: `loginUrlInfoRequestConfirmation` domain/url awaiting user consent.
@@ -119,14 +210,20 @@ impl crate::ui::on_screen::Farewell for LinkUi {
 }
 
 impl LinkUi {
+    /// The chat a resolved link waits to open, if it is that kind.
+    #[cfg(test)]
+    pub(super) fn waiting_open(&self) -> Option<&PendingOpen> {
+        match self.resolved.as_ref().map(|link| &link.step) {
+            Some(ResolvedStep::Open(open)) => Some(open),
+            _ => None,
+        }
+    }
+
     pub(super) fn new() -> Self {
         Self {
             deep_link_dialog: None,
-            deep_link_invite: None,
-            pending_deep_link_ui: None,
-            pending_deep_link_open: None,
-            flow_window: None,
-            pending_flow_window: None,
+            flow: LinkFlow::Idle,
+            resolved: None,
             callback_password_dialog: None,
             login_url_confirm: None,
             bot_alert: None,

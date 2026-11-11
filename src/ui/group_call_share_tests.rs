@@ -152,7 +152,8 @@ fn a_chat_gets_the_link_in_its_message_box(cx: &mut TestAppContext) {
         app.open_group_call_share_links(cx);
         app.share_group_call_link_to(chat, cx);
         // Taken before the next frame opens the chat.
-        let pending = app.links.pending_deep_link_open.take();
+        let pending = app.links.waiting_open().cloned();
+        app.links.resolved = None;
         assert_eq!(
             pending,
             Some(crate::ui::links_state::PendingOpen::user(
