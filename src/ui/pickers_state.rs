@@ -12,12 +12,10 @@ pub(crate) struct PickerUi {
     /// The emoji status selector's search (cleared on each open).
     pub(super) status_search_input: Entity<TextareaState>,
     /// The emoji packs box's search: typing searches once it pauses
-    /// (`emoji_sets_search_typed`); `emoji_set_keystroke` counts the edits so
-    /// only the last one searches, and `emoji_set_return_tab` is the tab an
-    /// emptied field goes back to.
+    /// (`emoji_sets_search_typed`); `emoji_sets_view` holds the tab the bar
+    /// shows and the pause being waited out.
     pub(super) emoji_set_search_input: Entity<InputState>,
-    pub(super) emoji_set_keystroke: u64,
-    pub(super) emoji_set_return_tab: quill::emoji::EmojiSetTab,
+    pub(super) emoji_sets_view: super::emoji_sets::SetsView,
     pub(super) emoji_set_scroll: ScrollHandle,
     pub(super) emoji_search_input: Entity<TextareaState>,
     /// The reaction selector's own search (cleared on each open).
@@ -88,8 +86,7 @@ impl PickerUi {
             media_panel: super::media_panel::MediaPanel::default(),
             status_search_input,
             emoji_set_search_input,
-            emoji_set_keystroke: 0,
-            emoji_set_return_tab: quill::emoji::EmojiSetTab::default(),
+            emoji_sets_view: super::emoji_sets::SetsView::default(),
             emoji_set_scroll: ScrollHandle::new(),
             emoji_search_input,
             reaction_search_input,
