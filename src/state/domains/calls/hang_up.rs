@@ -156,3 +156,41 @@ impl Session {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hang_up(call_id: i32) -> HangUp {
+        HangUp::new(RequestId(9), call_id, CallState::ExchangingKeys)
+    }
+
+    #[test]
+    fn a_failed_hang_up_goes_back_to_answered_or_idle() {
+        let mut progress = CallProgress::Idle;
+        progress.answer(5);
+        progress.hang_up_sent(hang_up(5));
+        assert!(progress.hang_up().is_some());
+        assert!(
+            progress.hang_up_failed(Some(RequestId(8))).is_none(),
+            "another request"
+        );
+        assert!(progress.hang_up_failed(Some(RequestId(9))).is_some());
+        assert_eq!(progress.answered_call(), Some(5));
+        progress.call_ended(5);
+        assert_eq!(progress, CallProgress::Idle);
+        progress.hang_up_sent(hang_up(6));
+        progress.hang_up_failed(Some(RequestId(9)));
+        assert_eq!(progress, CallProgress::Idle);
+    }
+
+    #[test]
+    fn a_failed_answer_leaves_the_call_ringing() {
+        let mut progress = CallProgress::Idle;
+        progress.answer(5);
+        progress.answer_failed(6);
+        assert_eq!(progress.answered_call(), Some(5), "another call's failure");
+        progress.answer_failed(5);
+        assert_eq!(progress, CallProgress::Idle);
+    }
+}

@@ -397,3 +397,49 @@ impl PaymentsState {
         }
     }
 }
+
+#[cfg(test)]
+mod checkout_tests {
+    use super::*;
+    use crate::telegram::envelope::PaymentFormTypeData;
+
+    fn form() -> PaymentFormData {
+        PaymentFormData {
+            id: 1,
+            form_type: PaymentFormTypeData::Stars { star_count: 5 },
+            seller_bot_user_id: 0,
+            product_title: String::new(),
+            product_description: String::new(),
+        }
+    }
+
+    #[test]
+    fn only_the_form_asked_for_opens_the_checkout() {
+        let mut checkout = CheckoutForm::Loading {
+            request: RequestId(2),
+        };
+        assert!(checkout.waits_for(Some(RequestId(2))));
+        assert!(
+            !checkout.waits_for(Some(RequestId(1))),
+            "an earlier checkout's fetch"
+        );
+        assert!(!checkout.waits_for(None));
+        assert!(checkout.form().is_none());
+        checkout = CheckoutForm::Ready(form());
+        assert!(checkout.form().is_some());
+        assert!(!checkout.is_loading());
+    }
+
+    #[test]
+    fn a_verification_step_ends_with_the_payment_answer_and_paid_stays_paid() {
+        let mut checkout = CheckoutForm::Ready(form());
+        checkout.mark_verifying();
+        assert!(checkout.is_verifying());
+        checkout.end_verification();
+        assert!(!checkout.is_verifying() && checkout.form().is_some());
+        checkout.mark_paid();
+        assert!(checkout.is_paid());
+        checkout.mark_verifying();
+        assert!(checkout.is_paid(), "a paid form is never sent twice");
+    }
+}
