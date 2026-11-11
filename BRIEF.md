@@ -104,3 +104,14 @@ tdesktop does); skip it with a one-line reason when it is not real, cannot happe
 Fix the real ones with the smallest change that removes the cause. A test per fix still applies where testable.
 The integration branch already carries every S1–S3 fix: re-read the code, many S4 lines moved or were fixed in
 passing (say "already fixed by <commit>" and skip).
+
+## IS bundles (implicit state)
+
+IS entries are not user-visible bugs. Each one names a struct whose stages are kept in step by hand: bools, `Option`s used as flags, a side list beside a stage, or a one-shot slot that nothing clears. The goal is that a re-run of the sweep finds nothing, so a fix means the shape is gone, not commented.
+
+- For each entry, read the struct and every reader and writer of the named `fields`. Replace them with one enum (or `Fetch<T>`, or an existing stage type) whose variants carry their data. Every stage needs a way out: the answer, the error, a cancel, or the owner going away. Answers must be matched to the request that asked (`RequestId` in the stage).
+- Keep behaviour the same unless the entry shows a real bug. The register's `effect` says what goes wrong. If the conversion fixes a bug, add a test for it. A pure reshape only needs the existing tests to keep passing; add a test where a new stage exit can be driven.
+- Skip an entry only when the fields already form one value or are truly independent (two settings, not two stages). Give the reason in one line. "It works today" is not a reason.
+- `scripts/implicit-state-baseline.txt` lists grandfathered fields. Drop the line of every field you convert. Also convert any other baseline field in the files your bundle touches when the change is local. The target is an empty baseline.
+- Bundles are cut so that no two bundles share a file or a struct. If you need a change in a file outside your bundle's list, make the smallest one and say so in your final message.
+- Section 8 of the decision doc gets one "Sweep fixes (is-NN)" entry with the id table.
