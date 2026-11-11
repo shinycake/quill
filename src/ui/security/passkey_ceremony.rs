@@ -218,7 +218,7 @@ impl CeremonyUi {
         self.run = CeremonyRun::Ended(reason);
     }
 
-    pub(super) fn qr(&self) -> Option<&hybrid::CableQr> {
+    fn qr(&self) -> Option<&hybrid::CableQr> {
         match &self.run {
             CeremonyRun::Live { qr, .. } => qr.as_ref(),
             CeremonyRun::Ended(_) => None,
