@@ -287,7 +287,7 @@ pub(super) fn hide_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit:
             }
         }
         // The stage ends here whether or not the window is still there.
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             if take_hide_after_full_screen(cx) {
                 let _ = main.update(cx, |_, window, _| hide_or_minimize(window));
             }

@@ -36,6 +36,7 @@ struct MemberRow {
 enum MembersStage {
     /// The session's fetch is out as `request` (`None`: not sent yet).
     Loading {
+        #[expect(dead_code, reason = "names the fetch the drawn rows wait for")]
         request: Option<RequestId>,
     },
     Ready,
