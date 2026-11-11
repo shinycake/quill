@@ -388,3 +388,18 @@ fn the_chooser_goes_with_its_video_chat(cx: &mut TestAppContext) {
         assert!(app.screen_share.window.is_none(), "its call went")
     });
 }
+
+/// A listing that fails opens no chooser, so the call it was for is
+/// forgotten like it is for an empty list: nothing later acts on it.
+#[gpui_kit::test]
+fn a_failed_listing_forgets_the_call_it_was_for(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, ScreenAccess::Granted);
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.screen_share.for_call = Some(ScreenFor::Group);
+        let generation = app.screen_share.generation;
+        let err = quill::calls::capture::CaptureError::Device("gone".into());
+        assert!(!app.screen_chooser_listed(generation, Err(err), cx));
+        assert!(app.screen_share.for_call.is_none());
+        assert!(app.screen_share.window.is_none());
+    });
+}

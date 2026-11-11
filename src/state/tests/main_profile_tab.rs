@@ -88,7 +88,7 @@ fn refused_main_tab_change_surfaces_as_a_notice() {
         ),
     );
     assert_eq!(
-        session.chats_state.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.last(),
         Some("could not save the change (error 400)")
     );
 }

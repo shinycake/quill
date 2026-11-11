@@ -487,3 +487,23 @@ fn a_links_or_bot_load_that_cannot_be_sent_fails_with_retry_not_a_spinner() {
     assert!(driver.ensure_connected_bot().is_ok());
     assert_eq!(count_sent(&recorder, "getBusinessConnectedBot"), 0);
 }
+
+#[test]
+fn a_refused_part_of_the_bot_lookup_lets_the_same_text_ask_again() {
+    let (mut driver, recorder, _sink, _seq) = driver_parts();
+    recorder.refuse(Some("searchPublicChats"));
+    assert!(driver.lookup_business_bot("shop_bot").is_err());
+    assert!(
+        driver
+            .session
+            .settings
+            .business_extra
+            .lookup
+            .query
+            .is_empty()
+    );
+    recorder.refuse(None);
+    driver.lookup_business_bot("shop_bot").unwrap();
+    assert_eq!(count_sent(&recorder, "searchPublicChat"), 2);
+    assert_eq!(count_sent(&recorder, "searchPublicChats"), 1);
+}

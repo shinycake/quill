@@ -396,6 +396,21 @@ fn a_style_the_server_dropped_is_unpicked() {
     assert_eq!(ai.card(), &CardState::Waiting);
 }
 
+/// Sweep 01-055: a Translate card made with a style the server then
+/// removed is replaced by one made without it.
+#[test]
+fn a_translate_style_the_server_dropped_asks_again() {
+    let (mut ai, send) = opened();
+    let styled = ai.select_translate_style(StyleChoice::Style("formal".into()));
+    ai.accept(token(&styled), result("Förmlich"));
+    assert!(matches!(ai.card(), CardState::Ready(_)));
+    let dropped = styles(&[("poet", 0)]);
+    let again = ai.refresh_styles(&dropped).expect("a fresh request");
+    assert_eq!(ai.translate_style(), &StyleChoice::None);
+    assert_ne!(again.token, send.token);
+    assert!(matches!(ai.card(), CardState::Loading { token } if *token == again.token));
+}
+
 #[test]
 fn original_toggle_flips() {
     let (mut ai, _) = opened();

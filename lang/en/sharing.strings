@@ -9,3 +9,5 @@
 "lng_action_no_forwards_accept" = "Accept";
 "lng_action_no_forwards_reject" = "Reject";
 "qll_sharing_answer_failed" = "Could not answer the request";
+"qll_start_files_dropped#one" = "{count} file was not added: too many files were sent at once.";
+"qll_start_files_dropped#other" = "{count} files were not added: too many files were sent at once.";

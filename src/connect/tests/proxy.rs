@@ -615,3 +615,20 @@ fn a_ping_sent_before_an_edit_does_not_land_on_the_edited_entry() {
     rig.feed(json!({"@type": "seconds", "seconds": 0.05, "@extra": before.0.to_string()}));
     assert_eq!(rig.driver.session.settings.proxy.pings.get(&1), None);
 }
+
+/// Sweep 02-189: Edit or Remove refused while another change is out keeps
+/// the proxy's ping result.
+#[test]
+fn a_refused_remove_keeps_the_ping_result() {
+    let mut rig = Rig::new();
+    rig.load_list(&[(1, false), (2, false)]);
+    rig.driver.ping_listed_proxy(1).unwrap();
+    rig.answer("pingProxy", json!({"@type": "seconds", "seconds": 0.0423}));
+    rig.driver.disable_proxy().unwrap();
+    assert!(rig.driver.session.settings.proxy.mutating);
+    assert!(rig.driver.remove_proxy(1).is_err());
+    assert_eq!(
+        rig.driver.session.settings.proxy.pings.get(&1),
+        Some(&PingStatus::Available(42))
+    );
+}

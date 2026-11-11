@@ -87,9 +87,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let answerable = self
             .session
-            .histories
-            .get(&chat_id.0)
-            .and_then(|history| history.messages.get(&message_id.0))
+            .loaded_message(chat_id, message_id)
             .and_then(|message| self.session.sharing_request_view(message))
             .is_some_and(|view| view.buttons);
         if !answerable || self.session.sharing_request_answering(chat_id, message_id) {

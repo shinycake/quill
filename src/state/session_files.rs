@@ -108,7 +108,7 @@ impl Session {
                 || downloads.is_listed(id)
                 || queued.contains(&id)
                 || avatars.contains_key(&id)
-                || open_chat.contains(&id)
+                || open_chat.contains_key(&id)
                 || extras.has_file(id)
                 || sounds.contains_key(&id)
         });

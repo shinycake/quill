@@ -121,6 +121,9 @@ impl QuillApp {
         // reach them, so the drag ends now, unsaved (round 18 B #2).
         if self.chat_list.tab != SidebarTab::Chats || self.search_is_open() {
             self.chat_list.pin_reorder = None;
+            // The rows laid out by the last chats render are not on screen
+            // now: key stepping and file drags must not use that list.
+            self.chat_list.items.clear();
         }
         if self.chat_list.tab == SidebarTab::Contacts {
             return list.child(self.contacts_panel(cx));

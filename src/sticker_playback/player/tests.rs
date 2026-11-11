@@ -975,6 +975,44 @@ fn video_stickers_open_when_no_opener_thread_starts() {
 }
 
 #[test]
+fn a_frame_that_cannot_be_drawn_fails_the_clip_instead_of_being_asked_again() {
+    // The worker "starts" without running; its body is kept, as a started
+    // thread keeps it.
+    let started = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let kept = started.clone();
+    let spawn = move |name: String, body: Box<dyn FnOnce() + Send>| {
+        if name.starts_with("quill-sticker-open") {
+            return Err(std::io::Error::other("no more threads"));
+        }
+        crate::locks::lock_or_recover(&kept).push(body);
+        Ok(())
+    };
+    let engine = engine::Engine::start(1, 64 << 20, &spawn);
+    let key = key(1, 16);
+    engine.open(key, synthetic(16, 3));
+    // No source opened for the key: the draw has nothing to render with,
+    // as when ThorVG returns an error.
+    let woke = worker::work(
+        engine.shared(),
+        &mut std::collections::HashMap::new(),
+        &mut Scratch::default(),
+        engine::Job::Frame {
+            key,
+            id: 1,
+            index: 0,
+            stored: None,
+        },
+    );
+    assert!(woke);
+    assert!(matches!(engine.state(&key), Some(ClipState::Failed(_))));
+    let wanted = crate::locks::lock_or_recover(&engine.shared().state)
+        .clips
+        .get(&key)
+        .map(|clip| clip.wanted.len());
+    assert_eq!(wanted, Some(0));
+}
+
+#[test]
 fn a_head_never_counts_time_twice_when_a_paint_reads_earlier() {
     let tl = timeline(60, 60.0, 1);
     let t0 = Instant::now();

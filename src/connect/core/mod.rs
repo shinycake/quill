@@ -972,7 +972,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         // Contains api_hash — do not log `json`.
         let json = params.to_json(extra);
-        self.sender.send_json(&json)?;
+        if let Err(err) = self.sender.send_json(&json) {
+            // Nothing went out: no dead entry waits for an answer.
+            self.session.requests.take(extra);
+            return Err(err);
+        }
         self.parameters_sent = true;
         self.send_language_options()
     }

@@ -17,7 +17,7 @@ impl QuillApp {
     /// Drain what the last ingest left for the UI. Returns whether anything
     /// was drained (the poll redraws at once).
     pub(super) fn poll_drains(&mut self, cx: &mut Context<Self>) -> bool {
-        let mut progressed = false;
+        let mut progressed = self.drain_storage_editor() | self.drain_twofa_step();
         if let Some(result) = self
             .live
             .as_mut()
@@ -85,6 +85,10 @@ impl QuillApp {
             self.set_note(StatusNote::error(err));
             progressed = true;
         }
+        // The same for a color change after the box closed.
+        if self.dialogs.peer_color_dialog.is_none() && self.take_peer_color_error() {
+            progressed = true;
+        }
         // Message widgets: their bots' answers and public data polls.
         let answers = self
             .live
@@ -106,10 +110,11 @@ impl QuillApp {
         // Slice CL1: a refused chat-list action (`toggleChatIsPinned`,
         // `toggleChatIsMarkedAsUnread`, `deleteChatHistory`) surfaces
         // here instead of silently doing nothing.
-        if let Some(err) = self
+        for err in self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.chats_state.chat_action_error.take())
+            .map(|live| live.driver.session.chats_state.chat_action_error.take_all())
+            .unwrap_or_default()
         {
             self.set_note(StatusNote::error(err));
             progressed = true;
@@ -360,6 +365,8 @@ impl QuillApp {
             | self.drain_peer_qr(cx)
             | self.drain_story_stealth(cx)
             | self.drain_communities(cx)
+            | self.drain_new_chat_done(cx)
+            | self.drain_statistics_theme(cx)
         {
             progressed = true;
         }

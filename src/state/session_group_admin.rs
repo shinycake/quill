@@ -408,6 +408,20 @@ impl Session {
         Some(self.groups.admin_followups.remove(index).1)
     }
 
+    /// A request that will never be answered (swept after its TTL, or
+    /// settled with its account) takes its waiting steps with it and tells
+    /// the person, as a refused request does.
+    pub fn drop_admin_followups_of_lost(&mut self, request: RequestId) {
+        let mut linking = None;
+        while let Some(followup) = self.take_admin_followup(request) {
+            let is_link = matches!(followup, AdminFollowup::LinkAfterHistory { .. });
+            linking = Some(linking.unwrap_or(false) || is_link);
+        }
+        if let Some(linking) = linking {
+            self.chats_state.chat_action_error.push(admin_followup_failure_note(linking));
+        }
+    }
+
     /// The supergroup chat a basic group became (recorded when
     /// `upgradeBasicGroupChatToSupergroupChat` answers).
     pub fn upgraded_chat_for(&self, old: ChatId) -> Option<ChatId> {
@@ -464,5 +478,16 @@ impl Session {
             reactions,
             max_reaction_count: max,
         }
+    }
+}
+
+/// The note shown when a waiting group-admin step could not run.
+pub(crate) fn admin_followup_failure_note(linking: bool) -> String {
+    if linking {
+        "could not link the discussion group".to_string()
+    } else {
+        "the group was upgraded, but the setting could not be applied; \
+         open the group settings to retry"
+            .to_string()
     }
 }

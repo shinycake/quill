@@ -122,6 +122,12 @@ impl RequestPurpose {
                 | RequestPurpose::SearchMessages
                 | RequestPurpose::SearchChatMessages
                 | RequestPurpose::SearchChatMessagesMore
+                | RequestPurpose::SearchMessagesMore
+                | RequestPurpose::SearchPublicPosts
+                | RequestPurpose::SearchPublicPostsMore
+                | RequestPurpose::SearchPublicMessagesByTag
+                | RequestPurpose::GetRecommendedChats
+                | RequestPurpose::CanTransferOwnership
                 | RequestPurpose::SearchChats
                 | RequestPurpose::SearchPublicChats
                 | RequestPurpose::GetSharedMedia { .. }
@@ -153,8 +159,12 @@ impl Session {
     /// The request must already be out of the registry.
     pub(crate) fn settle_lost_request(&mut self, pending: PendingRequest) {
         let extra = pending.id;
+        self.drop_admin_followups_of_lost(extra);
         let seq = self.last_seq;
         let error = TdError::from_code(LOST_REQUEST_ERROR_CODE);
+        // An export's worker waits on its link for this answer: without it
+        // the link stays busy and no further export request goes out.
+        self.settings.fail_lost_export(pending.purpose, extra);
         self.apply_payload_in_asking_view(
             EnvelopePayload::Error(error),
             Some(&pending),
@@ -512,6 +522,9 @@ pub struct PendingRequest {
     /// lands in a view applies to that window's
     /// (`Session::apply_payload_in_asking_view`).
     pub window: Option<ChatId>,
+    /// Which opening of that window it was (`WindowViews::opening_of`):
+    /// a window closed and opened again for the same chat is a new one.
+    pub window_opening: u64,
     /// When the request was registered. The periodic sweep
     /// ([`RequestRegistry::sweep_stale`]) drops dedupe-guard entries whose
     /// answer never came, so a lost response cannot block a chat forever.
@@ -526,6 +539,8 @@ pub struct RequestRegistry {
     /// main window's). `Session::enter_view` keeps it; every request
     /// registered meanwhile carries it (`PendingRequest::window`).
     pub(crate) window: Option<ChatId>,
+    /// The opening of `window` ([`PendingRequest::window_opening`]).
+    pub(crate) window_opening: u64,
     /// In-flight `DownloadFile` requests per file id, so the
     /// already-downloading check does not scan `pending`.
     downloads: HashMap<i32, u32>,
@@ -576,6 +591,7 @@ impl RequestRegistry {
             invite_link: None,
             rollback: None,
             window: self.window,
+            window_opening: self.window_opening,
             created_at: Instant::now(),
         }
     }

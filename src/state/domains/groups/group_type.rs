@@ -316,8 +316,9 @@ impl Session {
         if revoke.failed {
             state.revoke = None;
             state.public_chats = PublicChatsFetch::None;
-            self.chats_state.chat_action_error =
-                Some(crate::lang::tr(crate::lang::keys::Q_GROUP_TYPE_REVOKE_FAILED).to_string());
+            self.chats_state
+                .chat_action_error
+                .push(crate::lang::tr(crate::lang::keys::Q_GROUP_TYPE_REVOKE_FAILED).to_string());
             return;
         }
         state.revoke = None;

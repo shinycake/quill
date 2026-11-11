@@ -97,7 +97,7 @@ impl QuillApp {
                     Some(forum) => forum.unread_topics > 0,
                     None => chat_unread_indicator(chat).is_some(),
                 };
-                let fx = self.frame.row_fx.borrow_mut().observe(
+                let fx = self.chat_list.row_fx.borrow_mut().observe(
                     chat.id.0,
                     online,
                     has_badge,

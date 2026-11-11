@@ -39,7 +39,7 @@ fn pin_over_the_limit_opens_the_pins_box() {
         session.payments.hub.limit_box,
         Some((PremiumLimitKind::Pins, 0))
     );
-    assert_eq!(session.chats_state.chat_action_error, None);
+    assert!(session.chats_state.chat_action_error.is_empty());
 }
 
 #[test]
@@ -53,7 +53,7 @@ fn other_pin_errors_stay_error_lines() {
         "Chat not found",
     );
     assert_eq!(session.payments.hub.limit_box, None);
-    assert!(session.chats_state.chat_action_error.is_some());
+    assert!(!session.chats_state.chat_action_error.is_empty());
 }
 
 #[test]
@@ -153,6 +153,43 @@ fn a_stale_invite_link_join_opens_no_limit_box() {
     assert_eq!(session.payments.hub.limit_box, None);
 }
 
+/// 05-066: a failure of the current flow's request is shown whatever stage
+/// its generation sits in, and an older flow's is still dropped.
+#[test]
+fn a_join_failure_is_shown_when_the_flow_sits_at_the_preview() {
+    let (mut session, sink) = session();
+    session.chats_state.deep_link = Some(DeepLinkState::InvitePreview {
+        hash: "h".into(),
+        title: "Club".into(),
+        member_count: 3,
+        creates_join_request: false,
+        is_channel: false,
+        generation: 3,
+    });
+    fail(
+        &mut session,
+        &sink,
+        RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { generation: 2 }),
+        None,
+        "INVITE_HASH_EXPIRED",
+    );
+    assert!(matches!(
+        session.chats_state.deep_link,
+        Some(DeepLinkState::InvitePreview { .. })
+    ));
+    fail(
+        &mut session,
+        &sink,
+        RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { generation: 3 }),
+        None,
+        "INVITE_HASH_EXPIRED",
+    );
+    assert!(matches!(
+        session.chats_state.deep_link,
+        Some(DeepLinkState::ShowText(_))
+    ));
+}
+
 #[test]
 fn a_saved_messages_pin_over_the_limit_opens_its_own_box() {
     let (mut session, sink) = session();
@@ -167,7 +204,7 @@ fn a_saved_messages_pin_over_the_limit_opens_its_own_box() {
         session.payments.hub.limit_box,
         Some((PremiumLimitKind::SavedPins, 0))
     );
-    assert_eq!(session.chats_state.chat_action_error, None);
+    assert!(session.chats_state.chat_action_error.is_empty());
 }
 
 #[test]

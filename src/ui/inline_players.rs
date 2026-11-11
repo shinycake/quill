@@ -35,6 +35,7 @@
 #![deny(clippy::indexing_slicing)]
 
 mod demand;
+mod revive;
 mod windows;
 
 use super::inline_video::{InlineFrame, InlineTile};
@@ -235,16 +236,27 @@ struct Source {
     duration: Option<f64>,
 }
 
+/// Whether a slot's player has a decoder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Rest {
+    Awake,
+    /// Off screen for [`RELEASE_AFTER`]: the player has no backend, only
+    /// its last picture (`VideoPlayer::hibernate_on_last_picture`), until
+    /// a sweep sees it painted in view.
+    Asleep,
+    /// A sweep saw it in view, but its file no longer opens (deleted,
+    /// moved): the last picture stays as a still and no sweep tries again.
+    /// The slot's row leaving the history ends it.
+    Stuck,
+}
+
 struct Slot {
     player: VideoPlayer,
     source: Source,
     /// Decoded picture memory it may hold (0 for AVPlayer, whose buffers
     /// aren't ours, and for a sleeping slot).
     bytes: usize,
-    /// Off screen for [`RELEASE_AFTER`]: the player has no backend, only
-    /// its last picture (`VideoPlayer::hibernate_on_last_picture`), until
-    /// a sweep sees it painted in view.
-    asleep: bool,
+    rest: Rest,
     /// The windows its row renders in, each with the pass it last
     /// rendered in there (the history's, or its panel's for a [`Panel`]
     /// key), the paint count when that pass began, and whether that
@@ -501,7 +513,10 @@ impl InlineVideos {
                     continue;
                 };
                 let visible = note_sweep(&mut slot.windows, sweep, count, &unseen);
-                if slot.asleep {
+                if slot.rest == Rest::Stuck {
+                    continue;
+                }
+                if slot.rest == Rest::Asleep {
                     // Behind another app only its window's own pass wakes
                     // it: a recheck as every window is hidden (Cmd-H)
                     // would open decoders for clips nobody sees.
@@ -517,7 +532,7 @@ impl InlineVideos {
                     // Never cut a clip short while it is heard.
                     OffScreenStep::Release if slot.sound => {}
                     OffScreenStep::Release => {
-                        slot.asleep = true;
+                        slot.rest = Rest::Asleep;
                         slot.bytes = 0;
                         slot.hidden_since = None;
                         sleepers.push(slot.player.clone());
@@ -545,68 +560,6 @@ impl InlineVideos {
         }
         if hidden {
             self.arm_release(cx);
-        }
-    }
-
-    /// A sleeping slot was painted in view: open a new player for it (if
-    /// the budget admits one), showing the sleeping one's last picture
-    /// until its own, and redraw the histories showing it, whose tiles
-    /// still hold the sleeping one.
-    fn revive(&self, key: Key, source: Source, cx: &mut App) {
-        let Some((held, inactive, views, sleeping)) = self
-            .with(|state| {
-                let slot = state.players.get(&key)?;
-                let views: Vec<EntityId> = slot
-                    .windows
-                    .keys()
-                    .filter_map(|window| state.views.get(window).copied())
-                    .collect();
-                Some((
-                    state.players.values().map(|slot| slot.bytes).sum::<usize>(),
-                    state.inactive,
-                    views,
-                    slot.player.clone(),
-                ))
-            })
-            .flatten()
-        else {
-            return;
-        };
-        if !admits(held, source.bytes) {
-            return;
-        }
-        let Ok(player) = VideoPlayer::open(
-            &source.path,
-            Purpose::Inline {
-                max_edge: source.max_edge,
-            },
-            source.duration,
-            cx,
-        ) else {
-            return;
-        };
-        player.take_picture_from(&sleeping);
-        drop(sleeping);
-        player.set_volume(0.0);
-        player.set_looping(true);
-        // It is in view: play, unless the window is behind another app.
-        if !inactive {
-            player.play();
-        }
-        let mark = player.shown_count();
-        let replaced = self.with(|state| {
-            let slot = state.players.get_mut(&key)?;
-            slot.asleep = false;
-            slot.bytes = source.bytes;
-            for seen in slot.windows.values_mut() {
-                seen.mark = mark;
-            }
-            slot.hidden_since = None;
-            Some(std::mem::replace(&mut slot.player, player))
-        });
-        drop(replaced);
-        for view in views {
-            cx.notify(view);
         }
     }
 
@@ -852,7 +805,7 @@ impl InlineVideos {
             let slot = videos.players.get_mut(&key)?;
             // A sleeping slot's tile paints its last picture and counts
             // being painted; the sweep gives it a player.
-            let command = (!slot.asleep)
+            let command = (slot.rest == Rest::Awake)
                 .then(|| slot.settle(state, running, inactive))
                 .flatten()
                 .map(|command| (slot.player.clone(), command));
@@ -919,7 +872,7 @@ impl InlineVideos {
                         duration,
                     },
                     bytes,
-                    asleep: false,
+                    rest: Rest::Awake,
                     windows: HashMap::from([(
                         window,
                         Seen {
@@ -980,7 +933,7 @@ impl InlineVideos {
             state
                 .players
                 .get(&key)
-                .is_some_and(|slot| slot.hidden_since.is_some() || slot.asleep)
+                .is_some_and(|slot| slot.hidden_since.is_some() || slot.rest != Rest::Awake)
         })
         .unwrap_or(false)
     }
@@ -989,8 +942,13 @@ impl InlineVideos {
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
     pub(super) fn is_asleep(&self, key: Key) -> bool {
-        self.with(|state| state.players.get(&key).is_some_and(|slot| slot.asleep))
-            .unwrap_or(false)
+        self.with(|state| {
+            state
+                .players
+                .get(&key)
+                .is_some_and(|slot| slot.rest != Rest::Awake)
+        })
+        .unwrap_or(false)
     }
 }
 

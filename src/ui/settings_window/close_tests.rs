@@ -325,3 +325,35 @@ fn aborting_the_recovery_email_asks_inside_the_2fa_box(cx: &mut TestAppContext) 
         "the question shows in the 2FA box"
     );
 }
+
+/// A password typed into the Privacy page's check card, not sent, does not
+/// wait there for the next visit.
+#[gpui_kit::test]
+fn a_typed_password_check_is_emptied_when_the_page_is_left(cx: &mut TestAppContext) {
+    let (app, main) = new_app(cx);
+    let mut vcx = VisualTestContext::from_window(main, cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.demo_settings(Page::Account, cx);
+        app.show_settings_page(Page::Privacy, cx);
+        if let Some(session) = app.demo_session.as_mut() {
+            session.settings.privacy_data.check_password_suggested = true;
+        }
+        cx.notify();
+    });
+    frames(vcx);
+    app.update_in(vcx, |app, window, cx| {
+        let field = app.twofa.check_password.clone();
+        field.update(cx, |input, cx| input.set_value("secret", window, cx));
+    });
+    frames(vcx);
+    let typed = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, cx| {
+            app.twofa.check_password.read(cx).value().to_string()
+        })
+    };
+    assert_eq!(typed(&app, vcx), "secret", "kept while the page shows");
+    app.update(vcx, |app, cx| app.show_settings_page(Page::Calls, cx));
+    frames(vcx);
+    assert_eq!(typed(&app, vcx), "", "emptied when the page was left");
+}

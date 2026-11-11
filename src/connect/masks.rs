@@ -213,9 +213,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             .collect();
         for set_id in wanted {
             self.session.stickers.masks.set_requested.insert(set_id);
-            self.mask_request(StickersPurpose::GetMaskSet { set_id }.into(), |id| {
-                get_sticker_set(id, set_id)
-            })?;
+            if let Err(err) = self
+                .mask_request(StickersPurpose::GetMaskSet { set_id }.into(), |id| {
+                    get_sticker_set(id, set_id)
+                })
+            {
+                // Never left: asked again on the next strip refresh.
+                self.session.stickers.masks.set_requested.remove(&set_id);
+                return Err(err);
+            }
         }
         let files: Vec<_> = self
             .session

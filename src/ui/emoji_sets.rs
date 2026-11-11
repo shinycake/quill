@@ -57,6 +57,8 @@ impl QuillApp {
         cx.notify();
     }
     pub(super) fn close_emoji_sets(&mut self, cx: &mut Context<Self>) {
+        // A search still waiting on its pause is for a box that is gone.
+        self.pickers.emoji_set_keystroke = self.pickers.emoji_set_keystroke.wrapping_add(1);
         if let Some(live) = self.live.as_mut() {
             live.driver.session.stickers.emoji.open = false;
         } else if let Some(session) = self.demo_session.as_mut() {

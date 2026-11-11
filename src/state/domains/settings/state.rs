@@ -28,7 +28,17 @@ impl ReadDateStage {
     }
 }
 
+/// How the last `setAutoDownloadSettings` ended, by the request that asked:
+/// the editor that sent it closes on `Saved` and reopens on `Refused`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoDownloadAnswer {
+    Saved(RequestId),
+    Refused(RequestId),
+}
+
 pub struct SettingsState {
+    /// See [`AutoDownloadAnswer`].
+    pub auto_download_answer: Option<AutoDownloadAnswer>,
     /// Mirror of `settings::Preferences::notify_view` (tdesktop "Name" /
     /// "Text"), loaded from `prefs.json` at connect time.
     pub notify_view: crate::notify::NotifyView,
@@ -309,6 +319,29 @@ impl SettingsState {
             .chain(self.rich_html_exports.iter().map(|export| &export.link))
     }
 
+    /// An export's request that will never be answered: its worker waits on
+    /// the link for this answer, so the link is told the send failed.
+    pub(crate) fn fail_lost_export(&mut self, purpose: RequestPurpose, id: RequestId) {
+        match purpose {
+            RequestPurpose::ExportAccount => {
+                if let Some(export) = self.account_export.as_mut() {
+                    export.link.fail_send(id);
+                }
+            }
+            RequestPurpose::ExportChat => {
+                if let Some(export) = self.chat_export.as_mut() {
+                    export.link.fail_send(id);
+                }
+            }
+            RequestPurpose::ExportRichHtml => {
+                for export in &mut self.rich_html_exports {
+                    export.link.fail_send(id);
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             quick_replies: QuickRepliesState::default(),
@@ -341,6 +374,7 @@ impl SettingsState {
             data_storage: DataStoragePrefs::default(),
             data_storage_dirty: false,
             auto_download_presets_loading: false,
+            auto_download_answer: None,
             data_storage_error: None,
             storage_freed: None,
             storage_clearing: false,

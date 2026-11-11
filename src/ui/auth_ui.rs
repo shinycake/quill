@@ -64,8 +64,7 @@ impl QuillApp {
                 email.update(cx, |input, cx| input.set_value("", window, cx));
             }
         }
-        let recovering =
-            ui.recovery_mode && matches!(auth, AuthorizationState::WaitPassword { .. });
+        let recovering = self.recovery_code_step();
         if !recovering {
             let code = ui.recovery_code_input.clone();
             if !code.read(cx).value().is_empty() {

@@ -433,6 +433,11 @@ impl QuillApp {
 
     /// The submenu that is open, by hover or by key.
     fn open_submenu(&self) -> Option<ChatMenuSubmenu> {
+        // The chat list's and community's menus are the main window's: a
+        // chat window's message menu has none, and must not close theirs.
+        if self.windows.in_window() {
+            return None;
+        }
         match (&self.chat_list.menu, &self.admin.community.flow.row_menu) {
             (Some(menu), _) => menu.submenu,
             (None, Some(menu)) => menu.submenu,

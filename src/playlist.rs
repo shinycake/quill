@@ -83,6 +83,20 @@ impl ShuffleState {
         self.played.push(current);
         self.cursor = 0;
     }
+
+    /// Forget played tracks that left the list (deleted messages), keeping
+    /// `current` and its place among the rest.
+    fn retain_listed(&mut self, ids: &[i64], current: i64) {
+        let keep = |id: &i64| *id == current || ids.contains(id);
+        let before = self
+            .played
+            .iter()
+            .take(self.cursor)
+            .filter(|id| keep(id))
+            .count();
+        self.played.retain(keep);
+        self.cursor = before;
+    }
 }
 
 /// How the playlist moves: the playing track, direction, and the modes.
@@ -146,6 +160,7 @@ fn shuffled(
     pick: &mut impl FnMut(usize) -> usize,
 ) -> Option<i64> {
     state.note_current(mv.current);
+    state.retain_listed(ids, mv.current);
     if mv.step == Step::Previous {
         if state.cursor == 0 {
             return None;
@@ -310,6 +325,22 @@ mod tests {
         assert_eq!(g(1, Step::Previous), None);
         assert_eq!(g(1, Step::Next), Some(b));
         assert_eq!(g(b, Step::Next), Some(c));
+    }
+
+    #[test]
+    fn shuffle_previous_skips_a_track_that_was_deleted() {
+        let mut state = ShuffleState::default();
+        let mut g = |ids: &[i64], cur, step| {
+            let m = mv(cur, step, false, RepeatMode::Off, OrderMode::Shuffle);
+            next_track(ids, m, &mut state, |_| 0)
+        };
+        let all = [1, 2, 3, 4];
+        let b = g(&all, 1, Step::Next).unwrap();
+        let c = g(&all, b, Step::Next).unwrap();
+        let without_b: Vec<i64> = all.iter().copied().filter(|id| *id != b).collect();
+        assert_eq!(g(&without_b, c, Step::Previous), Some(1));
+        assert_eq!(g(&without_b, 1, Step::Previous), None);
+        assert_eq!(g(&without_b, 1, Step::Next), Some(c));
     }
 
     #[test]

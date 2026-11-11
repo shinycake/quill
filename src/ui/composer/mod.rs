@@ -62,6 +62,16 @@ impl QuillApp {
         }
     }
 
+    /// A message passed every refusal and is on its way: sending returns
+    /// the reader to the latest messages (the position left behind is not
+    /// where the chat reopens) and its hashtags join the recent ones. A
+    /// send that was refused (slow mode, rights, size, the paid box) did
+    /// neither.
+    fn note_message_leaving(&mut self, text: &str) {
+        self.forget_scroll_on_return_to_latest();
+        self.remember_sent_hashtags(text);
+    }
+
     pub(super) fn submit_composer(
         &mut self,
         text: String,
@@ -127,10 +137,6 @@ impl QuillApp {
                     cx.notify();
                     return;
                 }
-                // Sending returns the reader to the latest messages: the
-                // position left behind is not where the chat reopens.
-                self.forget_scroll_on_return_to_latest();
-                self.remember_sent_hashtags(&text);
                 // M2: the rich editor sends blocks, not text.
                 if self.chat_ui.rich_editor_open {
                     let blocks = quill::rich::markup_to_blocks(&text);
@@ -185,6 +191,7 @@ impl QuillApp {
                         cx.notify();
                         return;
                     }
+                    let text_for_memory = text.clone();
                     let attachments = self.pending_attachments().to_vec();
                     // The viewer's own rights in a group: text needs the
                     // basic right, each attachment its media right.
@@ -370,6 +377,7 @@ impl QuillApp {
                         &snaps,
                     );
                     origin.split = split;
+                    self.note_message_leaving(&text_for_memory);
                     if snaps.iter().any(ComposerSnapshot::needs_media_prep) {
                         self.begin_media_prep(origin, snaps, window, cx);
                     } else {
@@ -386,6 +394,7 @@ impl QuillApp {
                         return;
                     }
                     let attachments = self.pending_attachments().to_vec();
+                    self.note_message_leaving(&text);
                     if attachments.iter().any(|att| {
                         att.kind == AttachmentKind::VideoNote
                             && quill::video::probe_local_video_note(&att.path).is_err()
@@ -573,6 +582,7 @@ impl QuillApp {
             Ok(request) => {
                 // The field is cleared as the send starts; a refusal gives
                 // the text back (`settle_sent_text`).
+                self.note_message_leaving(&typed);
                 self.remember_sent_text(request, typed);
                 self.finish_pending_send();
                 self.chat_ui.schedule_popup_open = false;

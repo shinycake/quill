@@ -40,7 +40,7 @@ src/ui/window_frame.rs NATIVE_FRAME | an app setting
 src/ui/agent_takeover.rs PILL,PROMPT | drawn by the main window only
 src/ui/agent_driver_surface.rs BLOCKED | the agent driver's queue, not drawn
 src/ui/stat_chart/mod.rs CHARTS | keyed by the chart's data
-src/ui/image_budget/retired.rs RETIRED,SWEEPS,FRAME_DONE,WAKE | the app's retired-image queue; waits on every window (SEEN is by WindowId)
+src/ui/image_budget/retired.rs RETIRED,SWEEPS,FRAME_DONE,WAKE,RETRY | the app's retired-image queue; waits on every window (SEEN is by WindowId)
 src/ui/image_budget.rs FRAME | counts every window's frames on purpose
 src/ui/image_budget.rs ACTIVITY,IDLE_TRIMMED | the app's idle trim
 
@@ -95,3 +95,4 @@ src/ui/text_reveal.rs CURRENT | set and restored around one text block's build
 src/ui/bot_stream.rs PINNED | the stream demo's recording clock (demo-capture only)
 src/ui/dialogs/poll.rs NEXT | a counter that only has to give each option slot a number no other slot has
 src/ui/notifications/linux_dbus.rs NOTIFIER | the process's one D-Bus session connection, not a window's
+src/ui/dialogs/contacts.rs NEXT | the import-contacts box and read counter: it only hands out unique tokens, and every window may share it

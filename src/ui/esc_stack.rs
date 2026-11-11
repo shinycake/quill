@@ -295,7 +295,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
             .session()
             .and_then(|session| session.open_chat)
             .is_some_and(|chat| app.selecting_in(chat)),
-        |app, window, cx| app.clear_forward(window, cx)
+        |app, window, cx| app.end_selection(window, cx)
     ),
     layer!(
         "pending-reply",
@@ -326,15 +326,9 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // Side panels beside the conversation go last: they are not modal.
     layer!(
         "downloads-panel",
-        |app| app
-            .session()
-            .is_some_and(|session| session.media.downloads_panel_open),
+        |app| app.downloads_panel_open(),
         |app, _, cx| {
-            if let Some(live) = app.live.as_mut() {
-                live.driver.session.media.downloads_panel_open = false;
-            } else if let Some(session) = app.demo_session.as_mut() {
-                session.media.downloads_panel_open = false;
-            }
+            app.chat_list.downloads_panel_open = false;
             cx.notify();
         }
     ),
@@ -603,9 +597,7 @@ mod dispatch_tests {
                 app.chat_list.archive_menu = Some(point(px(10.), px(10.)));
             }),
             ("downloads-panel", |app, _, _| {
-                if let Some(session) = app.demo_session.as_mut() {
-                    session.media.downloads_panel_open = true;
-                }
+                app.chat_list.downloads_panel_open = true;
             }),
         ]
     }
@@ -624,6 +616,18 @@ mod dispatch_tests {
             }
             assert_eq!(top(&app, vcx), None, "Escape should close {name}");
         }
+    }
+
+    /// Sweep 09-053: the Downloads panel is the screen's, so an account
+    /// coming back on screen finds it closed.
+    #[gpui_kit::test]
+    fn the_downloads_panel_starts_closed_on_a_replaced_screen(cx: &mut TestAppContext) {
+        let (app, mut vcx) = new_app(cx);
+        let vcx = &mut vcx;
+        app.update_in(vcx, |app, _, _| app.chat_list.downloads_panel_open = true);
+        assert_eq!(top(&app, vcx), Some("downloads-panel"));
+        app.update_in(vcx, |app, window, cx| app.replace_screen(window, cx));
+        assert_eq!(top(&app, vcx), None);
     }
 
     /// The video chat window's boxes are drawn in that window: the main

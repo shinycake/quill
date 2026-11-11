@@ -350,7 +350,10 @@ fn a_finished_download_redraws_now_wherever_it_shows() {
 fn the_open_chats_media_downloads_show_live_progress() {
     let mut session = two_chats();
     session.begin_download(crate::ids::FileId(5));
-    session.media.open_chat_media_downloads.insert(5);
+    session
+        .media
+        .open_chat_media_downloads
+        .insert(5, ChatId(11));
     // Progress shows in the conversation only; the update that finishes
     // it can show the picture elsewhere too.
     assert_eq!(need(&session, &file(5, false)), RedrawNeed::Conversation);
@@ -375,7 +378,10 @@ fn chat_with_two_files() -> Session {
             ),
         );
         session.begin_download(crate::ids::FileId(file_id));
-        session.media.open_chat_media_downloads.insert(file_id);
+        session
+            .media
+            .open_chat_media_downloads
+            .insert(file_id, ChatId(11));
     }
     session
 }
@@ -389,6 +395,22 @@ fn progress_of_a_row_off_screen_waits_for_a_batched_redraw() {
     assert_eq!(need(&session, &file(6, true)), RedrawNeed::Now);
     session.note_rows_on_screen(None);
     assert_eq!(need(&session, &file(6, false)), RedrawNeed::Conversation);
+}
+
+/// Sweep 05-195: a chat window reports no rows, so the auto-download of a
+/// chat it draws shows live progress there.
+#[test]
+fn a_chat_windows_auto_download_shows_live_progress() {
+    let mut session = two_chats();
+    session.begin_download(crate::ids::FileId(5));
+    session
+        .media
+        .open_chat_media_downloads
+        .insert(5, ChatId(12));
+    session.note_rows_on_screen(Some(&[]));
+    assert_eq!(need(&session, &file(5, false)), RedrawNeed::Later);
+    session.open_window_chat(ChatId(12));
+    assert_eq!(need(&session, &file(5, false)), RedrawNeed::Conversation);
 }
 
 fn interaction(chat: i64, message: i64) -> String {

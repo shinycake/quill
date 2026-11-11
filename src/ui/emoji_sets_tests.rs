@@ -113,6 +113,26 @@ fn typing_searches_after_a_pause_and_clearing_goes_back(cx: &mut TestAppContext)
     assert!(has(vcx, "emoji-pack-open-1".into()));
 }
 
+/// Sweep 09-078: a search still waiting on its pause does not go out for a
+/// box that was closed meanwhile.
+#[gpui_kit::test]
+fn closing_the_box_cancels_the_search_waiting_on_its_pause(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let input = app.read_with(vcx, |app, _| app.pickers.emoji_set_search_input.clone());
+    vcx.update(|window, cx| {
+        input.update(cx, |input, cx| {
+            input.set_value("trav", window, cx);
+            cx.emit(InputEvent::Change);
+        })
+    });
+    frames(vcx);
+    app.update(vcx, |app, cx| app.close_emoji_sets(cx));
+    vcx.executor().advance_clock(Duration::from_millis(400));
+    frames(vcx);
+    assert_eq!(tab(&app, vcx), EmojiSetTab::Installed, "no search went out");
+}
+
 #[gpui_kit::test]
 fn remove_asks_before_removing_and_a_row_opens_the_pack(cx: &mut TestAppContext) {
     let (app, _shell, mut vcx) = open_demo(cx);

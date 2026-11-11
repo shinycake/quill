@@ -271,7 +271,11 @@ impl QuillApp {
             || tr(keys::Q_MONEY_THIS_USER_2).to_string(),
             |u| u.display_name(),
         );
-        if let Some(session) = self.paid_session_mut() {
+        // An earlier failure line goes; a save still out keeps its slot,
+        // and only its own answer settles it.
+        if let Some(session) = self.paid_session_mut()
+            && !session.payments.paid_messages.save.is_saving()
+        {
             session.payments.paid_messages.save = quill::paid_messages::PaidSave::Idle;
         }
         self.paid_messages.remove_fee = Some(RemoveFeeBox {

@@ -278,7 +278,7 @@ fn accepting_a_request_names_it_once_and_a_refusal_frees_the_buttons() {
             accept["@extra"]
         ),
     );
-    assert!(f.1.session.chats_state.chat_action_error.is_some());
+    assert!(!f.1.session.chats_state.chat_action_error.is_empty());
     f.1.answer_sharing_request(CHAT, REQUEST, false)
         .unwrap()
         .unwrap();

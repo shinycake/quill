@@ -167,10 +167,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let enable = enable && proxy.can_enable(draft.kind);
-        self.session.settings.proxy.pings.remove(&proxy_id);
-        self.send_proxy_mutation(by, |extra| {
+        let sent = self.send_proxy_mutation(by, |extra| {
             edit_proxy(extra, proxy_id, draft, enable, comment)
-        })
+        });
+        // The old result is dropped only once the edit is on its way.
+        if sent.is_ok() {
+            self.session.settings.proxy.pings.remove(&proxy_id);
+        }
+        sent
     }
 
     /// `enableProxy` (TDLib keeps one enabled at a time).
@@ -210,8 +214,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.settings.proxy.find(proxy_id).is_none() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.proxy.pings.remove(&proxy_id);
-        self.send_proxy_mutation(by, |extra| remove_proxy(extra, proxy_id))
+        let sent = self.send_proxy_mutation(by, |extra| remove_proxy(extra, proxy_id));
+        if sent.is_ok() {
+            self.session.settings.proxy.pings.remove(&proxy_id);
+        }
+        sent
     }
 
     /// `pingProxy` for a list entry.
