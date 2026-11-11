@@ -309,6 +309,25 @@ fn a_failed_older_page_of_a_window_with_rows_waits_for_retry() {
 }
 
 #[test]
+fn folder_boxes_refused_before_a_request_end_in_an_error_with_retry() {
+    let mut h = Harness::new();
+    h.driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
+    assert!(h.driver.fetch_folder_share(5).is_err());
+    assert!(h.driver.fetch_chat_folder(5).is_err());
+    assert!(h.driver.fetch_chat_folder_chats_to_leave(5).is_err());
+    let chat_list = &h.driver.session.chat_list;
+    let share = chat_list.folder_shares.get(&5).expect("entry");
+    assert!(share.links.error().is_some() && share.chats.error().is_some());
+    assert!(chat_list.folder_specs.error(5).is_some());
+    assert!(
+        chat_list
+            .folder_chats_to_leave
+            .get(&5)
+            .is_some_and(|f| f.error().is_some())
+    );
+}
+
+#[test]
 fn history_error_answer_also_offers_retry() {
     let mut h = Harness::new();
     let extra = h.open_history();
