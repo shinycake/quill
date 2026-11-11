@@ -332,6 +332,10 @@ enum Reuse {
 pub struct Handover {
     routes: Arc<Routes>,
     stopped: Arc<AtomicBool>,
+    /// The sequence counter: each client's `Session` ignores envelopes at or
+    /// below its last seen `seq`, so a counter restarting at 0 would make
+    /// every surviving client drop everything the new hub delivers.
+    seq: Arc<AtomicU64>,
 }
 
 fn reusable(slot: Option<&Arc<TdHub>>) -> Reuse {
@@ -423,6 +427,7 @@ impl TdHub {
         Handover {
             routes: self.routes.clone(),
             stopped: self.stopped.clone(),
+            seq: self.seq.clone(),
         }
     }
 
@@ -432,18 +437,22 @@ impl TdHub {
         sink: Arc<dyn DiagnosticSink>,
         handover: Option<Handover>,
     ) -> std::io::Result<Self> {
-        let (routes, stopped) = match handover {
+        let (routes, stopped, seq) = match handover {
             // The old loop is gone: the clients' flag reads running again.
-            Some(Handover { routes, stopped }) => {
+            Some(Handover {
+                routes,
+                stopped,
+                seq,
+            }) => {
                 stopped.store(false, Ordering::SeqCst);
-                (routes, stopped)
+                (routes, stopped, seq)
             }
             None => (
                 Arc::new(Routes::default()),
                 Arc::new(AtomicBool::new(false)),
+                Arc::new(AtomicU64::new(0)),
             ),
         };
-        let seq = Arc::new(AtomicU64::new(0));
         let shutdown = Arc::new(AtomicBool::new(false));
         let guard = StopGuard {
             shutdown: shutdown.clone(),
