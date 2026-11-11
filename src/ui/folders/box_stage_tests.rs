@@ -7,8 +7,9 @@
 
 use crate::ui::app::QuillApp;
 use crate::ui::dialogs::{
-    AddContactDialog, AddContactStage, ContactSave, CopyMark, EditContactDialog, FolderDeleteConfirm,
-    FolderEditorDialog, FolderInviteDialog, FolderLoad, FolderShareDialog, InviteStage, LinkOp,
+    AddContactDialog, AddContactStage, ContactSave, CopyMark, EditContactDialog,
+    FolderDeleteConfirm, FolderEditorDialog, FolderInviteDialog, FolderLoad, FolderShareDialog,
+    InviteStage, LinkOp,
 };
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
@@ -471,6 +472,9 @@ fn a_refused_limit_send_puts_the_sliders_back_on_what_tdlib_holds(cx: &mut TestA
                 s.settings.storage_limits.keep_for(),
             )
         });
-        assert_eq!(held.map(|(size, keep)| (size, keep)), Some(app.storage_slider_limits(cx)));
+        assert_eq!(
+            held,
+            Some(app.storage_slider_limits(cx))
+        );
     });
 }
