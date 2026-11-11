@@ -35,6 +35,7 @@ impl QuillApp {
         self.settle_edit_send(window, cx);
         self.settle_sent_text(window, cx);
         self.settle_left_sends(cx);
+        self.settle_scheduled_load(cx);
         // A forced reply for the chat this window shows arms its composer.
         self.arm_force_reply_here(window, cx);
         // The histories every window still reads stay whole.

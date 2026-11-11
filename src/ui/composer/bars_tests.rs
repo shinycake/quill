@@ -1087,3 +1087,21 @@ fn a_forced_reply_waits_for_its_chat(cx: &mut TestAppContext) {
     });
     assert_eq!(reply, Some((KEYBOARD_BOT, MessageId(88))));
 }
+
+/// Sweep 08-115: the scheduled dialog has its own load stage; a failed load
+/// is retried by opening again, never drawn as an empty list.
+#[gpui_kit::test]
+fn a_failed_scheduled_load_is_left_by_opening_again(cx: &mut TestAppContext) {
+    use crate::ui::composer::ScheduledDialog;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat(&app, vcx, GROUP);
+    app.update(vcx, |app, cx| {
+        app.chat_ui.scheduled_dialog = ScheduledDialog::Failed("offline".into());
+        assert!(app.chat_ui.scheduled_dialog.is_open());
+        assert!(app.chat_ui.scheduled_dialog.loading().is_none());
+        // Retry: the demo holds its list, so the dialog is ready at once.
+        app.open_scheduled_dialog(cx);
+        assert_eq!(app.chat_ui.scheduled_dialog, ScheduledDialog::Ready);
+    });
+}

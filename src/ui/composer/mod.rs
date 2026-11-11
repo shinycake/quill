@@ -989,8 +989,10 @@ mod command_menu;
 pub(super) use command_menu::CommandMenu;
 mod copy_inline_text;
 mod field_placeholder;
+mod scheduled_load;
 mod send_bot_command;
 mod sent_text;
+pub(in crate::ui) use scheduled_load::ScheduledDialog;
 pub(in crate::ui) use sent_text::{AiAsk, LeftSend, SentText};
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]

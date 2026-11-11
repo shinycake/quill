@@ -269,7 +269,7 @@ pub(crate) struct ChatUi {
     pub(super) scheduled_selected: Vec<MessageId>,
     /// M1: the scheduled-messages dialog (view/delete). Here so that a
     /// chat change closes it: its rows act on the chat shown.
-    pub(super) scheduled_dialog_open: bool,
+    pub(super) scheduled_dialog: super::composer::ScheduledDialog,
     /// M1: the schedule picker popup above the composer: `Some` while it is
     /// open, with the date+time picker it holds (created when the popup
     /// opens, see `open_schedule_picker`). Its Reschedule target is a message
@@ -584,6 +584,11 @@ impl QuillApp {
         // A rich send still waiting goes on waiting off the view, so a
         // refusal after the chat changed still gives the text back.
         self.leave_sent_text(std::mem::take(&mut old.sent_text));
+        if let Some(request) = old.scheduled_dialog.loading()
+            && let Some(live) = self.live.as_mut()
+        {
+            live.driver.session.acks.forget(request);
+        }
         self.drop_play_intent_of_visit(old.visit);
     }
 
