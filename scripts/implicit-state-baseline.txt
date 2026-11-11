@@ -25,7 +25,6 @@ BusinessSettingsState::time_zones_requested
 BusinessSettingsState::time_zones_requested+error
 CallSnap::connecting
 CallSummary::busy
-CallSummary::busy+debug_information_error
 CallUi::window_opening
 CameraDraft::starting
 Ceremony::finished

@@ -408,7 +408,10 @@ impl QuillApp {
                         .label(tr(keys::BOX_DONE))
                         .primary()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.open_stream_overlay(StreamOverlay::Settings { key_shown: false }, cx)
+                            this.open_stream_overlay(
+                                StreamOverlay::Settings { key_shown: false },
+                                cx,
+                            )
                         })),
                 ),
             )
@@ -559,7 +562,10 @@ fn confirm_box(
                         .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.open_stream_overlay(StreamOverlay::Settings { key_shown: false }, cx)
+                            this.open_stream_overlay(
+                                StreamOverlay::Settings { key_shown: false },
+                                cx,
+                            )
                         })),
                 )
                 .child(

@@ -42,7 +42,9 @@ impl QuillApp {
                         StatusNote::error(tr(keys::Q_AV_COULDNT_REACH_THE_VOICE_CHAT))
                     }
                 };
-                self.screen.connection.set_note_for(&self.screen.windows, note);
+                self.screen
+                    .connection
+                    .set_note_for(&self.screen.windows, note);
             } else if let Some(session) = self.demo_session.as_mut() {
                 // Screenshot demo: no live TDLib — the fixture already
                 // tracks the call; just surface the overlay.
@@ -644,7 +646,9 @@ impl QuillApp {
                     StatusNote::error(tr(keys::Q_AV_COULDNT_RENAME_THE_VOICE_CHAT))
                 }
             };
-            self.screen.connection.set_note_for(&self.screen.windows, note);
+            self.screen
+                .connection
+                .set_note_for(&self.screen.windows, note);
         } else {
             self.group_call_screen.title_dialog = Some(dialog);
             self.set_note(StatusNote::info(tr(

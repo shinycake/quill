@@ -874,9 +874,7 @@ fn a_switch_to_another_stream_closes_the_boxes(cx: &mut TestAppContext) {
     });
     frames(&mut call);
     assert!(
-        app.read_with(&call, |app, _| {
-            app.group_call.stream.overlay.is_none()
-        }),
+        app.read_with(&call, |app, _| { app.group_call.stream.overlay.is_none() }),
         "the other stream starts with no box and the key hidden"
     );
 }

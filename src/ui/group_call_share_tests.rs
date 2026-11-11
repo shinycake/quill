@@ -197,8 +197,11 @@ fn the_box_waits_for_the_passcode_unlock(cx: &mut TestAppContext) {
         app.account.passcode.force_locked(true);
         app.open_group_call_share_links(cx);
     });
+    // Nothing is asked for and no box opens behind the lock.
     assert!(!overlay_shown(&app, vcx));
     app.update_in(vcx, |app, _, _| app.account.passcode.force_locked(false));
+    assert!(!overlay_shown(&app, vcx));
+    app.update_in(vcx, |app, _, cx| app.open_group_call_share_links(cx));
     assert!(overlay_shown(&app, vcx));
 }
 
