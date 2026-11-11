@@ -97,3 +97,4 @@ src/ui/dialogs/poll.rs NEXT | a counter that only has to give each option slot a
 src/ui/notifications/linux_dbus.rs NOTIFIER | the process's one D-Bus session connection, not a window's
 src/ui/dialogs/contacts.rs NEXT | the import-contacts box and read counter: it only hands out unique tokens, and every window may share it
 src/ui/viewer_parts.rs TOKENS | a counter that tells one photo turn's decode from the next; a token only has to differ
+src/ui/group_type_box/mod.rs NEXT | a counter that only hands out link-check versions no box has used before; every window may share it
