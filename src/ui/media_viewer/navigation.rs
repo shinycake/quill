@@ -262,7 +262,7 @@ impl QuillApp {
         // A timestamp link's start belongs to this open: a clip that never
         // played here must not start there the next time it opens.
         self.viewer.pending_seek = None;
-        self.viewer.extra.saved_toast = None;
+        self.viewer.extra.saved_toast = Default::default();
         // Reopening the same item starts with its caption collapsed.
         self.viewer.extra.caption = Default::default();
         self.viewer.state.close();
