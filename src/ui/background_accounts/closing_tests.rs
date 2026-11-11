@@ -68,11 +68,14 @@ impl Fake {
     /// TDLib answers `authorizationStateClosed`.
     pub(super) fn close(&self) {
         self.progress.store(CLOSED, Ordering::SeqCst);
+        // The reply is an envelope: it pokes the background poll.
+        quill::wake::BACKGROUND_UPDATES.poke();
     }
 
     /// The receive loop dies before Closed arrives.
     pub(super) fn lose(&self) {
         self.progress.store(LOST, Ordering::SeqCst);
+        quill::wake::BACKGROUND_UPDATES.poke();
     }
 
     pub(super) fn boxed(&self) -> Box<dyn Closable> {

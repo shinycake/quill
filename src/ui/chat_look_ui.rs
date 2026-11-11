@@ -26,9 +26,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
 mod apply;
 #[cfg(test)]
@@ -822,20 +820,11 @@ impl QuillApp {
                     )
                 }
             };
-            let body = Rc::new(RefCell::new(Some(body)));
             dialog
                 .overlay(true)
                 .width(px(440.))
                 .title(super::shell::dialog_title(title))
-                .content(super::shell::scrollable_dialog_content(
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    },
-                ))
+                .content(super::shell::one_shot_dialog_content(body))
                 .footer(footer)
                 .on_close(on_close)
         })

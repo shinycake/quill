@@ -1,13 +1,11 @@
 
 # Implicit-state debt (scripts/check-implicit-state.py). Only remove lines.
 
-ActiveGroupCall::loaded_all_participants
 AppearancePrefs::ignore_battery_saving
 
 
 BackendStatus::failed
 CallSnap::connecting
-CallSummary::busy
 
 
 

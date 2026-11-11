@@ -182,12 +182,14 @@ impl super::app::QuillApp {
         Self::spawn_app(cx, async move |this, cx| {
             let (swept, prepared) = connect.await;
             quill::startup_trace::mark("prepare_done");
-            let _ = this.update(cx, |this, _| {
+            let _ = this.update(cx, |this, cx| {
                 this.background.screen_preparing =
                     this.background.screen_preparing.saturating_sub(1);
                 if let Some((root, deleted)) = &swept {
                     this.finish_sweep(root, deleted);
                 }
+                // A deletion waits for the screen's preparation to end.
+                this.settle_close_waiters(cx);
             });
             let account = prepared.as_ref().ok().map(|(_, p)| p.account.clone());
             let mut prepared = Some(prepared);

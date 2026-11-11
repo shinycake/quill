@@ -518,6 +518,8 @@ impl QuillApp {
                             return None;
                         }
                         let work_left = this.poll_background(cx);
+                        // A close, a start or a preparation may have ended.
+                        this.settle_close_waiters(cx);
                         if this.background.has_work() {
                             Some(PassEnd {
                                 work_left,

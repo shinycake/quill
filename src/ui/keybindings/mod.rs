@@ -714,13 +714,18 @@ pub fn apply_custom_bindings(cx: &mut App, customs: &[CustomKeybinding]) {
     // navigation) registered by `gpui_kit::init`. Keep everything that isn't
     // Quill-managed — Quill's own set is rebuilt below. Every Quill action
     // lives in the `quill_ui` actions! namespace (src/ui/actions.rs).
-    let mut bindings: Vec<KeyBinding> = cx
-        .key_bindings()
-        .borrow()
+    // A keymap that is borrowed elsewhere is left as it is: replacing it
+    // from a partial list would drop the kit's own bindings.
+    let kept = cx.key_bindings();
+    let Ok(keymap) = kept.try_borrow() else {
+        return;
+    };
+    let mut bindings: Vec<KeyBinding> = keymap
         .bindings()
         .filter(|kb| !kb.action().name().starts_with("quill_ui::"))
         .cloned()
         .collect();
+    drop(keymap);
 
     // Fixed bindings are installed and claimed first. GPUI resolves
     // same-keystroke ties later-added-wins, so a custom chord on
