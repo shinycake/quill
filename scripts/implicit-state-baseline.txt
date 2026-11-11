@@ -88,8 +88,6 @@ LanguageLinkLookup::loading+error
 Latest::wake_pending
 LayerFade::closing
 LiveInput::failed
-LocalFileState::is_downloading_active
-LocalFileState::is_downloading_completed
 LoginState::config_requested
 LoginState::config_requested+error
 Lookup::fade_started
@@ -118,7 +116,6 @@ Paged::loading
 Paged::loading+error
 PaidMessages::trust_loaded
 PanelMotion::opening
-ParsedFile::uploading
 ParsedGroupCall::loaded_all_participants
 ParsedSession::is_password_pending
 PasswordBox::sending
