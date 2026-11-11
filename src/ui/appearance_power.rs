@@ -117,21 +117,22 @@ impl QuillApp {
         }
         self.preferences.system_accent = quill::system_accent::read();
         self.preferences.system_accent_probed = true;
-        if quill::system_accent::pending() {
+        if quill::system_accent::pending() && self.preferences.system_accent_poll.is_none() {
             // screen-scope: the system accent is an app-wide setting; it applies to whichever account is on screen.
-            cx.spawn(async move |this, cx| {
+            let poll = cx.spawn(async move |this, cx| {
                 while quill::system_accent::pending() {
                     cx.background_executor()
                         .timer(std::time::Duration::from_millis(100))
                         .await;
                 }
                 let _ = this.update(cx, |this, cx| {
+                    this.preferences.system_accent_poll = None;
                     this.preferences.system_accent = quill::system_accent::read();
                     this.apply_appearance(cx);
                     cx.notify();
                 });
-            })
-            .detach();
+            });
+            self.preferences.system_accent_poll = Some(poll);
         }
     }
 

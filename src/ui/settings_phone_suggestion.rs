@@ -10,7 +10,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::chatlist_suggestions::{ACTION_PHONE, Suggestion};
+use quill::chatlist_suggestions::{ACTION_PHONE, PhonePrompt, Suggestion};
 use quill::lang::{keys, tr};
 
 impl QuillApp {
@@ -44,7 +44,7 @@ impl QuillApp {
             .map(|user| format_phone(&user.phone_number))
             .unwrap_or_default();
         let (muted, border) = (cx.theme().muted_foreground, cx.theme().border);
-        let note = self.settings.phone_change_note;
+        let note = session.chat_list.suggestions.phone_prompt == PhonePrompt::NotMine;
         Some(
             div()
                 .id("settings-phone-suggestion")
@@ -82,7 +82,10 @@ impl QuillApp {
                             .small()
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.settings.phone_change_note = true;
+                                if let Some(session) = this.session_mut() {
+                                    session.chat_list.suggestions.phone_prompt =
+                                        PhonePrompt::NotMine;
+                                }
                                 cx.notify();
                             }))
                             .into_any_element(),

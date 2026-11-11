@@ -8,7 +8,6 @@ src/ui/anim_layer.rs CURRENT,UNDER_LAYER | set and restored around one slice's d
 src/ui/anim_layer.rs PAINT_SEQ | a paint-order counter; only its order matters
 src/ui/chat_palette.rs ACTIVE,OUTGOING | set and restored around one chat's draw
 src/ui/selectable_text.rs VIEWPORT | set and restored around one history's paint
-src/ui/bubble_theme.rs HISTORY_AREA | the wallpaper layer sets it in the same frame before its bubbles read it
 src/ui/image_budget.rs SCOPE,SCOPED | set and restored around one slice's draw; SCOPED carries its window
 src/ui/agent_driver_shot.rs CAPTURING | set around the agent's filtered draw only
 src/ui/chat_theme.rs DARK,HIGH_CONTRAST,LAST | the app theme, the same in every window

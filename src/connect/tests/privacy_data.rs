@@ -95,7 +95,13 @@ fn new_chat_privacy_round_trip_keeps_the_paid_price() {
         f.1.session.settings.privacy_data.new_chat,
         Some(NewChatPrivacyState::Ready(s)) if s.allow_from_unknown
     ));
-    assert!(f.1.session.settings.privacy_data.error.is_some());
+    assert!(
+        f.1.session
+            .settings
+            .privacy_data
+            .error(crate::state::PrivacyControl::NewChat)
+            .is_some()
+    );
     cleanup(f);
 }
 
@@ -205,7 +211,13 @@ fn inactive_session_ttl_comes_from_sessions_and_is_set_optimistically() {
         f.1.session.settings.privacy_data.inactive_session_ttl_days,
         Some(180)
     );
-    assert!(f.1.session.settings.privacy_data.error.is_some());
+    assert!(
+        f.1.session
+            .settings
+            .privacy_data
+            .error(crate::state::PrivacyControl::SessionTtl)
+            .is_some()
+    );
     cleanup(f);
 }
 
@@ -244,13 +256,60 @@ fn sensitive_content_switch_follows_the_options_only() {
 }
 
 #[test]
+fn a_failed_setting_keeps_its_line_when_another_control_succeeds() {
+    use crate::state::PrivacyControl;
+    let mut f = fixture();
+    f.1.maybe_fetch_active_sessions().unwrap();
+    let fetch = last_request(&f);
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"sessions","sessions":[],"inactive_session_ttl_days":180,"@extra":"{}"}}"#,
+            extra_of(&fetch)
+        ),
+    );
+    f.1.set_inactive_session_ttl(30).unwrap();
+    let set = last_request(&f);
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"error","code":400,"message":"TTL_INVALID","@extra":"{}"}}"#,
+            extra_of(&set)
+        ),
+    );
+    // Network usage loads fine: the timeout's line stays.
+    f.1.fetch_network_statistics().unwrap();
+    let stats = last_request(&f);
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"networkStatistics","since_date":1,"entries":[],"@extra":"{}"}}"#,
+            extra_of(&stats)
+        ),
+    );
+    let data = &f.1.session.settings.privacy_data;
+    assert!(data.error(PrivacyControl::SessionTtl).is_some());
+    assert!(data.network.error().is_none());
+    // The next timeout attempt clears only its own line.
+    f.1.set_inactive_session_ttl(60).unwrap();
+    assert!(
+        f.1.session
+            .settings
+            .privacy_data
+            .error(PrivacyControl::SessionTtl)
+            .is_none()
+    );
+    cleanup(f);
+}
+
+#[test]
 fn network_usage_fetch_and_reset() {
     let mut f = fixture();
     f.1.fetch_network_statistics().unwrap();
     let request = last_request(&f);
     assert_eq!(request["@type"], "getNetworkStatistics");
     assert_eq!(request["only_current"], false);
-    assert!(f.1.session.settings.privacy_data.network_loading);
+    assert!(f.1.session.settings.privacy_data.network.is_loading());
     ingest(
         &mut f,
         &format!(
@@ -262,11 +321,12 @@ fn network_usage_fetch_and_reset() {
         f.1.session
             .settings
             .privacy_data
-            .network_usage
-            .clone()
+            .network
+            .data()
+            .cloned()
             .unwrap();
     assert_eq!(usage.grand_total().total(), 100);
-    assert!(!f.1.session.settings.privacy_data.network_loading);
+    assert!(!f.1.session.settings.privacy_data.network.is_loading());
     // Reset sends the request and asks for the fresh start date.
     f.1.reset_network_statistics().unwrap();
     let sent: Vec<String> =
@@ -276,7 +336,7 @@ fn network_usage_fetch_and_reset() {
             .collect();
     assert!(sent.contains(&"\"resetNetworkStatistics\"".to_string()));
     assert_eq!(sent.last().unwrap(), "\"getNetworkStatistics\"");
-    assert!(f.1.session.settings.privacy_data.network_usage.is_none());
+    assert!(f.1.session.settings.privacy_data.network.data().is_none());
     cleanup(f);
 }
 

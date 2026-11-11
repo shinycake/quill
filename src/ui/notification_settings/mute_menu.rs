@@ -29,7 +29,6 @@ impl QuillApp {
             },
         });
         self.ensure_chat_volume_slider(chat_id, cx);
-        self.queue_mute_time_inputs(cx);
         cx.notify();
     }
 
@@ -58,13 +57,15 @@ impl QuillApp {
         mute_for: i32,
         cx: &mut Context<Self>,
     ) {
-        // A preset of this chat's own box closes it; muting a chat from a
-        // row, a swipe or a profile leaves another chat's box open.
-        if self.notify.mute_chat() == Some(chat_id) {
-            self.close_mute_menu(cx);
-        }
+        // A preset of this chat's own box closes it once the change went
+        // out; muting a chat from a row, a swipe or a profile leaves another
+        // chat's box open, and a refused send leaves the box to try again.
+        let own_box = self.notify.mute_chat() == Some(chat_id);
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.set_chat_mute_for(chat_id, mute_for);
+            if result.is_ok() && own_box {
+                self.close_mute_menu(cx);
+            }
             self.set_note(match result {
                 Ok(_) if mute_for == 0 => StatusNote::silent(tr(keys::Q_PREFS_UNMUTING)),
                 Ok(_) => StatusNote::silent(tr(keys::Q_PREFS_MUTING)),
@@ -74,6 +75,9 @@ impl QuillApp {
             return;
         }
         if self.demo_session.is_some() {
+            if own_box {
+                self.close_mute_menu(cx);
+            }
             self.apply_demo_notification_settings(
                 chat_id,
                 |settings| {
@@ -420,16 +424,18 @@ impl QuillApp {
                 .child(
                     Button::new("notif-story-sound-picker-toggle")
                         .small()
-                        .label(if self.notify.story_sound_picker_open {
-                            tr(keys::Q_PREFS_HIDE)
-                        } else {
-                            tr(keys::Q_PREFS_CHANGE)
-                        })
+                        .label(
+                            if self.notify.mute_section() == MuteSection::StorySoundPicker {
+                                tr(keys::Q_PREFS_HIDE)
+                            } else {
+                                tr(keys::Q_PREFS_CHANGE)
+                            },
+                        )
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.notify.story_sound_picker_open =
-                                !this.notify.story_sound_picker_open;
-                            if this.notify.story_sound_picker_open
+                            if this
+                                .notify
+                                .toggle_mute_section(MuteSection::StorySoundPicker)
                                 && let Some(live) = this.live.as_mut()
                             {
                                 let _ = live.driver.maybe_fetch_notification_sounds();
@@ -438,7 +444,7 @@ impl QuillApp {
                         })),
                 ),
         );
-        if self.notify.story_sound_picker_open
+        if self.notify.mute_section() == MuteSection::StorySoundPicker
             && let Some(chat_id) = open_chat
         {
             let current = if chat_settings.use_default_story_sound {

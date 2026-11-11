@@ -48,7 +48,8 @@ pub enum ChatsPurpose {
     /// (`Session::installed_backgrounds`).
     GetInstalledBackgrounds,
     /// `setDefaultBackground`. Response is `background`
-    /// (`Session::default_backgrounds`).
+    /// (`Session::default_backgrounds`) under `for_dark_theme`, the theme this
+    /// request was sent for.
     SetDefaultBackground { for_dark_theme: bool },
     /// `deleteDefaultBackground`. Response is `ok`; the wallpaper leaves
     /// `default_backgrounds` when it arrives.

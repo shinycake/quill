@@ -510,12 +510,7 @@ impl QuillApp {
                     .accessibility_label(tr(keys::Q_PREFS_CHECK_SPELLING))
                     .on_click(cx.listener(|this, &on, _, cx| {
                         this.set_chat_prefs(cx, |c| c.spellcheck_enabled = on);
-                        // Every window's composer is checked again (or its
-                        // underlines cleared), not the main window's alone.
-                        this.in_every_window(cx, |this, cx| {
-                            let text = this.composer.read(cx).value().to_string();
-                            this.sync_spellcheck(&text, cx);
-                        });
+                        this.sync_spellcheck_everywhere(cx);
                     })),
             );
         let languages_shown = checked && !self.spell.info.available.is_empty();

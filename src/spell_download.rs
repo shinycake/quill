@@ -65,12 +65,27 @@ pub fn is_allowed_url(url: &str) -> bool {
         .is_some_and(|host| host == DOWNLOAD_HOST)
 }
 
+/// Why a download ended without installing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DownloadError {
+    /// The user switched the language off; nothing to show.
+    Cancelled,
+    /// The text the row shows.
+    Message(String),
+}
+
+impl From<&str> for DownloadError {
+    fn from(message: &str) -> Self {
+        Self::Message(message.to_string())
+    }
+}
+
 #[cfg(feature = "ui")]
-fn fetch(url: &str, progress: &Progress) -> Result<Vec<u8>, &'static str> {
+fn fetch(url: &str, progress: &Progress) -> Result<Vec<u8>, DownloadError> {
     use std::io::Read;
 
     if !is_allowed_url(url) {
-        return Err("Unexpected dictionary address.");
+        return Err("Unexpected dictionary address.".into());
     }
     let agent = ureq::Agent::config_builder()
         .https_only(true)
@@ -82,25 +97,29 @@ fn fetch(url: &str, progress: &Progress) -> Result<Vec<u8>, &'static str> {
         .get(url)
         .header("User-Agent", format!("Quill/{}", crate::version::APP))
         .call()
-        .map_err(|_| "Couldn't reach the dictionary server. Check your connection and retry.")?;
+        .map_err(|_| {
+            DownloadError::from(
+                "Couldn't reach the dictionary server. Check your connection and retry.",
+            )
+        })?;
     let limit = crate::spell_catalog::MAX_FILE_BYTES;
     let mut reader = response.body_mut().as_reader().take(limit + 1);
     let mut out = Vec::new();
     let mut chunk = [0u8; 32 * 1024];
     loop {
         if progress.is_cancelled() {
-            return Err("Cancelled.");
+            return Err(DownloadError::Cancelled);
         }
         let n = reader
             .read(&mut chunk)
-            .map_err(|_| "The download was interrupted. Retry.")?;
+            .map_err(|_| DownloadError::from("The download was interrupted. Retry."))?;
         if n == 0 {
             break;
         }
         out.extend_from_slice(chunk.get(..n).unwrap_or_default());
         progress.received.fetch_add(n as u64, Ordering::Relaxed);
         if out.len() as u64 > limit {
-            return Err("The dictionary is larger than expected.");
+            return Err("The dictionary is larger than expected.".into());
         }
     }
     Ok(out)
@@ -113,14 +132,15 @@ pub fn download_dictionary(
     dir: &std::path::Path,
     code: &str,
     progress: &Progress,
-) -> Result<(), String> {
+) -> Result<(), DownloadError> {
     let entry = crate::spell_catalog::entry(code).ok_or("Unknown dictionary.")?;
     let aff = fetch(&crate::spell_catalog::download_url(entry, "aff"), progress)?;
     let dic = fetch(&crate::spell_catalog::download_url(entry, "dic"), progress)?;
     if progress.is_cancelled() {
-        return Err("Cancelled.".to_string());
+        return Err(DownloadError::Cancelled);
     }
-    crate::spell_catalog::install(dir, code, &aff, &dic).map_err(|e| e.to_string())
+    crate::spell_catalog::install(dir, code, &aff, &dic)
+        .map_err(|e| DownloadError::Message(e.to_string()))
 }
 
 /// The text a row shows when its worker panicked.
@@ -131,11 +151,11 @@ pub const WORKER_PANICKED: &str = "The download stopped unexpectedly.";
 /// worker, and the progress is finished either way.
 pub fn run_guarded(
     progress: &Progress,
-    job: impl FnOnce() -> Result<(), String>,
-) -> Result<(), String> {
+    job: impl FnOnce() -> Result<(), DownloadError>,
+) -> Result<(), DownloadError> {
     let _done = progress.finish_on_drop();
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
-        .unwrap_or_else(|_| Err(WORKER_PANICKED.to_string()))
+        .unwrap_or_else(|_| Err(DownloadError::Message(WORKER_PANICKED.to_string())))
 }
 
 #[cfg(test)]
@@ -180,7 +200,10 @@ mod tests {
     fn a_panicking_worker_finishes_and_returns_an_error() {
         let p = Progress::default();
         let outcome = run_guarded(&p, || std::panic::resume_unwind(Box::new("worker failed")));
-        assert_eq!(outcome, Err(WORKER_PANICKED.to_string()));
+        assert_eq!(
+            outcome,
+            Err(DownloadError::Message(WORKER_PANICKED.to_string()))
+        );
         assert!(p.is_finished());
     }
 
@@ -191,8 +214,8 @@ mod tests {
         assert!(p.is_finished());
         let p = Progress::default();
         assert_eq!(
-            run_guarded(&p, || Err("Cancelled.".to_string())),
-            Err("Cancelled.".to_string())
+            run_guarded(&p, || Err(DownloadError::Cancelled)),
+            Err(DownloadError::Cancelled)
         );
         assert!(p.is_finished());
     }

@@ -188,6 +188,46 @@ fn custom_mute_is_three_fields_that_start_at_eight_hours(cx: &mut TestAppContext
 }
 
 #[gpui_kit::test]
+fn reopening_custom_mute_starts_at_eight_hours_again(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    let chat_id = open_chat(&app, vcx);
+    app.update(vcx, |app, cx| app.open_mute_menu_for(chat_id, true, cx));
+    frames(vcx);
+    app.update_in(vcx, |app, window, cx| {
+        let Some(inputs) = app.notify.mute_time.as_ref() else {
+            panic!("fields missing");
+        };
+        inputs.set_for_test("3", "0", "0", window, cx);
+    });
+    frames(vcx);
+    app.update(vcx, |app, cx| app.close_mute_menu(cx));
+    app.update(vcx, |app, cx| app.open_mute_menu_for(chat_id, true, cx));
+    frames(vcx);
+    let value = app.read_with(vcx, |app, cx| app.mute_time_value(cx));
+    assert_eq!(value.map(|v| v.mute_for()), Some(8 * 3600));
+}
+
+#[gpui_kit::test]
+fn the_mute_panel_reopens_collapsed_after_a_story_sound_picker(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    app.update(vcx, |app, cx| {
+        app.open_mute_menu(cx);
+        app.notify
+            .set_mute_section(crate::ui::notify_state::MuteSection::StorySoundPicker);
+        app.close_mute_menu(cx);
+        app.open_mute_menu(cx);
+        assert_eq!(
+            app.notify.mute_section(),
+            crate::ui::notify_state::MuteSection::Collapsed
+        );
+    });
+}
+
+#[gpui_kit::test]
 fn custom_mute_applies_the_total_and_closes_the_panel(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;

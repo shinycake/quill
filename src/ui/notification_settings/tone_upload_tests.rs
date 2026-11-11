@@ -90,7 +90,36 @@ fn a_picked_file_adds_a_pending_row(cx: &mut TestAppContext) {
     assert_eq!(
         upload_state(&app, &mut vcx),
         Some(ToneUpload::Uploading {
-            name: "Glass Chime".into()
+            name: "Glass Chime".into(),
+            target: SoundPickerTarget::Chat(ChatId(11)),
+        })
+    );
+}
+
+#[gpui_kit::test]
+fn a_file_chosen_while_locked_starts_after_the_unlock(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    idle(&app, &mut vcx);
+    let path = tone_file("Late Chime.mp3", 2000);
+    app.update(&mut vcx, |app, cx| {
+        app.set_locked(true, cx);
+        app.begin_tone_upload(SoundPickerTarget::Chat(ChatId(11)), &path, cx);
+    });
+    frames(&mut vcx);
+    assert_eq!(
+        upload_state(&app, &mut vcx),
+        Some(ToneUpload::Idle),
+        "nothing goes up under the lock"
+    );
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.unlock_answered(Ok(()), window, cx);
+    });
+    frames(&mut vcx);
+    assert_eq!(
+        upload_state(&app, &mut vcx),
+        Some(ToneUpload::Uploading {
+            name: "Late Chime".into(),
+            target: SoundPickerTarget::Chat(ChatId(11)),
         })
     );
 }
@@ -112,9 +141,11 @@ fn a_file_that_is_not_an_mp3_adds_no_row(cx: &mut TestAppContext) {
 fn the_new_sound_is_selected_where_the_upload_started(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx);
     app.update(&mut vcx, |app, cx| {
-        app.notify.tone_upload_target = Some(SoundPickerTarget::Chat(ChatId(11)));
         if let Some(session) = app.demo_session.as_mut() {
-            session.settings.tone_upload = ToneUpload::Added { sound_id: 901 };
+            session.settings.tone_upload = ToneUpload::Added {
+                sound_id: 901,
+                target: Some(SoundPickerTarget::Chat(ChatId(11))),
+            };
         }
         app.settle_tone_upload(cx);
     });

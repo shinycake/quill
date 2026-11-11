@@ -140,7 +140,7 @@ impl Session {
             }
             SettingsPayload::NotificationSounds { sounds } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::AddSavedNotificationSound) {
-                    self.settings.saved_sounds_stale = true;
+                    self.mark_saved_sounds_stale();
                 }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::UploadSavedNotificationSound)
                 {
@@ -166,7 +166,7 @@ impl Session {
             }
             SettingsPayload::UpdateSavedNotificationSounds { .. } => {
                 // The list changed server-side; refetch on the next ingest.
-                self.settings.saved_sounds_stale = true;
+                self.mark_saved_sounds_stale();
             }
             SettingsPayload::StorageStatistics {
                 total_size,

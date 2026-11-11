@@ -406,6 +406,35 @@ impl QuillApp {
             .into_any_element()
     }
 
+    /// What a contact picker with no row says: the contacts are still
+    /// coming, they could not be loaded (with Retry), or all are used.
+    pub(super) fn empty_contact_picker_note(&self, cx: &mut Context<Self>) -> AnyElement {
+        let session = self.session();
+        let failed = session.is_some_and(|s| s.users_state.contacts_error);
+        let loading = session.is_some_and(|s| !s.contacts_settled());
+        let muted = cx.theme().muted_foreground;
+        let line = |text: &'static str| div().text_xs().text_color(muted).px_2().child(text);
+        if failed {
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(line(tr(keys::Q_PEOPLE_COULDN_T_LOAD_CONTACTS)))
+                .child(
+                    Button::new("privacy-contacts-retry")
+                        .small()
+                        .label(tr(keys::Q_PEOPLE_RETRY))
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| this.retry_contacts(cx))),
+                )
+                .into_any_element()
+        } else if loading {
+            line(tr(keys::Q_PEOPLE_LOADING_CONTACTS)).into_any_element()
+        } else {
+            line(tr(keys::Q_PREFS_NO_MORE_CONTACTS)).into_any_element()
+        }
+    }
+
     /// Slice S3: add-exception contact picker — contacts not already in
     /// either exception list.
     pub(super) fn exception_picker(
@@ -430,13 +459,7 @@ impl QuillApp {
                 .child(tr(keys::Q_PREFS_CHOOSE_A_CONTACT)),
         );
         if rows.is_empty() {
-            body = body.child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .px_2()
-                    .child(tr(keys::Q_PREFS_NO_MORE_CONTACTS)),
-            );
+            body = body.child(self.empty_contact_picker_note(cx));
         }
         for row in rows {
             let user_id = row.user_id;

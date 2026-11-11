@@ -129,6 +129,32 @@ fn each_windows_composer_keeps_its_own_spelling(cx: &mut TestAppContext) {
     );
 }
 
+/// Turning Check spelling on checks the drafts already typed, in every
+/// window, not only on the next edit.
+#[gpui_kit::test]
+fn turning_spell_check_on_checks_every_windows_draft(cx: &mut TestAppContext) {
+    let (app, main, chat_window) = new_app(cx);
+    app.update(cx, |app, _| {
+        app.chat_prefs.spellcheck_enabled = false;
+        app.spell.checker = std::sync::Arc::new(quill::spellcheck::SpellChecker::wordlist());
+    });
+    type_in(&app, main, None, "qzxvb", cx);
+    type_in(&app, chat_window, Some(OTHER), "vbqzx", cx);
+    app.update(cx, |app, _| app.set_window_scope(None));
+    cx.executor().advance_clock(Duration::from_secs(1));
+    cx.run_until_parked();
+    assert_eq!(underlined(&app, None, cx), "");
+    app.update(cx, |app, cx| {
+        app.chat_prefs.spellcheck_enabled = true;
+        app.sync_spellcheck_everywhere(cx);
+        app.set_window_scope(None);
+    });
+    cx.executor().advance_clock(Duration::from_secs(1));
+    cx.run_until_parked();
+    assert_eq!(underlined(&app, None, cx), "qzxvb");
+    assert_eq!(underlined(&app, Some(OTHER), cx), "vbqzx");
+}
+
 fn autoscrolling(app: &Entity<QuillApp>, cx: &mut TestAppContext) -> bool {
     app.update(cx, |app, cx| {
         app.in_window_scope(Some(OTHER), cx, |app, _| app.autoscroll_active())

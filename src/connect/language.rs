@@ -93,6 +93,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             generation,
             pack: None,
             base: base_id.is_empty().then(Vec::new),
+            late: Default::default(),
         });
         let sent = self.send_language_switch(&id, &base_id, custom, generation);
         if sent.is_err() {

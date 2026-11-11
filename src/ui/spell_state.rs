@@ -12,7 +12,7 @@ pub(crate) struct SpellUi {
     /// Which engine that is and its dictionaries (Appearance → Spelling).
     pub(super) info: super::spellcheck_ui::SpellInfo,
     /// Appearance → Spelling → Manage dictionaries (parity:appearance-dictionaries).
-    pub(super) dict_manager: super::spell_dictionaries::DictManager,
+    pub(super) dict_manager: Box<super::spell_dictionaries::DictManager>,
     pub(super) dict_filter_input: Entity<TextareaState>,
     /// Builds the platform engine for the user's language picks; runs on a
     /// background task (a field so tests can slow it down).

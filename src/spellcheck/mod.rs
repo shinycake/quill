@@ -233,8 +233,9 @@ pub trait SpellBackend: Send + Sync {
     fn ignore(&self, _word: &str) {}
     /// Load any lazily parsed data now. Called once from a background
     /// thread at startup so the first check or suggestion never parses a
-    /// large dictionary on the thread that asked.
-    fn warm(&self) {}
+    /// large dictionary on the thread that asked. Stops early once `cancel`
+    /// is set (the engine that wanted it was replaced).
+    fn warm(&self, _cancel: &std::sync::atomic::AtomicBool) {}
 }
 
 /// Where "Add to Dictionary" stored the word.
@@ -255,7 +256,16 @@ pub struct SpellChecker {
     /// `ignoreWord:inSpellDocumentWithTag:0` they last until quit.
     ignored: RwLock<HashSet<String>>,
     /// Backend answers per exact word (case matters: "Paris" ≠ "paris").
-    cache: Mutex<HashMap<String, bool>>,
+    cache: Mutex<VerdictCache>,
+}
+
+/// The verdicts, stamped with how many times they were cleared: a verdict
+/// asked for before a clear (an Add to Dictionary, a language change) is
+/// not stored after it.
+#[derive(Default)]
+struct VerdictCache {
+    generation: u64,
+    words: HashMap<String, bool>,
 }
 
 impl SpellChecker {
@@ -264,7 +274,7 @@ impl SpellChecker {
             backend,
             app_words: RwLock::new(HashSet::new()),
             ignored: RwLock::new(HashSet::new()),
-            cache: Mutex::new(HashMap::new()),
+            cache: Mutex::new(VerdictCache::default()),
         }
     }
 
@@ -303,17 +313,23 @@ impl SpellChecker {
         if read(&self.ignored).contains(&lower) || read(&self.app_words).contains(&lower) {
             return true;
         }
-        if let Some(&known) = lock(&self.cache).get(&*word) {
-            return known;
-        }
+        let asked_in = {
+            let cache = lock(&self.cache);
+            if let Some(&known) = cache.words.get(&*word) {
+                return known;
+            }
+            cache.generation
+        };
         let Some(correct) = self.backend.judge(&word) else {
             return true;
         };
         let mut cache = lock(&self.cache);
-        if cache.len() >= CACHE_LIMIT {
-            cache.clear();
+        if cache.generation == asked_in {
+            if cache.words.len() >= CACHE_LIMIT {
+                cache.words.clear();
+            }
+            cache.words.insert(word.into_owned(), correct);
         }
-        cache.insert(word.into_owned(), correct);
         correct
     }
 
@@ -394,7 +410,9 @@ impl SpellChecker {
     }
 
     fn clear_cache(&self) {
-        lock(&self.cache).clear();
+        let mut cache = lock(&self.cache);
+        cache.generation = cache.generation.wrapping_add(1);
+        cache.words.clear();
     }
 }
 
