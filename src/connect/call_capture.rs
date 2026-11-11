@@ -316,7 +316,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Some((CaptureTarget::Private(call.id), call.muted));
         }
         let call = self.session.calls.active_group_call.as_ref()?;
-        if !call.is_joined || !call.transport_ready {
+        if !call.is_joined || !call.transport.is_connected() {
             return None;
         }
         Some((

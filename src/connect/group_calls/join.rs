@@ -142,7 +142,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A join starts over: a transport error left by the last time in
         // the call is not this join's failure.
         if let Some(call) = self.session.calls.active_group_call.as_mut() {
-            call.transport_error = None;
+            call.transport.clear_error();
         }
         self.decline_ringing_invite(None);
         Ok(self.start_group_join(group_call_id))
@@ -225,7 +225,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         let group_call_id = match &self.session.calls.active_group_call {
-            Some(call) if !call.is_joined && !call.join_as_requested && call.is_video_chat => {
+            Some(call)
+                if !call.is_joined && call.join_as_options.is_idle() && call.is_video_chat =>
+            {
                 call.id
             }
             _ => return Ok(()),
@@ -250,7 +252,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Asked once; an answered or failed request is not repeated (the
         // picker is optional, so a failure just leaves it out).
         if let Some(call) = self.session.calls.active_group_call.as_mut() {
-            call.join_as_requested = true;
+            call.join_as_options.begin();
         }
         Ok(())
     }
@@ -481,10 +483,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             // handshake again — reset the transport gate, the stale
             // answer, and the stale screen-share state so the pump
             // doesn't drop the new `joinVideoChat` answer.
-            call.transport_ready = false;
-            call.join_payload.clear();
-            call.screen.stop();
-            call.screen_share_answer.clear();
+            call.transport.reset();
+            call.screen_share.stop();
         }
         match conference.flatten() {
             Some(input) => {

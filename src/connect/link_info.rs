@@ -1,7 +1,7 @@
 //! Connect driver: the boxes behind `giftcode` and `setlanguage` links.
 use super::*;
 use crate::ids::RequestId;
-use crate::state::{GiftCodeLookup, LanguageLinkLookup, RequestPurpose};
+use crate::state::{GiftCodeLookup, GiftCodeStage, LanguageLinkLookup, RequestPurpose};
 use crate::telegram::requests::{
     apply_premium_gift_code, check_premium_gift_code, get_language_pack_info,
 };
@@ -16,8 +16,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::CheckPremiumGiftCode, None);
-        self.session.payments.gift_code =
-            Some(GiftCodeLookup::new(code.to_string()).checking(extra));
+        self.session.payments.gift_code = Some(GiftCodeLookup::checking(code.to_string(), extra));
         let result = self.send_json_request(extra, &check_premium_gift_code(extra, code));
         if result.is_err() {
             self.session.payments.gift_code = None;
@@ -31,27 +30,32 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let Some(lookup) = self.session.payments.gift_code.as_mut() else {
+        let Some(lookup) = self.session.payments.gift_code.as_ref() else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if lookup.applying || lookup.applied || lookup.info.as_ref().is_none_or(|i| i.is_used()) {
+        if !lookup.can_apply() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        lookup.applying = true;
-        lookup.error = None;
+        let Some(info) = lookup.info().cloned() else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let before = lookup.stage.clone();
         let code = lookup.code.clone();
         let extra = self
             .session
             .request(RequestPurpose::ApplyPremiumGiftCode, None);
         if let Some(lookup) = self.session.payments.gift_code.as_mut() {
-            lookup.apply = Some(extra);
+            lookup.stage = GiftCodeStage::Applying {
+                request: extra,
+                info,
+            };
         }
         let result = self.send_json_request(extra, &apply_premium_gift_code(extra, &code));
         if result.is_err()
             && let Some(lookup) = self.session.payments.gift_code.as_mut()
         {
-            lookup.applying = false;
-            lookup.apply = None;
+            // The apply never left: back to the stage it was asked from.
+            lookup.stage = before;
         }
         result
     }
@@ -66,7 +70,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::GetLanguagePackInfo, None);
         self.session.settings.language_link =
-            Some(LanguageLinkLookup::new(id.to_string()).waiting_for(extra));
+            Some(LanguageLinkLookup::looking_up(id.to_string(), extra));
         let result = self.send_json_request(extra, &get_language_pack_info(extra, id));
         if result.is_err() {
             self.session.settings.language_link = None;

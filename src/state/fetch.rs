@@ -205,6 +205,13 @@ impl<T> Fetch<T> {
     }
 }
 
+impl<T> Fetch<Vec<T>> {
+    /// The newest list held, empty when there is none.
+    pub fn items(&self) -> &[T] {
+        self.data().map(Vec::as_slice).unwrap_or(&[])
+    }
+}
+
 /// Several requests that answer one question (a peer's TON and Stars
 /// balances, the gift limit options): asked together, settled when every
 /// one has answered, failed when any send or answer fails. A failed batch

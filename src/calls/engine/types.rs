@@ -250,19 +250,42 @@ impl CallbackShared {
 pub(crate) struct CallMediaConfig {
     pub(crate) mic: Option<String>,
     pub(crate) speaker: Option<String>,
-    /// The camera being sent, by device id; `None` while it is off.
-    pub(crate) camera: Option<String>,
-    /// Phase C2i: screen-share send intent for the 1:1 call. When on,
-    /// the call sends the screen instead of the camera: a 1:1 call has
-    /// one video track.
-    pub(crate) screen_share_on: bool,
+    /// What the call sends as video. One value, because a 1:1 call has one
+    /// video track: the screen replaces the camera.
+    pub(crate) video: VideoSource,
+}
+
+/// Phase C2i: the 1:1 call's outgoing video choice.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) enum VideoSource {
+    /// No video is sent.
+    #[default]
+    Off,
+    /// The camera with this device id.
+    Camera(String),
+    /// The screen share (send intent; the engine holds the source).
+    Screen,
+}
+
+impl VideoSource {
+    /// The camera being sent, by device id.
+    pub(crate) fn camera(&self) -> Option<&str> {
+        match self {
+            Self::Camera(device) => Some(device),
+            Self::Off | Self::Screen => None,
+        }
+    }
+
+    pub(crate) fn screen(&self) -> bool {
+        matches!(self, Self::Screen)
+    }
 }
 
 /// Phase C2i: retained media config for `connect`. A transport
 /// reconnect re-runs `connect` with the retained params; an
 /// in-flight screen-share intent survives so the engine re-issues
 /// screen-only instead of flipping back to the camera. A fresh
-/// connect has no prior entry, so the flag starts off.
+/// connect has no prior entry, so the share starts off.
 pub(crate) fn retained_call_media(
     params: &ConnectParams,
     previous: Option<&CallMediaConfig>,
@@ -270,8 +293,14 @@ pub(crate) fn retained_call_media(
     CallMediaConfig {
         mic: params.mic_input.clone(),
         speaker: params.speaker_input.clone(),
-        camera: params.camera_input.clone(),
-        screen_share_on: previous.is_some_and(|config| config.screen_share_on),
+        video: if previous.is_some_and(|config| config.video.screen()) {
+            VideoSource::Screen
+        } else {
+            params
+                .camera_input
+                .clone()
+                .map_or(VideoSource::Off, VideoSource::Camera)
+        },
     }
 }
 

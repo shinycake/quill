@@ -1,6 +1,6 @@
 use super::*;
 use crate::ids::{ChatId, RequestId};
-use crate::marketplace::{GiftPrice, GiftPurchase, valid_gift_name};
+use crate::marketplace::{GiftPrice, GiftPurchase, GiftPurchaseStage, valid_gift_name};
 use crate::state::RequestPurpose;
 use crate::telegram::envelope::{ChatKind, MessageSender};
 
@@ -37,22 +37,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             } => MessageSender::Chat { chat_id: chat_id.0 },
             _ => return Err(ConnectSendError::InvalidRequest),
         };
-        self.session.payments.marketplace_gift = Some(GiftPurchase {
-            chat_id,
-            recipient,
-            recipient_name: chat.title.clone(),
-            requested_name: name.into(),
-            quote: None,
-            price: None,
-            loading: true,
-            sending: false,
-            completed: false,
-            note: None,
-        });
+        let recipient_name = chat.title.clone();
         self.ask_gift_text_limit();
         let extra = self
             .session
             .request(RequestPurpose::GetMarketplaceGift, Some(chat_id));
+        self.session.payments.marketplace_gift = Some(GiftPurchase::loading(
+            chat_id,
+            recipient,
+            recipient_name,
+            name.into(),
+            extra,
+        ));
         let result = self.send_json_request(
             extra,
             &crate::telegram::requests_payments::get_marketplace_gift(extra, name),
@@ -60,8 +56,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if result.is_err()
             && let Some(gift) = self.session.payments.marketplace_gift.as_mut()
         {
-            gift.loading = false;
-            gift.note = Some("Could not load the gift. Retry.".into());
+            gift.fail("Could not load the gift. Retry.".into());
         }
         result
     }
@@ -104,7 +99,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.ask_gift_text_limit();
             }
             if let Some(gift) = self.session.payments.marketplace_gift.as_mut() {
-                gift.note = Some(
+                gift.set_note(
                     crate::lang::tr(if max.is_none() {
                         crate::lang::keys::Q_MARKETPLACE_COMMENT_UNCHECKED
                     } else {
@@ -121,14 +116,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             .marketplace_gift
             .as_ref()
             .ok_or(ConnectSendError::InvalidRequest)?;
-        if gift.loading
-            || gift.sending
-            || gift.completed
-            || gift.price != Some(price)
-            || !gift.quote.as_ref().is_some_and(|q| q.allows(price))
-        {
+        let GiftPurchaseStage::Quoted { quote, .. } = &gift.stage else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if gift.price() != Some(price) || !quote.allows(price) {
             return Err(ConnectSendError::InvalidRequest);
         }
+        let quote = quote.clone();
         let json_fields = (gift.requested_name.clone(), gift.recipient, gift.chat_id);
         let extra = self
             .session
@@ -145,12 +139,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             ),
         );
         if let Some(gift) = self.session.payments.marketplace_gift.as_mut() {
-            gift.sending = result.is_ok();
-            gift.note = if result.is_ok() {
-                Some("Sending the gift…".into())
-            } else {
-                Some("Could not submit the purchase. Review and retry.".into())
-            };
+            match result {
+                Ok(request) => {
+                    gift.stage = GiftPurchaseStage::Sending {
+                        quote,
+                        price,
+                        request,
+                    };
+                }
+                Err(_) => gift.set_note("Could not submit the purchase. Review and retry.".into()),
+            }
         }
         result
     }

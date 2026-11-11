@@ -587,3 +587,25 @@ fn quality_is_reported_only_when_the_bucket_changes() {
     assert_eq!(tracker.observe(100.0), None);
     assert_eq!(tracker.observe(1280.0), Some(StreamQuality::Full));
 }
+
+#[test]
+fn a_drain_ends_the_streams_request_and_its_waiters() {
+    let mut port = FakePort::default();
+    let mut feeder = feeder();
+    feeder.on_time_request(engine_id(1), &mut port);
+    assert!(feeder.owns(RequestId(1)));
+    feeder.drain(&mut port);
+    assert!(!feeder.owns(RequestId(1)));
+    // The late reply is not this feeder's, and answers nobody.
+    let outcome = feeder.on_reply(
+        RequestId(1),
+        StreamReply::Streams(&[]),
+        Instant::now(),
+        &mut port,
+    );
+    assert_eq!(outcome, ReplyOutcome::NotMine);
+    assert!(port.time_answers().is_empty());
+    // The next time request asks afresh.
+    feeder.on_time_request(engine_id(2), &mut port);
+    assert_eq!(port.streams_requests.len(), 2);
+}

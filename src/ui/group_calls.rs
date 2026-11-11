@@ -107,7 +107,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             // As the driver's join: it starts without the last error.
             if let Some(call) = session.calls.active_group_call.as_mut() {
-                call.transport_error = None;
+                call.transport.clear_error();
                 call.is_joined = true;
             }
             self.set_note(StatusNote::silent(tr(
@@ -278,7 +278,7 @@ impl QuillApp {
         let sharing = self
             .session()
             .and_then(|session| session.calls.active_group_call.as_ref())
-            .is_some_and(|call| call.screen.is_active());
+            .is_some_and(|call| call.screen_share.is_on());
         if !sharing && self.open_screen_chooser(super::screen_share_state::ScreenFor::Group, cx) {
             return;
         }

@@ -8,7 +8,11 @@ use crate::agent::grants::Scope;
 use serde_json::{Value, json};
 
 fn done(text: String, data: Value) -> ToolOutput {
-    ToolOutput { text, data }
+    ToolOutput {
+        text,
+        data,
+        images: Vec::new(),
+    }
 }
 
 pub fn draft_schema() -> Value {

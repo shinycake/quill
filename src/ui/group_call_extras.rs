@@ -532,13 +532,17 @@ impl QuillApp {
         call: &quill::state::ActiveGroupCall,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if call.is_joined || call.join_as_options.len() < 2 {
+        let options = call
+            .join_as_options
+            .data()
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        if call.is_joined || options.len() < 2 {
             return None;
         }
         let selected = call.join_as;
         let owner = cx.entity().downgrade();
-        let names: Vec<(MessageSender, String)> = call
-            .join_as_options
+        let names: Vec<(MessageSender, String)> = options
             .iter()
             .map(|sender| (*sender, self.group_call_participant_name(sender)))
             .collect();

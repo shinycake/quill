@@ -181,7 +181,7 @@ impl QuillApp {
 
     fn gift_code_body(session: Option<&Session>, lookup: &GiftCodeLookup) -> AnyElement {
         let mut body = div().flex().flex_col().gap_2();
-        if lookup.loading {
+        if lookup.loading() {
             return body
                 .child(
                     div()
@@ -191,10 +191,10 @@ impl QuillApp {
                 )
                 .into_any_element();
         }
-        let Some(info) = lookup.info.as_ref() else {
+        let Some(info) = lookup.info() else {
             let reason = lookup
-                .error
-                .clone()
+                .error()
+                .map(str::to_string)
                 .unwrap_or_else(|| tr(keys::Q_REST_THIS_GIFT_CODE_LINK_HAS).into());
             return body
                 .child(div().id("gift-code-error").text_sm().child(reason))
@@ -261,7 +261,7 @@ impl QuillApp {
                 )),
             );
         }
-        if lookup.applied {
+        if lookup.applied() {
             body = body.child(
                 div()
                     .id("gift-code-applied")
@@ -269,7 +269,7 @@ impl QuillApp {
                     .child(tr(keys::Q_REST_TELEGRAM_PREMIUM_IS_NOW_ACTIVE)),
             );
         }
-        if let Some(error) = lookup.error.clone() {
+        if let Some(error) = lookup.error().map(str::to_string) {
             body = body.child(
                 div()
                     .id("gift-code-error")
@@ -301,17 +301,15 @@ impl QuillApp {
                     .on_close(on_close.clone());
             };
             let body = Self::gift_code_body(session, &lookup);
-            let can_apply = !lookup.loading
-                && !lookup.applied
-                && lookup.info.as_ref().is_some_and(|i| !i.is_used());
-            let applying = lookup.applying;
+            let can_apply = lookup.can_apply();
+            let applying = lookup.applying();
             let footer = div()
                 .flex()
                 .justify_end()
                 .gap_2()
                 .child(
                     Button::new("gift-code-close")
-                        .label(if lookup.applied {
+                        .label(if lookup.applied() {
                             tr(keys::BOX_DONE)
                         } else {
                             tr(keys::CLOSE)
@@ -340,7 +338,7 @@ impl QuillApp {
 
     fn language_body(lookup: &LanguageLinkLookup, current: &str) -> AnyElement {
         let body = div().flex().flex_col().gap_2();
-        if lookup.loading {
+        if lookup.loading() {
             return body
                 .child(
                     div()
@@ -350,14 +348,13 @@ impl QuillApp {
                 )
                 .into_any_element();
         }
-        let Some(info) = lookup.info.as_ref() else {
+        let Some(info) = lookup.info() else {
             return body
                 .child(
                     div().id("language-link-error").text_sm().child(
                         lookup
-                            .error
-                            .clone()
-                            .map(SharedString::from)
+                            .error()
+                            .map(|error| SharedString::from(error.to_string()))
                             .unwrap_or_else(|| tr(keys::LANGUAGE_NOT_FOUND).into()),
                     ),
                 )
@@ -397,7 +394,7 @@ impl QuillApp {
         let info = self
             .session()
             .and_then(|s| s.settings.language_link.as_ref())
-            .and_then(|lookup| lookup.info.clone());
+            .and_then(|lookup| lookup.info().cloned());
         self.close_language_box(cx);
         self.close_kit_dialog_if_done(DialogKind::LanguageLink, window, cx);
         if let Some(info) = info {
@@ -430,8 +427,7 @@ impl QuillApp {
             let current = quill::lang::current_pack_id();
             let body = Self::language_body(&lookup, &current);
             let can_apply = lookup
-                .info
-                .as_ref()
+                .info()
                 .is_some_and(|info| !info.id.eq_ignore_ascii_case(&current));
             let footer = div()
                 .flex()

@@ -493,7 +493,7 @@ fn a_join_that_never_lands_stops_waiting(cx: &mut TestAppContext) {
         let session = app.demo_session.as_mut().expect("demo");
         session.calls.group_call_error = None;
         if let Some(active) = session.calls.active_group_call.as_mut() {
-            active.transport_error = Some("connect failed".into());
+            active.transport.fail("connect failed");
         }
         app.group_call_screen.stream_joining = Some(
             crate::ui::group_call_state::StreamJoining::new(CALL, Task::ready(())),

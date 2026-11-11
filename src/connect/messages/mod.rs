@@ -273,6 +273,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         snapshot: &ComposerSnapshot,
     ) -> Result<RequestId, ConnectSendError> {
+        let place = self.send_place(snapshot.chat_id());
+        self.send_snapshot_to(&place, snapshot)
+    }
+
+    /// [`Self::send_snapshot`] to `place`: the topic and thread fixed when
+    /// the user pressed Send, not whatever is open when the send runs.
+    pub fn send_snapshot_to(
+        &mut self,
+        place: &SendPlace,
+        snapshot: &ComposerSnapshot,
+    ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -281,10 +292,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // The send box's price: photos and videos behind Stars.
         if snapshot.media.paid_stars > 0 {
-            return self.send_paid_media_snapshot(snapshot);
+            return self.send_paid_media_snapshot_to(place, snapshot);
         }
         if snapshot.is_album() {
-            return self.send_album_snapshot(snapshot);
+            return self.send_album_snapshot_to(place, snapshot);
         }
         let chat_id = snapshot.chat_id();
         // Phase 2.3: channel posting is admin-gated (`can_post` derives the
@@ -300,7 +311,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // Parity slice 4: never send into a closed forum topic (the
         // composer is hidden there; this guards a stale-snapshot race).
-        if self.topic_send_is_closed(chat_id) {
+        if self.place_is_closed(chat_id, place) {
             return Err(ConnectSendError::InvalidRequest);
         }
         let caption = snapshot.caption();
@@ -339,7 +350,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::SendMessage, Some(chat_id));
         // Parity slice 4: sends from a topic view address the open topic.
-        let topic_id = self.send_topic(chat_id);
+        let topic_id = place.topic;
         // Phase B3: TDLib accepts `inputMessagePhoto`/`inputMessageVideo`
         // `self_destruct_type` only in `chatTypePrivate` chats (its runtime
         // check is `dialog_id.get_type() != DialogType::User` → 400, and the
@@ -489,7 +500,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             json
         };
-        let json = self.thread_routed(chat_id, json);
+        let json = self.place_routed(chat_id, place, json);
         match self.sender.send_json(&json) {
             Ok(()) => {
                 let _ = self.cancel_outgoing_typing();

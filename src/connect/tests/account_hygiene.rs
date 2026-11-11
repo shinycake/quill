@@ -361,7 +361,7 @@ fn clear_storage_sends_optimize_storage_and_reports_freed_bytes() {
     assert_eq!(f.1.session.settings.storage_freed, Some(5_242_880));
     assert!(!f.1.session.settings.storage_clearing);
     // The usage numbers are refetched on the same ingest.
-    assert!(f.1.session.settings.storage_stats_loading);
+    assert!(f.1.session.settings.storage_stats.is_loading());
     assert_eq!(requests_of(&f.2, "getStorageStatistics").len(), 1);
     cleanup(f);
 }

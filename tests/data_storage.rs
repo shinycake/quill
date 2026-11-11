@@ -122,7 +122,7 @@ fn optimize_storage_answer_drops_stats_and_reports_freed_bytes() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let stats_extra = session.request(RequestPurpose::GetStorageStatistics, None);
-    session.settings.storage_stats_loading = true;
+    session.settings.storage_stats.begin();
     apply_json(
         &mut session,
         &seq,
@@ -132,7 +132,7 @@ fn optimize_storage_answer_drops_stats_and_reports_freed_bytes() {
             stats_extra.0,
         ),
     );
-    assert!(session.settings.storage_stats.is_some());
+    assert!(session.settings.storage_stats.data().is_some());
     session.settings.data_storage_error = Some("stale".into());
     let extra = session.request(RequestPurpose::OptimizeStorage, None);
     session.settings.storage_clearing = true;
@@ -145,8 +145,8 @@ fn optimize_storage_answer_drops_stats_and_reports_freed_bytes() {
             extra.0
         ),
     );
-    assert!(session.settings.storage_stats.is_none());
-    assert!(!session.settings.storage_stats_loading);
+    assert!(session.settings.storage_stats.data().is_none());
+    assert!(!session.settings.storage_stats.is_loading());
     assert!(!session.settings.storage_clearing);
     assert_eq!(session.settings.storage_freed, Some(5_242_880));
     assert!(session.settings.data_storage_error.is_none());
@@ -168,7 +168,7 @@ fn optimize_storage_error_keeps_stats() {
             stats_extra.0,
         ),
     );
-    assert!(session.settings.storage_stats.is_some());
+    assert!(session.settings.storage_stats.data().is_some());
     let extra = session.request(RequestPurpose::OptimizeStorage, None);
     session.settings.storage_clearing = true;
     apply_json(
@@ -182,7 +182,7 @@ fn optimize_storage_error_keeps_stats() {
     );
     let err = session.settings.data_storage_error.expect("error surfaced");
     assert!(err.starts_with("Couldn't clear the cache:"), "{err}");
-    assert!(session.settings.storage_stats.is_some());
+    assert!(session.settings.storage_stats.data().is_some());
     assert!(!session.settings.storage_clearing);
     assert!(session.settings.storage_freed.is_none());
 }

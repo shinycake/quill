@@ -29,7 +29,7 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        if !wanted && live.driver.session.stickers.masks.strip_wanted {
+        if !wanted && live.driver.session.stickers.masks.strip_wanted() {
             live.driver.release_editor_masks();
         }
     }

@@ -96,13 +96,6 @@ impl QuillApp {
             _search_subscription: subscription,
         });
         self.open_box(DialogKind::JoinRequests);
-        if let Some(live) = self.live.as_mut() {
-            live.driver
-                .session
-                .groups
-                .join_request_queries
-                .remove(&chat_id.0);
-        }
         self.ask_join_requests(chat_id, "", true);
         cx.notify();
     }
@@ -117,8 +110,10 @@ impl QuillApp {
     /// Retry from the box's error line: the query the field holds now.
     fn retry_join_requests(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         let query = self
-            .session()
-            .and_then(|s| s.groups.join_request_queries.get(&chat_id.0).cloned())
+            .admin
+            .join_requests_dialog
+            .as_ref()
+            .map(|dialog| dialog.search.read(cx).value().trim().to_string())
             .unwrap_or_default();
         if let Some(live) = self.live.as_mut() {
             live.driver.session.groups.join_requests.remove(&chat_id.0);
@@ -142,9 +137,9 @@ impl QuillApp {
             .driver
             .session
             .groups
-            .join_request_queries
+            .join_requests
             .get(&chat_id.0)
-            .map(String::as_str)
+            .map(JoinRequestFetch::query)
             .unwrap_or("");
         if current == query {
             return;
@@ -283,16 +278,12 @@ impl QuillApp {
                 .session()
                 .and_then(|s| s.groups.join_requests.get(&chat_id.0))
                 .cloned();
-            // A page is on its way while the chat has a latest request id.
-            let loading_more = this
-                .session()
-                .is_some_and(|s| s.groups.join_request_latest.contains_key(&chat_id.0));
+            // A next page is on its way while the list holds its request id.
+            let loading_more =
+                matches!(&fetch, Some(JoinRequestFetch::Loaded(list)) if list.more.is_some());
             let mut title = tr(keys::Q_CHAT_JOIN_REQUESTS_2).to_string();
             let mut body = div().flex().flex_col().gap_2();
-            let searching = this
-                .session()
-                .and_then(|s| s.groups.join_request_queries.get(&chat_id.0))
-                .is_some_and(|q| !q.is_empty());
+            let searching = fetch.as_ref().is_some_and(|f| !f.query().is_empty());
             body = body.child(
                 Textarea::new(&search)
                     .aria_label(tr(keys::Q_CHAT_SEARCH_JOIN_REQUESTS))
@@ -331,7 +322,7 @@ impl QuillApp {
                 );
             }
             match fetch {
-                None | Some(JoinRequestFetch::Loading) => {
+                None | Some(JoinRequestFetch::Loading { .. }) => {
                     body = body.child(
                         div()
                             .flex()

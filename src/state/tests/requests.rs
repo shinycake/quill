@@ -366,7 +366,7 @@ fn storage_statistics_answer_cached_by_purpose() {
     let (mut without_purpose, sink2) = session();
     let seq = AtomicU64::new(0);
     let extra = with_purpose.request(RequestPurpose::GetStorageStatistics, None);
-    with_purpose.settings.storage_stats_loading = true;
+    with_purpose.settings.storage_stats.begin();
     apply_json(
         &mut with_purpose,
         &seq,
@@ -376,7 +376,12 @@ fn storage_statistics_answer_cached_by_purpose() {
             extra.0
         ),
     );
-    let stats = with_purpose.settings.storage_stats.expect("stats cached");
+    let stats = with_purpose
+        .settings
+        .storage_stats
+        .data()
+        .cloned()
+        .expect("stats cached");
     assert_eq!(stats.total_size, 6000);
     assert!(
         stats
@@ -385,7 +390,7 @@ fn storage_statistics_answer_cached_by_purpose() {
             .any(|t| t.file_type == "fileTypeSecret" && t.size == 4000 && t.count == 1),
         "secret category present"
     );
-    assert!(!with_purpose.settings.storage_stats_loading);
+    assert!(!with_purpose.settings.storage_stats.is_loading());
 
     // A stray `storageStatistics` (no matching purpose) is ignored.
     let seq2 = AtomicU64::new(0);
@@ -395,7 +400,7 @@ fn storage_statistics_answer_cached_by_purpose() {
         &sink2,
         r#"{"@type":"storageStatistics","size":1,"count":1,"by_chat":[]}"#,
     );
-    assert!(without_purpose.settings.storage_stats.is_none());
+    assert!(without_purpose.settings.storage_stats.data().is_none());
 }
 
 #[test]
@@ -403,7 +408,7 @@ fn storage_statistics_error_clears_loading() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetStorageStatistics, None);
-    session.settings.storage_stats_loading = true;
+    session.settings.storage_stats.begin();
     apply_json(
         &mut session,
         &seq,
@@ -413,8 +418,9 @@ fn storage_statistics_error_clears_loading() {
             extra.0
         ),
     );
-    assert!(session.settings.storage_stats.is_none());
-    assert!(!session.settings.storage_stats_loading);
+    assert!(session.settings.storage_stats.data().is_none());
+    assert!(!session.settings.storage_stats.is_loading());
+    assert!(session.settings.storage_stats.error().is_some());
 }
 
 #[test]

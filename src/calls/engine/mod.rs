@@ -21,4 +21,4 @@ pub use types::*;
 /// Group-call and stream frames go to live feeds as planes.
 use crate::calls::live_video::{LiveFrame, LiveKey};
 
-pub(crate) use types::{CallMediaConfig, CallbackShared, retained_call_media};
+pub(crate) use types::{CallMediaConfig, CallbackShared, VideoSource, retained_call_media};

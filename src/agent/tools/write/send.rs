@@ -36,6 +36,7 @@ fn sent_output(
     ToolOutput {
         text,
         data: json!({"chat": target.summary(), "messages": shaped, "scheduled": scheduled, "failed": sent.failures}),
+        images: Vec::new(),
     }
 }
 

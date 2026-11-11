@@ -137,7 +137,7 @@ impl Session {
             // in-flight flag so the overlay shows "No storage data
             // yet." instead of spinning forever.
             Some(RequestPurpose::GetStorageStatistics) => {
-                self.settings.storage_stats_loading = false;
+                self.settings.storage_stats.fail(error_reason(err));
             }
             // Slice A3: a failed sessions fetch or terminate
             // clears the in-flight flags and parks the honest,

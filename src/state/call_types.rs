@@ -360,75 +360,6 @@ pub enum LocalVideo {
     Screen,
 }
 
-/// Your screen share in a group call.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum ScreenShare {
-    #[default]
-    Off,
-    /// The `startGroupCallScreenSharing` answer is in flight.
-    Pending,
-    /// The presentation transport connected.
-    On,
-    /// Your shared window is hidden, so the share is paused (the driver
-    /// sent `toggleGroupCallScreenSharingIsPaused`). Your own tile shows
-    /// the paused state at once, before the participant update.
-    Paused,
-}
-
-impl ScreenShare {
-    /// The presentation runs (paused or not).
-    pub fn is_sharing(self) -> bool {
-        matches!(self, Self::On | Self::Paused)
-    }
-
-    /// Sharing, or on its way to it: the screen button says "stop".
-    pub fn is_active(self) -> bool {
-        self != Self::Off
-    }
-
-    pub fn is_pending(self) -> bool {
-        self == Self::Pending
-    }
-
-    pub fn is_paused(self) -> bool {
-        self == Self::Paused
-    }
-
-    /// The start request went out.
-    pub fn begin(&mut self) {
-        *self = Self::Pending;
-    }
-
-    /// The start answer did not come (refused, dropped): back to off.
-    pub fn clear_pending(&mut self) {
-        if *self == Self::Pending {
-            *self = Self::Off;
-        }
-    }
-
-    /// The presentation connected.
-    pub fn connected(&mut self) {
-        if *self == Self::Pending {
-            *self = Self::On;
-        }
-    }
-
-    /// The share is over, however it ended.
-    pub fn stop(&mut self) {
-        *self = Self::Off;
-    }
-
-    /// The shared window was hidden or shown. Only a running share has a
-    /// pause.
-    pub fn set_paused(&mut self, paused: bool) {
-        *self = match (*self, paused) {
-            (Self::On, true) => Self::Paused,
-            (Self::Paused, false) => Self::On,
-            (other, _) => other,
-        };
-    }
-}
-
 /// 10830, `updateGroupCallVerificationState` 10836).
 #[derive(Debug, Clone)]
 pub struct ActiveGroupCall {
@@ -467,29 +398,21 @@ pub struct ActiveGroupCall {
     pub mute_new_participants: bool,
     pub can_toggle_mute_new_participants: bool,
     pub verification: Option<GroupCallVerificationState>,
-    /// The `Text` join payload returned by `joinVideoChat`; Phase C2g
-    /// consumes it in the driver pump to finish the native group
-    /// handshake.
-    pub join_payload: String,
-    /// Phase C2g: whether the native group transport handshake has
-    /// completed (`connect_group_call` with the `joinVideoChat` answer). False
-    /// when the join went out with the honest no-device params (no
-    /// engine) or while the answer is still in flight.
-    pub transport_ready: bool,
-    /// Phase C2g: last native group-transport error (offer/connect/
-    /// subscribe failures), mirroring the 1:1 call's `transport_error`.
-    /// The join itself is never blocked by these.
-    pub transport_error: Option<String>,
-    /// Phase C2g: screen-share presentation state (see [`ScreenShare`]).
-    pub screen: ScreenShare,
+    /// The native group transport: the `joinVideoChat` answer the driver
+    /// pump connects, the completed handshake, or its failure (offer,
+    /// connect, subscribe). The join itself is never blocked by these.
+    pub transport: GroupTransport,
+    /// Screen-share presentation: the `startGroupCallScreenSharing`
+    /// handshake, then the connected presentation.
+    pub screen_share: GroupScreenShare,
+    /// Your shared window is hidden, so the share is paused (the driver
+    /// sent `toggleGroupCallScreenSharingIsPaused`). Your own tile shows
+    /// the paused state at once, before the participant update.
+    pub screen_share_paused: bool,
     /// The last screen share's failure (its offer, start, connect or
     /// stop). Kept apart from `transport_error`: a failed share leaves
     /// the call itself working.
     pub screen_share_error: Option<String>,
-    /// The `Text` presentation answer from
-    /// `startGroupCallScreenSharing`; consumed by the driver pump to
-    /// finish the presentation handshake.
-    pub screen_share_answer: String,
     /// Speaker and listener links from `getVideoChatInviteLink`,
     /// fetched on demand (`crate::calls::share_links`).
     pub share_links: crate::calls::share_links::VideoChatShareLinks,
@@ -520,13 +443,12 @@ pub struct ActiveGroupCall {
     /// (`record_duration` seconds, 0 = not recording).
     pub record_duration: i32,
     pub is_video_recorded: bool,
-    /// "Join as" choices from `getVideoChatAvailableParticipants` (empty
-    /// until loaded, or when the call has no alternatives to offer).
-    pub join_as_options: Vec<MessageSender>,
+    /// "Join as" choices from `getVideoChatAvailableParticipants`: asked
+    /// once per tracked call (a failure leaves the picker out, the join
+    /// goes ahead as yourself); empty when there are no alternatives.
+    pub join_as_options: crate::state::fetch::Fetch<Vec<MessageSender>>,
     /// The identity the next join uses; `None` joins as yourself.
     pub join_as: Option<MessageSender>,
-    /// The options request was sent (once per tracked call).
-    pub join_as_requested: bool,
     /// How the joined call carries media, from the engine after the
     /// native connect (`CallEngine::group_call_mode`). Stream modes get their
     /// segments from TDLib (`calls::engine::StreamFeeder`).
@@ -697,13 +619,13 @@ impl ActiveGroupCall {
     /// The join or its transport failed, or the rejoins are spent: only a
     /// manual retry brings it back.
     pub fn join_failed(&self) -> bool {
-        self.transport_error.is_some() || self.rejoin == GroupCallRejoin::GaveUp
+        self.transport.error().is_some() || self.rejoin == GroupCallRejoin::GaveUp
     }
 
     /// The window offers Rejoin: the connection was lost, or the join
     /// itself failed (a failed camera on a connected call is not one).
     pub fn offers_rejoin(&self) -> bool {
-        self.reconnecting() || (self.join_failed() && !self.transport_ready)
+        self.reconnecting() || (self.join_failed() && !self.transport.is_connected())
     }
 
     /// Blank tracked call for a newly seen call id. Participant state
@@ -730,12 +652,10 @@ impl ActiveGroupCall {
             mute_new_participants: false,
             can_toggle_mute_new_participants: false,
             verification: None,
-            join_payload: String::new(),
-            transport_ready: false,
-            transport_error: None,
-            screen: ScreenShare::Off,
+            transport: GroupTransport::NoTransport,
+            screen_share: GroupScreenShare::Off,
+            screen_share_paused: false,
             screen_share_error: None,
-            screen_share_answer: String::new(),
             share_links: Default::default(),
             is_rtmp_stream: false,
             scheduled_start_date: 0,
@@ -749,9 +669,8 @@ impl ActiveGroupCall {
             messages: Vec::new(),
             record_duration: 0,
             is_video_recorded: false,
-            join_as_options: Vec::new(),
+            join_as_options: Default::default(),
             join_as: None,
-            join_as_requested: false,
             stream_mode: Default::default(),
             stream: Default::default(),
             viewer_count: 0,

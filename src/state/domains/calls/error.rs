@@ -216,7 +216,7 @@ impl Session {
                         "Could not join the voice chat",
                     ));
                 } else {
-                    call.transport_error = Some(call_request_error_line(
+                    call.transport.fail(call_request_error_line(
                         err,
                         "Could not join the live story",
                     ));
@@ -236,8 +236,7 @@ impl Session {
                 if let Some(tracked) = self.calls.active_group_call.as_mut()
                     && tracked.id == group_call_id
                 {
-                    tracked.screen.stop();
-                    tracked.screen_share_answer.clear();
+                    tracked.screen_share.stop();
                 }
                 self.calls.group_call_error = Some(call_request_error_line(
                     err,
@@ -250,8 +249,7 @@ impl Session {
                 if let Some(tracked) = self.calls.active_group_call.as_mut()
                     && tracked.id == group_call_id
                 {
-                    tracked.screen.stop();
-                    tracked.screen_share_answer.clear();
+                    tracked.screen_share.stop();
                 }
                 self.calls.group_call_error = Some(call_request_error_line(
                     err,
@@ -267,15 +265,14 @@ impl Session {
             })) => {
                 if let Some(tracked) = self.calls.active_group_call.as_mut()
                     && tracked.id == group_call_id
-                    && tracked.screen.is_paused() == paused
+                    && tracked.screen_share_paused == paused
                 {
-                    tracked.screen.set_paused(!paused);
+                    tracked.screen_share_paused = !paused;
                 }
             }
             Some(
                 RequestPurpose::Calls(CallsPurpose::LeaveGroupCall { .. })
                 | RequestPurpose::Calls(CallsPurpose::EndGroupCall { .. })
-                | RequestPurpose::Calls(CallsPurpose::GetGroupCall { .. })
                 | RequestPurpose::Calls(CallsPurpose::LoadGroupCallParticipants { .. })
                 | RequestPurpose::Calls(CallsPurpose::SetVideoChatDefaultParticipant { .. })
                 | RequestPurpose::Calls(CallsPurpose::SetVideoChatTitle { .. })
@@ -323,11 +320,28 @@ impl Session {
             // because you were busy is not about the voice chat you are
             // in: nothing shows (tdesktop sends it with no fail handler).
             Some(RequestPurpose::Calls(CallsPurpose::DeclineGroupCallInvitation { .. })) => {}
+            // The call a link offered could not be fetched: its hash goes
+            // with it, or a later join of that call would send it.
+            Some(RequestPurpose::Calls(CallsPurpose::GetGroupCall { group_call_id })) => {
+                if self
+                    .calls
+                    .call_link
+                    .as_ref()
+                    .is_some_and(|link| link.group_call_id == group_call_id)
+                {
+                    self.calls.call_link = None;
+                }
+                self.calls.group_call_error =
+                    Some(call_request_error_line(err, "Voice chat request failed"));
+            }
             // The "join as" list is optional: a failure just leaves the
             // picker out and the join goes ahead as yourself.
             Some(RequestPurpose::Calls(CallsPurpose::GetVideoChatAvailableParticipants {
-                ..
-            })) => {}
+                group_call_id,
+            })) => self.fail_group_call_join_as_options(
+                group_call_id,
+                &call_request_error_line(err, "Couldn't load who you can join as"),
+            ),
             // A failed "Add People" search ends it with what the other
             // half found (tdesktop's `fail` handler refreshes the rows).
             Some(

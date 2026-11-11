@@ -100,7 +100,7 @@ fn wait_for(mut done: impl FnMut() -> bool) {
 fn joined_group_call(muted: bool) -> ActiveGroupCall {
     let mut call = tracked_group_call(false, false, false);
     call.is_muted_self = muted;
-    call.transport_ready = true;
+    call.transport.connected();
     let json: Value =
         serde_json::from_str(&group_participant_json(777, true, "null", "null")).unwrap();
     let mut me = parse_group_call_participant(json.get("participant")).unwrap();
@@ -139,7 +139,7 @@ fn group_call_microphone_feeds_the_engine_and_follows_mute() {
 
     // Joined but the transport is not up yet: still nothing.
     let mut call = joined_group_call(false);
-    call.transport_ready = false;
+    call.transport.reset();
     driver.session.calls.active_group_call = Some(call);
     pump_until_mic_answers(&mut driver);
     assert!(mics.opened.lock().unwrap().is_empty());

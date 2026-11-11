@@ -296,7 +296,7 @@ fn a_chat_windows_style_preview_takes_its_answer_in_its_own_frame(cx: &mut TestA
             session.messages.ai_compose.style_lookup = Some(quill::state::StyleLookup {
                 token,
                 name: "formal".into(),
-                outcome: Some(Err(quill::state::StyleError::Invalid)),
+                outcome: quill::state::StyleReply::Answered(Err(quill::state::StyleError::Invalid)),
             });
         }
         cx.notify();
