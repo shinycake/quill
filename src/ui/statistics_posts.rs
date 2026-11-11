@@ -375,7 +375,7 @@ impl QuillApp {
         // The numbers come from the chat's recent interactions when the
         // post is among them, else from the post itself.
         let recent = match session.groups.chat_statistics.get(&chat_id) {
-            Some(ChatStatisticsFetch::Loaded(stats)) => match stats.as_ref() {
+            Some(ChatStatisticsFetch::Loaded { stats, .. }) => match stats.as_ref() {
                 ChatStatistics::Channel(c) => c
                     .recent_interactions
                     .iter()
@@ -519,7 +519,35 @@ impl QuillApp {
                         page = page.child(divider(cx)).child(section);
                     }
                 }
-                _ => {}
+                Some(PollStatsFetch::Loading) => {}
+                Some(PollStatsFetch::Failed(message)) => {
+                    page = page
+                        .child(divider(cx))
+                        .child(div().text_sm().text_color(danger()).child(message.clone()))
+                        .child(
+                            Button::new("message-poll-votes-retry")
+                                .label(tr(keys::Q_MONEY_RETRY))
+                                .small()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    let is_dark = super::chat_theme::is_dark_palette();
+                                    if let Some(live) = this.live.as_mut()
+                                        && live
+                                            .driver
+                                            .retry_stats_poll_votes(
+                                                ChatId(chat_id),
+                                                MessageId(message_id),
+                                                is_dark,
+                                            )
+                                            .is_err()
+                                    {
+                                        this.set_note(StatusNote::error(tr(
+                                            keys::Q_MONEY_COULD_NOT_LOAD_STATISTICS,
+                                        )));
+                                    }
+                                    cx.notify();
+                                })),
+                        );
+                }
             }
         }
         if let Some(state) = state {

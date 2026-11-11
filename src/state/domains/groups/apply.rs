@@ -312,9 +312,17 @@ impl Session {
                     && let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
                 {
+                    // The theme is the one the request in flight asked for.
+                    let is_dark = match self.groups.chat_statistics.get(&chat_id.0) {
+                        Some(ChatStatisticsFetch::Loading { is_dark }) => *is_dark,
+                        _ => false,
+                    };
                     self.groups.chat_statistics.insert(
                         chat_id.0,
-                        ChatStatisticsFetch::Loaded(std::sync::Arc::new(statistics)),
+                        ChatStatisticsFetch::Loaded {
+                            stats: std::sync::Arc::new(statistics),
+                            is_dark,
+                        },
                     );
                 }
             }

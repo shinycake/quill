@@ -5464,3 +5464,60 @@ land and the typed form was gone.
 - **Skipped.** 13-069: `AgentUi::pick_account` already resets the activity
   filter wherever `picked` changes, with a test
   (`picking_another_account_resets_the_activity_filter`).
+
+### Sweep fixes (s4-groups)
+
+- **Requests that never answer.** A swept or logout-settled request takes its
+  waiting group-admin follow-ups with it and says so (02-074). A refused part
+  of the business bot lookup clears the recorded query and drops late answers,
+  so the same text asks again (02-032). A refused poll-votes request is a
+  `Failed` chart with Retry, not an empty slot the next render asks for
+  again (13-030).
+- **Answers matched to what asked.** The join-request list keeps its newest
+  request id after it answers, so an older page that lands later is dropped;
+  "load more" asks the registry, not that map, whether a page is out; a stale
+  load-more error says nothing (05-078, 05-084). A membership update forgets
+  an administrator list asked before it, so its answer cannot put the old
+  administrators back (05-079). A list error does not fail a list that
+  already holds an answer (05-085). A hidden join request does not bump a
+  searched total (05-080). Statistics carry the theme their request asked
+  for in `Loading`/`Loaded`, and a poll drain asks again when the theme
+  changed (13-032).
+- **Saves in parts.** A permissions Save whose later part is refused returns
+  `PermissionsSent::Partial { sent, refused }`; the box stays, names the part
+  and a second Save sends only what still differs (02-168, 10-065). The
+  upgrade-to-supergroup confirm is a `Submit` page: it closes on the answer
+  or the upgrade event and shows TDLib's reason otherwise (10-043).
+- **New group dialog.** A made plain group takes its dialog (and its creation
+  row) away from a poll drain, like a community's chat (02-150, 05-087,
+  11-p5-001). Editing the link no longer forgets a type save still out
+  (11-p5-005). The subscribers step finishes only when the add went out; tdesktop
+  closes at the send, so the answer is not waited for (11-p5-004).
+- **Stage owners.** Add Members keeps the picked contacts when the add did
+  not go out (09-051). Unban, kick and remove no longer refetch the page
+  before the change applies: the request's `ok` marks the member list stale
+  (10-061). A saved Edit box is dropped, not hidden (10-055). The Custom
+  limit field clears its focus request when its content is drawn
+  (`Rc<Cell<bool>>` shared with the content closure) (10-150). Welcome
+  Retry only re-asks the load, so typed text stays (10-076). A blocked
+  Public choice is not stored in the draft (10-083); the apply-to-links and
+  username alerts name the box that asked (10-084, 10-086). The Share of a
+  group link names the asking window (10-095). A chat window of an upgraded
+  group is replaced from whichever window is live (10-044). A failed topic
+  select forgets no scroll position (10-073). The revoked-links list opens
+  only once its request is out (10-143); Requests on a link says when the
+  driver refused (10-147).
+- **Smaller.** One welcome message per chat in flight, not per account
+  (02-132); revoked links wait for the viewer's id (02-151); one failed
+  profile thumbnail download keeps the rest of the queue (02-186); a saved
+  business time zone stays when TDLib's list lacks it (08-007); typing on
+  past a debounced bot lookup reads as Loading (08-006); a Created
+  community closes the identity box too (08-124); the monoforum ban item says
+  Checking until the member status is known (09-063); a filter naming only
+  gone administrators opens as all (03-047); the boost count buttons wait
+  for the save in flight (02-124).
+- **Skipped.** 09-052: the New community box is a `Submit`; a refused
+  `createCommunity` lands in `Failed` with the reason and the box stays
+  (`settle_create_community_dialog`). 10-094: the info panel target is a
+  selection that draws from cached data; a failed fetch shows the error note
+  and reopening asks again, so no stage can stick.

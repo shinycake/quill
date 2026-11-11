@@ -389,9 +389,19 @@ impl QuillApp {
         }
     }
 
-    /// A typed link hides the refusal of the last Save.
+    /// A typed link hides the refusal of the last Save; a Save still out
+    /// stays, so its answer moves the step on.
     pub(super) fn new_chat_link_edited(&mut self) {
-        if let Some(dialog) = self.admin.create_chat_dialog.as_mut()
+        let out = match self.admin.create_chat_dialog.as_ref().map(|d| &d.stage) {
+            Some(NewChatStage::Type {
+                saving: Some(sent), ..
+            }) => self
+                .session()
+                .is_some_and(|session| sent.iter().any(|id| session.requests.get(*id).is_some())),
+            _ => false,
+        };
+        if !out
+            && let Some(dialog) = self.admin.create_chat_dialog.as_mut()
             && let NewChatStage::Type { saving, .. } = &mut dialog.stage
         {
             *saving = None;
@@ -438,10 +448,17 @@ impl QuillApp {
         if users.is_empty() {
             return;
         }
+        // tdesktop closes the box as the invite goes out; one the driver
+        // refused (no right, no connection) keeps the box and the picks.
         if let Some(live) = self.live.as_mut()
-            && live.driver.add_chat_members(chat, &users).is_err()
+            && !live
+                .driver
+                .add_chat_members(chat, &users)
+                .is_ok_and(|sent| sent.is_some())
         {
             self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_ADD_MEMBERS)));
+            cx.notify();
+            return;
         }
         self.finish_new_chat(chat, window, cx);
     }

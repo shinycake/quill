@@ -295,8 +295,17 @@ pub enum ChatStatisticsFetch {
     WaitingForInfo {
         is_dark: bool,
     },
-    Loading,
-    Loaded(std::sync::Arc<ChatStatistics>),
+    /// Asked for graphs in this theme.
+    Loading {
+        is_dark: bool,
+    },
+    /// The graphs' colors are the theme they were asked for
+    /// (`ConnectDriver::refresh_chat_statistics` asks again when the
+    /// theme changed).
+    Loaded {
+        stats: std::sync::Arc<ChatStatistics>,
+        is_dark: bool,
+    },
     Failed(String),
 }
 

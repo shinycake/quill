@@ -357,6 +357,8 @@ impl QuillApp {
             | self.drain_peer_qr(cx)
             | self.drain_story_stealth(cx)
             | self.drain_communities(cx)
+            | self.drain_new_chat_done(cx)
+            | self.drain_statistics_theme(cx)
         {
             progressed = true;
         }

@@ -140,7 +140,6 @@ impl QuillApp {
         }
         progressed |= self.drain_pending_ban(cx);
         progressed |= self.drain_new_community_chat(cx);
-        progressed |= self.drain_new_chat_done(cx);
         progressed
     }
 }

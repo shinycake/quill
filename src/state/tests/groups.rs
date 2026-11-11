@@ -876,7 +876,7 @@ fn a_join_request_hidden_by_a_search_does_not_bump_the_total() {
         &mut session,
         &seq,
         &sink,
-        r#"{"@type":"updateNewChatJoinRequest","chat_id":13,"request":{"@type":"chatJoinRequest","user_id":7003,"date":1788600000,"bio":"New"},"user_chat_id":0,"invite_link":null,"query_id":"42"}"#,
+        r#"{"@type":"updateNewChatJoinRequest","chat_id":13,"request":{"@type":"chatJoinRequest","user_id":7003,"date":1788600000,"bio":"New"},"user_chat_id":0,"invite_link":{"@type":"chatInviteLink","invite_link":"https://t.me/+join","name":"Join","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":8,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false},"query_id":"42"}"#,
     );
     let JoinRequestFetch::Loaded(list) = session.groups.join_requests.get(&13).unwrap() else {
         panic!("join requests were not loaded");
