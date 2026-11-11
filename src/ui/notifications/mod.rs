@@ -235,16 +235,17 @@ impl QuillApp {
     }
 
     fn apply_pending_keybindings(&mut self, cx: &mut Context<Self>) {
-        if self.preferences.keybinding.keymap == super::keybindings::Keymap::Applied {
-            return;
-        }
         let Some(live) = self.live.as_ref() else {
             return;
         };
+        let account = live.driver.session.account.clone();
+        if self.preferences.keybinding.keymap.carries(&account) {
+            return;
+        }
         let customs = live.driver.load_custom_keybindings();
         // Empty prefs rebuild defaults too, replacing the previous account's chords.
         super::keybindings::apply_custom_bindings(cx, &customs);
-        self.preferences.keybinding.keymap = super::keybindings::Keymap::Applied;
+        self.preferences.keybinding.keymap = super::keybindings::Keymap::Applied(account);
     }
 
     /// Redraw for what the TDLib poll applied, as urgently as it needs

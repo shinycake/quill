@@ -157,13 +157,13 @@ impl QuillApp {
                     price,
                     send_date: price_box.send_date,
                 };
-                let (target, admin) = (price_box.target, price_box.admin);
+                let (target, admin, mode) = (price_box.target, price_box.admin, price_box.mode);
                 if !admin && let Some(short) = price.and_then(|p| self.suggest_shortfall(p)) {
                     self.ask_for_balance(short, BalanceFor::Offer, cx);
                     return false;
                 }
                 self.suggested_posts.close_price();
-                self.apply_suggest_terms(target, terms, cx);
+                self.apply_suggest_terms(target, mode, terms, cx);
                 return true;
             }
             PriceCheck::TooSmall => limits.min_price_toast(ton),
@@ -191,6 +191,7 @@ impl QuillApp {
     pub(super) fn apply_suggest_terms(
         &mut self,
         target: SuggestTarget,
+        mode: SuggestMode,
         terms: SuggestTerms,
         cx: &mut Context<Self>,
     ) {
@@ -199,14 +200,15 @@ impl QuillApp {
                 let old = self
                     .session()
                     .and_then(|session| session.suggest_bar(chat_id));
-                self.set_suggest_bar(
-                    chat_id,
-                    Some(SuggestBar {
-                        terms,
-                        kind: old.map_or(BarKind::New, |bar| bar.kind),
-                    }),
-                    cx,
-                );
+                // A box that changed an edit's terms keeps the edit: with
+                // its bar gone (sent, cleared) there is nothing to change,
+                // and a new offer is not what the user was editing.
+                let kind = match (old, mode) {
+                    (Some(bar), _) => bar.kind,
+                    (None, SuggestMode::New) => BarKind::New,
+                    (None, SuggestMode::Change | SuggestMode::Publish) => return,
+                };
+                self.set_suggest_bar(chat_id, Some(SuggestBar { terms, kind }), cx);
             }
             SuggestTarget::Offer {
                 chat_id,
@@ -303,6 +305,7 @@ impl QuillApp {
                     chat_id,
                     message_id,
                 },
+                SuggestMode::Change,
                 SuggestTerms { price, send_date },
                 cx,
             ),

@@ -361,7 +361,9 @@ impl QuillApp {
                 }
             }
         });
-        *player.closer.borrow_mut() = Upkeep::Running { _task: task };
+        if let Ok(mut upkeep) = player.closer.try_borrow_mut() {
+            *upkeep = Upkeep::Running { _task: task };
+        }
     }
 
     /// Starts the task that redraws the app when a clip opened or its first
@@ -412,7 +414,9 @@ impl QuillApp {
                 }
             }
         });
-        *player.pump.borrow_mut() = Upkeep::Running { _task: task };
+        if let Ok(mut upkeep) = player.pump.try_borrow_mut() {
+            *upkeep = Upkeep::Running { _task: task };
+        }
     }
 
     /// A history row's animated sticker, `side` points across, with its

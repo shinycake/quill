@@ -67,11 +67,18 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn close_start_files(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.start_files.choosing.take();
+    /// The chooser ends: its files go (handed back) and the search clears.
+    /// The one place either happens.
+    fn end_start_files(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<PathBuf> {
+        let files = self.start_files.choosing.take();
         self.start_files
             .search
             .update(cx, |input, cx| input.set_value("", window, cx));
+        files
+    }
+
+    fn close_start_files(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.end_start_files(window, cx);
         cx.notify();
     }
 
@@ -141,10 +148,7 @@ impl QuillApp {
         self.select_listed_chat(chat, window, cx);
         if self.open_chat_id() == Some(chat) {
             // The files are taken only now that their chat is open.
-            let files = self.start_files.choosing.take();
-            self.start_files
-                .search
-                .update(cx, |input, cx| input.set_value("", window, cx));
+            let files = self.end_start_files(window, cx);
             self.attach_dropped_files(&files, cx);
         } else {
             // The chat did not open (filtered out, hidden by a folder): the

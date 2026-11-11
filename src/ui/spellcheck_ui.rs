@@ -289,6 +289,9 @@ impl QuillApp {
                     .background_spawn(async move { checker.check_text(&checked) })
                     .await;
                 let _ = this.update(cx, |this, cx| {
+                    // Answered: a replaced check was dropped, so this one is
+                    // the one in flight.
+                    this.composer_ui.spelling.check = Check::Idle;
                     if this.chat_prefs.spellcheck_enabled
                         && this.composer_ui.spelling.underlines.text == text
                         && this.composer_ui.spelling.underlines.found != found

@@ -24,7 +24,6 @@ use gpui_kit::{
     WindowOptions, WindowingRequest,
 };
 use quill::lang::{keys, tr};
-use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 /// How long attaching a new device may take. A platform that never answers
@@ -62,11 +61,43 @@ async fn attach_in_time(
 }
 
 /// Whether the device was already recovered once. Quill recovers once;
-/// the device going a second time gives up.
+/// the device going a second time gives up. Read off [`Watch`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Recovery {
     Healthy,
     Recovered,
+}
+
+/// What the watcher holds between closes: the window the platform kept
+/// (it holds the app until used or dropped), under the stage of recovery
+/// it was kept in. Recovering takes the window and moves to `Recovered`
+/// in the one call, so the two cannot disagree.
+enum Watch {
+    Healthy { kept: Option<KeptWindow> },
+    Recovered { kept: Option<KeptWindow> },
+}
+
+impl Watch {
+    fn recovery(&self) -> Recovery {
+        match self {
+            Self::Healthy { .. } => Recovery::Healthy,
+            Self::Recovered { .. } => Recovery::Recovered,
+        }
+    }
+
+    fn kept_mut(&mut self) -> &mut Option<KeptWindow> {
+        match self {
+            Self::Healthy { kept } | Self::Recovered { kept } => kept,
+        }
+    }
+
+    /// Recovering starts: the kept window is handed over, and a later
+    /// loss gives up.
+    fn recover(&mut self) -> Option<KeptWindow> {
+        let kept = self.kept_mut().take();
+        *self = Self::Recovered { kept: None };
+        kept
+    }
 }
 
 /// A window has closed.
@@ -168,24 +199,23 @@ fn watch_closed_windows(
 ) {
     cx.set_quit_mode(QuitMode::Explicit);
     let reopen = Rc::new(reopen);
-    let recovered = Rc::new(Cell::new(Recovery::Healthy));
-    let kept = RefCell::new(None);
+    let mut watch = Watch::Healthy { kept: None };
     cx.on_window_closed(move |cx, window_id| {
         // Taken even when it will not be used: until dropped it holds the
         // app, and a quit must drop the app as it always did.
         if let Some(left) = cx.take_kept_window(window_id) {
-            *kept.borrow_mut() = Some(left);
+            *watch.kept_mut() = Some(left);
         }
         let closed = Closed {
             windows_left: cx.windows().len(),
             gpu_gone: gpu_gone(cx),
             main_lost: crate::ui::link_inbox::main_window_id(cx) == Some(window_id)
                 && !super::quit_asked(),
-            recovered_before: recovered.get(),
+            recovered_before: watch.recovery(),
         };
         let step = after_window_closed(closed);
         if !matches!(step, Step::CloseTheRest | Step::Recover | Step::Reopen) {
-            kept.borrow_mut().take();
+            watch.kept_mut().take();
         }
         match step {
             Step::Nothing => {}
@@ -198,8 +228,7 @@ fn watch_closed_windows(
                 }
             }),
             step @ (Step::Recover | Step::Reopen) => {
-                recovered.set(Recovery::Recovered);
-                let Some(left) = kept.borrow_mut().take() else {
+                let Some(left) = watch.recover() else {
                     give_up(tr(keys::Q_MISC_GPU_STOPPED_WORKING_AGAIN), cx);
                     return;
                 };

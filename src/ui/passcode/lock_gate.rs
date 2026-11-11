@@ -174,7 +174,7 @@ impl QuillApp {
         self.close_cameras_for_lock(cx);
         // A key capture would take the first key of the passcode as a
         // binding: Settings > Shortcuts and the push-to-talk key.
-        self.preferences.keybinding.capture = crate::ui::keybindings::Capture::Idle;
+        self.preferences.keybinding.end();
         self.group_call.ptt_capture = false;
         // Now Playing names the sender or the song: the OS controls go off.
         self.publish_now_playing();

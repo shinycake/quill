@@ -255,7 +255,9 @@ pub(super) fn install(demo: bool, window: &mut Window, cx: &mut Context<QuillApp
                     let _ = this.update(cx, |app, cx| sync(app, window, cx, &task_state));
                 });
             });
-            *state.sync.borrow_mut() = SyncStage::Scheduled { _task: task };
+            if let Ok(mut stage) = state.sync.try_borrow_mut() {
+                *stage = SyncStage::Scheduled { _task: task };
+            }
         }
     };
     let shared: Rc<dyn Fn(&mut Context<QuillApp>)> = Rc::new(schedule.clone());

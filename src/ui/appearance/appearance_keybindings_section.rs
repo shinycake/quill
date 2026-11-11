@@ -55,8 +55,8 @@ impl QuillApp {
             } else {
                 self.preferences
                     .keybinding
-                    .capture
-                    .refusal_of(ra.id)
+                    .refusals
+                    .of(ra.id)
                     .map(str::to_owned)
                     .or(persisted_error)
             };
@@ -112,8 +112,7 @@ impl QuillApp {
                                         {
                                             this.preferences.keybinding.capture = Capture::Idle;
                                         } else {
-                                            this.preferences.keybinding.capture =
-                                                Capture::Waiting(id.clone());
+                                            this.preferences.keybinding.start_capture(id.clone());
                                             window.focus(&this.preferences.keybinding_focus, cx);
                                         }
                                         cx.notify();
@@ -138,6 +137,7 @@ impl QuillApp {
                                             apply_custom_bindings(cx, &customs);
                                         }
                                         this.preferences.keybinding.capture = Capture::Idle;
+                                        this.preferences.keybinding.refusals.clear_of(&id);
                                         cx.notify();
                                     })
                                 }),
@@ -231,10 +231,11 @@ impl QuillApp {
             .map(|live| live.driver.load_custom_keybindings())
             .unwrap_or_default();
         if let Some(conflict) = keybinding_conflict(&id, &chord, &customs) {
-            self.preferences.keybinding.capture = Capture::Refused {
-                action: id,
-                message: conflict_message(&chord, &conflict),
-            };
+            self.preferences.keybinding.capture = Capture::Idle;
+            self.preferences
+                .keybinding
+                .refusals
+                .refuse(id, conflict_message(&chord, &conflict));
             cx.notify();
             return;
         }

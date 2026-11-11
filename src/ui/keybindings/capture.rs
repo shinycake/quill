@@ -2,17 +2,13 @@
 //! that was refused, and whether the keymap holds this account's overrides.
 #![deny(clippy::indexing_slicing)]
 
-/// The rebinding capture. One value, so a row waiting for a key and a
-/// refusal message are never both on the page.
+/// The rebinding capture: which row waits for a keystroke.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(in crate::ui) enum Capture {
     #[default]
     Idle,
     /// The action with this id waits for a keystroke.
     Waiting(String),
-    /// A capture was refused (fixed chrome or another rebindable action).
-    /// The chip keeps showing the chord that is actually bound.
-    Refused { action: String, message: String },
 }
 
 impl Capture {
@@ -20,32 +16,62 @@ impl Capture {
     pub(in crate::ui) fn waiting(&self) -> Option<&str> {
         match self {
             Self::Waiting(id) => Some(id),
-            _ => None,
-        }
-    }
-
-    /// The refusal message of action `id`.
-    pub(in crate::ui) fn refusal_of(&self, id: &str) -> Option<&str> {
-        match self {
-            Self::Refused { action, message } if action == id => Some(message),
-            _ => None,
+            Self::Idle => None,
         }
     }
 }
 
-/// Whether the keymap carries the saved overrides of the account on screen.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// Chords the page refused (fixed chrome or another rebindable action),
+/// each under the row it was typed for. The chip keeps showing the chord
+/// that is actually bound. A row's own next try, reset or success ends its
+/// message; another row's capture leaves it alone.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(in crate::ui) struct Refusals(Vec<(String, String)>);
+
+impl Refusals {
+    /// The refusal message of action `id`.
+    pub(in crate::ui) fn of(&self, id: &str) -> Option<&str> {
+        self.0
+            .iter()
+            .find(|(action, _)| action == id)
+            .map(|(_, message)| message.as_str())
+    }
+
+    /// `id` was refused with `message`, replacing its earlier one.
+    pub(in crate::ui) fn refuse(&mut self, id: String, message: String) {
+        self.clear_of(&id);
+        self.0.push((id, message));
+    }
+
+    /// Action `id` starts over: only its own message goes.
+    pub(in crate::ui) fn clear_of(&mut self, id: &str) {
+        self.0.retain(|(action, _)| action != id);
+    }
+}
+
+/// Whose saved overrides the keymap carries. It is stale for any other
+/// account on screen, so an account change needs no reset by hand.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(in crate::ui) enum Keymap {
-    /// Saved overrides still to apply once the live driver is ready.
+    /// No account's overrides applied yet: apply once the live driver is
+    /// ready.
     #[default]
     Stale,
-    Applied,
+    Applied(quill::ids::AccountKey),
+}
+
+impl Keymap {
+    /// The keymap already carries `account`'s overrides.
+    pub(in crate::ui) fn carries(&self, account: &quill::ids::AccountKey) -> bool {
+        matches!(self, Self::Applied(applied) if applied == account)
+    }
 }
 
 /// Everything the Shortcuts page keeps besides its focus handle.
 #[derive(Debug, Default)]
 pub(in crate::ui) struct KeybindingUi {
     pub(in crate::ui) capture: Capture,
+    pub(in crate::ui) refusals: Refusals,
     pub(in crate::ui) keymap: Keymap,
 }
 
@@ -55,15 +81,27 @@ impl KeybindingUi {
     /// by a page that is gone is dropped.
     pub(in crate::ui) fn capture_active(&mut self, shown: bool) -> bool {
         if !shown {
-            self.capture = Capture::Idle;
+            self.end();
         }
         shown && self.capture.waiting().is_some()
     }
 
-    /// A new prefs root needs its own keymap, even when it has no overrides.
-    pub(in crate::ui) fn invalidate_account(&mut self) {
-        self.keymap = Keymap::Stale;
+    /// The page is left or locked: the capture and every message go.
+    pub(in crate::ui) fn end(&mut self) {
         self.capture = Capture::Idle;
+        self.refusals = Refusals::default();
+    }
+
+    /// A new prefs root: a capture for the old account's page is over. The
+    /// keymap needs no reset: it names the account it carries.
+    pub(in crate::ui) fn invalidate_account(&mut self) {
+        self.end();
+    }
+
+    /// Row `id` starts waiting for a keystroke; its old message goes.
+    pub(in crate::ui) fn start_capture(&mut self, id: String) {
+        self.refusals.clear_of(&id);
+        self.capture = Capture::Waiting(id);
     }
 }
 
@@ -83,28 +121,39 @@ mod tests {
 
     #[test]
     fn a_refusal_is_dropped_with_the_page_and_is_not_a_capture() {
-        let mut ui = KeybindingUi {
-            capture: Capture::Refused {
-                action: "focus-composer".into(),
-                message: "Conflict".into(),
-            },
-            ..KeybindingUi::default()
-        };
-        assert_eq!(ui.capture.refusal_of("focus-composer"), Some("Conflict"));
-        assert_eq!(ui.capture.refusal_of("other"), None);
+        let mut ui = KeybindingUi::default();
+        ui.refusals
+            .refuse("focus-composer".into(), "Conflict".into());
+        assert_eq!(ui.refusals.of("focus-composer"), Some("Conflict"));
+        assert_eq!(ui.refusals.of("other"), None);
         assert!(!ui.capture_active(true));
         assert!(!ui.capture_active(false));
         assert_eq!(ui.capture, Capture::Idle);
+        assert_eq!(ui.refusals.of("focus-composer"), None);
     }
 
     #[test]
-    fn account_change_invalidates_applied_bindings_and_capture() {
+    fn starting_or_resetting_another_row_keeps_a_refusal() {
+        let mut ui = KeybindingUi::default();
+        ui.refusals.refuse("a".into(), "Conflict".into());
+        ui.start_capture("b".into());
+        assert_eq!(ui.refusals.of("a"), Some("Conflict"));
+        ui.refusals.clear_of("b");
+        assert_eq!(ui.refusals.of("a"), Some("Conflict"));
+        ui.start_capture("a".into());
+        assert_eq!(ui.refusals.of("a"), None, "its own try ends its message");
+    }
+
+    #[test]
+    fn account_change_ends_the_capture_and_makes_the_keymap_stale_for_the_new_account() {
         let mut ui = KeybindingUi {
             capture: Capture::Waiting("focus-composer".into()),
-            keymap: Keymap::Applied,
+            keymap: Keymap::Applied(quill::ids::AccountKey("a".into())),
+            ..KeybindingUi::default()
         };
         ui.invalidate_account();
-        assert_eq!(ui.keymap, Keymap::Stale);
+        assert!(!ui.keymap.carries(&quill::ids::AccountKey("b".into())));
+        assert!(ui.keymap.carries(&quill::ids::AccountKey("a".into())));
         assert_eq!(ui.capture, Capture::Idle);
     }
 }

@@ -201,7 +201,7 @@ fn a_narrow_window_shows_the_list_then_a_page_with_a_way_back(cx: &mut TestAppCo
 }
 
 fn query(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> String {
-    app.read_with(vcx, |app, _| app.settings.search.query.clone())
+    app.read_with(vcx, |app, cx| app.settings.search.query(cx))
 }
 
 #[gpui_kit::test]

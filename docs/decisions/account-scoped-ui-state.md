@@ -6794,23 +6794,23 @@ or a side list becomes one value whose variants carry their data.
 | Id | Fix |
 | --- | --- |
 | 12-109, 13-082 | `SettingsUi::boxes: SettingsBox { None, LogOut, Stickers }` replaces `log_out_confirm` and `sticker_settings_open`; closing one box never closes the other. The Account box's `confirm_delete` / `confirm_logout` pair is `AccountConfirm { None, Delete, LogOut }`. |
-| 12-108 | `KeybindingUi { capture: Capture { Idle, Waiting(action), Refused { action, message } }, keymap: Keymap }` replaces `keybinding_capture`, `keybinding_error`, `keybindings_applied`; `SystemAccent { Unread, Read(Option<u32>) }` replaces `system_accent` + `system_accent_probed`. |
+| 12-108 | `KeybindingUi { capture: Capture { Idle, Waiting(action) }, refusals: Refusals, keymap: Keymap }` replaces `keybinding_capture`, `keybinding_error`, `keybindings_applied`. `Keymap { Stale, Applied(AccountKey) }` names the account whose overrides the keymap carries, so an account change makes it stale with no reset by hand. Refusals are kept per row: another row's capture or reset leaves a message alone, and only the row's own try, reset or success ends it; `SystemAccent { Unread, Read(Option<u32>) }` replaces `system_accent` + `system_accent_probed`. |
 | 13-079 | `Arrival::stage: Stage { Seeking, Washing { landed, centered_at } }`. |
-| 13-080 | `SettingsSearch::field: Field { Settled, ClearOnNextRender }` replaces `pending_clear`. |
+| 13-080 | `SettingsSearch::stage: Stage { Live { selected }, Finished }` replaces `pending_clear`, `selected` and the `query` mirror: the query is read from the field, the highlighted row lives with the search it belongs to, and a result opening clears the field at once (it has the window). Only closing Settings (no window) leaves `Finished` for the next render. |
 | 12-110 | `ChatListState::archive_settings: Fetch<ArchiveChatListSettings>` replaces the loading bool and the `Option`; a refused fetch now ends `Failed` (it used to leave the box "still loading" in `None`). The open flag stays in the session: it is the registry's single predicate and `Farewell` closes it. |
 | 13-081 | `AgentPageUi::picker` holds its fingerprint (`BuiltPicker`). `focus_chat` is the card's chat and `scroll_to` a one-shot scroll request: independent. |
 | 12-112 | Skipped: `reset_confirm` is the dialog registry's one open predicate (`AgentResetToken`), not a mirror of anything. |
-| 13-083 | `Mount { Mounting, Shown }` (`ui/mount.rs`) for the forward box's search focus and the contact box's; `link_text` and `forward_result` are single values with their own exits (`esc_stack`, chat change), not two fields in step. |
+| 13-083 | `Mount { Mounting, Shown }` (`ui/mount.rs`) lives in the stage it belongs to: `ForwardStage::Picking` and `ReplyChooser` start `Mounting` when they open (nothing sets it by hand) and `take_first_draw` hands the focus request out once. The contact box keeps its own `Mount`, made with the box it belongs to; `link_text` and `forward_result` are single values with their own exits (`esc_stack`, chat change), not two fields in step. |
 | 13-063 | Skipped: already `chat_list.tab: SidebarTab`. |
 | 13-054 | `SidebarReveal::mode: Mode { Docked, Hidden(Peek) }`: the pointer's peek exists only while hidden. |
 | 13-047, 13-048 | `ui/signin_clock.rs`: `StepClock { None, Code, Email }`, `ErrorClock { None, Seen { banner } }` (a different error shows its banned box again), `Ticker { Idle, Armed(task) }`. `PhoneStep` already carried the phone stages; `picker_open`, `touched` and `hint` are independent. |
-| 13-059 | `ComposerSpelling { underlines: Underlines { found, text }, check: Check { Idle, Checking(task) } }`: ranges and the text they refer to are one value. |
-| 13-035 | `StartFiles { Idle, Choosing { files } }`; closing hands the files back. |
-| 13-038 | `Recovery { Healthy, Recovered }` replaces the `Cell<bool>`. The kept window stays its own slot. |
+| 13-059 | `ComposerSpelling { underlines: Underlines { found, text }, check: Check { Idle, Checking(task) } }`: ranges and the text they refer to are one value. The check returns to `Idle` when its answer lands. |
+| 13-035 | `StartFiles { Idle, Choosing { files } }`; closing hands the files back, and `end_start_files` is the one place that also clears the search. |
+| 13-038 | `Watch { Healthy { kept }, Recovered { kept } }` replaces the `Cell<bool>` and the kept-window slot; `recover()` takes the window and moves to `Recovered` in one call. `Recovery` is only the decision function's input, read off the watch. |
 | 13-025 | `ZoomedDay::fetch: Fetch<Rc<StatChart>>`. |
 | 13-043 | `RangeSelector` and `PieZoom` own their subscription. |
 | 13-031 | Skipped: the lists already use `ForwardsPage` (matched to a `RequestId`). |
-| 13-014 | `UiClip::opening: Opening { Pending, Ready(timeline), Failed }`; the sticker pump and closer are `Upkeep { Idle, Running(task) }`. |
+| 13-014 | `UiClip::opening: Opening { Pending, Ready(timeline), Failed }`; the sticker pump and closer are `Upkeep { Idle, Running(task) }` (set through `try_borrow_mut`, as the Touch Bar's `SyncStage` is). |
 | 13-004 | `SetConfirm { None, Rename, DeleteSticker(item), DeleteSet, RemoveSet }` and `PickWait { None, Downloading(pending), Decoding(pick, file) }` replace six fields. `reordering`, `create`, `encoding` and `pick` stay: separate flows. |
 | 13-011 | `StickerPanel::installed_loaded()` reads `lists.installed`; the masks panel has `installed_fetch` / `archived_fetch` (`Fetch<()>`) instead of `installed_loaded`, `archived_loaded`, `failed`; `ManagerView` derives a `ListStatus`. The masks strip reads the same fetch (the twin screen). |
 | 13-017 | `StickerPanel::greeting: Fetch<Vec<StickerItem>>`: marked when answered, asked only from `Idle`, `Failed` when refused or not sent. |
@@ -6823,7 +6823,7 @@ or a side list becomes one value whose variants carry their data.
 | 13-095, 13-094 | `AfterStars` in the Stars box; `LiveJoin { Idle, Joining, Joined, Refused }`. |
 | 13-098 | `ReplyRow { Closed, Typing, Panel }`: the panel exists only in an open row. |
 | 13-109 | `SuggestedPostsUi` is a base box (price, accept or decline) and one box over it (time or Grams Needed). |
-| 13-110 | `SuggestBar::kind: BarKind { New, Edit { of, send } }`: only an edit has a message and a send. |
+| 13-110 | `SuggestBar::kind: BarKind { New, Edit { of, send } }`: only an edit has a message and a send. A Change-mode price box whose bar is gone applies nothing (it used to make a New bar). |
 | 13-118 | `SyntheticKind::{ImageLoading, ImageLoaded}`. |
 | 13-116 | `Showing::timer: Timer { Running, Paused }` and `ToastQueue::pointer: Pointer { Away, Over }`. |
 | 13-114 | `MoneyPage::view: MoneyView { Overview, Lookup, Tx, Nft }`; `Paged` carries a `Fetch<()>`. `hint_open` is an overlay over the view, kept. |
