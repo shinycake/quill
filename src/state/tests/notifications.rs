@@ -828,6 +828,7 @@ fn default_auto_delete_roundtrip_and_failure() {
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetDefaultAutoDelete, None);
     session.settings.default_auto_delete.begin();
+    session.settings.default_auto_delete.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -848,6 +849,7 @@ fn default_auto_delete_roundtrip_and_failure() {
         None,
     );
     session.settings.default_auto_delete.begin();
+    session.settings.default_auto_delete.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -864,6 +866,7 @@ fn default_auto_delete_roundtrip_and_failure() {
         None,
     );
     session.settings.default_auto_delete.begin();
+    session.settings.default_auto_delete.sent(extra);
     apply_json(
         &mut session,
         &seq,

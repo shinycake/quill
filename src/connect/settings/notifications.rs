@@ -264,6 +264,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::GetSavedNotificationSounds, None);
         self.session.settings.saved_sounds.begin();
+        self.session.settings.saved_sounds.sent(extra);
         match self.sender.send_json(&get_saved_notification_sounds(extra)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {

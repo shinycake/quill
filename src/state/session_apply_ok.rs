@@ -147,7 +147,9 @@ impl Session {
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds })) =
             pending.map(|p| p.purpose)
         {
-            self.settings.default_auto_delete.succeed(seconds);
+            self.settings
+                .default_auto_delete
+                .answered(pending.map(|p| p.id), seconds);
         }
         // Slice A7: a `setAccountTtl` succeeded — the server
         // confirmed the write of exactly the sent value, so it
@@ -160,7 +162,9 @@ impl Session {
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days })) =
             pending.map(|p| p.purpose)
         {
-            self.settings.account_ttl.succeed(days);
+            self.settings
+                .account_ttl
+                .answered(pending.map(|p| p.id), days);
         }
         if matches!(
             pending.map(|p| p.purpose),

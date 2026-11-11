@@ -34,6 +34,25 @@ pub(crate) enum View {
 }
 
 impl View {
+    /// Whether this screen draws a refusal of `area` (the hub draws all of
+    /// them: a save refused after the screen was left shows there).
+    pub(crate) fn shows(self, area: quill::state::BusinessArea) -> bool {
+        use quill::business_settings::BusinessSettingKind as Kind;
+        use quill::state::BusinessArea as Area;
+        match (self, area) {
+            (View::Hub, _) => true,
+            (View::Greeting, Area::Save(Kind::Greeting))
+            | (View::Away, Area::Save(Kind::Away))
+            | (View::Hours | View::Day(_) | View::TimeZone, Area::Save(Kind::OpeningHours))
+            | (View::Location, Area::Save(Kind::Location))
+            | (View::StartPage | View::StickerPick, Area::Save(Kind::StartPage))
+            | (View::ChatLinks | View::LinkEdit, Area::ChatLinks)
+            | (View::Chatbots, Area::Chatbot) => true,
+            (View::Picker, Area::Save(Kind::Greeting | Kind::Away)) => true,
+            _ => false,
+        }
+    }
+
     /// Screens that save when they are left (tdesktop saves a section in
     /// its destructor).
     pub(super) fn saves_on_leave(self) -> bool {

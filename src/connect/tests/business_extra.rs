@@ -380,9 +380,11 @@ fn the_bot_lookup_collects_three_answers() {
     );
     let lookup = &driver.session.settings.business_extra.lookup;
     assert!(lookup.done());
-    assert_eq!(lookup.exact, Some(Some(42)));
-    assert_eq!(lookup.mine.as_deref(), Some(&[42][..]));
-    assert_eq!(lookup.global.as_deref(), Some(&[][..]));
+    assert_eq!(lookup.exact_user(), Some(42));
+    assert_eq!(lookup.mine_users(), [42]);
+    // A refused leg is a failure, not an empty answer.
+    assert!(lookup.global_users().is_empty());
+    assert!(lookup.failed());
     assert!(driver.session.settings.business.error.is_none());
     // An invalid query clears it without sending.
     driver.lookup_business_bot("@").unwrap();

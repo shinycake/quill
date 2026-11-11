@@ -176,6 +176,7 @@ impl QuillApp {
         let Some(line) = self
             .session_mut()
             .and_then(|session| session.settings.business.error.take())
+            .map(|refusal| refusal.line)
         else {
             return;
         };

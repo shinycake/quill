@@ -1,6 +1,7 @@
 //! Connect driver: Telegram Business settings of the own account
 //! (`crate::business_settings`).
 use super::*;
+use crate::ids::RequestId;
 use crate::business_info::{BusinessLocation, OpeningHours};
 use crate::business_settings::{self as bs, AwaySettings, BusinessSettingKind, GreetingSettings};
 use crate::state::{RequestPurpose, SettingsPurpose};
@@ -10,13 +11,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         purpose: RequestPurpose,
         build: impl FnOnce(&str) -> String,
-    ) -> Result<(), ConnectSendError> {
+    ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(purpose, None);
         let json = build(&extra.as_extra());
-        self.send_json_request(extra, &json).map(|_| ())
+        self.send_json_request(extra, &json)
     }
 
     /// The own full info the Business screens are built from, asked when
@@ -53,14 +54,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Settings(SettingsPurpose::GetTimeZones),
             bs::get_time_zones_request,
         );
-        if sent.is_err() {
-            self.session
+        match sent {
+            Ok(extra) => self.session.settings.business.time_zones.sent(extra),
+            Err(_) => self
+                .session
                 .settings
                 .business
                 .time_zones
-                .fail("The time zones request was not sent.");
+                .fail("The time zones request was not sent."),
         }
-        sent
+        sent.map(|_| ())
     }
 
     fn save_business(
@@ -69,11 +72,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         build: impl FnOnce(&str) -> String,
     ) -> Result<(), ConnectSendError> {
         self.session.settings.business.error = None;
-        self.send_business_request(
+        let extra = self.send_business_request(
             RequestPurpose::Settings(SettingsPurpose::SaveBusinessSetting { kind }),
             build,
         )?;
-        self.session.settings.business.saving.push(kind);
+        self.session.settings.business.saving.push((extra, kind));
         Ok(())
     }
 

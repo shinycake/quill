@@ -32,6 +32,8 @@ enum Found {
     Bots(Vec<i64>),
     Missing,
     Unsupported,
+    /// A leg of the lookup was refused: its results are not "none".
+    Failed,
 }
 
 impl QuillApp {
@@ -205,15 +207,15 @@ impl QuillApp {
         if !lookup.done() {
             return Found::Loading;
         }
-        let exact = lookup.exact.flatten();
-        let bots = merge_found_bots(
-            exact,
-            lookup.mine.as_deref().unwrap_or_default(),
-            lookup.global.as_deref().unwrap_or_default(),
-            |id| self.business_bot_usable(id),
-        );
+        let exact = lookup.exact_user();
+        let bots = merge_found_bots(exact, lookup.mine_users(), lookup.global_users(), |id| {
+            self.business_bot_usable(id)
+        });
         if !bots.is_empty() {
             return Found::Bots(bots);
+        }
+        if lookup.failed() {
+            return Found::Failed;
         }
         let exact_bot = exact
             .and_then(|id| self.session()?.users.get(&id))
@@ -556,6 +558,15 @@ impl QuillApp {
                                 .text_color(muted)
                                 .text_center()
                                 .child(tr(keys::CHATBOTS_NOT_SUPPORTED)),
+                        );
+                    }
+                    Found::Failed => {
+                        body = body.child(
+                            div()
+                                .text_sm()
+                                .text_color(muted)
+                                .text_center()
+                                .child(tr(keys::Q_MEDIA_COULD_NOT_SEARCH_CHATBOTS)),
                         );
                     }
                     Found::Nothing => {}
