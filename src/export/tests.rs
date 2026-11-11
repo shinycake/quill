@@ -255,10 +255,12 @@ fn long_chats_split_into_numbered_files_oldest_first() {
     // The spool is gone.
     assert!(!run.out.join(".spool").exists());
     // The last report is the final write; the thread's wrapper marks it done.
-    assert_eq!(run.last.stage, Stage::Writing);
     assert_eq!(
-        (run.last.done, run.last.total),
-        (summary.messages, summary.messages)
+        run.last.stage,
+        Stage::Writing {
+            done: summary.messages,
+            total: summary.messages
+        }
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -489,12 +491,12 @@ fn progress_labels_and_fraction() {
     let mut p = Progress::starting();
     assert_eq!(p.label(), "Starting the export…");
     assert_eq!(p.fraction(), None);
-    p.stage = Stage::Collecting;
-    p.done = 120;
+    p.stage = Stage::Collecting { read: 120 };
     assert_eq!(p.label(), "Reading messages… 120");
-    p.stage = Stage::Writing;
-    p.total = 200;
-    p.done = 50;
+    p.stage = Stage::Writing {
+        done: 50,
+        total: 200,
+    };
     p.files = 3;
     assert_eq!(p.label(), "Saving messages… 50 of 200 · 3 files");
     assert_eq!(p.fraction(), Some(0.25));

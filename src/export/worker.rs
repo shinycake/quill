@@ -89,8 +89,15 @@ pub struct Summary {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stage {
     Starting,
-    Collecting,
-    Writing,
+    /// Reading the chat's messages: how many are in so far.
+    Collecting {
+        read: usize,
+    },
+    /// Saving them: `total` is known once collecting ends.
+    Writing {
+        done: usize,
+        total: usize,
+    },
     Finished(Summary),
     Failed(String),
     Cancelled,
@@ -99,9 +106,6 @@ pub enum Stage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Progress {
     pub stage: Stage,
-    pub done: usize,
-    /// Known once collecting ends.
-    pub total: usize,
     pub files: usize,
     pub skipped: usize,
 }
@@ -110,8 +114,6 @@ impl Progress {
     pub fn starting() -> Self {
         Self {
             stage: Stage::Starting,
-            done: 0,
-            total: 0,
             files: 0,
             skipped: 0,
         }
@@ -128,11 +130,10 @@ impl Progress {
     pub fn label(&self) -> String {
         match &self.stage {
             Stage::Starting => "Starting the export…".into(),
-            Stage::Collecting => format!("Reading messages… {}", self.done),
-            Stage::Writing => format!(
-                "Saving messages… {} of {} · {} files",
-                self.done, self.total, self.files
-            ),
+            Stage::Collecting { read } => format!("Reading messages… {read}"),
+            Stage::Writing { done, total } => {
+                format!("Saving messages… {done} of {total} · {} files", self.files)
+            }
             Stage::Finished(summary) => format!(
                 "Exported {} messages and {} files",
                 summary.messages, summary.files
@@ -145,9 +146,16 @@ impl Progress {
     /// 0.0..=1.0 while writing, `None` while the total is unknown.
     pub fn fraction(&self) -> Option<f32> {
         match self.stage {
-            Stage::Writing if self.total > 0 => Some(self.done as f32 / self.total as f32),
+            Stage::Writing { done, total } if total > 0 => Some(done as f32 / total as f32),
             Stage::Finished(_) => Some(1.0),
             _ => None,
+        }
+    }
+
+    /// One more message was saved.
+    pub(crate) fn wrote_one(&mut self) {
+        if let Stage::Writing { done, .. } = &mut self.stage {
+            *done += 1;
         }
     }
 }
@@ -281,10 +289,15 @@ pub(crate) fn fetch_file<T: Tdlib>(
     if file_id == 0 {
         return Ok(Err(Skip::Unavailable));
     }
-    let before = tdlib.call(
+    // A file call that times out leaves this file out, not the chat: the
+    // messages around it are still worth saving.
+    let before = match tdlib.call(
         json!({"@type": "getFile", "file_id": file_id}),
         QUERY_TIMEOUT,
-    )?;
+    ) {
+        Err(ExportError::Tdlib(_)) => return Ok(Err(Skip::Unavailable)),
+        answer => answer?,
+    };
     let only_for_export = nothing_held(&before);
     let remote_id = before.at("remote").at("id").as_str().unwrap_or_default();
     if only_for_export {
@@ -300,6 +313,14 @@ pub(crate) fn fetch_file<T: Tdlib>(
             tdlib.post_unanswered(json!({"@type": "cancelDownloadFile", "file_id": file_id,
                 "only_if_pending": false}));
             return Err(ExportError::Cancelled);
+        }
+        Err(ExportError::Tdlib(_)) => {
+            if only_for_export {
+                tdlib.post_unanswered(json!({"@type": "cancelDownloadFile", "file_id": file_id,
+                    "only_if_pending": false}));
+                unlist(tdlib, file_id);
+            }
+            return Ok(Err(Skip::Unavailable));
         }
         answer => answer?,
     };
@@ -544,16 +565,13 @@ fn write_chat<T: Tdlib>(
     progress: &mut Progress,
 ) -> Result<ChatResult, ExportError> {
     let wants_html = job.settings.format.wants_html();
-    progress.stage = Stage::Collecting;
-    progress.done = 0;
+    progress.stage = Stage::Collecting { read: 0 };
     (job.report)(progress.clone());
     let (mut ids, chunks) = collect(job, tdlib, out.spool, progress)?;
     ids.reverse();
     let total = ids.len();
     let pages = total.div_ceil(MESSAGES_PER_FILE).max(1);
-    progress.stage = Stage::Writing;
-    progress.total = total;
-    progress.done = 0;
+    progress.stage = Stage::Writing { done: 0, total };
     (job.report)(progress.clone());
     let mut namer = Namer::default();
     let mut buffer: Vec<(ExportMessage, Option<Outcome>)> = Vec::new();
@@ -578,7 +596,7 @@ fn write_chat<T: Tdlib>(
                 sink.push_message(&json::message_json(&msg, rooted.as_ref(), offset))?;
             }
             buffer.push((msg, outcome));
-            progress.done += 1;
+            progress.wrote_one();
             progress.files += usize::from(matches!(
                 buffer.last(),
                 Some((_, Some(Outcome::Saved { .. })))
