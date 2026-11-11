@@ -1,6 +1,6 @@
 //! Connect driver: call debug logs, call history, call privacy and busy-call handling.
 use super::*;
-use crate::state::{CallUpload, PrivacyAsk};
+use crate::state::{CallUpload, PrivacyAsk, RecentCallsClear, RecentCallsPage};
 
 impl<S: JsonSender> ConnectDriver<S> {
     pub(crate) fn call_debug_information(&self) -> Result<String, ConnectSendError> {
@@ -161,8 +161,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.session.calls.recent_calls.clear();
         self.session.calls.recent_calls_offset.clear();
-        self.session.calls.recent_calls_error = false;
-        self.session.calls.recent_calls_request = None;
+        self.session.calls.recent_calls_page = RecentCallsPage::Idle;
         self.fetch_call_history_page()
     }
 
@@ -178,7 +177,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if !crate::chatlist_calls::can_clear(
             self.session.calls.recent_calls.len(),
-            self.session.calls.recent_calls_clearing,
+            self.session.calls.recent_calls_clearing(),
         ) {
             return Ok(None);
         }
@@ -192,7 +191,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.calls.recent_calls_clearing = true;
+        self.session.calls.recent_calls_clear = RecentCallsClear::Clearing(extra);
         Ok(Some(extra))
     }
 
@@ -218,12 +217,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&search_call_messages(extra, &offset, 40))
         {
             self.session.requests.take(extra);
-            self.session.calls.recent_calls_error = true;
+            self.session.calls.recent_calls_page = RecentCallsPage::Failed;
             return Err(err);
         }
-        self.session.calls.recent_calls_request = Some(extra);
         // A retry of a failed page shows as loading again.
-        self.session.calls.recent_calls_error = false;
+        self.session.calls.recent_calls_page = RecentCallsPage::Loading(extra);
         Ok(extra)
     }
 

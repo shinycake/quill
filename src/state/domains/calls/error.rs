@@ -104,11 +104,11 @@ impl Session {
             // flags), not the call overlay.
             Some(RequestPurpose::SearchCallMessages) => {
                 if pending.is_some_and(|p| self.calls.take_recent_calls_request(p.id)) {
-                    self.calls.recent_calls_error = true;
+                    self.calls.recent_calls_page = RecentCallsPage::Failed;
                 }
             }
             Some(RequestPurpose::DeleteAllCallMessages) => {
-                self.calls.recent_calls_clearing = false;
+                self.calls.recent_calls_clear = RecentCallsClear::Idle;
                 self.chats_state
                     .chat_action_error
                     .push(crate::chatlist_calls::clear_failed(err.code));
