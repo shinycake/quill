@@ -85,9 +85,30 @@ impl EmojiLists {
     }
 }
 
+/// The install or archive of one emoji pack, as the pack browser shows it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SetMutation {
+    #[default]
+    Idle,
+    /// Pack `set_id` is being installed (`installed`) or removed.
+    Changing { set_id: i64, installed: bool },
+    /// The last change was refused: the browser says so until the next one.
+    Failed,
+}
+
+impl SetMutation {
+    /// The pack being changed, and which way.
+    pub fn changing(self) -> Option<(i64, bool)> {
+        match self {
+            Self::Changing { set_id, installed } => Some((set_id, installed)),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct EmojiPanel {
-    pub mutating_set: Option<(i64, bool)>,
+    pub mutation: SetMutation,
     /// Sets whose cover previews were asked for, so a repaint never asks twice.
     pub covers_requested: HashSet<i64>,
     pub pending_status_emoji: Option<i64>,
@@ -101,7 +122,6 @@ pub struct EmojiPanel {
     /// Each set list's own fetch: a failure shows on its tab only, and no
     /// other request clears it.
     pub lists: EmojiLists,
-    pub mutation_failed: bool,
     pub tab: EmojiSetTab,
     pub search_query: String,
     pub trending_offset: i32,
@@ -664,8 +684,7 @@ impl Session {
     /// affected cache so the next fetch shows the server-confirmed state.
     pub fn invalidate_emoji_caches(&mut self, purpose: Option<RequestPurpose>) {
         if purpose == Some(RequestPurpose::ChangeEmojiSet) {
-            self.stickers.emoji.mutation_failed = false;
-            self.stickers.emoji.mutating_set = None;
+            self.stickers.emoji.mutation = SetMutation::Idle;
         }
         if matches!(
             purpose,
