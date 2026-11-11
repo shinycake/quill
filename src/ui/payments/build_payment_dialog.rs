@@ -4,6 +4,7 @@ use super::*;
 use crate::ui::scroll_load::{load_due, loading_row, scrolled_near_end, watch};
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
+use quill::telegram::envelope::PaymentReceiptKind;
 
 impl QuillApp {
     /// kit Phase 2 (redo): payment checkout hosted in a kit `Dialog` via
@@ -27,7 +28,7 @@ impl QuillApp {
             };
             if session.payments.checkout.form().is_none()
                 && !session.payments.checkout.is_loading()
-                && session.payments.note.is_none()
+                && session.payments.checkout.note().is_none()
             {
                 return dialog.on_close(on_close.clone());
             }
@@ -42,29 +43,20 @@ impl QuillApp {
                         .child(tr(keys::Q_MONEY_LOADING_PAYMENT_FORM)),
                 );
             }
-            if let Some(note) = &session.payments.note {
+            if let Some(note) = session.payments.checkout.note() {
                 body = body.child(
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child(note.clone()),
+                        .child(note.to_string()),
                 );
             }
             let Some(form) = session.payments.checkout.form() else {
                 let body = body.into_any_element();
                 return dialog
-                    .content(crate::ui::shell::scrollable_dialog_content({
-                        // `content` needs an `Fn` closure, but the body is built once
-                        // per dialog render — hand it over through a one-shot cell.
-                        let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                        move |content, _, _| {
-                            let body = body
-                                .borrow_mut()
-                                .take()
-                                .unwrap_or_else(|| div().into_any_element());
-                            content.child(body)
-                        }
-                    }))
+                    .content(crate::ui::shell::one_shot_dialog_content(
+                        body.into_any_element(),
+                    ))
                     .on_close(on_close);
             };
             match &form.form_type {
@@ -100,18 +92,9 @@ impl QuillApp {
             }
             let body = body.into_any_element();
             dialog
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::one_shot_dialog_content(
+                    body.into_any_element(),
+                ))
                 .on_close(on_close)
         })
     }
@@ -161,13 +144,16 @@ impl QuillApp {
             let Some(receipt) = receipt else {
                 return dialog.on_close(on_close);
             };
-            let total = if receipt.is_stars {
-                tr_with(
+            let total = match &receipt.kind {
+                PaymentReceiptKind::Stars { star_count } => tr_with(
                     keys::Q_MONEY_STARS_3,
-                    &[("star_count", &receipt.star_count.to_string())],
-                )
-            } else {
-                format_payment_price(&receipt.currency, receipt.total_amount)
+                    &[("star_count", &star_count.to_string())],
+                ),
+                PaymentReceiptKind::Regular {
+                    currency,
+                    total_amount,
+                    ..
+                } => format_payment_price(currency, *total_amount),
             };
             let mut body = div()
                 .flex()
@@ -193,43 +179,39 @@ impl QuillApp {
                         .child(div().child(tr(keys::PAYMENTS_TOTAL_LABEL)))
                         .child(div().font_semibold().child(total)),
                 );
-            if !receipt.credentials_title.is_empty() {
-                body = body.child(
-                    div()
-                        .flex()
-                        .justify_between()
-                        .text_sm()
-                        .child(div().child(tr(keys::Q_MONEY_PAID_WITH)))
-                        .child(div().child(receipt.credentials_title.clone())),
-                );
-            }
-            if receipt.tip_amount > 0 {
-                body = body.child(
-                    div()
-                        .flex()
-                        .justify_between()
-                        .text_sm()
-                        .child(div().child(tr(keys::Q_MONEY_TIP)))
-                        .child(
-                            div()
-                                .child(format_payment_price(&receipt.currency, receipt.tip_amount)),
-                        ),
-                );
+            if let PaymentReceiptKind::Regular {
+                currency,
+                credentials_title,
+                tip_amount,
+                ..
+            } = &receipt.kind
+            {
+                if !credentials_title.is_empty() {
+                    body = body.child(
+                        div()
+                            .flex()
+                            .justify_between()
+                            .text_sm()
+                            .child(div().child(tr(keys::Q_MONEY_PAID_WITH)))
+                            .child(div().child(credentials_title.clone())),
+                    );
+                }
+                if *tip_amount > 0 {
+                    body = body.child(
+                        div()
+                            .flex()
+                            .justify_between()
+                            .text_sm()
+                            .child(div().child(tr(keys::Q_MONEY_TIP)))
+                            .child(div().child(format_payment_price(currency, *tip_amount))),
+                    );
+                }
             }
             let body = body.into_any_element();
             dialog
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::one_shot_dialog_content(
+                    body.into_any_element(),
+                ))
                 .on_close(on_close)
         })
     }
@@ -340,13 +322,9 @@ impl QuillApp {
                 .content(crate::ui::shell::scrollable_dialog_content_tracked(
                     Some(scroll),
                     {
-                        let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                        let body = std::rc::Rc::new(std::cell::Cell::new(Some(body)));
                         move |content, _, _| {
-                            let body = body
-                                .borrow_mut()
-                                .take()
-                                .unwrap_or_else(|| div().into_any_element());
-                            content.child(body)
+                            content.child(body.take().unwrap_or_else(|| div().into_any_element()))
                         }
                     },
                 ))

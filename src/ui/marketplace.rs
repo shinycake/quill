@@ -63,7 +63,7 @@ impl QuillApp {
     /// to (a user's private chat has the user's id).
     pub(super) fn send_gift_recipient_chat(&self) -> Option<ChatId> {
         let send = &self.session()?.payments.gifts_manage.send;
-        let recipient = send.recipient.as_ref().filter(|_| send.open)?;
+        let recipient = send.recipient.as_ref().filter(|_| send.is_open())?;
         Some(match recipient.sender {
             MessageSender::User { user_id } => ChatId(user_id),
             MessageSender::Chat { chat_id } => ChatId(chat_id),

@@ -4,6 +4,7 @@
 use crate::locks::{LockExt, RwLockExt};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex, RwLock};
 
 /// Canonicalize `candidate` and return it only if it is an existing file under an allowed root.
@@ -28,6 +29,7 @@ pub fn sandboxed_display_path(candidate: &str, allowed_roots: &[PathBuf]) -> Opt
     {
         return verdict.path.clone();
     }
+    let generation = SWEEP_GENERATION.load(Ordering::Acquire);
     let verdict = sandboxed_display_path_uncached(candidate, allowed_roots);
     // A plain file (final component not a symlink) that passed stays valid
     // for the long TTL: scrolling the chat list asks for thousands of
@@ -38,18 +40,37 @@ pub fn sandboxed_display_path(candidate: &str, allowed_roots: &[PathBuf]) -> Opt
     } else {
         VERDICT_TTL
     };
+    remember_verdict(candidate, roots, generation, verdict.clone(), ttl);
+    verdict
+}
+
+/// Counts the sweeps that cleared [`VERDICTS`]. A check that began before a
+/// sweep looked at files the sweep may have removed, so its verdict is not
+/// kept (a 60 s "plain file" verdict for a file that is gone).
+static SWEEP_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Keeps a verdict, unless a sweep cleared the memo since `generation`.
+fn remember_verdict(
+    candidate: &str,
+    roots: u64,
+    generation: u64,
+    path: Option<PathBuf>,
+    ttl: std::time::Duration,
+) {
+    let now = std::time::Instant::now();
     let mut cache = VERDICTS.lock_or_recover();
+    if SWEEP_GENERATION.load(Ordering::Acquire) != generation {
+        return;
+    }
     make_room(&mut cache, now);
     let variants = cache.entry(candidate.to_owned()).or_default();
     variants.retain(|v| v.roots != roots);
     variants.push(Verdict {
         roots,
         at: now,
-        path: verdict.clone(),
+        path,
         ttl,
     });
-    drop(cache);
-    verdict
 }
 
 const VERDICT_TTL: std::time::Duration = std::time::Duration::from_secs(1);
@@ -187,7 +208,10 @@ fn canonical_file(path: &Path) -> Option<PathBuf> {
 
 /// Account scope for private media caches: the account on screen, which is
 /// where every scratch producer (a webm sticker, a recording, a dropped
-/// archive, a thumbnail) is driven from. Default is "primary".
+/// archive, a thumbnail) is driven from. Default is "primary". A producer
+/// that works off the UI thread reads [`media_cache_base`] before it hands
+/// the job over and carries the path, so a switch while it runs does not
+/// move its files to the next account's folder.
 static MEDIA_CACHE_SCOPE: RwLock<Option<String>> = RwLock::new(None);
 
 /// Make `account` the scope used by [`media_cache_base`]. Called each time
@@ -211,9 +235,15 @@ fn media_cache_scope() -> String {
 /// video-note thumbnails): `{temp}/quill-media-cache/{account}`. Create with
 /// [`secure_create_dir`] — never world-readable, never through a symlink.
 pub fn media_cache_base() -> PathBuf {
-    cache_temp_dir()
-        .join("quill-media-cache")
-        .join(media_cache_scope())
+    media_cache_base_of(&media_cache_scope())
+}
+
+/// The scratch base of the account named `scope` (an [`AccountKey`] string),
+/// whichever account is on screen.
+///
+/// [`AccountKey`]: crate::ids::AccountKey
+fn media_cache_base_of(scope: &str) -> PathBuf {
+    cache_temp_dir().join("quill-media-cache").join(scope)
 }
 
 // Unit-test sweeps must not remove media owned by a live app or UI demo.
@@ -245,10 +275,20 @@ pub(crate) fn lock_shared_media_cache() -> std::sync::MutexGuard<'static, ()> {
 /// directories are regenerable scratch. Sweeps the whole parent without
 /// reading the account scope, so a startup sweep can never poison it.
 pub fn sweep_media_caches() {
+    let _ = sweep_media_caches_now();
+}
+
+/// [`sweep_media_caches`], returning the thread that deletes the
+/// tombstones, for a caller that waits for it.
+fn sweep_media_caches_now() -> Option<std::thread::JoinHandle<Option<()>>> {
     // Cached directory and canonicalization facts no longer hold.
     ENSURED_DIRS.lock_or_recover().clear();
     CANONICAL_ROOTS.lock_or_recover().clear();
-    VERDICTS.lock_or_recover().clear();
+    {
+        let mut verdicts = VERDICTS.lock_or_recover();
+        SWEEP_GENERATION.fetch_add(1, Ordering::AcqRel);
+        verdicts.clear();
+    }
     let temp = cache_temp_dir();
     let mut tombs = Vec::new();
     for name in [
@@ -265,38 +305,44 @@ pub fn sweep_media_caches() {
     // The directories can hold thousands of files: delete them off the
     // calling thread (the startup sweep runs before the window opens).
     // Leftovers of an interrupted run are picked up too.
-    let spawned = crate::thread_guard::spawn_guarded("quill-cache-sweep", move || {
+    crate::thread_guard::spawn_guarded("quill-cache-sweep", move || {
         for tomb in tombs {
             let _ = std::fs::remove_dir_all(tomb);
         }
         remove_stale_tombstones(&temp);
-    });
-    let _ = spawned;
+    })
+    .ok()
 }
 
-/// Remove only the on-screen account's media scratch
-/// (`{temp}/quill-media-cache/{account}`), as a log-out does: another
+/// Remove only `account`'s media scratch
+/// (`{temp}/quill-media-cache/{account}`), as its log-out does: another
 /// signed-in account's frames and recordings stay where they are. The
 /// memos about paths under it are forgotten; the others keep theirs.
-pub fn sweep_account_media_cache() {
-    let base = media_cache_base();
+pub fn sweep_account_media_cache(account: &crate::ids::AccountKey) {
+    let _ = sweep_account_media_cache_now(account);
+}
+
+fn sweep_account_media_cache_now(
+    account: &crate::ids::AccountKey,
+) -> Option<std::thread::JoinHandle<Option<()>>> {
+    let base = media_cache_base_of(&account.0);
     ENSURED_DIRS
         .lock_or_recover()
         .retain(|path| !path.starts_with(&base));
     CANONICAL_ROOTS
         .lock_or_recover()
         .retain(|root, _| !root.starts_with(&base));
-    VERDICTS
-        .lock_or_recover()
-        .retain(|path, _| !Path::new(path).starts_with(&base));
+    {
+        let mut verdicts = VERDICTS.lock_or_recover();
+        SWEEP_GENERATION.fetch_add(1, Ordering::AcqRel);
+        verdicts.retain(|path, _| !Path::new(path).starts_with(&base));
+    }
     let temp = cache_temp_dir();
-    let Some(tomb) = tombstone_dir(&temp, &base, "quill-account-cache") else {
-        return;
-    };
-    let spawned = crate::thread_guard::spawn_guarded("quill-cache-sweep", move || {
+    let tomb = tombstone_dir(&temp, &base, "quill-account-cache")?;
+    crate::thread_guard::spawn_guarded("quill-cache-sweep", move || {
         let _ = std::fs::remove_dir_all(tomb);
-    });
-    let _ = spawned;
+    })
+    .ok()
 }
 
 const TOMB_MARK: &str = ".tomb-";
@@ -445,11 +491,13 @@ mod tests {
         set_media_cache_scope(&a);
         let gone = media_cache_base().join("gif-frames");
         fs::create_dir_all(&gone).unwrap();
-        sweep_account_media_cache();
+        // The account that logs out is named, not read from the screen: b is
+        // on screen here and a's scratch still goes.
+        set_media_cache_scope(&b);
+        sweep_account_media_cache(&a);
         assert!(!gone.exists(), "the logged-out account's scratch is gone");
         assert!(kept.exists(), "the other account's scratch stays");
-        set_media_cache_scope(&b);
-        sweep_account_media_cache();
+        sweep_account_media_cache(&b);
         set_media_cache_scope(&crate::ids::AccountKey::primary());
     }
 
@@ -577,25 +625,34 @@ mod tests {
         let base = media_cache_base();
         fs::create_dir_all(base.join("x")).unwrap();
         fs::write(base.join("x").join("f"), b"1").unwrap();
-        sweep_media_caches();
+        let tombstones = sweep_media_caches_now();
         assert!(!cache_temp_dir().join("quill-media-cache").exists());
-        // The tombstones disappear shortly after.
+        // The tombstones disappear once the sweep thread has run.
+        assert!(tombstones.is_some_and(|thread| thread.join().is_ok()));
         let temp = cache_temp_dir();
-        let has_tomb = || {
-            fs::read_dir(&temp).is_ok_and(|rd| {
-                rd.flatten().any(|e| {
-                    let n = e.file_name().to_string_lossy().into_owned();
-                    n.starts_with("quill-media-cache") && n.contains(TOMB_MARK)
-                })
+        let has_tomb = fs::read_dir(&temp).is_ok_and(|rd| {
+            rd.flatten().any(|e| {
+                let n = e.file_name().to_string_lossy().into_owned();
+                n.starts_with("quill-media-cache") && n.contains(TOMB_MARK)
             })
-        };
-        for _ in 0..100 {
-            if !has_tomb() {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
-        assert!(!has_tomb());
+        });
+        assert!(!has_tomb);
+    }
+
+    /// A display check that began before a sweep does not keep its verdict.
+    #[test]
+    fn a_check_that_began_before_a_sweep_keeps_no_verdict() {
+        let _guard = lock_shared_media_cache();
+        let candidate = "/quill-test/swept-away.png";
+        let roots = roots_key(&[PathBuf::from("/quill-test")]);
+        let began = SWEEP_GENERATION.load(Ordering::Acquire);
+        let _ = sweep_account_media_cache_now(&crate::ids::AccountKey("sweep-gen".into()));
+        remember_verdict(candidate, roots, began, None, VERDICT_TTL_PLAIN);
+        assert!(!VERDICTS.lock_or_recover().contains_key(candidate));
+        let now = SWEEP_GENERATION.load(Ordering::Acquire);
+        remember_verdict(candidate, roots, now, None, VERDICT_TTL);
+        assert!(VERDICTS.lock_or_recover().contains_key(candidate));
+        invalidate_display_path(candidate);
     }
 
     fn scratch(label: &str) -> PathBuf {

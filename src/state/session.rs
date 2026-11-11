@@ -7,12 +7,14 @@ use super::*;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShutdownPhase {
     Running,
-    /// `logOut` is out under this request. A refusal returns the session
-    /// to `Running` (via `LogoutRefused`); a quit asked for meanwhile
-    /// replaces the stage, so the refusal no longer applies.
+    /// The account is closing but `close` waits behind a call's hang-up
+    /// until the hang-up landed or `until` passed. Nothing new starts.
+    HoldingClose {
+        until: std::time::Instant,
+    },
+    /// `logOut` went out as this request.
     LogoutRequested(RequestId),
-    /// TDLib refused the `logOut`: the account stays signed in and running.
-    /// The UI drains it once (`Session::take_logout_refusal`).
+    /// `logOut` was refused; the session is still signed in.
     LogoutRefused(TdError),
     CloseRequested,
     WaitingClosed,
@@ -29,7 +31,6 @@ impl ShutdownPhase {
 #[derive(Debug, Clone)]
 pub struct PendingBotMessage {
     pub draft_id: i64,
-    pub can_stop: bool,
     pub keep_on_stop: bool,
     pub content: MessageContent,
     pub expires_at_ms: u64,

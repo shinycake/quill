@@ -68,10 +68,10 @@ fn participant_has_video(
     screen: bool,
 ) -> bool {
     if screen {
-        participant.screen_sharing_enabled
+        participant.screen_sharing_enabled()
             || (participant.is_current_user && (call.screen_share.is_on()))
     } else {
-        participant.video_enabled
+        participant.video_enabled()
     }
 }
 

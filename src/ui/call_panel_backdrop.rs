@@ -18,7 +18,7 @@ pub(super) fn backdrop(colors: &[u32]) -> Option<Arc<RenderImage>> {
         return None;
     }
     let key = colors.to_vec();
-    if let Some(hit) = CACHE.with(|cache| cache.borrow_mut().get(&key)) {
+    if let Some(hit) = CACHE.with(|cache| cache.try_borrow_mut().ok()?.get(&key)) {
         return Some(hit);
     }
     let (w, h) = (360u32, 270u32);
@@ -42,12 +42,18 @@ pub(super) fn backdrop(colors: &[u32]) -> Option<Arc<RenderImage>> {
     let render = Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
         image::Frame::new(image),
     ])));
-    CACHE.with(|cache| {
-        // One per peer palette; a few calls' worth is plenty.
-        if let Some(old) = cache.borrow_mut().insert(key, render.clone()) {
-            super::image_budget::retire_all([old]);
-        }
+    // One per peer palette; a few calls' worth is plenty. The evicted
+    // picture is retired once the borrow is released: retiring calls into
+    // another module.
+    let evicted = CACHE.with(|cache| {
+        cache
+            .try_borrow_mut()
+            .ok()
+            .and_then(|mut cache| cache.insert(key, render.clone()))
     });
+    if let Some(old) = evicted {
+        super::image_budget::retire_all([old]);
+    }
     Some(render)
 }
 

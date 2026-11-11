@@ -57,6 +57,9 @@ pub struct ActiveCall {
     /// The connection quality, 0 to 4 bars (tdesktop `Calls::SignalBars`),
     /// from the engine; `None` until it reports.
     pub signal_bars: Option<u8>,
+    /// Why your microphone, level tap or shared screen stopped, for the
+    /// call window. It lives and dies with the call.
+    pub media_note: Option<String>,
 }
 
 /// What `callStateReady` brought, and when.
@@ -268,17 +271,20 @@ impl ActiveCall {
         is_outgoing: bool,
         is_video: bool,
         state: CallState,
-        ready: Option<ReadyParams>,
     ) -> Self {
+        let ready = match &state {
+            CallState::Ready(params) => Some(CallReady {
+                params: Some(params.clone()),
+                since: Instant::now(),
+            }),
+            _ => None,
+        };
         Self {
             id,
             user_id,
             is_outgoing,
             is_video,
-            ready: matches!(state, CallState::Ready).then(|| CallReady {
-                params: ready,
-                since: Instant::now(),
-            }),
+            ready,
             state,
             started_at: Instant::now(),
             transport: CallTransport::default(),
@@ -295,6 +301,7 @@ impl ActiveCall {
             remote_audio_muted: false,
             remote_battery_low: false,
             signal_bars: None,
+            media_note: None,
         }
     }
 

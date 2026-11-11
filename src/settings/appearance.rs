@@ -182,13 +182,11 @@ pub struct AppearancePrefs {
     /// first only covered the macOS minimize button.)
     #[serde(default)]
     pub minimize_to_tray: bool,
-    /// tdesktop `WorkMode` tray bit ("Show tray icon").
-    #[serde(default = "default_true")]
-    pub show_tray_icon: bool,
-    /// tdesktop `WorkMode` taskbar bit ("Show taskbar icon"): off keeps the
-    /// main window out of the taskbar (Windows, X11); the tray reopens it.
-    #[serde(default = "default_true")]
-    pub show_taskbar_icon: bool,
+    /// tdesktop `WorkMode`: "Show tray icon" and "Show taskbar icon" (off
+    /// keeps the main window out of the taskbar on Windows and X11; the tray
+    /// reopens it). Saved as the two `show_*_icon` keys.
+    #[serde(flatten)]
+    pub work_mode: crate::tray::work_mode::WorkMode,
     /// tdesktop `trayIconMonochrome` ("Use monochrome icon", on by default):
     /// the Windows tray shows a one-color glyph that matches the taskbar.
     #[serde(default = "default_true")]
@@ -253,8 +251,7 @@ impl Default for AppearancePrefs {
             folder_tabs_mode: crate::folder_icons::FolderTabsMode::Default,
             start_in_tray: false,
             minimize_to_tray: false,
-            show_tray_icon: true,
-            show_taskbar_icon: true,
+            work_mode: crate::tray::work_mode::WorkMode::WindowAndTray,
             tray_icon_monochrome: true,
             native_window_frame: false,
         }
@@ -409,8 +406,7 @@ mod tests {
             folder_tabs_mode: crate::folder_icons::FolderTabsMode::IconsOnly,
             start_in_tray: true,
             minimize_to_tray: true,
-            show_tray_icon: false,
-            show_taskbar_icon: false,
+            work_mode: crate::tray::work_mode::WorkMode::TrayOnly,
             tray_icon_monochrome: false,
             native_window_frame: true,
         };

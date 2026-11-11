@@ -29,8 +29,8 @@ impl QuillApp {
         let active = self.active_playback_id() == Some(item.message_id)
             && self
                 .playback
-                .player
-                .chat
+                .active
+                .chat()
                 .is_none_or(|playing| Some(playing) == chat);
         if active && self.is_playing() {
             return IconName::Pause;

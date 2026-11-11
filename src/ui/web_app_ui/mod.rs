@@ -274,8 +274,9 @@ pub(super) struct MiniApps {
     /// What only a render can do, in the order it was asked: two asked
     /// before the next render both run.
     render_actions: Vec<RenderAction>,
-    /// Bots whose "Emoji Status" switch has been on screen this run, so it
-    /// stays when the person turns it off (`bot_permissions`).
+    /// Bots whose "Emoji Status" switch the person turned off on the open
+    /// profile, so it stays to turn on again (`bot_permissions`); cleared
+    /// when the profile panel changes or closes.
     pub(super) emoji_access_shown: std::collections::HashSet<quill::ids::OfAccount<i64>>,
     /// The poll task, alive while a window is.
     poll: Option<Task<()>>,
@@ -555,9 +556,10 @@ impl QuillApp {
                     .live
                     .as_mut()
                     .map(|live| live.driver.search_web_app(bot_id, short_name));
-                if matches!(sent, Some(Ok(_))) {
+                if let Some(Ok(request)) = sent {
                     let window = self.asking_window_or_last_press();
                     self.mini_apps.flow.search(Awaited {
+                        request,
                         then: PendingOpen::Link {
                             chat_id: Some(chat_id),
                             bot_id,
@@ -597,9 +599,10 @@ impl QuillApp {
                     .live
                     .as_mut()
                     .map(|live| live.driver.fetch_attachment_menu_bot(bot_id));
-                if matches!(sent, Some(Ok(_))) {
+                if let Some(Ok(request)) = sent {
                     let window = self.asking_window_or_last_press();
                     self.mini_apps.flow.fetch_attach_bot(Awaited {
+                        request,
                         then: PendingOpen::Attach {
                             chat_id: target,
                             bot_id,
@@ -778,9 +781,13 @@ impl QuillApp {
                         bot.request_write_access && allow_write,
                     )
                 });
-                if matches!(sent, Some(Ok(_))) {
+                if let Some(Ok(request)) = sent {
                     let window = self.asking_window_or_last_press();
-                    self.mini_apps.flow.add(Awaited { then, window });
+                    self.mini_apps.flow.add(Awaited {
+                        request,
+                        then,
+                        window,
+                    });
                     self.ensure_mini_app_poll(cx);
                 } else {
                     self.set_status_note(
@@ -972,6 +979,7 @@ mod helper_pipe;
 mod inline_results_button;
 mod invoice;
 mod launch_flow;
+mod mini_app_poll;
 mod phone;
 mod spawn_mini_app_window;
 

@@ -243,17 +243,24 @@ enum ManageLine {
     },
 }
 
+/// One management call, matched by its request from the send to its answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ManageCall {
-    request: RequestId,
-    state: ManageCallState,
+enum ManageCall {
+    InFlight(RequestId),
+    Saved(RequestId),
+    Failed(RequestId, String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum ManageCallState {
-    InFlight,
-    Saved,
-    Failed(String),
+impl ManageCall {
+    fn request(&self) -> RequestId {
+        match self {
+            Self::InFlight(request) | Self::Saved(request) | Self::Failed(request, _) => *request,
+        }
+    }
+
+    fn is_in_flight(&self) -> bool {
+        matches!(self, Self::InFlight(_))
+    }
 }
 
 impl StoryManageState {
@@ -261,8 +268,7 @@ impl StoryManageState {
     /// so each reads as `Lost` (its sender leaves its stage) instead of
     /// `InFlight` for good, and the status line stops saying "Saving".
     pub fn forget_in_flight(&mut self) {
-        self.calls
-            .retain(|call| call.state != ManageCallState::InFlight);
+        self.calls.retain(|call| !call.is_in_flight());
         if matches!(self.line, ManageLine::Pending { .. }) {
             self.line = ManageLine::Quiet;
         }
@@ -292,10 +298,7 @@ impl StoryManageState {
             chat_id: chat_id.0,
             story_id,
         };
-        self.calls.push(ManageCall {
-            request,
-            state: ManageCallState::InFlight,
-        });
+        self.calls.push(ManageCall::InFlight(request));
     }
 
     /// The answer to `request` landed; `error` is its failure. The line
@@ -305,24 +308,21 @@ impl StoryManageState {
         let Some(call) = self
             .calls
             .iter_mut()
-            .find(|call| call.request == request && call.state == ManageCallState::InFlight)
+            .find(|call| call.request() == request && call.is_in_flight())
         else {
             return;
         };
-        call.state = match &error {
-            Some(error) => ManageCallState::Failed(error.clone()),
-            None => ManageCallState::Saved,
+        *call = match &error {
+            Some(error) => ManageCall::Failed(request, error.clone()),
+            None => ManageCall::Saved(request),
         };
         let settled = self
             .calls
             .iter()
-            .filter(|call| call.state != ManageCallState::InFlight)
+            .filter(|call| !call.is_in_flight())
             .count();
         if settled > STORY_MANAGE_SETTLED_CAP
-            && let Some(oldest) = self
-                .calls
-                .iter()
-                .position(|call| call.state != ManageCallState::InFlight)
+            && let Some(oldest) = self.calls.iter().position(|call| !call.is_in_flight())
         {
             self.calls.remove(oldest);
         }
@@ -347,11 +347,11 @@ impl StoryManageState {
     /// What became of `request`, matched by its id: a later call's
     /// answer is never taken for it.
     pub fn outcome(&self, request: RequestId) -> StoryManageOutcome {
-        match self.calls.iter().find(|call| call.request == request) {
-            Some(call) => match call.state {
-                ManageCallState::InFlight => StoryManageOutcome::InFlight,
-                ManageCallState::Saved => StoryManageOutcome::Saved,
-                ManageCallState::Failed(_) => StoryManageOutcome::Failed,
+        match self.calls.iter().find(|call| call.request() == request) {
+            Some(call) => match call {
+                ManageCall::InFlight(_) => StoryManageOutcome::InFlight,
+                ManageCall::Saved(_) => StoryManageOutcome::Saved,
+                ManageCall::Failed(..) => StoryManageOutcome::Failed,
             },
             None => StoryManageOutcome::Lost,
         }
@@ -361,9 +361,9 @@ impl StoryManageState {
     pub fn failure(&self, request: RequestId) -> Option<&str> {
         self.calls
             .iter()
-            .find(|call| call.request == request)
-            .and_then(|call| match &call.state {
-                ManageCallState::Failed(error) => Some(error.as_str()),
+            .find(|call| call.request() == request)
+            .and_then(|call| match call {
+                ManageCall::Failed(_, error) => Some(error.as_str()),
                 _ => None,
             })
     }

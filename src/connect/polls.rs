@@ -3,7 +3,7 @@ use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::poll::{PollDraft, can_stop_poll, poll_answer_for_tap};
 use crate::state::MessagesPurpose;
-use crate::state::{PollVotersFetch, RequestPurpose, RequestRollback};
+use crate::state::{PollVotersFetch, RequestPurpose, RequestRollback, VotersMore};
 use crate::telegram::envelope::MessageContent;
 use crate::telegram::requests::{
     PollSend, PollTypeSend, SendReply, get_poll_voters, send_poll, set_poll_answer,
@@ -272,6 +272,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .messages
                 .poll_voters
                 .insert(key, PollVotersFetch::Loading(extra));
+        } else if let Some(PollVotersFetch::Loaded { more, .. }) =
+            self.session.messages.poll_voters.get_mut(&key)
+        {
+            *more = VotersMore::Asking(extra);
         }
         let json = get_poll_voters(
             extra,
@@ -285,8 +289,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                if offset == 0 {
-                    self.session.messages.poll_voters.remove(&key);
+                match self.session.messages.poll_voters.get_mut(&key) {
+                    Some(PollVotersFetch::Loading(id)) if *id == extra => {
+                        self.session.messages.poll_voters.remove(&key);
+                    }
+                    Some(PollVotersFetch::Loaded { more, .. })
+                        if *more == VotersMore::Asking(extra) =>
+                    {
+                        *more = VotersMore::Ready;
+                    }
+                    _ => {}
                 }
                 Err(err)
             }

@@ -58,15 +58,67 @@ pub struct SponsoredReportOutcome {
     pub result: ReportSponsoredResult,
 }
 
-/// Slice B2: fetch state of `getBotSimilarBots` for a bot profile. The
-/// `users` payload carries only ids (names resolve through
-/// `Session::users`); presence records "fetched" so the driver never
-/// retries, and `Loading` dedupes the request. Only the request held in
-/// `Loading` answers or fails it.
-#[derive(Debug, Clone)]
-pub enum SimilarBotsFetch {
-    Loading(RequestId),
-    Loaded(Vec<i64>),
+/// The `reportChatSponsoredMessage` flow as one value. An answer applies
+/// only in `Asking` and only for its own request: after Cancel (or a newer
+/// report) a late answer re-arms nothing and reports no ad.
+#[derive(Debug, Clone, Default)]
+pub enum SponsoredReport {
+    /// No report in progress and no outcome to show.
+    #[default]
+    Idle,
+    /// The user chose an ad; the request has not gone out yet.
+    Chosen { chat_id: ChatId, message_id: i64 },
+    /// The request is out; its answer is the next step.
+    Asking {
+        chat_id: ChatId,
+        message_id: i64,
+        request: RequestId,
+    },
+    /// TDLib wants an option: the picker shows. Cancel returns to `Idle`.
+    Picking(SponsoredReportFlight),
+    /// The last report's outcome note, until it is dismissed.
+    Outcome(SponsoredReportOutcome),
+}
+
+impl SponsoredReport {
+    /// The option picker, while it shows.
+    pub fn picking(&self) -> Option<&SponsoredReportFlight> {
+        match self {
+            Self::Picking(flight) => Some(flight),
+            _ => None,
+        }
+    }
+
+    /// The outcome note, while it shows.
+    pub fn outcome(&self) -> Option<&SponsoredReportOutcome> {
+        match self {
+            Self::Outcome(outcome) => Some(outcome),
+            _ => None,
+        }
+    }
+
+    /// Whether `request` is the report request the flow waits on.
+    pub fn waits_on(&self, request: RequestId) -> bool {
+        matches!(self, Self::Asking { request: asked, .. } if *asked == request)
+    }
+
+    /// The chat of the ad being reported, from the first request until the
+    /// last answer or the picker's Cancel.
+    pub fn chat(&self) -> Option<ChatId> {
+        match self {
+            Self::Chosen { chat_id, .. } | Self::Asking { chat_id, .. } => Some(*chat_id),
+            Self::Picking(flight) => Some(flight.chat_id),
+            Self::Idle | Self::Outcome(_) => None,
+        }
+    }
+
+    /// The user cancels, a send fails, or the flow is applied elsewhere.
+    /// An outcome note is not the flow and stays.
+    pub fn dismiss(&mut self) {
+        if !matches!(self, Self::Outcome(_)) {
+            *self = Self::Idle;
+        }
+    }
 }
 
 impl SponsoredReportOutcome {

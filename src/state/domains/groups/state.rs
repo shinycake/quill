@@ -89,6 +89,19 @@ impl GroupsState {
         );
     }
 
+    /// A first page for `key` with `query` could not be sent: the list is
+    /// `Failed` under that query, with no request to wait for.
+    pub(crate) fn note_member_refused(&mut self, key: (i64, MemberListFilter), query: &str) {
+        self.member_asks.insert(
+            key,
+            MemberAsk {
+                first: None,
+                query: query.to_string(),
+                more: MoreMembers::Idle,
+            },
+        );
+    }
+
     /// The members panel of `chat` takes the failed next pages: each goes
     /// back to idle so the next scroll asks again. Whether any failed.
     pub fn take_member_more_failures(&mut self, chat: i64) -> bool {
@@ -113,6 +126,19 @@ impl GroupsState {
             .get(&key)
             .and_then(|ask| ask.first)
             .is_none_or(|id| id == pending.id)
+    }
+
+    /// The basic group's member list of `chat` is out as `request`. A basic
+    /// group has one list, held under the `Recent` key of `member_asks`.
+    pub(crate) fn basic_members_wait_for(&self, chat: i64, request: RequestId) -> bool {
+        matches!(
+            self.basic_group_members.get(&chat),
+            Some(SupergroupMembersFetch::Loading)
+        ) && self
+            .member_asks
+            .get(&(chat, MemberListFilter::Recent))
+            .and_then(|ask| ask.first)
+            == Some(request)
     }
 
     /// A next-page request for `key` was sent: it extends the list the
@@ -170,10 +196,10 @@ pub struct GroupsState {
     pub communities: HashMap<i64, ParsedCommunity>,
     /// Slice (communities backend core): `communityFullInfo` cache, keyed
     /// by community id, fed by the `getCommunityFullInfo` answer and
-    /// `updateCommunityFullInfo` (TDLib 1.8.68). Presence records
-    /// "fetched".
-    pub community_full_infos: HashMap<i64, ParsedCommunityFullInfo>,
-    /// TDLib 1.8.68 community management: set when
+    /// `updateCommunityFullInfo` (TDLib 1.8.68); one fetch per community
+    /// holds the stage, its request and the pack.
+    pub community_full_infos: CommunityFullInfos,
+    /// TDLib 1.8.68 community management: one-shot; set when
     /// `setCommunityName` / `setCommunityPhoto` / `setCommunityPermissions`
     /// / `deleteCommunity` errors. A queue like `invite_link_error`; the UI
     /// drains it into the status note.
@@ -411,7 +437,7 @@ impl GroupsState {
             invite_link_error: Default::default(),
             supergroup_full_infos: HashMap::new(),
             communities: HashMap::new(),
-            community_full_infos: HashMap::new(),
+            community_full_infos: CommunityFullInfos::default(),
             community_error: Default::default(),
             chat_statistics: HashMap::new(),
             stats: StatsState::default(),

@@ -307,6 +307,7 @@ impl QuillApp {
             Some(PollVotersFetch::Loaded {
                 voters,
                 total_count,
+                ..
             }) => {
                 let mut list = body;
                 if voters.is_empty() {

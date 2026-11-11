@@ -69,7 +69,7 @@ impl PollOptionMedia {
                 ids.extend(photo.largest_size().map(|size| size.file_id));
             }
             Self::Video(video) => ids.extend(video.thumb_file_id),
-            Self::Animation(animation) => ids.extend(animation.thumb_file_id),
+            Self::Animation(animation) => ids.extend(animation.thumb_file_id()),
             Self::Sticker(sticker) => ids.extend(sticker.display_file_id()),
             Self::Link { photo: None, .. } | Self::Location(_) | Self::Venue { .. } => {}
         }

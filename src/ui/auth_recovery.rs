@@ -137,7 +137,7 @@ impl QuillApp {
     /// Slice A10: leave recovery-code entry, back to password entry.
     pub(crate) fn cancel_password_recovery(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.auth_state.password_recovery = PasswordRecovery::Idle;
+            live.driver.session.cancel_password_recovery();
         }
         cx.notify();
     }

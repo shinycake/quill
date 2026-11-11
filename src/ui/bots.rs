@@ -15,10 +15,11 @@ use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
-use quill::state::{RequestPurpose, Session, SimilarBotsFetch};
+use quill::state::fetch::Fetch;
+use quill::state::{RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{BotInfo, CallbackQueryAnswer};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -381,12 +382,9 @@ impl QuillApp {
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    let body = Rc::new(Cell::new(Some(body.into_any_element())));
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))
@@ -461,12 +459,9 @@ impl QuillApp {
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    let body = Rc::new(Cell::new(Some(body.into_any_element())));
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))
@@ -686,7 +681,7 @@ impl QuillApp {
         // button fetches once; the names resolve through `Session::users`
         // and open the bot's chat.
         match &similar {
-            Some(SimilarBotsFetch::Loaded(ids)) => {
+            Some(Fetch::Ready(ids)) => {
                 let mut row = div().id("bot-similar").flex().flex_wrap().gap_1().child(
                     div()
                         .text_xs()
@@ -712,7 +707,7 @@ impl QuillApp {
                 }
                 panel = panel.child(row);
             }
-            Some(SimilarBotsFetch::Loading(_)) => {
+            Some(Fetch::Loading { .. }) => {
                 panel = panel.child(
                     div()
                         .id("bot-similar-loading")
@@ -721,7 +716,18 @@ impl QuillApp {
                         .child(tr(keys::Q_MEDIA_LOADING_SIMILAR_BOTS)),
                 );
             }
-            None => {
+            other => {
+                // Not asked, or refused: the button asks (again), with the
+                // reason of a refusal under it.
+                if let Some(error) = other.as_ref().and_then(|fetch| fetch.error()) {
+                    panel = panel.child(
+                        div()
+                            .id("bot-similar-error")
+                            .text_xs()
+                            .text_color(cx.theme().danger)
+                            .child(error.to_string()),
+                    );
+                }
                 panel = panel.child(ghost_text_button(
                     "bot-similar-fetch",
                     tr(keys::SIMILAR_BOTS_TITLE),

@@ -175,6 +175,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<RequestId, ConnectSendError> {
         self.owned_bots_ready(manager_bot_user_id)?;
         let create = &mut self.session.bots.owned.create;
+        // One create at a time, owned here and not by the Create button: a
+        // second `createBot` would drop the first's stage and its answer,
+        // and a second bot could be made unreported.
+        if matches!(create.stage, CreateStage::Creating(_)) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         create.generation = create.generation.wrapping_add(1);
         let generation = create.generation;
         create.stage = CreateStage::Creating(CreateSubmission {

@@ -23,9 +23,7 @@ impl Session {
         // The consent box and the raw-URL fallback of a login button
         // answered while away: its request goes with its answer. A request
         // still in flight keeps its context for the answer to come.
-        if self.bots.last_login_url_info.take().is_some() {
-            self.bots.login_url_request = None;
-        }
+        self.bots.login_url.forget_answer();
         let messages = &mut self.messages;
         messages.message_link = None;
         messages.message_link_error.clear();
@@ -37,6 +35,9 @@ impl Session {
         messages.send_permission_error.clear();
         messages.flood_notice.clear();
         self.groups.community_error.clear();
+        // The contacts line ("Contacts imported.") of a mutation that
+        // answered while the account was away is not news on return.
+        self.users_state.contacts_notice = None;
         self.groups.invite_link_error.clear();
         self.chats_state.chat_action_error.clear();
         self.chats_state.report_chat_outcome = None;

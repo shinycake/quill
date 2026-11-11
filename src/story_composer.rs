@@ -204,8 +204,10 @@ pub struct StoryMedia {
 /// another call's answer never moves it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum ComposerStage {
-    /// Nothing sent: the Post button is live.
+    /// The composer is not on screen; it holds nothing else.
     #[default]
+    Closed,
+    /// Nothing sent: the Post button is live.
     Editing,
     /// `canPostStory` for `target` is out; its answer posts or says why not.
     Checking {
@@ -228,57 +230,91 @@ pub enum ComposerStage {
 impl ComposerStage {
     /// A press of Post or Save is still being answered, or has been.
     pub fn busy(&self) -> bool {
-        !matches!(self, Self::Editing | Self::Failed(_))
+        !matches!(self, Self::Closed | Self::Editing | Self::Failed(_))
+    }
+
+    /// A request of this press is out and only its answer can report it:
+    /// the composer stays open until then.
+    pub fn in_flight(&self) -> bool {
+        matches!(
+            self,
+            Self::Checking { .. } | Self::Posting { .. } | Self::Saving { .. }
+        )
     }
 }
 
+/// A story of a poster chat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StoryRef {
+    pub poster: crate::ids::ChatId,
+    pub story_id: i32,
+}
+
 /// What the composer is for. Edit and repost are exclusive; each carries
-/// `(poster_chat_id, story_id)` of the story it works on.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// the story it works on, and the modes that post carry the chat they post
+/// as, so an edit can never hold a "post as" chat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ComposerMode {
-    #[default]
-    New,
+    /// A new story. `post_as` is the channel or supergroup it goes to
+    /// (`getChatsToPostStories`, `td_api.tl:13698`); `None` = the current
+    /// user's own stories. Privacy is server-ignored for channel/supergroup
+    /// posts, so the UI hides the selector when this is `Some`.
+    New { post_as: Option<crate::ids::ChatId> },
     /// Phase 9.5: the source story, sent as `postStory.from_story_full_id`
     /// (`td_api.tl:13715`).
-    Repost(i64, i32),
+    Repost {
+        source: StoryRef,
+        post_as: Option<crate::ids::ChatId>,
+    },
     /// Phase 9.5: the posted story being edited (`editStory`,
     /// `td_api.tl:13732`). The media path is optional (empty = keep
     /// current content); caption + areas are prefilled from the story.
-    Edit(i64, i32),
+    Edit { story: StoryRef },
 }
 
-/// Composer state. Pure (no GPUI); the UI layer owns the text inputs and
-/// syncs them into this before posting.
+impl Default for ComposerMode {
+    fn default() -> Self {
+        Self::New { post_as: None }
+    }
+}
+
+/// Composer state. Pure (no GPUI); the UI layer owns the text inputs (caption,
+/// link, reaction emoji) and passes what they hold when it posts.
+/// [`ComposerStage::Closed`] is the closed composer: `close` resets
+/// everything else with it.
 #[derive(Debug, Clone, Default)]
 pub struct StoryComposer {
-    pub open: bool,
+    /// Which opening of the composer this is (0 while closed): an answer
+    /// that was asked by an earlier composer (the file dialog) finds a
+    /// different id and is dropped.
+    pub id: u64,
     /// Picked with the native file dialog or dropped on the composer. In
     /// edit mode `None` keeps the story's current media.
     pub media: Option<StoryMedia>,
     pub privacy: StoryPrivacy,
     pub selected_user_ids: Vec<i64>,
-    /// Phase 9.4: expiry selection, post-to-chat-page, protect-content,
-    /// link area URL, and space-separated suggested-reaction emoji.
+    /// Phase 9.4: expiry selection, post-to-chat-page and protect-content.
     pub expiry: StoryExpiry,
     pub post_to_chat_page: bool,
     pub protect_content: bool,
-    pub link_url: String,
-    pub reaction_emojis: String,
-    /// Where the Post / Save press stands (`ComposerStage`).
+    /// Where the composer is: closed, or where the Post / Save press
+    /// stands (`ComposerStage`).
     pub stage: ComposerStage,
     /// What the composer posts: a new story, a repost or an edit.
     pub mode: ComposerMode,
-    /// Phase 9.5: post on behalf of this chat (`getChatsToPostStories`,
-    /// `td_api.tl:13698`); `None` = the current user's own stories.
-    /// Privacy is server-ignored for channel/supergroup posts, so the UI
-    /// hides the selector when this is `Some`.
-    pub as_chat_id: Option<i64>,
+}
+
+/// The next opening's id: never 0, never repeated.
+fn next_composer_id() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 impl StoryComposer {
     pub fn open() -> Self {
         Self {
-            open: true,
+            id: next_composer_id(),
+            stage: ComposerStage::Editing,
             ..Default::default()
         }
     }
@@ -286,8 +322,14 @@ impl StoryComposer {
     /// Phase 9.5: open the composer in edit mode for a posted story.
     pub fn open_edit(poster_chat_id: i64, story_id: i32) -> Self {
         Self {
-            open: true,
-            mode: ComposerMode::Edit(poster_chat_id, story_id),
+            id: next_composer_id(),
+            stage: ComposerStage::Editing,
+            mode: ComposerMode::Edit {
+                story: StoryRef {
+                    poster: crate::ids::ChatId(poster_chat_id),
+                    story_id,
+                },
+            },
             ..Default::default()
         }
     }
@@ -295,21 +337,33 @@ impl StoryComposer {
     /// Phase 9.5: open the composer in repost mode for a source story.
     pub fn open_repost(poster_chat_id: i64, story_id: i32) -> Self {
         Self {
-            open: true,
-            mode: ComposerMode::Repost(poster_chat_id, story_id),
+            id: next_composer_id(),
+            stage: ComposerStage::Editing,
+            mode: ComposerMode::Repost {
+                source: StoryRef {
+                    poster: crate::ids::ChatId(poster_chat_id),
+                    story_id,
+                },
+                post_as: None,
+            },
             ..Default::default()
         }
     }
 
+    /// The composer is on screen.
+    pub fn is_open(&self) -> bool {
+        self.stage != ComposerStage::Closed
+    }
+
     /// Phase 9.5: true in edit mode — the media path may be empty (keep).
     pub fn is_edit(&self) -> bool {
-        matches!(self.mode, ComposerMode::Edit(..))
+        matches!(self.mode, ComposerMode::Edit { .. })
     }
 
     /// Edit mode: `(poster_chat_id, story_id)` of the posted story.
     pub fn edit_target(&self) -> Option<(i64, i32)> {
         match self.mode {
-            ComposerMode::Edit(chat, story) => Some((chat, story)),
+            ComposerMode::Edit { story } => Some((story.poster.0, story.story_id)),
             _ => None,
         }
     }
@@ -318,8 +372,31 @@ impl StoryComposer {
     /// as `postStory.from_story_full_id` (`td_api.tl:13715`).
     pub fn repost_source(&self) -> Option<(i64, i32)> {
         match self.mode {
-            ComposerMode::Repost(chat, story) => Some((chat, story)),
+            ComposerMode::Repost { source, .. } => Some((source.poster.0, source.story_id)),
             _ => None,
+        }
+    }
+
+    /// The channel or supergroup the post goes to; `None` = the user's own
+    /// stories (and always in edit mode).
+    pub fn post_as(&self) -> Option<i64> {
+        match self.mode {
+            ComposerMode::New { post_as } | ComposerMode::Repost { post_as, .. } => {
+                post_as.map(|chat| chat.0)
+            }
+            ComposerMode::Edit { .. } => None,
+        }
+    }
+
+    /// Choose where the post goes (`None` = own stories). An edit has no
+    /// such choice and ignores it.
+    pub fn set_post_as(&mut self, chat_id: Option<i64>) {
+        let chosen = chat_id.map(crate::ids::ChatId);
+        match &mut self.mode {
+            ComposerMode::New { post_as } | ComposerMode::Repost { post_as, .. } => {
+                *post_as = chosen;
+            }
+            ComposerMode::Edit { .. } => {}
         }
     }
 
@@ -334,7 +411,7 @@ impl StoryComposer {
 
     /// Show `error`. A press still being answered keeps its stage.
     pub fn set_error(&mut self, error: impl Into<String>) {
-        if !self.stage.busy() {
+        if self.is_open() && !self.stage.busy() {
             self.stage = ComposerStage::Failed(error.into());
         }
     }
@@ -381,8 +458,9 @@ impl StoryComposer {
     }
 
     /// `inputStoryAreas` JSON for `postStory` (schema 1.8.67,
-    /// `td_api.tl:6619` / `td_api.tl:6610`). Built from the composer's
-    /// link URL and reaction emoji — the only area types expressible
+    /// `td_api.tl:6619` / `td_api.tl:6610`). Built from what the link and
+    /// reaction-emoji inputs hold now (`link_url`, `reaction_emojis`) — the
+    /// only area types expressible
     /// with plain text inputs: a link area (`inputStoryAreaTypeLink`,
     /// `td_api.tl:6597`; HTTP or tg:// URL; schema limits: Premium-only,
     /// up to `story_link_area_count_max`), and one
@@ -393,9 +471,9 @@ impl StoryComposer {
     /// The returned value is baked into the `postStory` request JSON, so
     /// the areas ride along with the post→answer correlation (temp
     /// story id → `updateStoryPostSucceeded`/`updateStoryPostFailed`).
-    pub fn areas_json(&self) -> Value {
+    pub fn areas_json(link_url: &str, reaction_emojis: &str) -> Value {
         let mut areas = Vec::new();
-        let url = self.link_url.trim();
+        let url = link_url.trim();
         if !url.is_empty() {
             areas.push(json!({
                 "@type": "inputStoryArea",
@@ -406,7 +484,7 @@ impl StoryComposer {
         // ponytail: UI-level cap of 5 emojis; server enforces the real
         // `story_suggested_reaction_area_count_max`. Raise the take() bound if
         // the server max is ever surfaced client-side.
-        for (i, emoji) in self.reaction_emojis.split_whitespace().take(5).enumerate() {
+        for (i, emoji) in reaction_emojis.split_whitespace().take(5).enumerate() {
             areas.push(json!({
                 "@type": "inputStoryArea",
                 "position": area_position(44.0, 24.0 + i as f64 * 13.0, 12.0, 12.0, 50.0),
@@ -423,8 +501,8 @@ impl StoryComposer {
 
     /// Light validation for the link area (schema 1.8.67 `td_api.tl:6597`:
     /// "An area pointing to a HTTP or tg:// link"). Empty = no link area.
-    pub fn link_url_error(&self) -> Option<&'static str> {
-        let url = self.link_url.trim();
+    pub fn link_url_error(link_url: &str) -> Option<&'static str> {
+        let url = link_url.trim();
         if url.is_empty() {
             return None;
         }
@@ -484,7 +562,7 @@ mod tests {
     #[test]
     fn composer_open_close_toggle_users() {
         let mut c = StoryComposer::open();
-        assert!(c.open);
+        assert!(c.is_open());
         assert!(!c.needs_users());
         c.privacy = StoryPrivacy::SelectedUsers;
         assert!(c.needs_users());
@@ -493,7 +571,8 @@ mod tests {
         c.toggle_user(7);
         assert!(c.needs_users());
         c.close();
-        assert!(!c.open);
+        assert!(!c.is_open());
+        assert_eq!(c.stage, ComposerStage::Closed);
         assert!(c.selected_user_ids.is_empty());
     }
 
@@ -511,17 +590,11 @@ mod tests {
     #[test]
     fn areas_json_shapes_match_1_8_67() {
         // Empty inputs → empty areas.
-        let c = StoryComposer::default();
-        let v = c.areas_json();
+        let v = StoryComposer::areas_json("", "");
         assert_eq!(v["@type"], "inputStoryAreas");
         assert_eq!(v["areas"], json!([]));
 
-        let c = StoryComposer {
-            link_url: " https://t.me/quill ".into(),
-            reaction_emojis: "❤️ 🔥".into(),
-            ..Default::default()
-        };
-        let v = c.areas_json();
+        let v = StoryComposer::areas_json(" https://t.me/quill ", "❤️ 🔥");
         let areas = v["areas"].as_array().unwrap();
         assert_eq!(areas.len(), 3);
         // Link area: td_api.tl:6610 (inputStoryArea) / td_api.tl:6597
@@ -547,14 +620,11 @@ mod tests {
 
     #[test]
     fn link_url_validation_accepts_schema_schemes() {
-        let mut c = StoryComposer::default();
-        assert!(c.link_url_error().is_none());
+        assert!(StoryComposer::link_url_error("").is_none());
         for url in ["http://a.b", "https://t.me/quill", "tg://resolve"] {
-            c.link_url = url.into();
-            assert!(c.link_url_error().is_none(), "{url}");
+            assert!(StoryComposer::link_url_error(url).is_none(), "{url}");
         }
-        c.link_url = "t.me/quill".into();
-        assert!(c.link_url_error().is_some());
+        assert!(StoryComposer::link_url_error("t.me/quill").is_some());
     }
 
     #[test]
@@ -596,13 +666,30 @@ mod tests {
 
     #[test]
     fn edit_and_repost_modes() {
-        let c = StoryComposer::open_edit(11, 5);
-        assert!(c.open && c.is_edit());
+        let mut c = StoryComposer::open_edit(11, 5);
+        assert!(c.is_open() && c.is_edit());
         assert_eq!(c.edit_target(), Some((11, 5)));
         assert_eq!(c.repost_source(), None);
-        let c = StoryComposer::open_repost(22, 3);
-        assert!(c.open && !c.is_edit());
+        c.set_post_as(Some(9));
+        assert_eq!(c.post_as(), None, "an edit has no post-as chat");
+        let mut c = StoryComposer::open_repost(22, 3);
+        assert!(c.is_open() && !c.is_edit());
         assert_eq!(c.repost_source(), Some((22, 3)));
-        assert_eq!(c.as_chat_id, None);
+        assert_eq!(c.post_as(), None);
+        c.set_post_as(Some(9));
+        assert_eq!(c.post_as(), Some(9));
+        assert_eq!(c.repost_source(), Some((22, 3)), "the source stays");
+    }
+
+    #[test]
+    fn a_closed_composer_takes_no_error_and_holds_nothing() {
+        let mut c = StoryComposer::open_repost(22, 3);
+        c.set_post_as(Some(9));
+        c.close();
+        c.set_error("late");
+        assert_eq!(c.stage, ComposerStage::Closed, "no error reopens it");
+        assert_eq!(c.error(), None);
+        assert_eq!(c.mode, ComposerMode::default());
+        assert!(!c.stage.busy());
     }
 }

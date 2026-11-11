@@ -372,7 +372,7 @@ impl QuillApp {
             .playback
             .active
             .audio()
-            .filter(|_| self.playback.player.chat == Some(chat));
+            .filter(|_| self.playback.active.chat() == Some(chat));
         let is_playing = self.is_playing();
         let mut list = div()
             .id("playlist-tracks")

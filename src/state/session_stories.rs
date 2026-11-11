@@ -25,25 +25,29 @@ impl Session {
 
     /// Phase 9.7: start tracking a story-page mutation (`Sending`) sent as
     /// `request`.
-    pub fn begin_story_page_op(&mut self, label: impl Into<String>, request: RequestId) {
-        self.track_story_page_op(label.into(), StoryPageOpState::Sending, request);
+    pub fn begin_story_page_op(&mut self, kind: StoryPageOpKind, request: RequestId) {
+        self.track_story_page_op(kind, StoryPageOpState::Sending, request);
     }
 
     /// Phase 9.7: start tracking a story-page read (`Checking`) sent as
     /// `request`.
-    pub fn begin_story_page_check(&mut self, label: impl Into<String>, request: RequestId) {
-        self.track_story_page_op(label.into(), StoryPageOpState::Checking, request);
+    pub fn begin_story_page_check(&mut self, kind: StoryPageOpKind, request: RequestId) {
+        self.track_story_page_op(kind, StoryPageOpState::Checking, request);
     }
 
     /// The chat page comes from the pending request the op tracks.
-    fn track_story_page_op(&mut self, label: String, state: StoryPageOpState, request: RequestId) {
+    fn track_story_page_op(
+        &mut self,
+        kind: StoryPageOpKind,
+        state: StoryPageOpState,
+        request: RequestId,
+    ) {
         let chat_id = self
             .requests
             .get(request)
-            .and_then(|pending| pending.chat_id)
-            .map(|chat| chat.0);
+            .and_then(|pending| pending.chat_id);
         self.stories.page_ops.begin(StoryPageOp {
-            label,
+            kind,
             state,
             request,
             chat_id,
@@ -53,16 +57,16 @@ impl Session {
     /// The driver could not send `request`: its op fails with `reason`.
     pub fn fail_story_page_send(
         &mut self,
-        label: String,
+        kind: StoryPageOpKind,
         request: RequestId,
         chat_id: Option<ChatId>,
         reason: String,
     ) {
         self.stories.page_ops.begin(StoryPageOp {
-            label,
+            kind,
             state: StoryPageOpState::Failed(reason),
             request,
-            chat_id: chat_id.map(|chat| chat.0),
+            chat_id,
         });
     }
 
@@ -97,7 +101,7 @@ impl Session {
 
     /// The story page of `chat_id` was closed: its calls are no longer
     /// tracked, in flight or finished.
-    pub fn leave_story_page(&mut self, chat_id: i64) {
+    pub fn leave_story_page(&mut self, chat_id: ChatId) {
         self.stories.page_ops.forget_chat(chat_id);
     }
 
@@ -320,6 +324,17 @@ impl Session {
     /// flow ends with the error instead of spinning on `Checking`/`Sending`
     /// forever (and is made when the first request never went out).
     pub fn fail_story_report_send(&mut self, chat_id: i64, story_id: i32, message: String) {
+        // A flow with a request out (this story's earlier step, or another
+        // story's) keeps waiting for its own answer: the send that never
+        // left must not replace it.
+        if self
+            .stories
+            .report
+            .as_ref()
+            .is_some_and(|flow| flow.stage.waiting_for().is_some())
+        {
+            return;
+        }
         self.stories.report = Some(StoryReportFlow {
             chat_id,
             story_id,

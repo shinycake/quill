@@ -40,9 +40,7 @@ impl Session {
                 {
                     self.set_live_story_senders(group_call_id, senders);
                 } else if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.chats_state
-                        .send_as_options
-                        .insert(chat_id.0, crate::state::fetch::Fetch::Ready(senders));
+                    self.accept_message_senders(chat_id, pending.map(|p| p.id), senders);
                 }
             }
             MessagesPayload::UpdateChatIsTranslatable {
@@ -166,16 +164,14 @@ impl Session {
                         .filter(|stop| {
                             matches!(stop, BotStopStage::Stopped | BotStopStage::Stopping(_))
                         });
-                    let stopped = carried == Some(BotStopStage::Stopped);
                     self.remember_files(&files);
                     self.messages.pending_bot_messages.insert(
                         (chat_id.0, forum_topic_id),
                         PendingBotMessage {
                             draft_id,
-                            can_stop: can_stop && !stopped,
                             keep_on_stop,
                             content,
-                            stop: carried.unwrap_or(BotStopStage::Running),
+                            stop: carried.unwrap_or(BotStopStage::Running { can_stop }),
                             expires_at_ms: unix_ms_now().saturating_add(
                                 self.messages.pending_bot_period_secs.saturating_mul(1000),
                             ),

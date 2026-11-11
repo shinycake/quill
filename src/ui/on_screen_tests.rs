@@ -62,7 +62,7 @@ fn surfaces(app: &QuillApp) -> Surfaces {
         rich_editor: app.chat_ui.rich.editor_open(),
         context_menu: app.chat_list.archive_menu.is_some(),
         selection: app.chat_list.selected.len(),
-        player_chat: app.playback.player.chat,
+        player_chat: app.playback.active.chat(),
     }
 }
 
@@ -94,8 +94,9 @@ fn open_everything(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
         app.chat_ui.rich.set_editor(true);
         app.chat_list.archive_menu = Some(point(px(10.), px(10.)));
         app.chat_list.selected.insert(CHAT.0);
-        app.playback.active = crate::ui::playback_state::ActiveTrack::Audio(MessageId(1));
-        app.playback.player.chat = Some(CHAT);
+        app.playback.active = crate::ui::playback_state::ActiveTrack::Audio(
+            crate::ui::playback_state::Track::new(MessageId(1)).in_chat(CHAT),
+        );
         cx.notify();
     });
     frames(vcx);
@@ -138,8 +139,10 @@ fn a_switch_replaces_every_surface_and_nothing_comes_back(cx: &mut TestAppContex
         app.spawn_screen(cx, async move |this, cx| {
             let _ = wait.await;
             seen.set(Some(
-                this.update(cx, |app, _| app.stories.composer.open = true)
-                    .is_ok(),
+                this.update(cx, |app, _| {
+                    *app.stories.composer = quill::story_composer::StoryComposer::open()
+                })
+                .is_ok(),
             ));
         })
         .detach();
@@ -163,7 +166,7 @@ fn a_switch_replaces_every_surface_and_nothing_comes_back(cx: &mut TestAppContex
         Some(false),
         "the task's update came back Gone"
     );
-    app.read_with(&vcx, |app, _| assert!(!app.stories.composer.open));
+    app.read_with(&vcx, |app, _| assert!(!app.stories.composer.is_open()));
 
     // Back to the first account: a third screen, with nothing restored.
     switch(&app, &mut vcx, &AccountKey::primary().0);

@@ -451,7 +451,7 @@ fn announcement_labels_are_fetched_once_and_hide_deletes_the_history() {
 fn the_about_box_waits_for_the_saved_flags_and_saves_without_overwriting() {
     use crate::psa_about::{load_seen_from, merge_save};
     use std::collections::BTreeSet;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     let dir = std::env::temp_dir().join(format!("quill-psa-driver-{}", std::process::id()));
     let file = dir.join("psa_about_seen.json");
@@ -481,23 +481,15 @@ fn the_about_box_waits_for_the_saved_flags_and_saves_without_overwriting() {
     };
     assert!(!shown(&f), "the saved flags are not in yet");
 
-    let mut tries = 0;
-    while !shown(&f) && tries < 200 {
-        f.driver.sync_psa_about();
-        std::thread::sleep(Duration::from_millis(10));
-        tries += 1;
-    }
+    f.driver.sync_psa_about();
+    f.driver.session.finish_psa_background(Instant::now());
     assert!(
         shown(&f),
         "unseen chat: the box shows once the flags are in"
     );
 
-    let mut tries = 0;
-    while !load_seen_from(&file).contains(&7) && tries < 200 {
-        f.driver.sync_psa_about();
-        std::thread::sleep(Duration::from_millis(10));
-        tries += 1;
-    }
+    f.driver.sync_psa_about();
+    f.driver.session.finish_psa_background(Instant::now());
     assert_eq!(
         load_seen_from(&file),
         BTreeSet::from([7, 9]),

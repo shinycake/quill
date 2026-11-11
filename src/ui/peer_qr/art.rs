@@ -184,7 +184,7 @@ impl QuillApp {
                     .swap
                     .iter()
                     .flat_map(|swap| swap.previous.iter().cloned());
-                super::plain_picks(&open.state.emoji)
+                super::plain_picks(open.state.emoji())
                     .into_iter()
                     .chain(previous)
                     .collect()

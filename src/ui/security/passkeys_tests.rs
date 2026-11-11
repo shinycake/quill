@@ -179,11 +179,10 @@ fn the_privacy_row_without_passkeys_follows_webauthn(cx: &mut TestAppContext) {
     assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::Passkeys));
     app.update_in(vcx, |app, window, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            let generation = session.settings.passkeys.generation;
-            session
-                .settings
-                .passkeys
-                .accept_list(Vec::new(), generation);
+            let passkeys = &mut session.settings.passkeys;
+            let ask = quill::ids::RequestId(0);
+            passkeys.list_asked(ask, std::time::Instant::now());
+            passkeys.accept_list(ask, Vec::new());
         }
         app.close_passkeys(cx);
         app.close_kit_dialog_if_done(DialogKind::Passkeys, window, cx);

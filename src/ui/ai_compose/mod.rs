@@ -135,7 +135,6 @@ impl QuillApp {
             ai,
             view: AiComposeView::Card,
             style_names: self.ai_compose_style_names(),
-            editor: None,
             select_saved: None,
         });
         self.open_box(crate::ui::shell::DialogKind::AiCompose);

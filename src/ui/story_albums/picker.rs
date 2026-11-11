@@ -124,7 +124,7 @@ impl QuillApp {
                 thumb_file_id,
                 file_id,
                 ..
-            } => thumb_file_id.or(Some(*file_id)),
+            } => thumb_file_id.or(*file_id),
             _ => None,
         }
     }

@@ -45,12 +45,16 @@ impl QuillApp {
             let send_box = &mut self.composer_sends.reads;
             send_box.thumbnail_jobs += 1;
             let job = send_box.thumbnail_jobs;
-            send_box.thumbnails.start(path.clone(), job);
             let source = path.clone();
-            let worker = cx.background_spawn(async move { write_file_thumbnail(&source) });
+            // The folder is the asking account's, read now: the worker may
+            // run after a switch.
+            let dir = quill::local_path::media_cache_base().join("file-thumbs");
+            let worker = cx.background_spawn(async move { write_file_thumbnail(&source, &dir) });
             let timer = cx.background_executor().timer(GIVE_UP_AFTER);
             let waited = path.clone();
-            self.spawn_scoped(cx, async move |this, cx| {
+            // screen-scope: the tray reads are the app's; the answer lands for
+            // every window and account whichever screen is on screen.
+            let give_up = Self::spawn_app(cx, async move |this, cx| {
                 timer.await;
                 let _ = this.update(cx, |this, cx| {
                     let send_box = &mut this.composer_sends.reads;
@@ -58,9 +62,10 @@ impl QuillApp {
                         cx.notify();
                     }
                 });
-            })
-            .detach();
-            self.spawn_scoped(cx, async move |this, cx| {
+            });
+            let key = path.clone();
+            // screen-scope: as the give-up above.
+            let answer = Self::spawn_app(cx, async move |this, cx| {
                 let thumbnail = worker.await;
                 let _ = this.update(cx, |this, cx| {
                     let send_box = &mut this.composer_sends.reads;
@@ -76,8 +81,12 @@ impl QuillApp {
                     }
                     cx.notify();
                 });
-            })
-            .detach();
+            });
+            // The stage owns both tasks: leaving it cancels the other.
+            self.composer_sends
+                .reads
+                .thumbnails
+                .start(key, job, vec![give_up, answer]);
         }
     }
 
@@ -122,9 +131,9 @@ pub(super) fn write_jpeg(picture: &image::RgbaImage, dir: &Path) -> Option<PathB
     Some(dest)
 }
 
-/// The thumbnail JPEG in `{media cache}/file-thumbs`, or `None` when the
+/// The thumbnail JPEG in `dir` (`{media cache}/file-thumbs`), or `None` when the
 /// server makes its own or the picture does not decode.
-fn write_file_thumbnail(source: &Path) -> Option<FileThumbnail> {
+fn write_file_thumbnail(source: &Path, dir: &Path) -> Option<FileThumbnail> {
     let size = std::fs::metadata(source).ok()?.len();
     if !file_thumbnail_upload_required(source, size) {
         return None;
@@ -141,10 +150,7 @@ fn write_file_thumbnail(source: &Path) -> Option<FileThumbnail> {
     let thumb_w = ((width as f32 * scale).round() as u32).max(1);
     let thumb_h = ((height as f32 * scale).round() as u32).max(1);
     let thumb = image::imageops::thumbnail(&picture, thumb_w, thumb_h);
-    let dest = write_jpeg(
-        &thumb,
-        &quill::local_path::media_cache_base().join("file-thumbs"),
-    )?;
+    let dest = write_jpeg(&thumb, dir)?;
     Some(FileThumbnail {
         path: dest,
         width: i32::try_from(thumb_w).ok()?,
@@ -160,7 +166,8 @@ mod tests {
     #[test]
     fn pictures_telegram_cannot_thumbnail_get_a_jpeg() {
         let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/images/halves.jxl");
-        let thumb = write_file_thumbnail(&source).expect("a thumbnail");
+        let dir = quill::local_path::media_cache_base().join("file-thumbs");
+        let thumb = write_file_thumbnail(&source, &dir).expect("a thumbnail");
         // The 32×16 picture is not enlarged.
         assert_eq!((thumb.width, thumb.height), (32, 16));
         let decoded = image::open(&thumb.path).expect("a JPEG");
@@ -169,7 +176,7 @@ mod tests {
         // A small PNG gets its thumbnail from the server.
         let png = std::env::temp_dir().join(format!("quill-thumb-{}.png", std::process::id()));
         image::RgbaImage::new(4, 4).save(&png).expect("a PNG");
-        assert!(write_file_thumbnail(&png).is_none());
+        assert!(write_file_thumbnail(&png, &dir).is_none());
         let _ = std::fs::remove_file(&png);
     }
 }

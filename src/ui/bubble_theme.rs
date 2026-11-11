@@ -32,6 +32,15 @@ pub(super) fn note_history_area(bounds: Bounds<Pixels>, window: &Window) {
     HISTORY_AREA.with(|area| area.set(Some((id, bounds))));
 }
 
+/// A window's frame starts: the area the last frame's history reported
+/// (in this window or another) is gone, so bubbles outside a history (the
+/// Appearance preview, a window with no chat) never take its slice. A
+/// history reports its area again in this frame's prepaint, before its
+/// rows paint.
+pub(in crate::ui) fn forget_history_area() {
+    HISTORY_AREA.with(|area| area.set(None));
+}
+
 /// The message area `window`'s history reported, if it did.
 fn history_area_of(window: &Window) -> Option<Bounds<Pixels>> {
     area_for(
@@ -178,7 +187,7 @@ pub(crate) fn gradient_layer(fill: OutgoingFill, joined_above: bool) -> Option<A
 
 #[cfg(test)]
 mod tests {
-    use super::{OutgoingFill, area_for, slice_of};
+    use super::{OutgoingFill, area_for, forget_history_area, slice_of};
     use gpui_kit::{Bounds, WindowId, point, px, size};
     use quill::telegram::envelope::{BackgroundFill, ThemeSettings};
 
@@ -234,6 +243,15 @@ mod tests {
         assert_eq!(area_for(Some((main, area)), main), Some(area));
         assert_eq!(area_for(Some((main, area)), chat), None);
         assert_eq!(area_for(None, main), None);
+    }
+
+    #[test]
+    fn a_new_frame_forgets_the_area_of_the_last_one() {
+        let area = Bounds::new(point(px(0.), px(100.)), size(px(300.), px(400.)));
+        super::HISTORY_AREA.with(|slot| slot.set(Some((WindowId::from(1_u64), area))));
+        assert!(super::HISTORY_AREA.with(std::cell::Cell::get).is_some());
+        forget_history_area();
+        assert!(super::HISTORY_AREA.with(std::cell::Cell::get).is_none());
     }
 
     #[test]

@@ -67,6 +67,14 @@ fn leaving_the_password_step_drops_the_recovery_stage() {
 }
 
 #[test]
+fn back_from_recovery_code_entry_is_a_session_transition() {
+    let (mut session, _sink) = session();
+    session.auth_state.password_recovery = PasswordRecovery::CodeSent;
+    session.cancel_password_recovery();
+    assert_eq!(session.auth_state.password_recovery, PasswordRecovery::Idle);
+}
+
+#[test]
 fn an_auto_download_save_is_answered_by_the_request_that_asked() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
@@ -86,7 +94,7 @@ fn an_auto_download_save_is_answered_by_the_request_that_asked() {
         ),
     );
     assert_eq!(
-        session.settings.auto_download_answer,
+        session.settings.auto_download_answers.peek(first),
         Some(AutoDownloadAnswer::Refused(first))
     );
     apply_json(
@@ -96,7 +104,16 @@ fn an_auto_download_save_is_answered_by_the_request_that_asked() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, second.0),
     );
     assert_eq!(
-        session.settings.auto_download_answer,
-        Some(AutoDownloadAnswer::Saved(second))
+        session.settings.auto_download_answers.peek(second),
+        Some(AutoDownloadAnswer::Saved(second)),
+        "the earlier refusal is still held for the editor that sent it"
+    );
+    assert_eq!(
+        session.settings.auto_download_answers.peek(first),
+        Some(AutoDownloadAnswer::Refused(first))
+    );
+    assert!(
+        session.settings.data_storage_error().is_some(),
+        "a later ok does not wipe the failure"
     );
 }

@@ -273,28 +273,41 @@ impl Session {
 
     /// The list was asked for: the picker shows a spinner, over the
     /// previous list if there was one.
-    pub fn message_senders_loading(&mut self, chat_id: ChatId) {
+    pub fn message_senders_loading(&mut self, chat_id: ChatId, request: RequestId) {
         let slot = self
             .chats_state
             .send_as_options
             .entry(chat_id.0)
             .or_default();
-        let stale = std::mem::take(slot).take_data();
-        *slot = crate::state::fetch::Fetch::Loading {
-            stale,
-            request: None,
-        };
+        slot.begin();
+        slot.sent(request);
     }
 
-    /// The request for the list failed: the picker offers Retry.
-    pub fn fail_message_senders(&mut self, chat_id: ChatId, error: String) {
-        let slot = self
-            .chats_state
-            .send_as_options
-            .entry(chat_id.0)
-            .or_default();
-        let stale = std::mem::take(slot).take_data();
-        *slot = crate::state::fetch::Fetch::Failed { error, stale };
+    /// The list `request` asked for arrived: taken only by the fetch that
+    /// waits for it (an older request's answer, or one after the lists
+    /// were dropped, is ignored).
+    pub(crate) fn accept_message_senders(
+        &mut self,
+        chat_id: ChatId,
+        request: Option<RequestId>,
+        senders: Vec<AvailableMessageSender>,
+    ) {
+        if let Some(slot) = self.chats_state.send_as_options.get_mut(&chat_id.0) {
+            slot.answered(request, senders);
+        }
+    }
+
+    /// The request for the list failed: the picker offers Retry. Only the
+    /// request the fetch waits for fails it.
+    pub fn fail_message_senders(
+        &mut self,
+        chat_id: ChatId,
+        request: Option<RequestId>,
+        error: String,
+    ) {
+        if let Some(slot) = self.chats_state.send_as_options.get_mut(&chat_id.0) {
+            slot.failed(request, error, false);
+        }
     }
 
     /// Display name of a sender for the picker. Users resolve through the

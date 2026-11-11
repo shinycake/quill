@@ -362,11 +362,12 @@ fn an_unanswered_device_login_and_tone_upload_settle_with_their_account() {
     use crate::tone_upload::{ToneTarget, ToneUpload};
     let (mut session, _) = session();
     let login = session.request(RequestPurpose::ConfirmDeviceLogin, None);
-    session.request(RequestPurpose::UploadSavedNotificationSound, None);
+    let upload = session.request(RequestPurpose::UploadSavedNotificationSound, None);
     session.settings.sessions_op.begin(login);
     session.settings.tone_upload = ToneUpload::Uploading {
         name: "Chime".into(),
         target: ToneTarget::Reaction,
+        request: upload,
     };
     session.settle_account_requests();
     assert!(!session.settings.sessions_op.is_mutating());

@@ -34,8 +34,10 @@ impl Session {
             })
     }
 
-    pub(crate) fn finish_sticker_batch_item(&mut self, set_id: i64, success: bool) {
-        self.stickers.stickers.batch.finish(set_id, success);
+    /// A sticker set change answered: the batch counts it when the request
+    /// is one of its own.
+    pub(crate) fn finish_sticker_batch_item(&mut self, request: RequestId, success: bool) {
+        self.stickers.stickers.batch.finish_item(request, success);
     }
 
     /// The box's change of the viewed set went out.
@@ -269,10 +271,13 @@ impl Session {
     ) {
         // A page of an earlier search, or of one that was left, is not the
         // search's now.
-        let gifs = &mut self.stickers.gifs;
-        if !gifs.search_page_answered(request, animations, next_offset, first_page) {
+        if !self.stickers.gifs.search_waits_for(request) {
             return;
         }
+        self.stickers
+            .gifs
+            .search_page_answered(animations, next_offset, first_page);
+        let gifs = &mut self.stickers.gifs;
         let query = gifs.search_query().to_string();
         let found = gifs.search_results().to_vec();
         gifs.searches_kept.keep(&query, &found);

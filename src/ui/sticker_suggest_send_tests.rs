@@ -76,8 +76,10 @@ fn hold_suggestions(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
             };
             stickers.suggestions = vec![sticker(1), sticker(2)];
             let emoji = &mut session.stickers.emoji;
-            emoji.animated_emoji_for = Some(EMOJI.into());
-            emoji.animated_emoji = Some(sticker(3));
+            emoji.animated = quill::emoji::AnimatedSuggestion::Ready {
+                emoji: EMOJI.into(),
+                sticker: Some(sticker(3)),
+            };
         }
         cx.notify();
     });
@@ -186,8 +188,10 @@ fn sending_the_animated_emoji_clears_its_emoji(cx: &mut TestAppContext) {
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             let emoji = &mut session.stickers.emoji;
-            emoji.animated_emoji_for = Some(EMOJI.into());
-            emoji.animated_emoji = Some(sticker(3));
+            emoji.animated = quill::emoji::AnimatedSuggestion::Ready {
+                emoji: EMOJI.into(),
+                sticker: Some(sticker(3)),
+            };
         }
         cx.notify();
     });

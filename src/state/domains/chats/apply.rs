@@ -12,9 +12,7 @@ impl Session {
                 self.chats_state.default_backgrounds.remove(&for_dark_theme);
             }
             RequestPurpose::Chats(ChatsPurpose::RemoveInstalledBackground { background_id }) => {
-                if let Some(list) = self.chats_state.installed_backgrounds.data_mut() {
-                    list.retain(|b| b.id != background_id);
-                }
+                self.chats_state.installed_backgrounds.forget(background_id);
             }
             RequestPurpose::DeleteChatBackground => {
                 if let Some(chat_id) = pending.chat_id {
@@ -454,7 +452,15 @@ impl Session {
                 for background in &list {
                     self.upsert_background_files(background);
                 }
-                self.chats_state.installed_backgrounds.succeed(list);
+                if let Some(RequestPurpose::Chats(ChatsPurpose::GetInstalledBackgrounds {
+                    for_dark_theme,
+                })) = pending.map(|p| p.purpose)
+                {
+                    self.chats_state
+                        .installed_backgrounds
+                        .theme_mut(for_dark_theme)
+                        .answered(extra, list);
+                }
             }
             ChatsPayload::Background(background) => {
                 self.upsert_background_files(&background);

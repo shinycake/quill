@@ -25,6 +25,11 @@ use crate::agent::td::{self, Client, TdError};
 use crate::ids::AccountKey;
 use serde_json::{Value, json};
 
+/// A client closed: drop what the tools cached for it.
+pub(crate) fn forget_client(client_id: i32) {
+    target::forget_client(client_id);
+}
+
 /// What one tool call produced.
 pub struct ToolOutput {
     pub text: String,
@@ -364,9 +369,12 @@ impl CallStart {
     }
 }
 
-/// The connection the current call came on (0 off a call).
-pub(crate) fn current_conn() -> u64 {
-    call_start().map_or(0, |began| began.conn)
+/// The connection the current call came on; none off a call, and none for
+/// a call that came on no connection.
+pub(crate) fn current_conn() -> Option<u64> {
+    call_start()
+        .map(|began| began.conn)
+        .filter(|conn| *conn != 0)
 }
 
 fn call_start() -> Option<CallStart> {
@@ -690,13 +698,13 @@ mod tests {
     fn a_nested_call_restores_the_outer_one() {
         let outer = super::CallScope::begin(super::CallStart::now(7), "Outer");
         let inner = super::CallScope::begin(super::CallStart::now(8), "Inner");
-        assert_eq!(super::current_conn(), 8);
+        assert_eq!(super::current_conn(), Some(8));
         assert_eq!(super::current_agent(), "Inner");
         drop(inner);
-        assert_eq!(super::current_conn(), 7);
+        assert_eq!(super::current_conn(), Some(7));
         assert_eq!(super::current_agent(), "Outer");
         drop(outer);
-        assert_eq!(super::current_conn(), 0);
+        assert_eq!(super::current_conn(), None);
     }
 
     /// The agent's name belongs to the call: off a call it is the generic one.

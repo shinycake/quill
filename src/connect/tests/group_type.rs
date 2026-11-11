@@ -365,9 +365,13 @@ fn a_check_that_could_not_be_sent_is_not_in_flight() {
             .check_group_username(ChatId(13), "quillchat")
             .is_err()
     );
+    // Not in flight, and not silent: the box says the check failed.
     assert_eq!(
         rig.driver.session.groups.group_type.check,
-        crate::state::UsernameCheck::Idle
+        crate::state::UsernameCheck::Failed {
+            chat_id: ChatId(13),
+            username: "quillchat".into()
+        }
     );
 }
 
@@ -383,4 +387,69 @@ fn queued_edits_without_an_upgraded_chat_are_reported() {
     };
     rig.driver.run_edit_after_upgrade(edit, true);
     assert!(!rig.driver.session.chats_state.chat_action_error.is_empty());
+}
+
+/// r2-05 (10-066): a check whose send is refused is a failed check of its
+/// text, not a "Checking..." nobody answers.
+#[test]
+fn a_refused_check_send_is_recorded_as_failed() {
+    let mut rig = Rig::new();
+    rig.recorder.refuse_sends(true);
+    assert!(
+        rig.driver
+            .check_group_username(ChatId(13), "quillchat")
+            .is_err()
+    );
+    assert!(
+        rig.driver
+            .session
+            .group_username_check_failed(ChatId(13), "quillchat")
+    );
+    rig.recorder.refuse_sends(false);
+    assert!(
+        rig.driver
+            .check_group_username(ChatId(13), "quillchat")
+            .unwrap()
+            .is_some(),
+        "Save asks again"
+    );
+}
+
+/// r2-05 (10-068): a link count that could not be asked for is `Failed`,
+/// not a count that is still on its way: Save does not wait for it, and
+/// the next open of the box asks again.
+#[test]
+fn a_refused_link_count_send_is_a_failed_count() {
+    let mut rig = Rig::new();
+    rig.recorder.refuse_sends(true);
+    assert!(
+        rig.driver
+            .fetch_chat_invite_link_counts(ChatId(13))
+            .is_err()
+    );
+    assert!(matches!(
+        rig.driver.session.groups.invite_link_counts.get(&13),
+        Some(crate::state::InviteLinkCountsFetch::Failed(_))
+    ));
+    assert!(
+        !rig.driver
+            .session
+            .chat_invite_link_count_loading(ChatId(13))
+    );
+    assert_eq!(
+        rig.driver.session.chat_active_invite_link_count(ChatId(13)),
+        0
+    );
+    rig.recorder.refuse_sends(false);
+    assert!(
+        rig.driver
+            .fetch_chat_invite_link_counts(ChatId(13))
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        rig.driver
+            .session
+            .chat_invite_link_count_loading(ChatId(13))
+    );
 }

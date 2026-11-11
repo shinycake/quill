@@ -433,7 +433,7 @@ type Waker = Box<dyn FnOnce() + Send>;
 /// Where the handler read stands: nothing yet, an answer, or a read on its
 /// own thread (the older answer stays to show meanwhile). The read leaves
 /// `Reading` by landing its answer or, when it dies, by putting back what
-/// was there.
+/// was there as just read (or "could not read" when there was nothing).
 enum Stage {
     Empty,
     Known(Cached),
@@ -498,8 +498,22 @@ impl Cell {
                 state,
                 generation,
             }),
-            (None, Some(last)) => Stage::Known(last),
-            (None, None) => Stage::Empty,
+            // A read that died is a read that ended: what was known stays,
+            // stamped now so the page does not start another read at its
+            // next draw, but after the TTL like any other answer (and an
+            // `invalidate` since still makes it stale).
+            (None, Some(last)) => Stage::Known(Cached {
+                at: Instant::now(),
+                generation: self.generation,
+                state: last.state,
+            }),
+            (None, None) => Stage::Known(Cached {
+                at: Instant::now(),
+                generation: self.generation,
+                state: LinkHandlerState::Unavailable(
+                    tr(keys::Q_PREFS_DEFAULT_APP_TOOL_FAILED).into(),
+                ),
+            }),
         };
         waker
     }
@@ -723,6 +737,32 @@ mod tests {
     };
     use std::path::Path;
     use std::time::Instant;
+
+    /// r2-05 (03-C001): a read that died is not read again at the next draw.
+    #[test]
+    fn a_dead_read_is_not_stale_until_its_ttl() {
+        let mut cell = super::Cell::new();
+        let generation = cell.begin_read().expect("the first read starts");
+        assert_eq!(cell.begin_read(), None, "one at a time");
+        cell.settle(generation, None);
+        let (answer, stale) = lookup(cell.last(), cell.generation);
+        assert!(matches!(answer, Some(LinkHandlerState::Unavailable(_))));
+        assert!(!stale, "not re-read from the next render");
+        // With an older answer, a dead read keeps it.
+        let generation = {
+            cell.generation += 1;
+            cell.begin_read().expect("read again after invalidate")
+        };
+        cell.settle(generation, Some(LinkHandlerState::Ours));
+        let generation = {
+            cell.generation += 1;
+            cell.begin_read().expect("another read")
+        };
+        cell.settle(generation, None);
+        let (answer, stale) = lookup(cell.last(), cell.generation);
+        assert_eq!(answer, Some(LinkHandlerState::Ours));
+        assert!(!stale);
+    }
 
     #[test]
     fn nothing_cached_is_stale_and_has_no_answer() {

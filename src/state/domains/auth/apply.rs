@@ -3,6 +3,11 @@ use crate::state::*;
 use crate::telegram::envelope::AuthPayload;
 
 impl Session {
+    /// Leave recovery-code entry for password entry (the Back button).
+    pub fn cancel_password_recovery(&mut self) {
+        self.auth_state.cancel_password_recovery();
+    }
+
     /// Applies one auth payload; called by
     /// [`Session::apply_payload`].
     pub(crate) fn apply_auth_payload(

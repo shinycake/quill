@@ -188,7 +188,7 @@ impl NetworkUsage {
                         .unwrap_or(0.0)
                         .max(0.0) as i64;
                     match usage.call_seconds.iter_mut().find(|(g, _)| *g == group) {
-                        Some((_, total)) => *total += seconds,
+                        Some((_, total)) => *total = total.saturating_add(seconds),
                         None => usage.call_seconds.push((group, seconds)),
                     }
                 }

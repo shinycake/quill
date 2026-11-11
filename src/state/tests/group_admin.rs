@@ -422,7 +422,10 @@ fn basic_group_manage_counts_its_admins() {
     session
         .groups
         .basic_group_members
-        .insert(30, SupergroupMembersFetch::Loading(extra));
+        .insert(30, SupergroupMembersFetch::Loading);
+    session
+        .groups
+        .note_member_first((30, MemberListFilter::Recent), extra, "");
     apply_json(
         &mut session,
         &seq,

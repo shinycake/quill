@@ -17,7 +17,7 @@
 
 use crate::locks::LockExt;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 
 /// Requests that create messages, and where their messages are counted.
@@ -41,7 +41,7 @@ pub struct HeldSend {
 
 impl HeldSend {
     pub fn total(&self) -> i64 {
-        self.per_message * self.messages
+        self.per_message.saturating_mul(self.messages)
     }
 
     /// The request that goes out after the user paid: the total in
@@ -70,7 +70,7 @@ struct State {
     prices: HashMap<i64, i64>,
     /// Prices the user agreed to for good, by chat id (`>=` price passes).
     trusted: HashMap<i64, i64>,
-    held: Vec<HeldSend>,
+    held: VecDeque<HeldSend>,
 }
 
 /// Shared between the driver (which feeds prices and trust) and the sender
@@ -112,16 +112,15 @@ fn sending(request: &Value) -> Option<(i64, i64)> {
         "forwardMessages" | "resendMessages" => request.get("message_ids")?.as_array()?.len(),
         _ => 1,
     };
-    Some((chat_id, count.max(1) as i64))
+    Some((chat_id, i64::try_from(count.max(1)).unwrap_or(i64::MAX)))
 }
 
 impl PaidGuard {
     /// Replaces the known prices and trusted prices.
     pub fn set_state(&self, prices: HashMap<i64, i64>, trusted: HashMap<i64, i64>) {
-        if let Ok(mut state) = self.state.lock() {
-            state.prices = prices;
-            state.trusted = trusted;
-        }
+        let mut state = self.state.lock_or_recover();
+        state.prices = prices;
+        state.trusted = trusted;
     }
 
     /// What goes to TDLib for `request`: the request itself (maybe with the
@@ -141,14 +140,14 @@ impl PaidGuard {
         let Some((chat_id, messages)) = sending(&value) else {
             return Some(request.to_string());
         };
-        let Ok(mut state) = self.state.lock() else {
-            return Some(request.to_string());
-        };
+        // A poisoned lock still screens: the state is plain maps, and an
+        // unscreened send could go out with a price the user never agreed to.
+        let mut state = self.state.lock_or_recover();
         let price = state.prices.get(&chat_id).copied().unwrap_or(0);
         if price <= 0 {
             return Some(request.to_string());
         }
-        let total = price * messages;
+        let total = price.saturating_mul(messages);
         let carried = match value.get("@type").and_then(Value::as_str) {
             Some("resendMessages") => value.get("paid_message_star_count"),
             _ => value
@@ -161,7 +160,7 @@ impl PaidGuard {
             set_paid(&mut value, total);
             return Some(value.to_string());
         }
-        state.held.push(HeldSend {
+        state.held.push_back(HeldSend {
             chat_id,
             per_message: price,
             messages,
@@ -172,13 +171,12 @@ impl PaidGuard {
 
     /// The oldest held request.
     pub fn held(&self) -> Option<HeldSend> {
-        self.state.lock_or_recover().held.first().cloned()
+        self.state.lock_or_recover().held.front().cloned()
     }
 
     /// Takes the oldest held request out.
     pub fn take_held(&self) -> Option<HeldSend> {
-        let mut state = self.state.lock_or_recover();
-        (!state.held.is_empty()).then(|| state.held.remove(0))
+        self.state.lock_or_recover().held.pop_front()
     }
 }
 
@@ -309,6 +307,26 @@ mod tests {
             g.screen(&text(7, 5)).is_none(),
             "an old price is not agreement"
         );
+    }
+
+    #[test]
+    fn a_poisoned_guard_still_screens_and_totals_saturate() {
+        let g = std::sync::Arc::new(guard(25, None));
+        let poisoner = g.clone();
+        let _ = std::thread::spawn(move || {
+            let _held = poisoner.state.lock();
+            panic!("poison the guard");
+        })
+        .join();
+        assert!(g.state.is_poisoned());
+        assert_eq!(g.screen(&text(7, 0)), None, "still held for confirmation");
+        let held = g.take_held().expect("held");
+        let huge = HeldSend {
+            per_message: i64::MAX,
+            messages: 2,
+            ..held
+        };
+        assert_eq!(huge.total(), i64::MAX);
     }
 
     #[test]

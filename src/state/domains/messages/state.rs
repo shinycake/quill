@@ -57,19 +57,13 @@ pub struct MessagesState {
     /// request errors. The UI drains it into the status note so the
     /// click never silently does nothing.
     pub message_link_error: Notes,
-    /// Slice msg-richtext-ai-tools: one-shot `fixTextWithAi` /
-    /// `composeTextWithAi` answer for the open chat's composer. The UI
-    /// drains it (replacing the draft) on the next frame. The first id is
-    /// the window that asked (`None`: the main window): only that window
-    /// takes the answer, even when another shows the same chat; the chat
-    /// id guards against applying to a chat the window has since left.
-    pub ai_composer_text: Option<(Option<ChatId>, ChatId, String)>,
-    /// Slice msg-richtext-ai-tools: one-shot `composeRichMessageWithAi`
-    /// / `createRichMessageWithAi` / `fixRichMessageWithAi` answer for
-    /// the open chat's composer. Same drain contract as
-    /// `ai_composer_text`. The UI writes the blocks back as editor markup
-    /// (`blocks_to_markup`); the note distinguishes create / fix / rewrite.
-    pub ai_composer_blocks: Option<(Option<ChatId>, ChatId, RichMessageContent, &'static str)>,
+    /// Slice msg-richtext-ai-tools: answers of `fixTextWithAi` /
+    /// `composeTextWithAi` / the rich-message AI methods (and their
+    /// failures) for the composers. Each window's frame takes the answers
+    /// of its own asks and applies one only while it holds that request
+    /// (`AiAsk::Asked`); a queue, so two answers in one frame are both
+    /// kept.
+    pub ai_answers: Vec<AiAnswer>,
     /// Slice msg-richtext-ai-tools: one-shot; set when an AI request
     /// errors. The UI drains it into the status note so the click never
     /// silently does nothing.
@@ -211,8 +205,7 @@ impl MessagesState {
             message_action_note: Notes::default(),
             message_link: None,
             message_link_error: Notes::default(),
-            ai_composer_text: None,
-            ai_composer_blocks: None,
+            ai_answers: Vec::new(),
             ai_error: Notes::default(),
             message_caption_length_max: 1024,
             paid_media_star_max: crate::composer::PAID_MEDIA_MAX_STARS,

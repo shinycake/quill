@@ -251,8 +251,11 @@ fn the_folder_limit_box_follows_the_box_that_hit_it(cx: &mut TestAppContext) {
     let h = new_app(cx);
     let chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, cx| {
-        app.windows
-            .open_box_in(DialogKind::FolderEditor, Some(OTHER));
+        app.windows.open_box_in(
+            DialogKind::FolderEditor,
+            Some(OTHER),
+            crate::ui::chat_window::AskWaits::Demo,
+        );
         app.note_window_press(None);
         app.set_window_scope(None);
         if let Some(session) = app.demo_session.as_mut() {
@@ -463,7 +466,7 @@ fn the_gif_tab_follows_its_windows_field(cx: &mut TestAppContext) {
     let _chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.stickers.gifs.search_begun("cats".into(), None);
+            session.stickers.gifs.search_begun("cats".into());
         }
         app.set_window_scope(Some(OTHER));
         app.follow_gif_field(cx);

@@ -124,11 +124,11 @@ fn from_member_search_filters_by_sender_and_pages_with_total() {
         .session
         .search
         .chat_search
-        .from_picker
-        .clone()
+        .from_picker()
+        .cloned()
         .unwrap();
     assert_eq!(
-        picker.members,
+        picker.members(),
         vec![
             MessageSender::User { user_id: 5 },
             MessageSender::User { user_id: 6 }
@@ -146,10 +146,10 @@ fn from_member_search_filters_by_sender_and_pages_with_total() {
             .session
             .search
             .chat_search
-            .from_picker
+            .from_picker()
             .as_ref()
             .unwrap()
-            .members
+            .members()
             .len(),
         2
     );
@@ -168,9 +168,9 @@ fn from_member_search_filters_by_sender_and_pages_with_total() {
             .session
             .search
             .chat_search
-            .from_picker
+            .from_picker()
             .as_ref()
-            .map(|picker| picker.members.clone()),
+            .map(|picker| picker.members().to_vec()),
         Some(vec![MessageSender::User { user_id: 9 }])
     );
 
@@ -178,7 +178,7 @@ fn from_member_search_filters_by_sender_and_pages_with_total() {
     fx.driver
         .set_chat_search_sender(Some(MessageSender::User { user_id: 5 }))
         .unwrap();
-    assert!(fx.driver.session.search.chat_search.from_picker.is_none());
+    assert!(fx.driver.session.search.chat_search.from_picker().is_none());
     let search = fx.last_request("searchChatMessages");
     assert_eq!(
         search["sender_id"],
@@ -194,7 +194,7 @@ fn from_member_search_filters_by_sender_and_pages_with_total() {
         text_message(40 << 20, 5, "older from five"),
     ));
     let state = &fx.driver.session.search.chat_search;
-    assert_eq!(state.hits.len(), 2);
+    assert_eq!(state.hits().len(), 2);
     assert_eq!(state.position_label(), "1 of 120");
 
     // Walking older reaches the page end and fetches the next page with
@@ -211,7 +211,7 @@ fn from_member_search_filters_by_sender_and_pages_with_total() {
         text_message(30 << 20, 5, "third from five"),
     ));
     let state = &fx.driver.session.search.chat_search;
-    assert_eq!(state.hits.len(), 3);
+    assert_eq!(state.hits().len(), 3);
     assert!(!state.loading_more());
     // Appending must not steal the selection or restart the jump.
     assert_eq!(state.position_label(), "2 of 120");
@@ -219,7 +219,7 @@ fn from_member_search_filters_by_sender_and_pages_with_total() {
 
     // Clearing the member (no text, no media tab) ends the search.
     fx.driver.set_chat_search_sender(None).unwrap();
-    assert!(fx.driver.session.search.chat_search.hits.is_empty());
+    assert!(fx.driver.session.search.chat_search.hits().is_empty());
     assert!(!fx.driver.session.search.chat_search.has_criteria());
 }
 
@@ -420,25 +420,23 @@ fn jump_to_a_date_before_the_chat_starts_goes_to_the_oldest_message() {
 
 #[test]
 fn global_search_filters_reach_search_messages() {
-    use crate::search_filters::{
-        GlobalSearchFilters, SearchChatType, SearchDateRange, SearchMediaKind,
-    };
+    use crate::search_filters::{GlobalSearchFilters, SearchChatType, SearchDateRange};
+    use crate::search_tabs::SearchTab;
     let mut fx = Fixture::new();
     commit_typed_search(&mut fx.driver, "dune");
     fx.driver
-        .set_search_filters(GlobalSearchFilters {
-            chat_type: SearchChatType::Channels,
-            media: SearchMediaKind::Files,
-            date: SearchDateRange::Week,
-            ..GlobalSearchFilters::default()
-        })
+        .set_search_filters(GlobalSearchFilters::default().with_chat_type(SearchChatType::Channels))
         .unwrap();
     let search = fx.last_request("searchMessages");
-    assert_eq!(search["query"], "dune");
     assert_eq!(
         search["chat_type_filter"]["@type"],
         "searchMessagesChatTypeFilterChannel"
     );
+    let mut files = GlobalSearchFilters::default().on_tab(SearchTab::Files);
+    files.date = SearchDateRange::Week;
+    fx.driver.set_search_filters(files).unwrap();
+    let search = fx.last_request("searchMessages");
+    assert_eq!(search["query"], "dune");
     assert_eq!(search["filter"]["@type"], "searchMessagesFilterDocument");
     assert!(search["min_date"].as_i64().unwrap() > 0);
     assert_eq!(search["max_date"], 0);
@@ -471,7 +469,7 @@ fn a_failed_older_page_waits_for_a_retry_and_keeps_the_results() {
     ));
     let state = &fx.driver.session.search.chat_search;
     assert!(state.more_failed(), "the strip offers Retry");
-    assert_eq!(state.hits.len(), 2, "the results stay");
+    assert_eq!(state.hits().len(), 2, "the results stay");
     assert!(!state.can_load_more(), "nothing asks again by itself");
 
     // Retry asks the same page.
@@ -486,6 +484,6 @@ fn a_failed_older_page_waits_for_a_retry_and_keeps_the_results() {
         text_message(30 << 20, 5, "third from five"),
     ));
     let state = &fx.driver.session.search.chat_search;
-    assert_eq!(state.hits.len(), 3);
+    assert_eq!(state.hits().len(), 3);
     assert!(!state.more_failed() && !state.loading_more());
 }

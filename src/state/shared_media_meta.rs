@@ -121,12 +121,12 @@ impl SharedMediaMeta {
                 let hidden = video.is_secret || video.has_spoiler;
                 SharedMediaMeta::Tile(SharedMediaTile {
                     thumbs: video
-                        .thumb_file_id()
-                        .filter(|_| !hidden && video.thumb_still)
+                        .still_thumb()
+                        .filter(|_| !hidden)
                         .into_iter()
                         .collect(),
-                    width: video.thumb_width,
-                    height: video.thumb_height,
+                    width: video.thumb.size().0,
+                    height: video.thumb.size().1,
                     mini: video.minithumbnail.clone().filter(|_| !hidden),
                     badge: TileBadge::Duration(video.duration),
                 })
@@ -134,13 +134,9 @@ impl SharedMediaMeta {
             MessageContent::Animation(gif) => {
                 let hidden = gif.is_secret || gif.has_spoiler;
                 SharedMediaMeta::Tile(SharedMediaTile {
-                    thumbs: gif
-                        .thumb_file_id()
-                        .filter(|_| !hidden && gif.thumb_still)
-                        .into_iter()
-                        .collect(),
-                    width: gif.thumb_width,
-                    height: gif.thumb_height,
+                    thumbs: gif.still_thumb().filter(|_| !hidden).into_iter().collect(),
+                    width: gif.thumb.size().0,
+                    height: gif.thumb.size().1,
                     mini: gif.minithumbnail.clone().filter(|_| !hidden),
                     badge: TileBadge::None,
                 })

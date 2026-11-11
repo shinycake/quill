@@ -229,6 +229,9 @@ impl QuillApp {
         } else if woke {
             self.tick_app(cx);
         }
+        if woke {
+            self.resume_event_log_poll(cx);
+        }
     }
 
     /// Animations run while any Quill window is active, a chat window's

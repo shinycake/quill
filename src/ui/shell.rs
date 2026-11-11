@@ -315,8 +315,14 @@ impl QuillShell {
     /// Close what an agent's step opened that agents never use
     /// (`agent_driver_surface::block_opened_by_agent`), each dialog with its
     /// own close, before the winner is picked: it never shows.
-    fn close_blocked_dialogs(app: &Entity<QuillApp>, window: &mut Window, cx: &mut App) {
-        let blocked = super::agent_driver_surface::take_blocked_closing_layers(app, window, cx);
+    fn close_blocked_dialogs(
+        app: &Entity<QuillApp>,
+        host: Option<ChatId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let blocked =
+            super::agent_driver_surface::take_blocked_closing_layers(app, host, window, cx);
         for name in blocked {
             let Some(spec) = registry().iter().find(|spec| spec.kind.0 == name) else {
                 continue;
@@ -434,7 +440,7 @@ impl QuillShell {
             return;
         }
         let shell = cx.entity();
-        Self::close_blocked_dialogs(&app, window, cx);
+        Self::close_blocked_dialogs(&app, host, window, cx);
         // A closed window's leftovers are session-wide: the main window's
         // own state is in place for their close.
         if host.is_none() {
@@ -462,22 +468,26 @@ impl QuillShell {
                 }
             }
         });
-        // An ask is waiting for the answer that sets its flag. With no
-        // request in flight and the flag still clear, that answer is not
-        // coming (it failed, was cancelled, or opened nothing): the ask
-        // ends here, so a later open of the kind is not pinned to it.
+        // An ask is waiting for the answer that sets its flag. Once the
+        // requests it was made with have settled and the flag is still
+        // clear, that answer is not coming (it failed, was cancelled, or
+        // opened nothing): the ask ends here, so a later open of the kind
+        // is not pinned to it. A demo stages its answers by hand.
         app.update(cx, |app, _| {
-            // Only a live client has requests to wait on; a demo stages its
-            // answers by hand.
-            if app
-                .live
-                .as_ref()
-                .is_some_and(|live| live.driver.session.requests.is_empty())
+            // An ask made since the last sync reads its requests now: the
+            // code that asked has run, so its own request is out.
+            if app.windows.has_unread_asks()
+                && let Some(live) = app.live.as_ref()
             {
-                for kind in app.windows.asked_dialogs() {
-                    if !Self::flag_open(app, kind) {
-                        app.windows.dialog_ask_expired(kind);
-                    }
+                let pending = live.driver.session.requests.pending_ids();
+                app.windows.read_ask_waits(&pending);
+            }
+            for (kind, waits) in app.windows.asked_dialogs() {
+                let settled = app.live.as_ref().is_some_and(|live| {
+                    waits.settled(|id| live.driver.session.requests.get(id).is_some())
+                });
+                if settled && !Self::flag_open(app, kind) {
+                    app.windows.dialog_ask_expired(kind);
                 }
             }
         });
@@ -665,6 +675,19 @@ where
     F: Fn(DialogContent, &mut Window, &mut App) -> DialogContent + 'static,
 {
     scrollable_dialog_content_tracked(None, build)
+}
+
+/// `scrollable_dialog_content` for a body built once per dialog render: the
+/// kit's `content` takes an `Fn`, so the element goes in through a `Cell`
+/// (no borrow that could panic). A call after the first draws nothing, as
+/// the builder runs again with the next render.
+pub(crate) fn one_shot_dialog_content(
+    body: AnyElement,
+) -> impl Fn(DialogContent, &mut Window, &mut App) -> DialogContent {
+    let slot = std::rc::Rc::new(std::cell::Cell::new(Some(body)));
+    scrollable_dialog_content(move |content, _, _| {
+        content.child(slot.take().unwrap_or_else(|| div().into_any_element()))
+    })
 }
 
 /// `scrollable_dialog_content` whose scroll region is tracked by `scroll`, so

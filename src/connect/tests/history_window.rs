@@ -269,7 +269,7 @@ fn mention_search_targets_group_members_and_drops_stale_answers() {
         .mention_search
         .as_ref()
         .unwrap()
-        .request
+        .asking()
         .unwrap();
     h.driver.search_mentions(Some("al")).unwrap();
     let current = h
@@ -279,7 +279,7 @@ fn mention_search_targets_group_members_and_drops_stale_answers() {
         .mention_search
         .as_ref()
         .unwrap()
-        .request
+        .asking()
         .unwrap();
     let sent = h
         .recorder
@@ -298,7 +298,7 @@ fn mention_search_targets_group_members_and_drops_stale_answers() {
             .mention_search
             .as_ref()
             .unwrap()
-            .request,
+            .asking(),
         Some(current)
     );
 
@@ -322,7 +322,7 @@ fn mention_search_targets_group_members_and_drops_stale_answers() {
             .mention_search
             .as_ref()
             .unwrap()
-            .user_ids
+            .user_ids()
             .is_empty()
     );
     h.ingest(&members(current, &[5, 6]));
@@ -333,7 +333,7 @@ fn mention_search_targets_group_members_and_drops_stale_answers() {
             .mention_search
             .as_ref()
             .unwrap()
-            .user_ids,
+            .user_ids(),
         vec![5, 6]
     );
     h.driver.search_mentions(None).unwrap();
@@ -360,7 +360,7 @@ fn a_failed_mention_search_is_asked_again_for_the_same_query() {
         .messages
         .mention_search
         .as_ref()
-        .and_then(|s| s.request)
+        .and_then(|s| s.asking())
         .unwrap();
     h.ingest(&format!(
         r#"{{"@type":"error","@extra":"{}","code":429,"message":"Too Many Requests: retry after 1"}}"#,
@@ -471,7 +471,8 @@ fn mention_button_jumps_to_the_oldest_unread_mention() {
     assert_eq!(
         h.driver.session.search.chat_search.jump,
         crate::state::ChatSearchJump::Loading {
-            message_id: MessageId(5)
+            message_id: MessageId(5),
+            then: crate::state::JumpLanding::Message,
         }
     );
 }
@@ -510,7 +511,8 @@ fn an_explicit_target_opens_highlighted() {
     assert_eq!(
         h.driver.session.search.chat_search.jump,
         crate::state::ChatSearchJump::Loading {
-            message_id: MessageId(45)
+            message_id: MessageId(45),
+            then: crate::state::JumpLanding::Message,
         }
     );
 }
@@ -590,7 +592,8 @@ fn a_jump_whose_page_was_dropped_by_a_window_reset_ends() {
     assert_eq!(
         h.driver.session.search.chat_search.jump,
         crate::state::ChatSearchJump::Loading {
-            message_id: MessageId(5)
+            message_id: MessageId(5),
+            then: crate::state::JumpLanding::Message,
         }
     );
     let extra: u64 = around["@extra"].as_str().unwrap().parse().unwrap();

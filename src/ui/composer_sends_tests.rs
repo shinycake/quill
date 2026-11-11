@@ -693,8 +693,8 @@ fn a_pending_check_for_another_chats_file_does_not_block_a_send_here(cx: &mut Te
         app.update_pending_send(|send| send.attachments.push(in_a.clone()))
             .expect("an open chat");
         let send_box = &mut app.composer_sends.reads;
-        send_box.sound.start(in_a.path.clone(), 1);
-        send_box.thumbnails.start(in_a.path.clone(), 1);
+        send_box.sound.start(in_a.path.clone(), 1, Vec::new());
+        send_box.thumbnails.start(in_a.path.clone(), 1, Vec::new());
         assert!(app.tray_videos_checking(), "A waits on its own file");
         assert!(app.tray_thumbnails_pending());
         app.select_listed_chat(B, window, cx);

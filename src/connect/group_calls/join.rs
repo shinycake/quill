@@ -296,7 +296,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// failed — a later tap can retry). The group-call overlay's Join
     /// button stays the manual fallback either way.
     pub(crate) fn maybe_join_live_story(&mut self) -> Result<(), ConnectSendError> {
-        self.maybe_fetch_live_story_extras()?;
+        let extras = self.maybe_fetch_live_story_extras();
+        let bursts = self.maybe_fetch_live_bursts();
+        extras?;
+        bursts?;
         self.maybe_resolve_live_story_custom_emoji()?;
         let intent = match self.session.calls.pending_live_story_join {
             Some(intent) => intent,

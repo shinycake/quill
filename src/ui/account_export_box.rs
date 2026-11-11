@@ -31,6 +31,14 @@ pub(super) struct AccountExportDraft {
     error: Option<String>,
 }
 
+impl AccountExportDraft {
+    /// Names this draft among the ones the box has held: the slider entity
+    /// is created with the draft and dies with it.
+    pub(super) fn key(&self) -> EntityId {
+        self.size_slider.entity_id()
+    }
+}
+
 /// The sections above the chat types, each with its line of explanation.
 const ACCOUNT_SECTIONS: [Section; 4] = [
     Section::PersonalInfo,
@@ -137,6 +145,15 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The folder the picker returned, for the draft that asked.
+    fn apply_account_export_folder(&mut self, asked: Option<EntityId>, folder: std::path::PathBuf) {
+        if let Some(draft) = self.dialogs.account_export.draft_mut()
+            && Some(draft.key()) == asked
+        {
+            draft.settings.dir = folder;
+        }
+    }
+
     fn choose_account_export_folder(&mut self, cx: &mut Context<Self>) {
         let picker = cx.prompt_for_paths(PathPromptOptions {
             files: false,
@@ -144,14 +161,20 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::Q_OPS_EXPORT_HERE).into()),
         });
+        // The answer belongs to the draft that asked: a box closed and reopened
+        // meanwhile holds a different draft (its own slider entity).
+        let asked = self
+            .dialogs
+            .account_export
+            .draft()
+            .map(AccountExportDraft::key);
         self.spawn_screen(cx, async move |this, cx| {
             let result = picker.await;
             let _ = this.update(cx, |this, cx| {
                 if let Ok(Ok(Some(paths))) = result
                     && let Some(folder) = paths.first()
-                    && let Some(draft) = this.dialogs.account_export.draft_mut()
                 {
-                    draft.settings.dir = folder.clone();
+                    this.apply_account_export_folder(asked, folder.clone());
                 }
                 cx.notify();
             });

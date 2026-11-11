@@ -371,7 +371,7 @@ fn a_search_typed_in_a_chat_window_searches_its_chat_and_answers_there() {
     assert!(!h.driver.session.search.chat_search.is_open());
     let hits = h.driver.with_window_chat(BOB, |driver| {
         let state = &driver.session.search.chat_search;
-        (state.chat_id, state.hits.len())
+        (state.chat_id(), state.hits().len())
     });
     assert_eq!(hits, (Some(BOB), 1), "the hits landed in Bob's window");
 }

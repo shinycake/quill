@@ -98,7 +98,7 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { first_page: true }),
         None,
     );
-    with_purpose.stickers.gifs.search_begun("cat".into(), None);
+    with_purpose.stickers.gifs.search_begun("cat".into());
     with_purpose.stickers.gifs.search_sent(extra);
     apply_json(
         &mut with_purpose,
@@ -123,7 +123,7 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { first_page: false }),
         None,
     );
-    with_purpose.stickers.gifs.search_asked("50");
+    with_purpose.stickers.gifs.search_page_asked("50".into());
     with_purpose.stickers.gifs.search_sent(extra);
     apply_json(
         &mut with_purpose,
@@ -301,11 +301,8 @@ fn gif_panel_downloads_stills_then_preview_loops_then_unpreviewed_clips() {
         file_name: "clip.mp4".into(),
         mime_type: "video/mp4".into(),
         file_id: FileId(file),
-        thumb_file_id: thumb.map(FileId),
-        thumb_width: 160,
-        thumb_height: 90,
+        thumb: crate::telegram::envelope::Thumb::of(thumb.map(FileId), 160, 90, still),
         minithumbnail: None,
-        thumb_still: still,
     };
     session.stickers.gifs.saved_answered(vec![
         // An MP4 preview loop: the loop plays, the GIF itself waits.
@@ -420,11 +417,8 @@ fn saved_gif(id: i32) -> crate::telegram::envelope::AnimationItem {
         file_name: String::new(),
         mime_type: "video/mp4".into(),
         file_id: crate::ids::FileId(id),
-        thumb_file_id: None,
-        thumb_width: 0,
-        thumb_height: 0,
+        thumb: crate::telegram::envelope::Thumb::of(None, 0, 0, true),
         minithumbnail: None,
-        thumb_still: true,
     }
 }
 
@@ -448,4 +442,22 @@ fn an_update_during_the_request_survives_its_answer_and_asks_again() {
     assert_eq!(gifs.animations.len(), 1);
     gifs.saved_retry();
     assert!(!gifs.failed() && !gifs.loaded());
+}
+
+#[test]
+fn a_new_gif_search_starts_with_no_results_or_paging() {
+    let mut gifs = crate::state::GifPanel::default();
+    gifs.search_begun("cats".into());
+    gifs.search_page_asked(String::new());
+    gifs.search_sent(crate::ids::RequestId(1));
+    gifs.search_page_answered(vec![saved_gif(1)], "50".into(), true);
+    assert_eq!(gifs.search_results().len(), 1);
+    assert_eq!(gifs.search_next_offset(), "50");
+    // A different search replaces the results and the paging whole.
+    gifs.search_begun("dogs".into());
+    assert!(gifs.search_results().is_empty());
+    assert_eq!(gifs.search_next_offset(), "");
+    // Back on the saved GIFs there is no search to page.
+    gifs.search_left();
+    assert!(gifs.search_results().is_empty());
 }

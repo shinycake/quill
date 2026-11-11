@@ -333,7 +333,8 @@ fn select_chat_at_requests_history_around_the_message_and_highlights_it() {
     assert_eq!(
         driver.session.search.chat_search.jump,
         crate::state::ChatSearchJump::Loading {
-            message_id: MessageId(40)
+            message_id: MessageId(40),
+            then: crate::state::JumpLanding::Message,
         }
     );
     driver

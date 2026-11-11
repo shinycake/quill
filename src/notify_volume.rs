@@ -209,15 +209,14 @@ pub fn persist() {
     if !PERSIST.load(Ordering::SeqCst) {
         return;
     }
-    let spawned = std::thread::Builder::new()
-        .name("quill-notify-volumes".into())
-        .spawn(|| {
-            let _guard = WRITE_LOCK.lock();
-            let Some(path) = volumes_path() else { return };
-            let file = with_file(Clone::clone);
-            let _ = crate::settings::write_json_atomic(&path, &file);
-        });
-    drop(spawned);
+    // A thread that cannot start leaves the volumes in memory; the next
+    // change saves them all.
+    let _ = crate::thread_guard::spawn_guarded("quill-notify-volumes", || {
+        let _guard = WRITE_LOCK.lock();
+        let Some(path) = volumes_path() else { return };
+        let file = with_file(Clone::clone);
+        let _ = crate::settings::write_json_atomic(&path, &file);
+    });
 }
 
 /// How many times a save was requested (tests check that drags don't).

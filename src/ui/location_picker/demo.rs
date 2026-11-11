@@ -171,7 +171,9 @@ pub(super) fn pump(app: &mut QuillApp) {
             let sharing = &mut session.location;
             sharing.request_sent(&request, extra);
             match request {
-                PickerRequest::ResolveVenueBot { .. } => sharing.venue_bot_resolved(Some(DEMO_BOT)),
+                PickerRequest::ResolveVenueBot { .. } => {
+                    sharing.venue_bot_resolved(extra, Some(DEMO_BOT))
+                }
                 PickerRequest::Venues {
                     generation,
                     point,

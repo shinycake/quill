@@ -78,4 +78,14 @@ mod tests {
         assert_eq!(v["options"]["scheduling_state"]["send_date"], 2_000_000_000);
         assert_eq!(v["options"]["scheduling_state"]["repeat_period"], 0);
     }
+
+    #[test]
+    fn a_date_past_2038_saturates_instead_of_wrapping_to_the_past() {
+        let far = i64::from(i32::MAX) + 10;
+        let json = super::super::messages::message_send_options(&SendOptions {
+            scheduling: ComposerScheduling::at(far),
+            ..SendOptions::default()
+        });
+        assert_eq!(json["scheduling_state"]["send_date"], i32::MAX);
+    }
 }

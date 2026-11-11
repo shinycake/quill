@@ -100,8 +100,18 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             let joined = live.driver.join_live_story(chat_id, story_id);
-            if joined.is_ok() {
-                self.stories.live.start_watching((chat_id, story_id));
+            match joined {
+                Ok(request) => self
+                    .stories
+                    .live
+                    .start_watching((chat_id, story_id), Some(request)),
+                // A join already waiting on its request goes on; anything
+                // else that was refused shows "Join live", not a spinner
+                // (or a failed stream's Retry) nothing will end.
+                Err(_) if self.stories.live.joining().is_none() => {
+                    self.stories.live.refuse((chat_id, story_id));
+                }
+                Err(_) => {}
             }
             self.screen.connection.set_note_for(
                 &self.screen.windows,
@@ -772,7 +782,7 @@ impl QuillApp {
             // Edit and Repost open the composer over the viewer: the story
             // under it must not play on, and TDLib must not mark the next
             // stories viewed behind it.
-            || self.stories.composer.open
+            || self.stories.composer.is_open()
     }
 
     /// Phase 9.6: 100ms tick while the story viewer is open (mirrors

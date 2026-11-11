@@ -20,7 +20,7 @@ pub(crate) fn parse_story_album(value: &Value) -> Option<ParsedStoryAlbum> {
         return None;
     }
     Some(ParsedStoryAlbum {
-        id: value.get("id")?.as_i64()? as i32,
+        id: i32::try_from(value.get("id")?.as_i64()?).ok()?,
         name: value
             .get("name")
             .and_then(Value::as_str)

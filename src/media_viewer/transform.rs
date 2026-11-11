@@ -174,9 +174,18 @@ impl ViewerOrientation {
     }
 }
 
+/// Whether `pixels` is exactly a packed RGBA image of `width` x `height`
+/// (the byte count is checked, so a huge size cannot wrap).
+fn is_rgba_image(pixels: &[u8], width: u32, height: u32) -> bool {
+    (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|count| count.checked_mul(4))
+        == Some(pixels.len())
+}
+
 /// Mirror a packed RGBA image horizontally and/or vertically.
 pub fn flip_rgba(pixels: &[u8], width: u32, height: u32, flip_h: bool, flip_v: bool) -> Vec<u8> {
-    if (!flip_h && !flip_v) || pixels.len() != (width * height * 4) as usize {
+    if (!flip_h && !flip_v) || !is_rgba_image(pixels, width, height) {
         return pixels.to_vec();
     }
     let (w, h) = (width as usize, height as usize);
@@ -354,7 +363,7 @@ pub fn rotate_rgba_quarter_turns(
     turns: u8,
 ) -> (Vec<u8>, u32, u32) {
     let turns = turns % 4;
-    if turns == 0 || pixels.len() != (width * height * 4) as usize {
+    if turns == 0 || !is_rgba_image(pixels, width, height) {
         return (pixels.to_vec(), width, height);
     }
     let (w, h) = (width as usize, height as usize);
@@ -541,6 +550,15 @@ mod tests {
         // First pixel of the flipped row is the last of the original.
         let w = w as usize;
         assert_eq!(&hflip[0..4], &px[(w - 1) * 4..w * 4]);
+    }
+
+    #[test]
+    fn a_size_that_overflows_u32_leaves_the_pixels_alone() {
+        let px = vec![1u8; 16];
+        // 65536 x 65536 x 4 wraps to 0 in u32 arithmetic.
+        assert_eq!(flip_rgba(&px, 65_536, 65_536, true, false), px);
+        let (out, w, h) = rotate_rgba_quarter_turns(&px, 65_536, 65_536, 1);
+        assert_eq!((out, w, h), (px, 65_536, 65_536));
     }
 
     #[test]
