@@ -96,6 +96,10 @@ pub struct LocationSharing {
     /// tdesktop `LastExactLocation`: the last fix, where the next picker starts.
     last_exact: Option<GeoPoint>,
     picker: Option<LocationPicker>,
+    /// Where the next picker numbers its venue queries from: the last
+    /// picker's count, never reset, so an answer for a closed picker's
+    /// query cannot match a later picker's.
+    venue_generation: u64,
     icons: HashMap<String, IconState>,
 }
 
@@ -121,18 +125,29 @@ impl LocationSharing {
     /// Open the picker for `chat_id`; `country` is the system country's
     /// centre, where the map starts without a previous fix.
     pub fn open(&mut self, chat_id: ChatId, country: Option<GeoPoint>) {
-        if self.venue_bot == VenueBot::Failed {
+        // Only a found bot is kept. A lookup still out (its request may
+        // have been dropped), failed, or answered with a bot not yet
+        // cached is asked again by this picker.
+        if self.venue_bot != VenueBot::Unknown && !matches!(self.venue_bot, VenueBot::Found(_)) {
             self.venue_bot = VenueBot::Unknown;
         }
+        self.retire_picker();
         self.picker = Some(LocationPicker::open(
             chat_id,
             self.last_exact,
             country.unwrap_or(GeoPoint::ORIGIN),
+            self.venue_generation,
         ));
     }
 
     pub fn close(&mut self) {
-        self.picker = None;
+        self.retire_picker();
+    }
+
+    fn retire_picker(&mut self) {
+        if let Some(picker) = self.picker.take() {
+            self.venue_generation = self.venue_generation.max(picker.generation());
+        }
     }
 
     pub fn geolocated(&mut self, outcome: GeoOutcome) {

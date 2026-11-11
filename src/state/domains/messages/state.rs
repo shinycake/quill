@@ -169,9 +169,9 @@ pub struct MessagesState {
     pub sponsored_hidden: bool,
     /// In-flight sponsored-message report waiting on an option choice.
     pub sponsored_report: Option<SponsoredReportFlight>,
-    /// Report target chosen by the user (chat + sponsored message id); cleared
-    /// when the flow resolves.
-    pub(crate) sponsored_report_target: Option<(ChatId, i64)>,
+    /// Report target chosen by the user, with the request its answer is
+    /// awaited as; cleared when the flow resolves or is dismissed.
+    pub(crate) sponsored_report_target: Option<SponsoredReportTarget>,
     /// Last `reportChatSponsoredMessage` outcome note.
     pub last_sponsored_report: Option<SponsoredReportOutcome>,
     /// Translation state (`translateText` / `translateMessageText`, the
@@ -241,4 +241,15 @@ impl MessagesState {
             ai_compose: AiComposeState::default(),
         }
     }
+}
+
+/// The ad being reported and the `reportChatSponsoredMessage` request the
+/// flow waits on. An answer for any other request (a report the user
+/// dismissed, or an earlier step) is dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SponsoredReportTarget {
+    pub(crate) chat_id: ChatId,
+    pub(crate) message_id: i64,
+    /// `None` between choosing the target and the request going out.
+    pub(crate) request: Option<RequestId>,
 }

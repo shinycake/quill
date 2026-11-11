@@ -561,6 +561,61 @@ impl<S: JsonSender> ConnectDriver<S> {
         let send_outcome = Self::send_outcome(&owned.envelope.payload);
         self.session.apply(owned);
         self.run_deferred_caption(send_outcome);
+        // The answers captured above are stashed before any step that can
+        // fail: a send error later in this ingest returns early with `?`,
+        // and the composer chip, copied link, AI text, username verdict
+        // or instant view they feed must not be lost with it.
+        // M2: full rich blocks replace the partial message's blocks in
+        // history. Only `RichMessage` rows are touched — an unrelated
+        // response can never clobber a different content kind.
+        if let Some((chat_id, message_id, rich)) = full_rich_answer
+            && let Some(history) = self.session.histories.get_mut(&chat_id.0)
+            && let Some(message) = history.messages.get_mut(&message_id.0)
+            && let MessageContent::RichMessage(existing) = &mut message.content
+        {
+            *existing = rich;
+        }
+        // M1: stash the `getMessageLink` answer for the UI clipboard drain.
+        if let Some((link, is_public)) = message_link_answer {
+            self.session.messages.message_link_result = Some(link);
+            self.session.messages.message_link_public = is_public;
+        }
+        // Slice msg-richtext-ai-tools: stash AI answers for the composer
+        // drain. A late answer for a chat the user has since left is
+        // dropped by the UI (chat-id check), never applied blindly.
+        if let Some((chat_id, text)) = ai_text_answer {
+            self.session.messages.ai_composer_text = Some((chat_id, text));
+        }
+        if let Some((chat_id, rich, note)) = ai_rich_answer {
+            self.session.messages.ai_composer_blocks = Some((chat_id, rich, note));
+        }
+        // A5: stash the `checkChatUsername` verdict for the
+        // edit-profile dialog.
+        if let Some((username, result)) = username_check_answer {
+            self.session.users_state.username_check = Some((username, result));
+        }
+        // MED4: stash the `getWebPageInstantView` answer (success →
+        // reader in the asking window, unless it closed; error → browser).
+        if let Some((window, url, rich)) = instant_view_answer {
+            let _ = self.session.with_view(window, |session| {
+                session.messages.instant_view = Some(InstantViewPage { url, rich });
+            });
+        }
+        if let Some(fallback) = instant_view_fallback {
+            self.session.messages.instant_view_fallbacks.push(fallback);
+        }
+        // MED4b: stash the `getLinkPreview` answer for the composer
+        // chip; a 404 becomes "no link info" (`Some(None)`); answers for
+        // superseded URLs are dropped.
+        if let Some(answer) = link_preview_answer {
+            self.session
+                .messages
+                .composer_previews
+                .answered(&answer.url, answer.fetch);
+        }
+        if let Some((url, miss)) = link_preview_failed {
+            self.session.messages.composer_previews.answered(&url, miss);
+        }
         if paid_prices_change {
             self.sync_paid_guard();
             self.resume_waiting_statistics();
@@ -752,16 +807,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if view_after {
             self.sync_shown_views()?;
         }
-        // M2: full rich blocks replace the partial message's blocks in
-        // history. Only `RichMessage` rows are touched — an unrelated
-        // response can never clobber a different content kind.
-        if let Some((chat_id, message_id, rich)) = full_rich_answer
-            && let Some(history) = self.session.histories.get_mut(&chat_id.0)
-            && let Some(message) = history.messages.get_mut(&message_id.0)
-            && let MessageContent::RichMessage(existing) = &mut message.content
-        {
-            *existing = rich;
-        }
         // Corner "@" / heart buttons and jump to date: run in the window
         // that asked, for its chat. A failed jump (closed chat) drops it.
         let unread = self.session.messages.unread_jump.take();
@@ -770,47 +815,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             .flatten()
         {
             let _ = self.run_view_jump(jump);
-        }
-        // M1: stash the `getMessageLink` answer for the UI clipboard drain.
-        if let Some((link, is_public)) = message_link_answer {
-            self.session.messages.message_link_result = Some(link);
-            self.session.messages.message_link_public = is_public;
-        }
-        // Slice msg-richtext-ai-tools: stash AI answers for the composer
-        // drain. A late answer for a chat the user has since left is
-        // dropped by the UI (chat-id check), never applied blindly.
-        if let Some((chat_id, text)) = ai_text_answer {
-            self.session.messages.ai_composer_text = Some((chat_id, text));
-        }
-        if let Some((chat_id, rich, note)) = ai_rich_answer {
-            self.session.messages.ai_composer_blocks = Some((chat_id, rich, note));
-        }
-        // A5: stash the `checkChatUsername` verdict for the
-        // edit-profile dialog.
-        if let Some((username, result)) = username_check_answer {
-            self.session.users_state.username_check = Some((username, result));
-        }
-        // MED4: stash the `getWebPageInstantView` answer (success →
-        // reader in the asking window, unless it closed; error → browser).
-        if let Some((window, url, rich)) = instant_view_answer {
-            let _ = self.session.with_view(window, |session| {
-                session.messages.instant_view = Some(InstantViewPage { url, rich });
-            });
-        }
-        if let Some(fallback) = instant_view_fallback {
-            self.session.messages.instant_view_fallbacks.push(fallback);
-        }
-        // MED4b: stash the `getLinkPreview` answer for the composer
-        // chip; a 404 becomes "no link info" (`Some(None)`); answers for
-        // superseded URLs are dropped.
-        if let Some(answer) = link_preview_answer {
-            self.session
-                .messages
-                .composer_previews
-                .answered(&answer.url, answer.fetch);
-        }
-        if let Some((url, miss)) = link_preview_failed {
-            self.session.messages.composer_previews.answered(&url, miss);
         }
         // M1 fix-up: "Share link" gate — chain to `getMessageLink` only
         // when `messageProperties.can_get_link` passed; otherwise tell

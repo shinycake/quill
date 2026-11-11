@@ -315,7 +315,9 @@ pub enum ChatsPayload {
     /// default wallpaper for the light or dark theme changed.
     UpdateDefaultBackground {
         for_dark_theme: bool,
-        background: Background,
+        /// `None` when the default wallpaper was removed (the update then
+        /// carries a null `background`).
+        background: Option<Background>,
     },
     /// `updateChatBackground` (`schema/td_api.tl:10924`); `None` when the
     /// chat's wallpaper was removed.

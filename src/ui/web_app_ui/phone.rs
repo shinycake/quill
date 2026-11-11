@@ -8,7 +8,7 @@
 //! The popup is the web view helper's native one, so it shows over the app.
 
 use super::*;
-use quill::ids::ChatId;
+use quill::ids::{ChatId, RequestId};
 use quill::telegram::requests::ContactShare;
 use std::time::Instant;
 
@@ -26,8 +26,9 @@ pub(super) enum PhoneFlow {
     Asking,
     /// "Share" was pressed and the bot is being unblocked.
     Unblocking(Instant),
-    /// The contact card is on its way.
-    Sending(Instant),
+    /// The contact card is on its way; only the answer to `request`
+    /// finishes it.
+    Sending { since: Instant, request: RequestId },
 }
 
 /// What the flow does next, given what the session shows.
@@ -53,7 +54,7 @@ impl PhoneFlow {
                     PhoneStep::Wait
                 }
             }
-            PhoneFlow::Sending(since) => match sent {
+            PhoneFlow::Sending { since, .. } => match sent {
                 Some(done) => PhoneStep::Finish(done),
                 None if now.saturating_duration_since(since) >= SEND_TIMEOUT => {
                     PhoneStep::Finish(false)
@@ -144,14 +145,23 @@ impl QuillApp {
                 .as_mut()
                 .map(|live| live.driver.share_phone_with_bot(bot_id, &contact))
         });
-        if matches!(sent, Some(Ok(_))) {
-            self.with_window(|window| window.phone = PhoneFlow::Sending(Instant::now()));
+        if let Some(Ok(request)) = sent {
+            self.with_window(|window| {
+                window.phone = PhoneFlow::Sending {
+                    since: Instant::now(),
+                    request,
+                }
+            });
         } else {
             self.finish_phone(false, cx);
         }
     }
 
     fn finish_phone(&mut self, shared: bool, cx: &mut Context<Self>) {
+        // An answer that comes after this (a timed-out send) is nobody's.
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.bots.web_apps.phone_share = None;
+        }
         self.with_window(|window| {
             window.phone = PhoneFlow::Idle;
             window.emit(BridgeReply::phone_requested(shared));
@@ -175,10 +185,12 @@ impl QuillApp {
         let blocked = self.bot_chat_blocked(bot_id);
         let sent = self.live.as_mut().and_then(|live| {
             let share = &mut live.driver.session.bots.web_apps.phone_share;
-            match *share {
-                Some((id, done)) if id == bot_id => {
+            match (*share, flow) {
+                (Some(answer), PhoneFlow::Sending { request, .. })
+                    if answer.request() == request =>
+                {
                     *share = None;
-                    Some(done)
+                    Some(answer.is_sent())
                 }
                 _ => None,
             }
@@ -195,6 +207,7 @@ impl QuillApp {
 mod tests {
     // No `super::*`: the kit's glob brings its own `test` attribute.
     use super::{PhoneFlow, PhoneStep, SEND_TIMEOUT, UNBLOCK_TIMEOUT};
+    use quill::ids::RequestId;
     use std::time::Instant;
 
     #[test]
@@ -218,7 +231,10 @@ mod tests {
     #[test]
     fn sending_reports_the_outcome_or_times_out() {
         let start = Instant::now();
-        let flow = PhoneFlow::Sending(start);
+        let flow = PhoneFlow::Sending {
+            since: start,
+            request: RequestId(5),
+        };
         assert_eq!(flow.step(start, false, None), PhoneStep::Wait);
         assert_eq!(flow.step(start, false, Some(true)), PhoneStep::Finish(true));
         assert_eq!(

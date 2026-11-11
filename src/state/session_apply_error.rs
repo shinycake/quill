@@ -1,4 +1,5 @@
 //! Error routing: maps TDLib errors onto per-purpose handlers.
+use super::request_kind::RequestKind;
 use super::*;
 
 impl Session {
@@ -32,7 +33,7 @@ impl Session {
         // `lng_flood_error`); background lookups were already retried by
         // the driver and stay quiet.
         if let Some(notice) = err.flood_notice()
-            && pending.is_some_and(|p| is_user_action(p.purpose))
+            && pending.is_some_and(|p| p.purpose.kind() == RequestKind::UserAction)
         {
             self.messages.flood_notice = Some(notice);
         }
@@ -267,26 +268,4 @@ impl Session {
             });
         }
     }
-}
-
-/// Q1: whether a request is something the user did on purpose (send,
-/// edit, join, ...), as opposed to a background lookup, a view/online
-/// ping or a login submit (which has its own error line).
-pub(crate) fn is_user_action(purpose: RequestPurpose) -> bool {
-    if is_auth_submit(purpose) || purpose.is_sweepable() {
-        return false;
-    }
-    let debug = format!("{purpose:?}");
-    ![
-        "Get",
-        "Load",
-        "Search",
-        "Download",
-        "View",
-        "Open",
-        "Close",
-        "SetOnline",
-    ]
-    .iter()
-    .any(|prefix| debug.starts_with(prefix))
 }

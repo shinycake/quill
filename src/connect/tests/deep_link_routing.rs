@@ -23,6 +23,29 @@ fn feed(
 }
 
 #[test]
+fn a_new_launch_link_replaces_a_finished_flow_but_not_one_in_flight() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let _keep = dir;
+
+    driver.session.chats_state.deep_link = Some(DeepLinkState::ShowText("old".into()));
+    let sent = driver.request_deep_link_info("https://t.me/durov").unwrap();
+    assert!(sent.is_some(), "an unconsumed ShowText does not block");
+    assert!(matches!(
+        driver.session.chats_state.deep_link,
+        Some(DeepLinkState::ResolvingChat { .. })
+    ));
+    assert_eq!(
+        driver.request_deep_link_info("https://t.me/other").unwrap(),
+        None,
+        "a flow in flight wins"
+    );
+}
+
+#[test]
 fn launch_links_resolve_locally_instead_of_get_deep_link_info() {
     let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());

@@ -8,6 +8,10 @@ pub struct SearchDomainState {
     pub chat_search: ChatSearchState,
     /// The calendar box ("Jump to date"), when open.
     pub history_calendar: Option<HistoryCalendar>,
+    /// The generation of the last calendar opened. It never goes back when
+    /// the box closes: a late page of an earlier calendar must not match a
+    /// later one's generation.
+    pub(crate) calendar_generation: u64,
     /// A resolved date jump the driver has not started yet, for the
     /// window and chat that asked.
     pub(crate) date_jump: Option<ViewJump>,
@@ -25,6 +29,7 @@ impl SearchDomainState {
             search: SearchState::default(),
             chat_search: ChatSearchState::default(),
             history_calendar: None,
+            calendar_generation: 0,
             date_jump: None,
             date_jump_pending: None,
             date_jump_note: None,

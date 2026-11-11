@@ -1,10 +1,10 @@
 //! Path sandbox: display only under allowed roots; send only via explicit user pick.
 #![deny(clippy::indexing_slicing)]
 
-use crate::locks::LockExt;
+use crate::locks::{LockExt, RwLockExt};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex, OnceLock};
+use std::sync::{LazyLock, Mutex, RwLock};
 
 /// Canonicalize `candidate` and return it only if it is an existing file under an allowed root.
 ///
@@ -180,21 +180,26 @@ fn canonical_file(path: &Path) -> Option<PathBuf> {
     canon.is_file().then_some(canon)
 }
 
-/// Account scope for private media caches. The app runs one Telegram account
-/// per process; `prepare_connect` sets the real scope, default is "primary".
-static MEDIA_CACHE_SCOPE: OnceLock<String> = OnceLock::new();
+/// Account scope for private media caches: the account on screen, which is
+/// where every scratch producer (a webm sticker, a recording, a dropped
+/// archive, a thumbnail) is driven from. Default is "primary".
+static MEDIA_CACHE_SCOPE: RwLock<Option<String>> = RwLock::new(None);
 
-/// Set the account scope used by [`media_cache_base`]. Called from
-/// `plan_restore` once per connect; later calls are ignored.
-pub fn set_media_cache_scope(scope: &str) {
-    let _ = MEDIA_CACHE_SCOPE.set(scope.to_owned());
+/// Make `account` the scope used by [`media_cache_base`]. Called each time
+/// a client takes the screen, so an account that is switched to (or comes
+/// forward from the background) has its own scratch folder, not the first
+/// account's. A background account's connect never sets it.
+pub fn set_media_cache_scope(account: &crate::ids::AccountKey) {
+    *MEDIA_CACHE_SCOPE.write_or_recover() = Some(account.0.clone());
 }
 
-fn media_cache_scope() -> &'static str {
-    // Non-initializing read: a startup sweep must not poison the scope
-    // before `prepare_connect` sets it.
-    static FALLBACK: &str = "primary";
-    MEDIA_CACHE_SCOPE.get().map_or(FALLBACK, String::as_str)
+fn media_cache_scope() -> String {
+    // A read that never initializes: a startup sweep must not decide the
+    // scope before an account is on screen.
+    MEDIA_CACHE_SCOPE
+        .read_or_recover()
+        .clone()
+        .unwrap_or_else(|| "primary".to_owned())
 }
 
 /// Account-scoped base for decrypted media scratch (GIF/video/viewer frames,
@@ -215,7 +220,7 @@ pub(crate) fn cache_temp_dir() -> PathBuf {
     #[cfg(not(any(test, feature = "test-support")))]
     {
         // Render paths resolve cache roots every frame; read `TMPDIR` once.
-        static TEMP: OnceLock<PathBuf> = OnceLock::new();
+        static TEMP: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
         TEMP.get_or_init(std::env::temp_dir).clone()
     }
 }
@@ -373,6 +378,22 @@ mod tests {
     use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// Sweep 03-070: the scope follows the account put on screen, so a
+    /// second account's scratch is not under the first one's folder.
+    #[test]
+    fn the_media_cache_scope_follows_the_account_on_screen() {
+        let _guard = lock_shared_media_cache();
+        let (a, b) = (
+            crate::ids::AccountKey("scope-a".into()),
+            crate::ids::AccountKey("scope-b".into()),
+        );
+        set_media_cache_scope(&a);
+        assert!(media_cache_base().ends_with("quill-media-cache/scope-a"));
+        set_media_cache_scope(&b);
+        assert!(media_cache_base().ends_with("quill-media-cache/scope-b"));
+        set_media_cache_scope(&crate::ids::AccountKey::primary());
+    }
 
     #[test]
     fn verdict_cache_hard_cap_evicts_oldest_first() {

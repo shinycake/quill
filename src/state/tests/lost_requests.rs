@@ -135,3 +135,35 @@ fn account_loss_resets_the_loading_flags_of_pending_lookups() {
     assert!(session.requests.get(user_action).is_none());
     assert!(session.stale_history_requests.is_empty());
 }
+
+/// Sweep 05-200: a request dropped by logout settles (its busy marker
+/// clears) without leaving a failure note that shows during logout or after
+/// the next login.
+#[test]
+fn logout_does_not_leave_failure_notes_of_dropped_user_actions() {
+    let mut session = ready_session();
+    session.messages.message_action_note = Some("earlier note".into());
+    session.request(RequestPurpose::SetChatMessageSender, Some(ChatId(5)));
+    session.request(RequestPurpose::SendMessage, Some(ChatId(5)));
+
+    session.begin_logout();
+
+    assert!(session.requests.is_empty());
+    assert_eq!(
+        session.messages.message_action_note.as_deref(),
+        Some("earlier note"),
+        "no 'could not change the sender' note from the dropped request"
+    );
+    assert!(session.messages.flood_notice.is_none());
+}
+
+/// A request lost to its TTL is the user's to hear about; only logout is
+/// quiet.
+#[test]
+fn a_swept_user_action_still_says_it_failed() {
+    let mut session = ready_session();
+    let id = session.request(RequestPurpose::SetChatMessageSender, Some(ChatId(5)));
+    let pending = session.requests.take(id).expect("registered");
+    session.settle_lost_request(pending);
+    assert!(session.messages.message_action_note.is_some());
+}

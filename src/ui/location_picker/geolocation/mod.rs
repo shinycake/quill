@@ -8,6 +8,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use quill::location_picker::{GeoOutcome, GeoPoint};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Receiver;
 
 #[cfg(target_os = "linux")]
@@ -24,10 +26,31 @@ use macos as platform;
 #[cfg(windows)]
 use windows as platform;
 
+/// A running "where am I" lookup: its answer, and whether the system's
+/// permission prompt is open (the user's turn, not the lookup's: its time
+/// limit does not run meanwhile).
+pub(in crate::ui) struct Locating {
+    pub(in crate::ui) answer: Receiver<GeoOutcome>,
+    pub(in crate::ui) permission_prompt: Arc<AtomicBool>,
+}
+
+impl Drop for Locating {
+    /// Dropping the lookup (the picker closed, or it timed out) stops the
+    /// platform's location manager instead of leaving it running.
+    fn drop(&mut self) {
+        platform::cancel(&self.permission_prompt);
+    }
+}
+
 /// One "where am I" lookup. Call on the UI thread (CoreLocation answers on
 /// the run loop of the thread that asked).
-pub(in crate::ui) fn locate() -> Receiver<GeoOutcome> {
-    platform::locate()
+pub(in crate::ui) fn locate() -> Locating {
+    let permission_prompt = Arc::new(AtomicBool::new(false));
+    let answer = platform::locate(&permission_prompt);
+    Locating {
+        answer,
+        permission_prompt,
+    }
 }
 
 /// The address of `point`, where the platform geocodes without a key

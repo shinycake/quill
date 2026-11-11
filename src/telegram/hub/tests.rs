@@ -220,7 +220,61 @@ fn a_stopped_shared_hub_is_replaced_but_a_running_one_is_kept() {
     dying_tx.send(()).unwrap();
     drop(dying_tx);
     assert!(wait_until(|| dead.stopped_unexpectedly()));
-    assert!(matches!(reusable(Some(&dead)), Reuse::Stopped(_)));
+    assert!(matches!(reusable(Some(&dead)), Reuse::Stopped(..)));
+}
+
+/// Sweep 06-065: a hub replacing a stopped one takes over its routes, so a
+/// client that was open keeps receiving, and its bridge reads running.
+#[test]
+fn a_replacement_hub_keeps_the_open_clients_routed() {
+    let (old_tx, old_rx) = mpsc::channel::<String>();
+    let source: ReceiveSource = Box::new(move |_| match old_rx.recv() {
+        Ok(json) => Some(json),
+        Err(_) => panic!("receive source failed"),
+    });
+    let dead =
+        Arc::new(TdHub::with_source(source, no_wake(), Arc::new(MemorySink::new())).unwrap());
+    let bridge = dead.bridge(1);
+    // The old hub delivers a few envelopes, so the client's session has seen
+    // a high seq before the hub dies.
+    let sink = Arc::new(MemorySink::new());
+    let mut session = crate::state::Session::new(crate::ids::AccountKey::primary(), sink);
+    for n in 0..3 {
+        old_tx.send(option_update(Some(1), n)).unwrap();
+        let owned = bridge
+            .next_timeout(Duration::from_secs(2))
+            .expect("the old hub delivers");
+        session.apply(owned);
+    }
+    let seen = session.last_seq;
+    assert!(seen > 0);
+    drop(old_tx);
+    assert!(wait_until(|| bridge.stopped_unexpectedly()));
+
+    let (tx, rx) = mpsc::channel::<String>();
+    let source: ReceiveSource =
+        Box::new(move |timeout| rx.recv_timeout(Duration::from_secs_f64(timeout)).ok());
+    let replacement = Arc::new(
+        TdHub::with_source_replacing(source, wake_on(&tx), Arc::new(MemorySink::new()), &dead)
+            .unwrap(),
+    );
+    assert!(!bridge.stopped_unexpectedly(), "running again");
+    tx.send(option_update(Some(1), 5)).unwrap();
+    let owned = bridge
+        .next_timeout(Duration::from_secs(2))
+        .expect("the old client's envelope is routed on the new hub");
+    assert_eq!(owned.client_id, Some(1));
+    assert!(!replacement.stopped_unexpectedly());
+    // The numbering continues, so the surviving session applies it.
+    assert!(owned.seq > seen, "seq continues past the old hub's");
+    let revision = session.revision;
+    session.apply(owned);
+    assert_eq!(
+        session.last_seq,
+        seen + 1,
+        "applied, not out-of-order-ignored"
+    );
+    assert!(session.revision > revision);
 }
 
 #[test]

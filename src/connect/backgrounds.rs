@@ -107,10 +107,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session
-            .chats_state
-            .default_backgrounds
-            .remove(&for_dark_theme);
+        let chats = &mut self.session.chats_state;
+        if let Some(removed) = chats.default_backgrounds.remove(&for_dark_theme) {
+            chats
+                .removed_default_backgrounds
+                .insert(for_dark_theme, (extra, removed));
+        }
         Ok(extra)
     }
 

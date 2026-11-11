@@ -534,7 +534,11 @@ fn sharing_the_phone_sends_my_contact_card_to_the_bot() {
         r#"{{"@type":"message","@extra":"{}","id":9,"chat_id":42,"is_outgoing":true,"date":1700000000,"content":{{"@type":"messageContact","contact":{{"@type":"contact","phone_number":"+15550100","first_name":"Ada","last_name":"L","user_id":7}}}}}}"#,
         extra.as_extra()
     ));
-    assert_eq!(h.driver.session.bots.web_apps.phone_share, Some((42, true)));
+    assert_eq!(
+        h.driver.session.bots.web_apps.phone_share,
+        Some(crate::state::PhoneShare::Sent(extra)),
+        "the answer names the send it answers"
+    );
 }
 
 #[test]
@@ -550,7 +554,7 @@ fn a_refused_phone_share_reports_failure() {
     ));
     assert_eq!(
         h.driver.session.bots.web_apps.phone_share,
-        Some((42, false))
+        Some(crate::state::PhoneShare::Refused(extra))
     );
 }
 
@@ -604,4 +608,60 @@ fn an_unshown_answer_is_closed_on_a_switch() {
     h.driver.forget_web_app_launches();
     assert_eq!(h.driver.session.bots.web_apps.open_result, None);
     assert_eq!(h.last("closeWebApp")["web_app_launch_id"], 778);
+}
+
+/// A second launch while the first answer is unshown must not leave the
+/// first app running at the bot: its launch is queued for `closeWebApp`.
+#[test]
+fn a_new_launch_closes_the_app_of_an_unshown_answer() {
+    let mut h = Harness::ready();
+    let theme = ThemeParams::light_default();
+    let first = h
+        .driver
+        .open_web_app(ChatId(5), 42, "", LaunchSource::InlineButton, &theme)
+        .expect("sent");
+    h.ingest(&format!(
+        r#"{{"@type":"webAppInfo","@extra":"{}","launch_id":"779","url":{{"@type":"webAppUrl","url":"https://bot.example/a","require_same_origin":false}}}}"#,
+        first.as_extra()
+    ));
+    assert!(matches!(
+        h.driver.session.bots.web_apps.open_result,
+        Some(WebAppOpenResult::Opened { launch_id: 779, .. })
+    ));
+    h.driver
+        .open_web_app(ChatId(5), 43, "", LaunchSource::InlineButton, &theme)
+        .expect("sent");
+    assert_eq!(h.driver.session.bots.web_apps.open_result, None);
+    assert_eq!(h.driver.session.bots.web_apps.dropped_launches, vec![779]);
+}
+
+/// A switch flip whose request never left has no error answer coming: it
+/// goes back at once.
+#[test]
+fn emoji_status_access_is_put_back_when_the_send_fails() {
+    use super::support::toggle_driver;
+    let (_dir, mut driver, sender, _sink, _seq) = toggle_driver();
+    driver.session.bots.bot_info.insert(
+        42,
+        Some(crate::telegram::envelope::BotInfo {
+            can_manage_emoji_status: true,
+            ..Default::default()
+        }),
+    );
+    sender.refuse(true);
+    assert!(driver.set_bot_emoji_status_access(42, false).is_err());
+    let value = driver
+        .session
+        .bots
+        .bot_info
+        .get(&42)
+        .and_then(|info| info.as_ref())
+        .map(|info| info.can_manage_emoji_status);
+    assert_eq!(value, Some(true));
+    assert!(
+        !sender
+            .snapshot()
+            .iter()
+            .any(|json| json.contains("toggleBotCanManageEmojiStatus"))
+    );
 }

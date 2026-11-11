@@ -159,19 +159,6 @@ impl Session {
             seq,
         );
     }
-
-    /// The account is going away (logout, close): no answer can land any
-    /// more, so settle every pending lookup the way a failure would and
-    /// forget the stale-window marks. User actions (sends, edits, ...) are
-    /// dropped without a failure notice about a session the user left.
-    pub(crate) fn settle_account_requests(&mut self) {
-        for pending in self.requests.drain_all() {
-            if !super::session_apply_error::is_user_action(pending.purpose) {
-                self.settle_lost_request(pending);
-            }
-        }
-        self.stale_history_requests.clear();
-    }
 }
 
 pub fn is_auth_submit(purpose: RequestPurpose) -> bool {

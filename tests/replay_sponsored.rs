@@ -46,6 +46,7 @@ fn replay_sponsored_report_option_required_then_ok() {
 
     assert!(session.begin_sponsored_report(chat_id, 9001).is_some());
     let extra = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(chat_id));
+    session.note_sponsored_report_request(extra);
     apply_all_seq(
         &mut session,
         &sink,
@@ -66,6 +67,7 @@ fn replay_sponsored_report_option_required_then_ok() {
     // Follow-up with the chosen option id.
     assert!(session.begin_sponsored_report(chat_id, 9001).is_some());
     let extra = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(chat_id));
+    session.note_sponsored_report_request(extra);
     apply_all_seq(
         &mut session,
         &sink,
@@ -91,6 +93,7 @@ fn replay_sponsored_report_failed() {
 
     assert!(session.begin_sponsored_report(chat_id, 9001).is_some());
     let extra = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(chat_id));
+    session.note_sponsored_report_request(extra);
     apply_all_seq(
         &mut session,
         &sink,
@@ -115,6 +118,7 @@ fn replay_sponsored_report_ads_hidden_and_premium_required() {
     let report = |session: &mut quill::state::Session, ctor: &str| {
         assert!(session.begin_sponsored_report(chat_id, 9001).is_some());
         let extra = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(chat_id));
+        session.note_sponsored_report_request(extra);
         apply_all_seq(
             session,
             &sink,

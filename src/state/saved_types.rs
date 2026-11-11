@@ -9,6 +9,19 @@ use crate::telegram::envelope::{ReactionType, SavedMessagesTag, SavedMessagesTop
 pub struct SavedSublistView {
     pub topic_id: i64,
     pub history: TopicHistory,
+    /// The page this view waits for: only its answer extends the list.
+    pub page: SavedPage,
+}
+
+/// The next page of a Saved Messages view (a sublist or a tag filter).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SavedPage {
+    /// No page is out.
+    #[default]
+    Idle,
+    /// This request asks for the next page. An answer to any other (a
+    /// request of a view that was left and entered again) is dropped.
+    Asking(RequestId),
 }
 
 /// A tag filter over Saved Messages or one sublist (`searchSavedMessages`
@@ -23,7 +36,7 @@ pub struct SavedTagSearch {
     pub loaded: bool,
     /// The `searchSavedMessages` page this filter waits for. Only its
     /// answer fills it: a page asked for the previous tag is dropped.
-    pub request: Option<RequestId>,
+    pub page: SavedPage,
 }
 
 /// Everything the Saved Messages sublist / tag UI needs.

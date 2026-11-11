@@ -268,8 +268,17 @@ impl Session {
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ReportChatSponsoredMessage) {
             // A TDLib error dismisses the option picker; no outcome is shown.
-            self.messages.sponsored_report = None;
-            self.messages.sponsored_report_target = None;
+            // Only for the request the flow waits on: a report already
+            // dismissed, or an earlier step, has nothing left to dismiss.
+            let waits = pending.is_some_and(|p| {
+                self.messages
+                    .sponsored_report_target
+                    .is_some_and(|target| target.request == Some(p.id))
+            });
+            if waits {
+                self.messages.sponsored_report = None;
+                self.messages.sponsored_report_target = None;
+            }
         }
     }
 }

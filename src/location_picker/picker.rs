@@ -40,14 +40,33 @@ struct Address {
     job: Option<GeoPoint>,
 }
 
+/// Where the venue query for a place and text stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AskStage {
+    /// Not sent yet (the bot is still being looked up, or the driver has
+    /// not picked it up).
+    Unsent,
+    InFlight,
+    Answered,
+    /// The lookup failed: asking for the same again sends it again.
+    Failed,
+}
+
+/// tdesktop `_venuesRequestLocation` / `_venuesRequestQuery`, with the
+/// stage of that request.
+#[derive(Debug)]
+struct VenueAsk {
+    point: GeoPoint,
+    query: String,
+    stage: AskStage,
+}
+
 #[derive(Debug)]
 struct VenueSearch {
     list: VenueList,
-    /// tdesktop `_venuesRequestLocation` / `_venuesRequestQuery`.
-    request: Option<(GeoPoint, String)>,
+    request: Option<VenueAsk>,
     initial_query: String,
     generation: u64,
-    needs_send: bool,
     cache: Vec<(String, GeoPoint, Vec<Venue>)>,
     /// Where a search looks (tdesktop `_venuesSearchLocation`); a search
     /// is offered once it is known.
@@ -83,7 +102,12 @@ impl LocationPicker {
     /// tdesktop `LocationPicker::setup`: start at the last exact fix when
     /// there is one (and look for places and the address there), else at
     /// `fallback` (the system country) or Null Island.
-    pub(super) fn open(chat_id: ChatId, last_exact: Option<GeoPoint>, fallback: GeoPoint) -> Self {
+    pub(super) fn open(
+        chat_id: ChatId,
+        last_exact: Option<GeoPoint>,
+        fallback: GeoPoint,
+        first_generation: u64,
+    ) -> Self {
         let view = match last_exact {
             Some(point) => MapView::new(point, START_ZOOM),
             None => MapView::new(fallback, 0),
@@ -99,8 +123,7 @@ impl LocationPicker {
                 list: VenueList::Loading,
                 request: None,
                 initial_query: String::new(),
-                generation: 0,
-                needs_send: false,
+                generation: first_generation,
                 cache: Vec::new(),
                 search_location: None,
                 search_query: None,
@@ -215,7 +238,10 @@ impl LocationPicker {
         } else {
             self.address.postponed = Some(location);
         }
-        if !same_place(self.venues.request.as_ref().map(|r| r.0), Some(location)) {
+        if !same_place(
+            self.venues.request.as_ref().map(|r| r.point),
+            Some(location),
+        ) {
             self.places_in_area = true;
         }
         self.venues.search_location = Some(location);
@@ -305,7 +331,7 @@ impl LocationPicker {
         if self.venues.search_shown != shown {
             self.venues.search_shown = shown;
             if shown {
-                self.venues.no_search_location = self.venues.request.as_ref().map(|r| r.0);
+                self.venues.no_search_location = self.venues.request.as_ref().map(|r| r.point);
             } else if let Some(point) = self.venues.no_search_location
                 && !self.venues_from_cache(point, "")
             {
@@ -348,9 +374,12 @@ impl LocationPicker {
         else {
             return false;
         };
-        self.venues.request = Some((point, normalized));
+        self.venues.request = Some(VenueAsk {
+            point,
+            query: normalized,
+            stage: AskStage::Answered,
+        });
         self.venues.initial_query = query.to_string();
-        self.venues.needs_send = false;
         self.venues.generation += 1;
         self.apply_venues(list);
         true
@@ -358,29 +387,48 @@ impl LocationPicker {
 
     fn request_venues(&mut self, point: GeoPoint, query: &str) {
         let normalized = normalize_query(query);
-        if let Some((old_point, old_query)) = &self.venues.request
-            && old_point.same_place(&point)
-            && *old_query == normalized
+        // The same ask is not repeated while it is on its way, or when its
+        // answer is on screen. After a failure, or when typing blanked the
+        // list, it is asked again.
+        if let Some(ask) = &self.venues.request
+            && ask.point.same_place(&point)
+            && ask.query == normalized
+            && match ask.stage {
+                AskStage::Unsent | AskStage::InFlight => true,
+                AskStage::Answered => self.venues.list != VenueList::Loading,
+                AskStage::Failed => false,
+            }
         {
             return;
         }
         self.venues.generation += 1;
         self.venues.list = VenueList::Loading;
-        self.venues.request = Some((point, normalized));
+        self.venues.request = Some(VenueAsk {
+            point,
+            query: normalized,
+            stage: AskStage::Unsent,
+        });
         self.venues.initial_query = query.to_string();
-        self.venues.needs_send = true;
+    }
+
+    /// The generation the next picker numbers its queries from, so a
+    /// late answer of this one never matches there.
+    pub(super) fn generation(&self) -> u64 {
+        self.venues.generation
     }
 
     pub(super) fn venue_query_to_send(&self) -> Option<(u64, GeoPoint, String)> {
-        let (point, query) = self.venues.request.as_ref()?;
-        self.venues
-            .needs_send
-            .then(|| (self.venues.generation, *point, query.clone()))
+        let ask = self.venues.request.as_ref()?;
+        (ask.stage == AskStage::Unsent)
+            .then(|| (self.venues.generation, ask.point, ask.query.clone()))
     }
 
     pub(super) fn venue_query_sent(&mut self, generation: u64) {
-        if generation == self.venues.generation {
-            self.venues.needs_send = false;
+        if generation == self.venues.generation
+            && let Some(ask) = self.venues.request.as_mut()
+            && ask.stage == AskStage::Unsent
+        {
+            ask.stage = AskStage::InFlight;
         }
     }
 
@@ -388,16 +436,20 @@ impl LocationPicker {
         if generation != self.venues.generation {
             return;
         }
-        self.venues.needs_send = false;
-        if let Some((point, query)) = self.venues.request.clone() {
-            self.venues.cache.push((query, point, venues.clone()));
+        if let Some(ask) = self.venues.request.as_mut() {
+            ask.stage = AskStage::Answered;
+            self.venues
+                .cache
+                .push((ask.query.clone(), ask.point, venues.clone()));
         }
         self.apply_venues(venues);
     }
 
     pub(super) fn venues_failed(&mut self, generation: u64) {
         if generation == self.venues.generation {
-            self.venues.needs_send = false;
+            if let Some(ask) = self.venues.request.as_mut() {
+                ask.stage = AskStage::Failed;
+            }
             self.apply_venues(Vec::new());
         }
     }

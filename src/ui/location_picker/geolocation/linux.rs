@@ -95,7 +95,9 @@ async fn lookup() -> GeoOutcome {
     first.map_or(GeoOutcome::Unavailable, GeoOutcome::Found)
 }
 
-pub(super) fn locate() -> Receiver<GeoOutcome> {
+pub(super) fn locate(
+    _permission_prompt: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Receiver<GeoOutcome> {
     let (answer, receiver) = channel();
     let fallback = answer.clone();
     let spawned = quill::thread_guard::spawn_guarded("quill-geolocation", move || {
@@ -116,3 +118,6 @@ pub(super) fn reverse_geocode(_point: GeoPoint) -> Option<Receiver<Option<String
 pub(super) fn system_country() -> Option<String> {
     quill::emoji::system_locale().and_then(|locale| locale_region(&locale))
 }
+
+/// Nothing to stop: the lookup ends with its own thread.
+pub(super) fn cancel(_lookup: &std::sync::Arc<std::sync::atomic::AtomicBool>) {}

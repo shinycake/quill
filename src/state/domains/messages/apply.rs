@@ -422,7 +422,7 @@ impl Session {
                 // Every window's thread, Saved Messages views and gallery.
                 self.in_every_view(|session| {
                     if is_permanent {
-                        session.miss_search_jump(&message_ids);
+                        session.miss_search_jump(chat_id, &message_ids);
                     }
                     session.thread_remove(chat_id, &message_ids);
                     session.saved_remove_messages(chat_id, &message_ids);
@@ -498,11 +498,13 @@ impl Session {
                     }
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SendMessage) {
                     self.upsert_message(message, true);
-                } else if let Some(RequestPurpose::Bots(BotsPurpose::SharePhoneWithMiniApp {
-                    bot_user_id,
-                })) = pending.map(|p| p.purpose)
-                {
-                    self.bots.web_apps.phone_share = Some((bot_user_id, true));
+                } else if let Some(request) = pending.filter(|p| {
+                    matches!(
+                        p.purpose,
+                        RequestPurpose::Bots(BotsPurpose::SharePhoneWithMiniApp { .. })
+                    )
+                }) {
+                    self.bots.web_apps.phone_share = Some(PhoneShare::Sent(request.id));
                     self.upsert_message(message, true);
                 } else {
                     self.upsert_message(message, false);

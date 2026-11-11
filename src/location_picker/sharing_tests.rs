@@ -136,3 +136,65 @@ fn unsent_requests_roll_back() {
     sharing.request_unsent(&tile[0]);
     assert_eq!(sharing.next_requests(), tile, "asked again");
 }
+
+/// Sweep 03-073: a query number is never reused by a later picker, so a
+/// late answer of a closed picker cannot land in the next one.
+#[test]
+fn a_closed_pickers_late_answer_is_dropped_by_the_next_picker() {
+    let mut sharing = LocationSharing::default();
+    sharing.set_venue_bot_username("foursquare".into());
+    sharing.open(ChatId(3), None);
+    sharing.geolocated(GeoOutcome::Found(point(10., 20.)));
+    let _ = sharing.next_requests();
+    sharing.venue_bot_resolved(Some(99));
+    let generation = |requests: Vec<PickerRequest>| {
+        requests.into_iter().find_map(|request| match request {
+            PickerRequest::Venues { generation, .. } => Some(generation),
+            _ => None,
+        })
+    };
+    let old = generation(sharing.next_requests()).expect("old query");
+    sharing.close();
+    sharing.open(ChatId(4), None);
+    sharing.geolocated(GeoOutcome::Found(point(50., 60.)));
+    let new = generation(sharing.next_requests()).expect("new query");
+    assert_ne!(old, new);
+    sharing.venues_answered(old, vec![cafe()]);
+    assert_eq!(
+        sharing.picker().map(|p| p.venues().clone()),
+        Some(VenueList::Loading),
+        "the old picker's venues are not shown"
+    );
+    sharing.venues_answered(new, vec![cafe()]);
+    assert!(matches!(
+        sharing.picker().map(|p| p.venues().clone()),
+        Some(VenueList::Found(_))
+    ));
+}
+
+/// Sweep 03-074: a bot lookup that never answered, or answered before the
+/// bot was cached, does not decide every later picker.
+#[test]
+fn a_new_picker_asks_again_after_a_lost_or_missing_bot_lookup() {
+    let resolve = || PickerRequest::ResolveVenueBot {
+        username: "foursquare".into(),
+    };
+    for missing in [false, true] {
+        let mut sharing = LocationSharing::default();
+        sharing.set_venue_bot_username("foursquare".into());
+        sharing.open(ChatId(3), None);
+        sharing.geolocated(GeoOutcome::Found(point(10., 20.)));
+        assert_eq!(sharing.next_requests(), vec![resolve()]);
+        if missing {
+            sharing.venue_bot_resolved(None);
+        }
+        sharing.close();
+        sharing.open(ChatId(3), None);
+        sharing.geolocated(GeoOutcome::Found(point(10., 21.)));
+        assert_eq!(
+            sharing.next_requests(),
+            vec![resolve()],
+            "missing={missing}"
+        );
+    }
+}

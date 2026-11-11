@@ -507,6 +507,8 @@ impl QuillApp {
             "a client is put on screen before the last one's goodbyes ran"
         );
         self.screen.client_filled = true;
+        // The private media scratch is this account's from here on.
+        quill::local_path::set_media_cache_scope(&live.driver.session.account);
         self.live = Some(live);
     }
 }

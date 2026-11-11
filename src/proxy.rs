@@ -595,6 +595,59 @@ pub enum RotationAction {
     Switch(i32),
 }
 
+/// Where the "Use system proxy settings" step sent last stands. Its answer
+/// is matched by request id, so it is never read off [`ProxyState::error`],
+/// which belongs to what the user did in the proxy box.
+#[derive(Debug, Clone, Default)]
+pub enum SystemStepState {
+    /// No step has gone out (or the OS now wants nothing).
+    #[default]
+    Idle,
+    /// Sent as this request, not answered.
+    InFlight {
+        step: crate::system_proxy::SystemProxyStep,
+        at: std::time::Instant,
+        request: crate::ids::RequestId,
+    },
+    /// TDLib accepted it.
+    Accepted {
+        step: crate::system_proxy::SystemProxyStep,
+        at: std::time::Instant,
+    },
+    /// TDLib answered with an error, or the step never left: it waits
+    /// `system_proxy::RETRY` before it is sent again.
+    Refused {
+        step: crate::system_proxy::SystemProxyStep,
+        at: std::time::Instant,
+    },
+}
+
+impl SystemStepState {
+    /// The answer for `request`, when it is the step in flight. Returns
+    /// whether it was; any other request (the user's own change) leaves
+    /// the stage alone.
+    pub fn answered(&mut self, request: crate::ids::RequestId, refused: bool) -> bool {
+        match std::mem::take(self) {
+            SystemStepState::InFlight {
+                step,
+                at,
+                request: sent,
+            } if sent == request => {
+                *self = if refused {
+                    SystemStepState::Refused { step, at }
+                } else {
+                    SystemStepState::Accepted { step, at }
+                };
+                true
+            }
+            other => {
+                *self = other;
+                false
+            }
+        }
+    }
+}
+
 /// Everything the proxy UI and driver cache (`Session::proxy`).
 #[derive(Debug, Clone, Default)]
 pub struct ProxyState {
@@ -611,6 +664,8 @@ pub struct ProxyState {
     /// A mutation is in flight.
     pub mutating: bool,
     pub error: Option<String>,
+    /// The system proxy step's own outcome (not `error`).
+    pub system_step: SystemStepState,
     /// Per-proxy-id ping results.
     pub pings: HashMap<i32, PingStatus>,
     /// Option `prefer_ipv6` (tdesktop "Try connecting through IPv6").
