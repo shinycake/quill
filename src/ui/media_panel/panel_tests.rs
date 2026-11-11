@@ -125,6 +125,34 @@ fn header(app: &QuillApp) -> Option<String> {
 }
 
 #[gpui_kit::test]
+fn a_reloaded_category_list_keeps_the_chosen_category(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| seed(app, true));
+    open_stickers(&app, vcx);
+    app.update(vcx, |app, cx| {
+        app.choose_sticker_category(Some(EmojiCategorySource::Search(vec!["😀".into()])), cx)
+    });
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert_eq!(header(app).as_deref(), Some("Smile"));
+    });
+    // The list reloads in another order: the chosen one is still Smile.
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.stickers.emoji.sticker_categories.succeed(vec![
+                category("Smile", EmojiCategorySource::Search(vec!["😀".into()])),
+                category("Premium", EmojiCategorySource::Premium),
+            ]);
+        }
+    });
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert_eq!(header(app).as_deref(), Some("Smile"));
+    });
+}
+
+#[gpui_kit::test]
 fn choosing_a_category_lists_its_stickers_and_back_returns(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
@@ -135,10 +163,13 @@ fn choosing_a_category_lists_its_stickers_and_back_returns(cx: &mut TestAppConte
         assert_ne!(header(app).as_deref(), Some("Premium"));
     });
 
-    app.update(vcx, |app, cx| app.choose_sticker_category(Some(0), cx));
+    app.update(vcx, |app, cx| app.choose_sticker_category(Some(EmojiCategorySource::Premium), cx));
     frames(vcx);
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.pickers.media_panel.category, Some(0));
+        assert_eq!(
+            app.pickers.media_panel.category,
+            Some(EmojiCategorySource::Premium)
+        );
         assert_eq!(header(app).as_deref(), Some("Premium"));
         assert_eq!(found_cells(app), 2, "the answer fills the grid");
     });
@@ -160,7 +191,7 @@ fn choosing_a_category_lists_its_stickers_and_back_returns(cx: &mut TestAppConte
         app.pickers
             .sticker_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        app.choose_sticker_category(Some(1), cx);
+        app.choose_sticker_category(Some(EmojiCategorySource::Search(vec!["😀".into()])), cx);
     });
     frames(vcx);
     app.read_with(vcx, |app, _| {
@@ -187,7 +218,7 @@ fn a_category_does_not_list_another_windows_search(cx: &mut TestAppContext) {
         session.stickers.stickers.searched = StickerSearch::Typed("cat".into());
     });
     open_stickers(&app, vcx);
-    app.update(vcx, |app, cx| app.choose_sticker_category(Some(0), cx));
+    app.update(vcx, |app, cx| app.choose_sticker_category(Some(EmojiCategorySource::Premium), cx));
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert_eq!(header(app).as_deref(), Some("Premium"));
@@ -237,7 +268,7 @@ fn an_animated_sticker_with_no_thumbnail_shows_its_first_frame(cx: &mut TestAppC
         ];
     });
     open_stickers(&app, vcx);
-    app.update(vcx, |app, cx| app.choose_sticker_category(Some(0), cx));
+    app.update(vcx, |app, cx| app.choose_sticker_category(Some(EmojiCategorySource::Premium), cx));
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert_eq!(found_cells(app), 2);
@@ -252,7 +283,7 @@ fn premium_stickers_are_hidden_where_premium_cannot_be_bought(cx: &mut TestAppCo
     let vcx = &mut vcx;
     app.update(vcx, |app, _| seed(app, false));
     open_stickers(&app, vcx);
-    app.update(vcx, |app, cx| app.choose_sticker_category(Some(0), cx));
+    app.update(vcx, |app, cx| app.choose_sticker_category(Some(EmojiCategorySource::Premium), cx));
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert_eq!(found_cells(app), 2, "a locked sticker is listed");
