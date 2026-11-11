@@ -214,7 +214,7 @@ pub(in crate::ui) fn seed_bot_stars(
         });
         page.history_mut(filter).apply(history, false);
     }
-    page.ad_account_url = Some("https://ads.telegram.org".into());
+    page.ad_account_url = Load::Ready("https://ads.telegram.org".into());
     session.payments.earn.page = Some(page);
 }
 

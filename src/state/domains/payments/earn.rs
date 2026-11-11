@@ -84,7 +84,11 @@ impl Session {
             }
             (EarnPayload::TonStats(stats), Some(EarnPurpose::TonStats { peer })) => {
                 earn.ton_balances.insert(peer, stats.amounts);
-                if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
+                if let Some(page) = earn
+                    .page
+                    .as_mut()
+                    .filter(|p| p.peer == peer && p.ton.waits_for(pending.map(|p| p.id)))
+                {
                     page.ton = Load::Ready(stats);
                 }
             }
@@ -114,7 +118,11 @@ impl Session {
                 if me.is_some_and(|me| peer == EarnPeer::User(me)) {
                     earn.self_stats = Some(true);
                 }
-                if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
+                if let Some(page) = earn
+                    .page
+                    .as_mut()
+                    .filter(|p| p.peer == peer && p.stars.waits_for(pending.map(|p| p.id)))
+                {
                     page.stars = Load::Ready(stats);
                 }
             }
@@ -310,8 +318,14 @@ impl Session {
                 true
             }
             Some(EarnPurpose::AdAccountUrl { peer }) => {
-                if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
-                    page.ad_account_url = Some(url).filter(|u| !u.is_empty());
+                if let Some(page) = earn.page.as_mut().filter(|p| {
+                    p.peer == peer && p.ad_account_url.waits_for(pending.map(|p| p.id))
+                }) {
+                    page.ad_account_url = if url.is_empty() {
+                        Load::Unavailable
+                    } else {
+                        Load::Ready(url)
+                    };
                 }
                 true
             }
@@ -484,7 +498,11 @@ impl Session {
         let earn = &mut self.payments.earn;
         match purpose {
             EarnPurpose::TonStats { peer } => {
-                if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
+                if let Some(page) = earn
+                    .page
+                    .as_mut()
+                    .filter(|p| p.peer == peer && p.ton.waits_for(request))
+                {
                     // tdesktop: a group without TON ads just leaves the
                     // TON part out; anything else is shown.
                     if matches!(peer, EarnPeer::Chat(_))
@@ -505,7 +523,11 @@ impl Session {
                 if self.my_user_id.is_some_and(|me| peer == EarnPeer::User(me)) {
                     earn.self_stats = Some(false);
                 }
-                if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
+                if let Some(page) = earn
+                    .page
+                    .as_mut()
+                    .filter(|p| p.peer == peer && p.stars.waits_for(request))
+                {
                     page.stars = Load::Failed(crate::lang::tr_with(
                         crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_REVENUE_REASON,
                         &[("reason", &reason)],
@@ -529,7 +551,15 @@ impl Session {
             EarnPurpose::TonBalance { peer } | EarnPurpose::StarBalance { peer } => {
                 earn.fail_balance(peer, request);
             }
-            EarnPurpose::AdAccountUrl { .. } => {}
+            EarnPurpose::AdAccountUrl { peer } => {
+                if let Some(page) = earn
+                    .page
+                    .as_mut()
+                    .filter(|p| p.peer == peer && p.ad_account_url.waits_for(request))
+                {
+                    page.ad_account_url = Load::Failed(reason.clone());
+                }
+            }
             EarnPurpose::WithdrawalUrl { with_password } => {
                 if earn
                     .withdraw

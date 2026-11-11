@@ -115,21 +115,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let me = self.session.my_user_id;
         let is_self = matches!(peer, EarnPeer::User(id) if Some(id) == me);
         let is_bot = matches!(peer, EarnPeer::User(_)) && !is_self;
-        let mut page = EarnPage::new(peer, screen);
+        let page = EarnPage::new(peer, screen);
         let want_ton = screen == EarnScreen::Monetization;
         // tdesktop's channel page reads the Stars side too; a bot's
         // Stars live on its own "Stars Balance" page.
         let want_stars = screen == EarnScreen::Stars || !is_bot;
-        if want_ton {
-            page.ton = Load::Loading;
-        }
-        if want_stars {
-            page.stars = Load::Loading;
-        }
         self.session.payments.earn.page = Some(page);
         let _ = self.ensure_earn_app_config();
         self.send_earn_page_requests(peer, screen, is_dark, want_ton, want_stars)
-            .inspect_err(|_| self.fail_earn_page_loads(peer))
+            .inspect_err(|_| self.fail_earn_page_loads(peer, want_ton, want_stars))
     }
 
     /// The page's requests, in the order tdesktop sends them. A send that
@@ -146,9 +140,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let is_self = matches!(peer, EarnPeer::User(id) if Some(id) == me);
         let chat_id = peer.chat_id();
         if want_ton {
-            self.send_earn(EarnPurpose::TonStats { peer }, |extra| {
-                get_chat_revenue_statistics(extra, chat_id, is_dark)
-            })?;
+            self.send_earn_tracked(
+                EarnPurpose::TonStats { peer },
+                |extra| get_chat_revenue_statistics(extra, chat_id, is_dark),
+                |session, extra| {
+                    if let Some(page) = session.payments.earn.page.as_mut() {
+                        page.ton.start(extra);
+                    }
+                },
+            )?;
             self.send_earn_tracked(
                 EarnPurpose::TonTransactions {
                     peer,
@@ -163,9 +163,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             )?;
         }
         if want_stars {
-            self.send_earn(EarnPurpose::StarStats { peer }, |extra| {
-                get_star_revenue_statistics(extra, peer, is_dark)
-            })?;
+            self.send_earn_tracked(
+                EarnPurpose::StarStats { peer },
+                |extra| get_star_revenue_statistics(extra, peer, is_dark),
+                |session, extra| {
+                    if let Some(page) = session.payments.earn.page.as_mut() {
+                        page.stars.start(extra);
+                    }
+                },
+            )?;
             let filters: &[TxFilter] = match screen {
                 // The channel page has one Stars list.
                 EarnScreen::Monetization => &[TxFilter::All],
@@ -177,9 +183,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.fetch_earn_star_history(peer, filter, false)?;
             }
             if !is_self {
-                self.send_earn(EarnPurpose::AdAccountUrl { peer }, |extra| {
-                    get_star_ad_account_url(extra, peer)
-                })?;
+                self.send_earn_tracked(
+                    EarnPurpose::AdAccountUrl { peer },
+                    |extra| get_star_ad_account_url(extra, peer),
+                    |session, extra| {
+                        if let Some(page) = session.payments.earn.page.as_mut() {
+                            page.ad_account_url.start(extra);
+                        }
+                    },
+                )?;
             }
         }
         Ok(())
@@ -234,7 +246,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// A send of the page's requests failed: whatever still waits on a
     /// request that never left (or will not be followed up) is failed, so
     /// the page shows its error instead of a spinner.
-    fn fail_earn_page_loads(&mut self, peer: EarnPeer) {
+    fn fail_earn_page_loads(&mut self, peer: EarnPeer, want_ton: bool, want_stars: bool) {
         let Some(page) = self
             .session
             .payments
@@ -246,23 +258,20 @@ impl<S: JsonSender> ConnectDriver<S> {
             return;
         };
         let failed = crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_REVENUE).to_string();
-        if page.ton.is_loading()
-            && !self
-                .session
-                .requests
-                .has_purpose(purpose(EarnPurpose::TonStats { peer }))
-        {
+        let requests = &self.session.requests;
+        // A side the page wants that never went out (Idle) or whose send
+        // was refused (its request is gone) shows the error.
+        let gone = |request: RequestId| requests.get(request).is_none();
+        if page.ton.never_left(want_ton, gone) {
             page.ton = Load::Failed(failed.clone());
         }
-        if page.stars.is_loading()
-            && !self
-                .session
-                .requests
-                .has_purpose(purpose(EarnPurpose::StarStats { peer }))
-        {
+        if page.stars.never_left(want_stars, gone) {
             page.stars = Load::Failed(failed);
         }
-        let requests = &self.session.requests;
+        if matches!(page.ad_account_url, Load::Loading(request) if requests.get(request).is_none())
+        {
+            page.ad_account_url = Load::Idle;
+        }
         let stranded = |load: PageLoad| matches!(load, PageLoad::Loading { request, .. } if requests.get(request).is_none());
         if stranded(page.ton_history.load) {
             page.ton_history.load.fail();

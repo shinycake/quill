@@ -141,7 +141,7 @@ impl QuillApp {
         let available = stats.status.available;
         let enabled = stats.status.withdrawal_enabled;
         let max = withdraw_max(limits, available.stars.max(0));
-        let ad_url = page.ad_account_url.clone();
+        let ad_url = page.ad_account_url.ready().cloned();
         let now = quill::local_time::now_unix();
         let left = (stats.status.next_withdrawal_at - now).max(0);
         let locked = stats.status.next_withdrawal_at != 0 && left > 0;

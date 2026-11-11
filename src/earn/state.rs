@@ -13,7 +13,8 @@ use std::collections::HashMap;
 pub enum Load<T> {
     #[default]
     Idle,
-    Loading,
+    /// On its way as `request`: only its answer or error settles it.
+    Loading(crate::ids::RequestId),
     Ready(T),
     /// The request failed; the text is shown on the page.
     Failed(String),
@@ -31,7 +32,27 @@ impl<T> Load<T> {
     }
 
     pub fn is_loading(&self) -> bool {
-        matches!(self, Self::Loading)
+        matches!(self, Self::Loading(_))
+    }
+
+    /// `request` is the one this fetch waits on.
+    pub fn waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!((self, request), (Self::Loading(held), Some(id)) if *held == id)
+    }
+
+    /// A side the page `wanted` that never went out (Idle), or whose
+    /// request `gone` says is no longer out.
+    pub fn never_left(&self, wanted: bool, gone: impl Fn(crate::ids::RequestId) -> bool) -> bool {
+        match self {
+            Self::Idle => wanted,
+            Self::Loading(request) => gone(*request),
+            _ => false,
+        }
+    }
+
+    /// A send is about to go out as `request`.
+    pub fn start(&mut self, request: crate::ids::RequestId) {
+        *self = Self::Loading(request);
     }
 
     /// Settled: loaded, failed or never asked.
@@ -224,8 +245,9 @@ pub struct EarnPage {
     pub stars_tab: bool,
     /// The Stars page's history tab.
     pub star_filter: TxFilter,
-    /// `getStarAdAccountUrl` (tdesktop's "Buy Ads").
-    pub ad_account_url: Option<String>,
+    /// `getStarAdAccountUrl` (tdesktop's "Buy Ads"). `Unavailable`: the
+    /// server sent an empty link, so the row is left out.
+    pub ad_account_url: Load<String>,
 }
 
 impl EarnPage {
@@ -239,7 +261,7 @@ impl EarnPage {
             star_history: Default::default(),
             stars_tab: false,
             star_filter: TxFilter::All,
-            ad_account_url: None,
+            ad_account_url: Load::Idle,
         }
     }
 
