@@ -625,3 +625,32 @@ fn statistics_whose_full_info_send_fails_end_in_an_error() {
     ));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Sweep 02-217: a send that fails leaves the page on Failed (with its
+/// Retry), not Loading for good.
+#[test]
+fn a_message_statistics_send_that_fails_shows_failed_not_loading() {
+    let mut rig = Rig::new();
+    rig.recorder.refuse_sends(true);
+    assert!(
+        rig.driver
+            .fetch_message_statistics(ChatId(-100), MessageId(7), false)
+            .is_err()
+    );
+    let state = rig.driver.session.groups.stats.message.as_ref().unwrap();
+    assert!(matches!(state.statistics, MessageStatsFetch::Failed(_)));
+    rig.recorder.refuse_sends(false);
+    rig.driver
+        .retry_message_statistics(ChatId(-100), MessageId(7), false)
+        .unwrap()
+        .expect("Retry sends again");
+}
+
+/// Sweep 02-219: a refused load records no zoom.
+#[test]
+fn a_zoom_whose_load_is_refused_is_not_recorded() {
+    let mut rig = Rig::new();
+    rig.recorder.refuse_sends(true);
+    assert!(rig.driver.zoom_stat_graph(ChatId(-100), "zoom", 5).is_err());
+    assert!(rig.driver.session.groups.stats.zoomed.is_empty());
+}

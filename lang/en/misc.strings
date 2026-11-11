@@ -200,6 +200,7 @@
 "qll_misc_could_not_save_gif" = "Couldn't save GIF";
 "qll_misc_could_not_save_the_fact" = "Couldn't save the fact check";
 "qll_misc_could_not_search_gifs" = "Couldn't search GIFs";
+"qll_misc_link_inbox_full" = "Too many links opened at once. Some were ignored.";
 "qll_misc_could_not_send_video_note" = "Couldn't send video note";
 "qll_misc_could_not_send_voice_note" = "Couldn't send voice note";
 "qll_misc_could_not_submit_recovery_code" = "Couldn't submit recovery code";
