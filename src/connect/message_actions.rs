@@ -551,14 +551,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let window = pending.window;
         let messages = &mut self.session.messages;
-        let from_agent = messages.instant_view_agent_requests.remove(&id);
-        let url = messages.instant_view_urls.remove(&id)?;
+        let ask = messages.instant_view_requests.remove(&id)?;
         window
             .is_none_or(|chat| self.session.window_chats.contains(&chat))
             .then_some(crate::state::InstantViewFallback {
                 window,
-                url,
-                from_agent,
+                url: ask.url,
+                from_agent: ask.from_agent,
             })
     }
 
@@ -579,16 +578,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = get_web_page_instant_view(extra, url);
         match self.sender.send_json(&json) {
             Ok(()) => {
-                self.session
-                    .messages
-                    .instant_view_urls
-                    .insert(extra, url.to_string());
-                if crate::agent::ui_driver::guard::injecting() {
-                    self.session
-                        .messages
-                        .instant_view_agent_requests
-                        .insert(extra);
-                }
+                self.session.messages.instant_view_requests.insert(
+                    extra,
+                    crate::state::InstantViewAsk {
+                        url: url.to_string(),
+                        from_agent: crate::agent::ui_driver::guard::injecting(),
+                    },
+                );
                 InstantViewOutcome::Requested
             }
             Err(_) => {

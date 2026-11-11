@@ -811,6 +811,17 @@ pub(crate) const MAX_QUEUED_SIGNALING_CHUNKS: usize = 32;
 
 /// A link whose `getWebPageInstantView` failed (TDLib 404: no Instant View
 /// for the page): the window that asked opens it in the browser.
+/// A `getWebPageInstantView` request in flight (`RequestPurpose` stays
+/// `Copy`, so the URL rides `MessagesState::instant_view_requests` keyed by
+/// the `RequestId`). It leaves with its answer or its error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstantViewAsk {
+    pub url: String,
+    /// Sent while the agent UI driver injected input
+    /// (`guard::injecting`): the browser fallback opens as part of that step.
+    pub from_agent: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstantViewFallback {
     /// The chat window that asked; `None` is the main window.

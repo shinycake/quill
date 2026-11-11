@@ -462,7 +462,7 @@ fn replay_forward_messages_result_and_attribution() {
         ],
     );
     let extra = session.request(RequestPurpose::ForwardMessages, Some(quill::ids::ChatId(8)));
-    session.messages.in_flight_forward = Some(quill::state::ForwardFlight {
+    session.messages.forward_flights.push(quill::state::ForwardFlight {
         extra,
         dest_chat_id: quill::ids::ChatId(8),
         from_chat_id: quill::ids::ChatId(7),

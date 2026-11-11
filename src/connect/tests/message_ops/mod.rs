@@ -406,7 +406,7 @@ fn driver_instant_view_success_ingest() {
     // MED4: a `webPageInstantView` answer for a tracked
     // `GetWebPageInstantView` request populates `session.messages.instant_view`
     // (the UI drains it into the reader). The URL rides
-    // `instant_view_urls`, keyed by the request id.
+    // `instant_view_requests`, keyed by the request id.
     use crate::telegram::client::copy_and_parse;
 
     let store = MemorySecretStore::new();
@@ -426,8 +426,14 @@ fn driver_instant_view_success_ingest() {
     driver
         .session
         .messages
-        .instant_view_urls
-        .insert(extra, "https://example.com/article".to_string());
+        .instant_view_requests
+        .insert(
+            extra,
+            crate::state::InstantViewAsk {
+                url: "https://example.com/article".to_string(),
+                from_agent: false,
+            },
+        );
 
     let json = format!(
         r#"{{"@type":"webPageInstantView","page_blocks":[],"@extra":"{id}"}}"#,
@@ -470,8 +476,14 @@ fn driver_instant_view_error_falls_back() {
     driver
         .session
         .messages
-        .instant_view_urls
-        .insert(extra, "https://example.com/noiv".to_string());
+        .instant_view_requests
+        .insert(
+            extra,
+            crate::state::InstantViewAsk {
+                url: "https://example.com/noiv".to_string(),
+                from_agent: false,
+            },
+        );
 
     let json = format!(
         r#"{{"@type":"error","code":404,"message":"Not Found","@extra":"{id}"}}"#,
@@ -518,8 +530,14 @@ fn driver_instant_view_fallback_belongs_to_the_asking_window() {
         driver
             .session
             .messages
-            .instant_view_urls
-            .insert(extra, url.to_string());
+            .instant_view_requests
+            .insert(
+                extra,
+                crate::state::InstantViewAsk {
+                    url: url.to_string(),
+                    from_agent: false,
+                },
+            );
         let json = format!(
             r#"{{"@type":"error","code":404,"message":"Not Found","@extra":"{id}"}}"#,
             id = extra.0,

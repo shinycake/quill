@@ -553,8 +553,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // M1: stash the `getMessageLink` answer for the UI clipboard drain.
         if let Some((link, is_public)) = message_link_answer {
-            self.session.messages.message_link_result = Some(link);
-            self.session.messages.message_link_public = is_public;
+            self.session.messages.message_link = Some(crate::state::MessageLinkAnswer { link, is_public });
         }
         // Slice msg-richtext-ai-tools: stash AI answers for the composer
         // drain. A late answer for a chat the user has since left is

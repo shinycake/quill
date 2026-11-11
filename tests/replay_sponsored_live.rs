@@ -66,7 +66,7 @@ fn sponsored_tail_hides_after_report_and_hide() {
 
     // Hide ads without Premium: the No ads preview, ads stay available.
     assert_eq!(session.begin_sponsored_hide(chat_id, 9002), Some(false));
-    assert!(session.messages.last_sponsored_report.is_none());
+    assert!(session.messages.sponsored_report.outcome().is_none());
     assert_eq!(
         session
             .payments

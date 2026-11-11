@@ -430,7 +430,7 @@ impl QuillApp {
             return;
         };
         let extra = session.request(RequestPurpose::ForwardMessages, Some(dest));
-        session.messages.in_flight_forward = Some(quill::state::ForwardFlight {
+        session.messages.forward_flights.push(quill::state::ForwardFlight {
             extra,
             dest_chat_id: dest,
             from_chat_id: draft.from_chat_id,
