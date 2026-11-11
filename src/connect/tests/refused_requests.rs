@@ -5,6 +5,7 @@
 use super::super::*;
 use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
+use crate::connect::tests::support::toggle_driver;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::platform::MemorySecretStore;
 use crate::state::{SimilarBotsFetch, StickerTab};
@@ -157,4 +158,31 @@ fn a_refused_topic_mute_shows_the_topic_unmuted_again() {
     assert_eq!(muted(&rig), Some(true), "shown at once");
     rig.refuse(asked, "TOPIC_ID_INVALID");
     assert_eq!(muted(&rig), Some(false));
+}
+
+/// A refused save or remove marks the saved list, never a good search
+/// grid; a refused search page marks the search, never the saved list.
+#[test]
+fn a_refused_gif_request_fails_only_what_it_asked() {
+    let (_dir, mut driver, sender, _sink, _seq) = toggle_driver();
+    driver.session.stickers.gifs.open = true;
+    driver.session.stickers.gifs.search_begun("cats".into());
+    driver.session.stickers.gifs.search_answered();
+    driver.session.stickers.gifs.saved_answered(Vec::new());
+    assert!(!driver.session.stickers.gifs.search_failed());
+
+    sender.refuse(true);
+    assert!(driver.set_gif_saved(crate::ids::FileId(5), true).is_err());
+    assert!(
+        !driver.session.stickers.gifs.search_failed(),
+        "a failed save must not turn the search grid into an error"
+    );
+    assert!(driver.session.stickers.gifs.failed());
+
+    driver.session.stickers.gifs.saved_answered(Vec::new());
+    driver.session.stickers.gifs.search_bot_username = "gif".into();
+    driver.session.stickers.gifs.search_bot_user_id = Some(7);
+    assert!(driver.maybe_search_gifs(false).is_err());
+    assert!(driver.session.stickers.gifs.search_failed());
+    assert!(!driver.session.stickers.gifs.failed());
 }
