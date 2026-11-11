@@ -81,25 +81,33 @@ pub(crate) fn synthetic_service_row(
     date: i32,
     action: ServiceAction,
 ) -> HistoryMessage {
-    HistoryMessage {
-        sender: None,
-        id: MessageId(id),
-        chat_id,
-        is_outgoing: false,
-        date,
-        content: MessageContent::Action(Box::new(action)),
-        send: crate::state::SendState::Sent,
-        reply_to: None,
-        forward_info: None,
-        extras: MessageExtras::default(),
-        interaction_info: None,
-        is_pinned: false,
-        media_album_id: 0,
-        reply_markup: None,
-        self_destruct: None,
-        auto_delete: None,
-        author_signature: None,
-        ephemeral: None,
+    HistoryMessage::local(chat_id, id, date, MessageContent::Action(Box::new(action)))
+}
+
+impl HistoryMessage {
+    /// A row Quill makes itself, never sent: an incoming message of nobody
+    /// with `content`, under an `id` no real message has.
+    pub fn local(chat_id: ChatId, id: i64, date: i32, content: MessageContent) -> Self {
+        Self {
+            sender: None,
+            id: MessageId(id),
+            chat_id,
+            is_outgoing: false,
+            date,
+            content,
+            send: crate::state::SendState::Sent,
+            reply_to: None,
+            forward_info: None,
+            extras: MessageExtras::default(),
+            interaction_info: None,
+            is_pinned: false,
+            media_album_id: 0,
+            reply_markup: None,
+            self_destruct: None,
+            auto_delete: None,
+            author_signature: None,
+            ephemeral: None,
+        }
     }
 }
 

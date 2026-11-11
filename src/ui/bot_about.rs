@@ -26,6 +26,7 @@ impl QuillApp {
         let session = self.session()?;
         let info = session.bot_info_for_chat(chat.id)?;
         let text = bot_about_text(info)?;
+        let animation = info.description_animation.as_deref().cloned();
         let body = crate::ui::message_text::rich_text_line(
             text,
             &info.description_entities,
@@ -42,7 +43,8 @@ impl QuillApp {
             .rev()
             .find(|size| size.width <= PHOTO_MAX_SIZE_WIDTH)
             .or(info.description_photo.last())
-            .map(|size| (size.file_id, (size.width, size.height)));
+            .map(|size| (size.file_id, (size.width, size.height)))
+            .filter(|_| animation.is_none());
         let picture_path = picture.and_then(|(file_id, _)| {
             let roots = self.media_display_roots();
             let file = session.media.files.get(&file_id.0)?.usable_path()?;
@@ -57,6 +59,10 @@ impl QuillApp {
             let _ = live.driver.ensure_media_files(&[file_id]);
         }
         let picture = picture.map(|(_, dims)| about_picture(picture_path.as_deref(), dims, cx));
+        // A clip takes the photo's place (tdesktop shows `BotInfo::document`
+        // when there is one), looping like a GIF in the history.
+        let clip = animation.map(|animation| self.about_clip(chat.id, animation, cx));
+        let picture = clip.or(picture);
         // tdesktop draws it as an incoming message bubble in the middle of
         // the empty history (`AboutView`), the description photo on top.
         Some(
@@ -99,6 +105,57 @@ impl QuillApp {
     }
 }
 
+impl QuillApp {
+    /// The description clip across the card's width: playing once local
+    /// (the inline player downloads it like an autoplaying GIF), its
+    /// thumbnail until then.
+    fn about_clip(
+        &mut self,
+        chat: quill::ids::ChatId,
+        animation: quill::telegram::envelope::AnimationContent,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let dims = (animation.width, animation.height);
+        let thumb = animation.thumb_file_id().and_then(|file_id| {
+            let roots = self.media_display_roots();
+            let session = self.session()?;
+            let file = session.media.files.get(&file_id.0)?.usable_path()?;
+            quill::local_path::sandboxed_display_path(file, &roots).map(|path| path.to_path_buf())
+        });
+        if thumb.is_none()
+            && let Some(file_id) = animation.thumb_file_id()
+            && let Some(live) = self.live.as_mut()
+        {
+            let _ = live.driver.ensure_media_files(&[file_id]);
+        }
+        let message = quill::state::HistoryMessage::local(
+            chat,
+            ABOUT_CLIP_ROW_ID,
+            0,
+            quill::telegram::envelope::MessageContent::Animation(animation),
+        );
+        let still = about_picture(thumb.as_deref(), dims, cx);
+        match self.inline_frame(&message, cx) {
+            Some(inline) => {
+                let (w, h) = about_frame(dims);
+                let corners = super::message_media::MediaCorners::edges(
+                    cx.theme().radius_2xl(),
+                    true,
+                    true,
+                    false,
+                    false,
+                    None,
+                );
+                super::message_media::clip_tile(inline, Some(still), (w, h), corners)
+            }
+            None => still,
+        }
+    }
+}
+
+/// The id the description clip plays under, past every real message id.
+const ABOUT_CLIP_ROW_ID: i64 = -9_000_000_003;
+
 /// tdesktop `msgMaxWidth`.
 const ABOUT_MAX_WIDTH: f32 = 430.;
 /// The widest photo size worth loading for a card this wide on a 2x
@@ -109,13 +166,7 @@ const PHOTO_MAX_SIZE_WIDTH: i32 = 1000;
 /// (clamped so a tall picture leaves room for the text); a muted
 /// placeholder of the same size while it downloads.
 fn about_picture(path: Option<&std::path::Path>, (w, h): (i32, i32), cx: &App) -> AnyElement {
-    let width = ABOUT_MAX_WIDTH;
-    let ratio = if w > 0 && h > 0 {
-        (h as f32 / w as f32).clamp(0.3, 1.)
-    } else {
-        0.5
-    };
-    let frame = (px(width), px(width * ratio));
+    let frame = about_frame((w, h));
     let slot = div()
         .w(frame.0)
         .h(frame.1)
@@ -137,6 +188,18 @@ fn about_picture(path: Option<&std::path::Path>, (w, h): (i32, i32), cx: &App) -
             .into_any_element(),
         None => slot.into_any_element(),
     }
+}
+
+/// The picture's frame: the card's width at the picture's own aspect,
+/// clamped so a tall one leaves room for the text.
+fn about_frame((w, h): (i32, i32)) -> (Pixels, Pixels) {
+    let width = ABOUT_MAX_WIDTH;
+    let ratio = if w > 0 && h > 0 {
+        (h as f32 / w as f32).clamp(0.3, 1.)
+    } else {
+        0.5
+    };
+    (px(width), px(width * ratio))
 }
 
 #[cfg(test)]

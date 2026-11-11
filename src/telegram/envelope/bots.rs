@@ -37,6 +37,11 @@ pub struct BotInfo {
     /// The files of `description_photo`, for the session's file map; the
     /// session takes them when the full info arrives.
     pub description_photo_files: Vec<super::ParsedFile>,
+    /// `botInfo.animation`: the clip shown above the description instead
+    /// of the photo (tdesktop `BotInfo::document`).
+    pub description_animation: Option<Box<super::AnimationContent>>,
+    /// The files of `description_animation`, taken like the photo's.
+    pub description_animation_files: Vec<super::ParsedFile>,
     pub commands: Vec<BotCommand>,
     /// Slice B2: `botInfo.menu_button` — `(text, url)`. Absent/null in the
     /// payload → `None` (bots without a menu button, or older payloads).
@@ -139,6 +144,13 @@ pub(crate) fn parse_bot_info(value: Option<&Value>) -> Option<BotInfo> {
         .filter(|photo| !photo.is_null())
         .map(super::message_media::parse_photo_sizes)
         .unwrap_or_default();
+    let (description_animation, description_animation_files) =
+        match super::message_audio_video::parse_message_animation(value) {
+            (super::MessageContent::Animation(animation), files) => {
+                (Some(Box::new(animation)), files)
+            }
+            _ => (None, Vec::new()),
+        };
     Some(BotInfo {
         short_description: value
             .get("short_description")
@@ -153,6 +165,8 @@ pub(crate) fn parse_bot_info(value: Option<&Value>) -> Option<BotInfo> {
         description_entities: Vec::new(),
         description_photo,
         description_photo_files,
+        description_animation,
+        description_animation_files,
         commands: value
             .get("commands")
             .and_then(Value::as_array)

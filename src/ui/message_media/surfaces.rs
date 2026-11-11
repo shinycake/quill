@@ -332,6 +332,19 @@ fn blur(jpeg: &[u8]) -> Option<Arc<RenderImage>> {
     ]))))
 }
 
+/// A playing clip at `(w, h)` outside a message (the bot intro card), with
+/// `still` under it until its first picture.
+pub(in crate::ui) fn clip_tile(
+    inline: crate::ui::inline_video::InlineFrame,
+    still: Option<AnyElement>,
+    (w, h): (Pixels, Pixels),
+    corners: MediaCorners,
+) -> AnyElement {
+    live_tile(inline, still, (w, h), move |frame| {
+        inline_surface(frame, w, h, corners)
+    })
+}
+
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod tests {
