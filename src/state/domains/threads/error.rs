@@ -37,19 +37,21 @@ impl Session {
             // sublists were loaded; it is not a failure.
             Some(RequestPurpose::LoadSavedMessagesTopics) => {
                 if err.code == 404 {
-                    self.threads.saved.topics_exhausted = true;
+                    self.threads.saved.topics_load = SavedTopicsLoad::Exhausted;
                 } else {
                     // Not sent as far as the pump goes: it asks again when
                     // the connection is back or Saved Messages opens again.
-                    self.threads.saved.topics_requested = false;
-                    self.threads.saved.retry_when_online = true;
+                    self.threads.saved.topics_load = SavedTopicsLoad::Retry;
                     self.chats_state
                         .chat_action_error
                         .push(call_request_error_line(err, "Could not load saved chats"));
                 }
             }
             Some(RequestPurpose::GetSavedMessagesTags { topic_id: 0 }) => {
-                self.threads.saved.retry_when_online = true;
+                self.threads
+                    .saved
+                    .tags
+                    .fail(format!("error {}", err.code));
                 self.chats_state
                     .chat_action_error
                     .push(call_request_error_line(

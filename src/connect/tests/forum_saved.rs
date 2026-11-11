@@ -262,7 +262,7 @@ fn saved_sublists_load_open_page_pin_and_delete() {
         "loadSavedMessagesTopics",
         r#"{"@type":"error","@extra":"EXTRA","code":404,"message":"Not Found"}"#,
     );
-    assert!(f.driver.session.threads.saved.topics_exhausted);
+    assert!(f.driver.session.threads.saved.topics_exhausted());
     assert!(f.driver.load_saved_topics().unwrap().is_none());
 
     f.driver.open_saved_sublist(77).unwrap();
@@ -323,7 +323,7 @@ fn tag_label_needs_premium_and_filter_searches_saved_messages() {
     assert_eq!(sent[0]["tag"]["@type"], "reactionTypeEmoji");
     // 12 characters at most, and the bar shows the name at once.
     assert!(sent[0]["label"].as_str().unwrap().chars().count() <= 12);
-    assert_eq!(f.driver.session.threads.saved.tags[0].label, "A very long");
+    assert_eq!(f.driver.session.threads.saved.tag_list()[0].label, "A very long");
 
     // Filter by tag: searchSavedMessages over all of Saved Messages.
     f.driver.filter_saved_by_tag(tag.clone()).unwrap();
@@ -371,12 +371,11 @@ fn a_second_tag_asks_at_once_and_the_first_tags_page_is_dropped() {
     let search = f.driver.session.threads.saved.tag_search.as_ref().unwrap();
     assert_eq!(search.tag, like);
     assert!(
-        !search.loaded,
+        search.history.messages.is_empty(),
         "the first tag's page does not fill the chip"
     );
     f.ingest(&page(second, 5));
     let search = f.driver.session.threads.saved.tag_search.as_ref().unwrap();
-    assert!(search.loaded);
     assert!(search.history.messages.contains_key(&5));
     assert!(!search.history.messages.contains_key(&9));
 }

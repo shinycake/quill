@@ -153,9 +153,6 @@ RowForum::loaded
 RowMenuFacts::is_saved_messages
 RowState::pending
 RtmpStart::failed
-SavedMessagesState::tags_loaded
-SavedMessagesState::topics_requested
-SavedTagSearch::loaded
 SearchTabsState::recommended_loaded
 SearchTabsState::recommended_loading
 SettingsSearch::pending_clear

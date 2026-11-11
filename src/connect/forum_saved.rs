@@ -2,7 +2,7 @@
 //! sublists and tags (batch B16).
 use super::*;
 use crate::ids::{ChatId, FileId, RequestId};
-use crate::state::{OlderEnd, SavedPage, ThreadsPurpose};
+use crate::state::{OlderEnd, SavedPage, SavedTopicsLoad, ThreadsPurpose};
 use crate::state::{RequestPurpose, SAVED_PAGE, SAVED_TOPICS_PAGE};
 use crate::telegram::envelope::ReactionType;
 use crate::telegram::requests::{TOPIC_ICON_COLORS, valid_topic_icon_color};
@@ -252,7 +252,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Ask for more sublists (`loadSavedMessagesTopics`); deduped, and
     /// silent once TDLib said everything is loaded.
     pub fn load_saved_topics(&mut self) -> Sent {
-        if self.session.threads.saved.topics_exhausted
+        if self.session.threads.saved.topics_exhausted()
             || self
                 .session
                 .requests
@@ -260,10 +260,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.session.threads.saved.topics_requested = true;
-        self.send_purpose(RequestPurpose::LoadSavedMessagesTopics, None, |extra| {
+        let sent = self.send_purpose(RequestPurpose::LoadSavedMessagesTopics, None, |extra| {
             load_saved_messages_topics(extra, SAVED_TOPICS_PAGE)
-        })
+        });
+        // A page that never left waits for the connection like a failed one.
+        let saved = &mut self.session.threads.saved;
+        match &sent {
+            Ok(Some(_)) if saved.topics_load != SavedTopicsLoad::Exhausted => {
+                saved.topics_load = SavedTopicsLoad::Started;
+            }
+            Err(_) => saved.topics_load = SavedTopicsLoad::Retry,
+            _ => {}
+        }
+        sent
     }
 
     /// `getSavedMessagesTags` for all of Saved Messages (once; updates keep
@@ -380,7 +389,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .threads
             .saved
             .tags
-            .iter_mut()
+            .data_mut()
+            .into_iter()
+            .flatten()
             .find(|entry| entry.tag == *tag)
         {
             entry.label = label;

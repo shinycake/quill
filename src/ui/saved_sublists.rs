@@ -157,7 +157,7 @@ impl QuillApp {
                 let search = session.threads.saved.tag_search.as_ref()?;
                 let label = tag_name(
                     &session.saved_tag_choices(),
-                    &session.threads.saved.tags,
+                    session.threads.saved.tag_list(),
                     &search.tag,
                 );
                 Some((
@@ -364,10 +364,10 @@ impl QuillApp {
         }
         let session = &live.driver.session;
         // A failed first page or tags request waits for the connection.
-        if session.threads.saved.retry_when_online {
+        if session.threads.saved.waiting_to_retry() {
             return;
         }
-        if !session.threads.saved.tags_loaded
+        if session.threads.saved.tags.is_idle()
             && !session
                 .requests
                 .has_purpose(quill::state::RequestPurpose::GetSavedMessagesTags { topic_id: 0 })
@@ -376,8 +376,7 @@ impl QuillApp {
         }
         let session = &live.driver.session;
         if session.chat_views_as_topics(chat_id)
-            && !session.threads.saved.topics_requested
-            && !session.threads.saved.topics_exhausted
+            && session.threads.saved.topics_load == quill::state::SavedTopicsLoad::Idle
         {
             let _ = live.driver.load_saved_topics();
         }
@@ -392,7 +391,7 @@ impl QuillApp {
         };
         let topics = session.threads.saved.ordered_topics();
         if topics.is_empty() {
-            let loading = !session.threads.saved.topics_exhausted;
+            let loading = !session.threads.saved.topics_exhausted();
             return pane_placeholder(
                 if loading {
                     tr(keys::Q_PEOPLE_LOADING_SAVED_CHATS)
@@ -457,7 +456,7 @@ impl QuillApp {
         };
         let saved = &session.threads.saved;
         let loaded = saved.topics.len();
-        let has_more = !saved.topics_exhausted
+        let has_more = !saved.topics_exhausted()
             && (saved.topic_count == 0 || loaded < saved.topic_count as usize);
         if !load_due(
             scrolled_near_end(&self.dialogs.saved_scroll),
@@ -772,7 +771,7 @@ impl QuillApp {
             .and_then(|s| {
                 s.threads
                     .saved
-                    .tags
+                    .tag_list()
                     .iter()
                     .find(|entry| entry.tag == tag)
                     .map(|entry| entry.label.clone())
@@ -839,7 +838,7 @@ impl QuillApp {
             let named = this.session().is_some_and(|s| {
                 s.threads
                     .saved
-                    .tags
+                    .tag_list()
                     .iter()
                     .any(|entry| entry.tag == state.tag && !entry.label.is_empty())
             });
