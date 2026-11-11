@@ -73,6 +73,7 @@ mod story_insights;
 mod story_tray_load;
 mod subsection_tabs;
 mod sweep_payments_2;
+mod sweep_s4_links_tdlib_1;
 mod threads;
 mod topic_load;
 mod topic_window_cap;

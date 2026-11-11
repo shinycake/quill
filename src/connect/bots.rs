@@ -115,6 +115,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .is_err()
             {
                 self.session.requests.take(extra);
+                self.session.bots.asked_bot_users.remove(&user_id);
                 continue;
             }
             sent = true;

@@ -719,7 +719,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
     let saved = driver.open_gif_panel().unwrap().unwrap();
-    driver.search_gifs("before bot option").unwrap();
+    driver.search_gifs("before bot option", None).unwrap();
     assert!(driver.session.stickers.gifs.search_failed);
     driver
         .ingest(
@@ -746,9 +746,9 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .count()
     };
     assert_eq!(count_saved(), 1); // A confirmed empty collection must not fetch on every update.
-    driver.search_gifs("old").unwrap();
+    driver.search_gifs("old", None).unwrap();
     let old_bot = sent_request(&recorder, "searchPublicChat")["@extra"].clone();
-    driver.search_gifs(" cats ").unwrap();
+    driver.search_gifs(" cats ", None).unwrap();
     let bot = sent_request(&recorder, "searchPublicChat")["@extra"].clone();
     assert_ne!(old_bot, bot);
     let resolved = |extra| {
@@ -766,7 +766,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
         "cats"
     );
     let old = sent_request(&recorder, "getInlineQueryResults")["@extra"].clone();
-    let fresh = driver.search_gifs("dogs").unwrap().unwrap();
+    let fresh = driver.search_gifs("dogs", None).unwrap().unwrap();
     let animation = |id| json!({"@type":"animation","duration":1,"width":100,"height":100,"animation":{"@type":"file","id":id,"local":{"@type":"localFile","can_be_downloaded":false},"remote":{"@type":"remoteFile"}},"thumbnail":{"@type":"thumbnail","width":100,"height":100,"file":{"@type":"file","id":id+100,"local":{"@type":"localFile","can_be_downloaded":true},"remote":{"@type":"remoteFile"}}}});
     let page = |extra, ids: Vec<i32>, next: &str| {
         json!({"@type":"inlineQueryResults","@extra":extra,"inline_query_id":"1","results":ids.iter().map(|id|json!({"@type":"inlineQueryResultAnimation","id":id.to_string(),"animation":animation(*id)})).collect::<Vec<_>>(),"next_offset":next}).to_string()
@@ -945,7 +945,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
         )
         .unwrap();
     assert!(driver.session.stickers.gifs.animations.is_empty());
-    driver.search_gifs("").unwrap();
+    driver.search_gifs("", None).unwrap();
     let old_page = sent_request(&recorder, "getInlineQueryResults")["@extra"].clone();
     driver.ingest(copy_and_parse(&json!({"@type":"updateOption","name":"animation_search_bot_username","value":{"@type":"optionValueString","value":"othergif"}}).to_string(),&seq,&sink).unwrap()).unwrap();
     assert_eq!(

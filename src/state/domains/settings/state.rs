@@ -308,6 +308,29 @@ impl SettingsState {
             .chain(self.rich_html_exports.iter().map(|export| &export.link))
     }
 
+    /// An export's request that will never be answered: its worker waits on
+    /// the link for this answer, so the link is told the send failed.
+    pub(crate) fn fail_lost_export(&mut self, purpose: RequestPurpose, id: RequestId) {
+        match purpose {
+            RequestPurpose::ExportAccount => {
+                if let Some(export) = self.account_export.as_mut() {
+                    export.link.fail_send(id);
+                }
+            }
+            RequestPurpose::ExportChat => {
+                if let Some(export) = self.chat_export.as_mut() {
+                    export.link.fail_send(id);
+                }
+            }
+            RequestPurpose::ExportRichHtml => {
+                for export in &mut self.rich_html_exports {
+                    export.link.fail_send(id);
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             quick_replies: QuickRepliesState::default(),

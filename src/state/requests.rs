@@ -152,6 +152,9 @@ impl Session {
         let extra = pending.id;
         let seq = self.last_seq;
         let error = TdError::from_code(LOST_REQUEST_ERROR_CODE);
+        // An export's worker waits on its link for this answer: without it
+        // the link stays busy and no further export request goes out.
+        self.settings.fail_lost_export(pending.purpose, extra);
         self.apply_payload_in_asking_view(
             EnvelopePayload::Error(error),
             Some(&pending),

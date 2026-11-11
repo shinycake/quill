@@ -64,12 +64,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         token: &str,
         x: i64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        // The zoom shows only once its load was issued (or is already
+        // loaded): a refused load leaves the graph as it was.
+        let sent = self.load_stat_graph(chat_id, token, x)?;
         self.session
             .groups
             .stats
             .zoomed
             .insert(token.to_string(), x);
-        self.load_stat_graph(chat_id, token, x)
+        Ok(sent)
     }
 
     /// "Zoom Out".
@@ -117,10 +120,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             state.statistics = MessageStatsFetch::Loading;
         }
         let extra = self.session.request(purpose, Some(chat_id));
-        self.send_json_request(
+        if let Err(err) = self.send_json_request(
             extra,
             &get_message_statistics(extra, chat_id, message_id, is_dark),
-        )?;
+        ) {
+            // Nothing went out: the page offers Retry, not a spinner.
+            if let Some(state) = self.session.groups.stats.message.as_mut() {
+                state.statistics = MessageStatsFetch::Failed(
+                    crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_STATISTICS)
+                        .to_string(),
+                );
+            }
+            return Err(err);
+        }
         if !self.message_forwards_loaded(chat_id, message_id) {
             let _ = self.fetch_message_public_forwards(chat_id, message_id, "");
         }

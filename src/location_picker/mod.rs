@@ -131,6 +131,10 @@ impl LocationSharing {
         if self.venue_bot != VenueBot::Unknown && !matches!(self.venue_bot, VenueBot::Found(_)) {
             self.venue_bot = VenueBot::Unknown;
         }
+        // Icons that failed, or whose answer was dropped, are asked again
+        // by this picker.
+        self.icons
+            .retain(|_, state| matches!(state, IconState::Ready(_)));
         self.retire_picker();
         self.picker = Some(LocationPicker::open(
             chat_id,

@@ -5464,3 +5464,56 @@ land and the typed form was gone.
 - **Skipped.** 13-069: `AgentUi::pick_account` already resets the activity
   filter wherever `picked` changes, with a test
   (`picking_another_account_resets_the_activity_filter`).
+
+### Sweep fixes (s4-links-tdlib-1)
+
+Minor entries, each proved against the code first.
+
+- **Sent before recorded, recorded before sent.** A group bot's `getUser` that
+  could not be sent leaves `asked_bot_users` (02-084). A mask set's request
+  that could not be sent leaves `set_requested` (02-139). `setTdlibParameters`
+  that could not be sent takes its `SetParameters` entry back (02-039).
+  `request_close` puts back the logOut request `begin_close` cleared when its
+  send fails (02-038). Edit and Remove of a proxy drop its ping result only
+  once the change was accepted (02-189). The retry stash is written before
+  `td_send` and the entry taken back when the send fails, so a fast 429 finds
+  its request (02-231).
+- **Answers matched to what asked.** A superseded username check's failure
+  sets no profile error: only the check that is still current does (05-156).
+  A failed `getChatMessageCount` drops the chat's entry, so the next open asks
+  for all of them again (02-030). A lost export request (flood-retry re-send
+  failed, TTL sweep) frees the export's link, so the worker is not left
+  waiting out its timeout (03-046). Composer link previews never evict an
+  entry that is still `Asked` (05-056). The sharing request is answered from
+  `loaded_message`, so a request shown in a topic or other view works
+  (02-196). The Translate card made with a style the server removed is asked
+  again without it, like the Style tab (01-055).
+- **Failures drawn.** A message statistics send that fails is `Failed`, which
+  has Retry, not `Loading` (02-217). The Collect password box shows an error
+  when its request could not be sent (04-043). A refused zoom is not recorded
+  (02-219; `zoomed` stays keyed by the graph token, which TDLib makes unique
+  per graph).
+- **Window and account scope.** The GIF search asks with the chat of the
+  window that searched (`GifPanel::search_chat`), not the main window's open
+  chat (02-061). A log-out sweeps only the on-screen account's media scratch
+  (`sweep_account_media_cache`), and `ensure_private_dir` makes a directory
+  again when the OS removed it (03-071, 03-072).
+- **Links and the picker.** A ninth queued external link is `Full`, not
+  silently dropped: the poll turn says "Too many links opened at once" once
+  (03-019; tdesktop opens each at once and has no queue, so this is the
+  smallest safe message). Venue icons that failed or never answered are asked
+  again when a picker opens (03-075). The address hidden while the pin moves
+  is kept with its place and restored only there (03-086). A launch whose
+  sender thread cannot be spawned reports `NotSent` and Quill starts
+  unchecked, not "not responding" (05-012; not tested: a thread-spawn failure
+  cannot be forced). Profile accent colour is refused while the own user is
+  unknown instead of sending emoji id 0 (02-171). A failing call-audio send is
+  no longer a change to redraw for (02-056).
+- **Skipped.** 02-043: `resume_disk_paused_found` already puts unsent ids back
+  and always saves. 02-071 and 02-178: the asked set and the request box are
+  already written after the send (tests `a_grams_peer_request_that_never_left_…`
+  and the private-sharing tests). 03-005: the wallet's explorer, rates and
+  state are already `Fetch`-like stages with `cancel`/`fail`. 05-177: the add
+  contact box reads its own answer (`ContactSave::Failed`, test
+  `the_add_contact_box_closes_on_the_answer_and_shows_a_refusal`); the contacts
+  notice belongs to the settings list.

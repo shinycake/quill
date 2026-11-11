@@ -12,15 +12,20 @@ impl Session {
         _seq: u64,
     ) {
         // The failed check is over: its text no longer reads "Checking…".
-        if extra.is_some()
+        // A superseded check (the person typed on) is not the current one:
+        // its failure says nothing about the text now being checked.
+        let current_check = extra.is_some()
             && self
                 .users_state
                 .username_check_pending
                 .as_ref()
                 .map(|(id, _)| *id)
-                == extra
-        {
+                == extra;
+        if current_check {
             self.users_state.username_check_pending = None;
+        }
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::CheckUsername) && !current_check {
+            return;
         }
         match pending.map(|p| p.purpose) {
             // A5: profile-edit failures surface in the
@@ -53,6 +58,13 @@ impl Session {
                     self.users_state
                         .user_full_infos
                         .fail(user, error_reason(err));
+                }
+            }
+            // One filter's count failed: drop the chat's entry so the next
+            // open asks for all of them again, not a zero for good.
+            Some(RequestPurpose::Users(UsersPurpose::GetChatMessageCount { .. })) => {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.media.chat_media_counts.remove(&chat_id.0);
                 }
             }
             Some(RequestPurpose::GetProfilePhotoEmojiIcons) => {
