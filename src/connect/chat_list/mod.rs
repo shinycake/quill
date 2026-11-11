@@ -117,6 +117,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Parity slice: channel/supergroup header extras.
         self.maybe_fetch_supergroup_profile(chat_id)?;
         self.maybe_fetch_supergroup_full_info_for_header(chat_id)?;
+        // Opening the chat retries a failed topic list; the rows never do.
+        self.session.threads.forum_topics.clear_failure(chat_id.0);
         self.maybe_fetch_forum_topics(chat_id)?;
         self.retry_direct_topics_on_open(chat_id);
         Ok(())

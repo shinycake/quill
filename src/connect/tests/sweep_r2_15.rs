@@ -310,3 +310,20 @@ fn a_refused_member_probe_is_not_sent_again_by_the_poll() {
         "no re-ask after the refusal"
     );
 }
+
+#[test]
+fn opening_a_forum_retries_a_failed_topic_list_but_the_rows_do_not() {
+    let mut rig = forum_rig();
+    rig.driver.load_forum_topics(ChatId(13)).unwrap();
+    let ask = rig.sent("getForumTopics");
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":500,"message":"X"}}"#,
+        extra_of(&ask[0])
+    ));
+    // A row's upkeep asks nothing while the list is failed.
+    rig.driver.load_forum_topics(ChatId(13)).unwrap();
+    assert_eq!(rig.sent("getForumTopics").len(), 1);
+    // Opening the chat asks again.
+    rig.driver.fetch_open_chat_extras(ChatId(13)).unwrap();
+    assert_eq!(rig.sent("getForumTopics").len(), 2);
+}

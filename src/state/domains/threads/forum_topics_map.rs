@@ -109,6 +109,14 @@ impl ForumTopicsMap {
             .is_some_and(|list| list.failed(request, error, false))
     }
 
+    /// A failed ask for `chat_id` is forgotten (the held list, if any,
+    /// stays), so the next ask goes out: opening the chat retries it.
+    pub fn clear_failure(&mut self, chat_id: i64) {
+        if let Some(list) = self.lists.get_mut(&chat_id) {
+            list.clear_error();
+        }
+    }
+
     /// `getForumTopics` for `chat_id` never left.
     pub fn fail(&mut self, chat_id: i64, error: impl Into<String>) {
         self.lists.entry(chat_id).or_default().fail(error);
