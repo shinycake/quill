@@ -1101,8 +1101,8 @@ fn a_refreshed_invite_link_list_takes_only_the_newest_answer_in_either_order() {
         ] {
             let (mut session, sink) = session();
             let seq = AtomicU64::new(0);
-            let older = session.request(purpose.clone(), Some(ChatId(13)));
-            let newer = session.request(purpose.clone(), Some(ChatId(13)));
+            let older = session.request(purpose, Some(ChatId(13)));
+            let newer = session.request(purpose, Some(ChatId(13)));
             let slot = if purpose == RequestPurpose::GetChatInviteLinks {
                 &mut session.groups.invite_links
             } else {
