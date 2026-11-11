@@ -263,8 +263,6 @@ pub(crate) struct ChatUi {
     /// `StopPollWarn` / `StopQuizWarn`: nobody can vote afterwards and
     /// the action can't be undone.
     pub(super) pending_stop_poll: Option<(ChatId, MessageId, bool)>,
-    /// Last row clicked in selection mode: the Shift+click range anchor.
-    pub(super) selection_anchor: Option<MessageId>,
     /// What keyboard selection and the screen reader's focus rest on in
     /// this chat: a row (Ctrl+Space, Up / Down) or the unread bar. One
     /// value of the chat, so another chat starts with none.

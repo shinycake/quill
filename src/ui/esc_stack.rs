@@ -87,7 +87,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // Slice CL: the peek preview is the most transient layer.
     layer!(
         "chat-preview",
-        |app| app.chat_list.peek.open().is_some(),
+        |app| app.chat_list.overlay.peek().is_some(),
         |app, _, cx| app.close_chat_preview(cx)
     ),
     // Drawn in the call windows, not the main window: Esc there closes

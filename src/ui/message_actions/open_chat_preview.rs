@@ -15,14 +15,14 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let started = Instant::now();
-        self.chat_list.peek.press(chat_id, started);
+        self.chat_list.overlay.press(chat_id, started);
         self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(Self::CHAT_PREVIEW_LONG_PRESS)
                 .await;
             let _ = this.update(cx, |this, cx| {
                 // Still the same press (no release, no newer press)?
-                if this.chat_list.peek.is_press(chat_id, started) {
+                if this.chat_list.overlay.is_press(chat_id, started) {
                     this.open_chat_preview(chat_id, anchor, cx);
                 }
             });
@@ -39,9 +39,9 @@ impl QuillApp {
         anchor: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        self.chat_list.menu = None;
-        self.chat_list.peek =
-            crate::ui::chat_list_state::PeekPreview::Open(ChatPreviewState { chat_id, anchor });
+        self.chat_list
+            .overlay
+            .open_peek(ChatPreviewState { chat_id, anchor });
         // Live fetch for unopened chats; already-loaded history renders
         // immediately. Demo/no-driver sessions skip the network.
         if let Some(live) = self.live.as_mut() {

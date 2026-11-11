@@ -210,7 +210,6 @@ QuillApp::round_record_overlay::round_preview.borrow_mut 1
 QuillApp::run_passcode_job::answer.borrow_mut 1
 QuillApp::run_passcode_job::asked.borrow_mut 1
 QuillApp::selection_bar::selection.borrow 1
-QuillApp::shortcuts_reference::bindings.borrow 1
 QuillApp::sidebar_chats::row_fx.borrow_mut 1
 QuillApp::spawn_system_unlock_wait::held.borrow_mut 1
 QuillApp::spawn_system_unlock_wait::master.borrow_mut 1

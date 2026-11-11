@@ -110,3 +110,31 @@ fn the_share_boxs_text_and_ticks_go_with_the_box(cx: &mut TestAppContext) {
         assert_eq!(app.share.tick_count(), 0, "a new box starts with no ticks");
     });
 }
+
+/// The Shift+click anchor is the selection's: a new selection starts with
+/// none, not with the row an earlier one ended on.
+#[gpui_kit::test]
+fn a_new_selection_starts_without_the_old_ones_anchor(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        let (chat, ids) = {
+            let session = app.demo_session.as_ref().expect("demo session");
+            let (chat, history) = session
+                .histories
+                .iter()
+                .find(|(_, history)| history.messages.len() >= 2)
+                .expect("a chat with two messages");
+            let ids: Vec<MessageId> = history.messages.keys().map(|id| MessageId(*id)).collect();
+            (ChatId(*chat), ids)
+        };
+        let (first, second) = (ids[0], ids[1]);
+        app.toggle_forward_select(chat, first, false, cx);
+        app.set_selection_anchor(first);
+        assert_eq!(app.selection_anchor(), Some(first));
+        app.end_selection(window, cx);
+        assert_eq!(app.selection_anchor(), None, "the selection took it along");
+        app.toggle_forward_select(chat, second, false, cx);
+        assert_eq!(app.selection_anchor(), None, "a new selection has none yet");
+    });
+}

@@ -550,7 +550,7 @@ impl Render for QuillApp {
                 },
             )
             // Slice CL1: right-click chat-row context menu.
-            .when_some(self.chat_list.menu, |this, menu| {
+            .when_some(self.chat_list.overlay.menu(), |this, menu| {
                 this.child(self.chat_menu_overlay(menu, cx))
             })
             .when_some(
@@ -575,7 +575,7 @@ impl Render for QuillApp {
             // messages beside the pressed chat-list row. Rendered above
             // the row menu; any click or the long-press release closes
             // it.
-            .when_some(self.chat_list.peek.open(), |this, preview| {
+            .when_some(self.chat_list.overlay.peek(), |this, preview| {
                 this.child(self.chat_preview_overlay(preview, cx))
             })
             // MED4: Instant View reader overlay (above the menu).

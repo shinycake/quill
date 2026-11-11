@@ -170,13 +170,13 @@ impl QuillApp {
     /// Escape closes an open message or chat context menu first: the
     /// window's own message menu, and in the main window the chat menu.
     pub(super) fn close_context_menus(&mut self, cx: &mut Context<Self>) -> bool {
-        let chat_menu = !self.windows.in_window() && self.chat_list.menu.is_some();
+        let chat_menu = !self.windows.in_window() && self.chat_list.overlay.menu().is_some();
         if !self.message_ui.menu.is_open() && !chat_menu {
             return false;
         }
         self.close_message_menu();
         if chat_menu {
-            self.chat_list.menu = None;
+            self.chat_list.overlay.close_menu();
         }
         cx.notify();
         true

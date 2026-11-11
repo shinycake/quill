@@ -115,7 +115,7 @@ impl QuillApp {
             window.focus(&self.message_ui.history_focus, cx);
             self.chat_ui.focus = A11yFocus::Row(message_id);
             if event.modifiers.shift
-                && let Some(anchor) = self.chat_ui.selection_anchor
+                && let Some(anchor) = self.selection_anchor()
             {
                 let ids = self.loaded_selectable_ids(chat);
                 let range = quill::selection_pin::range_between(&ids, anchor, message_id);
@@ -285,13 +285,13 @@ impl QuillApp {
                 self.set_selection(drag.chat, next, cx);
                 // The release ends the drag, not a swipe to reply.
                 self.message_ui.swipe_reply_start = None;
-                self.chat_ui.selection_anchor = Some(range.to);
+                self.set_selection_anchor(range.to);
                 self.chat_ui.focus = A11yFocus::Row(range.to);
             }
             None if drag.click_toggles => {
                 let pending = self.message_still_sending(drag.chat, drag.press);
                 self.toggle_forward_select(drag.chat, drag.press, pending, cx);
-                self.chat_ui.selection_anchor = Some(drag.press);
+                self.set_selection_anchor(drag.press);
                 self.chat_ui.focus = A11yFocus::Row(drag.press);
             }
             None => {}
@@ -686,7 +686,7 @@ mod tests {
         vcx.simulate_click(blank_point(a), Modifiers::default());
         assert_eq!(selected(&app, vcx), vec![b.id], "a click toggles a off");
         assert_eq!(
-            app.read_with(vcx, |app, _| app.chat_ui.selection_anchor),
+            app.read_with(vcx, |app, _| app.selection_anchor()),
             Some(a.id),
             "the last clicked row anchors the next Shift+click"
         );

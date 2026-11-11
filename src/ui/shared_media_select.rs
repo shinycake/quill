@@ -383,6 +383,7 @@ impl QuillApp {
             send_copy: false,
             remove_caption: false,
             topic_id: None,
+            range_anchor: None,
         };
         self.share.forward.begin_selection(draft);
         self.clear_shared_media_selection(cx);

@@ -38,6 +38,22 @@ pub(super) enum SaveSelection {
 }
 
 impl QuillApp {
+    /// The row a Shift+click or Shift+arrow range runs from: the selection's
+    /// own, so it is gone with the selection.
+    pub(super) fn selection_anchor(&self) -> Option<MessageId> {
+        self.share
+            .forward
+            .draft()
+            .and_then(|draft| draft.range_anchor)
+    }
+
+    /// Make `id` the range anchor of the selection on now; nothing without one.
+    pub(super) fn set_selection_anchor(&mut self, id: MessageId) {
+        if let Some(draft) = self.share.forward.draft_mut() {
+            draft.range_anchor = Some(id);
+        }
+    }
+
     /// Whether selection mode is on in `chat_id`, in the conversation the
     /// view shows there (`forward_draft` hides one made in another topic).
     /// A forward bar is no selection mode, in the chat it waits in or the
@@ -265,7 +281,7 @@ impl QuillApp {
             quill::selection_pin::room_for(draft.count()),
         );
         self.add_to_selection(chat_id, span);
-        self.chat_ui.selection_anchor = Some(message_id);
+        self.set_selection_anchor(message_id);
         self.chat_ui.focus = A11yFocus::Row(message_id);
         cx.notify();
     }

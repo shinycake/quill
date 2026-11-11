@@ -86,11 +86,13 @@ fn chat_menu_closes_when_its_chat_is_removed(cx: &mut TestAppContext) {
             .expect("another chat")
     });
     app.update(vcx, |app, cx| {
-        app.chat_list.menu = Some(ChatMenuState::at(chat, point(px(100.), px(200.))));
+        app.chat_list
+            .overlay
+            .open_menu(ChatMenuState::at(chat, point(px(100.), px(200.))));
         cx.notify();
     });
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.chat_list.menu.is_some()));
+    assert!(app.read_with(vcx, |app, _| app.chat_list.overlay.menu().is_some()));
     app.update(vcx, |app, cx| {
         if let Some(session) = app.session_mut() {
             session.chats.remove(&chat.0);
@@ -98,7 +100,7 @@ fn chat_menu_closes_when_its_chat_is_removed(cx: &mut TestAppContext) {
         cx.notify();
     });
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.chat_list.menu.is_none()));
+    assert!(app.read_with(vcx, |app, _| app.chat_list.overlay.menu().is_none()));
 }
 
 fn other_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> (ChatId, ChatId) {
