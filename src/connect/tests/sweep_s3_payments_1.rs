@@ -920,3 +920,31 @@ fn a_refused_saved_tags_send_is_not_asked_at_every_pump() {
     assert!(t.driver.load_saved_tags(0).unwrap().is_some());
     assert!(t.driver.session.threads.saved.tags.is_loading());
 }
+
+#[test]
+fn a_refused_refetch_after_a_set_edit_keeps_both_lists_marked_for_the_next_try() {
+    let mut t = Flaky::new();
+    t.driver.session.stickers.stickers.lists.installed.outdate();
+    t.driver.session.stickers.emoji.lists.installed.outdate();
+    // Both lists ask `getInstalledStickerSets` (by sticker type).
+    t.sender.refuse(&["getInstalledStickerSets"]);
+    assert!(t.driver.refetch_installed_sets_after_edit().is_err());
+    assert_eq!(t.sender.count("getInstalledStickerSets"), 0);
+    // The emoji list is still due, not left `Failed` for good.
+    assert!(t.driver.session.stickers.emoji.lists.installed.is_outdated());
+    assert!(t.driver.session.stickers.stickers.lists.installed.is_outdated());
+    t.sender.refuse(&[]);
+    t.driver.refetch_installed_sets_after_edit().unwrap();
+    let asked = t.sender.all("getInstalledStickerSets");
+    assert_eq!(asked.len(), 2);
+    assert!(
+        asked
+            .iter()
+            .any(|ask| ask["sticker_type"]["@type"] == "stickerTypeCustomEmoji")
+    );
+    assert!(!t.driver.session.stickers.emoji.lists.installed.is_outdated());
+    assert!(!t.driver.session.stickers.stickers.lists.installed.is_outdated());
+    // Nothing is due any more: nothing more goes out.
+    t.driver.refetch_installed_sets_after_edit().unwrap();
+    assert_eq!(t.sender.count("getInstalledStickerSets"), 2);
+}

@@ -210,7 +210,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// An edit renamed, changed or deleted a set: fetch both installed
     /// lists again so the "Add to … Set" menus and the panel's "edit" badge
     /// follow the server (tdesktop `notifyUpdated` after `feedSetFull`).
-    fn refetch_installed_sets_after_edit(&mut self) -> Result<(), ConnectSendError> {
+    pub(crate) fn refetch_installed_sets_after_edit(&mut self) -> Result<(), ConnectSendError> {
         let stickers_due = self.session.stickers.stickers.lists.installed.is_outdated();
         let emoji_due = self.session.stickers.emoji.lists.installed.is_outdated();
         if !(stickers_due || emoji_due) || !self.chats_path_active() {

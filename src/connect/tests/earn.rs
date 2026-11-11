@@ -710,3 +710,35 @@ fn a_program_click_answered_after_its_list_closed_opens_nothing() {
     );
     assert!(p.0.session.payments.earn.link_box.is_none());
 }
+
+#[test]
+fn a_refused_ads_link_is_drawn_failed_and_asks_again_only_from_its_retry() {
+    let mut p = parts();
+    p.0.open_earn_page(EarnPeer::User(BOT), EarnScreen::Stars, false)
+        .unwrap();
+    assert_eq!(count(&p.1, "getStarAdAccountUrl"), 1);
+    error(&mut p, "getStarAdAccountUrl", "FLOOD");
+    let page = p.0.session.payments.earn.page.as_ref().unwrap();
+    assert!(matches!(page.ad_account_url, Load::Failed(_)));
+    // Nothing re-asks by itself (a poll, another ingest).
+    feed(&mut p, json!({"@type": "updateOption", "name": "x", "value": {"@type": "optionValueBoolean", "value": true}}));
+    assert_eq!(count(&p.1, "getStarAdAccountUrl"), 1);
+    // The Retry asks again; only that request's answer lands.
+    p.0.retry_earn_ad_account_url(EarnPeer::User(BOT)).unwrap();
+    assert_eq!(count(&p.1, "getStarAdAccountUrl"), 2);
+    let page = p.0.session.payments.earn.page.as_ref().unwrap();
+    assert!(page.ad_account_url.is_loading());
+    answer(
+        &mut p,
+        "getStarAdAccountUrl",
+        json!({"@type": "httpUrl", "url": "https://ads.example/acc"}),
+    );
+    let page = p.0.session.payments.earn.page.as_ref().unwrap();
+    assert_eq!(
+        page.ad_account_url.ready().map(String::as_str),
+        Some("https://ads.example/acc")
+    );
+    // A retry with nothing refused sends nothing.
+    p.0.retry_earn_ad_account_url(EarnPeer::User(BOT)).unwrap();
+    assert_eq!(count(&p.1, "getStarAdAccountUrl"), 2);
+}

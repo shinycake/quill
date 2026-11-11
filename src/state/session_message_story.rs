@@ -150,12 +150,8 @@ impl Session {
 
     /// After a successful Stars payment for a paid-media message: the note
     /// tdesktop shows as a toast (`ShowPaidMediaUnlockedToast`, "Media
-    /// Unlocked"). Only for paid media; an invoice message gets none. `true` when the
-    /// note was queued.
-    pub(crate) fn note_paid_media_unlocked(
-        &mut self,
-        paid: &crate::state::PaymentInFlight,
-    ) -> bool {
+    /// Unlocked"). Only for paid media; an invoice message gets none.
+    pub(crate) fn note_paid_media_unlocked(&mut self, paid: &crate::state::PaymentInFlight) {
         use crate::payment_invoice::InputInvoice;
         use crate::telegram::envelope::PaymentFormTypeData;
         let InputInvoice::Message {
@@ -163,12 +159,12 @@ impl Session {
             message_id,
         } = paid.invoice.clone()
         else {
-            return false;
+            return;
         };
         let Some(PaymentFormTypeData::Stars { star_count }) =
             paid.form.as_ref().map(|f| f.form_type.clone())
         else {
-            return false;
+            return;
         };
         let paid_media = self
             .histories
@@ -176,15 +172,13 @@ impl Session {
             .and_then(|history| history.messages.get(&message_id.0))
             .is_some_and(|message| is_paid_media_content(&message.content));
         if !paid_media {
-            return false;
+            return;
         }
         let chat = self
             .chats
             .get(&chat_id.0)
             .map_or("the chat", |chat| chat.title.as_str());
-        self.payments
-            .notify(NoticeKind::Info, media_unlocked_note(star_count, chat));
-        true
+        self.payments.unlocked_notice = Some(media_unlocked_note(star_count, chat));
     }
 }
 

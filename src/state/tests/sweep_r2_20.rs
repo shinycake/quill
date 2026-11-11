@@ -27,26 +27,27 @@ fn an_older_close_friends_answer_does_not_overwrite_a_saved_list() {
 }
 
 #[test]
-fn an_older_forum_topics_answer_after_a_created_topic_lands_nowhere() {
+fn an_older_forum_topics_answer_while_a_newer_ask_waits_lands_nowhere() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let chat = ChatId(16);
     let old = session.request(RequestPurpose::GetForumTopics, Some(chat));
     session.threads.forum_topics.begin(16);
     session.threads.forum_topics.sent(16, old);
-    // A topic was created: the list is dropped, the row asks again.
-    session.threads.forum_topics.remove(&16);
-    apply_json(
-        &mut session,
-        &seq,
-        &sink,
-        &format!(
+    let new = session.request(RequestPurpose::GetForumTopics, Some(chat));
+    session.threads.forum_topics.begin(16);
+    session.threads.forum_topics.sent(16, new);
+    let answer = |extra: RequestId| {
+        format!(
             r#"{{"@type":"forumTopics","@extra":"{}","total_count":0,"topics":[],"next_offset_date":0,"next_offset_message_id":0,"next_offset_forum_topic_id":0}}"#,
-            old.0
-        ),
-    );
+            extra.0
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &answer(old));
     assert!(!session.threads.forum_topics.contains_key(&16));
-    assert!(!session.threads.forum_topics.asked(16));
+    assert!(session.threads.forum_topics.asked(16));
+    apply_json(&mut session, &seq, &sink, &answer(new));
+    assert!(session.threads.forum_topics.contains_key(&16));
 }
 
 #[test]
@@ -208,4 +209,23 @@ fn a_scope_default_update_beats_the_fetch_still_out() {
             .map(|s| s.mute_for),
         Some(77)
     );
+}
+
+#[test]
+fn a_gift_market_error_with_no_request_fails_nothing_it_does_not_wait_for() {
+    use crate::gift_market::{AuctionFetch, GiftMarketPurpose};
+    let (mut session, _sink) = session();
+    let waiting = RequestId(5);
+    session.payments.gift_market.auction = AuctionFetch::Loading { request: waiting.0 };
+    let err = crate::telegram::envelope::TdError::from_code(400);
+    let purpose = GiftMarketPurpose::AuctionState { gift_id: 1 };
+    // An error nobody tracked, and another request's, leave the fetch.
+    session.apply_gift_market_error(&err, purpose, None);
+    session.apply_gift_market_error(&err, purpose, Some(RequestId(6)));
+    assert_eq!(
+        session.payments.gift_market.auction,
+        AuctionFetch::Loading { request: waiting.0 }
+    );
+    session.apply_gift_market_error(&err, purpose, Some(waiting));
+    assert_eq!(session.payments.gift_market.auction, AuctionFetch::Idle);
 }

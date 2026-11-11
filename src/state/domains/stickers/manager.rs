@@ -155,3 +155,39 @@ mod tests {
         assert_eq!(commit.next_step(), CommitStep::Done);
     }
 }
+
+#[cfg(test)]
+mod commit_stage_tests {
+    use super::*;
+
+    fn manager_with_step_out(request: u64) -> StickersManager {
+        let mut manager = StickersManager::default();
+        let mut commit = ManagerCommit::new(false, [4], None);
+        commit.stage = CommitStage::Sent(RequestId(request));
+        manager.commits.push_back(commit);
+        manager
+    }
+
+    #[test]
+    fn a_step_is_out_until_its_own_answer() {
+        let mut manager = manager_with_step_out(7);
+        assert!(manager.step_out());
+        // Another request's answer leaves it out.
+        manager.step_answered(Some(RequestId(8)));
+        manager.step_answered(None);
+        assert!(manager.step_out());
+        manager.step_answered(Some(RequestId(7)));
+        assert!(!manager.step_out());
+        assert_eq!(manager.failure, None);
+    }
+
+    #[test]
+    fn a_failed_step_leaves_the_stage_and_is_told_once() {
+        let mut manager = manager_with_step_out(7);
+        assert!(!manager.note_commit_failure(RequestId(8)));
+        assert!(manager.note_commit_failure(RequestId(7)));
+        assert!(!manager.step_out());
+        assert_eq!(manager.take_failure(), Some(CommitFailure { masks: false }));
+        assert_eq!(manager.take_failure(), None);
+    }
+}
