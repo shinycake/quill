@@ -161,7 +161,7 @@ impl QuillApp {
         key: &AccountKey,
         cx: &mut Context<Self>,
     ) {
-        self.account.accounts.remove_confirm = None;
+        self.account.accounts.row_edit = crate::ui::accounts::AccountRowEdit::None;
         // A second click on Remove while the first is still closing.
         if self.background.deleting.contains(key)
             || self

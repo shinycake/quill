@@ -825,3 +825,9 @@
 "lng_proxy_web_host_ph" = "proxy.example.com";
 "lng_proxy_web_server_label" = "Web proxy server";
 "lng_proxy_web_warning" = "This WEB proxy runs a web page from its provider in the background while you're connected. Only use it if you trust the provider. It may also display a sponsored channel in your chat list. This doesn't reveal any of your Telegram traffic.";
+"qll_prefs_switch_to_account_1" = "Switch to account 1";
+"qll_prefs_switch_to_account_2" = "Switch to account 2";
+"qll_prefs_switch_to_account_3" = "Switch to account 3";
+"qll_prefs_switch_to_account_4" = "Switch to account 4";
+"qll_prefs_switch_to_account_5" = "Switch to account 5";
+"qll_prefs_switch_to_account_6" = "Switch to account 6";
