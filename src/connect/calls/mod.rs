@@ -498,6 +498,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         // separate attempted set. A Ready call without an encryption key
         // cannot build the native encryption parameters; the call stays
         // up (TDLib owns signaling) but carries no sound.
+        // The parameters live in `CallState::Ready`, which a hang-up in flight
+        // replaces: media is not started for a call being hung up, and a
+        // failed `discardCall` puts the state (and its parameters) back, so
+        // the next pass connects.
         if let Some((call_id, _, is_outgoing, Some(ready))) = &active_call_after
             && self
                 .session

@@ -736,3 +736,19 @@ fn sticker_set_emojis_stay_with_their_stickers() {
         other => panic!("{other:?}"),
     }
 }
+
+#[test]
+fn a_file_being_sent_keeps_the_local_state_it_was_in() {
+    let partial = LocalFileState::from_parts("/tmp/p.bin", true, false, false, 7);
+    let sending = partial.clone().into_uploading();
+    assert!(sending.is_uploading());
+    assert_eq!(sending.path(), "/tmp/p.bin");
+    assert_eq!(sending.downloaded_size(), 7);
+    assert!(sending.can_be_downloaded());
+    assert!(!sending.is_downloading_completed());
+    assert!(sending.is_idle_incomplete());
+
+    let done = LocalFileState::from_parts("/tmp/c.bin", false, false, true, 9).into_uploading();
+    assert!(done.is_uploading() && done.is_downloading_completed());
+    assert_eq!(done.clone().into_uploading(), done, "sending twice is sending");
+}

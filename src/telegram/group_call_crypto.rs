@@ -292,14 +292,15 @@ impl GroupCallCrypto {
     /// answered with it (tdesktop `setCallId`). TDLib's request log stops
     /// writing frames first.
     pub fn bind(&self, group_call_id: i32) {
-        let first = matches!(
-            *crate::locks::lock_or_recover(&self.stage),
-            CryptoStage::Unbound
+        // One step: the stage that was there decides, so two binds racing
+        // cannot both hide the log (it would be shown only once).
+        let was = std::mem::replace(
+            &mut *crate::locks::lock_or_recover(&self.stage),
+            CryptoStage::Bound { group_call_id },
         );
-        if first {
+        if matches!(was, CryptoStage::Unbound) {
             self.link.hide_request_log(true);
         }
-        *crate::locks::lock_or_recover(&self.stage) = CryptoStage::Bound { group_call_id };
     }
 
     /// The call is over (tdesktop `clearCallId`): frames still waiting on

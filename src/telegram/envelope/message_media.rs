@@ -211,12 +211,10 @@ pub enum LocalFileState {
         can_download: bool,
         downloaded_size: i64,
     },
-    /// Fully on disk and being sent (`remoteFile.is_uploading_active`).
-    Uploading {
-        path: String,
-        can_download: bool,
-        downloaded_size: i64,
-    },
+    /// The file is being sent (`remoteFile.is_uploading_active`). It keeps
+    /// the local state it was in, whatever that was: sending says nothing
+    /// about how much is on disk.
+    Uploading(Box<LocalFileState>),
 }
 
 impl Default for LocalFileState {
@@ -265,59 +263,57 @@ impl LocalFileState {
         }
     }
 
-    /// The file is on its way out: a complete local file being sent.
+    /// The file is on its way out; its local state stays what it was.
     pub fn into_uploading(self) -> Self {
         match self {
-            Self::Complete {
-                path,
-                can_download,
-                downloaded_size,
-            } => Self::Uploading {
-                path,
-                can_download,
-                downloaded_size,
-            },
+            Self::Uploading(_) => self,
+            other => Self::Uploading(Box::new(other)),
+        }
+    }
+
+    /// The local state, whether or not the file is being sent.
+    fn local(&self) -> &Self {
+        match self {
+            Self::Uploading(inner) => inner.local(),
             other => other,
         }
     }
 
     pub fn path(&self) -> &str {
-        match self {
-            Self::Absent { .. } => "",
+        match self.local() {
             Self::Partial { path, .. }
             | Self::Downloading { path, .. }
-            | Self::Complete { path, .. }
-            | Self::Uploading { path, .. } => path,
+            | Self::Complete { path, .. } => path,
+            Self::Absent { .. } | Self::Uploading(_) => "",
         }
     }
 
     pub fn can_be_downloaded(&self) -> bool {
-        match self {
+        match self.local() {
             Self::Absent { can_download }
             | Self::Partial { can_download, .. }
             | Self::Downloading { can_download, .. }
-            | Self::Complete { can_download, .. }
-            | Self::Uploading { can_download, .. } => *can_download,
+            | Self::Complete { can_download, .. } => *can_download,
+            Self::Uploading(_) => false,
         }
     }
 
     pub fn is_downloading_active(&self) -> bool {
-        matches!(self, Self::Downloading { .. })
+        matches!(self.local(), Self::Downloading { .. })
     }
 
-    /// Fully on disk (a file being sent is too).
+    /// Fully on disk.
     pub fn is_downloading_completed(&self) -> bool {
-        matches!(self, Self::Complete { .. } | Self::Uploading { .. })
+        matches!(self.local(), Self::Complete { .. })
     }
 
     pub fn is_uploading(&self) -> bool {
-        matches!(self, Self::Uploading { .. })
+        matches!(self, Self::Uploading(_))
     }
 
     /// Total downloaded bytes so far.
     pub fn downloaded_size(&self) -> i64 {
-        match self {
-            Self::Absent { .. } => 0,
+        match self.local() {
             Self::Partial {
                 downloaded_size, ..
             }
@@ -326,16 +322,14 @@ impl LocalFileState {
             }
             | Self::Complete {
                 downloaded_size, ..
-            }
-            | Self::Uploading {
-                downloaded_size, ..
             } => *downloaded_size,
+            Self::Absent { .. } | Self::Uploading(_) => 0,
         }
     }
 
     /// Download is neither in flight nor finished (`file` / `updateFile` idle).
     pub fn is_idle_incomplete(&self) -> bool {
-        matches!(self, Self::Absent { .. } | Self::Partial { .. })
+        matches!(self.local(), Self::Absent { .. } | Self::Partial { .. })
     }
 }
 
