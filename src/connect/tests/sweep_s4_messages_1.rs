@@ -356,19 +356,11 @@ fn the_reply_bar_copy_shows_an_edit_and_the_oldest_copy_is_the_one_dropped() {
 #[test]
 fn each_create_gets_its_own_start_number_and_a_reset_keeps_the_count() {
     let mut t = Flaky::new();
-    t.feed(
-        json!({"@type":"updateUser","user":{"id":900,"first_name":"Manager",
-        "type":{"@type":"userTypeBot","can_be_edited":false}}}),
-    );
     let starts = |t: &Flaky| t.driver.session.bots.owned.create.starts;
     let before = starts(&t);
-    if t.driver
+    t.driver
         .create_managed_bot(900, "A", "a_bot", false)
-        .is_err()
-    {
-        // The manager bot is not set up in this fixture: nothing to count.
-        return;
-    }
+        .unwrap();
     let first = starts(&t);
     assert_eq!(first, before + 1);
     t.driver

@@ -56,7 +56,6 @@ Drawn::leaving
 DropTopic::load_failed
 EarnLimits::app_config_loaded
 EmojiBarUi::sets_asked
-EmojiPanel::failed
 EmojiPanel::installed_loaded
 EmojiPanel::mutation_failed
 EmojiStyleUi::started

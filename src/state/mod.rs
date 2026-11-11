@@ -59,6 +59,7 @@ use std::time::Instant;
 mod account_notices;
 mod acks;
 pub mod answers;
+mod bot_stop;
 mod business_bot_bar;
 mod call_types;
 mod chat_activity;
@@ -184,6 +185,7 @@ mod web_app_types;
 
 pub use account_notices::*;
 pub use acks::{Answer, RequestAcks};
+pub use bot_stop::BotStopStage;
 pub use call_types::*;
 pub use chat_activity::*;
 pub use chat_types::*;
