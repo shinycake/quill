@@ -191,6 +191,9 @@ struct MediaTile {
 
 /// Where the media tile stands. `Building` ends in `Ready` when the build
 /// answers; the app owns the build, so a closed window does not strand it.
+/// The build is claimed by the frame callback itself (`claim_build`), not
+/// by the ask: a window that closes before its next frame leaves the tile
+/// `Idle`, and the next window to paint asks again.
 enum TileState {
     Idle,
     Building,
@@ -204,31 +207,38 @@ thread_local! {
 const TILE_UNUSED: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// The media tile when it is built, marked painted now. While it is not,
-/// the first ask starts the build at the window's next frame and the
-/// specks wait (the spoiler's cover is already drawn under them).
+/// the ask schedules the build for the window's next frame and the specks
+/// wait (the spoiler's cover is already drawn under them).
 fn image_tile(window: &mut Window) -> Option<Arc<RenderImage>> {
-    let start = TILE.with(|tile| {
-        let mut tile = tile.borrow_mut();
-        match &mut *tile {
-            TileState::Ready(ready) => {
-                ready.painted = Instant::now();
-                ready.stamp = super::image_budget::paint_stamp();
-                Err(Some(ready.image.clone()))
-            }
-            TileState::Building => Err(None),
-            TileState::Idle => {
-                *tile = TileState::Building;
-                Ok(())
-            }
+    let ready = TILE.with(|tile| match &mut *tile.borrow_mut() {
+        TileState::Ready(ready) => {
+            ready.painted = Instant::now();
+            ready.stamp = super::image_budget::paint_stamp();
+            Some(Some(ready.image.clone()))
         }
+        TileState::Building => Some(None),
+        TileState::Idle => None,
     });
-    match start {
-        Err(image) => image,
-        Ok(()) => {
-            window.on_next_frame(|_, cx| build_tile_in_background(cx));
-            None
+    ready.unwrap_or_else(|| {
+        window.on_next_frame(|_, cx| {
+            if claim_build() {
+                build_tile_in_background(cx);
+            }
+        });
+        None
+    })
+}
+
+/// Idle to `Building`: true for the one frame callback that starts it.
+fn claim_build() -> bool {
+    TILE.with(|tile| {
+        let mut tile = tile.borrow_mut();
+        let idle = matches!(&*tile, TileState::Idle);
+        if idle {
+            *tile = TileState::Building;
         }
-    }
+        idle
+    })
 }
 
 /// Build the tile on the background executor and install it.
@@ -699,6 +709,12 @@ mod tests {
         assert_eq!(speck_coverage(10., 10., 10., 10., 4., 4.), 1.);
         assert_eq!(speck_coverage(14., 10., 10., 10., 4., 4.), 0.);
     }
+}
+
+/// Whether the tile is neither built nor being built (tests).
+#[cfg(all(test, feature = "demo-capture"))]
+fn tile_is_idle() -> bool {
+    TILE.with(|tile| matches!(&*tile.borrow(), TileState::Idle))
 }
 
 #[cfg(test)]

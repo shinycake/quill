@@ -1022,3 +1022,24 @@ fn a_failed_saved_pause_search_asks_again_and_a_stale_answer_is_ignored() {
     session.apply(copy_and_parse(&failed, &seq, &sink).unwrap());
     assert_eq!(session.media.disk_search, DiskSearch::NotAsked);
 }
+
+#[test]
+fn a_lost_saved_pause_search_asks_again() {
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let mut session = Session::new(AccountKey::primary(), sink);
+    let request = session.request(
+        crate::state::RequestPurpose::Media(crate::state::MediaPurpose::SearchDiskPausedDownloads),
+        None,
+    );
+    session.media.disk_search = asked_search(&[(7, 99)]);
+    if let DiskSearch::Asked { request: asked, .. } = &mut session.media.disk_search {
+        *asked = request;
+    }
+    // The sweep drops a search that TDLib never answered (its TTL), and
+    // that settles it like a failure.
+    let sink_conn = crate::telegram::ConnectionState::Ready;
+    session.connection = sink_conn;
+    let later = std::time::Instant::now() + crate::state::PENDING_REQUEST_TTL * 2;
+    assert!(session.sweep_stale_requests(later, crate::state::PENDING_REQUEST_TTL, |_| false));
+    assert_eq!(session.media.disk_search, DiskSearch::NotAsked);
+}

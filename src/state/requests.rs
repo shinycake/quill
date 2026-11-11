@@ -126,6 +126,7 @@ impl RequestPurpose {
                 | RequestPurpose::SearchPublicChats
                 | RequestPurpose::GetSharedMedia { .. }
                 | RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { .. })
+                | RequestPurpose::Media(MediaPurpose::SearchDiskPausedDownloads)
                 | RequestPurpose::GetPinnedMessages
                 | RequestPurpose::GetUserFullInfo
                 | RequestPurpose::GetSupergroupFullInfo
