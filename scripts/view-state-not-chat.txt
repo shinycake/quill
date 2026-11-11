@@ -32,7 +32,6 @@ ShareUi.forward.Bar.dest | the chat the forward bar waits in; kept across chats 
 ShareUi.forward.Picking.bar | the forward bar the share box was opened over, which leaving the box returns to; it goes with the bar (dismiss_forward_for_view)
 ViewerUi.video | the media viewer's clip, which outlives a chat change (the viewer is the screen's)
 ViewerUi.pending_seek | a media-timestamp link's seek for the viewer's clip, as ViewerUi.video
-ComposerUi.once.effect | an effect id, not a chat's: set only around one synchronous send (`with_send_once`)
 ComposerUi.suggest.stickers_dismissed | carries its chat and text: another chat never matches
 MessageUi.a11y.announce_first | carries its chat; read against the chat viewed
 MessageUi.rendered_sponsored | each ad carries the chat painted; the next frame reports only the open chat's
@@ -59,7 +58,7 @@ MessageUi.fact_check_dialog * | carries its chat and message
 HistoryUi.rows * | rebuilt whenever `rows_key` (with its chat) changes; the ids inside are emoji status and album ids
 HistoryUi.rows_key * | what the rows were built from, its chat included: the check that rebuilds them on a change
 HistoryUi.reaction_fly * | carries its chat and message; drawn only on that row (`reaction_fly_for`)
-HistoryUi.landing * | ended by the history's sync when the chat or topic shown changes (`end_landing`)
+HistoryUi.aim * | a landing is ended by the history's sync when the chat or topic shown changes (`end_landing`); a goal is a thread root, dropped when the thread closes
 PickerUi.media_panel * | sticker set and emoji status ids; the reaction target carries its chat and message
 ViewerUi.photo_editor * | the editor's target carries its own chat or sticker set; it is not opened from a chat's history
 MessageUi.custom_emoji.Asked.emoji_id | a custom emoji's id, not a chat's: the card it shows is about that emoji and its set, the same in any chat
