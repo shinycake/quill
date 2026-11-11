@@ -4108,7 +4108,9 @@ Media and players. Entry ids in brackets; a skipped entry says why.
   reading (02-140; the low-disk and saved-pause loops follow the same
   order). The saved-pause search is `DiskSearch::{NotAsked, Asked { request,
   keys }, Done}`: set after the send succeeded, its answer matched by
-  request id, and a failed search goes back to `NotAsked` (05-082).
+  request id, and a failed search goes back to `NotAsked`; so does a lost
+  one, because the search is swept like the other dedupe-guarded lookups
+  and the sweep settles it through the error arm (05-082).
 - **Quick reaction.** `setDefaultReactionType` carries
   `RequestRollback::DefaultReaction { previous }` (02-142; one line in
   `session_apply_error.rs`, with a `Hotspot-change` trailer: every new
@@ -4131,9 +4133,12 @@ Media and players. Entry ids in brackets; a skipped entry says why.
 - **Profile boxes.** Edit contact, birthday, personal channel and photo,
   and share contact send their request and stay open as
   `ProfileDialog::Saving { dialog, request, saved }`; the request is watched
-  by id (`SaveWatch`, filled by `apply_error`), the answer closes the box
-  with its toast, a refusal puts the box back and says why, closing it
-  forgets the wait (12-042). The personal-channel entry in the profile
+  by id (`SaveWatch`: one slot, since one box is open at a time, so a box
+  replaced without closing leaves nothing behind). The toast is earned by
+  the answer itself (`Session::apply` marks it), not by the request leaving
+  flight: a request dropped unanswered puts the box back with no success
+  toast. A refusal puts the box back and says why, closing it forgets the
+  wait (12-042). The personal-channel entry in the profile
   menu has no box, so it still toasts on send.
 - **Pickers.** `PickerUi`'s farewell closes the GIF gate and the
   status-choices resolver on the client being left (11-p1-001). The Masks
@@ -4146,7 +4151,8 @@ Media and players. Entry ids in brackets; a skipped entry says why.
   when its window ends a pass or leaves the list with no row that rendered
   it (10-136). The HDR viewer's poll and draw read one headroom
   (`display_headroom`), so a screen that lost EDR does not repaint every
-  second (10-097); a chat window runs the EDR sync too (10-098). The HDR
+  second (10-097); a chat window runs the EDR sync too, under its scope guard like the rest
+  of its upkeep (10-098). The HDR
   JPEG XL decode converts a chunk at a time into the final buffer and caps
   at 32 Mpx (10-103). A sticker worker that ended fails its clips and gets
   no new ones (`WorkerLife`, 06-011). The sticker pump redraws only for a
@@ -4154,17 +4160,28 @@ Media and players. Entry ids in brackets; a skipped entry says why.
   until its content changes (08-019).
 - **Sticker box.** `Encoding::{Idle, Running { cancel }}` is ended only by
   the job holding that flag (13-003); a chosen video whose download failed
-  ends the wait with a note, and a download that could not be sent says so
+  ends the wait with a note, and a download that could not be sent says so.
+  The wait asks with an automatic download, whose end `status` reads as
+  `Idle` (only user downloads fail), so it checks
+  `DownloadIntents::ended_without_file`, which holds for any origin
   (13-005; no progress bar: tdesktop shows none for this wait).
 - **Spoiler tile.** The media spoiler tile is built on the background
   executor (`TileState::{Idle, Building, Ready}`) and released only by the
-  idle image trim, not every three seconds (13-041).
+  idle image trim, not every three seconds. The frame callback claims the
+  build (`claim_build`), not the ask, so a window that closes before its
+  next frame leaves the tile `Idle` for the next window to ask again
+  (13-041).
 - **Statistics export.** A workbook is refused while an async graph of the
-  page is loading or failed (13-027); the toast says the statistics are
-  still loading.
+  page was never asked or is loading, and the toast says the statistics are
+  still loading. A graph whose request failed is exported without its
+  sheet, as one the server could not build is: the page only asks a graph
+  once, so waiting on it would block the export for good (13-027).
 - **Playlist.** Remove and reorder report a send that failed; TDLib's later
   refusal already lands in the session's note (12-002).
-- Skipped: 02-144. The only sender of media snapshots is the composer, and
-  it prepares every snapshot that needs it (`needs_media_prep`) before
-  delivery; the inline fallback in `media_options` is reached by driver
-  tests and embedders only.
+- **Edit media.** A replacement video is probed in the background when it
+  is staged or re-cut (`EditMediaReplacement::probe`, `ReplacementProbe::{
+  NotNeeded, Probing, Ready}`), matched by path. Save says "Preparing the
+  video…" and waits while it is `Probing`; a failed probe drops the
+  replacement with the reason; the driver sends only a `Ready` probe, so
+  no ffprobe subprocess runs on the UI thread (02-144, fixed after being
+  skipped).

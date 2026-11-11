@@ -302,3 +302,25 @@ fn an_ended_automatic_download_reads_as_ended_without_a_file() {
     apply_json(&mut session, &seq, &sink, &update_file(70, false, true, 100));
     assert!(!ended(&session, 70));
 }
+
+#[test]
+fn a_profile_box_saves_on_the_answer_not_on_the_request_leaving_flight() {
+    use crate::state::SaveOutcome;
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let saves = |s: &mut Session, id| s.users_state.saves.take_outcome(id, false);
+    let answered = session.request(RequestPurpose::Other, None);
+    session.users_state.saves.watch(answered);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, answered.0),
+    );
+    assert_eq!(saves(&mut session, answered), SaveOutcome::Saved);
+    // Dropped without an answer (the connection restarted): no success.
+    let dropped = session.request(RequestPurpose::Other, None);
+    session.users_state.saves.watch(dropped);
+    session.requests.take(dropped);
+    assert_eq!(saves(&mut session, dropped), SaveOutcome::Unknown);
+}

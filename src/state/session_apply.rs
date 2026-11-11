@@ -34,6 +34,14 @@ impl Session {
             });
             return;
         }
+        // A box that waits on this request saves on its answer, not on the
+        // request merely having left flight.
+        if let Some(id) = extra
+            && pending.is_some()
+            && !matches!(owned.envelope.payload, EnvelopePayload::Error(_))
+        {
+            self.users_state.saves.answered(id);
+        }
         self.apply_payload_in_asking_view(
             owned.envelope.payload,
             pending.as_ref(),
