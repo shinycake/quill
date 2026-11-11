@@ -268,7 +268,6 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
         group_call: entry.has("group_call_id"),
     };
     sanitize(&mut request, schema, true).map_err(ToolError::new)?;
-    td_offset::reveal(&mut request).map_err(ToolError::new)?;
     let mut class = td_policy::classify(&method, shape);
     if has_type(&request, "callbackQueryPayloadDataWithPassword") {
         class = Class::Blocked("agents never send the user's password.");
@@ -290,6 +289,8 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
     }
     check_uploads(&request)?;
     let ctx = Ctx::active()?;
+    let offsets = td_offset::binding(&ctx.account, &current_agent(), &method);
+    td_offset::reveal(&mut request, &offsets).map_err(ToolError::new)?;
     let mut grants = Grants::new(&ctx)?;
     let named = chats_named(&request);
     let first_chat = request
@@ -301,9 +302,16 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
         Class::Blocked(_) => return Err(ToolError::new("Not available to agents.")),
         Class::Ask(risk) => {
             grants.require(&named, Scope::ReadWrite)?;
+            // A send that writable() refuses is refused before the user is
+            // asked, so an Allow is never clicked for nothing.
+            let sends = td_policy::SENDS.contains(&method.as_str());
+            let target = if sends {
+                Some(grants.writable(first_chat)?)
+            } else {
+                None
+            };
             ask_user(&ctx, &method, risk, &request, reason)?;
-            if td_policy::SENDS.contains(&method.as_str()) {
-                let target = grants.writable(first_chat)?;
+            if let Some(target) = target {
                 send(&ctx, &target, &method, request)
             } else {
                 td::call(&ctx.client, request).map_err(write_error(&ctx))
@@ -345,7 +353,7 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
     if class != Class::Granted(Scope::Read) {
         redact(&mut grants, &mut result);
     }
-    td_offset::hide(&mut result);
+    td_offset::hide(&mut result, &offsets);
     Ok(output(method, result))
 }
 

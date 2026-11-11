@@ -156,18 +156,6 @@ pub fn mute_chat(args: &Value) -> Result<ToolOutput, ToolError> {
     };
     let ctx = Ctx::active()?;
     let target = require(&ctx, args, Scope::ReadWrite)?;
-    let chat = ctx.call(json!({"@type": "getChat", "chat_id": target.chat_id}))?;
-    let mut settings = chat
-        .get("notification_settings")
-        .cloned()
-        .filter(Value::is_object)
-        .ok_or_else(|| {
-            ToolError::new("Quill could not read this chat's notification settings. Retry.")
-        })?;
-    if let Some(fields) = settings.as_object_mut() {
-        fields.insert("use_default_mute_for".into(), json!(false));
-        fields.insert("mute_for".into(), json!(mute_for));
-    }
     let summary = match minutes {
         Some(0) => "Unmuted".to_string(),
         Some(m) => format!("Muted for {m} minutes"),
@@ -179,17 +167,35 @@ pub fn mute_chat(args: &Value) -> Result<ToolOutput, ToolError> {
         Some(m) => ("mute_chat", format!("{m} min")),
         None => ("mute_chat", "∞".to_string()),
     };
-    change(
-        &ctx,
-        &target,
-        kind,
-        &detail,
-        json!({"@type": "setChatNotificationSettings", "chat_id": target.chat_id, "notification_settings": settings}),
-    )?;
+    // TDLib takes the whole settings object, so it is read at the write's
+    // turn and only `mute_for` changes: the user's sound or preview change
+    // made while the write waited stays.
+    change_built(&ctx, &target, kind, &detail, || {
+        let chat = ctx.call(json!({"@type": "getChat", "chat_id": target.chat_id}))?;
+        let mut settings = chat
+            .get("notification_settings")
+            .cloned()
+            .filter(Value::is_object)
+            .ok_or_else(|| {
+                ToolError::new("Quill could not read this chat's notification settings. Retry.")
+            })?;
+        with_mute(&mut settings, mute_for);
+        Ok(
+            json!({"@type": "setChatNotificationSettings", "chat_id": target.chat_id, "notification_settings": settings}),
+        )
+    })?;
     Ok(done(
         format!("{summary} \"{}\".", target.title),
         json!({"chat": target.summary(), "mute_for_seconds": mute_for}),
     ))
+}
+
+/// `settings` with only the mute changed.
+fn with_mute(settings: &mut Value, mute_for: i64) {
+    if let Some(fields) = settings.as_object_mut() {
+        fields.insert("use_default_mute_for".into(), json!(false));
+        fields.insert("mute_for".into(), json!(mute_for));
+    }
 }
 
 pub fn archive_schema() -> Value {
@@ -262,12 +268,43 @@ fn folder_id(ctx: &Ctx, wanted: Option<&Value>) -> Result<(i64, String), ToolErr
         .ok_or_else(|| ToolError::new("No such folder. Call list_folders for the names and ids."))
 }
 
-pub fn set_chat_folder(args: &Value) -> Result<ToolOutput, ToolError> {
-    let remove = args.get("remove").and_then(Value::as_bool).unwrap_or(false);
-    let ctx = Ctx::active()?;
-    let target = require(&ctx, args, Scope::ReadWrite)?;
-    let (id, name) = folder_id(&ctx, args.get("folder"))?;
-    let chat_id = target.chat_id;
+/// How a folder's lists hold one chat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Membership {
+    Pinned,
+    Included,
+    Excluded,
+    /// In no list: in the folder only if its rules (contacts, groups…) say so.
+    None,
+}
+
+impl Membership {
+    fn in_list(folder: &Value, key: &str, chat_id: i64) -> bool {
+        folder
+            .get(key)
+            .and_then(Value::as_array)
+            .is_some_and(|list| list.iter().any(|v| v.as_i64() == Some(chat_id)))
+    }
+
+    fn of(folder: &Value, chat_id: i64) -> Self {
+        if Self::in_list(folder, "pinned_chat_ids", chat_id) {
+            Membership::Pinned
+        } else if Self::in_list(folder, "included_chat_ids", chat_id) {
+            Membership::Included
+        } else if Self::in_list(folder, "excluded_chat_ids", chat_id) {
+            Membership::Excluded
+        } else {
+            Membership::None
+        }
+    }
+}
+
+/// Put `chat_id` in or out of `folder`'s lists as Telegram Desktop does: a
+/// chat the lists name is taken off them, and only a chat that is in by the
+/// folder's rules alone is excluded (an exclusion spends the folder's limit).
+/// A pinned chat is already in; adding it again would double-list it.
+fn edit_membership(folder: &mut Value, chat_id: i64, remove: bool) {
+    let held = Membership::of(folder, chat_id);
     let edit = |folder: &mut Value, key: &str, keep: bool| {
         if let Some(list) = folder.get_mut(key).and_then(Value::as_array_mut) {
             list.retain(|v| v.as_i64() != Some(chat_id));
@@ -276,6 +313,26 @@ pub fn set_chat_folder(args: &Value) -> Result<ToolOutput, ToolError> {
             }
         }
     };
+    match (remove, held) {
+        (true, Membership::Pinned | Membership::Included) => {
+            edit(folder, "pinned_chat_ids", false);
+            edit(folder, "included_chat_ids", false);
+        }
+        (true, Membership::None) => edit(folder, "excluded_chat_ids", true),
+        (true, Membership::Excluded) | (false, Membership::Pinned | Membership::Included) => {}
+        (false, Membership::Excluded | Membership::None) => {
+            edit(folder, "excluded_chat_ids", false);
+            edit(folder, "included_chat_ids", true);
+        }
+    }
+}
+
+pub fn set_chat_folder(args: &Value) -> Result<ToolOutput, ToolError> {
+    let remove = args.get("remove").and_then(Value::as_bool).unwrap_or(false);
+    let ctx = Ctx::active()?;
+    let target = require(&ctx, args, Scope::ReadWrite)?;
+    let (id, name) = folder_id(&ctx, args.get("folder"))?;
+    let chat_id = target.chat_id;
     let summary = if remove {
         format!("Removed from folder \"{name}\"")
     } else {
@@ -292,21 +349,12 @@ pub fn set_chat_folder(args: &Value) -> Result<ToolOutput, ToolError> {
         &format!("\"{name}\""),
         || {
             let mut folder = ctx.call(json!({"@type": "getChatFolder", "chat_folder_id": id}))?;
-            if remove {
-                edit(&mut folder, "pinned_chat_ids", false);
-                edit(&mut folder, "included_chat_ids", false);
-                edit(&mut folder, "excluded_chat_ids", true);
-            } else {
-                edit(&mut folder, "excluded_chat_ids", false);
-                edit(&mut folder, "included_chat_ids", true);
-            }
+            edit_membership(&mut folder, chat_id, remove);
             Ok(json!({"@type": "editChatFolder", "chat_folder_id": id, "folder": folder}))
         },
     )
     .map_err(|error| {
-        if error.0.contains("CHATLIST_INCLUDE_INVALID")
-            || error.0.contains("FILTER_INCLUDE_TOO_MUCH")
-        {
+        if error.0.contains("FILTER_INCLUDE_TOO_MUCH") {
             ToolError::new(format!(
                 "Folder \"{name}\" is full (Telegram's limit on chats per folder)."
             ))
@@ -322,7 +370,7 @@ pub fn set_chat_folder(args: &Value) -> Result<ToolOutput, ToolError> {
 
 #[cfg(test)]
 mod tests {
-    use super::mark_read_requests;
+    use super::{edit_membership, mark_read_requests};
     use serde_json::{Value, json};
 
     fn types(requests: &[Value]) -> Vec<&str> {
@@ -343,5 +391,41 @@ mod tests {
         let read = json!({"last_message": {"id": 9}, "is_marked_as_unread": false});
         assert_eq!(types(&mark_read_requests(&read, 4)), ["viewMessages"]);
         assert!(mark_read_requests(&json!({}), 4).is_empty());
+    }
+
+    fn folder() -> Value {
+        json!({"pinned_chat_ids": [1], "included_chat_ids": [2], "excluded_chat_ids": [3]})
+    }
+
+    fn after(chat: i64, remove: bool) -> Value {
+        let mut folder = folder();
+        edit_membership(&mut folder, chat, remove);
+        folder
+    }
+
+    #[test]
+    fn removing_an_included_chat_does_not_also_exclude_it() {
+        let folder = after(2, true);
+        assert_eq!(folder["included_chat_ids"], json!([]));
+        assert_eq!(folder["excluded_chat_ids"], json!([3]));
+        assert_eq!(after(1, true)["pinned_chat_ids"], json!([]));
+        assert_eq!(after(1, true)["excluded_chat_ids"], json!([3]));
+        assert_eq!(after(9, true)["excluded_chat_ids"], json!([3, 9]));
+        assert_eq!(after(3, true), folder_unchanged());
+    }
+
+    fn folder_unchanged() -> Value {
+        folder()
+    }
+
+    #[test]
+    fn adding_a_pinned_or_included_chat_changes_nothing() {
+        assert_eq!(after(1, false), folder());
+        assert_eq!(after(2, false), folder());
+        let added = after(9, false);
+        assert_eq!(added["included_chat_ids"], json!([2, 9]));
+        let readded = after(3, false);
+        assert_eq!(readded["excluded_chat_ids"], json!([]));
+        assert_eq!(readded["included_chat_ids"], json!([2, 3]));
     }
 }

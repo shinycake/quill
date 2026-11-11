@@ -50,7 +50,8 @@ pub enum TdError {
 }
 
 static CLIENTS: Mutex<Vec<(AccountKey, Client)>> = Mutex::new(Vec::new());
-static PENDING: Mutex<Option<HashMap<u64, SyncSender<Value>>>> = Mutex::new(None);
+/// Waiting agent requests: request id → (the client it went to, its waiter).
+static PENDING: Mutex<Option<HashMap<u64, (i32, SyncSender<Value>)>>> = Mutex::new(None);
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Make `live` the client agents use for `account`. Called when the
@@ -97,7 +98,13 @@ pub fn call_waiting(
     let (tx, rx) = mpsc::sync_channel(1);
     crate::locks::lock_or_recover(&PENDING)
         .get_or_insert_with(HashMap::new)
-        .insert(id, tx);
+        .insert(id, (client.client_id, tx));
+    // The route may have closed before the request was filed: nothing would
+    // wake the waiter then.
+    if !client.alive() {
+        forget(id);
+        return Err(TdError::Send);
+    }
     if client
         .api
         .send(client.client_id, &request.to_string())
@@ -108,7 +115,10 @@ pub fn call_waiting(
     }
     let answer = rx.recv_timeout(timeout);
     forget(id);
-    let answer = answer.map_err(|_| TdError::Timeout)?;
+    let answer = answer.map_err(|why| match why {
+        mpsc::RecvTimeoutError::Timeout => TdError::Timeout,
+        mpsc::RecvTimeoutError::Disconnected => TdError::Send,
+    })?;
     if answer.get("@type").and_then(Value::as_str) == Some("error") {
         return Err(TdError::Td {
             code: answer.get("code").and_then(Value::as_i64).unwrap_or(0),
@@ -126,6 +136,28 @@ fn forget(id: u64) {
     if let Some(pending) = crate::locks::lock_or_recover(&PENDING).as_mut() {
         pending.remove(&id);
     }
+}
+
+/// The client's route closed (log-out, account removed): end its waiting
+/// requests now, as a send failure, instead of at their timeout.
+pub fn client_closed(client_id: i32) {
+    let ended: Vec<SyncSender<Value>> = {
+        let mut guard = crate::locks::lock_or_recover(&PENDING);
+        let Some(pending) = guard.as_mut() else {
+            return;
+        };
+        let ids: Vec<u64> = pending
+            .iter()
+            .filter(|(_, (client, _))| *client == client_id)
+            .map(|(id, _)| *id)
+            .collect();
+        ids.iter()
+            .filter_map(|id| pending.remove(id))
+            .map(|(_, tx)| tx)
+            .collect()
+    };
+    // Dropping the senders wakes each waiter with a disconnect.
+    drop(ended);
 }
 
 fn agent_request_id(envelope: &Value) -> Option<u64> {
@@ -153,7 +185,7 @@ pub fn intercept(json: &str) -> bool {
     let waiter = crate::locks::lock_or_recover(&PENDING)
         .as_mut()
         .and_then(|pending| pending.remove(&id));
-    if let Some(tx) = waiter {
+    if let Some((_, tx)) = waiter {
         let _ = tx.try_send(envelope);
     }
     true
@@ -161,7 +193,7 @@ pub fn intercept(json: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{PENDING, intercept};
+    use super::{PENDING, client_closed, intercept};
     use serde_json::json;
     use std::collections::HashMap;
     use std::sync::mpsc;
@@ -171,7 +203,7 @@ mod tests {
         let (tx, rx) = mpsc::sync_channel(1);
         crate::locks::lock_or_recover(&PENDING)
             .get_or_insert_with(HashMap::new)
-            .insert(9_000_001, tx);
+            .insert(9_000_001, (1, tx));
         assert!(intercept(
             r#"{"@type":"ok","@extra":"quill-agent:9000001","@client_id":1}"#
         ));
@@ -188,5 +220,23 @@ mod tests {
         assert!(!intercept(
             r#"{"@type":"updateNewMessage","message":{"content":{"text":{"text":"quill-agent:5"}}}}"#
         ));
+    }
+
+    #[test]
+    fn a_closed_client_ends_only_its_own_waiting_requests() {
+        use std::sync::mpsc::TryRecvError;
+        let (mine, mine_rx) = mpsc::sync_channel::<serde_json::Value>(1);
+        let (other, other_rx) = mpsc::sync_channel::<serde_json::Value>(1);
+        {
+            let mut pending = crate::locks::lock_or_recover(&PENDING);
+            let map = pending.get_or_insert_with(HashMap::new);
+            map.insert(9_100_001, (71, mine));
+            map.insert(9_100_002, (72, other));
+        }
+        client_closed(71);
+        assert_eq!(mine_rx.try_recv(), Err(TryRecvError::Disconnected));
+        assert_eq!(other_rx.try_recv(), Err(TryRecvError::Empty));
+        client_closed(72);
+        assert_eq!(other_rx.try_recv(), Err(TryRecvError::Disconnected));
     }
 }

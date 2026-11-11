@@ -384,6 +384,7 @@ impl CallScope {
 impl Drop for CallScope {
     fn drop(&mut self) {
         let _ = CALL.try_with(|current| current.set(None));
+        let _ = AGENT.try_with(|agent| agent.borrow_mut().clear());
     }
 }
 
@@ -491,11 +492,8 @@ pub fn granted_message_arrived(
     let mut known = std::collections::HashMap::new();
     let (arrived, checked) = crate::agent::events::wait_for(ctx.client.id(), *since, wait, |new| {
         !new.outgoing
-            && *known.entry(new.chat_id).or_insert_with(|| {
-                target::granted(&ctx, new.chat_id, me)
-                    .ok()
-                    .flatten()
-                    .is_some()
+            && target::remember_grant(&mut known, new.chat_id, || {
+                target::granted(&ctx, new.chat_id, me).map(|found| found.is_some())
             })
     });
     *since = checked.max(*since);
@@ -675,6 +673,16 @@ mod tests {
         assert!(super::still_allowed().is_ok(), "a call begun after it");
         drop(call);
         access::set_enabled(false);
+    }
+
+    /// The agent's name belongs to the call: off a call it is the generic one.
+    #[test]
+    fn the_agent_name_does_not_outlive_its_call() {
+        let call = super::CallScope::begin(super::CallStart::now(0));
+        let _ = super::AGENT.try_with(|agent| agent.replace("Agent A".to_string()));
+        assert_eq!(super::current_agent(), "Agent A");
+        drop(call);
+        assert_eq!(super::current_agent(), "An agent");
     }
 
     /// An Allow on a one-off confirmation runs a grants update that changes

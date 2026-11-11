@@ -11,7 +11,7 @@ use gpui_kit::*;
 use quill::agent::ui_driver::bridge::UiSend;
 use quill::agent::ui_driver::guard;
 use quill::composer::SendOptions;
-use quill::ids::{ChatId, RequestId};
+use quill::ids::{AccountKey, ChatId, RequestId};
 use quill::telegram::requests::send_text;
 use serde_json::Value;
 
@@ -37,6 +37,9 @@ impl QuillApp {
             return;
         }
         let Some(chat_id) = self.open_chat_id() else {
+            return;
+        };
+        let Some(account) = self.session().map(|session| session.account.clone()) else {
             return;
         };
         if text.trim().is_empty() {
@@ -69,6 +72,7 @@ impl QuillApp {
             .map(|chat| chat.title.clone())
             .unwrap_or_default();
         self.agent_bridge.ui_send = Some(UiSend {
+            account,
             chat_id: chat_id.0,
             chat_title,
             text,
@@ -82,11 +86,15 @@ impl QuillApp {
     /// send from the window does.
     pub(super) fn agent_composer_sent(
         &mut self,
+        account: &AccountKey,
         chat_id: i64,
         text: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.session().map(|session| &session.account) != Some(account) {
+            return;
+        }
         if self.open_chat_id().map(|chat| chat.0) != Some(chat_id) {
             return;
         }

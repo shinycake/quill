@@ -544,11 +544,28 @@ fn the_composer_send_goes_to_the_agent_path_and_read_only_refuses(cx: &mut TestA
     });
     assert!(row_draft(vcx).is_some(), "the chat holds the draft");
 
+    // A clear meant for another account's chat of the same id leaves the box.
+    let reply = drive(
+        &app,
+        vcx,
+        UiCommand::ComposerSent {
+            account: quill::ids::AccountKey("another-account".into()),
+            chat_id: 11,
+            text: "hi there".into(),
+        },
+    );
+    assert!(matches!(reply, Ok(UiReply::Ok)), "{reply:?}");
+    assert_eq!(
+        vcx.update(|_, cx| app.read(cx).composer_markup(cx)),
+        "hi there"
+    );
+
     // The agent path reports the send: the box clears.
     let reply = drive(
         &app,
         vcx,
         UiCommand::ComposerSent {
+            account: send.account.clone(),
             chat_id: 11,
             text: "hi there".into(),
         },

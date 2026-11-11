@@ -102,8 +102,13 @@ impl QuillApp {
         // the user paused or stopped the agent meanwhile (pressing Confirm
         // may itself have been the input), so the next Enter does not send
         // the text twice. The open chat and the text must still match.
-        if let UiCommand::ComposerSent { chat_id, text } = &pending.request.command {
-            self.agent_composer_sent(*chat_id, text, window, cx);
+        if let UiCommand::ComposerSent {
+            account,
+            chat_id,
+            text,
+        } = &pending.request.command
+        {
+            self.agent_composer_sent(account, *chat_id, text, window, cx);
             pending.answer(UiReply::Ok);
             return;
         }

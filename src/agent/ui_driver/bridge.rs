@@ -68,6 +68,7 @@ pub enum UiCommand {
     /// clear the composer if it still holds `text` for `chat_id`. Answered
     /// at once.
     ComposerSent {
+        account: crate::ids::AccountKey,
         chat_id: i64,
         text: String,
     },
@@ -159,6 +160,9 @@ pub struct UiState {
 /// activity log) and tells the UI with [`UiCommand::ComposerSent`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiSend {
+    /// The account the window showed when the composer was asked to send:
+    /// the chat id means nothing in another account.
+    pub account: crate::ids::AccountKey,
     pub chat_id: i64,
     pub chat_title: String,
     /// The composer's text, as the draft holds it.
@@ -334,7 +338,10 @@ pub fn post_with_shot(
     shot: Option<ShotOptions>,
 ) -> Result<Ticket, BridgeError> {
     let mut queue = crate::locks::lock_or_recover(&QUEUE);
-    if queue.len() >= MAX_WAITING {
+    // The clear that follows a send that already went out is never turned
+    // away: dropping it would leave the text in the composer to be sent again.
+    let is_clear = matches!(command, UiCommand::ComposerSent { .. });
+    if queue.len() >= MAX_WAITING && !is_clear {
         return Err(BridgeError::Busy);
     }
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
@@ -477,6 +484,26 @@ mod tests {
     }
 
     #[test]
+    fn the_composer_clear_after_a_send_is_not_turned_away_when_the_queue_is_full() {
+        let _guard = lock();
+        let tickets: Vec<_> = (0..super::MAX_WAITING)
+            .map(|_| post("Test", UiCommand::ReadTree))
+            .collect();
+        assert!(tickets.iter().all(Result::is_ok));
+        assert_eq!(
+            post("Test", UiCommand::ReadTree).err(),
+            Some(BridgeError::Busy)
+        );
+        let clear = UiCommand::ComposerSent {
+            account: crate::ids::AccountKey("a".into()),
+            chat_id: 1,
+            text: "hi".into(),
+        };
+        assert!(post("Test", clear).is_ok());
+        let _ = take();
+    }
+
+    #[test]
     fn a_command_goes_in_and_its_reply_comes_out() {
         let _guard = lock();
         let ticket = post("Test", UiCommand::State).unwrap_or_else(|e| panic!("post: {e:?}"));
@@ -543,6 +570,7 @@ mod tests {
         );
         assert!(
             !UiCommand::ComposerSent {
+                account: crate::ids::AccountKey("a".into()),
                 chat_id: 1,
                 text: String::new()
             }

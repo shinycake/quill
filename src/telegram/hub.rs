@@ -228,6 +228,7 @@ impl Routes {
     pub fn unregister(&self, client_id: i32) {
         lock(&self.map).remove(&client_id);
         lock(&self.on_ready).remove(&client_id);
+        crate::agent::td::client_closed(client_id);
     }
 
     /// Run `send` on the receive thread when `client_id` next reports
@@ -265,6 +266,7 @@ impl Routes {
             Delivery::Delivered
         } else {
             map.remove(&client_id);
+            crate::agent::td::client_closed(client_id);
             Delivery::ReaderGone
         }
     }
