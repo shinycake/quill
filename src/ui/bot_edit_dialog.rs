@@ -296,11 +296,9 @@ impl QuillApp {
             let danger = cx.theme().danger;
             let edit = this.session().and_then(|s| s.bots.owned.edit.clone());
             // Save diffs the fields against the bot's texts: until the
-            // fields hold them, an empty field would clear the bot's.
-            let loaded = matches!(state.stage, EditStage::Editing(_))
-                && edit
-                    .as_ref()
-                    .is_some_and(|e| e.name.text().is_some() && e.about.text().is_some());
+            // fields hold them (the one stage change `fill_bot_edit` makes
+            // when both texts are Ready), an empty field would clear them.
+            let loaded = matches!(state.stage, EditStage::Editing(_));
             let load_failed = edit.as_ref().is_some_and(|e| e.load_failed());
             let saving = edit.as_ref().is_some_and(|e| e.saving() > 0);
             let server_error = edit.as_ref().and_then(|e| e.error().map(str::to_string));

@@ -79,6 +79,7 @@ impl QuillApp {
             return;
         }
         self.profile_modal_replaced_by(target);
+        self.forget_emoji_access_shown();
         if let InfoPanelTarget::User(user_id) = target {
             self.reset_common_groups_search(user_id, window, cx);
         }
@@ -261,6 +262,7 @@ impl QuillApp {
             session.users_state.open_info_panel = None;
         }
         self.common_groups.close();
+        self.forget_emoji_access_shown();
         // The members block belongs to the panel that closed.
         self.inline_members.reset(None);
         cx.notify();

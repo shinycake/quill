@@ -128,6 +128,14 @@ impl QuillApp {
         {
             self.fill_bot_edit(window, cx);
         }
+        // A Verify accounts box that sent its request: the answer returns
+        // it to the list, a refusal shows its reason.
+        if self
+            .windows
+            .dialog_may_show_in(crate::ui::shell::DialogKind::BotVerify, self.windows.scope)
+        {
+            self.pump_bot_verify(cx);
+        }
         self.business_closed_error_upkeep();
         if self.windows.dialog_may_show_in(
             crate::ui::shell::DialogKind::GroupSettings,

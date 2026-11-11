@@ -74,9 +74,9 @@ impl Session {
                     // objects arrive via `updateUser`; ids alone drive the
                     // list (Telegram X `SharedChatsController` similarly
                     // resolves users from its cache).
-                    self.bots
-                        .similar_bots
-                        .insert(bot_user_id, SimilarBotsFetch::Loaded(user_ids));
+                    if let Some(fetch) = self.bots.similar_bots.get_mut(&bot_user_id) {
+                        fetch.answered(Some(pending.id), user_ids);
+                    }
                 }
             }
             // Phase B1: secret chat lifecycle (schema 1.8.67, lines

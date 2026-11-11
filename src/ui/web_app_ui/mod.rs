@@ -274,8 +274,9 @@ pub(super) struct MiniApps {
     /// What only a render can do, in the order it was asked: two asked
     /// before the next render both run.
     render_actions: Vec<RenderAction>,
-    /// Bots whose "Emoji Status" switch has been on screen this run, so it
-    /// stays when the person turns it off (`bot_permissions`).
+    /// Bots whose "Emoji Status" switch the person turned off on the open
+    /// profile, so it stays to turn on again (`bot_permissions`); cleared
+    /// when the profile panel changes or closes.
     pub(super) emoji_access_shown: std::collections::HashSet<quill::ids::OfAccount<i64>>,
     /// The poll task, alive while a window is.
     poll: Option<Task<()>>,

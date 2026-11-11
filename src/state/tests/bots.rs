@@ -1,6 +1,7 @@
 //! State reducer tests: bots.
 use super::common::*;
 use super::*;
+use crate::state::fetch::Fetch;
 
 #[test]
 fn b2_bot_start_link_parser_only_accepts_start_links() {
@@ -39,6 +40,9 @@ fn b2_similar_bots_users_response_lands_by_pending_user() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request_for_user(RequestPurpose::GetBotSimilarBots, 21);
+    let fetch = session.bots.similar_bots.entry(21).or_default();
+    fetch.begin();
+    fetch.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -50,7 +54,7 @@ fn b2_similar_bots_users_response_lands_by_pending_user() {
     );
     assert!(matches!(
         session.bots.similar_bots.get(&21),
-        Some(SimilarBotsFetch::Loaded(ids)) if ids == &[31, 32]
+        Some(Fetch::Ready(ids)) if ids == &[31, 32]
     ));
 }
 
