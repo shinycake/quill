@@ -559,3 +559,48 @@ fn default_icons_keep_only_custom_emoji_stickers() {
         Some(5005)
     );
 }
+
+/// r2-18 05-071 / 06-013: the older page of a Saved Messages view is asked
+/// through its own older end: a view left and entered again drops the answer
+/// of the page the first one asked, and a failed page settles the end.
+#[test]
+fn a_saved_page_lands_only_in_the_view_that_asked_it() {
+    let (mut session, sink, seq) = saved_session();
+    let purpose = RequestPurpose::GetSavedMessagesTopicHistory { topic_id: 77 };
+    session.open_saved_sublist(77);
+    let old = session.request(purpose, None);
+    ask_sublist(&mut session, old);
+    // The sublist is left and entered again: a new view, its own page.
+    session.open_saved_sublist(77);
+    let new = session.request(purpose, None);
+    ask_sublist(&mut session, new);
+    let page = |extra: RequestId, id: i64| {
+        format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":1,"messages":[{}]}}"#,
+            extra.0,
+            message_json(id, "m")
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &page(old, 30));
+    let view = session.threads.saved.sublist.as_ref().unwrap();
+    assert!(view.history.messages.is_empty());
+    assert_eq!(view.history.older, OlderEnd::Asking(new));
+    apply_json(&mut session, &seq, &sink, &page(new, 20));
+    let view = session.threads.saved.sublist.as_ref().unwrap();
+    assert_eq!(view.history.messages.len(), 1);
+    assert_eq!(view.history.older, OlderEnd::Open);
+    // A failed page ends in `Failed`, which waits for the user's Retry.
+    let again = session.request(purpose, None);
+    ask_sublist(&mut session, again);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"INTERNAL"}}"#,
+            again.0
+        ),
+    );
+    let view = session.threads.saved.sublist.as_ref().unwrap();
+    assert_eq!(view.history.older, OlderEnd::Failed);
+}

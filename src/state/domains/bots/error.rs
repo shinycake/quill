@@ -22,6 +22,15 @@ impl Session {
                     .chat_action_error
                     .push(format!("could not start the bot (error {})", err.code));
             }
+            // The list of recent inline bots goes back to being askable
+            // (the next "@" asks again), instead of staying in flight.
+            Some(RequestPurpose::GetRecentInlineBots) => {
+                self.bots.reply_keyboards.recent_inline_bots.failed(
+                    pending.map(|p| p.id),
+                    format!("could not load recent inline bots (error {})", err.code),
+                    false,
+                );
+            }
             Some(RequestPurpose::GetBotSimilarBots) => {
                 // The section goes back to its button, so it can ask again
                 // (a `Loading` left behind refused every later press).

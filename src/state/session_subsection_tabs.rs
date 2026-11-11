@@ -54,14 +54,38 @@ pub struct RowTopic {
     pub icon: i64,
 }
 
+/// The topic titles of a forum row: not here yet (the row reads "Loading…"),
+/// or what the list answered (empty reads "No chats"; a failed list is
+/// listed empty too).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RowTopics {
+    Loading,
+    Listed(Vec<RowTopic>),
+}
+
+impl RowTopics {
+    /// The topic list neither arrived nor failed.
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading)
+    }
+}
+
+impl std::ops::Deref for RowTopics {
+    type Target = [RowTopic];
+
+    fn deref(&self) -> &[RowTopic] {
+        match self {
+            Self::Loading => &[],
+            Self::Listed(topics) => topics,
+        }
+    }
+}
+
 /// What a forum's chat row shows below the name: the topic titles and the
 /// unread-topic count.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RowForum {
-    pub topics: Vec<RowTopic>,
-    /// The topic list arrived (or failed): empty then reads "No chats", not
-    /// "Loading…".
-    pub loaded: bool,
+    pub topics: RowTopics,
     /// The badge counts topics, not messages: the unmuted topics with unread
     /// messages, or all of them when every one is muted
     /// (`IncludeInBadge::UnmutedOrAll`).
@@ -273,13 +297,17 @@ impl Session {
             (muted, muted > 0)
         };
         let jump = topics.first().filter(|t| t.unread).map(|t| t.id);
+        let listed = self.threads.forum_topics.contains_key(&chat_id.0)
+            || self.threads.forum_topics_failed(chat_id.0);
         Some(RowForum {
-            loaded: self.threads.forum_topics.contains_key(&chat_id.0)
-                || self.threads.forum_topics_failed(chat_id.0),
             unread_topics: i32::try_from(shown).unwrap_or(i32::MAX),
             badge_muted,
             jump,
-            topics,
+            topics: if listed {
+                RowTopics::Listed(topics)
+            } else {
+                RowTopics::Loading
+            },
         })
     }
 

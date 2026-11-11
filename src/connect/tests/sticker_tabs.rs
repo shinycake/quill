@@ -618,11 +618,11 @@ fn sticker_batches_report_confirmed_partial_results_and_reject_overlapping_work(
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
     assert!(driver.manage_sticker_sets(&[77, -1], true).is_err());
-    assert_eq!(driver.session.stickers.stickers.batch_total, 0);
+    assert_eq!(driver.session.stickers.stickers.batch.total(), 0);
     assert_eq!(driver.manage_sticker_sets(&[77, 88, 77], true).unwrap(), 2);
-    assert_eq!(driver.session.stickers.stickers.batch_total, 2);
-    assert_eq!(driver.session.stickers.stickers.batch_completed, 0);
-    assert_eq!(driver.session.stickers.stickers.batch_pending, vec![77, 88]);
+    assert_eq!(driver.session.stickers.stickers.batch.total(), 2);
+    assert_eq!(driver.session.stickers.stickers.batch.completed(), 0);
+    assert_eq!(driver.session.stickers.stickers.batch.pending(), vec![77, 88]);
     assert!(driver.manage_sticker_sets(&[99], false).is_err());
     let ok = driver
         .session
@@ -650,8 +650,8 @@ fn sticker_batches_report_confirmed_partial_results_and_reject_overlapping_work(
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.stickers.stickers.batch_completed, 1);
-    assert_eq!(driver.session.stickers.stickers.batch_pending, vec![88]);
+    assert_eq!(driver.session.stickers.stickers.batch.completed(), 1);
+    assert_eq!(driver.session.stickers.stickers.batch.pending(), vec![88]);
     driver
         .ingest(
             copy_and_parse(
@@ -662,8 +662,8 @@ fn sticker_batches_report_confirmed_partial_results_and_reject_overlapping_work(
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.stickers.stickers.batch_failed, 1);
-    assert!(driver.session.stickers.stickers.batch_pending.is_empty());
+    assert_eq!(driver.session.stickers.stickers.batch.failed(), 1);
+    assert!(driver.session.stickers.stickers.batch.pending().is_empty());
     driver
         .ingest(
             copy_and_parse(
@@ -674,11 +674,11 @@ fn sticker_batches_report_confirmed_partial_results_and_reject_overlapping_work(
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.stickers.stickers.batch_completed, 1);
+    assert_eq!(driver.session.stickers.stickers.batch.completed(), 1);
     assert_eq!(driver.manage_sticker_sets(&[88], false).unwrap(), 1);
-    assert_eq!(driver.session.stickers.stickers.batch_failed, 0);
-    assert_eq!(driver.session.stickers.stickers.batch_completed, 0);
-    assert_eq!(driver.session.stickers.stickers.batch_total, 1);
+    assert_eq!(driver.session.stickers.stickers.batch.failed(), 0);
+    assert_eq!(driver.session.stickers.stickers.batch.completed(), 0);
+    assert_eq!(driver.session.stickers.stickers.batch.total(), 1);
     assert_eq!(
         sent_request(&recorder, "changeStickerSet")["is_installed"],
         false

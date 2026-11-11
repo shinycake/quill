@@ -130,7 +130,7 @@ impl Session {
             ) => self.fail_audience(purpose),
             Some(RequestPurpose::GetChatAvailableMessageSenders) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.fail_message_senders(chat_id, error_reason(err));
+                    self.fail_message_senders(chat_id, pending.map(|p| p.id), error_reason(err));
                 }
             }
             Some(RequestPurpose::Messages(MessagesPurpose::GetMessageMenuActions {

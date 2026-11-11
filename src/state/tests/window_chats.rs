@@ -302,3 +302,19 @@ fn an_answer_for_a_closed_window_leaves_the_main_view_in_place() {
         None
     );
 }
+
+/// r2-18 06-003: the comment thread of a channel post lives in the
+/// discussion chat but was opened from the channel; the main window leaving
+/// the channel closes it too.
+#[test]
+fn leaving_the_origin_chat_closes_its_comment_thread() {
+    let (mut session, _sink) = session();
+    session.open_chat(ChatId(5));
+    session.begin_thread(ChatId(5), MessageId(3));
+    if let Some(thread) = session.threads.thread.as_mut() {
+        thread.chat_id = ChatId(9);
+        thread.thread_id = 77;
+    }
+    assert_eq!(session.leave_open_chat(), Some(ChatId(5)));
+    assert!(session.threads.thread.is_none());
+}

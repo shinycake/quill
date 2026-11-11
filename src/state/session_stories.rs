@@ -320,6 +320,17 @@ impl Session {
     /// flow ends with the error instead of spinning on `Checking`/`Sending`
     /// forever (and is made when the first request never went out).
     pub fn fail_story_report_send(&mut self, chat_id: i64, story_id: i32, message: String) {
+        // A flow with a request out (this story's earlier step, or another
+        // story's) keeps waiting for its own answer: the send that never
+        // left must not replace it.
+        if self
+            .stories
+            .report
+            .as_ref()
+            .is_some_and(|flow| flow.stage.waiting_for().is_some())
+        {
+            return;
+        }
         self.stories.report = Some(StoryReportFlow {
             chat_id,
             story_id,

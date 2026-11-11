@@ -1,4 +1,5 @@
 //! Where Stop stands for a streaming bot reply.
+use super::PendingBotMessage;
 
 /// The stage of the Stop button of a pending bot message. Pressing Stop
 /// again leaves `Failed`; the request's answer or loss leaves `Stopping`.
@@ -24,5 +25,12 @@ impl BotStopStage {
             Self::Stopping(_) | Self::Failed => true,
             Self::Stopped => false,
         }
+    }
+}
+
+impl PendingBotMessage {
+    /// The Stop button is offered for this reply.
+    pub fn can_stop(&self) -> bool {
+        self.stop.can_stop()
     }
 }

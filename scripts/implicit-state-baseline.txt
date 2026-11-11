@@ -61,13 +61,11 @@ PlaybackHealth::output_failed
 
 
 ReceivedGift::is_saved
-RowForum::loaded
 RowMenuFacts::is_saved_messages
 RowState::pending
 
 
 ReceivedGift::is_saved
-RowForum::loaded
 RowMenuFacts::is_saved_messages
 RowState::pending
 

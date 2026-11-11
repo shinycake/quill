@@ -18,13 +18,6 @@ pub struct PendingBotMessage {
     pub stop: BotStopStage,
 }
 
-impl PendingBotMessage {
-    /// The Stop button is offered for this reply.
-    pub fn can_stop(&self) -> bool {
-        self.stop.can_stop()
-    }
-}
-
 pub struct Session {
     pub account: AccountKey,
     pub account_generation: AccountGeneration,

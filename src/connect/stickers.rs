@@ -342,10 +342,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .copied()
             .filter(|id| seen.insert(*id))
             .collect();
-        self.session.stickers.stickers.batch_total = ids.len();
-        self.session.stickers.stickers.batch_completed = 0;
-        self.session.stickers.stickers.batch_failed = 0;
-        self.session.stickers.stickers.batch_pending = ids.clone();
+        self.session.stickers.stickers.batch = crate::state::StickerBatch::begin(ids.clone());
         let mut sent = 0;
         for id in ids {
             if self

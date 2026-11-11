@@ -1167,3 +1167,100 @@ fn voters_pages_land_by_request_and_a_next_page_error_stays_retryable() {
         Some(PollVotersFetch::Loaded { voters, more: VotersMore::Ready, .. }) if voters.len() == 2
     ));
 }
+
+/// r2-18 05-069: the in-chat search bar is one value: closing it, or opening
+/// it on another chat, replaces what it held (sender, media tab, member
+/// picker, results) instead of resetting fields one by one.
+#[test]
+fn the_in_chat_search_bar_is_replaced_whole_on_close_and_on_another_chat() {
+    let (mut session, _sink) = session();
+    let search = &mut session.search.chat_search;
+    assert_eq!(search.status(), SearchStatus::Closed);
+    search.open_for(ChatId(1));
+    search.set_sender(Some(MessageSender::User { user_id: 5 }));
+    search.set_media(crate::search_filters::SearchMediaKind::Files);
+    search.set_from_picker(Some(FromPicker::default()));
+    search.begin_query("cats");
+    search.accept_hits(Vec::new(), 0, MessageId(0), false);
+    assert_eq!(search.status(), SearchStatus::Empty);
+    // The same chat again is not a new search.
+    search.open_for(ChatId(1));
+    assert_eq!(search.query(), "cats");
+    // Another chat starts a fresh one.
+    search.open_for(ChatId(2));
+    assert_eq!(search.chat_id(), Some(ChatId(2)));
+    assert_eq!(search.status(), SearchStatus::Idle);
+    assert!(search.sender().is_none() && search.from_picker().is_none());
+    assert_eq!(
+        search.media(),
+        crate::search_filters::SearchMediaKind::All
+    );
+    search.set_sender(Some(MessageSender::User { user_id: 6 }));
+    let generation = search.generation;
+    search.close();
+    assert!(!search.is_open() && search.chat_id().is_none());
+    assert!(search.sender().is_none() && !search.has_criteria());
+    assert!(search.generation > generation, "late answers are dropped");
+    // Nothing writes into a closed bar.
+    search.set_sender(Some(MessageSender::User { user_id: 7 }));
+    search.begin_query("late");
+    assert_eq!(search.status(), SearchStatus::Closed);
+    assert!(search.query().is_empty());
+}
+
+/// r2-18 05-085: the demo's local filter goes through the search's own
+/// transitions, so it starts a generation and drops a typed query waiting.
+#[test]
+fn the_local_global_filter_starts_a_new_generation() {
+    let (mut session, _sink) = session();
+    session.search.search.open_field();
+    let before = session.search.search.generation;
+    session.search.search.typed.arm("old".to_string());
+    session.apply_local_search_filter("cats");
+    assert!(session.search.search.generation > before);
+    assert!(session.search.search.typed.armed().is_none());
+    assert_eq!(session.search.search.query, "cats");
+    assert!(session.search.search.is_open());
+    session.apply_local_search_filter("  ");
+    assert!(session.search.search.is_recents());
+    assert!(session.search.search.query.is_empty());
+}
+
+/// r2-18 06-012: the date jump waiting for its window is part of the jump
+/// stage; when its chat goes it becomes a plain jump in that stage, with no
+/// second value to clear.
+#[test]
+fn a_date_jump_waiting_for_its_window_lives_in_the_jump_stage() {
+    use crate::state::DateJumpMode;
+    let (mut session, _sink) = session();
+    session.open_chat(ChatId(5));
+    let need = session.begin_date_jump(MessageId(50), DateJumpMode::Next);
+    assert_eq!(need, ChatSearchJumpNeed::LoadAround);
+    assert_eq!(
+        session.search.chat_search.jump,
+        ChatSearchJump::Loading {
+            message_id: MessageId(50),
+            then: JumpLanding::Date {
+                chat_id: ChatId(5),
+                mode: DateJumpMode::Next
+            }
+        }
+    );
+    // Another chat's pieces go: this jump stays.
+    session.clear_date_jump_ui(Some(ChatId(9)));
+    assert!(matches!(
+        session.search.chat_search.jump,
+        ChatSearchJump::Loading {
+            then: JumpLanding::Date { .. },
+            ..
+        }
+    ));
+    session.clear_date_jump_ui(Some(ChatId(5)));
+    assert_eq!(
+        session.search.chat_search.jump,
+        ChatSearchJump::Loading {
+            message_id: MessageId(50),
+            then: JumpLanding::Message
+        }
+    );
+}

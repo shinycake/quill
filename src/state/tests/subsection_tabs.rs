@@ -357,7 +357,7 @@ fn forum_rows_follow_display_as_forum() {
         &topics_answer(extra.0, 43, &[2, 3]),
     );
     let row = session.chat_row_forum(ChatId(43)).expect("a forum row");
-    assert!(row.loaded);
+    assert!(!row.topics.is_loading());
     // Both topics are unread; the newest is first and is the jump target.
     assert_eq!(row.unread_topics, 2);
     assert_eq!(row.jump, Some(3));
@@ -377,9 +377,15 @@ fn forum_rows_follow_display_as_forum() {
         r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":16,"is_forum":true}}"#,
     );
     let row = session.chat_row_forum(ChatId(16)).expect("a forum row");
-    assert!(!row.loaded && row.topics.is_empty());
+    assert!(row.topics.is_loading() && row.topics.is_empty());
     session.threads.forum_topics.fail(16, "failed");
-    assert!(session.chat_row_forum(ChatId(16)).expect("row").loaded);
+    assert!(
+        !session
+            .chat_row_forum(ChatId(16))
+            .expect("row")
+            .topics
+            .is_loading()
+    );
 }
 
 /// The forum badge follows `IncludeInBadge::UnmutedOrAll`, ignores the unread

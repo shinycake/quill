@@ -198,8 +198,10 @@ impl Session {
             .threads
             .thread
             .as_ref()
-            .is_some_and(|thread| thread.chat_id == prev)
+            .is_some_and(|thread| thread.chat_id == prev || thread.origin_chat_id == prev)
         {
+            // The thread of a channel post lives in its discussion chat but
+            // was opened from the channel: leaving either closes it.
             self.threads.thread = None;
         }
         self.view_generation.bump();

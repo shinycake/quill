@@ -942,3 +942,22 @@ fn an_account_going_away_ends_the_management_calls_on_their_way() {
         StoryManageOutcome::Lost
     );
 }
+
+/// r2-18 06-014: a report step of another story that never left does not
+/// replace a flow that has a request out, and the first one that never left
+/// still ends in a failed flow.
+#[test]
+fn an_unsent_story_report_leaves_a_flow_with_a_request_out_alone() {
+    let (mut session, _sink) = session();
+    session.fail_story_report_send(12, 6, "no".into());
+    assert!(matches!(
+        session.stories.report.as_ref().map(|flow| &flow.stage),
+        Some(StoryReportStage::Failed(_))
+    ));
+    let extra = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
+    session.begin_story_report(12, 6, extra);
+    session.fail_story_report_send(13, 7, "no".into());
+    let flow = session.stories.report.as_ref().expect("flow");
+    assert!(flow.is_for(12, 6), "story 6 keeps its flow");
+    assert!(matches!(flow.stage, StoryReportStage::Checking { .. }));
+}

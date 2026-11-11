@@ -501,28 +501,27 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// `getRecentInlineBots`, once per session, when the user types "@".
     pub fn maybe_fetch_recent_inline_bots(&mut self) -> Result<(), ConnectSendError> {
-        if !self.chats_path_active()
-            || self
-                .session
-                .bots
-                .reply_keyboards
-                .recent_inline_bots
-                .is_some()
-        {
-            return Ok(());
-        }
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetRecentInlineBots)
+        // Asked once: a request out or an answer waits, a failed ask goes
+        // out again with the next "@".
+        if !self.chats_path_active() || !self.session.bots.reply_keyboards.recent_inline_bots.can_ask()
         {
             return Ok(());
         }
         let extra = self
             .session
             .request(RequestPurpose::GetRecentInlineBots, None);
-        self.send_json_request(extra, &get_recent_inline_bots(extra))
-            .map(|_| ())
+        let recent = &mut self.session.bots.reply_keyboards.recent_inline_bots;
+        recent.begin();
+        recent.sent(extra);
+        let sent = self.send_json_request(extra, &get_recent_inline_bots(extra));
+        if sent.is_err() {
+            self.session
+                .bots
+                .reply_keyboards
+                .recent_inline_bots
+                .failed(Some(extra), "not sent", false);
+        }
+        sent.map(|_| ())
     }
 
     /// `shareUsersWithBot` after the user confirmed the picked users.

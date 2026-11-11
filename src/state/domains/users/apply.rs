@@ -65,7 +65,10 @@ impl Session {
                     // B14: `getCloseFriends` answer.
                     self.stories.close_friends = CloseFriendsList::Ready(user_ids);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetRecentInlineBots) {
-                    self.bots.reply_keyboards.recent_inline_bots = Some(user_ids);
+                    self.bots
+                        .reply_keyboards
+                        .recent_inline_bots
+                        .answered(pending.map(|p| p.id), user_ids);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBotSimilarBots)
                     && let Some(pending) = pending
                     && let Some(bot_user_id) = pending.user_id

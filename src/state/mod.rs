@@ -101,6 +101,7 @@ mod requests;
 mod saved_types;
 mod scroll_memory;
 mod search_tabs_state;
+mod chat_search_types;
 mod search_types;
 mod session;
 mod session_apply;
@@ -232,6 +233,7 @@ pub use requests::*;
 pub use saved_types::*;
 pub use scroll_memory::*;
 pub use search_tabs_state::*;
+pub use chat_search_types::*;
 pub use search_types::*;
 pub use session::*;
 pub use session_boost_settings::*;
@@ -260,7 +262,9 @@ pub use session_reply::{
 pub use session_reply_keyboard::*;
 pub use session_saved::{SAVED_PAGE, SAVED_TOPICS_PAGE};
 pub use session_share::{SearchPart, ShareSearch};
-pub use session_subsection_tabs::{BotTopics, ROW_TOPIC_COUNT, RowForum, RowTopic, TopicBadge};
+pub use session_subsection_tabs::{
+    BotTopics, ROW_TOPIC_COUNT, RowForum, RowTopic, RowTopics, TopicBadge,
+};
 pub use session_translate::*;
 pub use shared_media_meta::*;
 pub use shared_media_months::*;

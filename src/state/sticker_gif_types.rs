@@ -151,6 +151,100 @@ impl StickerLists {
     }
 }
 
+/// A batch of sticker set changes: each set's `changeStickerSet` answers on
+/// its own, and a batch is not atomic. The confirmed results are what the
+/// stage keeps; a new batch replaces the finished one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum StickerBatch {
+    #[default]
+    Idle,
+    /// Changes are out for `pending`; each answer or error moves one set to
+    /// `completed` or `failed`.
+    Running {
+        total: usize,
+        completed: usize,
+        failed: usize,
+        pending: Vec<i64>,
+    },
+    /// Every set answered.
+    Finished {
+        total: usize,
+        completed: usize,
+        failed: usize,
+    },
+}
+
+impl StickerBatch {
+    /// A batch over `set_ids` starts.
+    pub fn begin(set_ids: Vec<i64>) -> Self {
+        Self::Running {
+            total: set_ids.len(),
+            completed: 0,
+            failed: 0,
+            pending: set_ids,
+        }
+    }
+
+    /// `set_id` answered (`success`) or failed; a set the batch does not wait
+    /// for changes nothing.
+    pub fn finish_item(&mut self, set_id: i64, success: bool) {
+        let Self::Running {
+            total,
+            completed,
+            failed,
+            pending,
+        } = self
+        else {
+            return;
+        };
+        let Some(index) = pending.iter().position(|id| *id == set_id) else {
+            return;
+        };
+        pending.remove(index);
+        if success {
+            *completed += 1;
+        } else {
+            *failed += 1;
+        }
+        if pending.is_empty() {
+            *self = Self::Finished {
+                total: *total,
+                completed: *completed,
+                failed: *failed,
+            };
+        }
+    }
+
+    pub fn total(&self) -> usize {
+        match self {
+            Self::Idle => 0,
+            Self::Running { total, .. } | Self::Finished { total, .. } => *total,
+        }
+    }
+
+    pub fn completed(&self) -> usize {
+        match self {
+            Self::Idle => 0,
+            Self::Running { completed, .. } | Self::Finished { completed, .. } => *completed,
+        }
+    }
+
+    pub fn failed(&self) -> usize {
+        match self {
+            Self::Idle => 0,
+            Self::Running { failed, .. } | Self::Finished { failed, .. } => *failed,
+        }
+    }
+
+    /// The sets still waited for.
+    pub fn pending(&self) -> &[i64] {
+        match self {
+            Self::Running { pending, .. } => pending,
+            _ => &[],
+        }
+    }
+}
+
 /// Composer sticker panel (Unigram `StickerDrawerViewModel` installed regular sets).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StickerPanel {
@@ -168,10 +262,8 @@ pub struct StickerPanel {
     /// Each list tab's own fetch: a failure of one list shows on that tab
     /// only, and a failed mutation is a note, not a list failure.
     pub lists: StickerLists,
-    pub batch_total: usize,
-    pub batch_completed: usize,
-    pub batch_failed: usize,
-    pub batch_pending: Vec<i64>,
+    /// The batch of set changes (install / archive many) and how far it got.
+    pub batch: StickerBatch,
     /// Slice S8: trending sets (`getTrendingStickerSets`) + premium-row flag.
     pub trending: Vec<StickerSetInfo>,
     pub trending_total: usize,
