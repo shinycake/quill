@@ -4,7 +4,6 @@
 use super::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::ids::MessageId;
 
 pub(crate) struct MessageUi {
     /// M1: right-click context menu target + window position, and what
@@ -30,8 +29,8 @@ pub(crate) struct MessageUi {
     pub(super) history_focus: FocusHandle,
     /// Screen-reader focus among the history's messages (`history_a11y`).
     pub(super) a11y: super::history_a11y::HistoryA11y,
-    /// M1: swipe-to-reply press origin (chat, message, press x).
-    pub(super) swipe_reply_start: Option<(ChatId, MessageId, Pixels)>,
+    /// M1: swipe-to-reply press of the gesture under way.
+    pub(super) swipe_reply: super::conversation::swipe_reply::SwipeReply,
     /// Phase 4.1: revealed text-entity spoilers, keyed by
     /// (chat id, message id, run index, is-caption block). Message ids are
     /// only unique within a chat, so the chat id is part of the key.
@@ -77,7 +76,7 @@ impl MessageUi {
             selection_drag: Default::default(),
             history_focus: cx.focus_handle(),
             a11y: Default::default(),
-            swipe_reply_start: None,
+            swipe_reply: Default::default(),
             revealed: Default::default(),
             dismissed_keyboards: std::collections::HashSet::new(),
             collapsed_keyboards: std::collections::HashSet::new(),

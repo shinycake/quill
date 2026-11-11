@@ -280,8 +280,9 @@ impl QuillApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                            this.message_ui.swipe_reply_start =
-                                Some((row_chat, row_msg, event.position.x));
+                            this.message_ui
+                                .swipe_reply
+                                .press(row_chat, row_msg, event.position.x);
                             // A press that starts on text selects text; any
                             // other press may become a message drag
                             // (`selection_drag`). In selection mode the
@@ -299,23 +300,15 @@ impl QuillApp {
                             cx.notify();
                         }),
                     )
-                    // A press that ends outside its row is not a swipe.
-                    .on_mouse_up_out(
-                        MouseButton::Left,
-                        cx.listener(|this, _: &MouseUpEvent, _, _| {
-                            this.message_ui.swipe_reply_start = None;
-                        }),
-                    )
                     .on_mouse_up(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseUpEvent, window, cx| {
-                            if let Some((chat_id, message_id, start_x)) =
-                                this.message_ui.swipe_reply_start.take()
-                                && chat_id == row_chat
-                                && message_id == row_msg
-                                && start_x - event.position.x > px(24.)
+                            if this
+                                .message_ui
+                                .swipe_reply
+                                .release_on(row_chat, row_msg, event.position.x)
                             {
-                                this.begin_reply_from_message(chat_id, message_id, window, cx);
+                                this.begin_reply_from_message(row_chat, row_msg, window, cx);
                             }
                             // Double-click runs the quick action setting
                             // (tdesktop `chatQuickAction`); on selected

@@ -541,6 +541,7 @@ mod render_history_row_body;
 mod row_build;
 pub(super) mod row_chrome;
 mod row_splice;
+pub(super) mod swipe_reply;
 mod rows_cache;
 mod view_hold;
 pub(super) use rows_cache::{HistoryRowsKey, RowsInput};

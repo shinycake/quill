@@ -270,6 +270,8 @@ pub(crate) struct ChatUi {
     /// M1: the scheduled-messages dialog (view/delete). Here so that a
     /// chat change closes it: its rows act on the chat shown.
     pub(super) scheduled_dialog: super::composer::ScheduledDialog,
+    /// Scheduled deletes sent from this chat and not yet answered.
+    pub(super) scheduled_deletes: Vec<super::composer::ScheduledDelete>,
     /// M1: the schedule picker popup above the composer: `Some` while it is
     /// open, with the date+time picker it holds (created when the popup
     /// opens, see `open_schedule_picker`). Its Reschedule target is a message
@@ -589,6 +591,12 @@ impl QuillApp {
         {
             live.driver.session.acks.forget(request);
         }
+        for delete in &old.scheduled_deletes {
+            if let Some(live) = self.live.as_mut() {
+                live.driver.session.acks.forget(delete.request);
+            }
+        }
+        self.message_ui.swipe_reply.clear();
         self.drop_play_intent_of_visit(old.visit);
     }
 

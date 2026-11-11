@@ -113,7 +113,16 @@ impl QuillApp {
             return;
         };
         match live.driver.delete_scheduled_message(chat_id, message_id) {
-            Ok(_) => {
+            Ok(request) => {
+                // The row leaves as the delete goes out, as in tdesktop;
+                // a refusal brings the list back (`settle_scheduled_deletes`).
+                live.driver.session.acks.expect(request);
+                self.chat_ui
+                    .scheduled_deletes
+                    .push(ScheduledDelete { request, chat_id });
+                let Some(live) = self.live.as_mut() else {
+                    return;
+                };
                 live.driver
                     .session
                     .messages
