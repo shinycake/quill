@@ -48,14 +48,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !state.time_zones.can_ask() {
             return Ok(());
         }
+        state.time_zones.begin();
         let sent = self.send_business_request(
             RequestPurpose::Settings(SettingsPurpose::GetTimeZones),
             bs::get_time_zones_request,
         );
-        let zones = &mut self.session.settings.business.time_zones;
-        match &sent {
-            Ok(()) => zones.begin(),
-            Err(_) => zones.fail("could not send"),
+        if sent.is_err() {
+            self.session
+                .settings
+                .business
+                .time_zones
+                .fail("The time zones request was not sent.");
         }
         sent
     }

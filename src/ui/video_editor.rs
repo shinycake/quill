@@ -24,7 +24,7 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::composer::{AttachmentExtras, AttachmentKind, EditMediaKind};
+use quill::composer::{AttachmentExtras, AttachmentKind, EditMediaKind, GifMode};
 use quill::lang::{keys, tr};
 use quill::sticker_set_box::SetKind;
 use quill::video_edit::{VideoEdits, VideoSource, probe_source, render_edited, render_frame};
@@ -208,7 +208,7 @@ impl QuillApp {
         // `modifications.gif = !hasAudio`); the range is filled in once the
         // video is read.
         let initial = attachment.extras.edits.or_else(|| {
-            attachment.extras.gif.then(|| VideoEdits {
+            attachment.extras.is_gif().then(|| VideoEdits {
                 gif: true,
                 ..VideoEdits::full(0)
             })
@@ -540,7 +540,11 @@ impl QuillApp {
                 ..edits
             }
             .start_timestamp_secs(info.duration_ms),
-            sound_removed: edits.gif && info.has_audio,
+            gif: match (edits.gif, info.has_audio) {
+                (false, _) => GifMode::Off,
+                (true, true) => GifMode::SoundRemoved,
+                (true, false) => GifMode::Gif,
+            },
             ..AttachmentExtras::default()
         };
         let note = match target {
@@ -553,7 +557,6 @@ impl QuillApp {
                         let _ = std::fs::remove_file(&attachment.path);
                     }
                     extras.cover = attachment.extras.cover.take();
-                    extras.gif = edits.gif;
                     if edited {
                         attachment.file_name = mp4_name(&attachment.file_name);
                     }
@@ -588,8 +591,7 @@ impl QuillApp {
                 }
                 replacement.path = output;
                 replacement.probe = quill::composer::ReplacementProbe::for_kind(replacement.kind);
-                extras.gif = false;
-                extras.sound_removed = false;
+                extras.gif = GifMode::Off;
                 replacement.video_extras = extras;
                 self.probe_edit_replacement(cx);
                 tr(keys::Q_AV_VIDEO_EDITS_SAVED)

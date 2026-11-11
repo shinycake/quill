@@ -8,8 +8,8 @@ use crate::state::*;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BusinessSettingsState {
-    /// `getTimeZones`, sorted for the picker. Asked once per session; a
-    /// failed one is asked again at the next look.
+    /// `getTimeZones`, sorted for the picker: asked once per session, again
+    /// only after it failed.
     pub time_zones: crate::state::fetch::Fetch<Vec<TimeZone>>,
     /// Saves sent and not answered yet.
     pub saving: Vec<BusinessSettingKind>,
@@ -21,6 +21,14 @@ pub struct BusinessSettingsState {
     /// here: [`Session::business_own_info`] reads the cache and the request
     /// table.
     pub own_info_error: Option<String>,
+}
+
+impl BusinessSettingsState {
+    /// The refusal the Business screens draw: the last refused save, else
+    /// why the time zones failed to load.
+    pub fn refusal(&self) -> Option<&str> {
+        self.error.as_deref().or_else(|| self.time_zones.error())
+    }
 }
 
 impl Session {
@@ -84,9 +92,12 @@ impl Session {
         let state = &mut self.settings.business;
         match purpose {
             Some(RequestPurpose::Settings(SettingsPurpose::GetTimeZones)) => {
-                let line = format!("Couldn't load the time zones: {}", error_reason(err));
-                state.time_zones.fail(line.clone());
-                state.error = Some(line);
+                // The failure line lives in the fetch only; the screens read
+                // it from there ([`BusinessSettingsState::refusal`]).
+                state.time_zones.fail(format!(
+                    "Couldn't load the time zones: {}",
+                    error_reason(err)
+                ));
             }
             Some(RequestPurpose::Settings(SettingsPurpose::SaveBusinessSetting { kind })) => {
                 state.saving.retain(|k| *k != kind);

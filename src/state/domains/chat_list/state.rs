@@ -29,17 +29,11 @@ pub struct ChatListState {
     /// responses (keyed by folder id) — edit dialog prefill and the
     /// remove-from-folder chain. Dropped when the folder is edited
     /// through the dialog or deleted.
-    pub folder_specs: HashMap<i32, ChatFolderSpec>,
-    /// Folders whose cached spec may be behind the server: a folder
-    /// changed since it was fetched (`updateChatFolders`, an edit or an
-    /// "Add to folder"), possibly from another device. An edit must start
-    /// from a fresh spec ([`ChatListState::fresh_spec`]), or it writes the
-    /// old chat lists back for every device.
-    pub(crate) folder_specs_stale: HashSet<i32>,
-    /// Folders whose `getChatFolder` failed, with the line to show: the
-    /// folder editor waiting on that spec ends in it (and a Retry) instead
-    /// of loading forever. Cleared when the spec is asked again or lands.
-    pub folder_spec_errors: HashMap<i32, String>,
+    ///
+    /// Each folder's entry also says whether the spec may be behind the
+    /// server (an edit must start from a fresh one,
+    /// [`ChatListState::fresh_spec`]) and why its last fetch failed.
+    pub folder_specs: FolderSpecs,
     /// Parity slice: `getChatListsToAddChat` results per chat id — the chat
     /// lists a chat may be added to. Drives the per-chat folder picker as
     /// the schema intends (`:13347` doc comment).
@@ -158,32 +152,24 @@ impl ChatListState {
     /// `folder_id`'s spec when nothing changed the folder since it was
     /// fetched: the only spec an edit may start from.
     pub fn fresh_spec(&self, folder_id: i32) -> Option<&ChatFolderSpec> {
-        if self.folder_specs_stale.contains(&folder_id) {
-            return None;
-        }
-        self.folder_specs.get(&folder_id)
+        self.folder_specs.fresh(folder_id)
     }
 
     /// A `getChatFolder` answer: the folder's spec as it is now.
     pub(crate) fn store_spec(&mut self, folder_id: i32, spec: ChatFolderSpec) {
         self.folder_specs.insert(folder_id, spec);
-        self.folder_specs_stale.remove(&folder_id);
-        self.folder_spec_errors.remove(&folder_id);
     }
 
     /// Something changed `folder_id`: its cached spec stays for display,
     /// but the next edit fetches it again.
     pub(crate) fn mark_spec_stale(&mut self, folder_id: i32) {
-        if self.folder_specs.contains_key(&folder_id) {
-            self.folder_specs_stale.insert(folder_id);
-        }
+        self.folder_specs.mark_stale(folder_id);
     }
 
     /// Some folder changed (`updateChatFolders` names no folder): every
     /// cached spec is fetched again before an edit.
     pub(crate) fn mark_specs_stale(&mut self) {
-        self.folder_specs_stale
-            .extend(self.folder_specs.keys().copied());
+        self.folder_specs.mark_all_stale();
     }
 
     /// The next folder request that failed on a limit, for the UI to show.
@@ -222,9 +208,7 @@ impl ChatListState {
             chat_folders: Vec::new(),
             main_list_position: 0,
             are_folder_tags_enabled: false,
-            folder_specs: HashMap::new(),
-            folder_specs_stale: HashSet::new(),
-            folder_spec_errors: HashMap::new(),
+            folder_specs: FolderSpecs::default(),
             chat_lists_for_add: HashMap::new(),
             folder_chats_exhausted: HashSet::new(),
             folder_remove_queue: Vec::new(),

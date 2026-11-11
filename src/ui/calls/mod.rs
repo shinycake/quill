@@ -2,6 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::calls_state::CallTick;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -143,7 +144,7 @@ impl QuillApp {
                 .calls
                 .active_call
                 .as_ref()
-                .is_some_and(|call| !call.camera_on)
+                .is_some_and(|call| !call.camera_on())
         });
         if turning_on {
             self.with_camera_access(Self::flip_call_camera, cx);
@@ -157,7 +158,7 @@ impl QuillApp {
             let Some(call) = live.driver.session.calls.active_call.as_ref() else {
                 return;
             };
-            let (call_id, want_on) = (call.id, !call.camera_on);
+            let (call_id, want_on) = (call.id, !call.camera_on());
             let result = live.driver.set_call_camera(call_id, want_on);
             let camera_on = live
                 .driver
@@ -165,14 +166,14 @@ impl QuillApp {
                 .calls
                 .active_call
                 .as_ref()
-                .is_some_and(|call| call.camera_on);
+                .is_some_and(|call| call.camera_on());
             self.set_note(camera_toggle_note(result, camera_on));
         } else if let Some(call) = self
             .demo_session
             .as_mut()
             .and_then(|session| session.calls.active_call.as_mut())
         {
-            call.camera_on = !call.camera_on;
+            call.set_camera_on(!call.camera_on());
             self.set_note(StatusNote::silent(tr(
                 keys::Q_OPS_DEMO_CAMERA_TOGGLE_NO_LIVE,
             )));
@@ -194,7 +195,7 @@ impl QuillApp {
         let Some((call_id, sharing)) = self
             .session()
             .and_then(|session| session.calls.active_call.as_ref())
-            .map(|call| (call.id, call.screen_sharing))
+            .map(|call| (call.id, call.screen_sharing()))
         else {
             return;
         };
@@ -232,7 +233,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|session| session.calls.active_call.as_mut())
         {
-            call.screen_sharing = sharing;
+            call.set_screen_sharing(sharing);
             self.set_note(StatusNote::silent(tr(
                 keys::Q_OPS_DEMO_SCREEN_SHARE_TOGGLE_NO,
             )));
@@ -310,7 +311,7 @@ impl QuillApp {
                 .calls
                 .active_call
                 .as_ref()
-                .map(|call| call.camera_on)
+                .map(|call| call.camera_on())
         });
         match camera {
             Some(camera) => self.with_capture_access(camera, Self::answer_call, cx),
@@ -547,10 +548,10 @@ impl QuillApp {
     /// ringing / connected clock fresh and the ringtones looping. Mirrors
     /// the Phase A1 slow-mode tick (at most one task; exits when unwanted).
     pub(super) fn ensure_call_tick(&mut self, cx: &mut Context<Self>) {
-        if !self.call_tick_wanted() || self.calls.tick_active {
+        if !self.call_tick_wanted() || self.calls.tick == CallTick::Running {
             return;
         }
-        self.calls.tick_active = true;
+        self.calls.tick = CallTick::Running;
         // window-scope: the clock redraws every window's conversation (`notify_conversations`).
         // screen-scope: the call tick reads the current screen and the background accounts' rings on every beat, and must keep running across a switch.
         cx.spawn(async move |this, cx| {
@@ -566,7 +567,7 @@ impl QuillApp {
                             this.sync_call_sounds();
                             true
                         } else {
-                            this.calls.tick_active = false;
+                            this.calls.tick = CallTick::Idle;
                             false
                         }
                     })
@@ -576,7 +577,7 @@ impl QuillApp {
                 }
             }
             let _ = this.update(cx, |this, _| {
-                this.calls.tick_active = false;
+                this.calls.tick = CallTick::Idle;
             });
         })
         .detach();
@@ -586,7 +587,7 @@ impl QuillApp {
     /// intent is on and video can run (live: driver ready; demo:
     /// fixtures carry the frames).
     pub(super) fn call_camera_effective(&self, call: &ActiveCall) -> bool {
-        call.camera_on
+        call.camera_on()
             && (self.live.is_none()
                 || self
                     .live
@@ -710,8 +711,11 @@ impl QuillApp {
                     signaling_queue: Vec::new(),
                     signaling_dropped: 0,
                     muted: false,
-                    camera_on: is_video,
-                    screen_sharing: false,
+                    video: if is_video {
+                        quill::state::LocalVideo::Camera
+                    } else {
+                        quill::state::LocalVideo::Off
+                    },
                     remote_video: quill::calls::engine::RemoteVideoState::Inactive,
                     remote_screen: quill::calls::engine::RemoteVideoState::Inactive,
                     remote_audio_muted: false,

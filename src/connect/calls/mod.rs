@@ -135,13 +135,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// engine leaves the cache untouched.
     pub fn refresh_call_devices(&mut self) {
         self.take_listed_call_devices();
-        if self.call_devices_listing.is_some() {
+        if matches!(self.call_devices_listing, DeviceListing::Listing(_)) {
             return;
         }
         if let Some(engine) = self.call_engine.as_deref() {
             let (answer, listed) = std::sync::mpsc::channel();
             engine.list_media_devices(answer);
-            self.call_devices_listing = Some(listed);
+            self.call_devices_listing = DeviceListing::Listing(listed);
             self.take_listed_call_devices();
         }
     }
@@ -149,19 +149,19 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// The list [`Self::refresh_call_devices`] asked for, when it is ready.
     /// Says whether the cache changed.
     pub(crate) fn take_listed_call_devices(&mut self) -> bool {
-        let Some(listing) = self.call_devices_listing.as_ref() else {
+        let DeviceListing::Listing(listing) = &self.call_devices_listing else {
             return false;
         };
         match listing.try_recv() {
             Ok(devices) => {
-                self.call_devices_listing = None;
+                self.call_devices_listing = DeviceListing::Listed;
                 let changed = devices != self.call_devices_cache;
                 self.call_devices_cache = devices;
                 changed
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => false,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                self.call_devices_listing = None;
+                self.call_devices_listing = DeviceListing::Listed;
                 false
             }
         }
@@ -227,7 +227,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .calls
             .active_call
             .as_ref()
-            .is_some_and(|call| call.camera_on)
+            .is_some_and(|call| call.camera_on())
             .then(|| self.call_camera_device())
             .flatten();
         ConnectParams {
@@ -333,10 +333,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             engine.set_camera(call.id, camera.as_deref())?;
         }
-        call.camera_on = enabled;
-        if enabled {
-            call.screen_sharing = false;
-        }
+        // A 1:1 call has one video track: the camera replaces a screen share.
+        call.set_camera_on(enabled);
         self.sync_one_to_one_feeds();
         Ok(())
     }
@@ -375,10 +373,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             engine.set_screen_share_enabled(call.id, enabled)?;
         }
-        call.screen_sharing = enabled;
-        if enabled {
-            call.camera_on = false;
-        }
+        // Screen share replaces the camera.
+        call.set_screen_sharing(enabled);
         Ok(())
     }
 
@@ -393,7 +389,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .calls
             .active_call
             .as_ref()
-            .filter(|call| call.camera_on && call.transport.started())
+            .filter(|call| call.camera_on() && call.transport.started())
             .map(|call| call.id);
         if let Some(call_id) = sending
             && let Some(engine) = self.call_engine.as_deref_mut()
@@ -528,7 +524,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .calls
                     .active_call
                     .as_ref()
-                    .is_some_and(|call| call.screen_sharing);
+                    .is_some_and(|call| call.screen_sharing());
                 if result.is_ok()
                     && pre_sharing
                     && let Some(engine) = self.call_engine.as_deref_mut()

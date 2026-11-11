@@ -394,10 +394,13 @@ fn a_gift_list_failure_leaves_a_send_in_flight_alone() {
 #[test]
 fn a_mutation_answer_without_a_request_frees_the_lock() {
     use crate::ids::RequestId;
-    use crate::premium_hub::GiftMutation;
-    let mut lock = GiftMutation::Busy(RequestId(3));
-    lock.settle(Some(RequestId(4)));
-    assert!(lock.is_busy(), "another request's answer keeps it");
-    lock.settle(None);
-    assert!(!lock.is_busy());
+    use crate::state::fetch::ListOp;
+    let mut lock = ListOp::Mutating(RequestId(3));
+    lock.failed(Some(RequestId(4)));
+    assert!(lock.is_mutating(), "another request's answer keeps it");
+    lock.failed(None);
+    assert!(!lock.is_mutating());
+    let mut lock = ListOp::Mutating(RequestId(3));
+    lock.changed(None);
+    assert!(lock.is_stale(), "an answer naming no request frees it too");
 }

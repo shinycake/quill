@@ -13,7 +13,6 @@ fn password_state_response_replaces_cache_and_clears_error() {
         None,
     );
     session.auth_state.password_op = crate::state::PasswordFlight::InFlight(extra);
-    session.auth_state.password_op_error = Some("stale".into());
     apply_json(
         &mut session,
         &seq,
@@ -26,6 +25,7 @@ fn password_state_response_replaces_cache_and_clears_error() {
     let state = session
         .auth_state
         .password_state
+        .clone()
         .expect("password state cached");
     assert!(state.has_password);
     assert_eq!(state.password_hint, "street");
@@ -35,7 +35,7 @@ fn password_state_response_replaces_cache_and_clears_error() {
         session.auth_state.password_op,
         crate::state::PasswordFlight::Idle
     );
-    assert!(session.auth_state.password_op_error.is_none());
+    assert!(session.auth_state.password_op_error().is_none());
 }
 
 #[test]
@@ -82,13 +82,11 @@ fn password_state_error_surfaces_honest_classified_line() {
         );
         let line = session
             .auth_state
-            .password_op_error
-            .expect("error line set");
+            .password_op_error()
+            .expect("error line set")
+            .to_string();
         assert!(line.contains(expect), "op {op:?} code {code}: {line}");
-        assert_eq!(
-            session.auth_state.password_op,
-            crate::state::PasswordFlight::Idle
-        );
+        assert!(!session.auth_state.password_state_loading());
         assert!(session.auth_state.password_state.is_none());
     }
 }
@@ -201,7 +199,7 @@ fn sessions_answer_replaces_cache_for_matching_request() {
     assert!(sessions.iter().any(|s| s.is_password_pending && s.id == 33));
     assert!(!session.settings.sessions.is_loading());
     assert!(session.settings.sessions.error().is_none());
-    assert!(!session.settings.sessions_stale);
+    assert!(!session.settings.sessions_op.is_stale());
 }
 
 #[test]
@@ -239,11 +237,11 @@ fn terminate_session_ok_keeps_cache_and_marks_stale() {
         location: "Tel Aviv, Israel".into(),
         ..Default::default()
     }]);
-    session.settings.sessions_mutating = true;
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::TerminateSession { session_id: 22 }),
         None,
     );
+    session.settings.sessions_op.begin(extra);
     apply_json(
         &mut session,
         &seq,
@@ -253,8 +251,8 @@ fn terminate_session_ok_keeps_cache_and_marks_stale() {
     // The old cache stays visible until the authoritative refetch
     // replaces it — no optimistic deletion.
     assert_eq!(session.settings.sessions.data().unwrap().len(), 1);
-    assert!(session.settings.sessions_stale);
-    assert!(!session.settings.sessions_mutating);
+    assert!(session.settings.sessions_op.is_stale());
+    assert!(!session.settings.sessions_op.is_mutating());
     assert!(session.settings.sessions.error().is_none());
 }
 
@@ -262,11 +260,11 @@ fn terminate_session_ok_keeps_cache_and_marks_stale() {
 fn terminate_session_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.sessions_mutating = true;
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::TerminateSession { session_id: 22 }),
         None,
     );
+    session.settings.sessions_op.begin(extra);
     apply_json(
         &mut session,
         &seq,
@@ -276,7 +274,7 @@ fn terminate_session_error_surfaces_honestly() {
             extra.0
         ),
     );
-    assert!(!session.settings.sessions_mutating);
+    assert!(!session.settings.sessions_op.is_mutating());
     assert_eq!(
         session.settings.sessions.error(),
         Some("Could not terminate the session: Telegram refused the request")
@@ -291,7 +289,7 @@ fn sessions_fetch_error_clears_loading() {
     // A failed stale-refetch (e.g. after a terminate-ok marked the
     // cache stale) must NOT leave the cache stale — otherwise the
     // next ingest retries the fetch and flood state worsens.
-    session.settings.sessions_stale = true;
+    session.settings.sessions_op.mark_stale();
     let extra = session.request(RequestPurpose::GetActiveSessions, None);
     apply_json(
         &mut session,
@@ -305,7 +303,7 @@ fn sessions_fetch_error_clears_loading() {
     assert!(!session.settings.sessions.is_loading());
     // The failed stale-refetch clears staleness: no auto-retry on
     // the next ingest; the user retries via the Refresh button.
-    assert!(!session.settings.sessions_stale);
+    assert!(!session.settings.sessions_op.is_stale());
     assert_eq!(
         session.settings.sessions.error(),
         Some("Could not load the sessions list: try again in 3 seconds")
@@ -317,8 +315,8 @@ fn account_ttl_answer_writes_cache_for_matching_request() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetAccountTtl, None);
-    session.settings.account_ttl_loading = true;
-    session.settings.account_error = Some("stale".into());
+    session.settings.account_ttl.fail("stale");
+    session.settings.account_ttl.begin();
     apply_json(
         &mut session,
         &seq,
@@ -328,16 +326,16 @@ fn account_ttl_answer_writes_cache_for_matching_request() {
             extra.0
         ),
     );
-    assert_eq!(session.settings.account_ttl_days, Some(180));
-    assert!(!session.settings.account_ttl_loading);
-    assert!(session.settings.account_error.is_none());
+    assert_eq!(session.settings.account_ttl.data().copied(), Some(180));
+    assert!(!session.settings.account_ttl.is_loading());
+    assert!(session.settings.account_error().is_none());
 }
 
 #[test]
 fn account_ttl_fetch_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.account_ttl_loading = true;
+    session.settings.account_ttl.begin();
     let extra = session.request(RequestPurpose::GetAccountTtl, None);
     apply_json(
         &mut session,
@@ -348,9 +346,9 @@ fn account_ttl_fetch_error_surfaces_honestly() {
             extra.0
         ),
     );
-    assert!(!session.settings.account_ttl_loading);
+    assert!(!session.settings.account_ttl.is_loading());
     assert_eq!(
-        session.settings.account_error.as_deref(),
+        session.settings.account_error(),
         Some("Could not load the account inactivity timer: Telegram refused the request")
     );
 }
@@ -359,8 +357,11 @@ fn account_ttl_fetch_error_surfaces_honestly() {
 fn code_info_answer_ignores_unknown_extra() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.auth_state.change_number_loading = true;
     let extra = session.request(RequestPurpose::SendPhoneNumberCode, None);
+    session.auth_state.change_number = crate::state::ChangeNumber::Sending {
+        request: extra,
+        code: None,
+    };
     apply_json(
         &mut session,
         &seq,
@@ -370,8 +371,8 @@ fn code_info_answer_ignores_unknown_extra() {
             extra.0 + 1000
         ),
     );
-    assert!(session.auth_state.change_number_phone.is_none());
-    assert!(session.auth_state.change_number_loading);
+    assert!(session.auth_state.change_number.phone().is_none());
+    assert!(session.auth_state.change_number.is_sending());
 }
 
 #[test]
@@ -387,11 +388,16 @@ fn check_code_ok_updates_own_phone_number() {
             ..Default::default()
         },
     );
-    session.auth_state.change_number_phone = Some("+15550199".into());
-    session.auth_state.change_number_checking = true;
-    session.auth_state.change_number_error = Some("stale".into());
     let resend_extra = session.request(RequestPurpose::ResendPhoneNumberCode, None);
     let extra = session.request(RequestPurpose::CheckPhoneNumberCode, None);
+    session.auth_state.change_number = crate::state::ChangeNumber::Checking {
+        request: extra,
+        code: crate::state::CodeSent {
+            phone: "+15550199".into(),
+            timeout: 60,
+        },
+        resend: Some(resend_extra),
+    };
     apply_json(
         &mut session,
         &seq,
@@ -399,9 +405,10 @@ fn check_code_ok_updates_own_phone_number() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
     assert_eq!(session.users.get(&31).unwrap().phone_number, "+15550199");
-    assert!(session.auth_state.change_number_phone.is_none());
-    assert!(!session.auth_state.change_number_checking);
-    assert!(session.auth_state.change_number_error.is_none());
+    assert_eq!(
+        session.auth_state.change_number,
+        crate::state::ChangeNumber::Idle
+    );
     // The stale resend purpose is gone: its late answer writes nothing.
     apply_json(
         &mut session,
@@ -412,17 +419,25 @@ fn check_code_ok_updates_own_phone_number() {
             resend_extra.0
         ),
     );
-    assert!(session.auth_state.change_number_phone.is_none());
-    assert!(session.auth_state.change_number_error.is_none());
+    assert_eq!(
+        session.auth_state.change_number,
+        crate::state::ChangeNumber::Idle
+    );
 }
 
 #[test]
 fn code_check_error_keeps_pending_number() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.auth_state.change_number_phone = Some("+15550199".into());
-    session.auth_state.change_number_checking = true;
     let extra = session.request(RequestPurpose::CheckPhoneNumberCode, None);
+    session.auth_state.change_number = crate::state::ChangeNumber::Checking {
+        request: extra,
+        code: crate::state::CodeSent {
+            phone: "+15550199".into(),
+            timeout: 60,
+        },
+        resend: None,
+    };
     apply_json(
         &mut session,
         &seq,
@@ -432,13 +447,10 @@ fn code_check_error_keeps_pending_number() {
             extra.0
         ),
     );
-    assert!(!session.auth_state.change_number_checking);
+    assert!(!session.auth_state.change_number.is_checking());
+    assert_eq!(session.auth_state.change_number.phone(), Some("+15550199"));
     assert_eq!(
-        session.auth_state.change_number_phone.as_deref(),
-        Some("+15550199")
-    );
-    assert_eq!(
-        session.auth_state.change_number_error.as_deref(),
+        session.auth_state.change_number.error(),
         Some("Could not check the verification code: Telegram refused the request")
     );
 }
@@ -448,8 +460,7 @@ fn websites_answer_replaces_cache_for_matching_request() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetConnectedWebsites, None);
-    session.settings.connected_websites_loading = true;
-    session.settings.websites_error = Some("stale".into());
+    session.settings.connected_websites.begin();
     apply_json(
         &mut session,
         &seq,
@@ -459,11 +470,7 @@ fn websites_answer_replaces_cache_for_matching_request() {
             extra.0,
         ),
     );
-    let websites = session
-        .settings
-        .connected_websites
-        .as_ref()
-        .expect("cached");
+    let websites = session.settings.connected_websites.data().expect("cached");
     assert_eq!(websites.len(), 1);
     let site = &websites[0];
     assert_eq!(site.id, 55);
@@ -474,33 +481,30 @@ fn websites_answer_replaces_cache_for_matching_request() {
     assert_eq!(site.log_in_date, 1758900000);
     assert_eq!(site.ip_address, "9.9.9.9");
     assert_eq!(site.location, "Boston, United States");
-    assert!(!session.settings.connected_websites_loading);
-    assert!(session.settings.websites_error.is_none());
-    assert!(!session.settings.websites_stale);
+    assert!(!session.settings.connected_websites.is_loading());
+    assert!(session.settings.connected_websites.error().is_none());
+    assert!(!session.settings.websites_op.is_stale());
 }
 
 #[test]
 fn websites_answer_ignored_without_matching_request() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.connected_websites = Some(Vec::new());
+    session.settings.connected_websites = crate::state::fetch::Fetch::Ready(Vec::new());
     apply_json(
         &mut session,
         &seq,
         &sink,
         r#"{"@type":"connectedWebsites","websites":[{"@type":"connectedWebsite","id":55,"domain_name":"example.com"}]}"#,
     );
-    assert_eq!(
-        session.settings.connected_websites.as_ref().unwrap().len(),
-        0
-    );
+    assert_eq!(session.settings.connected_websites.data().unwrap().len(), 0);
 }
 
 #[test]
 fn disconnect_website_ok_keeps_cache_and_marks_stale() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.connected_websites = Some(vec![ParsedWebsite {
+    session.settings.connected_websites = crate::state::fetch::Fetch::Ready(vec![ParsedWebsite {
         id: 55,
         domain_name: "example.com".into(),
         bot_user_id: 77,
@@ -511,11 +515,11 @@ fn disconnect_website_ok_keeps_cache_and_marks_stale() {
         ip_address: "9.9.9.9".into(),
         location: "Boston, United States".into(),
     }]);
-    session.settings.websites_mutating = true;
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::DisconnectWebsite { website_id: 55 }),
         None,
     );
+    session.settings.websites_op.begin(extra);
     apply_json(
         &mut session,
         &seq,
@@ -524,21 +528,18 @@ fn disconnect_website_ok_keeps_cache_and_marks_stale() {
     );
     // The old cache stays visible until the authoritative refetch
     // replaces it — no optimistic deletion.
-    assert_eq!(
-        session.settings.connected_websites.as_ref().unwrap().len(),
-        1
-    );
-    assert!(session.settings.websites_stale);
-    assert!(!session.settings.websites_mutating);
-    assert!(session.settings.websites_error.is_none());
+    assert_eq!(session.settings.connected_websites.data().unwrap().len(), 1);
+    assert!(session.settings.websites_op.is_stale());
+    assert!(!session.settings.websites_op.is_mutating());
+    assert!(session.settings.connected_websites.error().is_none());
 }
 
 #[test]
 fn disconnect_all_websites_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.websites_mutating = true;
     let extra = session.request(RequestPurpose::DisconnectAllWebsites, None);
+    session.settings.websites_op.begin(extra);
     apply_json(
         &mut session,
         &seq,
@@ -548,9 +549,9 @@ fn disconnect_all_websites_error_surfaces_honestly() {
             extra.0
         ),
     );
-    assert!(!session.settings.websites_mutating);
+    assert!(!session.settings.websites_op.is_mutating());
     assert_eq!(
-        session.settings.websites_error.as_deref(),
+        session.settings.connected_websites.error(),
         Some("Could not disconnect the website: Telegram refused the request")
     );
 }
@@ -559,11 +560,11 @@ fn disconnect_all_websites_error_surfaces_honestly() {
 fn websites_fetch_error_clears_loading() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.connected_websites_loading = true;
+    session.settings.connected_websites.begin();
     // A failed stale-refetch (e.g. after a disconnect-ok marked the
     // cache stale) must NOT leave the cache stale — otherwise the
     // next ingest retries the fetch and flood state worsens.
-    session.settings.websites_stale = true;
+    session.settings.websites_op.mark_stale();
     let extra = session.request(RequestPurpose::GetConnectedWebsites, None);
     apply_json(
         &mut session,
@@ -574,12 +575,12 @@ fn websites_fetch_error_clears_loading() {
             extra.0
         ),
     );
-    assert!(!session.settings.connected_websites_loading);
+    assert!(!session.settings.connected_websites.is_loading());
     // The failed stale-refetch clears staleness: no auto-retry on
     // the next ingest; the user retries via the Refresh button.
-    assert!(!session.settings.websites_stale);
+    assert!(!session.settings.websites_op.is_stale());
     assert_eq!(
-        session.settings.websites_error.as_deref(),
+        session.settings.connected_websites.error(),
         Some("Could not load the websites list: try again in 3 seconds")
     );
 }
@@ -605,11 +606,11 @@ fn toggle_session_calls_ok_marks_sessions_stale() {
         location: "Tel Aviv, Israel".into(),
         ..Default::default()
     }]);
-    session.settings.sessions_mutating = true;
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::ToggleSessionCalls { session_id: 22 }),
         None,
     );
+    session.settings.sessions_op.begin(extra);
     apply_json(
         &mut session,
         &seq,
@@ -620,8 +621,8 @@ fn toggle_session_calls_ok_marks_sessions_stale() {
     // authoritative refetch replaces the list.
     let sessions = session.settings.sessions.data().unwrap();
     assert!(sessions[0].can_accept_calls);
-    assert!(session.settings.sessions_stale);
-    assert!(!session.settings.sessions_mutating);
+    assert!(session.settings.sessions_op.is_stale());
+    assert!(!session.settings.sessions_op.is_mutating());
     assert!(session.settings.sessions.error().is_none());
 }
 
@@ -629,11 +630,11 @@ fn toggle_session_calls_ok_marks_sessions_stale() {
 fn toggle_session_secret_chats_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.sessions_mutating = true;
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::ToggleSessionSecretChats { session_id: 22 }),
         None,
     );
+    session.settings.sessions_op.begin(extra);
     apply_json(
         &mut session,
         &seq,
@@ -643,7 +644,7 @@ fn toggle_session_secret_chats_error_surfaces_honestly() {
             extra.0
         ),
     );
-    assert!(!session.settings.sessions_mutating);
+    assert!(!session.settings.sessions_op.is_mutating());
     assert_eq!(
         session.settings.sessions.error(),
         Some("Could not change the session setting: Telegram refused the request")
@@ -724,7 +725,6 @@ fn a_late_2fa_answer_leaves_the_newer_request_waiting() {
     let older = session.request(op(PasswordOp::Fetch), None);
     let newer = session.request(op(PasswordOp::SetPassword), None);
     session.auth_state.password_op = PasswordFlight::InFlight(newer);
-    session.auth_state.password_op_error = Some("kept".into());
     apply_json(
         &mut session,
         &seq,
@@ -738,10 +738,7 @@ fn a_late_2fa_answer_leaves_the_newer_request_waiting() {
         session.auth_state.password_op,
         PasswordFlight::InFlight(newer)
     );
-    assert_eq!(
-        session.auth_state.password_op_error.as_deref(),
-        Some("kept")
-    );
+    assert_eq!(session.auth_state.password_op_error(), None);
     apply_json(
         &mut session,
         &seq,
@@ -751,9 +748,8 @@ fn a_late_2fa_answer_leaves_the_newer_request_waiting() {
             newer.0
         ),
     );
-    assert_eq!(session.auth_state.password_op, PasswordFlight::Idle);
-    assert_ne!(
-        session.auth_state.password_op_error.as_deref(),
-        Some("kept")
-    );
+    assert!(matches!(
+        session.auth_state.password_op,
+        PasswordFlight::Failed(_)
+    ));
 }

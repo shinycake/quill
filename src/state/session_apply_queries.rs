@@ -190,8 +190,11 @@ impl Session {
                 // stashed in the request purpose.
                 is_video,
                 muted: false,
-                camera_on: is_video,
-                screen_sharing: false,
+                video: if is_video {
+                    crate::state::LocalVideo::Camera
+                } else {
+                    crate::state::LocalVideo::Off
+                },
                 remote_video: RemoteVideoState::Inactive,
                 remote_screen: RemoteVideoState::Inactive,
                 remote_audio_muted: false,

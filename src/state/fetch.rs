@@ -6,6 +6,70 @@
 //! The previous answer stays reachable while a refetch runs or after it
 //! fails, so a list does not blank out under a spinner or an error line.
 
+/// What a fetched list is doing besides loading: one change at a time under
+/// its request, or waiting for a refetch after a change (or after something
+/// else moved the list). Only that request's answer or error ends the
+/// change; an older request's late answer leaves a newer one waiting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ListOp {
+    #[default]
+    Idle,
+    /// A change is in flight under this request; its controls stay disabled.
+    Mutating(crate::ids::RequestId),
+    /// The list is kept for display and fetched again before it is trusted.
+    Stale,
+}
+
+impl ListOp {
+    pub fn is_mutating(self) -> bool {
+        matches!(self, Self::Mutating(_))
+    }
+
+    pub fn is_stale(self) -> bool {
+        self == Self::Stale
+    }
+
+    /// A change goes out under `request`.
+    pub fn begin(&mut self, request: crate::ids::RequestId) {
+        *self = Self::Mutating(request);
+    }
+
+    /// `request` came back with a refusal, or never left: the change did
+    /// not happen. Another request's late answer changes nothing; an answer
+    /// that names no request (its entry is gone) frees the list, or it
+    /// would stay locked for good.
+    pub fn failed(&mut self, request: Option<crate::ids::RequestId>) {
+        if matches!(*self, Self::Mutating(waiting) if request.is_none_or(|id| id == waiting)) {
+            *self = Self::Idle;
+        }
+    }
+
+    /// `request` changed the list on the server: it is fetched again. A
+    /// newer change in flight keeps its place and marks the list when it
+    /// lands.
+    pub fn changed(&mut self, request: Option<crate::ids::RequestId>) {
+        match *self {
+            Self::Mutating(waiting) if request.is_some_and(|id| id != waiting) => {}
+            _ => *self = Self::Stale,
+        }
+    }
+
+    /// Something else moved the list (not a change of ours): fetch it
+    /// again, unless a change is in flight (its landing marks the list).
+    pub fn mark_stale(&mut self) {
+        if *self == Self::Idle {
+            *self = Self::Stale;
+        }
+    }
+
+    /// The refetch went out, was answered or failed: no longer waiting.
+    pub fn refetched(&mut self) {
+        if *self == Self::Stale {
+            *self = Self::Idle;
+        }
+    }
+}
+
 /// The state of a fetched `T`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Fetch<T> {

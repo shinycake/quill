@@ -32,8 +32,17 @@ use std::time::{Duration, Instant};
 pub(super) struct ChatSwipeState {
     machine: SwipeMachine<i64, SwipeLabel>,
     epoch: Instant,
-    /// Runs while a gesture or a spring-back is active.
-    poll: Option<Task<()>>,
+    poll: SwipePoll,
+}
+
+/// The active-swipe timer: it runs while a gesture or a spring-back is
+/// active, and its task is dropped with the stage.
+enum SwipePoll {
+    Idle,
+    /// The task is held, not read: dropping the stage cancels it.
+    Running {
+        _task: Task<()>,
+    },
 }
 
 impl ChatSwipeState {
@@ -48,7 +57,7 @@ impl Default for ChatSwipeState {
         Self {
             machine: SwipeMachine::new(),
             epoch: Instant::now(),
-            poll: None,
+            poll: SwipePoll::Idle,
         }
     }
 }
@@ -263,26 +272,28 @@ impl QuillApp {
 
     /// Start the active-swipe timer unless it runs.
     fn schedule_swipe_poll(&mut self, cx: &mut Context<Self>) {
-        if self.chat_list.swipe.poll.is_some() {
+        if matches!(self.chat_list.swipe.poll, SwipePoll::Running { .. }) {
             return;
         }
-        self.chat_list.swipe.poll = Some(self.spawn_screen(cx, async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(POLL_MS))
-                    .await;
-                // The chat list is the main window's: so is what a swipe opens.
-                let Ok(more) = this.update(cx, |this, cx| {
-                    this.as_asked_by(None, |this| this.poll_swipe(cx))
-                }) else {
-                    return;
-                };
-                if !more {
-                    break;
+        self.chat_list.swipe.poll = SwipePoll::Running {
+            _task: self.spawn_screen(cx, async move |this, cx| {
+                loop {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(POLL_MS))
+                        .await;
+                    // The chat list is the main window's: so is what a swipe opens.
+                    let Ok(more) = this.update(cx, |this, cx| {
+                        this.as_asked_by(None, |this| this.poll_swipe(cx))
+                    }) else {
+                        return;
+                    };
+                    if !more {
+                        break;
+                    }
                 }
-            }
-            let _ = this.update(cx, |this, _| this.chat_list.swipe.poll = None);
-        }));
+                let _ = this.update(cx, |this, _| this.chat_list.swipe.poll = SwipePoll::Idle);
+            }),
+        };
     }
 
     /// Run a due action and abandon a gesture that lost its end event.

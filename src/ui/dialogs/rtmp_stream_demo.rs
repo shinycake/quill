@@ -60,8 +60,7 @@ pub(super) fn seed_manager(session: &mut quill::state::Session) {
 /// The answer is in: the box has its Server URL and Stream Key.
 pub(super) fn seed_rtmp_start(session: &mut quill::state::Session) {
     seed_manager(session);
-    let mut start = RtmpStart::new(ChatId(CHANNEL));
-    start.sent(REQUEST);
+    let mut start = RtmpStart::new(ChatId(CHANNEL), REQUEST);
     start.accept(
         Some(REQUEST),
         RtmpInfo {

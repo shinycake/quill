@@ -335,7 +335,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             None => None,
         };
         let video_probe = match snapshot.attachment.as_ref() {
-            Some(att) if att.kind == AttachmentKind::Video && !att.extras.gif => {
+            Some(att) if att.kind == AttachmentKind::Video && !att.extras.is_gif() => {
                 Some(media_options::video_probe(att, snapshot)?)
             }
             _ => None,
@@ -410,7 +410,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         )
                     }
                     // A GIF keeps its caption as an animation.
-                    AttachmentKind::Video if att.extras.gif => send_local_animation(
+                    AttachmentKind::Video if att.extras.is_gif() => send_local_animation(
                         extra,
                         chat_id,
                         topic_id,

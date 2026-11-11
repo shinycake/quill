@@ -280,7 +280,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     self.session.requests.take(extra);
                     return Err(err);
                 }
-                self.session.chat_list.suggestions.birthdays_hidden = true;
+                self.session.chat_list.suggestions.hide_birthdays(extra);
                 Ok(extra)
             }
         }

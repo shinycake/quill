@@ -180,7 +180,7 @@ impl Session {
                 if pending.is_some_and(|p| p.id.0 == self.payments.hub.gifts_request) {
                     self.payments.hub.gifts_loading = false;
                     // A failed refetch is not asked again every frame.
-                    self.payments.hub.gifts_stale = false;
+                    self.payments.hub.gifts_op.refetched();
                     self.payments.hub.gifts_error = Some(crate::lang::tr_with(
                         crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_GIFTS_REASON,
                         &[("reason", &error_reason(err))],
@@ -191,10 +191,7 @@ impl Session {
                 RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { .. })
                 | RequestPurpose::SellGift,
             ) => {
-                self.payments
-                    .hub
-                    .gift_mutation
-                    .settle(pending.map(|p| p.id));
+                self.payments.hub.gifts_op.failed(pending.map(|p| p.id));
                 self.payments.hub.gift_convert_confirm = None;
                 self.payments.hub.gifts_error =
                     Some(format!("Couldn't update the gift: {}", error_reason(err)));

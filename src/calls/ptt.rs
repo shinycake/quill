@@ -86,13 +86,22 @@ pub enum PttAction {
     Mute,
 }
 
+/// Where push-to-talk stands; talking is every stage but `Idle`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum PttStage {
+    #[default]
+    Idle,
+    /// The key is down and the microphone open.
+    Held,
+    /// The key came up; the microphone stays open until `mute_at` (ms on
+    /// the caller's clock).
+    Releasing { mute_at: u64 },
+}
+
 /// Key-driven talk state with a release delay.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PushToTalk {
-    held: bool,
-    /// Deadline (ms on the caller's clock) at which a released key mutes.
-    mute_at: Option<u64>,
-    talking: bool,
+    stage: PttStage,
 }
 
 impl PushToTalk {
@@ -102,12 +111,15 @@ impl PushToTalk {
 
     /// Whether the microphone is currently open because of push-to-talk.
     pub fn is_talking(&self) -> bool {
-        self.talking
+        self.stage != PttStage::Idle
     }
 
     /// Pending mute deadline, so the UI can schedule one wake-up.
     pub fn mute_deadline(&self) -> Option<u64> {
-        self.mute_at
+        match self.stage {
+            PttStage::Releasing { mute_at } => Some(mute_at),
+            _ => None,
+        }
     }
 
     /// Whether `key` is the configured push-to-talk key.
@@ -117,43 +129,40 @@ impl PushToTalk {
 
     /// The key went down. Auto-repeat while held is ignored.
     pub fn key_down(&mut self) -> Option<PttAction> {
-        if self.held {
-            return None;
-        }
-        self.held = true;
-        self.mute_at = None;
-        if self.talking {
+        match self.stage {
+            PttStage::Held => None,
             // Pressed again inside the release delay: stay open.
-            None
-        } else {
-            self.talking = true;
-            Some(PttAction::Talk)
+            PttStage::Releasing { .. } => {
+                self.stage = PttStage::Held;
+                None
+            }
+            PttStage::Idle => {
+                self.stage = PttStage::Held;
+                Some(PttAction::Talk)
+            }
         }
     }
 
     /// The key came up at `now_ms`. With no delay the mute is immediate.
     pub fn key_up(&mut self, now_ms: u64, delay_ms: u32) -> Option<PttAction> {
-        if !self.held {
-            return None;
-        }
-        self.held = false;
-        if !self.talking {
+        if self.stage != PttStage::Held {
             return None;
         }
         if delay_ms == 0 {
-            self.talking = false;
+            self.stage = PttStage::Idle;
             return Some(PttAction::Mute);
         }
-        self.mute_at = Some(now_ms.saturating_add(u64::from(delay_ms)));
+        self.stage = PttStage::Releasing {
+            mute_at: now_ms.saturating_add(u64::from(delay_ms)),
+        };
         None
     }
 
     /// Advance the clock; fires the delayed mute once its deadline passed.
     pub fn tick(&mut self, now_ms: u64) -> Option<PttAction> {
-        match self.mute_at {
-            Some(deadline) if now_ms >= deadline && !self.held => {
-                self.mute_at = None;
-                self.talking = false;
+        match self.stage {
+            PttStage::Releasing { mute_at } if now_ms >= mute_at => {
+                self.stage = PttStage::Idle;
                 Some(PttAction::Mute)
             }
             _ => None,
@@ -163,7 +172,7 @@ impl PushToTalk {
     /// Window lost focus, the call ended or PTT was switched off: drop any
     /// held/pending state. Returns `Mute` when the microphone was open.
     pub fn reset(&mut self) -> Option<PttAction> {
-        let was_talking = self.talking;
+        let was_talking = self.is_talking();
         *self = PushToTalk::default();
         was_talking.then_some(PttAction::Mute)
     }

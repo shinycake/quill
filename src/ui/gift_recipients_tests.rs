@@ -116,7 +116,7 @@ fn hiding_the_card_says_where_gifts_wait(cx: &mut TestAppContext) {
         );
         assert!(
             app.session()
-                .is_some_and(|s| s.chat_list.suggestions.birthdays_hidden)
+                .is_some_and(|s| s.chat_list.suggestions.birthdays_hidden())
         );
     });
     assert!(!card_shown(vcx));

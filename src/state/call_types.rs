@@ -35,15 +35,10 @@ pub struct ActiveCall {
     /// Phase C1b: local-only mute toggle state. Tracked but a no-op
     /// without media transport (C2) — the UI labels it honestly.
     pub muted: bool,
-    /// Phase C2e: local camera intent (UI toggle). Initialized from
+    /// What you send as video (see [`LocalVideo`]). Initialized from
     /// `is_video` — a video call starts with the camera on, a voice
-    /// call with it off. The engine picks it up through
-    /// `set_camera`.
-    pub camera_on: bool,
-    /// Phase C2i: local screen-share send intent (UI toggle). The
-    /// engine picks it up through `set_screen_share_enabled`; screen
-    /// share replaces the camera (a 1:1 call has one video track).
-    pub screen_sharing: bool,
+    /// call with it off.
+    pub video: LocalVideo,
     /// Phase C2e: peer camera state from the engine hook; `Inactive`
     /// until the first state callback arrives.
     pub remote_video: RemoteVideoState,
@@ -284,13 +279,46 @@ impl ActiveCall {
             signaling_queue: Vec::new(),
             signaling_dropped: 0,
             muted: false,
-            camera_on: is_video,
-            screen_sharing: false,
+            video: if is_video {
+                LocalVideo::Camera
+            } else {
+                LocalVideo::Off
+            },
             remote_video: RemoteVideoState::Inactive,
             remote_screen: RemoteVideoState::Inactive,
             remote_audio_muted: false,
             remote_battery_low: false,
             signal_bars: None,
+        }
+    }
+
+    /// The camera is what you send.
+    pub fn camera_on(&self) -> bool {
+        self.video == LocalVideo::Camera
+    }
+
+    /// The screen is what you send.
+    pub fn screen_sharing(&self) -> bool {
+        self.video == LocalVideo::Screen
+    }
+
+    /// The camera turns on (replacing a screen share) or off (a share
+    /// stays).
+    pub fn set_camera_on(&mut self, on: bool) {
+        if on {
+            self.video = LocalVideo::Camera;
+        } else if self.camera_on() {
+            self.video = LocalVideo::Off;
+        }
+    }
+
+    /// The screen share turns on (replacing the camera) or off (the camera
+    /// stays).
+    pub fn set_screen_sharing(&mut self, on: bool) {
+        if on {
+            self.video = LocalVideo::Screen;
+        } else if self.screen_sharing() {
+            self.video = LocalVideo::Off;
         }
     }
 
@@ -319,6 +347,18 @@ pub struct GroupCallVerificationState {
 /// `need_rejoin` (the C2d 1:1 reconnect discipline). Past them only the
 /// manual Rejoin is left.
 pub const MAX_GROUP_CALL_REJOIN_ATTEMPTS: usize = 3;
+
+/// The video you send in a 1:1 call: a call has one video track, so the
+/// camera and a screen share replace each other. The UI toggles are the
+/// intent; the engine picks it up through `set_camera` and
+/// `set_screen_share_enabled`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LocalVideo {
+    #[default]
+    Off,
+    Camera,
+    Screen,
+}
 
 /// 10830, `updateGroupCallVerificationState` 10836).
 #[derive(Debug, Clone)]

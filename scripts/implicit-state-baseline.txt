@@ -1,11 +1,10 @@
 # Implicit-state debt (scripts/check-implicit-state.py). Only remove lines.
+
 ActiveGroupCall::loaded_all_participants
 AppearancePrefs::ignore_battery_saving
 AudioEngine::failed
 AudioEngine::start_failed
 AudioEngine::start_failed+error
-AuthState::change_number_loading
-AuthState::change_number_loading+last_auth_error
 AwardMembers::done
 AwardMembers::loading
 AwardMembers::loading+error
@@ -15,7 +14,6 @@ BarFacts::bot_start_pending
 
 CallSnap::connecting
 CallSummary::busy
-CallUi::window_opening
 CameraDraft::starting
 
 ChatSummary::my_rights_fetched
@@ -52,7 +50,7 @@ HistoryState::loaded_complete
 HistoryState::newer_failed
 
 JoinedLines::started
-Latest::wake_pending
+
 LinuxState::failed
 LiveInput::failed
 LocalFileState::is_downloading_active
@@ -67,7 +65,7 @@ MediaFacts::in_saved_messages
 MediaMenuFacts::downloading
 MediaState::disk_paused_saved_changed
 MiniAppWindow::closing_confirmation
-MutedSpeechHint::done
+
 NewChatView::busy
 NewChatView::busy+failure
 OutputState::opening
@@ -101,16 +99,12 @@ ReceivedGift::is_saved
 RowForum::loaded
 RowMenuFacts::is_saved_messages
 RowState::pending
-RtmpStart::failed
 SavedMessagesState::tags_loaded
 SavedMessagesState::topics_requested
 SavedTagSearch::loaded
 
-SettingsState::account_ttl_loading
-SettingsState::connected_websites_loading
-SettingsState::default_auto_delete_busy
+
 SettingsState::pending_attention
-SettingsState::pending_attention+default_auto_delete_error
 SettingsState::saved_sounds_loaded
 SettingsState::saved_sounds_stale
 

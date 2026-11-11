@@ -581,7 +581,9 @@ impl Session {
                 self.messages.scheduled_messages.retain(|m| !is_it(m));
                 self.messages.note_action("message sent");
             }
-            ComposerScheduling::SendAtDate(send_date) => {
+            ComposerScheduling::SendAtDate {
+                date: send_date, ..
+            } => {
                 if let Some(message) = self
                     .messages
                     .scheduled_messages

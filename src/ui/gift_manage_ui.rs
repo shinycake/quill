@@ -252,7 +252,7 @@ pub(super) fn gift_collection_tabs(
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let manage = &session.payments.gifts_manage;
-    let busy = session.payments.hub.gift_mutation.is_busy();
+    let busy = session.payments.hub.gifts_op.is_mutating();
     if manage.collections.is_empty() && !mine {
         return div().into_any_element();
     }

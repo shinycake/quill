@@ -351,15 +351,15 @@ fn take_purpose_drops_only_matching_request() {
 fn an_unanswered_device_login_and_tone_upload_settle_with_their_account() {
     use crate::tone_upload::{ToneTarget, ToneUpload};
     let (mut session, _) = session();
-    session.request(RequestPurpose::ConfirmDeviceLogin, None);
+    let login = session.request(RequestPurpose::ConfirmDeviceLogin, None);
     session.request(RequestPurpose::UploadSavedNotificationSound, None);
-    session.settings.sessions_mutating = true;
+    session.settings.sessions_op.begin(login);
     session.settings.tone_upload = ToneUpload::Uploading {
         name: "Chime".into(),
         target: ToneTarget::Reaction,
     };
     session.settle_account_requests();
-    assert!(!session.settings.sessions_mutating);
+    assert!(!session.settings.sessions_op.is_mutating());
     assert!(matches!(
         session.settings.tone_upload,
         ToneUpload::Failed(_)

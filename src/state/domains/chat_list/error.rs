@@ -137,7 +137,7 @@ impl Session {
             // on every ingest would loop at round-trip speed.
             Some(RequestPurpose::GetChatFolder) => {
                 if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
-                    self.chat_list.folder_spec_errors.insert(
+                    self.chat_list.folder_specs.fail(
                         folder_id,
                         call_request_error_line(
                             err,

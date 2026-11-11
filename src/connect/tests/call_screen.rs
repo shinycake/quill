@@ -273,7 +273,7 @@ fn a_refused_capture_ends_the_share_with_its_error() {
     driver.session.calls.active_group_call = Some(sharing_group_call());
     driver.choose_call_screen_source(SourceId("display:1".into()), false);
     pump_until_screen_answers(&mut driver);
-    assert_eq!(driver.call_screen().error.as_deref(), Some("no access"));
+    assert_eq!(driver.call_screen().error(), Some("no access"));
     assert_eq!(sent_of(&driver, "endGroupCallScreenSharing").len(), 1);
     std::fs::remove_dir_all(dir).ok();
 }
@@ -350,7 +350,7 @@ fn a_private_call_shares_without_pause_requests() {
     {
         let call = driver.session.calls.active_call.as_mut().unwrap();
         call.transport = CallTransport::Connected(Default::default());
-        call.screen_sharing = true;
+        call.set_screen_sharing(true);
     }
     pump_until_screen_answers(&mut driver);
     assert_eq!(
@@ -444,7 +444,7 @@ fn a_lost_output_device_turns_the_audio_share_off_and_keeps_the_screen() {
     driver.pump_call_screen(std::time::Instant::now());
     assert!(!driver.call_screen().sharing_audio(), "audio is off");
     assert!(!driver.call_screen().with_audio(), "no retry every pump");
-    assert!(driver.call_screen().error.is_some());
+    assert!(driver.call_screen().error().is_some());
     assert!(
         driver.call_screen().target().is_some(),
         "the screen goes on"
@@ -518,7 +518,7 @@ fn failed_system_audio_keeps_the_screen_and_says_why() {
     pump_until_screen_answers(&mut driver);
     assert!(driver.call_screen().target().is_some());
     assert!(!driver.call_screen().with_audio(), "not retried every pump");
-    assert_eq!(driver.call_screen().error.as_deref(), Some("no speakers"));
+    assert_eq!(driver.call_screen().error(), Some("no speakers"));
     assert!(mic_mix(&controls).is_none());
     std::fs::remove_dir_all(dir).ok();
 }

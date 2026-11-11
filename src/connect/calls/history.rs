@@ -1,7 +1,6 @@
 //! Connect driver: call debug logs, call history, call privacy and busy-call handling.
 use super::*;
-use crate::state::RecentCalls;
-use crate::state::{CallUpload, PrivacyAsk};
+use crate::state::{CallUpload, PrivacyAsk, RecentCalls};
 
 impl<S: JsonSender> ConnectDriver<S> {
     pub(crate) fn call_debug_information(&self) -> Result<String, ConnectSendError> {
@@ -161,7 +160,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         if self.session.calls.recent_calls_clearing() {
-            // The clear answers first; the list reopens then.
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.calls.recent_calls.clear();
@@ -182,7 +180,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if !crate::chatlist_calls::can_clear(
             self.session.calls.recent_calls.len(),
-            self.session.calls.recent_calls_clearing(),
+            self.session.calls.recent_calls_stage,
         ) {
             return Ok(None);
         }
@@ -196,7 +194,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.calls.recent_calls_stage = RecentCalls::Clearing;
+        self.session.calls.recent_calls_stage = RecentCalls::Clearing { request: extra };
         Ok(Some(extra))
     }
 
@@ -210,6 +208,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     fn fetch_call_history_page(&mut self) -> Result<RequestId, ConnectSendError> {
+        // A clear in flight keeps its stage: the list reloads after its answer.
         if self.session.calls.recent_calls_loading() || self.session.calls.recent_calls_clearing() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -226,7 +225,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         // A retry of a failed page shows as loading again.
-        self.session.calls.recent_calls_stage = RecentCalls::Loading(extra);
+        self.session.calls.recent_calls_stage = RecentCalls::Loading { request: extra };
         Ok(extra)
     }
 

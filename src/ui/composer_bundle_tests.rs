@@ -88,17 +88,18 @@ fn the_repeat_choice_rides_the_schedule_for_premium(cx: &mut TestAppContext) {
         schedule_with_repeat(app, 7 * DAY, window, cx);
         assert!(matches!(
             app.pending_send().scheduling,
-            ComposerScheduling::SendAtDate(_)
+            ComposerScheduling::SendAtDate { .. }
         ));
-        assert_eq!(app.pending_send().schedule_repeat, 7 * DAY);
+        assert_eq!(app.pending_send().scheduling.repeat_period(), 7 * DAY);
         let options = app.composer_send_options(Default::default());
-        assert_eq!(options.schedule_repeat_period, 7 * DAY);
+        assert_eq!(options.scheduling.repeat_period(), 7 * DAY);
         // The choice is as one-shot as the schedule: clearing the schedule
         // drops it from the options.
         app.update_pending_send(|send| send.scheduling = ComposerScheduling::None);
         assert_eq!(
             app.composer_send_options(Default::default())
-                .schedule_repeat_period,
+                .scheduling
+                .repeat_period(),
             0
         );
     });
@@ -116,7 +117,7 @@ fn without_premium_the_repeat_choice_is_dropped_and_the_button_is_locked(cx: &mu
         assert!(!app.repeat_allowed(ScheduleTarget::Composer));
         app.close_schedule_picker(cx);
         schedule_with_repeat(app, DAY, window, cx);
-        assert_eq!(app.pending_send().schedule_repeat, 0);
+        assert_eq!(app.pending_send().scheduling.repeat_period(), 0);
     });
 }
 

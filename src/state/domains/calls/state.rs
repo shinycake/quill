@@ -3,6 +3,24 @@
 //! with `new`.
 use crate::state::*;
 
+/// The stage of the recent-calls list (`searchCallMessages` pages and
+/// `deleteAllCallMessages`). Only the answer or error of the request in the
+/// stage lands: a reopen asks for the first page again at once, and
+/// "Clear all" forgets the page in flight, so an older page never fills
+/// the list.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RecentCalls {
+    #[default]
+    Idle,
+    /// A page waits for its answer; its error is `Failed`.
+    Loading { request: RequestId },
+    /// The last page failed; asking again shows it as loading.
+    Failed,
+    /// "Clear all" waits for TDLib; the list empties on `ok`, and its
+    /// error is `Idle` again.
+    Clearing { request: RequestId },
+}
+
 pub struct CallsState {
     /// Phase C1: the tracked live call, if any. **Signaling only** —
     /// TDLib transports no audio/video (official clients use
@@ -67,8 +85,8 @@ pub struct CallsState {
     /// `next_offset` from the last `foundMessages` page; empty starts
     /// (or restarts) the list.
     pub recent_calls_offset: String,
-    /// Where the recent-calls list stands (`RecentCalls`): the page it
-    /// waits for, a failure, or a "Clear all" in flight.
+    /// Where the recent-calls list stands: its page or its "Clear all" in
+    /// flight, or the last page's failure.
     pub recent_calls_stage: RecentCalls,
     /// Phase C3a: the tracked group call / voice chat, if any.
     /// **Signaling only** — TDLib transports no audio/video; the
@@ -145,23 +163,23 @@ impl CallsState {
 
     /// A recent-calls page is in flight.
     pub fn recent_calls_loading(&self) -> bool {
-        matches!(self.recent_calls_stage, RecentCalls::Loading(_))
+        matches!(self.recent_calls_stage, RecentCalls::Loading { .. })
     }
 
     /// The last `searchCallMessages` request failed.
-    pub fn recent_calls_failed(&self) -> bool {
+    pub fn recent_calls_error(&self) -> bool {
         self.recent_calls_stage == RecentCalls::Failed
     }
 
     /// A `deleteAllCallMessages` request is in flight.
     pub fn recent_calls_clearing(&self) -> bool {
-        self.recent_calls_stage == RecentCalls::Clearing
+        matches!(self.recent_calls_stage, RecentCalls::Clearing { .. })
     }
 
     /// Whether `request` is the recent-calls page the list waits for; if
     /// so the list stops waiting for it.
     pub(crate) fn take_recent_calls_request(&mut self, request: RequestId) -> bool {
-        if self.recent_calls_stage != RecentCalls::Loading(request) {
+        if self.recent_calls_stage != (RecentCalls::Loading { request }) {
             return false;
         }
         self.recent_calls_stage = RecentCalls::Idle;
@@ -247,22 +265,6 @@ pub enum PrivacyAsk {
     /// Asked as this request; only its answer settles the rule.
     Asking(RequestId),
     Failed,
-}
-
-/// The stage of the recent-calls list. `Loading` leaves on its own answer
-/// (to `Idle`) or error (to `Failed`); `Failed` on a retry or a reopen;
-/// `Clearing` on the answer or error of the clear, and it forgets a page
-/// in flight, so an older page never fills the list. A reopen asks for the
-/// first page again at once.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum RecentCalls {
-    #[default]
-    Idle,
-    /// The `searchCallMessages` page the list waits for; only its answer
-    /// or error lands.
-    Loading(RequestId),
-    Failed,
-    Clearing,
 }
 
 /// The two rules the calls UI reads (`userPrivacySettingAllowCalls` and

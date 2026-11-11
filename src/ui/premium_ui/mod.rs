@@ -802,7 +802,7 @@ fn gift_details(
                     tr(keys::Q_MONEY_SHOW_ON_MY_PROFILE)
                 })
                 .ghost()
-                .disabled(hub.gift_mutation.is_busy())
+                .disabled(hub.gifts_op.is_mutating())
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.toggle_gift(id.clone(), !saved, cx);
                 })),
@@ -830,7 +830,7 @@ fn gift_details(
                                     Button::new("gift-convert-yes")
                                         .label(tr(keys::Q_MONEY_CONVERT))
                                         .danger()
-                                        .disabled(hub.gift_mutation.is_busy())
+                                        .disabled(hub.gifts_op.is_mutating())
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.convert_gift(id.clone(), cx);
                                         })),
@@ -854,7 +854,7 @@ fn gift_details(
                             &[("sell_star_count", &gift.sell_star_count.to_string())],
                         ))
                         .ghost()
-                        .disabled(hub.gift_mutation.is_busy())
+                        .disabled(hub.gifts_op.is_mutating())
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.ask_convert_gift(Some(id.clone()), cx);
                         })),

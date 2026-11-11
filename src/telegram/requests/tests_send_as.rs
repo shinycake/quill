@@ -88,7 +88,7 @@ fn forward_options_carry_silent_and_schedule() {
         false,
         false,
         &SendOptions {
-            scheduling: ComposerScheduling::SendAtDate(1_900_000_000),
+            scheduling: ComposerScheduling::at(1_900_000_000),
             ..SendOptions::default()
         },
     ));

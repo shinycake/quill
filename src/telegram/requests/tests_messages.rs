@@ -565,7 +565,7 @@ fn send_text_silent_and_scheduled_options() {
         None,
         &SendOptions {
             disable_notification: true,
-            scheduling: ComposerScheduling::SendAtDate(1_700_000_000),
+            scheduling: ComposerScheduling::at(1_700_000_000),
             ..SendOptions::default()
         },
     );
@@ -867,7 +867,7 @@ fn edit_message_scheduling_state_shape() {
         RequestId(5),
         ChatId(7),
         MessageId(70),
-        ComposerScheduling::SendAtDate(1_800_000_600),
+        ComposerScheduling::at(1_800_000_600),
     ))
     .unwrap();
     assert_eq!(v["@type"], "editMessageSchedulingState");

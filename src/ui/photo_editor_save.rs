@@ -92,7 +92,7 @@ impl QuillApp {
     ) {
         let render = NEXT_RENDER.fetch_add(1, Ordering::Relaxed);
         let marked = self.composer_sends.update_item(&item, |attachment| {
-            attachment.extras.photo_render = Some(render);
+            attachment.extras.begin_render(render);
         });
         if marked.is_none() {
             return;
@@ -183,45 +183,15 @@ impl QuillApp {
         render: u64,
         saved: Option<PathBuf>,
         cx: &mut Context<Self>,
-    ) -> Landed {
+    ) -> super::composer_sends::Landed {
         cx.notify();
-        let found = self.composer_sends.update(slot, |send| {
-            let attachment = send
-                .attachments
-                .iter_mut()
-                .find(|attachment| attachment.extras.photo_render == Some(render))?;
-            attachment.extras.photo_render = None;
-            let Some(saved) = &saved else {
-                // The held Send would carry the unedited photo.
-                send.held_send = None;
-                return Some(Landed {
-                    held: None,
-                    path: Some(attachment.path.clone()),
-                });
-            };
-            let stem = attachment
-                .path
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .unwrap_or("photo")
-                .to_string();
-            attachment.path = saved.clone();
-            attachment.extras.photo_jpeg = None;
-            attachment.extras.file_only = false;
-            attachment.file_name = format!("{stem}.png");
-            attachment.kind = quill::composer::AttachmentKind::Photo;
-            let held = (!send.renders_an_edit())
-                .then(|| send.held_send.take())
-                .flatten();
-            Some(Landed {
-                held,
-                path: Some(saved.clone()),
-            })
-        });
+        let found = self
+            .composer_sends
+            .update(slot, |send| send.end_render(render, saved.as_deref()));
         match (found, saved) {
             (None, Some(saved)) => {
                 let _ = std::fs::remove_file(saved);
-                Landed::default()
+                super::composer_sends::Landed::default()
             }
             (found, None) => {
                 if found.is_some() {
@@ -239,14 +209,4 @@ impl QuillApp {
             }
         }
     }
-}
-
-/// What a finished render left in its tray.
-#[derive(Default)]
-struct Landed {
-    /// The held Send and its one-time options, once nothing in that tray
-    /// renders.
-    held: Option<(String, super::composer_sends::SendOnce)>,
-    /// The photo's file now, while it is still in the tray.
-    path: Option<PathBuf>,
 }

@@ -8,7 +8,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         scanned_link: &str,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active()
-            || self.session.settings.sessions_mutating
+            || self.session.settings.sessions_op.is_mutating()
             || !crate::auth::is_device_login_qr(scanned_link)
         {
             return Err(ConnectSendError::InvalidRequest);
@@ -17,14 +17,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::ConfirmDeviceLogin, None);
         self.session.settings.device_login_result = None;
-        self.session.settings.sessions_mutating = true;
+        self.session.settings.sessions_op.begin(id);
         self.session.settings.sessions.clear_error();
         let request = zeroize::Zeroizing::new(
             crate::telegram::requests::confirm_qr_code_authentication(id, scanned_link),
         );
         if let Err(error) = self.sender.send_json(&request) {
             self.session.requests.take(id);
-            self.session.settings.sessions_mutating = false;
+            self.session.settings.sessions_op.failed(Some(id));
             return Err(error);
         }
         Ok(id)
@@ -39,7 +39,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         if (self.session.settings.sessions.data().is_some()
-            && !self.session.settings.sessions_stale)
+            && !self.session.settings.sessions_op.is_stale())
             || self
                 .session
                 .requests
@@ -50,12 +50,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetActiveSessions, None);
+        // The mark is taken as the request goes out (a change landing during
+        // the refetch marks the list again); a send that fails gives it back.
+        let was_stale = self.session.settings.sessions_op.is_stale();
+        self.session.settings.sessions_op.refetched();
         self.session.settings.sessions.begin();
         match self.sender.send_json(&get_active_sessions(extra)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
                 self.session.settings.sessions.cancel();
+                if was_stale {
+                    self.session.settings.sessions_op.mark_stale();
+                }
                 Err(err)
             }
         }
@@ -68,7 +75,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn refresh_active_sessions_if_stale(
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.session.settings.sessions_stale {
+        if !self.session.settings.sessions_op.is_stale() {
             return Ok(None);
         }
         self.maybe_fetch_active_sessions()
@@ -80,7 +87,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// (no such session in the cache) is rejected before it leaves;
     /// TDLib is the authority for the rest.
     pub fn terminate_session(&mut self, session_id: i64) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.sessions_mutating {
+        if !self.chats_path_active() || self.session.settings.sessions_op.is_mutating() {
             return Err(ConnectSendError::InvalidRequest);
         }
         if !self
@@ -97,12 +104,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Settings(SettingsPurpose::TerminateSession { session_id }),
             None,
         );
-        self.session.settings.sessions_mutating = true;
+        self.session.settings.sessions_op.begin(extra);
         match self.sender.send_json(&terminate_session(extra, session_id)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.sessions_mutating = false;
+                self.session.settings.sessions_op.failed(Some(extra));
                 Err(err)
             }
         }
@@ -112,19 +119,19 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// 15108). One mutation at a time; the list is refetched from the
     /// authoritative `ok` response — never optimistic.
     pub fn terminate_all_other_sessions(&mut self) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.sessions_mutating {
+        if !self.chats_path_active() || self.session.settings.sessions_op.is_mutating() {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.settings.sessions.clear_error();
         let extra = self
             .session
             .request(RequestPurpose::TerminateAllOtherSessions, None);
-        self.session.settings.sessions_mutating = true;
+        self.session.settings.sessions_op.begin(extra);
         match self.sender.send_json(&terminate_all_other_sessions(extra)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.sessions_mutating = false;
+                self.session.settings.sessions_op.failed(Some(extra));
                 Err(err)
             }
         }
@@ -139,12 +146,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         reason: &str,
         password: &str,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.account_mutating {
+        if !self.chats_path_active() || self.session.settings.account_busy() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.account_error = None;
+        self.session.settings.account_ttl.clear_error();
         let extra = self.session.request(RequestPurpose::DeleteAccount, None);
-        self.session.settings.account_mutating = true;
+        self.session.settings.account_delete.begin();
         match self
             .sender
             .send_json(&delete_account(extra, reason, password))
@@ -152,7 +159,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.account_mutating = false;
+                self.session.settings.account_delete.cancel();
                 Err(err)
             }
         }
@@ -165,22 +172,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.settings.default_auto_delete_secs.is_some()
-            || self.session.settings.default_auto_delete_busy
-        {
+        let auto_delete = &mut self.session.settings.default_auto_delete;
+        if auto_delete.data().is_some() || auto_delete.is_loading() {
             return Ok(None);
         }
-        self.session.settings.default_auto_delete_error = None;
         let extra = self
             .session
             .request(RequestPurpose::GetDefaultAutoDelete, None);
-        self.session.settings.default_auto_delete_busy = true;
+        self.session.settings.default_auto_delete.begin();
         let json = crate::telegram::requests::get_default_message_auto_delete_time(extra);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.default_auto_delete_busy = false;
+                self.session.settings.default_auto_delete.cancel();
                 Err(err)
             }
         }
@@ -191,23 +196,22 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// the authoritative `ok`.
     pub fn set_default_auto_delete(&mut self, seconds: i32) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active()
-            || self.session.settings.default_auto_delete_busy
+            || self.session.settings.default_auto_delete.is_loading()
             || !crate::auto_delete::is_valid_regular_ttl(seconds)
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.default_auto_delete_error = None;
         let extra = self.session.request(
             RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds }),
             None,
         );
-        self.session.settings.default_auto_delete_busy = true;
+        self.session.settings.default_auto_delete.begin();
         let json = crate::telegram::requests::set_default_message_auto_delete_time(extra, seconds);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.default_auto_delete_busy = false;
+                self.session.settings.default_auto_delete.cancel();
                 Err(err)
             }
         }
@@ -221,19 +225,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.settings.account_ttl_days.is_some()
-            || self.session.settings.account_ttl_loading
-        {
+        let ttl = &self.session.settings.account_ttl;
+        if ttl.data().is_some() || ttl.is_loading() {
             return Ok(None);
         }
-        self.session.settings.account_error = None;
         let extra = self.session.request(RequestPurpose::GetAccountTtl, None);
-        self.session.settings.account_ttl_loading = true;
+        self.session.settings.account_ttl.begin();
         match self.sender.send_json(&get_account_ttl(extra)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.account_ttl_loading = false;
+                self.session.settings.account_ttl.cancel();
                 Err(err)
             }
         }
@@ -243,20 +245,20 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// mutation at a time; the confirmed days land from the
     /// authoritative `ok` (never an optimistic write).
     pub fn set_account_ttl(&mut self, days: i32) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.account_mutating {
+        if !self.chats_path_active() || self.session.settings.account_busy() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.account_error = None;
+        self.session.settings.account_delete.clear_error();
         let extra = self.session.request(
             RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days }),
             None,
         );
-        self.session.settings.account_mutating = true;
+        self.session.settings.account_ttl.begin();
         match self.sender.send_json(&set_account_ttl(extra, days)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.account_mutating = false;
+                self.session.settings.account_ttl.cancel();
                 Err(err)
             }
         }
@@ -290,7 +292,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         session_id: i64,
         kind: ToggleSessionKind,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.sessions_mutating {
+        if !self.chats_path_active() || self.session.settings.sessions_op.is_mutating() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let flags = self
@@ -330,12 +332,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         };
         self.session.settings.sessions.clear_error();
-        self.session.settings.sessions_mutating = true;
+        self.session.settings.sessions_op.begin(extra);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.sessions_mutating = false;
+                self.session.settings.sessions_op.failed(Some(extra));
                 Err(err)
             }
         }
@@ -350,8 +352,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if (self.session.settings.connected_websites.is_some()
-            && !self.session.settings.websites_stale)
+        if (self.session.settings.connected_websites.data().is_some()
+            && !self.session.settings.websites_op.is_stale())
             || self
                 .session
                 .requests
@@ -362,13 +364,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetConnectedWebsites, None);
-        self.session.settings.connected_websites_loading = true;
-        self.session.settings.websites_error = None;
+        // The mark is taken as the request goes out (a change landing during
+        // the refetch marks the list again); a send that fails gives it back.
+        let was_stale = self.session.settings.websites_op.is_stale();
+        self.session.settings.websites_op.refetched();
+        self.session.settings.connected_websites.begin();
         match self.sender.send_json(&get_connected_websites(extra)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.connected_websites_loading = false;
+                self.session.settings.connected_websites.cancel();
+                if was_stale {
+                    self.session.settings.websites_op.mark_stale();
+                }
                 Err(err)
             }
         }
@@ -381,7 +389,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn refresh_connected_websites_if_stale(
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.session.settings.websites_stale {
+        if !self.session.settings.websites_op.is_stale() {
             return Ok(None);
         }
         self.maybe_fetch_connected_websites()
@@ -393,24 +401,24 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// (no such website in the cache) is rejected before it leaves;
     /// TDLib is the authority for the rest.
     pub fn disconnect_website(&mut self, website_id: i64) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.websites_mutating {
+        if !self.chats_path_active() || self.session.settings.websites_op.is_mutating() {
             return Err(ConnectSendError::InvalidRequest);
         }
         if !self
             .session
             .settings
             .connected_websites
-            .as_ref()
+            .data()
             .is_some_and(|s| s.iter().any(|s| s.id == website_id))
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.websites_error = None;
+        self.session.settings.connected_websites.clear_error();
         let extra = self.session.request(
             RequestPurpose::Settings(SettingsPurpose::DisconnectWebsite { website_id }),
             None,
         );
-        self.session.settings.websites_mutating = true;
+        self.session.settings.websites_op.begin(extra);
         match self
             .sender
             .send_json(&disconnect_website(extra, website_id))
@@ -418,7 +426,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.websites_mutating = false;
+                self.session.settings.websites_op.failed(Some(extra));
                 Err(err)
             }
         }
@@ -428,28 +436,28 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// 15130). One mutation at a time; the list is refetched from the
     /// authoritative `ok` response — never optimistic.
     pub fn disconnect_all_websites(&mut self) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.websites_mutating {
+        if !self.chats_path_active() || self.session.settings.websites_op.is_mutating() {
             return Err(ConnectSendError::InvalidRequest);
         }
         if !self
             .session
             .settings
             .connected_websites
-            .as_ref()
+            .data()
             .is_some_and(|s| !s.is_empty())
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.websites_error = None;
+        self.session.settings.connected_websites.clear_error();
         let extra = self
             .session
             .request(RequestPurpose::DisconnectAllWebsites, None);
-        self.session.settings.websites_mutating = true;
+        self.session.settings.websites_op.begin(extra);
         match self.sender.send_json(&disconnect_all_websites(extra)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.websites_mutating = false;
+                self.session.settings.websites_op.failed(Some(extra));
                 Err(err)
             }
         }

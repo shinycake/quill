@@ -357,7 +357,7 @@ fn confirm_peer_view(
     let price = transfer_price(star_count);
     let balance = session.payments.hub.balance.map(|b| b.stars);
     let too_poor = star_count > 0 && balance.is_some_and(|b| b < star_count);
-    let busy = session.payments.hub.gift_mutation.is_busy();
+    let busy = session.payments.hub.gifts_op.is_mutating();
     let roots = app.media_display_roots();
     let collectible = gift.and_then(|g| g.gift.collectible.as_deref());
     let photo = session

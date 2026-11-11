@@ -206,11 +206,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             // The box waiting on this spec ends in the error with a Retry.
             self.session
                 .chat_list
-                .folder_spec_errors
-                .insert(folder_id, err.stage_line());
+                .folder_specs
+                .fail(folder_id, err.stage_line());
             return Err(err);
         }
-        self.session.chat_list.folder_spec_errors.remove(&folder_id);
+        self.session.chat_list.folder_specs.clear_error(folder_id);
         Ok(Some(extra))
     }
 

@@ -40,7 +40,7 @@ fn open_call(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext, V
     app.update(&mut main, |app, cx| app.sync_call_window(cx));
     frames(&mut main);
     let window = app
-        .read_with(&main, |app, _| app.calls.window)
+        .read_with(&main, |app, _| app.calls.window.handle())
         .expect("the call window opens");
     let mut call = VisualTestContext::from_window(window, cx);
     frames(&mut call);
@@ -87,7 +87,7 @@ fn closing_the_call_window_forgets_its_panel_view(cx: &mut TestAppContext) {
     });
     frames(&mut main);
     app.read_with(&main, |app, _| {
-        assert!(app.calls.window.is_none());
+        assert!(app.calls.window.handle().is_none());
         assert!(app.calls.panel_view.get().is_none(), "no dead panel id");
     });
     // The clock tick has nothing left to notify, and does not fail.

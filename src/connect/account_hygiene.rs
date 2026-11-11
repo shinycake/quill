@@ -38,6 +38,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn review_unconfirmed_sessions(&mut self, confirmed: bool) -> Result<(), ConnectSendError> {
         if !self.chats_path_active()
             || self.session.settings.notices.review.busy()
+            // The last review's follow-up waits for the UI to take it.
+            || self.session.settings.notices.review.outcome().is_some()
             || self.session.settings.notices.unconfirmed_entries.is_empty()
         {
             return Err(ConnectSendError::InvalidRequest);
@@ -80,22 +82,22 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `acceptTermsOfService` (schema 1.8.67, :16143) for the pending
     /// `updateTermsOfService`.
     pub fn accept_terms(&mut self) -> Result<RequestId, ConnectSendError> {
-        let Some(terms) = self.session.settings.notices.terms.clone() else {
+        let Some(terms) = self.session.settings.notices.terms.terms().cloned() else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if self.session.settings.notices.terms_accept.is_loading() {
+        if self.session.settings.notices.terms.is_accepting() {
             return Err(ConnectSendError::InvalidRequest);
         }
         // The box cannot be closed: a press that cannot go out says why.
         let not_sent = "Could not send your answer. Please try again.";
         if !self.chats_path_active() {
-            self.session.settings.notices.terms_accept.fail(not_sent);
+            self.session.settings.notices.terms.fail_accept(not_sent);
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
             .request_for_subject(RequestPurpose::AcceptTermsOfService, &terms.id);
-        self.session.settings.notices.terms_accept.begin();
+        self.session.settings.notices.terms.begin_accept();
         match self
             .sender
             .send_json(&accept_terms_of_service(extra, &terms.id))
@@ -103,7 +105,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.notices.terms_accept.fail(not_sent);
+                self.session.settings.notices.terms.fail_accept(not_sent);
                 Err(err)
             }
         }

@@ -127,28 +127,35 @@ impl SampleRing {
 /// click on every buffer.
 pub struct Playout {
     prime: usize,
-    primed: bool,
+    stage: PlayoutStage,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PlayoutStage {
+    /// Waiting for `prime` samples.
+    Priming,
+    Playing,
 }
 
 impl Playout {
     pub fn new(prime: usize) -> Self {
         Self {
             prime,
-            primed: false,
+            stage: PlayoutStage::Priming,
         }
     }
 
     /// Fill `out` from `ring`, silence where there is no audio. Returns
     /// how many samples came from the ring.
     pub fn fill(&mut self, ring: &SampleRing, out: &mut [i16]) -> usize {
-        if !self.primed && ring.len() < self.prime.min(ring.capacity()) {
+        if self.stage == PlayoutStage::Priming && ring.len() < self.prime.min(ring.capacity()) {
             out.fill(0);
             return 0;
         }
-        self.primed = true;
+        self.stage = PlayoutStage::Playing;
         let got = ring.pop(out);
         if got < out.len() {
-            self.primed = false;
+            self.stage = PlayoutStage::Priming;
             if let Some(rest) = out.get_mut(got..) {
                 rest.fill(0);
             }

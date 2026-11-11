@@ -481,14 +481,12 @@ fn a_schedule_in_the_repeated_hour_confirmed_unchanged_keeps_its_pass(cx: &mut T
             WallClock::CHICAGO_FALL_BACK - 6 * 3600,
         ));
         app.select_listed_chat(A, window, cx);
-        app.update_pending_send(|send| {
-            send.scheduling = ComposerScheduling::SendAtDate(second_pass)
-        });
+        app.update_pending_send(|send| send.scheduling = ComposerScheduling::at(second_pass));
         app.open_schedule_picker(ScheduleTarget::Composer, window, cx);
         app.confirm_schedule_picker(window, cx);
         assert_eq!(
             app.pending_send().scheduling,
-            ComposerScheduling::SendAtDate(second_pass)
+            ComposerScheduling::at(second_pass)
         );
     });
 }
@@ -515,7 +513,7 @@ fn a_time_picked_just_before_its_first_showing_takes_the_second(cx: &mut TestApp
         assert!(app.chat_ui.schedule_picker.is_none(), "no \"too soon\"");
         assert_eq!(
             app.pending_send().scheduling,
-            ComposerScheduling::SendAtDate(WallClock::CHICAGO_FALL_BACK + 1800)
+            ComposerScheduling::at(WallClock::CHICAGO_FALL_BACK + 1800)
         );
     });
 }

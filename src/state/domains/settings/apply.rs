@@ -218,9 +218,7 @@ impl Session {
                         op: PasswordOp::ResetPassword
                     }))
                 ) {
-                    if self.auth_state.settle_password_op(pending.map(|p| p.id)) {
-                        self.auth_state.password_op_error = None;
-                    }
+                    self.auth_state.settle_password_op(pending.map(|p| p.id));
                     self.apply_reset_password_result(outcome);
                 }
             }
@@ -236,12 +234,9 @@ impl Session {
                 ) {
                     let has_password = state.has_password;
                     self.auth_state.password_state = Some(state);
-                    let ours = self.auth_state.settle_password_op(pending.map(|p| p.id));
+                    self.auth_state.settle_password_op(pending.map(|p| p.id));
                     self.route_gift_export_on_password(has_password);
                     self.route_gram_withdrawal_on_password(has_password);
-                    if ours {
-                        self.auth_state.password_op_error = None;
-                    }
                     if let Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp { op })) =
                         pending.map(|p| p.purpose)
                     {
@@ -252,11 +247,11 @@ impl Session {
             SettingsPayload::DeviceLoginResult { result } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::ConfirmDeviceLogin) {
                     self.settings.device_login_result = Some(result);
-                    self.settings.sessions_mutating = false;
                     if result != crate::auth::DeviceLoginResult::Failed {
-                        self.settings.sessions_stale = true;
+                        self.settings.sessions_op.changed(pending.map(|p| p.id));
                         self.settings.sessions.clear_error();
                     } else {
+                        self.settings.sessions_op.failed(pending.map(|p| p.id));
                         self.settings
                             .sessions
                             .fail("Telegram returned an invalid device session.");
@@ -266,7 +261,7 @@ impl Session {
             SettingsPayload::UpdateContactCloseBirthdays { users } => {
                 // A new list (also an empty one) re-enables the suggestion.
                 self.chat_list.suggestions.close_birthdays = users;
-                self.chat_list.suggestions.birthdays_hidden = false;
+                self.chat_list.suggestions.show_birthdays();
             }
             SettingsPayload::AddedProxies { proxies } => {
                 self.apply_added_proxies(pending, proxies);
@@ -304,7 +299,6 @@ impl Session {
                         self.settings.privacy_data.inactive_session_ttl_days =
                             inactive_session_ttl_days;
                     }
-                    self.settings.sessions_stale = false;
                 }
             }
             SettingsPayload::AccountTtl { days } => {
@@ -313,9 +307,7 @@ impl Session {
                 // `@extra`). Authoritative: replaces the cached days and
                 // clears any stale error.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetAccountTtl) {
-                    self.settings.account_ttl_days = Some(days);
-                    self.settings.account_ttl_loading = false;
-                    self.settings.account_error = None;
+                    self.settings.account_ttl.succeed(days);
                 }
             }
             SettingsPayload::ConnectedWebsites { websites } => {
@@ -325,10 +317,7 @@ impl Session {
                 // clears any stale error. No optimistic mutation ever
                 // happens client-side.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetConnectedWebsites) {
-                    self.settings.connected_websites = Some(websites);
-                    self.settings.connected_websites_loading = false;
-                    self.settings.websites_error = None;
-                    self.settings.websites_stale = false;
+                    self.settings.connected_websites.succeed(websites);
                 }
             }
             SettingsPayload::ScopeNotificationSettings { settings, .. } => {

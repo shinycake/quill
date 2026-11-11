@@ -20,7 +20,7 @@ impl QuillApp {
         let current = settings
             .and_then(|settings| settings.sessions.data().map(Vec::as_slice))
             .and_then(current_session_accepts_calls);
-        let mutating = settings.is_some_and(|settings| settings.sessions_mutating);
+        let mutating = settings.is_some_and(|settings| settings.sessions_op.is_mutating());
         // The list arrives once; ask for it when this section first shows.
         let needs_fetch =
             self.live.is_some() && settings.is_some_and(|settings| settings.sessions.is_idle());

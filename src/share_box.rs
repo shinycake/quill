@@ -12,8 +12,8 @@ pub enum ShareSend {
     #[default]
     Normal,
     Silent,
-    /// A send time and the repeat period in seconds (zero: never).
-    Scheduled(ComposerScheduling, i32),
+    /// A send time, with its repeat period.
+    Scheduled(ComposerScheduling),
 }
 
 impl ShareSend {
@@ -25,9 +25,8 @@ impl ShareSend {
                 disable_notification: true,
                 ..SendOptions::default()
             },
-            ShareSend::Scheduled(scheduling, repeat) => SendOptions {
+            ShareSend::Scheduled(scheduling) => SendOptions {
                 scheduling,
-                schedule_repeat_period: repeat,
                 ..SendOptions::default()
             },
         }
@@ -188,9 +187,12 @@ mod tests {
     fn send_modes_map_to_options() {
         assert_eq!(ShareSend::Normal.options(), SendOptions::default());
         assert!(ShareSend::Silent.options().disable_notification);
-        let scheduled = ShareSend::Scheduled(ComposerScheduling::SendAtDate(9), 86_400).options();
-        assert_eq!(scheduled.scheduling, ComposerScheduling::SendAtDate(9));
-        assert_eq!(scheduled.schedule_repeat_period, 86_400);
+        let scheduled = ShareSend::Scheduled(ComposerScheduling::at(9).repeating(86_400)).options();
+        assert_eq!(scheduled.scheduling.repeat_period(), 86_400);
+        assert_eq!(
+            scheduled.scheduling,
+            ComposerScheduling::at(9).repeating(86_400)
+        );
         assert!(!scheduled.disable_notification);
     }
 

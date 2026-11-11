@@ -135,7 +135,7 @@ fn prepared_round_videos_and_gifs_are_sent_without_probing() {
     assert_eq!(content["video_note"]["length"], 280);
 
     let mut gif = rig.junk("fun.mp4", AttachmentKind::Video);
-    gif.extras.gif = true;
+    gif.extras.set_gif(true);
     let prepared = PreparedMedia::default().with_file(
         gif.path.clone(),
         PreparedFile {

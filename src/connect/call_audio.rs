@@ -44,40 +44,51 @@ const READ_EVERY: Duration = Duration::from_millis(92);
 
 type Opened = Result<Box<dyn LevelSource + Send>, String>;
 
+/// Where the level tap stands.
+enum Tap {
+    Closed,
+    /// The microphone opens on a worker. `previous` is the failure that
+    /// came before, kept for the call window's note until this open ends.
+    Opening {
+        answer: Receiver<Opened>,
+        previous: Option<(Instant, String)>,
+    },
+    Open {
+        source: Box<dyn LevelSource>,
+        /// The open source is the injected one (so closing keeps it).
+        injected: bool,
+        /// When the poll last read the source.
+        read_at: Option<Instant>,
+    },
+    /// The last open failed (or the device went away) at `at`; the error
+    /// is the call window's note. The next open waits [`REOPEN_AFTER`].
+    Failed {
+        at: Instant,
+        error: String,
+    },
+}
+
 /// Driver-side state of the level tap and the speaking decision.
 pub struct CallAudio {
-    source: Option<Box<dyn LevelSource>>,
-    pub(crate) opening: Option<Receiver<Opened>>,
+    tap: Tap,
     pub(crate) open_microphone: Arc<dyn Fn() -> Opened + Send + Sync>,
     /// A source injected by tests or demos; used instead of opening
     /// the microphone, and kept across close/open.
     injected: Option<Box<dyn LevelSource>>,
-    /// The open source is the injected one (so closing keeps it).
-    injected_open: bool,
     tracker: SpeakingTracker,
     clock: Instant,
-    failed_at: Option<Instant>,
-    /// The last open error, for the call window's note.
-    pub error: Option<String>,
     speaking: bool,
-    /// When the poll last read the open source.
-    read_at: Option<Instant>,
 }
 
 impl Default for CallAudio {
     fn default() -> Self {
         Self {
-            source: None,
-            opening: None,
+            tap: Tap::Closed,
             open_microphone: Arc::new(open_microphone),
             injected: None,
-            injected_open: false,
             tracker: SpeakingTracker::default(),
             clock: Instant::now(),
-            failed_at: None,
-            error: None,
             speaking: false,
-            read_at: None,
         }
     }
 }
@@ -97,13 +108,13 @@ impl CallAudio {
     /// after the last read while the tap is open and `measuring`, or while
     /// you are marked speaking (so the mark runs out on time).
     pub(crate) fn deadline(&self, now: Instant, measuring: bool) -> Option<Duration> {
-        self.source.as_ref()?;
+        let Tap::Open { read_at, .. } = &self.tap else {
+            return None;
+        };
         if !measuring && !self.speaking {
             return None;
         }
-        let since = self
-            .read_at
-            .map_or(READ_EVERY, |at| now.saturating_duration_since(at));
+        let since = read_at.map_or(READ_EVERY, |at| now.saturating_duration_since(at));
         Some(READ_EVERY.saturating_sub(since))
     }
 
@@ -113,52 +124,99 @@ impl CallAudio {
     }
 
     pub fn is_open(&self) -> bool {
-        self.source.is_some()
+        matches!(self.tap, Tap::Open { .. })
+    }
+
+    /// The last open error, for the call window's note.
+    pub fn error(&self) -> Option<&str> {
+        match &self.tap {
+            Tap::Failed { error, .. } => Some(error),
+            Tap::Opening {
+                previous: Some((_, error)),
+                ..
+            } => Some(error),
+            _ => None,
+        }
+    }
+
+    /// The worker's answer, taken out (tests feed it back in).
+    #[cfg(test)]
+    pub(crate) fn take_opening(&mut self) -> Option<Receiver<Opened>> {
+        match std::mem::replace(&mut self.tap, Tap::Closed) {
+            Tap::Opening { answer, .. } => Some(answer),
+            other => {
+                self.tap = other;
+                None
+            }
+        }
+    }
+
+    /// A worker's answer put in (tests).
+    #[cfg(test)]
+    pub(crate) fn set_opening(&mut self, answer: Receiver<Opened>) {
+        self.tap = Tap::Opening {
+            answer,
+            previous: None,
+        };
     }
 
     /// Open the level source: an injected one, the call capture's level
     /// (`capture`), or the default microphone (no call capture).
     fn open(&mut self, capture: Option<Arc<LevelCell>>) {
-        if self.source.is_some() {
+        if self.is_open() {
             return;
         }
         if let Some(injected) = self.injected.take() {
-            self.source = Some(injected);
-            self.injected_open = true;
+            self.tap = Tap::Open {
+                source: injected,
+                injected: true,
+                read_at: None,
+            };
             return;
         }
         if let Some(level) = capture {
             // Drop what the stream measured before you could speak.
             let _ = level.take();
-            self.source = Some(Box::new(CaptureLevel(level)));
-            self.opening = None;
-            self.failed_at = None;
-            self.error = None;
+            self.tap = Tap::Open {
+                source: Box::new(CaptureLevel(level)),
+                injected: false,
+                read_at: None,
+            };
             return;
         }
-        if self.failed_at.is_some_and(|at| at.elapsed() < REOPEN_AFTER) {
-            return;
-        }
-        let Some(opening) = self.opening.as_ref() else {
-            self.opening = Some(self.open_on_worker());
-            return;
-        };
-        let opened = match opening.try_recv() {
-            Ok(opened) => opened,
-            Err(TryRecvError::Empty) => return,
-            Err(TryRecvError::Disconnected) => Err("The microphone thread stopped.".to_string()),
-        };
-        self.opening = None;
-        match opened {
-            Ok(source) => {
-                self.source = Some(source);
-                self.failed_at = None;
-                self.error = None;
+        match &self.tap {
+            Tap::Failed { at, .. } if at.elapsed() < REOPEN_AFTER => {}
+            Tap::Opening { answer, .. } => {
+                let opened = match answer.try_recv() {
+                    Ok(opened) => opened,
+                    Err(TryRecvError::Empty) => return,
+                    Err(TryRecvError::Disconnected) => {
+                        Err("The microphone thread stopped.".to_string())
+                    }
+                };
+                self.tap = match opened {
+                    Ok(source) => Tap::Open {
+                        source,
+                        injected: false,
+                        read_at: None,
+                    },
+                    Err(error) => Tap::Failed {
+                        at: Instant::now(),
+                        error,
+                    },
+                };
             }
-            Err(err) => {
-                self.failed_at = Some(Instant::now());
-                self.error = Some(err);
+            Tap::Closed | Tap::Failed { .. } => {
+                let previous = match std::mem::replace(&mut self.tap, Tap::Closed) {
+                    Tap::Failed { at, error } => Some((at, error)),
+                    _ => None,
+                };
+                self.tap = Tap::Opening {
+                    answer: self.open_on_worker(),
+                    previous,
+                };
             }
+            Tap::Open { .. } => {}
         }
     }
 
@@ -172,14 +230,48 @@ impl CallAudio {
         opened
     }
 
-    /// Close the microphone; an injected source goes back to waiting.
+    /// Close the microphone; an injected source goes back to waiting. A
+    /// failure stays for the note and the wait before the next open.
     fn close(&mut self) {
-        self.opening = None;
-        self.read_at = None;
-        let source = self.source.take();
-        if self.injected_open {
-            self.injected = source;
-            self.injected_open = false;
+        self.tap = match std::mem::replace(&mut self.tap, Tap::Closed) {
+            Tap::Open {
+                source, injected, ..
+            } => {
+                if injected {
+                    self.injected = Some(source);
+                }
+                Tap::Closed
+            }
+            Tap::Opening { previous, .. } => match previous {
+                Some((at, error)) => Tap::Failed { at, error },
+                None => Tap::Closed,
+            },
+            other => other,
+        };
+    }
+
+    /// The open source reported an error (the device went away): close it
+    /// and try again later.
+    fn fail(&mut self, error: String) {
+        self.close();
+        self.tap = Tap::Failed {
+            at: Instant::now(),
+            error,
+        };
+    }
+
+    /// The poll read the source at `now`.
+    fn read_at(&mut self, now: Instant) {
+        if let Tap::Open { read_at, .. } = &mut self.tap {
+            *read_at = Some(now);
+        }
+    }
+
+    /// The open source.
+    fn source(&self) -> Option<&dyn LevelSource> {
+        match &self.tap {
+            Tap::Open { source, .. } => Some(source.as_ref()),
+            _ => None,
         }
     }
 }
@@ -341,7 +433,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .enabled()
             .then(|| self.call_capture.level());
         self.call_audio.open(capture_level);
-        let Some(source) = self.call_audio.source.as_ref() else {
+        let Some(source) = self.call_audio.source() else {
             return Ok(false);
         };
         let (level, error) = (source.take_level(), source.error());
@@ -349,16 +441,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             // The device went away: drop the tap and try again later. You
             // cannot be speaking without it: as when the tap is not wanted,
             // the mark and the tracker reset and TDLib is told.
-            self.call_audio.close();
-            self.call_audio.failed_at = Some(Instant::now());
-            self.call_audio.error = Some(err);
+            self.call_audio.fail(err);
             self.call_audio.speaking = false;
             if self.call_audio.tracker.reset() && was_speaking && audio_source != 0 {
                 self.send_speaking(group_call_id, audio_source, false)?;
             }
             return Ok(was_speaking);
         }
-        self.call_audio.read_at = Some(now);
+        self.call_audio.read_at(now);
         let now_ms = self.call_audio.ms(now);
         let update = match level {
             Some(level) => self.call_audio.tracker.update(level, false, now_ms),
@@ -389,10 +479,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// The level tap's error, if it could not open the microphone.
     pub fn group_call_level_error(&self) -> Option<&str> {
-        self.call_capture
-            .error
-            .as_deref()
-            .or(self.call_audio.error.as_deref())
+        self.call_capture.error().or(self.call_audio.error())
     }
 
     pub(crate) fn send_speaking(

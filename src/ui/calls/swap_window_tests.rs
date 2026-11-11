@@ -43,7 +43,7 @@ fn open_call_window(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestCon
     frames(&mut main);
     app.update(&mut main, |app, cx| app.sync_call_window(cx));
     frames(&mut main);
-    let Some(window) = app.read_with(&main, |app, _| app.calls.window) else {
+    let Some(window) = app.read_with(&main, |app, _| app.calls.window.handle()) else {
         panic!("the call window opens");
     };
     let call = VisualTestContext::from_window(window, cx);
@@ -101,7 +101,7 @@ fn a_second_call_reopens_a_call_window_you_closed(cx: &mut TestAppContext) {
         app.sync_call_window(cx);
     });
     call.run_until_parked();
-    assert!(app.read_with(call, |app, _| app.calls.window.is_none()));
+    assert!(app.read_with(call, |app, _| app.calls.window.handle().is_none()));
     app.update(call, |app, cx| {
         if let Some(session) = app.demo_session.as_deref_mut() {
             session.calls.second_call = SecondCall::Prompt {
@@ -114,7 +114,7 @@ fn a_second_call_reopens_a_call_window_you_closed(cx: &mut TestAppContext) {
     });
     call.run_until_parked();
     assert!(
-        app.read_with(call, |app, _| app.calls.window.is_some()),
+        app.read_with(call, |app, _| app.calls.window.handle().is_some()),
         "the window opens for the second call"
     );
     app.update(call, |app, cx| {
@@ -125,7 +125,7 @@ fn a_second_call_reopens_a_call_window_you_closed(cx: &mut TestAppContext) {
     });
     call.run_until_parked();
     assert!(
-        app.read_with(call, |app, _| app.calls.window.is_none()),
+        app.read_with(call, |app, _| app.calls.window.handle().is_none()),
         "and closes again once answered"
     );
 }

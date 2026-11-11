@@ -176,7 +176,7 @@ fn open_call(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext, V
     app.update(&mut main, |app, cx| app.sync_call_window(cx));
     frames(&mut main);
     let window = app
-        .read_with(&main, |app, _| app.calls.window)
+        .read_with(&main, |app, _| app.calls.window.handle())
         .expect("the call window opens");
     let mut call = VisualTestContext::from_window(window, cx);
     frames(&mut call);

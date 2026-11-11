@@ -386,7 +386,7 @@ fn a_lost_microphone_needs_no_telegram_update() {
     assert!(driver.request_tick(t0), "the call window shows the note");
     assert_eq!(driver.call_capture().target(), None);
     assert_eq!(
-        driver.call_capture().error.as_deref(),
+        driver.call_capture().error(),
         Some("The microphone was disconnected.")
     );
     let t1 = t0 + Duration::from_secs(1);
@@ -406,7 +406,7 @@ fn a_lost_microphone_needs_no_telegram_update() {
     }
     assert_eq!(mics.opened.lock().unwrap().len(), 2);
     assert!(driver.call_capture().target().is_some());
-    assert_eq!(driver.call_capture().error, None);
+    assert_eq!(driver.call_capture().error(), None);
     assert_eq!(
         driver.next_deadline(t2, 0),
         Some(Duration::from_millis(92)),

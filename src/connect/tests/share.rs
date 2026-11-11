@@ -120,7 +120,7 @@ fn scheduled_forward_carries_the_send_date() {
         ForwardDraft::from_message(ChatId(7), crate::ids::TopicId::None, MessageId(50), false)
             .unwrap();
     let options = SendOptions {
-        scheduling: ComposerScheduling::SendAtDate(1_900_000_000),
+        scheduling: ComposerScheduling::at(1_900_000_000),
         ..SendOptions::default()
     };
     driver

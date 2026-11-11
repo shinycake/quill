@@ -44,7 +44,7 @@ impl QuillApp {
             let loading = session.is_some_and(|s| s.auth_state.password_state_loading());
             let error = session
                 .as_ref()
-                .and_then(|s| s.auth_state.password_op_error.clone());
+                .and_then(|s| s.auth_state.password_op_error().map(str::to_string));
             let notice = this.twofa_notice_line();
             let mut body = div().flex().flex_col().gap_2();
             if let Some(line) = notice.filter(|_| this.twofa.view() == TwofaView::Status) {
@@ -129,8 +129,8 @@ impl QuillApp {
                 .and_then(|s| s.settings.sessions.data().cloned())
                 .unwrap_or_default();
             let loading = session.is_some_and(|s| s.settings.sessions.is_loading());
-            let mutating = session.is_some_and(|s| s.settings.sessions_mutating);
-            let stale = session.is_some_and(|s| s.settings.sessions_stale);
+            let mutating = session.is_some_and(|s| s.settings.sessions_op.is_mutating());
+            let stale = session.is_some_and(|s| s.settings.sessions_op.is_stale());
             let error = session
                 .as_ref()
                 .and_then(|s| s.settings.sessions.error().map(str::to_string));
@@ -510,7 +510,7 @@ impl QuillApp {
         if let Some(auth) = self.session_mut().map(|session| &mut session.auth_state)
             && !auth.password_state_loading()
         {
-            auth.password_op_error = None;
+            auth.clear_password_error();
         }
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_password_state();
@@ -608,7 +608,7 @@ impl QuillApp {
     pub(super) fn refresh_sessions(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.sessions = Fetch::Idle;
-            live.driver.session.settings.sessions_stale = false;
+            live.driver.session.settings.sessions_op.refetched();
             let _ = live.driver.maybe_fetch_active_sessions();
         } else if let Some(session) = self.demo_session.as_mut() {
             session.settings.sessions = Fetch::Ready(demo_sessions());

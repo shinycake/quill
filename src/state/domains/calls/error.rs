@@ -106,7 +106,12 @@ impl Session {
                 }
             }
             Some(RequestPurpose::DeleteAllCallMessages) => {
-                if self.calls.recent_calls_clearing() {
+                if let Some(pending) = pending
+                    && self.calls.recent_calls_stage
+                        == (RecentCalls::Clearing {
+                            request: pending.id,
+                        })
+                {
                     self.calls.recent_calls_stage = RecentCalls::Idle;
                 }
                 self.chats_state

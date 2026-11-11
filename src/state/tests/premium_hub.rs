@@ -78,19 +78,19 @@ fn gift_mutation_ok_marks_the_list_stale_and_errors_release_the_lock() {
         RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { saved: false }),
         None,
     );
-    session.payments.hub.gift_mutation = crate::premium_hub::GiftMutation::Busy(extra);
+    session.payments.hub.gifts_op = crate::state::fetch::ListOp::Mutating(extra);
     apply_json(
         &mut session,
         &seq,
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!session.payments.hub.gift_mutation.is_busy());
-    assert!(session.payments.hub.gifts_stale);
+    assert!(!session.payments.hub.gifts_op.is_mutating());
+    assert!(session.payments.hub.gifts_op.is_stale());
 
     session.payments.hub.gift_convert_confirm = Some("g1".into());
     let extra = session.request(RequestPurpose::SellGift, None);
-    session.payments.hub.gift_mutation = crate::premium_hub::GiftMutation::Busy(extra);
+    session.payments.hub.gifts_op = crate::state::fetch::ListOp::Mutating(extra);
     apply_json(
         &mut session,
         &seq,
@@ -100,7 +100,7 @@ fn gift_mutation_ok_marks_the_list_stale_and_errors_release_the_lock() {
             extra.0
         ),
     );
-    assert!(!session.payments.hub.gift_mutation.is_busy());
+    assert!(!session.payments.hub.gifts_op.is_mutating());
     assert!(session.payments.hub.gift_convert_confirm.is_none());
     assert!(session.payments.hub.gifts_error.is_some());
 }
@@ -110,7 +110,7 @@ fn another_requests_answer_does_not_free_a_gift_mutation() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let busy = session.request(RequestPurpose::SellGift, None);
-    session.payments.hub.gift_mutation = crate::premium_hub::GiftMutation::Busy(busy);
+    session.payments.hub.gifts_op = crate::state::fetch::ListOp::Mutating(busy);
     let other = session.request(
         RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { saved: true }),
         None,
@@ -122,7 +122,7 @@ fn another_requests_answer_does_not_free_a_gift_mutation() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, other.0),
     );
     assert!(
-        session.payments.hub.gift_mutation.is_busy(),
+        session.payments.hub.gifts_op.is_mutating(),
         "only the request that locked it frees it"
     );
     apply_json(
@@ -131,7 +131,7 @@ fn another_requests_answer_does_not_free_a_gift_mutation() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, busy.0),
     );
-    assert!(!session.payments.hub.gift_mutation.is_busy());
+    assert!(!session.payments.hub.gifts_op.is_mutating());
 }
 
 #[test]
@@ -217,5 +217,27 @@ fn business_features_keep_the_server_order() {
             BusinessFeature::QuickReplies,
             BusinessFeature::Location
         ])
+    );
+}
+
+#[test]
+fn a_late_answer_of_an_older_gift_change_leaves_the_newer_one_locked() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let old = session.request(
+        RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { saved: true }),
+        None,
+    );
+    let new = session.request(RequestPurpose::SellGift, None);
+    session.payments.hub.gifts_op = crate::state::fetch::ListOp::Mutating(new);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, old.0),
+    );
+    assert!(
+        session.payments.hub.gifts_op.is_mutating(),
+        "the sale is still out"
     );
 }

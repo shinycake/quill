@@ -410,7 +410,7 @@ impl QuillApp {
         };
         // A held Send takes the tray once its renders land, which would
         // close this editor and lose its edits without a word.
-        if self.pending_send().held_send.is_some() {
+        if self.pending_send().send_is_held() {
             self.set_note(super::status_note::StatusNote::silent(quill::lang::tr(
                 quill::lang::keys::Q_OPS_PHOTOS_ARE_SENDING,
             )));
@@ -420,7 +420,7 @@ impl QuillApp {
         let render = self
             .pending_attachments()
             .get(index)
-            .and_then(|attachment| attachment.extras.photo_render);
+            .and_then(|attachment| attachment.extras.photo_render());
         if let Some(render) = render {
             let view = self
                 .session()

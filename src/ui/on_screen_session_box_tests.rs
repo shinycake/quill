@@ -50,7 +50,7 @@ fn a_switch_closes_the_boxes_whose_flag_is_the_sessions(cx: &mut TestAppContext)
             session.stickers.masks.set_dialog_open(true);
             session.stickers.emoji.open = true;
             session.chat_list.archive_settings_open = true;
-            session.calls.rtmp_start = Some(RtmpStart::new(CHAT));
+            session.calls.rtmp_start = Some(RtmpStart::new(CHAT, quill::ids::RequestId(1)));
             session.groups.boost_box = Some(BoostBoxState::new(CHAT.0, false));
             session.settings.language_link = Some(LanguageLinkLookup::looking_up(
                 "de".into(),

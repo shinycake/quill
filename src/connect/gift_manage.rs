@@ -8,7 +8,6 @@ use super::*;
 use crate::gift_manage::*;
 use crate::ids::{ChatId, RequestId};
 use crate::local_time::now_unix;
-use crate::premium_hub::GiftMutation;
 use crate::state::{PaymentsPurpose, RequestPurpose};
 use crate::telegram::envelope::MessageSender;
 use crate::telegram::requests_gifts as rq;
@@ -17,7 +16,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn gifts_owner_if_mine(&self) -> Result<MessageSender, ConnectSendError> {
         let hub = &self.session.payments.hub;
         if !self.chats_path_active()
-            || hub.gift_mutation.is_busy()
+            || hub.gifts_op.is_mutating()
             || !hub.gifts_are_mine(self.session.my_user_id)
         {
             return Err(ConnectSendError::InvalidRequest);
@@ -30,7 +29,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn gifts_owner_if_deletable(&self) -> Result<MessageSender, ConnectSendError> {
         let hub = &self.session.payments.hub;
         if !self.chats_path_active()
-            || hub.gift_mutation.is_busy()
+            || hub.gifts_op.is_mutating()
             || !self.session.gifts_deletable()
         {
             return Err(ConnectSendError::InvalidRequest);
@@ -58,10 +57,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::Payments(purpose), None);
+        self.session.payments.hub.gifts_op.begin(extra);
         self.session.payments.hub.gifts_error = None;
         self.session.payments.gifts_manage.note = None;
-        self.send_json_request(extra, &build(extra, owner))?;
-        self.session.payments.hub.gift_mutation = GiftMutation::Busy(extra);
+        if let Err(err) = self.send_json_request(extra, &build(extra, owner)) {
+            self.session.payments.hub.gifts_op.failed(Some(extra));
+            return Err(err);
+        }
         Ok(extra)
     }
 
@@ -262,7 +264,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         };
         // A second click while the first transfer is out sends nothing.
-        if self.session.payments.hub.gift_mutation.is_busy() {
+        if self.session.payments.hub.gifts_op.is_mutating() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let person = self
@@ -289,7 +291,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// gift of the user's own list, with nothing else in flight.
     fn export_allowed(&self, id: &str) -> Result<(), ConnectSendError> {
         if !self.chats_path_active()
-            || self.session.payments.hub.gift_mutation.is_busy()
+            || self.session.payments.hub.gifts_op.is_mutating()
             || self.own_gift(id)?.export_state(now_unix()) != ExportState::Ready
             || !self
                 .session

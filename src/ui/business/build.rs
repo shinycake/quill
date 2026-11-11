@@ -331,7 +331,7 @@ impl QuillApp {
             }
             let server_error = this
                 .session()
-                .and_then(|s| s.settings.business.error.clone());
+                .and_then(|s| s.settings.business.refusal().map(str::to_string));
             // The screen's own line and TDLib's refusal both show: a local
             // "still loading" must not hide why the load failed.
             let server_error = server_error.filter(|line| local_error.as_ref() != Some(line));

@@ -139,7 +139,7 @@ pub(crate) fn one_to_one_has_video(call: &ActiveCall, key: LiveKey) -> bool {
     };
     call.id == call_id
         && match (local, screen) {
-            (true, _) => call.camera_on,
+            (true, _) => call.camera_on(),
             (false, false) => call.remote_video != RemoteVideoState::Inactive,
             (false, true) => call.remote_screen != RemoteVideoState::Inactive,
         }

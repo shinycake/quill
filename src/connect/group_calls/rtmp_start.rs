@@ -27,10 +27,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(());
         }
-        self.session.calls.rtmp_start = Some(RtmpStart::new(chat_id));
-        self.send_rtmp_url_request(chat_id, false).inspect_err(|_| {
-            self.session.calls.rtmp_start = None;
-        })
+        let request = self.send_rtmp_url_request(chat_id, false)?;
+        self.session.calls.rtmp_start = Some(RtmpStart::new(chat_id, request));
+        Ok(())
     }
 
     /// "Revoke Stream Key" in the box: the same request with `revoke`.
@@ -41,7 +40,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.send_rtmp_url_request(chat_id, true)
+        let request = self.send_rtmp_url_request(chat_id, true)?;
+        if let Some(start) = self.session.calls.rtmp_start.as_mut() {
+            start.revoking(request);
+        }
+        Ok(())
     }
 
     /// "Start Streaming": create the video chat as an RTMP stream with the
@@ -108,7 +111,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
         revoke: bool,
-    ) -> Result<(), ConnectSendError> {
+    ) -> Result<RequestId, ConnectSendError> {
         let purpose = if revoke {
             CallsPurpose::ReplaceVideoChatRtmpUrl { chat_id: chat_id.0 }
         } else {
@@ -124,9 +127,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        if let Some(start) = self.session.calls.rtmp_start.as_mut() {
-            start.sent(extra);
-        }
-        Ok(())
+        Ok(extra)
     }
 }

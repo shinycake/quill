@@ -77,9 +77,6 @@ pub struct SendOptions {
     /// `disable_notification` — silent send.
     pub disable_notification: bool,
     pub scheduling: ComposerScheduling,
-    /// `messageSchedulingStateSendAtDate.repeat_period` (seconds, Premium).
-    /// Zero for never; ignored unless `scheduling` is a send date.
-    pub schedule_repeat_period: i32,
     /// `linkPreviewOptions.is_disabled` — the composer preview toggle.
     /// Secret chats force this on the driver side regardless.
     pub link_preview_disabled: bool,
@@ -165,14 +162,47 @@ impl PreviewMediaSize {
 /// M1: `MessageSchedulingState` for a send (TDLib 1.8.67,
 /// `schema/td_api.tl:5902` `messageSchedulingStateSendAtDate
 /// send_date repeat_period` / `:5905` `messageSchedulingStateSendWhenOnline`).
-/// `repeat_period` rides [`SendOptions::schedule_repeat_period`].
+/// `repeat_period` rides the send date.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ComposerScheduling {
     #[default]
     None,
-    /// Unix timestamp of the scheduled send.
-    SendAtDate(i64),
+    SendAtDate {
+        /// Unix timestamp of the scheduled send.
+        date: i64,
+        /// `repeat_period` in seconds (Premium); zero for never.
+        repeat_period: i32,
+    },
     SendWhenOnline,
+}
+
+impl ComposerScheduling {
+    /// A send at `date` that does not repeat.
+    pub fn at(date: i64) -> Self {
+        ComposerScheduling::SendAtDate {
+            date,
+            repeat_period: 0,
+        }
+    }
+
+    /// The same send with `repeat_period` (a send date only).
+    pub fn repeating(self, repeat_period: i32) -> Self {
+        match self {
+            ComposerScheduling::SendAtDate { date, .. } => ComposerScheduling::SendAtDate {
+                date,
+                repeat_period,
+            },
+            other => other,
+        }
+    }
+
+    /// The repeat period of a send date; zero otherwise.
+    pub fn repeat_period(self) -> i32 {
+        match self {
+            ComposerScheduling::SendAtDate { repeat_period, .. } => repeat_period,
+            _ => 0,
+        }
+    }
 }
 
 /// Send-started copy reflects both connectivity and the submitted schedule.
@@ -182,7 +212,9 @@ pub fn send_started_note(offline: bool, scheduling: ComposerScheduling, online_n
     }
     match scheduling {
         ComposerScheduling::None => "You're offline — will send when you reconnect",
-        ComposerScheduling::SendAtDate(_) => "You're offline — will schedule when you reconnect",
+        ComposerScheduling::SendAtDate { .. } => {
+            "You're offline — will schedule when you reconnect"
+        }
         ComposerScheduling::SendWhenOnline => "You're offline — will send when they're online",
     }
 }
@@ -199,7 +231,7 @@ mod tests {
                 "You're offline — will send when you reconnect",
             ),
             (
-                ComposerScheduling::SendAtDate(1_800_000_000),
+                ComposerScheduling::at(1_800_000_000),
                 "You're offline — will schedule when you reconnect",
             ),
             (
@@ -215,7 +247,7 @@ mod tests {
     fn online_send_started_notes_preserve_provided_copy() {
         for scheduling in [
             ComposerScheduling::None,
-            ComposerScheduling::SendAtDate(1_800_000_000),
+            ComposerScheduling::at(1_800_000_000),
             ComposerScheduling::SendWhenOnline,
         ] {
             for online_note in ["sending…", "saving edit…", "retrying send…"] {

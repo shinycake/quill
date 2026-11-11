@@ -6,7 +6,7 @@ use super::*;
 /// A request lost to logout is settled through those handlers so its busy
 /// marker clears, but nobody asked it to fail: its note would show while the
 /// account signs out, and again after the next login in this Session.
-pub(super) struct UserNotes([Option<String>; 6], [Notes; 6]);
+pub(super) struct UserNotes([Option<String>; 7], [Notes; 6]);
 
 impl Session {
     /// The account is going away (logout, close): no answer can land any
@@ -38,7 +38,8 @@ impl Session {
                 self.groups.invite_link_error.clone(),
                 self.calls.group_call_error.clone(),
                 self.calls.error.clone(),
-                self.settings.account_error.clone(),
+                self.settings.account_ttl.error().map(str::to_string),
+                self.settings.account_delete.error().map(str::to_string),
             ],
             [
                 self.chats_state.chat_action_error.clone(),
@@ -53,7 +54,15 @@ impl Session {
 
     pub(super) fn restore_user_notes(&mut self, notes: UserNotes) {
         let UserNotes(
-            [payments, contacts, invite_link, group_call, calls, account],
+            [
+                payments,
+                contacts,
+                invite_link,
+                group_call,
+                calls,
+                account_ttl,
+                account_delete,
+            ],
             [
                 chat_action,
                 message_action,
@@ -74,6 +83,15 @@ impl Session {
         self.groups.invite_link_error = invite_link;
         self.calls.group_call_error = group_call;
         self.calls.error = calls;
-        self.settings.account_error = account;
+        restore_error(&mut self.settings.account_ttl, account_ttl);
+        restore_error(&mut self.settings.account_delete, account_delete);
+    }
+}
+
+/// The failure line of `fetch` as it was before the lost requests settled.
+fn restore_error<T>(fetch: &mut crate::state::fetch::Fetch<T>, line: Option<String>) {
+    match line {
+        Some(line) => fetch.fail(line),
+        None => fetch.clear_error(),
     }
 }
