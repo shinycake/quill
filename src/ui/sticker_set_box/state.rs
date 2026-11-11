@@ -110,6 +110,8 @@ pub(crate) struct PickExisting {
 
 /// The set box's editing state (`ui/sticker_set_box/`).
 pub(crate) struct StickerSetBoxUi {
+    /// The window showing the dialog, if it is open.
+    pub(crate) host: SetBoxHost,
     /// "Edit Stickers" was pressed: cells drag to reorder, the footer is
     /// "Done" (tdesktop `setReorderState`).
     pub(crate) reordering: bool,
@@ -280,9 +282,21 @@ impl Encoding {
     }
 }
 
+/// The window that shows the sticker set dialog. The session holds one
+/// viewed set and one editing state, so the box is open in one window at a
+/// time: opening it elsewhere moves it, and closing it is one transition.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum SetBoxHost {
+    #[default]
+    Closed,
+    /// Open in this window (`None`: the main window).
+    In(Option<quill::ids::ChatId>),
+}
+
 impl StickerSetBoxUi {
     pub(crate) fn new(window: &mut Window, cx: &mut App) -> Self {
         Self {
+            host: SetBoxHost::Closed,
             reordering: false,
             confirm: SetConfirm::None,
             rename_input: cx

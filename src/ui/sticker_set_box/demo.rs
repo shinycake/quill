@@ -83,7 +83,7 @@ impl QuillApp {
             };
             session.stickers.sticker_set_view = Some(view);
         }
-        self.message_ui.menu_ui.show_sticker_set();
+        self.sticker_box.host = super::state::SetBoxHost::In(self.windows.scope);
         // `QUILL_DEMO_STICKER_BOX=<state>` opens one of the editing states
         // for its screenshot: reorder, rename, delete, create, editor, video, panel.
         match std::env::var("QUILL_DEMO_STICKER_BOX").as_deref() {
@@ -167,7 +167,7 @@ impl QuillApp {
                 );
             }
             Ok("panel") => {
-                self.message_ui.menu_ui.end_sticker_set();
+                self.sticker_box.host = super::state::SetBoxHost::Closed;
                 self.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
                 self.pickers.media_panel.tab = crate::ui::media_panel::PanelTab::Stickers;
             }

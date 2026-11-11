@@ -201,7 +201,7 @@ fn delete_for_everyone_asks_then_closes_the_box(cx: &mut TestAppContext) {
     frames(vcx);
     vcx.update(|window, cx| window.click("sticker-set-delete-confirm", cx));
     frames(vcx);
-    assert!(!app.read_with(vcx, |app, _| app.message_ui.menu_ui.sticker_set_open()));
+    assert!(!app.read_with(vcx, |app, _| app.sticker_set_open()));
     assert!(shell.read_with(vcx, |shell, _| shell.open_dialog.is_none()));
 }
 
@@ -307,7 +307,7 @@ fn the_photo_editor_takes_the_box_aside_until_it_closes(cx: &mut TestAppContext)
     });
     frames(vcx);
     assert!(shell.read_with(vcx, |shell, _| shell.open_dialog.is_none()));
-    assert!(app.read_with(vcx, |app, _| app.message_ui.menu_ui.sticker_set_open()));
+    assert!(app.read_with(vcx, |app, _| app.sticker_set_open()));
     // Done in the editor hands the image to the "New Sticker" box.
     app.update(vcx, |app, cx| {
         let job = app

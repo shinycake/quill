@@ -36,40 +36,16 @@ pub(super) use super::message_menu_state::MessageMenuPage;
 
 /// UI state of the message menu's extras.
 pub(super) struct MessageMenuUi {
-    /// The sticker set dialog (`DialogKind::StickerSet`) of this window.
     /// The report dialog is not kept here: it shows while the session's
-    /// report flow exists, in the window that opened it (`open_box`).
-    pub sticker_box: StickerBox,
+    /// report flow exists, in the window that opened it (`open_box`). The
+    /// sticker set dialog's window is the box's own (`SetBoxHost`).
     /// Details of a report (`reportChatResultTextRequired`).
     pub report_text: Entity<TextareaState>,
-}
-
-/// Whether this window shows the sticker set dialog.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(super) enum StickerBox {
-    #[default]
-    Closed,
-    Shown,
-}
-
-impl MessageMenuUi {
-    pub(super) fn sticker_set_open(&self) -> bool {
-        self.sticker_box == StickerBox::Shown
-    }
-
-    pub(super) fn show_sticker_set(&mut self) {
-        self.sticker_box = StickerBox::Shown;
-    }
-
-    pub(super) fn end_sticker_set(&mut self) {
-        self.sticker_box = StickerBox::Closed;
-    }
 }
 
 impl MessageMenuUi {
     pub(super) fn new(window: &mut Window, cx: &mut App) -> Self {
         Self {
-            sticker_box: StickerBox::Closed,
             report_text: cx.new(|cx| {
                 TextareaState::new(window, cx)
                     .placeholder(tr(keys::Q_CHAT_ADD_COMMENT))
