@@ -3,7 +3,6 @@
 //! it, discards, and asks a non-Premium sender about its formatting. Over
 //! the `ready-chats` demo; nothing reaches Telegram.
 
-use super::RichDraftBox;
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -129,7 +128,7 @@ fn the_editor_opens_the_draft_and_closing_it_shows_the_draft_again(cx: &mut Test
     let vcx = &mut vcx;
     remote_rich_draft(&app, vcx, true);
     click(vcx, "rich-draft-preview");
-    assert!(app.read_with(vcx, |app, _| app.chat_ui.rich_editor_open));
+    assert!(app.read_with(vcx, |app, _| app.chat_ui.rich.editor_open()));
     assert_eq!(composer_text(&app, vcx), "# Plan\n\n**ship it**");
     assert!(!shown(vcx, "rich-draft-preview"));
 
@@ -175,11 +174,8 @@ fn sending_without_premium_offers_the_text_without_formatting(cx: &mut TestAppCo
         });
     });
     frames(vcx);
-    let choice = app.read_with(vcx, |app, _| app.chat_ui.rich_draft_box.clone());
-    assert_eq!(
-        choice,
-        RichDraftBox::PremiumChoice("Plan\n**ship it**".into())
-    );
+    let choice = app.read_with(vcx, |app, _| app.chat_ui.rich.choice().map(String::from));
+    assert_eq!(choice.as_deref(), Some("Plan\n**ship it**"));
     assert!(shown(vcx, "rich-choice-plain"));
 }
 
@@ -226,8 +222,8 @@ fn a_rich_draft_box_goes_with_its_chat(cx: &mut TestAppContext) {
     });
     frames(vcx);
     assert_eq!(
-        app.read_with(vcx, |app, _| app.chat_ui.rich_draft_box.clone()),
-        RichDraftBox::Closed
+        app.read_with(vcx, |app, _| app.chat_ui.rich.clone()),
+        super::RichComposer::Field
     );
     assert!(!shown(vcx, "rich-choice-plain"));
     assert_eq!(
@@ -251,7 +247,7 @@ fn the_rich_editor_shows_the_blocks_of_a_long_draft(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     let markup = crate::ui::demos::composer::rich_editor_markup(32 * 1024);
     app.update_in(vcx, |app, window, cx| {
-        app.chat_ui.rich_editor_open = true;
+        app.chat_ui.rich.set_editor(true);
         app.set_composer_markup(&markup, window, cx);
     });
     frames(vcx);

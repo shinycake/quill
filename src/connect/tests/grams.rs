@@ -193,3 +193,33 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
         );
     }
 }
+
+/// Sweep is-17 (12-024): a probe that failed is one stage, not a flag left
+/// set: the row stays hidden and the tick does not ask again.
+#[test]
+fn a_failed_probe_is_a_stage_and_is_not_asked_again() {
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    assert!(driver.grams_tick(true));
+    assert!(driver.session.payments.hub.grams.probe.is_loading());
+    let probe = sent_request(&recorder, "getTonTransactions");
+    let failure = answer(
+        &probe["@extra"],
+        json!({"@type": "error", "code": 400, "message": "NOPE"}),
+    );
+    driver
+        .ingest(copy_and_parse(&failure, &seq, &sink).unwrap())
+        .unwrap();
+    let grams = &driver.session.payments.hub.grams;
+    assert!(grams.probe.error().is_some());
+    assert_eq!(grams.balance_nano, None);
+    assert!(
+        !driver.grams_tick(true),
+        "a failed probe is not asked again"
+    );
+    assert_eq!(sent_of(&recorder, "getTonTransactions").len(), 1);
+}

@@ -218,7 +218,7 @@ impl QuillApp {
     /// The composer's content as markup, for sending, drafts and edits.
     pub(super) fn composer_markup(&self, cx: &App) -> String {
         let state = self.composer.read(cx);
-        if self.chat_ui.rich_editor_open {
+        if self.chat_ui.rich.editor_open() {
             return state.value().to_string();
         }
         field_doc(state).to_markup()
@@ -231,7 +231,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let content = if self.chat_ui.rich_editor_open {
+        let content = if self.chat_ui.rich.editor_open() {
             InputContent::new(quill::composer::strip_barrier(markup))
         } else {
             doc_content(&ComposerDoc::from_markup(markup))
@@ -295,7 +295,7 @@ impl QuillApp {
         custom_emoji_id: i64,
     ) -> InputContent {
         let fallback = if fallback.is_empty() { "⭐" } else { fallback };
-        if self.chat_ui.rich_editor_open {
+        if self.chat_ui.rich.editor_open() {
             InputContent::new(quill::composer::custom_emoji_markup(
                 fallback,
                 custom_emoji_id,
@@ -325,7 +325,7 @@ impl QuillApp {
         };
         let content = if !username.is_empty() {
             InputContent::new(format!("@{username} "))
-        } else if self.chat_ui.rich_editor_open {
+        } else if self.chat_ui.rich.editor_open() {
             InputContent::new(quill::moderation::mention_text(user_id, "", name))
         } else {
             mention_content(user_id, name)
@@ -434,7 +434,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.chat_ui.rich_editor_open {
+        if self.chat_ui.rich.editor_open() {
             return false;
         }
         let revert = self

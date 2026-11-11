@@ -128,7 +128,10 @@ fn keys_stay_unique_when_ids_are_empty_or_repeat() {
     assert_eq!(keys, ["0-10", "a", "2-12", "3-10"]);
     hub.selected = Some("2-12".into());
     assert_eq!(hub.selected_tx().map(|tx| tx.gram_nano), Some(3));
-    assert!(hub.peers_dirty);
+    assert_eq!(
+        hub.peers_checked, 0,
+        "the new rows still need their peers checked"
+    );
 }
 
 #[test]

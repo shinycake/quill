@@ -346,11 +346,11 @@ fn privacy_rules_open_over_the_page_and_esc_closes_them_first(cx: &mut TestAppCo
     assert!(shown(vcx, "settings-page-privacy"));
     vcx.update(|window, cx| window.click("privacy-rule-userPrivacySettingShowStatus", cx));
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.privacy.editor.is_some()));
+    assert!(app.read_with(vcx, |app, _| app.privacy.layer.editor().is_some()));
 
     vcx.simulate_keystrokes("escape");
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.privacy.editor.is_none()));
+    assert!(app.read_with(vcx, |app, _| app.privacy.layer.editor().is_none()));
     assert!(shown(vcx, "settings-page-privacy"), "the page stays");
 }
 
@@ -418,15 +418,17 @@ fn devices_page_esc_leaves_session_details_before_the_page(cx: &mut TestAppConte
             .session()
             .and_then(|s| s.settings.sessions.data())
             .and_then(|list| list.first().map(|s| s.id));
-        app.privacy.extra.session_details = first;
+        if let Some(id) = first {
+            app.privacy.devices.open_details(id);
+        }
         cx.notify();
     });
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.privacy.extra.session_details.is_some()));
+    assert!(app.read_with(vcx, |app, _| app.privacy.devices.details().is_some()));
 
     vcx.simulate_keystrokes("escape");
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.privacy.extra.session_details.is_none()));
+    assert!(app.read_with(vcx, |app, _| app.privacy.devices.details().is_none()));
     assert!(shown(vcx, "settings-page-devices"), "the page stays");
 }
 
@@ -500,7 +502,7 @@ fn a_session_box_whose_session_left_the_list_is_not_a_layer(cx: &mut TestAppCont
     let vcx = &mut vcx;
     frames(vcx);
     app.update(vcx, |app, _| {
-        app.privacy.extra.session_details = Some(i64::MAX);
+        app.privacy.devices.open_details(i64::MAX);
     });
     assert!(
         !app.read_with(vcx, |app, _| app.sessions_layer_open()),

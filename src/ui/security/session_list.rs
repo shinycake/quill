@@ -132,9 +132,8 @@ impl QuillApp {
                     .child(text),
             )
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.privacy.extra.session_details = Some(session_id);
+                this.privacy.devices.open_details(session_id);
                 this.open_box(DialogKind::SessionDetails);
-                this.privacy.extra.renaming_device = false;
                 cx.notify();
             }));
         div()
@@ -223,13 +222,12 @@ impl QuillApp {
     }
 
     fn close_session_details(&mut self, cx: &mut Context<Self>) {
-        self.privacy.extra.session_details = None;
-        self.privacy.extra.renaming_device = false;
+        self.privacy.devices.close_details();
         cx.notify();
     }
 
     pub(in crate::ui) fn details_session(&self) -> Option<ParsedSession> {
-        let id = self.privacy.extra.session_details?;
+        let id = self.privacy.devices.details()?;
         self.session()?
             .settings
             .sessions
@@ -242,7 +240,7 @@ impl QuillApp {
     /// The session box body: the device, its info rows and, for a signed
     /// in session, the switches that pick what it accepts.
     fn session_box_body(&self, s: &ParsedSession, cx: &mut Context<Self>) -> Div {
-        if s.is_current && self.privacy.extra.renaming_device {
+        if s.is_current && self.privacy.devices.renaming() {
             return self.rename_device_fields(cx);
         }
         let muted = cx.theme().muted_foreground;
@@ -394,7 +392,7 @@ impl QuillApp {
         let session_id = s.id;
         let incomplete = s.is_password_pending;
         let footer = div().flex().items_center().gap_2().w_full();
-        if s.is_current && self.privacy.extra.renaming_device {
+        if s.is_current && self.privacy.devices.renaming() {
             return footer
                 .justify_end()
                 .child(
@@ -402,7 +400,7 @@ impl QuillApp {
                         .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.privacy.extra.renaming_device = false;
+                            this.privacy.devices.stop_rename();
                             cx.notify();
                         })),
                 )
@@ -424,7 +422,7 @@ impl QuillApp {
                 .custom(quiet_danger(cx))
                 .disabled(mutating)
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.privacy.extra.session_details = None;
+                    this.privacy.devices.close_details();
                     this.begin_terminate_session(session_id, incomplete, cx);
                 }))
         };
@@ -453,7 +451,7 @@ impl QuillApp {
             let footer = this
                 .details_session()
                 .map(|s| this.session_box_footer(&s, mutating, cx));
-            (footer, this.privacy.extra.renaming_device)
+            (footer, this.privacy.devices.renaming())
         });
         let body_app = app.clone();
         let ok_app = app.clone();
@@ -467,7 +465,7 @@ impl QuillApp {
             })
             .on_ok(move |_, _, cx| {
                 ok_app.update(cx, |this, cx| {
-                    if this.privacy.extra.renaming_device {
+                    if this.privacy.devices.renaming() {
                         this.save_device_name(cx);
                     } else {
                         this.close_session_details(cx);
@@ -497,7 +495,7 @@ impl QuillApp {
         dialog: Dialog,
         cx: &mut App,
     ) -> Dialog {
-        let (title, text) = match app.read(cx).privacy.sessions_confirm {
+        let (title, text) = match app.read(cx).privacy.devices.confirm() {
             Some(SessionsConfirm::TerminateAll) => (
                 tr(keys::SESSIONS_TERMINATE_ALL),
                 tr(keys::SETTINGS_RESET_SURE),
@@ -543,7 +541,7 @@ crate::ui::shell::register_dialogs! {
 
     SessionsConfirm => DialogSpec::new(
         615,
-        |app| app.privacy.sessions_confirm.is_some(),
+        |app| app.privacy.devices.confirm().is_some(),
         QuillApp::build_sessions_confirm_dialog,
     )
     .close(|app, _, cx| app.cancel_sessions_confirm(cx)),

@@ -180,7 +180,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(kind) = self.hub_mut().and_then(|hub| hub.limit_toast.take()) else {
+        let Some(kind) = self.hub_mut().and_then(|hub| hub.take_limit_toast()) else {
             return;
         };
         let Some(toast) = self.session().and_then(|s| limit_toast_text(s, kind)) else {

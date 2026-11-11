@@ -274,19 +274,16 @@ impl Session {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { .. })) => {
                 self.payments.hub.gifts_op.changed(pending.map(|p| p.id));
-                self.payments.hub.gifts_error = None;
+                self.payments.hub.gift_notice = None;
             }
             Some(RequestPurpose::SellGift) => {
                 self.payments.hub.gifts_op.changed(pending.map(|p| p.id));
-                self.payments.hub.gifts_error = None;
+                self.payments.hub.gift_notice = None;
                 // The panel and the box close only when they are still the
                 // sold gift's: the user may have opened another meanwhile.
                 let sold = pending.and_then(|p| p.subject_id.as_deref());
-                if self.payments.hub.gift_selected.as_deref() == sold {
-                    self.payments.hub.gift_convert_confirm = None;
-                    self.payments.hub.gift_selected = None;
-                }
-                self.payments.hub.tx_loaded = false;
+                self.payments.hub.gift_view.close_if_selected(sold);
+                self.payments.hub.tx.invalidate();
             }
             _ => {}
         }

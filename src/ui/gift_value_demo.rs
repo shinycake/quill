@@ -70,10 +70,10 @@ pub(super) fn seed_gift_value_session(sink: Arc<MemorySink>) -> Session {
     let hub = &mut session.payments.hub;
     hub.gifts = parse_received_gift(&received_gift()).into_iter().collect();
     hub.gifts_total = 1;
-    hub.gifts_loaded = true;
+    hub.gifts_page = quill::premium_hub::page_stage::PageStage::Ready;
     hub.gifts_owner = Some(MessageSender::User { user_id: ME });
     hub.gifts_open = true;
-    hub.gift_selected = Some(RECEIVED_ID.into());
+    hub.gift_view.select(Some(RECEIVED_ID.into()));
     session
 }
 

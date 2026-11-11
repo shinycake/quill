@@ -132,7 +132,7 @@ impl QuillApp {
 
     pub(in crate::ui) fn dismiss_premium_limit(&mut self) {
         if let Some(hub) = self.hub_mut() {
-            hub.limit_box = None;
+            hub.close_limit_box();
         }
     }
 
@@ -182,7 +182,8 @@ impl QuillApp {
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            let Some((kind, extra)) = this.session().and_then(|s| s.payments.hub.limit_box) else {
+            let Some((kind, extra)) = this.session().and_then(|s| s.payments.hub.limit_box())
+            else {
                 return dialog
                     .overlay(true)
                     .title(crate::ui::shell::dialog_title(tr(
@@ -262,7 +263,7 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     PremiumLimit => DialogSpec::new(
         1310,
-        |app| app.session().is_some_and(|s| s.payments.hub.limit_box.is_some()),
+        |app| app.session().is_some_and(|s| s.payments.hub.limit_box().is_some()),
         QuillApp::build_premium_limit_dialog,
     )
     .close(|app, _, cx| { app.dismiss_premium_limit(); cx.notify(); }),

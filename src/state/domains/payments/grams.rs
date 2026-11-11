@@ -3,7 +3,7 @@
 //! page (the tab changed in flight) is dropped.
 use super::gift_manage::{PasswordCheckFailure, password_check_failure};
 use crate::earn::EarnErrorHint;
-use crate::premium_hub::ton::{GramWithdraw, GramsPayload, GramsPurpose};
+use crate::premium_hub::ton::{GramWithdraw, GramsPayload, GramsPurpose, WithdrawOutcome};
 use crate::state::*;
 
 impl Session {
@@ -20,6 +20,7 @@ impl Session {
                 match purpose {
                     Some((GramsPurpose::Probe, _)) => {
                         self.payments.hub.grams.balance_nano = Some(page.balance_nano);
+                        self.payments.hub.grams.probe.succeed(());
                     }
                     Some((GramsPurpose::Page { append }, id))
                         if self.payments.hub.grams.load.waits_for(id.0) =>
@@ -56,7 +57,8 @@ impl Session {
         let peer = pending.and_then(|p| p.chat_id).map(|id| id.0);
         match purpose {
             // The Settings row just stays hidden.
-            GramsPurpose::Probe | GramsPurpose::Revenue => {}
+            GramsPurpose::Probe => grams.probe.fail(error_reason(err)),
+            GramsPurpose::Revenue => {}
             GramsPurpose::PeerUser => grams.missing_users.extend(peer),
             GramsPurpose::PeerChat => grams.missing_chats.extend(peer),
             GramsPurpose::Page { .. } => {
@@ -81,7 +83,7 @@ impl Session {
         }
         grams.withdraw = None;
         if !url.is_empty() {
-            grams.withdraw_url = Some(url);
+            grams.withdraw_outcome = Some(WithdrawOutcome::Url(url));
         }
     }
 
@@ -106,7 +108,7 @@ impl Session {
         }
         if err.earn_hint == Some(EarnErrorHint::AmountTooSmall) {
             grams.withdraw = None;
-            grams.withdraw_too_small = true;
+            grams.withdraw_outcome = Some(WithdrawOutcome::TooSmall);
             return;
         }
         grams.withdraw = Some(match password_check_failure(err, &error_reason(err)) {

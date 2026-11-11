@@ -26,17 +26,18 @@ impl QuillApp {
     fn demo_premium_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
             let hub = &mut session.payments.hub;
-            hub.premium = Some(parse_premium_features(&serde_json::json!({
-                "features": [
-                    {"@type": "premiumFeatureIncreasedLimits"},
-                    {"@type": "premiumFeatureVoiceRecognition"},
-                    {"@type": "premiumFeatureDisabledAds"},
-                    {"@type": "premiumFeatureUniqueReactions"},
-                    {"@type": "premiumFeatureEmojiStatus"},
-                    {"@type": "premiumFeatureAccentColor"},
-                ],
-                "limits": [],
-            })));
+            hub.premium
+                .succeed(parse_premium_features(&serde_json::json!({
+                    "features": [
+                        {"@type": "premiumFeatureIncreasedLimits"},
+                        {"@type": "premiumFeatureVoiceRecognition"},
+                        {"@type": "premiumFeatureDisabledAds"},
+                        {"@type": "premiumFeatureUniqueReactions"},
+                        {"@type": "premiumFeatureEmojiStatus"},
+                        {"@type": "premiumFeatureAccentColor"},
+                    ],
+                    "limits": [],
+                })));
             hub.premium_state = Some(parse_premium_state(&serde_json::json!({
                 "state": {"text": "", "entities": []},
                 "payment_options": [

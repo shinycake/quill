@@ -1,6 +1,7 @@
 //! Methods moved out of `privacy.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::privacy_layer::ExceptionPicker;
 use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
 use gpui_kit::assets::IconName;
@@ -117,8 +118,8 @@ impl QuillApp {
                     }),
             )
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.privacy.exceptions = Some((target, kind));
-                this.privacy.exception_picker_open = false;
+                this.privacy.layer.open_exceptions(target, kind);
+                this.privacy.layer.close_exception_picker();
                 cx.notify();
             }))
             .into_any_element()
@@ -200,7 +201,7 @@ impl QuillApp {
     /// rows where tdesktop offers them, then users and groups with Remove
     /// and Add pickers.
     pub(crate) fn privacy_exceptions_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.privacy.exceptions?;
+        self.privacy.layer.exceptions()?;
         self.privacy_exceptions_overlay_body(cx)
     }
 
@@ -210,7 +211,7 @@ impl QuillApp {
     /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn privacy_exceptions_overlay_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let (target, kind) = self.privacy.exceptions?;
+        let (target, kind) = self.privacy.layer.exceptions()?;
         let session = self.session()?;
         let PrivacyEditorTarget::Rule(key) = target else {
             return None;
@@ -329,8 +330,9 @@ impl QuillApp {
                         .label(tr(keys::Q_PREFS_ADD_USER))
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.privacy.exception_picker_open = true;
-                            this.privacy.extra.exception_picker_groups = false;
+                            this.privacy.layer.open_exception_picker(
+                                crate::ui::privacy_layer::ExceptionPicker::Contacts,
+                            );
                             if let Some(live) = this.live.as_mut() {
                                 let _ = live.driver.fetch_contacts();
                             }
@@ -343,18 +345,21 @@ impl QuillApp {
                         .label(tr(keys::Q_PREFS_ADD_GROUP))
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.privacy.exception_picker_open = true;
-                            this.privacy.extra.exception_picker_groups = true;
+                            this.privacy.layer.open_exception_picker(
+                                crate::ui::privacy_layer::ExceptionPicker::Groups,
+                            );
                             cx.notify();
                         })),
                 ),
         );
-        if self.privacy.exception_picker_open {
-            body = if self.privacy.extra.exception_picker_groups {
-                body.child(self.exception_group_picker(cx, target, kind, &detail))
-            } else {
-                body.child(self.exception_picker(cx, target, kind, &detail))
-            };
+        match self.privacy.layer.exception_picker() {
+            ExceptionPicker::Closed => {}
+            ExceptionPicker::Groups => {
+                body = body.child(self.exception_group_picker(cx, target, kind, &detail));
+            }
+            ExceptionPicker::Contacts => {
+                body = body.child(self.exception_picker(cx, target, kind, &detail));
+            }
         }
         let title = if key == PrivacySettingKey::AllowUnpaidMessages {
             key.label()
@@ -619,7 +624,7 @@ impl QuillApp {
             cx,
         );
         if add {
-            self.privacy.exception_picker_open = false;
+            self.privacy.layer.close_exception_picker();
         }
         cx.notify();
     }
@@ -660,7 +665,7 @@ impl QuillApp {
             cx,
         );
         if add {
-            self.privacy.exception_picker_open = false;
+            self.privacy.layer.close_exception_picker();
         }
         cx.notify();
     }

@@ -160,8 +160,7 @@ impl Session {
                 } else if purpose == Some(RequestPurpose::GetRecentStickers) {
                     self.accept_recent_stickers(stickers);
                 } else if purpose == Some(RequestPurpose::GetPremiumStickerExamples) {
-                    self.payments.hub.premium_stickers = stickers;
-                    self.payments.hub.premium_stickers_loading = false;
+                    self.payments.hub.premium_stickers.succeed(stickers);
                 } else if purpose == Some(RequestPurpose::GetGreetingStickers) {
                     self.stickers.stickers.greeting.succeed(stickers);
                 } else if purpose == Some(RequestPurpose::GetCustomEmojiStickers) {

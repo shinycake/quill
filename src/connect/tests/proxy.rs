@@ -602,25 +602,15 @@ fn an_earlier_links_ping_does_not_fill_the_next_links_box() {
     };
     let first = rig.driver.ping_link_proxy(&dead).unwrap();
     // The box closes and the next link's box opens and checks its proxy.
-    rig.driver
-        .session
-        .settings
-        .proxy
-        .pings
-        .remove(&crate::state::LINK_PING_ID);
+    rig.driver.session.settings.proxy.link_check = crate::proxy::LinkCheck::Review;
     let second = rig.driver.ping_link_proxy(&live).unwrap();
     rig.feed(json!({"@type": "seconds", "seconds": 0.05, "@extra": second.0.to_string()}));
     rig.feed(
         json!({"@type": "error", "code": 400, "message": "Request timeout", "@extra": first.0.to_string()}),
     );
     assert_eq!(
-        rig.driver
-            .session
-            .settings
-            .proxy
-            .pings
-            .get(&crate::state::LINK_PING_ID),
-        Some(&PingStatus::Available(50)),
+        rig.driver.session.settings.proxy.link_check,
+        crate::proxy::LinkCheck::Done(PingStatus::Available(50)),
         "the working proxy is not shown as unavailable"
     );
 }

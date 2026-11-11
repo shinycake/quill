@@ -59,14 +59,14 @@ impl Session {
                     .gifts_manage
                     .close_flow_answered_by(PaymentsPurpose::ChangeGiftCollection);
                 self.payments.hub.gifts_op.changed(pending.map(|p| p.id));
-                self.payments.hub.gifts_error = None;
+                self.payments.hub.gift_notice = None;
             }
             (GiftManagePayload::Upgraded(summary), PaymentsPurpose::UpgradeGift) => {
                 let hub = &mut self.payments.hub;
                 hub.gifts_op.changed(pending.map(|p| p.id));
-                hub.gifts_error = None;
-                hub.gift_selected = None;
-                hub.tx_loaded = false;
+                hub.gift_notice = None;
+                hub.gift_view.select(None);
+                hub.tx.invalidate();
                 let manage = &mut self.payments.gifts_manage;
                 manage.close_flow_answered_by(PaymentsPurpose::UpgradeGift);
                 manage.note = Some(if summary.title.is_empty() {
@@ -116,13 +116,13 @@ impl Session {
         match purpose {
             PaymentsPurpose::SetPinnedGifts => {
                 hub.gifts_op.changed(pending.map(|p| p.id));
-                hub.gifts_error = None;
+                hub.gift_notice = None;
                 manage.note = Some("Pinned gifts updated.".into());
             }
             PaymentsPurpose::TransferGift => {
                 hub.gifts_op.changed(pending.map(|p| p.id));
-                hub.gifts_error = None;
-                hub.tx_loaded = false;
+                hub.gift_notice = None;
+                hub.tx.invalidate();
                 // tdesktop `ShowGiftTransferredToast`, then the recipient's
                 // chat (`showPeerHistory`). Only the picker that sent this
                 // transfer closes and names its recipient; another flow
@@ -136,21 +136,19 @@ impl Session {
                 if let Some((done, gift_id)) = sent_by {
                     manage.events.push(GiftEvent::Transferred(done));
                     manage.flow = None;
-                    if hub.gift_selected.as_deref() == Some(gift_id.as_str()) {
-                        hub.gift_selected = None;
-                    }
+                    hub.gift_view.close_if_selected(Some(gift_id.as_str()));
                 }
                 manage.note = Some("Gift transferred.".into());
             }
             PaymentsPurpose::SetGiftResalePrice => {
                 hub.gifts_op.changed(pending.map(|p| p.id));
-                hub.gifts_error = None;
+                hub.gift_notice = None;
                 manage.close_flow_answered_by(PaymentsPurpose::SetGiftResalePrice);
                 manage.note = Some("Resale price updated.".into());
             }
             PaymentsPurpose::DeleteGiftCollection => {
                 hub.gifts_op.changed(pending.map(|p| p.id));
-                hub.gifts_error = None;
+                hub.gift_notice = None;
                 manage.close_flow_answered_by(PaymentsPurpose::DeleteGiftCollection);
                 manage.active_collection = 0;
                 manage.collections_fetch = CollectionsFetch::Stale;
@@ -159,7 +157,7 @@ impl Session {
             PaymentsPurpose::DeleteGift => self.finish_gift_delete(request),
             PaymentsPurpose::SendStarGift => {
                 // Stars were spent whichever dialog asked.
-                hub.tx_loaded = false;
+                hub.tx.invalidate();
                 let ours = manage.send.waits_for(pending);
                 if ours {
                     manage.send.stage = SendStage::Idle;
@@ -203,19 +201,15 @@ impl Session {
     pub fn finish_gift_delete(&mut self, request: Option<RequestId>) {
         let hub = &mut self.payments.hub;
         let manage = &mut self.payments.gifts_manage;
-        // The server's list stays the source of truth (it may have been
-        // reopened while the request was out): fetched again.
         hub.gifts_op.changed(request);
-        hub.gifts_error = None;
+        hub.gift_notice = None;
         if let Some(id) = manage.deleting.take() {
             let before = hub.gifts.len();
             hub.gifts.retain(|g| g.id != id);
             if hub.gifts.len() < before {
                 hub.gifts_total = hub.gifts_total.saturating_sub(1);
             }
-            if hub.gift_selected.as_deref() == Some(id.as_str()) {
-                hub.gift_selected = None;
-            }
+            hub.gift_view.close_if_selected(Some(id.as_str()));
         }
         manage.collections_fetch = CollectionsFetch::Stale;
         manage.events.push(GiftEvent::Deleted);
@@ -394,7 +388,7 @@ impl Session {
             }
             _ => {
                 self.payments.hub.gifts_op.failed(pending.map(|p| p.id));
-                self.payments.hub.gifts_error = Some(format!("Couldn't update the gift: {reason}"));
+                self.payments.hub.gift_notice = Some(format!("Couldn't update the gift: {reason}"));
             }
         }
     }

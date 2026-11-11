@@ -17,7 +17,7 @@ use quill::media_viewer::READ_BYTES_LIMIT;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
-/// What reading a tray file found. Kept by path (`SendBoxUi::media_checked`),
+/// What reading a tray file found. Kept by path (`TrayReads::media`),
 /// so the same file in a second tray gets the same answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum MediaCheck {
@@ -39,17 +39,17 @@ impl QuillApp {
             .map(|attachment| (attachment.path.clone(), attachment.kind))
             .collect();
         for (path, kind) in unread {
-            if let Some(check) = self.composer_sends.reads.media_checked.get(&path).cloned() {
+            if let Some(check) = self.composer_sends.reads.media.done(&path).cloned() {
                 self.apply_media_check(&path, &check);
                 continue;
             }
-            if self.composer_sends.reads.media_checking.contains_key(&path) {
+            if self.composer_sends.reads.media.is_reading(&path) {
                 continue;
             }
             let send_box = &mut self.composer_sends.reads;
             send_box.media_check_jobs += 1;
             let job = send_box.media_check_jobs;
-            send_box.media_checking.insert(path.clone(), job);
+            send_box.media.start(path.clone(), job);
             let source = path.clone();
             let worker = cx.background_spawn(async move {
                 match kind {
@@ -78,10 +78,10 @@ impl QuillApp {
 
     /// Files of the open slot's tray are still being read.
     pub(super) fn tray_media_checks_pending(&self) -> bool {
-        let reading = &self.composer_sends.reads.media_checking;
+        let reading = &self.composer_sends.reads.media;
         self.pending_attachments()
             .iter()
-            .any(|attachment| reading.contains_key(&attachment.path))
+            .any(|attachment| reading.is_reading(&attachment.path))
     }
 
     fn finish_media_check(
@@ -92,13 +92,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let send_box = &mut self.composer_sends.reads;
-        if send_box.media_checking.get(path) != Some(&job) {
+        if !send_box.media.finish(path, job, check.clone()) {
             return;
         }
-        send_box.media_checking.remove(path);
-        send_box
-            .media_checked
-            .insert(path.to_path_buf(), check.clone());
         self.apply_media_check(path, &check);
         // A file now needs its thumbnail.
         self.prepare_tray_file_thumbnails(cx);

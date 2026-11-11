@@ -139,7 +139,7 @@ impl QuillApp {
         // The server's order (`getBusinessFeatures`), else tdesktop's.
         let features = self
             .session()
-            .and_then(|s| s.payments.hub.business_features.clone())
+            .and_then(|s| s.payments.hub.business_features.data().cloned())
             .unwrap_or_else(|| BusinessFeature::FALLBACK_ORDER.to_vec());
         for feature in features {
             let (title, about) = feature.text_keys();

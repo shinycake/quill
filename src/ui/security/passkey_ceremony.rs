@@ -209,7 +209,7 @@ impl QuillApp {
     /// Whether "Create Passkey" is busy (options or the result on their
     /// way, or the ceremony open).
     pub(in crate::ui) fn passkey_creation_busy(&self) -> bool {
-        self.privacy.passkeys.ceremony.is_some()
+        self.privacy.passkeys.ceremony().is_some()
             || self
                 .live
                 .as_ref()
@@ -221,7 +221,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.privacy.passkeys.ticker.is_some() || self.refused_while_locked() {
+        if self.privacy.passkeys.ticking() || self.refused_while_locked() {
             return;
         }
         let ticker = self.spawn_screen_in(window, cx, async move |this, cx| {
@@ -236,9 +236,9 @@ impl QuillApp {
                     break;
                 }
             }
-            let _ = this.update(cx, |this, _| this.privacy.passkeys.ticker = None);
+            let _ = this.update(cx, |this, _| this.privacy.passkeys.stop_ticker());
         });
-        self.privacy.passkeys.ticker = Some(ticker);
+        self.privacy.passkeys.set_ticker(ticker);
     }
 
     /// One tick: start the ceremony once the options are there, follow
@@ -271,7 +271,7 @@ impl QuillApp {
         };
         if let Some(options) = start {
             // box-host: opened by an answer; start_passkey_creation named the window
-            self.privacy.passkeys.ceremony = Some(CeremonyUi::new(
+            self.privacy.passkeys.show_ceremony(CeremonyUi::new(
                 CeremonyMode::Register,
                 first_sheet(),
                 Some(webauthn::start_register(options, parent_window(window))),
@@ -280,7 +280,7 @@ impl QuillApp {
         }
         if let Some(options) = start_login {
             // box-host: opened by an answer; start_passkey_login named the window
-            self.privacy.passkeys.ceremony = Some(CeremonyUi::new(
+            self.privacy.passkeys.show_ceremony(CeremonyUi::new(
                 CeremonyMode::Login,
                 first_sheet(),
                 Some(webauthn::start_login(options, parent_window(window))),
@@ -291,8 +291,7 @@ impl QuillApp {
         let events = self
             .privacy
             .passkeys
-            .ceremony
-            .as_mut()
+            .ceremony_mut()
             .and_then(|ui| ui.ceremony.as_mut())
             .map(Ceremony::poll)
             .unwrap_or_default();
@@ -303,7 +302,7 @@ impl QuillApp {
         self.focus_passkey_pin_if_asked(window, cx);
         if added {
             // tdesktop closes the box once `registerPasskey` is done.
-            self.privacy.passkeys.about_open = false;
+            self.privacy.passkeys.close_about();
             changed = true;
         }
         if changed {
@@ -317,8 +316,7 @@ impl QuillApp {
         let asked = self
             .privacy
             .passkeys
-            .ceremony
-            .as_mut()
+            .ceremony_mut()
             .is_some_and(|ui| std::mem::take(&mut ui.focus_pin));
         if asked && let Some(input) = self.privacy.passkeys.pin_input.clone() {
             input.update(cx, |input, cx| input.focus(window, cx));
@@ -328,13 +326,13 @@ impl QuillApp {
     fn apply_ceremony_event(&mut self, event: CeremonyEvent) {
         match event {
             CeremonyEvent::NeedPin { invalid } => {
-                if let Some(ui) = self.privacy.passkeys.ceremony.as_mut() {
+                if let Some(ui) = self.privacy.passkeys.ceremony_mut() {
                     ui.sheet = CeremonySheet::Pin { invalid };
                     ui.focus_pin = true;
                 }
             }
             CeremonyEvent::Hybrid { qr } => {
-                if let Some(ui) = self.privacy.passkeys.ceremony.as_mut() {
+                if let Some(ui) = self.privacy.passkeys.ceremony_mut() {
                     ui.qr = qr.and_then(|qr| hybrid::render_cable_qr(&qr.0));
                     ui.sheet = CeremonySheet::Choose {
                         bluetooth: ui.qr.is_some(),
@@ -351,7 +349,7 @@ impl QuillApp {
             }
             CeremonyEvent::Registered(registration) => {
                 // The dialog closes; the server gets the result.
-                let ui = self.privacy.passkeys.ceremony.take();
+                let ui = self.privacy.passkeys.take_ceremony();
                 if ui.is_some_and(|ui| ui.mode == CeremonyMode::Register)
                     && let Some(live) = self.live.as_mut()
                     && live.driver.finish_register(&registration).is_err()
@@ -363,7 +361,7 @@ impl QuillApp {
             CeremonyEvent::SignedIn(assertion) => {
                 // tdesktop closes the touch box and calls
                 // `FinishPasskeyLogin`; the auth state takes it from there.
-                let ui = self.privacy.passkeys.ceremony.take();
+                let ui = self.privacy.passkeys.take_ceremony();
                 if ui.is_some_and(|ui| ui.mode == CeremonyMode::Login)
                     && let Some(live) = self.live.as_mut()
                     && live.driver.finish_login(&assertion).is_err()
@@ -372,10 +370,10 @@ impl QuillApp {
                 }
             }
             CeremonyEvent::Failed(CeremonyError::Cancelled) => {
-                self.privacy.passkeys.ceremony = None;
+                self.privacy.passkeys.take_ceremony();
             }
             CeremonyEvent::Failed(error)
-                if self.privacy.passkeys.ceremony.as_ref().is_some_and(|ui| {
+                if self.privacy.passkeys.ceremony().is_some_and(|ui| {
                     matches!(ui.sheet, CeremonySheet::System | CeremonySheet::Probing)
                 }) =>
             {
@@ -383,7 +381,7 @@ impl QuillApp {
                 // system dialog, a toast with the generic reason; a phone
                 // ceremony that fails before its box shows toasts its
                 // reason (`cable_ceremony.cpp` `finish`).
-                let Some(ui) = self.privacy.passkeys.ceremony.take() else {
+                let Some(ui) = self.privacy.passkeys.take_ceremony() else {
                     return;
                 };
                 quill::webauthn::log(&format!("{:?} failed: {error:?}", ui.mode));
@@ -395,7 +393,7 @@ impl QuillApp {
                 })));
             }
             CeremonyEvent::Failed(error) => {
-                if let Some(ui) = self.privacy.passkeys.ceremony.as_mut() {
+                if let Some(ui) = self.privacy.passkeys.ceremony_mut() {
                     let reason = match ui.mode {
                         CeremonyMode::Register => register_error(&error),
                         CeremonyMode::Login => login_error(&error),
@@ -410,7 +408,7 @@ impl QuillApp {
     }
 
     fn set_ceremony_sheet(&mut self, sheet: CeremonySheet) {
-        if let Some(ui) = self.privacy.passkeys.ceremony.as_mut() {
+        if let Some(ui) = self.privacy.passkeys.ceremony_mut() {
             ui.sheet = sheet;
             ui.qr = None;
         }
@@ -427,7 +425,7 @@ impl QuillApp {
         let Some(input) = self.privacy.passkeys.pin_input.clone() else {
             return;
         };
-        let Some(ui) = self.privacy.passkeys.ceremony.as_mut() else {
+        let Some(ui) = self.privacy.passkeys.ceremony_mut() else {
             return;
         };
         if !matches!(ui.sheet, CeremonySheet::Pin { .. }) {
@@ -453,7 +451,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(ui) = self.privacy.passkeys.ceremony.take()
+        if let Some(ui) = self.privacy.passkeys.take_ceremony()
             && let Some(ceremony) = ui.ceremony
         {
             ceremony.cancel();
@@ -474,13 +472,13 @@ impl QuillApp {
     /// The ticker stops with it, and options already queued for a
     /// ceremony are dropped, so none starts under the lock.
     pub(in crate::ui) fn close_passkey_ceremony_for_lock(&mut self) {
-        if let Some(ui) = self.privacy.passkeys.ceremony.take()
+        if let Some(ui) = self.privacy.passkeys.take_ceremony()
             && let Some(ceremony) = ui.ceremony
         {
             ceremony.cancel();
         }
         self.privacy.passkeys.pin_input = None;
-        self.privacy.passkeys.ticker = None;
+        self.privacy.passkeys.stop_ticker();
         if let Some(live) = self.live.as_mut() {
             let state = &mut live.driver.session.settings.passkeys;
             state.cancel_register();
@@ -506,8 +504,7 @@ impl QuillApp {
             let (mode, sheet) = this
                 .privacy
                 .passkeys
-                .ceremony
-                .as_ref()
+                .ceremony()
                 .map_or((CeremonyMode::Register, CeremonySheet::Key), |ui| {
                     (ui.mode, ui.sheet)
                 });
@@ -642,8 +639,7 @@ crate::ui::shell::register_dialogs! {
         |app| app
             .privacy
             .passkeys
-            .ceremony
-            .as_ref()
+            .ceremony()
             .is_some_and(|ui| ui.sheet != CeremonySheet::Probing),
         QuillApp::build_passkey_ceremony_dialog,
     )
@@ -686,7 +682,7 @@ impl QuillApp {
             ui.qr = hybrid::render_cable_qr(&hybrid::demo_qr());
         }
         // box-host: demo
-        self.privacy.passkeys.ceremony = Some(ui);
+        self.privacy.passkeys.show_ceremony(ui);
         cx.notify();
     }
 
@@ -701,11 +697,12 @@ impl QuillApp {
         let mode = self
             .privacy
             .passkeys
-            .ceremony
-            .as_ref()
+            .ceremony()
             .map_or(CeremonyMode::Register, |ui| ui.mode);
         // box-host: a step of the open ceremony; it stays where it shows
-        self.privacy.passkeys.ceremony = Some(CeremonyUi::new(mode, sheet, None));
+        self.privacy
+            .passkeys
+            .show_ceremony(CeremonyUi::new(mode, sheet, None));
         cx.notify();
     }
 

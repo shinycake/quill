@@ -439,9 +439,8 @@ impl QuillApp {
         ) {
             return;
         }
-        self.privacy.websites_open = true;
+        self.privacy.websites.open();
         self.open_box(DialogKind::Websites);
-        self.privacy.websites_confirm = None;
         // The last open's failure line goes: a cached list skips the fetch.
         if let Some(session) = self.session_mut() {
             session.settings.connected_websites.clear_error();
@@ -455,8 +454,7 @@ impl QuillApp {
     /// Slice A4: close the overlay and drop any pending disconnect
     /// confirmation.
     pub(in crate::ui) fn close_websites(&mut self, cx: &mut Context<Self>) {
-        self.privacy.websites_open = false;
-        self.privacy.websites_confirm = None;
+        self.privacy.websites.close();
         cx.notify();
     }
 
@@ -480,7 +478,9 @@ impl QuillApp {
         website_id: i64,
         cx: &mut Context<Self>,
     ) {
-        self.privacy.websites_confirm = Some(WebsitesConfirm::DisconnectOne { website_id });
+        self.privacy
+            .websites
+            .ask(WebsitesConfirm::DisconnectOne { website_id });
         cx.notify();
     }
 
@@ -488,13 +488,13 @@ impl QuillApp {
     /// `DisconnectAllWebsitesHint` "Are you sure you want to disconnect
     /// all websites?").
     pub(in crate::ui) fn begin_disconnect_all_websites(&mut self, cx: &mut Context<Self>) {
-        self.privacy.websites_confirm = Some(WebsitesConfirm::DisconnectAll);
+        self.privacy.websites.ask(WebsitesConfirm::DisconnectAll);
         cx.notify();
     }
 
     /// Slice A4: drop the pending disconnect confirmation.
     pub(in crate::ui) fn cancel_websites_confirm(&mut self, cx: &mut Context<Self>) {
-        self.privacy.websites_confirm = None;
+        self.privacy.websites.drop_confirm();
         cx.notify();
     }
 
@@ -502,7 +502,7 @@ impl QuillApp {
     /// no TDLib; the list refreshes from the authoritative `ok` answer,
     /// never optimistically.
     pub(in crate::ui) fn confirm_websites_disconnect(&mut self, cx: &mut Context<Self>) {
-        let confirm = self.privacy.websites_confirm.take();
+        let confirm = self.privacy.websites.take_confirm();
         if let (Some(live), Some(confirm)) = (self.live.as_mut(), confirm) {
             let result = match confirm {
                 WebsitesConfirm::DisconnectOne { website_id } => {

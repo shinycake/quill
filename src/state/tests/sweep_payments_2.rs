@@ -4,6 +4,7 @@ use super::common::*;
 use super::*;
 use crate::gift_market::{CraftSession, GiftMarketPurpose, PageLoad, ResaleFilter, ResaleSearch};
 use crate::ids::RequestId;
+use crate::premium_hub::page_stage::{PageKind, PageStage};
 use crate::state::fetch::Fetch;
 
 fn fail(session: &mut Session, id: RequestId, sink: &Arc<MemorySink>) {
@@ -34,14 +35,16 @@ fn an_older_stars_history_failure_leaves_the_live_request_loading() {
         RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { append: false }),
         None,
     );
-    session.payments.hub.tx_request = new.0;
-    session.payments.hub.tx_loading = true;
+    session.payments.hub.tx = PageStage::Loading {
+        request: new,
+        kind: PageKind::First,
+    };
     fail(&mut session, old, &sink);
-    assert!(session.payments.hub.tx_loading);
-    assert!(session.payments.hub.tx_error.is_none());
+    assert!(session.payments.hub.tx.is_loading());
+    assert!(session.payments.hub.tx.error().is_none());
     fail(&mut session, new, &sink);
-    assert!(!session.payments.hub.tx_loading);
-    assert!(session.payments.hub.tx_error.is_some());
+    assert!(!session.payments.hub.tx.is_loading());
+    assert!(session.payments.hub.tx.error().is_some());
 }
 
 #[test]
@@ -55,14 +58,16 @@ fn an_older_received_gifts_failure_leaves_the_live_request_loading() {
         RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append: false }),
         None,
     );
-    session.payments.hub.gifts_request = new.0;
-    session.payments.hub.gifts_loading = true;
+    session.payments.hub.gifts_page = PageStage::Loading {
+        request: new,
+        kind: PageKind::First,
+    };
     fail(&mut session, old, &sink);
-    assert!(session.payments.hub.gifts_loading);
-    assert!(session.payments.hub.gifts_error.is_none());
+    assert!(session.payments.hub.gifts_page.is_loading());
+    assert!(session.payments.hub.gifts_page.error().is_none());
     fail(&mut session, new, &sink);
-    assert!(!session.payments.hub.gifts_loading);
-    assert!(session.payments.hub.gifts_error.is_some());
+    assert!(!session.payments.hub.gifts_page.is_loading());
+    assert!(session.payments.hub.gifts_page.error().is_some());
 }
 
 #[test]

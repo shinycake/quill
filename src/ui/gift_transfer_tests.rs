@@ -93,10 +93,7 @@ fn the_picker_opens_over_the_gift_and_walks_its_steps(cx: &mut TestAppContext) {
     });
     app.read_with(vcx, |app, _| {
         let hub = app.session().map(|s| &s.payments.hub);
-        assert_eq!(
-            hub.and_then(|h| h.gift_selected.as_deref()),
-            Some(DEMO_GIFT)
-        );
+        assert_eq!(hub.and_then(|h| h.gift_view.selected()), Some(DEMO_GIFT));
         assert!(stage(app).is_none());
     });
 }

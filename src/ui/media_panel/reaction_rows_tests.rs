@@ -61,7 +61,7 @@ fn free_account(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
     app.update(cx, |app, cx| {
         let session = app.demo_session.as_mut().expect("demo session");
         session.payments.premium_option = Some(false);
-        session.payments.hub.premium = Some(premium_features());
+        session.payments.hub.premium.succeed(premium_features());
         cx.notify();
     });
     frames(cx);
@@ -110,7 +110,7 @@ fn strip_cell(
 }
 
 fn premium_page(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Option<PromoPage> {
-    app.read_with(cx, |app, _| Some(app.session()?.payments.hub.promo_page))
+    app.read_with(cx, |app, _| Some(app.session()?.payments.hub.promo_page()))
 }
 
 fn reactions(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Vec<(String, i32, bool)> {

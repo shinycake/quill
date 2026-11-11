@@ -26,7 +26,7 @@ impl QuillApp {
         self.group_call.stream.overlay = None;
         self.group_call_screen.title_dialog = None;
         self.group_call_screen.settings_open = false;
-        self.screen_share.privacy_for = None;
+        self.screen_share.close_privacy();
         cx.notify();
     }
 }

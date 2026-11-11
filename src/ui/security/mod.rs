@@ -534,9 +534,7 @@ impl QuillApp {
 
     /// Entering the Devices page: a clean list and a guarded fetch.
     pub(crate) fn fetch_sessions(&mut self) {
-        self.privacy.sessions_confirm = None;
-        self.privacy.extra.session_details = None;
-        self.privacy.extra.renaming_device = false;
+        self.privacy.devices.close_all();
         // An earlier visit's failure line goes: with a list held, the
         // guarded fetch below sends nothing that would replace it.
         if let Some(session) = self.session_mut() {
@@ -581,9 +579,7 @@ impl QuillApp {
     /// terminate confirmation.
     pub(crate) fn leave_devices(&mut self) {
         self.clear_device_qr();
-        self.privacy.sessions_confirm = None;
-        self.privacy.extra.session_details = None;
-        self.privacy.extra.renaming_device = false;
+        self.privacy.devices.close_all();
     }
 
     /// Something over the Devices list that Esc peels first.
@@ -591,15 +587,12 @@ impl QuillApp {
     /// terminated from another device closes the box, and Esc must not
     /// spend itself on the invisible layer.
     pub(crate) fn sessions_layer_open(&self) -> bool {
-        self.privacy.sessions_confirm.is_some() || self.details_session().is_some()
+        self.privacy.devices.confirm().is_some() || self.details_session().is_some()
     }
 
     /// Esc on the Devices page: the confirmation first, then the details.
     pub(crate) fn close_sessions_top(&mut self, cx: &mut Context<Self>) {
-        if self.privacy.sessions_confirm.take().is_none() {
-            self.privacy.extra.session_details = None;
-            self.privacy.extra.renaming_device = false;
-        }
+        self.privacy.devices.close_top();
         cx.notify();
     }
 
@@ -766,7 +759,7 @@ impl QuillApp {
         incomplete: bool,
         cx: &mut Context<Self>,
     ) {
-        self.privacy.sessions_confirm = Some(SessionsConfirm::TerminateOne {
+        self.privacy.devices.ask(SessionsConfirm::TerminateOne {
             session_id,
             incomplete,
         });
@@ -777,14 +770,14 @@ impl QuillApp {
     /// Slice A3: arm the "terminate all other sessions" confirmation
     /// (TGX `AreYouSureSessions`).
     pub(super) fn begin_terminate_all_sessions(&mut self, cx: &mut Context<Self>) {
-        self.privacy.sessions_confirm = Some(SessionsConfirm::TerminateAll);
+        self.privacy.devices.ask(SessionsConfirm::TerminateAll);
         self.open_box(DialogKind::SessionsConfirm);
         cx.notify();
     }
 
     /// Slice A3: drop the pending terminate confirmation.
     pub(super) fn cancel_sessions_confirm(&mut self, cx: &mut Context<Self>) {
-        self.privacy.sessions_confirm = None;
+        self.privacy.devices.take_confirm();
         cx.notify();
     }
 
@@ -792,7 +785,7 @@ impl QuillApp {
     /// no TDLib; the list refreshes from the authoritative `ok` answer,
     /// never optimistically.
     pub(super) fn confirm_sessions_terminate(&mut self, cx: &mut Context<Self>) {
-        let confirm = self.privacy.sessions_confirm.take();
+        let confirm = self.privacy.devices.take_confirm();
         if let (Some(live), Some(confirm)) = (self.live.as_mut(), confirm) {
             let result = match confirm {
                 SessionsConfirm::TerminateOne { session_id, .. } => {
@@ -824,7 +817,7 @@ pub(super) fn quiet_danger(cx: &App) -> ButtonCustomVariant {
 crate::ui::shell::register_dialogs! {
     Websites => DialogSpec::new(
         600,
-        |app| app.privacy.websites_open,
+        |app| app.privacy.websites.is_open(),
         QuillApp::build_websites_dialog,
     )
     .close(|app, _, cx| app.close_websites(cx)),

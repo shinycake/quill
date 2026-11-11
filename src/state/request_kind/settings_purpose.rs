@@ -51,6 +51,7 @@ impl SettingsPurpose {
             | Self::MutateProxy
             | Self::ReportWebProxyCarrier
             | Self::PingProxy { .. }
+            | Self::PingLinkProxy
             | Self::SetPreferIpv6 { .. }
             | Self::DisconnectWebsite { .. }
             | Self::DisconnectAllWebsites

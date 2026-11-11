@@ -159,7 +159,7 @@ fn failed_premium_sticker_examples_are_asked_again() {
     driver
         .ingest(copy_and_parse(&error, &seq, &sink).unwrap())
         .unwrap();
-    assert!(!driver.session.payments.hub.premium_stickers_loading);
+    assert!(!driver.session.payments.hub.premium_stickers.is_loading());
     assert!(driver.maybe_fetch_premium_stickers().unwrap().is_some());
 }
 

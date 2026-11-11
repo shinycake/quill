@@ -220,7 +220,7 @@ fn a_lookup_asked_from_a_box_that_is_gone_does_not_open_later(cx: &mut TestAppCo
     // The gift box is left before the answer lands.
     app.update_in(vcx, |app, _, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.hub.gift_selected = None;
+            session.payments.hub.gift_view.select(None);
         }
         app.gift_market.stack.clear();
         cx.notify();
@@ -244,7 +244,7 @@ fn a_lookup_for_one_gift_is_dropped_when_the_box_shows_another(cx: &mut TestAppC
     app.update_in(vcx, |app, _, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             let hub = &mut session.payments.hub;
-            let selected = hub.gift_selected.clone();
+            let selected = hub.gift_view.selected().map(str::to_string);
             if let Some(c) = hub
                 .gifts
                 .iter_mut()

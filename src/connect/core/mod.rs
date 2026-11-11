@@ -347,19 +347,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         // takes the pending request. The verdict is stashed with the
         // in-flight username text so the edit-profile dialog can ignore
         // stale answers for superseded text.
-        let username_check_answer: Option<(String, UsernameCheckResult)> =
+        let username_check_answer: Option<(RequestId, UsernameCheckResult)> =
             match &owned.envelope.payload {
                 EnvelopePayload::Users(UsersPayload::CheckChatUsernameResult(result)) => owned
                     .envelope
                     .extra
-                    .and_then(|id| {
-                        self.session
-                            .users_state
-                            .username_check_pending
-                            .clone()
-                            .filter(|(pending, _)| *pending == id)
-                    })
-                    .map(|(_, username)| (username, *result)),
+                    .filter(|id| self.session.users_state.username_check.pending() == Some(*id))
+                    .map(|id| (id, *result)),
                 _ => None,
             };
         // MED4: capture the `getWebPageInstantView` answer before `apply`
@@ -566,8 +560,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // A5: stash the `checkChatUsername` verdict for the
         // edit-profile dialog.
-        if let Some((username, result)) = username_check_answer {
-            self.session.users_state.username_check = Some((username, result));
+        if let Some((request, result)) = username_check_answer {
+            self.session
+                .users_state
+                .username_check
+                .answer(request, result);
         }
         // MED4: stash the `getWebPageInstantView` answer (success →
         // reader in the asking window, unless it closed; error → browser).

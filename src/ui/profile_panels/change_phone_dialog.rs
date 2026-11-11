@@ -13,8 +13,7 @@ pub(super) fn change_phone_error() -> &'static str {
 
 impl QuillApp {
     pub(in crate::ui) fn open_change_phone_dialog(&mut self, cx: &mut Context<Self>) {
-        self.dialogs.profile_dialog = Some(ProfileDialog::ChangePhone);
-        self.open_box(DialogKind::ProfilePanel);
+        self.open_profile_dialog(ProfileDialog::ChangePhone);
         cx.notify();
     }
 

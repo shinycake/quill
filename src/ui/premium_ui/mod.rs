@@ -210,17 +210,17 @@ impl QuillApp {
                     });
                 }
                 body = body.child(tabs);
-                if let Some(err) = hub.tx_error.as_ref() {
-                    body = body.child(div().text_sm().child(err.clone()));
+                if let Some(err) = hub.tx.error() {
+                    body = body.child(div().text_sm().child(err.to_string()));
                 }
-                if hub.tx_loading && hub.transactions.is_empty() {
+                if hub.tx.is_loading() && hub.transactions.is_empty() {
                     body = body.child(
                         div()
                             .text_sm()
                             .text_color(muted)
                             .child(tr(keys::Q_MONEY_LOADING_TRANSACTIONS)),
                     );
-                } else if hub.transactions.is_empty() && hub.tx_loaded {
+                } else if hub.transactions.is_empty() && hub.tx.is_loaded() {
                     body = body.child(
                         div()
                             .text_sm()
@@ -231,7 +231,7 @@ impl QuillApp {
                 for (ix, tx) in hub.transactions.iter().enumerate() {
                     body = body.child(tx_row(session, ix, tx, cx));
                 }
-                if !hub.tx_offset.is_empty() && hub.tx_loading {
+                if !hub.tx_offset.is_empty() && hub.tx.is_loading() {
                     body = body.child(loading_row("stars-loading", cx));
                 }
                 body = body.child(star_packs::star_packs_section(session, cx));
@@ -291,8 +291,8 @@ impl QuillApp {
     pub(super) fn close_gifts(&mut self, cx: &mut Context<Self>) {
         if let Some(hub) = self.hub_mut() {
             hub.gifts_open = false;
-            hub.gift_selected = None;
-            hub.gift_convert_confirm = None;
+            hub.gift_view.select(None);
+            hub.gift_view.confirm_convert(None);
         }
         cx.notify();
     }
@@ -311,15 +311,15 @@ impl QuillApp {
             });
         }
         if let Some(hub) = self.hub_mut() {
-            hub.gift_selected = id;
-            hub.gift_convert_confirm = None;
+            hub.gift_view.select(id);
+            hub.gift_view.confirm_convert(None);
         }
         cx.notify();
     }
 
     fn ask_convert_gift(&mut self, id: Option<String>, cx: &mut Context<Self>) {
         if let Some(hub) = self.hub_mut() {
-            hub.gift_convert_confirm = id;
+            hub.gift_view.confirm_convert(id);
         }
         cx.notify();
     }
@@ -348,7 +348,7 @@ impl QuillApp {
             )));
         }
         if let Some(hub) = self.hub_mut() {
-            hub.gift_convert_confirm = None;
+            hub.gift_view.confirm_convert(None);
         }
         cx.notify();
     }
@@ -410,17 +410,17 @@ impl QuillApp {
                     &this.payments.gift_collection_input,
                     cx,
                 ));
-                if let Some(err) = hub.gifts_error.as_ref() {
-                    body = body.child(div().text_sm().child(err.clone()));
+                if let Some(err) = hub.gifts_page.error().or(hub.gift_notice.as_deref()) {
+                    body = body.child(div().text_sm().child(err.to_string()));
                 }
-                if hub.gifts_loading && hub.gifts.is_empty() {
+                if hub.gifts_page.is_loading() && hub.gifts.is_empty() {
                     body = body.child(
                         div()
                             .text_sm()
                             .text_color(muted)
                             .child(tr(keys::Q_MONEY_LOADING_GIFTS)),
                     );
-                } else if hub.gifts.is_empty() && hub.gifts_loaded {
+                } else if hub.gifts.is_empty() && hub.gifts_page.is_loaded() {
                     body = body.child(
                         div()
                             .text_sm()
@@ -440,7 +440,7 @@ impl QuillApp {
                     grid = grid.child(gift_tile(session, ix, gift, mine, &roots, cx));
                 }
                 body = body.child(grid);
-                if !hub.gifts_offset.is_empty() && hub.gifts_loading {
+                if !hub.gifts_offset.is_empty() && hub.gifts_page.is_loading() {
                     body = body.child(loading_row("gifts-loading", cx));
                 }
             }
@@ -809,7 +809,7 @@ fn gift_details(
         );
         if gift.can_convert() {
             let id = gift.id.clone();
-            if hub.gift_convert_confirm.as_deref() == Some(gift.id.as_str()) {
+            if hub.gift_view.confirming() == Some(gift.id.as_str()) {
                 col = col.child(
                     div()
                         .flex()
@@ -865,8 +865,8 @@ fn gift_details(
     if let Some(actions) = owner_actions {
         col = col.child(actions);
     }
-    if let Some(err) = hub.gifts_error.as_ref() {
-        col = col.child(div().text_sm().child(err.clone()));
+    if let Some(err) = hub.gifts_page.error().or(hub.gift_notice.as_deref()) {
+        col = col.child(div().text_sm().child(err.to_string()));
     }
     col.into_any_element()
 }

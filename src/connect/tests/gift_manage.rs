@@ -272,7 +272,7 @@ fn transfer_needs_a_readable_recipient_and_the_gifts_price() {
     assert_eq!(sent["star_count"], 25);
     feed(&mut p, json!({"@type": "ok", "@extra": extra.as_extra()}));
     let hub = &p.0.session.payments.hub;
-    assert!(!hub.gifts_op.is_mutating() && hub.gift_selected.is_none());
+    assert!(!hub.gifts_op.is_mutating() && hub.gift_view.selected().is_none());
 }
 
 #[test]
@@ -385,7 +385,7 @@ fn deleting_a_gift_sends_delete_gift_and_removes_it_on_ok() {
             received("c", json!({"can_be_deleted": true})),
         ],
     );
-    p.0.session.payments.hub.gift_selected = Some("a".into());
+    p.0.session.payments.hub.gift_view.select(Some("a".into()));
     // Only a gift TDLib marks deletable, and only one that is listed.
     assert!(p.0.delete_received_gift("b").is_err());
     assert!(p.0.delete_received_gift("zzz").is_err());
@@ -404,7 +404,7 @@ fn deleting_a_gift_sends_delete_gift_and_removes_it_on_ok() {
         ["b", "c"]
     );
     assert_eq!(hub.gifts_total, 2);
-    assert_eq!(hub.gift_selected, None);
+    assert_eq!(hub.gift_view.selected(), None);
     // The toast is a one-shot, and the server's list is refetched.
     assert!(p.0.session.payments.gifts_manage.deleted());
     // ...so the driver asked for the list again, right after the answer.

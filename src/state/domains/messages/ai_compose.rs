@@ -256,7 +256,7 @@ impl Session {
         self.payments
             .hub
             .premium
-            .as_ref()
+            .data()
             .and_then(|info| info.limit_pair_for_type(CUSTOM_STYLES_LIMIT_TYPE))
             .unwrap_or(CUSTOM_STYLES_FALLBACK)
     }

@@ -241,7 +241,6 @@ pub use session_message_story::{
     StoryCardState, StoryPreview, media_unlocked_note, message_story_key,
 };
 pub use session_privacy_data::{PasswordCheck, PrivacyControl, PrivacyData};
-pub use session_proxy::LINK_PING_ID;
 pub use session_reply::story_thumb_candidates;
 pub use session_reply::{
     ForwardHeader, ForwardLink, MAX_REPLY_TARGETS_OUTSIDE_WINDOW, ReplyHeader, ReplyState,

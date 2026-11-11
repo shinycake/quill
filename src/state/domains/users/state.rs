@@ -3,6 +3,115 @@
 //! with `new`.
 use crate::state::*;
 
+/// The verdict of a `checkChatUsername`: the checked text and what the
+/// server said.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileUsernameVerdict {
+    pub text: String,
+    pub result: UsernameCheckResult,
+}
+
+/// Where the edit-profile dialog's username check stands.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ProfileUsernameCheck {
+    /// Nothing asked since the dialog opened.
+    #[default]
+    Idle,
+    /// A check of `text` is out as `request`; `last` is the verdict before
+    /// it (it still stands for its own text).
+    Checking {
+        request: RequestId,
+        text: String,
+        last: Option<ProfileUsernameVerdict>,
+    },
+    /// The latest check answered.
+    Checked(ProfileUsernameVerdict),
+}
+
+impl ProfileUsernameCheck {
+    /// The newest verdict held.
+    pub fn verdict(&self) -> Option<&ProfileUsernameVerdict> {
+        match self {
+            Self::Idle => None,
+            Self::Checking { last, .. } => last.as_ref(),
+            Self::Checked(verdict) => Some(verdict),
+        }
+    }
+
+    /// The verdict for exactly `text`.
+    pub fn verdict_for(&self, text: &str) -> Option<UsernameCheckResult> {
+        self.verdict()
+            .filter(|verdict| verdict.text == text)
+            .map(|verdict| verdict.result)
+    }
+
+    /// Whether a check of exactly `text` is out.
+    pub fn is_checking(&self, text: &str) -> bool {
+        matches!(self, Self::Checking { text: asked, .. } if asked == text)
+    }
+
+    /// The request in flight.
+    pub fn pending(&self) -> Option<RequestId> {
+        match self {
+            Self::Checking { request, .. } => Some(*request),
+            _ => None,
+        }
+    }
+
+    /// A check of `text` goes out as `request`.
+    pub fn begin(&mut self, request: RequestId, text: &str) {
+        let last = std::mem::take(self).into_verdict();
+        *self = Self::Checking {
+            request,
+            text: text.to_string(),
+            last,
+        };
+    }
+
+    /// The check that never left, or failed: back to the verdict held
+    /// before it. Only the request in flight counts (`request`); whether it
+    /// was.
+    pub fn end(&mut self, request: RequestId) -> bool {
+        if self.pending() != Some(request) {
+            return false;
+        }
+        *self = match std::mem::take(self).into_verdict() {
+            Some(verdict) => Self::Checked(verdict),
+            None => Self::Idle,
+        };
+        true
+    }
+
+    /// The answer to `request`: the text it asked and the verdict, when it
+    /// is the check in flight.
+    pub fn answer(&mut self, request: RequestId, result: UsernameCheckResult) -> bool {
+        let Self::Checking {
+            request: current,
+            text,
+            ..
+        } = self
+        else {
+            return false;
+        };
+        if *current != request {
+            return false;
+        }
+        *self = Self::Checked(ProfileUsernameVerdict {
+            text: std::mem::take(text),
+            result,
+        });
+        true
+    }
+
+    fn into_verdict(self) -> Option<ProfileUsernameVerdict> {
+        match self {
+            Self::Idle => None,
+            Self::Checking { last, .. } => last,
+            Self::Checked(verdict) => Some(verdict),
+        }
+    }
+}
+
 pub struct UsersState {
     /// The requests the profile boxes wait on before they close.
     pub saves: SaveWatch,
@@ -52,15 +161,12 @@ pub struct UsersState {
     /// `(user id, photo id)` whose full info was asked for to learn the
     /// clips of a video userpic (`Session::take_userpic_full_info_ask`).
     pub userpic_full_info_asked: std::collections::HashSet<(i64, i64)>,
-    /// A5: latest `checkChatUsername` verdict for the edit-profile
-    /// dialog: (checked username text, result). Written by the driver
-    /// before `apply` takes the pending request; the dialog only shows it
-    /// when it matches the current input text (stale verdicts ignored).
-    pub username_check: Option<(String, UsernameCheckResult)>,
-    /// A5: the in-flight `checkChatUsername` and the text it checks. Its
-    /// answer or its error is matched by this request, not by purpose: an
-    /// earlier check's reply never stands for the latest text.
-    pub username_check_pending: Option<(RequestId, String)>,
+    /// A5: the `checkChatUsername` of the edit-profile dialog: the
+    /// request in flight with the text it checks, and the latest verdict.
+    /// The dialog shows a verdict only when it matches the current input
+    /// text (stale verdicts ignored), and an answer or error only counts
+    /// for the request in flight, not for an earlier check's reply.
+    pub username_check: ProfileUsernameCheck,
     /// `bio_length_max` option (TDLib default 70, Premium raises it):
     /// the edit-profile bio counter.
     pub bio_length_max: usize,
@@ -165,8 +271,7 @@ impl UsersState {
             replies_bot_chat_id: None,
             user_full_infos: UserFullInfos::default(),
             userpic_full_info_asked: Default::default(),
-            username_check: None,
-            username_check_pending: None,
+            username_check: ProfileUsernameCheck::Idle,
             bio_length_max: 70,
             profile_edit_error: None,
             peer_color_error: None,
@@ -199,5 +304,46 @@ mod bio_limit_tests {
         users.apply_option("bio_length_max", &OptionValue::Integer(0));
         users.apply_option("other", &OptionValue::Integer(5));
         assert_eq!(users.bio_length_max, 140);
+    }
+}
+
+#[cfg(test)]
+mod username_check_tests {
+    use super::*;
+
+    #[test]
+    fn only_the_check_in_flight_is_answered_or_ended() {
+        let mut check = ProfileUsernameCheck::Idle;
+        check.begin(RequestId(1), "old");
+        check.begin(RequestId(2), "new");
+        assert!(!check.answer(RequestId(1), UsernameCheckResult::Occupied));
+        assert!(!check.end(RequestId(1)));
+        assert!(check.is_checking("new"));
+        assert!(check.answer(RequestId(2), UsernameCheckResult::Available));
+        assert_eq!(
+            check.verdict_for("new"),
+            Some(UsernameCheckResult::Available)
+        );
+        assert_eq!(check.verdict_for("old"), None);
+    }
+
+    #[test]
+    fn a_failed_check_gives_back_the_verdict_held_before_it() {
+        let mut check = ProfileUsernameCheck::Idle;
+        check.begin(RequestId(1), "a");
+        check.answer(RequestId(1), UsernameCheckResult::Occupied);
+        check.begin(RequestId(2), "b");
+        assert_eq!(
+            check.verdict_for("a"),
+            Some(UsernameCheckResult::Occupied),
+            "the earlier text keeps its verdict while another is checked"
+        );
+        assert!(check.end(RequestId(2)));
+        assert_eq!(check.pending(), None);
+        assert_eq!(check.verdict_for("a"), Some(UsernameCheckResult::Occupied));
+        let mut first = ProfileUsernameCheck::Idle;
+        first.begin(RequestId(3), "c");
+        assert!(first.end(RequestId(3)));
+        assert_eq!(first, ProfileUsernameCheck::Idle);
     }
 }

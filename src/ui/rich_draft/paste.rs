@@ -21,11 +21,46 @@ const DURATION: Duration = Duration::from_secs(9);
 /// tdesktop `kOfferTimeout` (`RichPasteOfferThrottle`).
 const THROTTLE: Duration = Duration::from_secs(30);
 
-#[derive(Default)]
-pub(super) struct PasteNotice {
-    shown_at: Option<Instant>,
-    /// The field's text when the notice showed; any other text closes it.
-    field: Option<String>,
+/// The paste notice: not on screen (with when it last was, for the
+/// throttle), or on screen with the field's text when it showed.
+pub(super) enum PasteNotice {
+    Idle {
+        last: Option<Instant>,
+    },
+    /// Any other field text closes it, so does the timer of its own `at`.
+    Showing {
+        at: Instant,
+        field: String,
+    },
+}
+
+impl Default for PasteNotice {
+    fn default() -> Self {
+        Self::Idle { last: None }
+    }
+}
+
+impl PasteNotice {
+    /// When the notice last showed.
+    fn last_shown(&self) -> Option<Instant> {
+        match self {
+            Self::Idle { last } => *last,
+            Self::Showing { at, .. } => Some(*at),
+        }
+    }
+
+    /// The notice at `at` is over (its timer, a changed field, the action):
+    /// back to idle, remembering when it showed. Whether it was the one
+    /// showing.
+    fn close(&mut self, at: Option<Instant>) -> bool {
+        match self {
+            Self::Showing { at: shown, .. } if at.is_none_or(|at| at == *shown) => {
+                *self = Self::Idle { last: Some(*shown) };
+                true
+            }
+            _ => false,
+        }
+    }
 }
 
 /// Identifies the notice so it can be closed.
@@ -36,7 +71,7 @@ impl QuillApp {
     pub(in crate::ui) fn offer_rich_paste(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.composer.read(cx).focus_handle(cx).is_focused(window)
             || self.chat_ui.is_editing()
-            || self.chat_ui.rich_editor_open
+            || self.chat_ui.rich.editor_open()
             || self.open_chat_id().is_none()
         {
             return;
@@ -72,20 +107,25 @@ impl QuillApp {
     ) {
         let now = self.composer.read(cx).value().to_string();
         let notice = &mut self.composer_ui.rich_draft.paste;
-        if now == was || notice.shown_at.is_some_and(|at| at.elapsed() < THROTTLE) {
+        if now == was
+            || notice
+                .last_shown()
+                .is_some_and(|at| at.elapsed() < THROTTLE)
+        {
             return;
         }
         let shown_at = Instant::now();
-        notice.shown_at = Some(shown_at);
-        notice.field = Some(now);
+        *notice = PasteNotice::Showing {
+            at: shown_at,
+            field: now,
+        };
         let toast = self.rich_paste_toast(locked, cx);
         window.push_notification(toast, cx);
         self.spawn_scoped_in(window, cx, async move |this, cx| {
             cx.background_executor().timer(DURATION).await;
             let _ = this.update_in(cx, |this, window, cx| {
                 let notice = &mut this.composer_ui.rich_draft.paste;
-                if notice.shown_at == Some(shown_at) {
-                    notice.field = None;
+                if notice.close(Some(shown_at)) {
                     window.remove_notification::<RichPasteToast>(cx);
                 }
             });
@@ -124,7 +164,7 @@ impl QuillApp {
                     .on_click(cx.listener(move |note, _, window, cx| {
                         note.dismiss(window, cx);
                         let _ = app.update(cx, |this, cx| {
-                            this.composer_ui.rich_draft.paste.field = None;
+                            this.composer_ui.rich_draft.paste.close(None);
                             if locked {
                                 // tdesktop `rich_paste_toast_hidden`.
                                 this.set_chat_prefs(cx, |prefs| {
@@ -147,8 +187,9 @@ impl QuillApp {
         cx: &mut App,
     ) {
         let notice = &mut self.composer_ui.rich_draft.paste;
-        if notice.field.as_deref().is_some_and(|field| field != text) {
-            notice.field = None;
+        if matches!(notice, PasteNotice::Showing { field, .. } if field != text)
+            && notice.close(None)
+        {
             window.remove_notification::<RichPasteToast>(cx);
         }
     }
@@ -156,7 +197,7 @@ impl QuillApp {
     /// The field's text, as block markup, in the rich editor.
     fn open_rich_editor_with_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let markup = self.composer_markup(cx);
-        self.chat_ui.rich_editor_open = true;
+        self.chat_ui.rich.set_editor(true);
         self.set_composer_markup(&markup, window, cx);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));

@@ -428,8 +428,10 @@ impl QuillApp {
         if id.is_some() && self.group_call_screen.window_closed_by_user == id {
             self.group_call_screen.title_dialog = None;
             self.group_call_screen.settings_open = false;
-            if self.screen_share.privacy_for == Some(super::screen_share_state::ScreenFor::Group) {
-                self.screen_share.privacy_for = None;
+            if self.screen_share.chooser.privacy_for().map(|t| t.for_call)
+                == Some(super::screen_share_state::ScreenFor::Group)
+            {
+                self.screen_share.close_privacy();
             }
         }
         if self.group_call_boxes.share_open()

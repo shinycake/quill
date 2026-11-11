@@ -120,15 +120,14 @@ impl QuillApp {
             .map(|attachment| attachment.path.clone())
             .filter(|path| {
                 let send_box = &self.composer_sends.reads;
-                !send_box.sound_checking.contains_key(path)
-                    && !send_box.sound_checked.contains(path)
+                send_box.sound.is_unread(path)
             })
             .collect();
         for path in paths {
             let send_box = &mut self.composer_sends.reads;
             send_box.sound_jobs = send_box.sound_jobs.wrapping_add(1);
             let job = send_box.sound_jobs;
-            send_box.sound_checking.insert(path.clone(), job);
+            send_box.sound.start(path.clone(), job);
             let probed = path.clone();
             let worker =
                 cx.background_spawn(async move { quill::composer::without_sound_track(&probed) });
@@ -137,11 +136,9 @@ impl QuillApp {
                 let _ = this.update(cx, |this, cx| {
                     let send_box = &mut this.composer_sends.reads;
                     // The batch may have been sent or cleared meanwhile.
-                    if send_box.sound_checking.get(&path) != Some(&job) {
+                    if !send_box.sound.finish(&path, job, ()) {
                         return;
                     }
-                    send_box.sound_checking.remove(&path);
-                    send_box.sound_checked.insert(path.clone());
                     if silent {
                         for attachment in this
                             .composer_sends
@@ -163,10 +160,10 @@ impl QuillApp {
     /// Videos in the open slot's tray are still being read (a probe for
     /// another chat's tray does not count).
     pub(super) fn tray_videos_checking(&self) -> bool {
-        let checking = &self.composer_sends.reads.sound_checking;
+        let checking = &self.composer_sends.reads.sound;
         self.pending_attachments()
             .iter()
-            .any(|attachment| checking.contains_key(&attachment.path))
+            .any(|attachment| checking.is_reading(&attachment.path))
     }
 
     /// The options row of the tray: High quality and the price.

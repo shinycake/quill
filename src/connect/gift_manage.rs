@@ -58,7 +58,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::Payments(purpose), None);
         self.session.payments.hub.gifts_op.begin(extra);
-        self.session.payments.hub.gifts_error = None;
+        self.session.payments.hub.gift_notice = None;
         self.session.payments.gifts_manage.note = None;
         if let Err(err) = self.send_json_request(extra, &build(extra, owner)) {
             self.session.payments.hub.gifts_op.failed(Some(extra));
@@ -171,10 +171,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         hub.gifts.clear();
         hub.gifts_total = 0;
         hub.gifts_offset.clear();
-        hub.gifts_loaded = false;
-        hub.gifts_error = None;
-        hub.gift_selected = None;
-        hub.gift_convert_confirm = None;
+        hub.gifts_page = crate::premium_hub::page_stage::PageStage::Idle;
+        hub.gift_notice = None;
+        hub.gift_view.select(None);
+        hub.gift_view.confirm_convert(None);
         self.fetch_received_gifts_page(false).map(Some)
     }
 

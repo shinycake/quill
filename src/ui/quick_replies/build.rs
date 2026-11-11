@@ -114,7 +114,7 @@ impl QuillApp {
 
     fn quick_replies_error_line(&mut self, line: &str, cx: &mut Context<Self>) {
         if let Some(dialog) = self.dialogs.quick_replies_dialog.as_mut() {
-            dialog.local_error = Some(line.to_string());
+            dialog.pane.error = Some(line.to_string());
         }
         cx.notify();
     }
@@ -214,7 +214,7 @@ impl QuillApp {
                     .map(|s| s.settings.quick_replies.messages_of(id).to_vec())
             })
             .unwrap_or_default();
-        let editing = state.editing;
+        let editing = state.pane.editing;
         let message_limit = self.session().map_or(qr::MESSAGES_MAX, |s| {
             s.settings.quick_replies.message_limit()
         });
@@ -316,7 +316,7 @@ impl QuillApp {
                             })),
                     ),
             );
-        let confirm = state.confirm_delete;
+        let confirm = state.pane.delete == super::DeleteStep::Asked;
         body.child(
             div()
                 .flex()
@@ -405,7 +405,7 @@ impl QuillApp {
                 .session()
                 .and_then(|s| s.settings.quick_replies.error.clone());
             let danger = cx.theme().danger;
-            let error = state.local_error.clone().or(server_error);
+            let error = state.pane.error.clone().or(server_error);
             if let Some(line) = error {
                 body = body.child(div().text_xs().text_color(danger).child(line));
             }

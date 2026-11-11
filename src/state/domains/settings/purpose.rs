@@ -85,6 +85,10 @@ pub enum SettingsPurpose {
     PingProxy {
         proxy_id: i32,
     },
+    /// `pingProxy` for the proxy-link box's proxy (not in the list). The
+    /// answer settles `ProxyState::link` when it is the request that
+    /// stage waits for.
+    PingLinkProxy,
     /// `parity:proxy-settings`: `setOption("prefer_ipv6")`. Response is
     /// `ok`; `on` is the value that was requested.
     SetPreferIpv6 {

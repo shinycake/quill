@@ -105,7 +105,7 @@ impl QuillApp {
             self.composer_sends.set_draft_clear(&slot, None);
         }
         if self.composer.read(cx).value().is_empty() && !self.chat_ui.is_editing() {
-            self.chat_ui.rich_editor_open = rich;
+            self.chat_ui.rich.set_editor(rich);
             self.set_composer_markup(&markup, window, cx);
             self.note_open_draft(false, cx);
             cx.notify();

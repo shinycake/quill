@@ -41,8 +41,7 @@ impl QuillApp {
     pub(in crate::ui) fn passkey_login_busy(&self) -> bool {
         self.privacy
             .passkeys
-            .ceremony
-            .as_ref()
+            .ceremony()
             .is_some_and(|ui| ui.mode == CeremonyMode::Login)
             || self
                 .live
@@ -57,14 +56,13 @@ impl QuillApp {
         let login_open = self
             .privacy
             .passkeys
-            .ceremony
-            .as_ref()
+            .ceremony()
             .is_some_and(|ui| ui.mode == CeremonyMode::Login);
         if !login_open || self.live.is_none() || signing_in(&self.current_auth()) {
             return false;
         }
         // Dropping the ceremony cancels it.
-        self.privacy.passkeys.ceremony = None;
+        self.privacy.passkeys.take_ceremony();
         true
     }
 
@@ -162,8 +160,9 @@ impl QuillApp {
         };
         if let Some(sheet) = sheet {
             // box-host: demo
-            self.privacy.passkeys.ceremony =
-                Some(CeremonyUi::new(CeremonyMode::Login, sheet, None));
+            self.privacy
+                .passkeys
+                .show_ceremony(CeremonyUi::new(CeremonyMode::Login, sheet, None));
         }
         cx.notify();
     }
@@ -179,7 +178,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         // box-host: a step of the open ceremony; it stays where it shows
-        self.privacy.passkeys.ceremony = Some(CeremonyUi::new(CeremonyMode::Login, sheet, None));
+        self.privacy
+            .passkeys
+            .show_ceremony(CeremonyUi::new(CeremonyMode::Login, sheet, None));
         cx.notify();
     }
 }

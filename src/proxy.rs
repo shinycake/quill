@@ -669,6 +669,22 @@ impl ProxyFetch {
     }
 }
 
+/// Where the proxy-link box stands. The check's request id is part of the
+/// stage, so only its own answer settles it; a new link, a close or a
+/// connect puts it back to `Review`.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub enum LinkCheck {
+    /// The proxy's details, with Check Status and Connect Proxy.
+    #[default]
+    Review,
+    /// The one-time "this exposes your IP" warning before a check.
+    Warn,
+    /// `pingProxy` sent; this request's answer settles it.
+    Checking(crate::ids::RequestId),
+    /// The ping answered: `Available(ms)` or `Unavailable`.
+    Done(PingStatus),
+}
+
 /// Everything the proxy UI and driver cache (`Session::proxy`).
 #[derive(Debug, Clone, Default)]
 pub struct ProxyState {
@@ -692,6 +708,8 @@ pub struct ProxyState {
     pub system_step: SystemStepState,
     /// Per-proxy-id ping results.
     pub pings: HashMap<i32, PingStatus>,
+    /// The proxy-link box's stage (its proxy is not in the list).
+    pub link_check: LinkCheck,
     /// Option `prefer_ipv6` (tdesktop "Try connecting through IPv6").
     pub prefer_ipv6: bool,
     pub prefs: ProxyPrefs,

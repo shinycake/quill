@@ -229,10 +229,15 @@ impl QuillApp {
                     .on_close(on_close);
             };
             let draft = link.draft.clone();
-            let warn = link.warn;
-            let ping = this
+            let stage = this
                 .session()
-                .and_then(|s| s.settings.proxy.pings.get(&LINK_PING_ID).copied());
+                .map_or(LinkCheck::Review, |s| s.settings.proxy.link_check);
+            let warn = stage == LinkCheck::Warn;
+            let ping = match stage {
+                LinkCheck::Checking(_) => Some(PingStatus::Checking),
+                LinkCheck::Done(status) => Some(status),
+                LinkCheck::Review | LinkCheck::Warn => None,
+            };
             let mut body = div().flex().flex_col().gap_2().child(Self::link_row(
                 tr(keys::PROXY_BOX_SERVER),
                 draft.display_address(),

@@ -281,8 +281,7 @@ impl QuillApp {
             return;
         };
         self.close_media_viewer(cx);
-        self.dialogs.profile_dialog = Some(ProfileDialog::ReportPhoto { owner, file_id });
-        self.open_box(crate::ui::shell::DialogKind::ProfilePanel);
+        self.open_profile_dialog(ProfileDialog::ReportPhoto { owner, file_id });
         cx.notify();
     }
 

@@ -138,7 +138,7 @@ impl QuillApp {
             .and_then(|bytes| bytes.parse().ok())
             .unwrap_or(0);
         let markup = rich_editor_markup(bytes);
-        self.chat_ui.rich_editor_open = true;
+        self.chat_ui.rich.set_editor(true);
         self.set_composer_markup(&markup, window, cx);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));

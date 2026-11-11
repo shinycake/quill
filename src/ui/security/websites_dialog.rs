@@ -41,7 +41,7 @@ impl QuillApp {
                         .child(tr_with(keys::Q_PREFS_ERROR, &[("line", &line.to_string())])),
                 );
             }
-            if let Some(confirm) = this.privacy.websites_confirm {
+            if let Some(confirm) = this.privacy.websites.confirm() {
                 body = body.child(this.websites_confirm_banner(confirm, &websites, mutating, cx));
             }
             if websites.is_empty() {

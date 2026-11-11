@@ -55,7 +55,7 @@ pub(in crate::ui) fn seed_grams_session(sink: Arc<MemorySink>) -> Session {
         .map(|value| parse_ton_transactions(&value))
         .unwrap_or_default();
     let grams = &mut session.payments.hub.grams;
-    grams.probed = true;
+    grams.probe.succeed(());
     grams.apply_page(page, false);
     grams.revenue = Some(GramRevenue {
         available_nano: 18_500_000_000,

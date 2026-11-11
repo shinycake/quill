@@ -64,8 +64,8 @@ pub(super) fn price_slider(
 impl QuillApp {
     /// The Messages row of the Privacy screen was pressed.
     pub(crate) fn open_new_chat_editor(&mut self, cx: &mut Context<Self>) {
-        self.privacy.editor = Some(PrivacyEditorTarget::NewChat);
-        self.privacy.exception_picker_open = false;
+        self.privacy.layer.open_editor(PrivacyEditorTarget::NewChat);
+        self.privacy.layer.close_exception_picker();
         self.paid_messages.charge = None;
         if let Some(live) = self.live.as_mut() {
             // The free-messages list behind "Remove fee".
@@ -381,8 +381,10 @@ impl QuillApp {
                             }),
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.privacy.exceptions = Some((target, PrivacyExceptionKind::Always));
-                        this.privacy.exception_picker_open = false;
+                        this.privacy
+                            .layer
+                            .open_exceptions(target, PrivacyExceptionKind::Always);
+                        this.privacy.layer.close_exception_picker();
                         cx.notify();
                     })),
             )

@@ -158,8 +158,7 @@ impl QuillApp {
             .unwrap_or_default();
         if let Some(live) = self.live.as_mut() {
             live.driver.session.users_state.profile_edit_error = None;
-            live.driver.session.users_state.username_check = None;
-            live.driver.session.users_state.username_check_pending = None;
+            live.driver.session.users_state.username_check = Default::default();
         }
         self.dialogs.edit_profile_dialog = Some(EditProfileDialog::new(
             window, cx, &first, &last, &bio, &username,
@@ -226,10 +225,8 @@ impl QuillApp {
             .unwrap_or_default();
         let checked_ok = self
             .session()
-            .and_then(|s| s.users_state.username_check.clone())
-            .is_some_and(|(text, result)| {
-                text == username && result == UsernameCheckResult::Available
-            });
+            .and_then(|s| s.users_state.username_check.verdict_for(&username))
+            .is_some_and(|result| result == UsernameCheckResult::Available);
         if !username.is_empty() && username != editable && !checked_ok {
             self.set_note(StatusNote::silent(tr(
                 keys::Q_PEOPLE_CHECK_AVAILABILITY_FIRST_THE_TEXT,
@@ -391,14 +388,11 @@ impl QuillApp {
         let username_text = dialog.username_text(cx);
         let verdict = self
             .session()
-            .and_then(|s| s.users_state.username_check.clone())
-            .filter(|(text, _)| *text == username_text)
-            .map(|(_, result)| result);
+            .and_then(|s| s.users_state.username_check.verdict_for(&username_text));
         let checking = verdict.is_none()
             && self
                 .session()
-                .and_then(|s| s.users_state.username_check_pending.clone())
-                .is_some_and(|(_, text)| text == username_text);
+                .is_some_and(|s| s.users_state.username_check.is_checking(&username_text));
         let error = self
             .session()
             .and_then(|s| s.users_state.profile_edit_error.clone());

@@ -25,14 +25,15 @@ fn sticker(file_id: i32) -> StickerItem {
 }
 
 fn preview_of(feature: PremiumFeature) -> PremiumHub {
-    PremiumHub {
-        premium_open: true,
-        promo_page: PromoPage::Preview {
+    let mut hub = PremiumHub::default();
+    hub.open_premium_box(
+        PromoPage::Preview {
             feature: PromoFeature::Premium(feature),
             opened: PreviewOpen::Overview,
         },
-        ..PremiumHub::default()
-    }
+        "",
+    );
+    hub
 }
 
 #[test]
@@ -55,12 +56,12 @@ fn the_clip_is_downloaded_whenever_the_premium_state_lands() {
 fn the_example_stickers_are_downloaded_whenever_their_answer_lands() {
     let mut hub = preview_of(PremiumFeature::UniqueStickers);
     assert!(preview_downloads(&hub).is_empty());
-    hub.premium_stickers = vec![sticker(5), sticker(6)];
+    hub.premium_stickers.succeed(vec![sticker(5), sticker(6)]);
     assert_eq!(preview_downloads(&hub), vec![(5, 16), (6, 16)]);
     // A closed dialog or another page asks for nothing.
-    hub.premium_open = false;
+    let open = hub.premium_box.take();
     assert!(preview_downloads(&hub).is_empty());
-    hub.premium_open = true;
-    hub.promo_page = PromoPage::Overview;
+    hub.premium_box = open;
+    hub.set_promo_page(PromoPage::Overview);
     assert!(preview_downloads(&hub).is_empty());
 }

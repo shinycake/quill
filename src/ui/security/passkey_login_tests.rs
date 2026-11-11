@@ -47,7 +47,7 @@ fn shown_dialog(shell: &Entity<QuillShell>, vcx: &mut VisualTestContext) -> Opti
 
 fn sheet(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<CeremonySheet> {
     app.read_with(vcx, |app, _| {
-        app.privacy.passkeys.ceremony.as_ref().map(|ui| ui.sheet)
+        app.privacy.passkeys.ceremony().map(|ui| ui.sheet)
     })
 }
 

@@ -144,7 +144,7 @@ impl QuillApp {
     /// several messages), so the label says how many.
     pub(in crate::ui) fn text_limit_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         // The rich editor sends one message, and refuses text over its own limit.
-        if self.chat_ui.rich_editor_open || !self.pending_attachments().is_empty() {
+        if self.chat_ui.rich.editor_open() || !self.pending_attachments().is_empty() {
             return None;
         }
         let editing = self.chat_ui.pending_edit();

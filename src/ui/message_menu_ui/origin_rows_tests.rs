@@ -280,8 +280,8 @@ fn the_read_time_box_subscribes_with_its_ref(cx: &mut TestAppContext) {
     let premium = app.read_with(vcx, |app, _| {
         app.session().map(|session| {
             (
-                session.payments.hub.premium_open,
-                session.payments.hub.premium_ref.clone(),
+                session.payments.hub.premium_open(),
+                session.payments.hub.premium_ref().to_string(),
             )
         })
     });

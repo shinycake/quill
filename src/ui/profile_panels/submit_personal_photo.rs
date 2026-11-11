@@ -79,8 +79,7 @@ impl QuillApp {
         dialog
             .first_name_input
             .update(cx, |input, cx| input.focus(window, cx));
-        self.dialogs.profile_dialog = Some(ProfileDialog::EditContact(dialog));
-        self.open_box(DialogKind::ProfilePanel);
+        self.open_profile_dialog(ProfileDialog::EditContact(dialog));
         cx.notify();
     }
 
@@ -154,8 +153,7 @@ impl QuillApp {
         dialog
             .day_input
             .update(cx, |input, cx| input.focus(window, cx));
-        self.dialogs.profile_dialog = Some(ProfileDialog::Birthday(dialog));
-        self.open_box(DialogKind::ProfilePanel);
+        self.open_profile_dialog(ProfileDialog::Birthday(dialog));
         cx.notify();
     }
 
@@ -165,9 +163,11 @@ impl QuillApp {
     pub(in crate::ui) fn open_birthday_privacy(&mut self, cx: &mut Context<Self>) {
         self.dialogs.profile_dialog = None;
         self.open_privacy(cx);
-        self.privacy.editor = Some(super::super::privacy::PrivacyEditorTarget::Rule(
-            quill::telegram::requests_privacy::PrivacySettingKey::ShowBirthdate,
-        ));
+        self.privacy
+            .layer
+            .open_editor(super::super::privacy::PrivacyEditorTarget::Rule(
+                quill::telegram::requests_privacy::PrivacySettingKey::ShowBirthdate,
+            ));
         cx.notify();
     }
 
@@ -231,8 +231,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_suitable_personal_chats();
         }
-        self.dialogs.profile_dialog = Some(ProfileDialog::PersonalChannel);
-        self.open_box(DialogKind::ProfilePanel);
+        self.open_profile_dialog(ProfileDialog::PersonalChannel);
         cx.notify();
     }
 
@@ -266,11 +265,10 @@ impl QuillApp {
         user_id: i64,
         cx: &mut Context<Self>,
     ) {
-        self.dialogs.profile_dialog = Some(ProfileDialog::ShareContact {
+        self.open_profile_dialog(ProfileDialog::ShareContact {
             user_id,
             target: None,
         });
-        self.open_box(DialogKind::ProfilePanel);
         cx.notify();
     }
 

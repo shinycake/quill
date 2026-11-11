@@ -62,7 +62,7 @@ fn open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, chat: ChatId) {
 /// Open the three surfaces the old hand list missed, and a reply.
 fn open_chat_surfaces(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     app.update(vcx, |app, cx| {
-        app.chat_ui.rich_editor_open = true;
+        app.chat_ui.rich.set_editor(true);
         app.chat_ui.send_as_open = true;
         app.chat_ui.link_popup = Some(LinkPopup {
             position: point(px(10.), px(10.)),
@@ -83,7 +83,7 @@ struct Shown {
 
 fn shown(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Shown {
     app.read_with(vcx, |app, _| Shown {
-        rich_editor: app.chat_ui.rich_editor_open,
+        rich_editor: app.chat_ui.rich.editor_open(),
         send_as: app.chat_ui.send_as_open,
         link_popup: app.chat_ui.link_popup.is_some(),
         reply: app.chat_ui.has_reply(),
@@ -166,7 +166,7 @@ fn a_reply_aimed_at_the_next_chat_comes_along(cx: &mut TestAppContext) {
     app.update(&mut vcx, |app, _| {
         let reply = ComposerReplyTo::new(CHAT, MessageId(1)).into_chat(other);
         app.chat_ui.set_reply(Some(reply));
-        app.chat_ui.rich_editor_open = true;
+        app.chat_ui.rich.set_editor(true);
     });
     open(&app, &mut vcx, other);
     let after = shown(&app, &mut vcx);
@@ -310,7 +310,7 @@ fn another_chat_drops_the_reschedule_picker_and_the_scheduled_list(cx: &mut Test
     });
     frames(&mut vcx);
     app.read_with(&vcx, |app, _| {
-        assert!(app.chat_ui.schedule_picker.is_some());
+        assert!(app.chat_ui.schedule_popup_shown());
     });
     open(&app, &mut vcx, other);
     app.read_with(&vcx, |app, _| {
@@ -318,6 +318,7 @@ fn another_chat_drops_the_reschedule_picker_and_the_scheduled_list(cx: &mut Test
             app.chat_ui.schedule_picker.is_none(),
             "the picker was the last chat's"
         );
+        assert!(!app.chat_ui.schedule_popup_shown());
         assert!(
             !app.chat_ui.scheduled_dialog_open,
             "the list was the last chat's"

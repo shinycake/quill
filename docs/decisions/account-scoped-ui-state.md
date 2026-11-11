@@ -7128,6 +7128,49 @@ files, each rebuilt as one value per stage.
   mic switch (a setting), and `call_sound_watch` is the driver's
   diagnostics watch keyed by call; neither is a stage of the other.
 
+### Sweep fixes (is-17)
+
+Implicit-state entries: each stage that was kept in step by hand is one
+value now, with a way out of every stage. Where an entry's fields were
+already one value, or are independent, it is skipped and says why.
+
+| id | result |
+| --- | --- |
+| 12-010 | Skipped: already fixed (`ClipSlot` holds the file id with its player or failure). |
+| 12-024 | `GramsHub::history: PageStage` (request id and page kind in `Loading`, the error in `Failed`); the Settings probe is `probe: Fetch<()>`; `peers_dirty` is `peers_checked`, how many rows have had their peers checked. |
+| 12-025 | `withdraw_url` / `withdraw_too_small` are one `withdraw_outcome: Option<WithdrawOutcome>` the window drains. |
+| 12-021, 12-022 | `PremiumHub::tx` and `gifts_page` are `PageStage` (`premium_hub/page_stage.rs`), shared with the Grams history. The cursor (`tx_offset`, `gifts_offset`) stays: it is data of the list. A mutation failure line is `gift_notice`, apart from the load error. |
+| 12-023 | `gift_view: GiftView { List, Detail, ConfirmConvert, Mutating }`. The in-flight lock outlives the panel (a second request would pay twice), so `Mutating` carries the panel. |
+| 12-027 | `premium_box: Option<PremiumBox { page, start_ref, requested }>` (closing drops all of it); `premium`, `premium_stickers` and `business_features` are `Fetch`, asked again after a failure. |
+| 12-028 | `limit_notice: Option<LimitNotice { Box { kind, extra, toast }, Toast }>`. A toast raised over an open box waits in the box (`toast`) and the window still drains it once; a box raised over a toast not yet shown keeps that toast; closing the box leaves a waiting toast. |
+| 12-029, 12-046 | `PrivacyState::layer: PrivacyLayer` (page, editor, exceptions with its picker, block picker, Unblock question, last-seen warning). `websites_open` / `websites_confirm` are `WebsitesScreen`. |
+| 12-030 | Skipped: already one enum, `ReadDateStage`, with the request ids. |
+| 12-031 | `FileOpenConfirm` holds `remember`; session details, rename and the terminate question are `DeviceLayer`. |
+| 12-033 | `UsersState::username_check: ProfileUsernameCheck { Idle, Checking, Checked }` (request id and text in `Checking`). `profile_edit_error` stays, and is independent: it is the only cell of its kind (no flag or stage beside it), a message line that every starter clears and the window drains as a note, like `peer_color_error`; the in-flight edits are tracked by their own request purposes. |
+| 12-034 | `rating_box: Option<RatingBox { user_id, mode }>`. |
+| 12-037 | `ProfileModal::fade: ModalFade { Open(Glide), Closing(Glide) }`: the glide is inside the variants and `close()` is the one transition that runs it to hidden, so there is no stage next to a glide set by hand. |
+| 12-041 | Skipped: `PendingGallery` is one `Option` carrying the request's keys, dropped on answer, failure or owner change. |
+| 12-043 | `open_profile_dialog` sets the dialog and its window together. |
+| 12-047 | Skipped: `CommonGroupsUi::search` is one value carrying its owner id; `common_groups_paging` is gone. |
+| 04-050 | `CameraDraft` is `CameraStage { Idle, Starting, Live, Saving, Taken, Stopped }`; `PhotoSources::busy` is `Saving`. |
+| 12-059 | The link box's stage is `ProxyState::link_check: LinkCheck { Review, Warn, Checking(RequestId), Done(PingStatus) }` in the session; `ProxyLinkBox` holds only the draft. The link ping has its own purpose (`PingLinkProxy`) and `LINK_PING_ID` and its slot in the ping map are gone: only the request `Checking` carries can settle it, and a new link, a close or a connect puts it back to `Review`, so a late answer of an earlier link is ignored (test). `ip_warning_acked` is a remembered consent, not a stage. |
+| 12-060 | `PullUi::route: Route { Unfound, Found(Next), Jumping { next, task } }`; leaving the history drops the jump with the route. |
+| 12-062 | `QuickRepliesDialog::pane: ShortcutPane { editing, save, delete: DeleteStep, error }`, replaced whole on every screen change. |
+| 12-064 | `MessageUi::menu: Option<OpenMenu { at, page, target: MenuTarget }>`. The window position, the page the menu shows and what it was opened over are one value, so closing the menu (`menu = None`) drops all three; `menu_target` and `menu_ui.page` are gone. |
+| 12-066, 11-p4-004 | `RequestShare::stage: ShareStage { Picking, Confirm, Locating(task), Located }`; closing the box drops the lookup. |
+| 12-067 | `schedule_popup_open` is gone: the popup shows while `schedule_picker` is set. |
+| 12-068, 12-080 | `ScreenShareUi::chooser: Chooser { Closed, Listing, Open, PrivacyBox }`. A window made after the chooser closed is removed. A second ask while the chooser is listing or open retargets it (the old `for_call`). |
+| 12-070 | `PasteNotice { Idle { last }, Showing { at, field } }`. |
+| 12-071 | `ChatUi::rich: RichComposer { Field, Editor, Discard, Choice(plain), EditorChoice(plain) }`: one value with the transitions `set_editor`, `ask_discard`, `ask_choice`, `dismiss` and `take_choice`; the box and the editor are no longer two cells set by hand. Opening the editor dismisses the discard question (its draft moves into the editor). |
+| 12-083, 12-093 | `TwoStepUi::stage: TwofaStage { Closed, Open { view, notice, confirm } }`. Skipped in `TwofaFlow`: the recovery code and the login-email code are two flows with two emails (a test holds both). |
+| 12-084, 12-096, 12-111 | `DeviceLayer { None, Details, Renaming, Confirm }` and `DeviceLink { Idle, Scanning, Consent }`. `sessions_mutating` is `sessions_op: ListOp { Idle, Running(RequestId) }` (`state/fetch.rs`): only the answer of the request it carries ends it. `sessions_stale` stays: a refetch mark that a notice can raise while a request is out. |
+| 12-085 | Skipped: `top_view` is the rule state, reset with the search; `top_toggled_at` is a render clock and `top_drag` a pointer gesture. |
+| 12-090 | The pointer poll is held by the drag (`DragSelect::poll`); dropping the drag stops it. |
+| 12-092 | `PasskeysScreen { Closed, List, ConfirmDelete, About }` and `PasskeyRun { Idle, Waiting, Showing }` (the ticker is in it). |
+| 12-095 | `connected_websites: Fetch<Vec<ParsedWebsite>>` (fetch and disconnect errors land in it, like `sessions`); `WebsitesScreen`; `websites_mutating` is `websites_op: ListOp`. |
+| 12-101 | `TrayReads` holds one `Reads<T>` per kind: a path is `Reading { job }` or `Done`. |
+| 12-103 | `SendMenu::list: EffectList { Strip, Expanded }` and `card: Card { None, Shown }`. |
+| (review) | A paged list kept failing its follow-up page: `PageStage::invalidate` keeps the error line of a failed page and only makes the first page due again. `gift_notice` blocks the received gifts' auto-paging like `gifts_error` did. |
 ### Sweep fixes (is-01)
 
 Implicit-state entries: each names a struct whose stages were kept in step by

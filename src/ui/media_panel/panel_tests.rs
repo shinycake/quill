@@ -290,7 +290,7 @@ fn a_locked_sticker_opens_the_premium_preview_instead_of_sending(cx: &mut TestAp
     app.update(vcx, |app, _| {
         seed(app, false);
         let session = app.demo_session.as_mut().unwrap();
-        session.payments.hub.premium = Some(premium_features());
+        session.payments.hub.premium.succeed(premium_features());
     });
     app.update(vcx, |app, cx| {
         app.send_sticker_pick(FileId(1), "😀".into(), 512, 512, None, cx);
@@ -299,27 +299,19 @@ fn a_locked_sticker_opens_the_premium_preview_instead_of_sending(cx: &mut TestAp
         let hub = &app.session().unwrap().payments.hub;
         // The locked sticker leads the stickers feature's preview.
         assert_eq!(
-            hub.promo_page,
+            hub.promo_page(),
             PromoPage::Preview {
                 feature: PremiumFeature::UniqueStickers.into(),
                 opened: PreviewOpen::Box,
             }
         );
-        assert_eq!(
-            hub.premium_requested.as_ref().map(|s| s.file_id),
-            Some(FileId(1))
-        );
+        assert_eq!(hub.premium_requested().map(|s| s.file_id), Some(FileId(1)));
         assert_ne!(app.connection.status_note(), "Sticker sent");
     });
 
     // With Premium the same sticker is just sent.
     app.update(vcx, |app, cx| {
-        app.demo_session
-            .as_mut()
-            .unwrap()
-            .payments
-            .hub
-            .premium_requested = None;
+        app.demo_session.as_mut().unwrap().payments.hub.premium_box = None;
         app.demo_session.as_mut().unwrap().payments.premium_option = Some(true);
         app.demo_session.as_mut().unwrap().open_chat(ChatId(11));
         app.send_sticker_pick(FileId(1), "😀".into(), 512, 512, None, cx);
@@ -330,7 +322,7 @@ fn a_locked_sticker_opens_the_premium_preview_instead_of_sending(cx: &mut TestAp
                 .unwrap()
                 .payments
                 .hub
-                .premium_requested
+                .premium_requested()
                 .is_none()
         );
         assert_eq!(app.connection.status_note(), "Sticker sent");

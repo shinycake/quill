@@ -128,7 +128,7 @@ impl super::on_screen::Farewell for CallScreen {
         cx: &mut Context<super::app::QuillApp>,
     ) {
         app.close_screen_chooser(cx);
-        app.screen_share.privacy_for = None;
+        app.screen_share.close_privacy();
     }
 }
 

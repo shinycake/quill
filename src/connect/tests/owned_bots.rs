@@ -280,7 +280,7 @@ fn a_failed_create_keeps_the_dialog_open_with_a_reason() {
     let create = &driver.session.bots.owned.create;
     assert!(!create.creating());
     assert!(create.error().unwrap().contains("BotFather"));
-    assert_eq!(driver.session.payments.hub.limit_toast, None);
+    assert_eq!(driver.session.payments.hub.take_limit_toast(), None);
 }
 
 #[test]
@@ -303,7 +303,7 @@ fn the_bot_limit_shows_the_premium_toast_over_the_open_dialog() {
     assert!(!create.creating());
     assert_eq!(create.error(), None);
     assert_eq!(
-        driver.session.payments.hub.limit_toast,
+        driver.session.payments.hub.take_limit_toast(),
         Some(crate::premium_limits::PremiumLimitKind::OwnedBots)
     );
 }

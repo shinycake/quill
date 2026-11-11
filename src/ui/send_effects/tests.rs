@@ -255,7 +255,7 @@ fn a_click_on_the_card_hides_it_and_one_outside_closes_the_menu(cx: &mut TestApp
     frames(vcx);
     app.update(vcx, |app, _| {
         let open = app.composer_ui.send_menu.open.as_ref().expect("still open");
-        assert!(open.preview.as_ref().is_some_and(|p| p.hiding.is_some()));
+        assert!(open.preview().is_some_and(|p| p.hiding.is_some()));
     });
     // A hiding card takes no presses.
     assert!(!shown(vcx, card));
@@ -324,13 +324,11 @@ fn the_full_list_shows_every_effect_and_searches_them(cx: &mut TestAppContext) {
 
     // A sticker effect opens its card from the list too.
     app.update_in(vcx, |app, window, cx| {
-        app.composer_ui
-            .send_menu
-            .open
-            .as_mut()
-            .expect("open")
-            .query
-            .clear();
+        if let Some(open) = app.composer_ui.send_menu.open.as_mut()
+            && let super::EffectList::Expanded { query, .. } = &mut open.list
+        {
+            query.clear();
+        }
         let _ = window;
         cx.notify();
     });

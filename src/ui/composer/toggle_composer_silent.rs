@@ -55,7 +55,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.chat_ui.rich_editor_open {
+        if !self.chat_ui.rich.editor_open() {
             let tag = super::composer_field::tag_for_action(&action);
             self.toggle_composer_tag(tag, window, cx);
             self.composer
@@ -81,7 +81,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.chat_ui.rich_editor_open {
+        if !self.chat_ui.rich.editor_open() {
             self.clear_composer_tags(window, cx);
             self.composer
                 .update(cx, |input, cx| input.focus(window, cx));
@@ -100,7 +100,7 @@ impl QuillApp {
 
     /// M1: load the chat's scheduled sends and open the dialog.
     pub(in crate::ui) fn open_scheduled_dialog(&mut self, cx: &mut Context<Self>) {
-        self.close_composer_schedule_popup();
+        self.chat_ui.hide_schedule_popup();
         if let Some(live) = self.live.as_mut()
             && let Some(chat_id) = live.driver.session.open_chat
         {
@@ -386,7 +386,7 @@ impl QuillApp {
                 .cursor_pointer()
                 .on_click(cx.listener(|this, _, window, cx| {
                     if this.chat_ui.schedule_picker.is_some() {
-                        this.close_composer_schedule_popup();
+                        this.chat_ui.hide_schedule_popup();
                         cx.notify();
                     } else {
                         this.open_schedule_picker(ScheduleTarget::Composer, window, cx);
@@ -441,7 +441,7 @@ impl QuillApp {
     /// of opening the editor.
     #[inline(never)]
     fn rich_editor_entry(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if self.chat_ui.rich_editor_open || self.composer.read(cx).value().lines().count() <= 3 {
+        if self.chat_ui.rich.editor_open() || self.composer.read(cx).value().lines().count() <= 3 {
             return None;
         }
         Some(
@@ -456,7 +456,7 @@ impl QuillApp {
                     if premium {
                         // The editor works on block markup: show it raw.
                         let markup = this.composer_markup(cx);
-                        this.chat_ui.rich_editor_open = true;
+                        this.chat_ui.rich.set_editor(true);
                         this.set_composer_markup(&markup, window, cx);
                         this.set_note(StatusNote::silent(tr(
                             keys::Q_CHAT_RICH_EDITOR_MARKUP_BECOMES_BLOCKS,

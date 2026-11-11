@@ -8,7 +8,7 @@ use quill::lang::{keys, tr};
 /// Slice A2: which form the two-step verification overlay shows.
 /// The status screen is the hub; each form submits one TDLib request
 /// and the status screen renders the authoritative answer.
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub(crate) enum TwofaView {
     #[default]
     Status,

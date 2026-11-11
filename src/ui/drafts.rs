@@ -104,7 +104,7 @@ impl QuillApp {
         }
         let reply = self.draft_reply(self.chat_ui.reply(), chat_id);
         let markup = self.composer_markup(cx);
-        let content = if self.chat_ui.rich_editor_open {
+        let content = if self.chat_ui.rich.editor_open() {
             let blocks = self
                 .composer_ui
                 .rich_draft
@@ -190,7 +190,7 @@ impl QuillApp {
             let held = session.draft_is_dirty(chat_id, topic)
                 || !session.accepts_composer_draft(chat_id, topic);
             // The rich editor holds what the user is writing.
-            let held = held || self.chat_ui.rich_editor_open;
+            let held = held || self.chat_ui.rich.editor_open();
             (topic, draft, held)
         }) else {
             return;
@@ -360,7 +360,7 @@ impl QuillApp {
         });
         self.chat_ui.set_reply(restored_reply);
         if draft.as_ref().is_some_and(|draft| draft.rich.is_some()) {
-            self.chat_ui.rich_editor_open = false;
+            self.chat_ui.rich.set_editor(false);
         }
         self.set_composer_markup(&text, window, cx);
         // `set_value` emits no Change: re-check the restored draft.

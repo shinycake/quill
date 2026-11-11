@@ -42,13 +42,15 @@ impl QuillApp {
                     ..Default::default()
                 }),
             );
-            self.privacy.last_seen_warning = Some(PrivacyRuleDetail {
+            self.privacy.layer.warn_last_seen(PrivacyRuleDetail {
                 who: Some(PrivacyWho::Contacts),
                 ..Default::default()
             });
         }
         self.open_settings(Some(quill::settings_catalog::Page::Privacy), cx);
-        self.privacy.editor = Some(PrivacyEditorTarget::Rule(key));
+        self.privacy
+            .layer
+            .open_editor(PrivacyEditorTarget::Rule(key));
         cx.notify();
     }
 }

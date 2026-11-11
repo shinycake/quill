@@ -66,7 +66,7 @@ impl QuillApp {
         matches!(self.pane_mode(), PaneMode::Ready)
             && self.composer_available(PaneMode::Ready)
             && !self.chat_ui.is_editing()
-            && !self.chat_ui.rich_editor_open
+            && !self.chat_ui.rich.editor_open()
             && !self.recording_active()
     }
 

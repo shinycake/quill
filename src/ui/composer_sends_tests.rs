@@ -606,24 +606,16 @@ fn a_file_another_tray_holds_keeps_its_checks_when_one_tray_drops_it(cx: &mut Te
         app.update_pending_attachments(|tray| tray.push(shared.clone()));
         app.composer_sends
             .reads
-            .sound_checked
-            .insert(shared.path.clone());
+            .sound
+            .set_done(shared.path.clone(), ());
         app.clear_attachment(cx);
         assert!(
-            app.composer_sends
-                .reads
-                .sound_checked
-                .contains(&shared.path),
+            !app.composer_sends.reads.sound.is_unread(&shared.path),
             "A's tray still holds it"
         );
         app.select_listed_chat(A, window, cx);
         app.clear_attachment(cx);
-        assert!(
-            !app.composer_sends
-                .reads
-                .sound_checked
-                .contains(&shared.path)
-        );
+        assert!(app.composer_sends.reads.sound.is_unread(&shared.path));
     });
 }
 
@@ -701,8 +693,8 @@ fn a_pending_check_for_another_chats_file_does_not_block_a_send_here(cx: &mut Te
         app.update_pending_send(|send| send.attachments.push(in_a.clone()))
             .expect("an open chat");
         let send_box = &mut app.composer_sends.reads;
-        send_box.sound_checking.insert(in_a.path.clone(), 1);
-        send_box.thumbnailing.insert(in_a.path.clone(), 1);
+        send_box.sound.start(in_a.path.clone(), 1);
+        send_box.thumbnails.start(in_a.path.clone(), 1);
         assert!(app.tray_videos_checking(), "A waits on its own file");
         assert!(app.tray_thumbnails_pending());
         app.select_listed_chat(B, window, cx);

@@ -143,7 +143,7 @@ crate::ui::shell::register_dialogs! {
     /// Read-only Premium features explainer.
     PremiumFeatures => DialogSpec::new(
         4000,
-        |app| app.session().is_some_and(|s| s.payments.hub.premium_open),
+        |app| app.session().is_some_and(|s| s.payments.hub.premium_open()),
         QuillApp::build_premium_dialog,
     )
     .close(|app, _, cx| app.close_premium(cx)),

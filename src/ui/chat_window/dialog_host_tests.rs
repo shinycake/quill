@@ -309,14 +309,14 @@ fn a_premium_limit_toast_shows_in_the_window_that_hit_it(cx: &mut TestAppContext
         app.windows.last_press = Some(OTHER);
         let session = app.demo_session.as_mut().expect("a demo session");
         session.open_premium_limit(PremiumLimitKind::SavedGifs, 0);
-        assert!(session.payments.hub.limit_toast.is_some(), "a toast kind");
+        assert!(session.payments.hub.limit_toast().is_some(), "a toast kind");
     });
     draw(h.main, cx);
     assert!(
         h.app.read_with(cx, |app, _| app.session().is_some_and(|s| s
             .payments
             .hub
-            .limit_toast
+            .limit_toast()
             .is_some())),
         "the main window's frame leaves it"
     );

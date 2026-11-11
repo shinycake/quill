@@ -142,7 +142,7 @@ impl QuillApp {
             self.request_animation_tick(60, cx);
             return None;
         };
-        let search = open.search.clone()?;
+        let search = open.search().cloned()?;
         let premium = session.my_is_premium();
         let possible = session.premium_possible();
         let all = picker_lists(&session.stickers.effects, possible, None);
@@ -158,7 +158,7 @@ impl QuillApp {
             min_height,
             f32::from(open.viewport.height),
         );
-        let found = (!open.query.is_empty()).then(|| self.effect_search_emoji(&open.query));
+        let found = (!open.query().is_empty()).then(|| self.effect_search_emoji(open.query()));
         let lists = picker_lists(&session.stickers.effects, possible, found.as_ref());
         let inner = w - 2. * STRIP_SKIP;
         let muted = cx.theme().muted_foreground;
