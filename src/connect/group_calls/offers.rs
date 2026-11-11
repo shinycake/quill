@@ -340,10 +340,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.drop_group_offer(GroupOfferKey::Screen(id));
     }
 
-    /// The engine that was making them is gone.
+    /// The engine that was making them is gone: each offer fails the way a
+    /// failed payload does, so the rejoin, screen share or conference join
+    /// waiting on it is put back instead of waiting for a request that is
+    /// gone.
     pub(crate) fn forget_all_group_offers(&mut self) {
-        for (_, waiting) in std::mem::take(&mut self.group_offers) {
-            self.session.requests.take(waiting.extra);
+        let keys: Vec<GroupOfferKey> = self.group_offers.keys().copied().collect();
+        for key in keys {
+            self.finish_offer(GroupOffer {
+                key,
+                payload: Err(EngineError::Unavailable),
+            });
         }
     }
 }

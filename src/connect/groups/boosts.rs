@@ -1,6 +1,6 @@
 //! Connect driver: chat boosts.
 use super::*;
-use crate::boost_box::{BoostDecision, BoostPhase, BoostWork, classify, decide};
+use crate::boost_box::{BoostDecision, BoostPhase, BoostWork, ReassignSummary, classify, decide};
 use crate::telegram::requests::{get_chat_boost_features, set_supergroup_unrestrict_boost_count};
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -9,6 +9,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// open boost box, profile row or look dialog shows the new level.
     pub(crate) fn refresh_moved_boost_statuses(&mut self) {
         for chat_id in self.session.take_moved_boost_chats() {
+            // A status asked before the move would land the old level as
+            // the current one: it is dropped and asked again. A send that
+            // fails leaves no cached status, so the next look asks.
+            self.session
+                .requests
+                .take_purpose_for_chat(RequestPurpose::GetChatBoostStatus, chat_id);
             let _ = self.fetch_chat_boost_status(chat_id);
         }
     }
@@ -81,19 +87,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                     Some(crate::boost_box::BoostBoxState::new(chat_id.0, group));
             }
         }
-        // A slots read from a press whose box closed is still out: this
-        // press takes it over, and its answer continues this boost.
-        if self
-            .session
+        // A slots read from a press whose box closed may still be out: its
+        // answer belongs to that box, so it is dropped and this press asks
+        // for its own.
+        self.session
             .requests
-            .has_purpose_for_chat(RequestPurpose::GetBoostSlotsForBoost, chat_id)
-        {
-            if let Some(state) = self.boost_box_for(chat_id) {
-                state.phase = BoostPhase::Working(BoostWork::Slots);
-                state.note = None;
-            }
-            return Ok(None);
-        }
+            .take_purpose_for_chat(RequestPurpose::GetBoostSlotsForBoost, chat_id);
         let extra = self
             .session
             .request(RequestPurpose::GetBoostSlotsForBoost, Some(chat_id));
@@ -105,7 +104,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         if let Some(state) = self.boost_box_for(chat_id) {
-            state.phase = BoostPhase::Working(BoostWork::Slots);
+            state.phase = BoostPhase::Working(BoostWork::Slots { request: extra });
             state.note = None;
         }
         Ok(Some(extra))
@@ -124,10 +123,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         let chat_id = state.chat_id;
-        let BoostPhase::Working(BoostWork::SlotsReady(slots)) = std::mem::replace(
-            &mut state.phase,
-            BoostPhase::Working(BoostWork::Boosting { reassign: None }),
-        ) else {
+        let BoostPhase::Working(BoostWork::SlotsReady(slots)) =
+            std::mem::replace(&mut state.phase, BoostPhase::Main)
+        else {
             return Ok(());
         };
         let now = crate::local_time::now_unix();
@@ -139,7 +137,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         });
         match decision {
             BoostDecision::Boost(slot_id) => {
-                self.send_boost_chat(ChatId(chat_id), &[slot_id])?;
+                self.send_boost_chat(ChatId(chat_id), &[slot_id], None)?;
             }
             other => {
                 if let Some(state) = self.boost_box_for(ChatId(chat_id)) {
@@ -156,6 +154,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat: ChatId,
         slot_ids: &[i32],
+        reassign: Option<ReassignSummary>,
     ) -> Result<(), ConnectSendError> {
         let extra = self.session.request(RequestPurpose::BoostChat, Some(chat));
         if let Err(err) = self.sender.send_json(&boost_chat(extra, chat, slot_ids)) {
@@ -164,6 +163,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 state.phase = BoostPhase::Main;
             }
             return Err(err);
+        }
+        // The box works under this request until its answer or error.
+        if let Some(state) = self.boost_box_for(chat) {
+            state.boosting(extra, reassign);
+            state.note = None;
         }
         Ok(())
     }

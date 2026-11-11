@@ -280,9 +280,12 @@ impl Session {
                         .boost_box
                         .as_mut()
                         .filter(|state| state.chat_id == chat_id.0)
+                    && pending.is_some_and(|p| state.waits_for(p.id))
                     && matches!(
                         state.phase,
-                        crate::boost_box::BoostPhase::Working(crate::boost_box::BoostWork::Slots)
+                        crate::boost_box::BoostPhase::Working(
+                            crate::boost_box::BoostWork::Slots { .. }
+                        )
                     )
                 {
                     state.phase = crate::boost_box::BoostPhase::Working(
@@ -304,13 +307,14 @@ impl Session {
                         .boost_box
                         .as_mut()
                         .filter(|state| state.chat_id == chat_id.0)
+                        .filter(|state| pending.is_some_and(|p| state.waits_for(p.id)))
                     {
                         let moved = match std::mem::replace(
                             &mut state.phase,
                             crate::boost_box::BoostPhase::Main,
                         ) {
                             crate::boost_box::BoostPhase::Working(
-                                crate::boost_box::BoostWork::Boosting { reassign },
+                                crate::boost_box::BoostWork::Boosting { reassign, .. },
                             ) => reassign,
                             _ => None,
                         };

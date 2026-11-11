@@ -747,7 +747,9 @@ fn g2_boost_slots_stashed_for_chain() {
     let extra = session.request(RequestPurpose::GetBoostSlotsForBoost, Some(ChatId(13)));
     // Kept only while the box of that chat waits for the slots.
     let mut open = crate::boost_box::BoostBoxState::new(13, false);
-    open.phase = crate::boost_box::BoostPhase::Working(crate::boost_box::BoostWork::Slots);
+    open.phase = crate::boost_box::BoostPhase::Working(crate::boost_box::BoostWork::Slots {
+        request: extra,
+    });
     session.groups.boost_box = Some(open);
     apply_json(
         &mut session,
@@ -769,6 +771,34 @@ fn g2_boost_slots_stashed_for_chain() {
     };
     let ids: Vec<i32> = slots.iter().map(|slot| slot.slot_id).collect();
     assert_eq!(ids, vec![3, 7]);
+}
+
+/// r2-14, 02-071: a boost answer or error counts for the request its box
+/// waits for: an older one (the box closed and reopened) leaves the new
+/// box's stage alone.
+#[test]
+fn an_older_boost_answer_does_not_end_the_new_boxes_wait() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let old = session.request(RequestPurpose::BoostChat, Some(ChatId(13)));
+    let asked = session.request(RequestPurpose::GetBoostSlotsForBoost, Some(ChatId(13)));
+    let mut open = crate::boost_box::BoostBoxState::new(13, false);
+    open.phase = crate::boost_box::BoostPhase::Working(crate::boost_box::BoostWork::Slots {
+        request: asked,
+    });
+    session.groups.boost_box = Some(open);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"BOOST_NOT_MODIFIED"}}"#,
+            old.0
+        ),
+    );
+    let state = session.groups.boost_box.as_ref().expect("the box");
+    assert!(state.waits_for(asked), "the new press still waits");
+    assert!(state.note.is_none());
 }
 
 #[test]

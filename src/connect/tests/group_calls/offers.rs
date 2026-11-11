@@ -320,8 +320,8 @@ fn a_new_join_drops_the_last_transport_error() {
     let call = tracked(&driver);
     assert_eq!(call.transport.error(), None);
     assert!(
-        call.screen_share.error().is_none(),
-        "the fresh context drops the last share's failure too"
+        call.screen_share.error().is_some(),
+        "the last share's failure is its own, not the join's"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -362,5 +362,23 @@ fn a_voice_chat_in_no_known_chat_joins_with_an_instance_and_its_payload() {
         [(555, 51)],
         "once, when the chat loads"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// r2-14, 02-072: replacing the engine while a share waits for its payload
+/// fails that share instead of leaving it `Starting` for a gone request.
+#[test]
+fn replacing_the_engine_fails_the_waiting_share() {
+    let (dir, mut driver, _recorder, handle, _sink, _seq) = ready_group_call_driver();
+    sharable(&handle, &mut driver);
+    handle.hold_group_offers();
+    driver
+        .toggle_group_call_screen_share()
+        .expect("start sharing");
+    assert!(tracked(&driver).screen_share.is_starting());
+    driver.set_call_engine(Box::new(MockEngine::new()));
+    let call = tracked(&driver);
+    assert!(!call.screen_share.is_starting());
+    assert!(call.screen_share.error().is_some());
     let _ = std::fs::remove_dir_all(&dir);
 }

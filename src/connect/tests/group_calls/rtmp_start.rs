@@ -182,6 +182,20 @@ fn a_failed_request_marks_the_process_and_leaves_the_call_error_alone() {
     assert!(driver.session.calls.group_call_error.is_none());
 }
 
+/// r2-14, 02-069: a process whose first request failed does not block the
+/// next start for the chat while the UI has not dropped it yet.
+#[test]
+fn a_start_after_a_failed_fetch_asks_again_without_waiting_for_the_ui() {
+    let (recorder, mut driver) = driver_with_channel(true);
+    driver.begin_rtmp_start(ChatId(CHAT)).expect("sends");
+    let request = last(&recorder);
+    reply(&mut driver, error_answer(&request));
+    driver.begin_rtmp_start(ChatId(CHAT)).expect("sends again");
+    let start = driver.session.calls.rtmp_start.as_ref().expect("process");
+    assert!(matches!(start.stage, RtmpStage::Fetching { .. }));
+    assert_ne!(last(&recorder)["@extra"], request["@extra"]);
+}
+
 #[test]
 fn a_late_failure_of_an_earlier_process_is_ignored() {
     let (recorder, mut driver) = driver_with_channel(true);

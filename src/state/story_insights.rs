@@ -185,6 +185,19 @@ impl Session {
         }
     }
 
+    /// The forwards page after `offset` could not be sent for the story's
+    /// insights: the panel shows the error, and a scroll or Retry asks
+    /// again (the stage would otherwise stay `NotAsked`, which draws "No
+    /// public shares yet").
+    pub fn story_forwards_unsent(&mut self, chat_id: i64, story_id: i32, message: String) {
+        if let Some(state) = self.stories.insights.as_mut()
+            && state.chat_id == chat_id
+            && state.story_id == story_id
+        {
+            state.forwards_page = ForwardsPage::Failed(message);
+        }
+    }
+
     fn insights_for(&mut self, pending: &PendingRequest) -> Option<&mut StoryInsightsState> {
         let (chat_id, story_id) = (pending.chat_id?, pending.story_id?);
         self.stories

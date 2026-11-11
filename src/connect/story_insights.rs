@@ -116,6 +116,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             Err(err) => {
                 self.session.requests.take(extra);
+                self.session.story_forwards_unsent(
+                    chat_id.0,
+                    story_id,
+                    "Could not load statistics.".to_string(),
+                );
                 Err(err)
             }
         }

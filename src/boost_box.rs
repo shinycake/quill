@@ -22,6 +22,7 @@
 //! restriction prompts use.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ids::RequestId;
 use crate::local_time::{civil_local, day_label};
 use crate::telegram::envelope::{ParsedBoostSlot, ParsedBoostStatus};
 
@@ -441,14 +442,18 @@ pub fn reassign_done_text(count: usize, groups: usize, channels: usize) -> Strin
 /// nothing waiting.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BoostWork {
-    /// The Boost press asked for the boost slots and waits for them.
-    Slots,
+    /// The Boost press asked for the boost slots (`request`) and waits for
+    /// them: only that request's answer or error leaves the stage.
+    Slots { request: RequestId },
     /// The slots arrived; the driver reads them next (a free slot boosts,
     /// else the box shows what to do).
     SlotsReady(Vec<ParsedBoostSlot>),
-    /// `boostChat` is out; `reassign` is what a reassignment moves, for the
-    /// toast, and is dropped with the stage.
-    Boosting { reassign: Option<ReassignSummary> },
+    /// `boostChat` is out as `request`; `reassign` is what a reassignment
+    /// moves, for the toast, and is dropped with the stage.
+    Boosting {
+        request: RequestId,
+        reassign: Option<ReassignSummary>,
+    },
 }
 
 /// Where the open box stands.
@@ -499,21 +504,36 @@ impl BoostBoxState {
     pub fn awaiting_slots(&self) -> bool {
         matches!(
             self.phase,
-            BoostPhase::Working(BoostWork::Slots | BoostWork::SlotsReady(_))
+            BoostPhase::Working(BoostWork::Slots { .. } | BoostWork::SlotsReady(_))
         )
     }
 
-    /// Show what the Boost button decided. `Boost` keeps the box working
-    /// until `boostChat` answers.
+    /// Show what the Boost button decided. `Boost` changes nothing here:
+    /// the driver sends `boostChat` and the box works under that request
+    /// ([`BoostBoxState::boosting`]) until it answers.
     pub fn apply_decision(&mut self, decision: BoostDecision) {
         self.phase = match decision {
-            BoostDecision::Boost(_) => BoostPhase::Working(BoostWork::Boosting { reassign: None }),
+            BoostDecision::Boost(_) => return,
             BoostDecision::Reassign(slots) => BoostPhase::Reassign {
                 slots,
                 selected: Vec::new(),
             },
             BoostDecision::Notice(notice) => BoostPhase::Notice(notice),
         };
+    }
+
+    /// `boostChat` went out as `request`.
+    pub fn boosting(&mut self, request: RequestId, reassign: Option<ReassignSummary>) {
+        self.phase = BoostPhase::Working(BoostWork::Boosting { request, reassign });
+    }
+
+    /// Whether the box waits for the answer or error of `request`.
+    pub fn waits_for(&self, request: RequestId) -> bool {
+        match &self.phase {
+            BoostPhase::Working(BoostWork::Slots { request: asked })
+            | BoostPhase::Working(BoostWork::Boosting { request: asked, .. }) => *asked == request,
+            _ => false,
+        }
     }
 
     /// Check or uncheck a row. A row that is cooling down stays unchecked
@@ -862,10 +882,9 @@ mod tests {
         assert!(state.reassign_selection(NOW).is_empty());
         let mut state = state;
         state.apply_decision(BoostDecision::Boost(3));
-        assert_eq!(
-            state.phase,
-            BoostPhase::Working(BoostWork::Boosting { reassign: None })
-        );
+        assert_eq!(state.phase, BoostPhase::Main, "the driver sends the boost");
+        state.boosting(RequestId(4), None);
+        assert!(state.waits_for(RequestId(4)) && !state.waits_for(RequestId(5)));
     }
 
     #[test]

@@ -611,6 +611,7 @@ impl Session {
                 .boost_box
                 .as_mut()
                 .filter(|state| state.chat_id == chat_id.0)
+                .filter(|state| pending.is_some_and(|p| state.waits_for(p.id)))
         {
             state.phase = crate::boost_box::BoostPhase::Main;
             state.note = Some(call_request_error_line(err, "Could not boost"));
