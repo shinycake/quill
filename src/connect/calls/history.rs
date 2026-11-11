@@ -1,6 +1,6 @@
 //! Connect driver: call debug logs, call history, call privacy and busy-call handling.
 use super::*;
-use crate::state::PrivacyAsk;
+use crate::state::{CallUpload, PrivacyAsk};
 
 impl<S: JsonSender> ConnectDriver<S> {
     pub(crate) fn call_debug_information(&self) -> Result<String, ConnectSendError> {
@@ -9,7 +9,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .calls
             .summary
             .as_ref()
-            .filter(|summary| summary.need_debug_information && !summary.debug_information_sent)
+            .filter(|summary| {
+                summary.need_debug_information && summary.debug_information.can_send()
+            })
             .ok_or(ConnectSendError::InvalidRequest)?;
         Ok(self.call_log_payload(summary).to_string())
     }
@@ -86,7 +88,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         )) {
             self.session.requests.take(extra);
             if let Some(summary) = self.session.calls.summary.as_mut() {
-                summary.debug_information_error = Some(match err {
+                summary.debug_information = CallUpload::Failed(match err {
                     ConnectSendError::InvalidRequest => {
                         "Could not upload diagnostics: invalid request".into()
                     }
@@ -106,8 +108,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         if let Some(summary) = self.session.calls.summary.as_mut() {
-            summary.debug_information_sent = true;
-            summary.debug_information_error = None;
+            summary.debug_information = CallUpload::Sending(extra);
         }
         Ok(extra)
     }
@@ -125,7 +126,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .calls
             .summary
             .as_ref()
-            .filter(|s| s.need_log && !s.log_sent)
+            .filter(|s| s.need_log && s.log.can_send())
             .ok_or(ConnectSendError::InvalidRequest)?;
         let log_text = self.call_log_payload(summary).to_string();
         let call_id = summary.call_id;
@@ -140,9 +141,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             self.session.requests.take(extra);
             if let Some(summary) = self.session.calls.summary.as_mut() {
-                summary.log_error = Some("Could not upload the call log".into());
+                summary.log = CallUpload::Failed("Could not upload the call log".into());
             }
             return Err(err);
+        }
+        if let Some(summary) = self.session.calls.summary.as_mut() {
+            summary.log = CallUpload::Sending(extra);
         }
         Ok(extra)
     }

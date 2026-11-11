@@ -425,12 +425,18 @@ impl Session {
             }
             LiveStoryPurpose::GetBursts => {}
             LiveStoryPurpose::AddPendingReaction { stars, .. } => {
+                // The Stars may already have gone out in a commit: what the
+                // pending reaction no longer holds comes off the committed.
+                let mut left = stars;
                 if let Some(pending) = live.pending_reaction.as_mut() {
-                    pending.stars = pending.stars.saturating_sub(stars);
+                    let taken = pending.stars.min(left).max(0);
+                    pending.stars -= taken;
+                    left -= taken;
                     if pending.stars <= 0 {
                         live.pending_reaction = None;
                     }
                 }
+                live.committed_stars = live.committed_stars.saturating_sub(left).max(0);
                 live.note = Some(crate::lang::tr_with(
                     crate::lang::keys::Q_MONEY_STARS_NOT_SENT_REASON,
                     &[("reason", &reason)],

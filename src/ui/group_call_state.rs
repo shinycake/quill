@@ -198,7 +198,7 @@ impl QuillApp {
             .map(|call| {
                 (
                     call.id,
-                    call.share_links.generating,
+                    call.share_links.generating(),
                     call.share_links.ready(),
                 )
             });

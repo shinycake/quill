@@ -9,7 +9,7 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
-use quill::calls::share_links::{InviteRowAction, VideoChatShareLinks};
+use quill::calls::share_links::{InviteRowAction, ShareLink, VideoChatShareLinks};
 use quill::ids::ChatId;
 use quill::state::{ActiveGroupCall, DeepLinkAction, VideoChatInfo};
 use quill::telegram::envelope::ChatKind;
@@ -61,9 +61,8 @@ fn video_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, speaker: &str
             is_video_chat: true,
             can_be_managed: true,
             share_links: VideoChatShareLinks {
-                listener: Some(LISTENER.into()),
-                speaker: Some(speaker.into()),
-                generating: false,
+                listener: ShareLink::Got(LISTENER.into()),
+                speaker: ShareLink::Got(speaker.into()),
             },
             ..ActiveGroupCall::fresh(77)
         });

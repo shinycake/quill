@@ -174,3 +174,24 @@ fn failed_comments_are_marked_only_for_the_watched_call() {
     assert!(!session.live_story_message_failed(43, 5));
     assert!(live(&session).failed.contains(&5));
 }
+
+#[test]
+fn a_failed_add_after_the_commit_takes_its_stars_off_the_committed() {
+    use super::LiveStoryPurpose;
+    let mut session = session();
+    if let Some(live) = session.live_story_mut(42) {
+        live.pending_reaction = Some(crate::live_story::PendingLiveReaction::add(None, 3, 0));
+        // The window elapsed and the commit went out with the 3 Stars.
+        live.commit_reaction();
+    }
+    assert_eq!(live(&session).committed_stars, 3);
+    session.apply_live_story_error(
+        LiveStoryPurpose::AddPendingReaction {
+            group_call_id: 42,
+            stars: 3,
+        },
+        &crate::telegram::envelope::TdError::from_code(400),
+    );
+    assert_eq!(live(&session).committed_stars, 0);
+    assert!(live(&session).pending_reaction.is_none());
+}

@@ -449,8 +449,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|session| session.calls.summary.as_mut())
         {
-            summary.debug_information_sent = true;
-            summary.debug_information_error = None;
+            summary.debug_information = crate::state::CallUpload::Sent;
             self.set_note(StatusNote::silent(tr(
                 keys::Q_OPS_DEMO_DIAGNOSTICS_UPLOAD_NO_LIVE,
             )));
@@ -474,8 +473,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|session| session.calls.summary.as_mut())
         {
-            summary.log_sent = true;
-            summary.log_error = None;
+            summary.log = crate::state::CallUpload::Sent;
             self.set_note(StatusNote::silent(tr(keys::Q_OPS_DEMO_CALL_LOG_UPLOAD_NO)));
         }
         cx.notify();

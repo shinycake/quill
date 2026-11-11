@@ -412,7 +412,11 @@ impl StreamFeeder {
                         self.answer_time_waiters(first.time_offset, port);
                     }
                     None => {
-                        self.state = FeederState::NoStream;
+                        // Failed and Ended are terminal: a late empty list
+                        // must not revive them.
+                        if !matches!(self.state, FeederState::Failed | FeederState::Ended) {
+                            self.state = FeederState::NoStream;
+                        }
                         self.answer_time_waiters(0, port);
                     }
                 }
