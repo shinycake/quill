@@ -27,7 +27,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if search {
             self.session.stickers.gifs.search_failed = false;
         } else {
-            self.session.stickers.gifs.failed = false;
+            self.session.stickers.gifs.saved.retry();
         }
         let extra = self.session.request(purpose, None);
         if let Err(error) = self.sender.send_json(&build(extra)) {
@@ -36,7 +36,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.stickers.gifs.search_failed = true;
                 self.session.stickers.gifs.search_loading = false;
             } else {
-                self.session.stickers.gifs.failed = true;
+                self.session.stickers.gifs.saved.fail();
             }
             return Err(error);
         }
@@ -79,7 +79,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.cancel_gif_search_requests();
         self.session.stickers.gifs.search_mode = false;
         self.session.stickers.gifs.search_loading = false;
-        self.session.stickers.gifs.loaded = false;
+        self.session.stickers.gifs.saved.unload();
         self.maybe_refresh_saved_animations()
     }
 

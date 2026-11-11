@@ -216,9 +216,9 @@ impl QuillApp {
     pub(in crate::ui) fn note_gif_replaced(&mut self, cx: &mut Context<Self>) {
         let full = self.session().is_some_and(|s| {
             !s.my_is_premium()
-                && s.stickers.gifs.loaded
+                && s.stickers.gifs.saved.is_loaded()
                 && saved_list_full(
-                    s.stickers.gifs.animations.len(),
+                    s.stickers.gifs.saved.items().len(),
                     s.premium_limit_in_force(PremiumLimitKind::SavedGifs),
                 )
         });

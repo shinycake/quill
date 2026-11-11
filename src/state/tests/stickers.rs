@@ -146,7 +146,7 @@ fn s9_gif_backend_purpose_gated_dispatch() {
 
     // An addSavedAnimation `ok` clears the saved-GIF cache so it
     // refetches the server-confirmed list.
-    with_purpose.stickers.gifs.animations = with_purpose.stickers.gifs.search_results.clone();
+    with_purpose.stickers.gifs.saved.loaded(with_purpose.stickers.gifs.search_results.clone());
     let extra = with_purpose.request(RequestPurpose::AddSavedAnimation, None);
     apply_json(
         &mut with_purpose,
@@ -154,10 +154,10 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.stickers.gifs.animations.is_empty());
+    assert!(with_purpose.stickers.gifs.saved.items().is_empty());
 
     // A removeSavedAnimation `ok` invalidates the same way.
-    with_purpose.stickers.gifs.animations = with_purpose.stickers.gifs.search_results.clone();
+    with_purpose.stickers.gifs.saved.loaded(with_purpose.stickers.gifs.search_results.clone());
     let extra = with_purpose.request(RequestPurpose::RemoveSavedAnimation, None);
     apply_json(
         &mut with_purpose,
@@ -165,7 +165,7 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.stickers.gifs.animations.is_empty());
+    assert!(with_purpose.stickers.gifs.saved.items().is_empty());
 
     // updateAnimationSearchParameters stores provider + emojis.
     apply_json(
@@ -292,14 +292,14 @@ fn gif_panel_downloads_stills_then_preview_loops_then_unpreviewed_clips() {
         minithumbnail: None,
         thumb_still: still,
     };
-    session.stickers.gifs.animations = vec![
+    session.stickers.gifs.saved.loaded(vec![
         // An MP4 preview loop: the loop plays, the GIF itself waits.
         gif(1, Some(11), false),
         // A still JPEG and no loop: the GIF itself plays.
         gif(2, Some(12), true),
         // Nothing but the GIF.
         gif(3, None, true),
-    ];
+    ]);
     // A closed panel fetches nothing.
     assert!(session.gif_panel_file_ids_to_download().is_empty());
     session.stickers.gifs.open = true;

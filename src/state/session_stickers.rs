@@ -259,11 +259,7 @@ impl Session {
     }
 
     pub fn accept_saved_animations(&mut self, animations: Vec<AnimationItem>) {
-        self.stickers.gifs.loading = false;
-        self.stickers.gifs.failed = false;
-        self.stickers.gifs.stale = false;
-        self.stickers.gifs.animations = animations;
-        self.stickers.gifs.loaded = true;
+        self.stickers.gifs.saved.loaded(animations);
     }
 
     /// Slice S9: store a GIF-search `inlineQueryResults` page. A first page

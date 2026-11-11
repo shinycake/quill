@@ -219,8 +219,8 @@ pub struct StickerPanel {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GifPanel {
     pub open: bool,
-    pub animations: Vec<AnimationItem>,
-    pub loaded: bool,
+    /// The saved GIFs and where their request stands.
+    pub saved: SavedGifs,
     pub search_mode: bool,
     pub search_loading: bool,
     pub search_failed: bool,
@@ -230,10 +230,6 @@ pub struct GifPanel {
     pub search_chat: Option<crate::ids::ChatId>,
     pub search_bot_username: String,
     pub search_bot_user_id: Option<i64>,
-    pub loading: bool,
-    pub failed: bool,
-    /// `updateSavedAnimations` arrived; refresh even if the panel was closed.
-    pub stale: bool,
     /// Slice S9: GIF search via the animation search bot
     /// (`getInlineQueryResults`; schema 1.8.67, lines 6483, 13019).
     /// First page replaces; later pages append, deduped by file id.
@@ -249,6 +245,121 @@ pub struct GifPanel {
     /// The searches answered lately, so a window's GIF tab shows its own
     /// search while another window's is the one in `search_results`.
     pub searches_kept: GifSearches,
+}
+
+/// The saved GIFs (`getSavedAnimations`) and where their request stands: one
+/// value, so the list, "loaded", "loading" and "failed" cannot disagree. The
+/// last list stays in every stage, so the panel does not blank under a
+/// spinner or an error line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SavedGifs {
+    /// Not asked for yet, or dropped to be asked again.
+    Unloaded(Vec<AnimationItem>),
+    /// The request is in flight.
+    Loading(Vec<AnimationItem>),
+    /// The latest answer. `stale`: `updateSavedAnimations` arrived since, so
+    /// the list is fetched again even while the panel is closed.
+    Ready {
+        items: Vec<AnimationItem>,
+        stale: bool,
+    },
+    /// The latest request or change failed; the next opening asks again.
+    Failed(Vec<AnimationItem>),
+}
+
+impl Default for SavedGifs {
+    fn default() -> Self {
+        Self::Unloaded(Vec::new())
+    }
+}
+
+impl SavedGifs {
+    pub fn items(&self) -> &[AnimationItem] {
+        match self {
+            Self::Unloaded(items) | Self::Loading(items) | Self::Failed(items) => items,
+            Self::Ready { items, .. } => items,
+        }
+    }
+
+    fn take_items(&mut self) -> Vec<AnimationItem> {
+        match std::mem::take(self) {
+            Self::Unloaded(items) | Self::Loading(items) | Self::Failed(items) => items,
+            Self::Ready { items, .. } => items,
+        }
+    }
+
+    /// The list was answered (or failed to be): it is not asked for again
+    /// until `updateSavedAnimations` or a change drops it.
+    pub fn is_loaded(&self) -> bool {
+        matches!(self, Self::Ready { .. } | Self::Failed(_))
+    }
+
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading(_))
+    }
+
+    pub fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed(_))
+    }
+
+    /// Whether `getSavedAnimations` should go out now.
+    pub fn needs_load(&self) -> bool {
+        matches!(self, Self::Unloaded(_) | Self::Ready { stale: true, .. })
+    }
+
+    /// The request goes out.
+    pub fn begin_load(&mut self) {
+        *self = Self::Loading(self.take_items());
+    }
+
+    /// `getSavedAnimations` answered.
+    pub fn loaded(&mut self, items: Vec<AnimationItem>) {
+        *self = Self::Ready {
+            items,
+            stale: false,
+        };
+    }
+
+    /// The request or a change failed.
+    pub fn fail(&mut self) {
+        *self = Self::Failed(self.take_items());
+    }
+
+    /// A change goes out: a failure before it is forgiven.
+    pub fn retry(&mut self) {
+        if self.is_failed() {
+            *self = Self::Ready {
+                items: self.take_items(),
+                stale: false,
+            };
+        }
+    }
+
+    /// `updateSavedAnimations`: fetch the list again.
+    pub fn mark_stale(&mut self) {
+        match self {
+            Self::Ready { stale, .. } => *stale = true,
+            Self::Failed(_) => {
+                *self = Self::Ready {
+                    items: self.take_items(),
+                    stale: true,
+                }
+            }
+            Self::Unloaded(_) | Self::Loading(_) => {}
+        }
+    }
+
+    /// Ask again, showing the list meanwhile.
+    pub fn unload(&mut self) {
+        if !matches!(self, Self::Unloaded(_)) {
+            *self = Self::Unloaded(self.take_items());
+        }
+    }
+
+    /// A saved GIF was added or removed: the list is no longer the server's.
+    pub fn clear(&mut self) {
+        *self = Self::Unloaded(Vec::new());
+    }
 }
 
 /// GIF searches answered lately, by query: each window's GIF tab asks for
@@ -292,7 +403,7 @@ impl GifPanel {
         if self.search_mode {
             &self.search_results
         } else {
-            &self.animations
+            self.saved.items()
         }
     }
 

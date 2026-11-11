@@ -179,13 +179,10 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::AddSavedAnimation | RequestPurpose::RemoveSavedAnimation)
         ) {
-            self.stickers.gifs.failed = true;
+            self.stickers.gifs.saved.fail();
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedAnimations) {
-            self.stickers.gifs.loading = false;
-            self.stickers.gifs.loaded = true;
-            self.stickers.gifs.failed = true;
-            self.stickers.gifs.stale = false;
+            self.stickers.gifs.saved.fail();
         }
     }
 }

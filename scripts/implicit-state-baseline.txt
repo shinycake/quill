@@ -53,9 +53,6 @@ FastShareFacts::sent
 FieldResult::finished
 FirstRunPrefs::completed
 FooterMeta::pending
-GifPanel::failed
-GifPanel::loaded
-GifPanel::loading
 GifPanel::search_failed
 GifPanel::search_loading
 GiftCodeLookup::loading

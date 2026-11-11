@@ -46,7 +46,7 @@ fn empty_tile(color: Hsla) -> AnyElement {
 
 /// An answer for the session's GIF list is on its way.
 fn gifs_on_their_way(panel: &GifPanel) -> bool {
-    panel.loading || panel.search_loading
+    panel.saved.is_loading() || panel.search_loading
 }
 
 /// What the footer's sections choose.
@@ -278,8 +278,8 @@ impl QuillApp {
             return GifShown::Live;
         }
         match &self.pickers.gif_wanted {
-            GifWanted::Saved if panel.loaded || !panel.animations.is_empty() => {
-                GifShown::Saved(&panel.animations)
+            GifWanted::Saved if panel.saved.is_loaded() || !panel.saved.items().is_empty() => {
+                GifShown::Saved(panel.saved.items())
             }
             GifWanted::Saved => GifShown::Missing,
             GifWanted::Search(query) => panel
@@ -405,7 +405,7 @@ impl QuillApp {
             None
         } else if panel.search_mode && panel.search_failed && panel.search_bot_username.is_empty() {
             Some(tr(keys::Q_MISC_GIF_SEARCH_IS_NOT_AVAILABLE))
-        } else if panel.failed || panel.search_mode && panel.search_failed {
+        } else if panel.saved.is_failed() || panel.search_mode && panel.search_failed {
             Some(tr(keys::Q_MISC_COULD_NOT_UPDATE_GIFS_TRY))
         } else if panel.search_mode {
             Some(tr(keys::Q_MISC_NO_GIFS_FOUND))
@@ -456,7 +456,8 @@ impl QuillApp {
                     continue;
                 };
                 let saved = panel
-                    .animations
+                    .saved
+                    .items()
                     .iter()
                     .any(|item| item.file_id == animation.file_id);
                 line = line.child(self.gif_tile(animation, cell, saved, pending, &roots, cx));

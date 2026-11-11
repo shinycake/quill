@@ -262,11 +262,12 @@ impl QuillApp {
                     .iter()
                     .any(|s| s.file_id == target.file_id)
             }),
-            gif_saved: session.stickers.gifs.loaded.then(|| {
+            gif_saved: session.stickers.gifs.saved.is_loaded().then(|| {
                 session
                     .stickers
                     .gifs
-                    .animations
+                    .saved
+                    .items()
                     .iter()
                     .any(|item| item.file_id == target.file_id)
             }),

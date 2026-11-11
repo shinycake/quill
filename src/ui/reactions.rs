@@ -129,7 +129,7 @@ impl QuillApp {
                     let _ = live.driver.fetch_sticker_menu_facts();
                 }
                 Some(quill::telegram::envelope::MessageContent::Animation(_))
-                    if !live.driver.session.stickers.gifs.loaded =>
+                    if !live.driver.session.stickers.gifs.saved.is_loaded() =>
                 {
                     let _ = live.driver.show_saved_gifs();
                 }

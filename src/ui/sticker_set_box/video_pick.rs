@@ -32,7 +32,7 @@ impl QuillApp {
             return Vec::new();
         }
         self.session()
-            .map(|session| session.stickers.gifs.animations.clone())
+            .map(|session| session.stickers.gifs.saved.items().to_vec())
             .unwrap_or_default()
     }
 
