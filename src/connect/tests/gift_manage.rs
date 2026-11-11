@@ -688,3 +688,33 @@ fn an_earlier_boxs_gift_answers_are_dropped() {
     let send = &p.0.session.payments.gifts_manage.send;
     assert!(send.gifts_fetch == GiftListFetch::Answered && send.gifts.len() == 1);
 }
+
+/// Sweep r2-27 (10-013): a failed Premium options list is a line the box
+/// shows, and Retry asks again only the list that failed.
+#[test]
+fn a_failed_premium_list_shows_a_line_and_retry_asks_only_it() {
+    let mut p = parts();
+    add_chat(
+        &mut p,
+        json!({"@type":"updateNewChat","chat":{"id":21,"title":"Ann","type":{"@type":"chatTypePrivate","user_id":21},"unread_count":0}}),
+    );
+    p.0.open_send_gift(ChatId(21)).unwrap();
+    let gifts = sent_request(&p.1, "getAvailableGifts");
+    let premium = sent_request(&p.1, "getPremiumGiftPaymentOptions");
+    feed(
+        &mut p,
+        json!({"@type": "availableGifts", "@extra": gifts["@extra"], "gifts": []}),
+    );
+    feed(
+        &mut p,
+        json!({"@type": "error", "@extra": premium["@extra"], "code": 400, "message": "FLOOD"}),
+    );
+    let send = &p.0.session.payments.gifts_manage.send;
+    assert!(send.lists_failed());
+    assert!(send.error_line().is_some_and(|line| !line.is_empty()));
+    p.0.retry_send_gift_lists().unwrap();
+    let send = &p.0.session.payments.gifts_manage.send;
+    assert!(send.premium_fetch.is_loading());
+    assert_eq!(send.gifts_fetch, GiftListFetch::Answered);
+    assert!(!send.lists_failed());
+}

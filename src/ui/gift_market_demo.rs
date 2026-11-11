@@ -290,12 +290,12 @@ impl QuillApp {
             _ => None,
         };
         if let Some(next) = next {
-            self.gift_market.recipient = Some(GiftRecipient {
+            self.gift_market.flow.set_recipient(Some(GiftRecipient {
                 sender: MessageSender::User { user_id: 502 },
                 name: "Maya Chen".into(),
                 is_self: false,
                 is_channel: false,
-            });
+            }));
             self.gift_market.stack = vec![next];
         }
         cx.notify();

@@ -75,7 +75,7 @@ impl GifSection {
 
 /// What one window's GIF tab asks the session's one GIF list for: the
 /// saved GIFs, or a search (empty: trending; a footer emoji; typed text).
-/// Each window has its own (`PickerUi::gif_wanted`), as each tdesktop
+/// Each window has its own (`PickerUi::gif_tab`), as each tdesktop
 /// window has its own `GifsListWidget`: a footer emoji empties the field
 /// but stays the window's section, and another window's search is not
 /// this window's.
@@ -86,14 +86,44 @@ pub(in crate::ui) enum GifWanted {
     Search(String),
 }
 
-/// What a window last asked the session's GIF list for: a window not in
+/// One window's GIF tab, as a stage (`PickerUi::gif_tab`): what it shows,
+/// and whether it has asked the session's one list for that. A window not in
 /// use asks for its own section once, so two of them never take the list
 /// from each other every frame.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(in crate::ui) enum GifAsked {
-    #[default]
-    Nothing,
-    For(GifWanted),
+pub(in crate::ui) enum GifTab {
+    /// Shows this section and has not asked for it yet.
+    Wants(GifWanted),
+    /// Asked the session for it (the answer or a refusal ended the ask):
+    /// upkeep does not ask again.
+    Asked(GifWanted),
+    /// Typed text waits for the pause before it searches, while `wanted`
+    /// stays shown. The timer is owned here: the next keystroke, a section
+    /// choice, closing the panel or leaving the account drops it.
+    Typing { wanted: GifWanted, _pause: Task<()> },
+}
+
+impl Default for GifTab {
+    fn default() -> Self {
+        Self::Wants(GifWanted::default())
+    }
+}
+
+impl GifTab {
+    /// The section this window's tab shows.
+    pub(in crate::ui) fn wanted(&self) -> &GifWanted {
+        match self {
+            Self::Wants(wanted) | Self::Asked(wanted) | Self::Typing { wanted, .. } => wanted,
+        }
+    }
+
+    /// Typed text that has not searched yet is dropped (the panel closed
+    /// first); what was shown stays, and the field searches on reopening
+    /// (`follow_gif_field`).
+    fn stop_typing(&mut self) {
+        if let Self::Typing { wanted, .. } = self {
+            *self = Self::Wants(std::mem::take(wanted));
+        }
+    }
 }
 
 /// What one window's GIF tab shows from the session.
@@ -133,8 +163,6 @@ impl QuillApp {
     /// The search field changed: an empty field shows the saved GIFs at
     /// once, text searches once typing pauses.
     pub(super) fn gif_search_typed(&mut self, cx: &mut Context<Self>) {
-        self.pickers.gif_keystroke = self.pickers.gif_keystroke.wrapping_add(1);
-        let keystroke = self.pickers.gif_keystroke;
         let query = self
             .pickers
             .gif_search_input
@@ -146,16 +174,17 @@ impl QuillApp {
             self.choose_gif_section(GifSection::Saved, cx);
             return;
         }
-        self.spawn_scoped(cx, async move |this, cx| {
+        let wanted = self.pickers.gif_tab.wanted().clone();
+        let pause = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor().timer(SEARCH_DELAY).await;
-            this.update(cx, |this, cx| {
-                if this.pickers.gif_keystroke == keystroke {
-                    this.search_gifs_for(&query, cx);
-                }
-            })
-            .ok();
-        })
-        .detach();
+            this.update(cx, |this, cx| this.search_gifs_for(&query, cx))
+                .ok();
+        });
+        // Replacing the stage drops the previous keystroke's timer.
+        self.pickers.gif_tab = GifTab::Typing {
+            wanted,
+            _pause: pause,
+        };
     }
 
     fn search_gifs_for(&mut self, query: &str, cx: &mut Context<Self>) {
@@ -167,8 +196,7 @@ impl QuillApp {
     /// that cannot be sent leaves the window on what the list holds, so
     /// nothing asks again every frame.
     fn request_gifs(&mut self, wanted: GifWanted, cx: &mut Context<Self>) {
-        self.pickers.gif_wanted = wanted.clone();
-        self.pickers.gif_asked = GifAsked::For(wanted.clone());
+        self.pickers.gif_tab = GifTab::Asked(wanted.clone());
         let chat = self.viewed_chat();
         let sent = if let Some(live) = self.live.as_mut() {
             match &wanted {
@@ -196,7 +224,7 @@ impl QuillApp {
         };
         if !sent {
             if let Some(panel) = self.session().map(|session| &session.stickers.gifs) {
-                self.pickers.gif_wanted = GifWanted::shown(panel);
+                self.pickers.gif_tab = GifTab::Wants(GifWanted::shown(panel));
             }
             if matches!(wanted, GifWanted::Search(_)) && self.live.is_some() {
                 self.set_note(StatusNote::error(tr(keys::Q_MISC_COULD_NOT_SEARCH_GIFS)));
@@ -208,15 +236,15 @@ impl QuillApp {
     /// A footer section was picked: the field empties (tdesktop cancels its
     /// search) and the section's GIFs show from the top.
     pub(super) fn choose_gif_section(&mut self, section: GifSection, cx: &mut Context<Self>) {
-        // Typing that was waiting no longer searches.
-        self.pickers.gif_keystroke = self.pickers.gif_keystroke.wrapping_add(1);
+        // Typing that was waiting no longer searches: the request below
+        // replaces its stage.
         self.pickers.gif_scroll.set_offset(point(px(0.), px(0.)));
         self.request_gifs(GifWanted::of_section(&section), cx);
     }
 
     /// The GIF tab shows in the window in place: the session keeps one
     /// list for every window, and each window has its own field and
-    /// section (`PickerUi::gif_wanted`), so the list follows this
+    /// section (`PickerUi::gif_tab`), so the list follows this
     /// window's. Typed text that has not searched yet searches now.
     pub(super) fn follow_gif_field(&mut self, cx: &mut Context<Self>) {
         let field = self
@@ -226,7 +254,7 @@ impl QuillApp {
             .value()
             .trim()
             .to_string();
-        if !field.is_empty() && self.pickers.gif_wanted != GifWanted::Search(field.clone()) {
+        if !field.is_empty() && *self.pickers.gif_tab.wanted() != GifWanted::Search(field.clone()) {
             self.search_gifs_for(&field, cx);
             return;
         }
@@ -238,6 +266,12 @@ impl QuillApp {
     /// section kept from before shows meanwhile, and waits for an answer
     /// on its way to another window instead of cancelling it.
     fn follow_gif_wanted(&mut self, cx: &mut Context<Self>) {
+        // Typed text is waiting for its pause: asking for the section still
+        // shown would replace the stage and drop that timer, and the text
+        // would never search. The search that follows asks for the list.
+        if matches!(self.pickers.gif_tab, GifTab::Typing { .. }) {
+            return;
+        }
         let Some(panel) = self.session().map(|session| &session.stickers.gifs) else {
             return;
         };
@@ -247,7 +281,7 @@ impl QuillApp {
             GifShown::Missing => true,
         };
         if ask {
-            let wanted = self.pickers.gif_wanted.clone();
+            let wanted = self.pickers.gif_tab.wanted().clone();
             self.request_gifs(wanted, cx);
         }
     }
@@ -259,6 +293,7 @@ impl QuillApp {
     /// once, after any answer on its way, without a press.
     pub(in crate::ui) fn gif_tab_upkeep(&mut self, cx: &mut Context<Self>) {
         if !self.pickers.media_panel.shows_gifs() {
+            self.pickers.gif_tab.stop_typing();
             return;
         }
         if self.windows.pressed_here() {
@@ -268,10 +303,12 @@ impl QuillApp {
         let Some(panel) = self.session().map(|session| &session.stickers.gifs) else {
             return;
         };
-        let wanted = self.pickers.gif_wanted.clone();
+        let wanted = self.pickers.gif_tab.wanted().clone();
+        // `Wants` only: a section already asked for is not asked again, and
+        // typed text waiting for its pause keeps its timer (as above).
         if matches!(self.gif_shown(panel), GifShown::Missing)
             && !gifs_on_their_way(panel)
-            && self.pickers.gif_asked != GifAsked::For(wanted.clone())
+            && matches!(self.pickers.gif_tab, GifTab::Wants(_))
         {
             self.request_gifs(wanted, cx);
         }
@@ -279,10 +316,10 @@ impl QuillApp {
 
     /// What this window's tab shows from the session's list.
     pub(super) fn gif_shown<'a>(&self, panel: &'a GifPanel) -> GifShown<'a> {
-        if GifWanted::shown(panel) == self.pickers.gif_wanted {
+        if GifWanted::shown(panel) == *self.pickers.gif_tab.wanted() {
             return GifShown::Live;
         }
-        match &self.pickers.gif_wanted {
+        match self.pickers.gif_tab.wanted() {
             GifWanted::Saved if panel.loaded() || !panel.animations.is_empty() => {
                 GifShown::Saved(&panel.animations)
             }
@@ -620,7 +657,7 @@ impl QuillApp {
     /// The footer: saved GIFs, trending and the search provider's emoji,
     /// like the sticker and emoji tabs' section strip.
     fn gif_sections(&self, panel: &GifPanel, cx: &mut Context<Self>) -> AnyElement {
-        let shown = GifSection::of(&self.pickers.gif_wanted, panel);
+        let shown = GifSection::of(self.pickers.gif_tab.wanted(), panel);
         let glyph = |icon| Icon::new(icon).size(px(18.)).into_any_element();
         let mut sections = vec![
             (

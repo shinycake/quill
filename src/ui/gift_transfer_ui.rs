@@ -25,12 +25,11 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::gift_manage::{
-    ExportError, ExportSend, GiftEvent, ProbeOutcome, TransferPicker, TransferStage,
-    fragment_gift_url,
+    ExportSend, GiftEvent, ProbeOutcome, TransferPicker, TransferStage, fragment_gift_url,
 };
 use quill::lang::{keys, tr, tr_with};
 use quill::local_time::now_unix;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 impl QuillApp {
@@ -195,15 +194,7 @@ impl QuillApp {
             Some(Ok(_)) => {}
             // Refused before sending: say so under the field, where it is
             // seen (a note would sit behind the picker).
-            Some(Err(_)) => self.edit_transfer(cx, |picker| {
-                if let TransferStage::Password {
-                    send: ExportSend::Idle,
-                    error,
-                } = &mut picker.stage
-                {
-                    *error = Some(ExportError::Other(String::new()));
-                }
-            }),
+            Some(Err(_)) => self.edit_transfer(cx, TransferPicker::export_refused),
             None => self.note_gift_refused(tr(keys::Q_MONEY_DEMO_MODE_THIS_NEEDS_A)),
         }
         cx.notify();
@@ -348,7 +339,7 @@ impl QuillApp {
             else {
                 return dialog.overlay(true).on_close(on_close);
             };
-            let body = Rc::new(RefCell::new(Some(body)));
+            let body = Rc::new(Cell::new(Some(body)));
             let dialog = dialog.overlay(true).w(px(420.));
             let dialog = match title {
                 Some(title) => dialog.title(crate::ui::shell::dialog_title(title)),
@@ -357,10 +348,7 @@ impl QuillApp {
             dialog
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))

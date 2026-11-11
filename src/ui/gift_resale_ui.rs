@@ -90,15 +90,23 @@ impl QuillApp {
             if self.gift_market.stack.is_empty() {
                 // Only an open send box names a recipient (its recipient
                 // stays in the session after it closes).
-                self.gift_market.recipient = self
+                let recipient = self
                     .session()
                     .map(|s| &s.payments.gifts_manage.send)
                     .filter(|send| send.is_open())
                     .and_then(|send| send.recipient.clone());
+                self.gift_market.flow.set_recipient(recipient);
             }
             self.gift_market.push(MarketBox::Resale);
             self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         } else {
+            // The refused open already replaced the session's search: with
+            // no resale box to show it, nothing is left to own it.
+            if !self.gift_market.stack.contains(&MarketBox::Resale)
+                && let Some(market) = self.gift_market_mut()
+            {
+                market.resale = None;
+            }
             self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULDNT_LOAD_THE_GIFTS_ON,
             )));
@@ -146,7 +154,7 @@ impl QuillApp {
 
     pub(super) fn pick_resale_listing(&mut self, name: String, cx: &mut Context<Self>) {
         // The send box's recipient, or none for yourself.
-        let recipient = self.gift_market.recipient.clone();
+        let recipient = self.gift_market.flow.recipient().cloned();
         let started = match self.live.as_mut() {
             Some(live) => {
                 let started = live

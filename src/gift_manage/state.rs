@@ -210,12 +210,20 @@ impl SendGiftState {
         }
     }
 
-    /// The line after a failed send or gift list.
+    /// The line after a failed send, gift list or Premium options list.
     pub fn error_line(&self) -> Option<&str> {
-        match (&self.stage, &self.gifts_fetch) {
-            (SendStage::Failed(line), _) | (_, GiftListFetch::Failed(line)) => Some(line),
+        match (&self.stage, &self.gifts_fetch, &self.premium_fetch) {
+            (SendStage::Failed(line), _, _)
+            | (_, GiftListFetch::Failed(line), _)
+            | (_, _, GiftListFetch::Failed(line)) => Some(line),
             _ => None,
         }
+    }
+
+    /// A list the box shows failed: Retry asks it again.
+    pub fn lists_failed(&self) -> bool {
+        matches!(self.gifts_fetch, GiftListFetch::Failed(_))
+            || matches!(self.premium_fetch, GiftListFetch::Failed(_))
     }
 
     /// Whether `pending` is the gift list request of this dialog.

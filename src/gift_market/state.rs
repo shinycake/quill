@@ -361,6 +361,18 @@ impl CraftSession {
         })
     }
 
+    /// Fresh lists for the next craft: the candidates and the market
+    /// search start again, and an answer to a page asked before is dropped
+    /// by its request id ([`PageLoad::waits_for`]).
+    pub fn reset_lists(&mut self) {
+        self.candidates.clear();
+        self.candidates_total = 0;
+        self.candidates_load = PageLoad::Idle;
+        self.candidates_offset.clear();
+        self.candidates_page = 0;
+        self.market = ResaleSearch::new(self.regular_gift_id, ResaleFilter::default(), true);
+    }
+
     /// Adds a gift to the first free slot; `false` when full or present.
     pub fn add(&mut self, gift: CraftGift) -> bool {
         if self.slots.len() >= super::CRAFT_SLOTS
@@ -450,9 +462,11 @@ pub enum AuctionFetch {
     Loading {
         request: u64,
     },
-    /// The state of this gift arrived; the UI takes it once.
+    /// The state of this gift arrived as the answer to `request`; the box
+    /// that asked takes it once, and one that did not ask leaves it.
     Ready {
         gift_id: i64,
+        request: u64,
     },
 }
 

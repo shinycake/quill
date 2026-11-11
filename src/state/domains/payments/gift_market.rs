@@ -60,6 +60,7 @@ impl Session {
                 if request != 0 && market.auction == (AuctionFetch::Loading { request }) {
                     market.auction = AuctionFetch::Ready {
                         gift_id: state.gift_id(),
+                        request,
                     };
                 }
                 market.store_auction(*state);

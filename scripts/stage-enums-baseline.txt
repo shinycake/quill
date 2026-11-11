@@ -164,7 +164,6 @@ unkeyed:AddressStage::Resolving 1
 unkeyed:AdminsFallback::Asked 1
 unkeyed:Assembly::Reading 1
 unkeyed:AuctionFetch::Loading 1
-unkeyed:AuctionOpen::Waiting 1
 unkeyed:Beats::Running 1
 unkeyed:BotUsernameCheck::Checking 1
 unkeyed:CallLinkStage::Leaving 1

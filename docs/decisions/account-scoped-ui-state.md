@@ -8818,3 +8818,42 @@ Round 2, files `composer_sends`, `composer_state`, `composer_suggest`,
 - **Behaviour that changed.** Tapping a custom emoji again while its card shows
   restarts the card's timer without asking again. A custom emoji whose pack
   lookup is refused shows no card instead of waiting for good.
+
+### Sweep fixes (r2-27)
+
+Files: `frame_clips`, `frame_clock`, `frame_grid`, `frame_profile`,
+`frame_trace`, `gifs_ui`, the gift craft, market, resale, send, transfer and
+value boxes, `giveaway_boosts_ui`, `giveaway_info_ui`. Branched from
+`f9fd2d57b` (the commit the register's lines refer to): the named
+integration branch `claude/project-thread-mnl7ex` was not on origin.
+
+| Id | Result |
+|---|---|
+| 09-127 | A sleeping clip frame request's timer is held by its `VideoAsk` (`sleep: Option<Task<()>>`): a replaced, lost or forgotten ask drops and cancels it. |
+| 09-128, 09-129, 09-130, 10-001 | Every non-test `RefCell` borrow in the frame files is `try_borrow_mut`/`try_borrow` behind `with_asks`, `with_answered`, `with_cell`, or a let-else; a re-entrant call skips its bookkeeping. |
+| 09-122 | "A Quill window is active" is one cell: `FrameUi::window_active` is an `Rc<Cell<bool>>` and `AppGate::active` holds that same cell for the readers that have only a window (clip frame requests), so there is no second copy to keep in step. `AppGate::held` is not a copy of `main_covered`: it is the list of windows hidden whole (the main window when covered, plus the covered chat windows), worked out in `follow_windows` and published when it changes. |
+| 09-126 | `Profiler { Off, Armed, Running }` replaces `State { path, last_write, started }`; baseline line `State::started` dropped. |
+| 10-002, 10-003 | `GifTab { Wants, Asked, Typing { wanted, _pause } }` replaces `gif_wanted`, `gif_asked` and `gif_keystroke`. The debounce timer lives in the stage: the next keystroke, a section choice or the panel closing (`gif_tab_upkeep`) drops it. A refused send leaves `Wants(shown)`. |
+| 10-004 | Skipped: no flag is held. In flight is read from the session's request table, which drops the entry on answer or error, and the driver's own single-flight gate (`set_gif_saved`) reads the same table, so a per-file disable would let a second save be refused silently. |
+| 10-011 | A failed Show more page of the on-sale list draws its error with Retry (`retry_row`); the listings stay. |
+| 10-009 | The forge's end lets the craft go on every exit that opens no box (`InvalidGift`, an error, a vanished session, a gate with no notice). The forge animation (`CraftStage::Forging`, a minimum display time) and `CraftRun::Crafting` (the request) are different timelines: the answer can come before or after the animation. |
+| 10-010 | `CraftSession::reset_lists()` owns the reset. |
+| 10-007, 10-005 | `MarketFlow { Boxes { recipient, hide_name }, Opening { request, from_send_box, .. } }` replaces `recipient`, `hide_name` and `auction_open`. The last box leaving, by pop, clear or close_where, resets it (`drop_orphans`). `AuctionFetch::Ready` carries its request: only the answer to this ask opens its box. |
+| 10-008 | `bid(gift_id)` / `bid_mut(gift_id)` find the box of that gift. |
+| 10-006 | `requested_files` holds `FileAsk::{Sent, Refused}` per file: a refusal is retried only when the file set changes or the boxes reopen. |
+| 10-014, 10-017, 10-020 | The take-once dialog bodies are `Cell<Option<_>>`, not `RefCell`. |
+| 10-016 | `ResaleBuy::go_to` and `pay_in` own the step and the currency (`pay_in` clears `price_changed`). `gift_inputs.hide_name` stays: the resale purchase continues the send-gift flow it came from, so the choice is shared on purpose; the auction's choice is its own flow's (`MarketFlow`). |
+| 10-015 | A refused `open_gift_resale` drops the search it replaced when no resale box shows it. |
+| 10-013 | A failed gift list or Premium options list shows its line with Retry (`retry_send_gift_lists`, asks only what failed). A failed Premium list used to carry an empty line and vanish. |
+| 10-018 | `TransferPicker::export_refused()` and `ExportError::NotSent` replace the hand-written empty `Other`. |
+| 10-019 | A learn-more that cannot go out stores a failed lookup the box shows. |
+| 10-028 | The prepaid giveaway list draws Loading (request in flight) or Retry (status missing), from the request table. |
+| 10-029 | The giveaway info box opens only once its ask went out. No test: the box host table is private to `chat_window`. |
+
+Tests: `closing_the_panel_drops_the_gif_typing_pause`,
+`a_refused_craft_after_the_boxes_closed_drops_the_craft`,
+`clearing_the_boxes_ends_a_pending_open_and_forgets_the_recipient`,
+`another_asks_auction_answer_does_not_open_this_asks_box`,
+`a_bid_box_reads_its_own_slider`,
+`a_failed_premium_list_shows_a_line_and_retry_asks_only_it`,
+`a_learn_more_that_cannot_go_out_says_so`.

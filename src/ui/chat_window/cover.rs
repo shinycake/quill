@@ -266,8 +266,16 @@ impl QuillApp {
             .chain(chats.iter().copied())
             .collect();
         let before = cx.try_global::<AppGate>().cloned();
-        let gate = AppGate { active, held };
-        if before.as_ref() != Some(&gate) {
+        // The gate holds the app's own activity cell, so only the held
+        // windows (or a gate that is not this app's yet) need publishing.
+        let gate = AppGate {
+            active: self.frame.window_active.clone(),
+            held,
+        };
+        let published = before.as_ref().is_some_and(|before| {
+            std::rc::Rc::ptr_eq(&before.active, &gate.active) && before.held == gate.held
+        });
+        if !published {
             cx.set_global(gate);
             // A chat window that shows again draws what it skipped.
             let was_held = before.map(|gate| gate.held).unwrap_or_default();

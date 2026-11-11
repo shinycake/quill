@@ -247,3 +247,22 @@ fn closing_the_boxes_during_the_forge_keeps_the_outcome(cx: &mut TestAppContext)
         assert_eq!(app.gift_market.top(), Some(&MarketBox::CraftResult));
     });
 }
+
+/// Sweep r2-27 (10-009): closed boxes, then the craft is refused or fails
+/// without an answer: the forge's end lets the craft go.
+#[gpui_kit::test]
+fn a_refused_craft_after_the_boxes_closed_drops_the_craft(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, cx| {
+        app.craft_now(cx);
+        app.gift_market.stack.clear();
+        app.after_craft_pop();
+        assert!(app.craft_session().is_some(), "held by the forge");
+        answer_forge(app, CraftResult::InvalidGift);
+        app.craft_frame_upkeep(cx);
+        assert!(app.gift_market.craft.primary().is_none());
+        assert!(app.craft_session().is_none(), "nothing left to hold it");
+    });
+}
