@@ -32,7 +32,7 @@ impl QuillApp {
         let split = self.chat_prefs.profile_media_tabs_expanded;
         if let Some(live) = self.live.as_mut() {
             let gallery = &mut live.driver.session.media.shared_media;
-            if gallery.open {
+            if gallery.open() {
                 if live.driver.set_shared_media_split(split).is_err() {
                     self.set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_LOAD_THAT_TAB)));
                 }
@@ -175,7 +175,7 @@ impl QuillApp {
             .flex_1()
             .overflow_y_scroll()
             .child(grid);
-        if state.can_load_more() {
+        if state.more_askable() {
             body = body.child(self.shared_media_load_more(tab, cx));
         }
         body.into_any_element()

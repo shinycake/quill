@@ -164,7 +164,7 @@ fn share_search_sends_both_searches_and_ignores_stale_answers() {
         &seq,
         &sink,
     );
-    assert!(driver.session.messages.share_search.server.is_empty());
+    assert!(driver.session.messages.share_search.server().is_empty());
     assert!(
         driver
             .session

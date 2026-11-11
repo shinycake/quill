@@ -77,7 +77,11 @@ fn new_rows_replying_to_the_deleted(
                 h.messages
                     .iter()
                     .filter(|(id, _)| !before.contains(id))
-                    .filter(|(_, m)| m.reply_to.as_ref().is_some_and(|r| r.message_id == REPLIED))
+                    .filter(|(_, m)| {
+                        m.reply_to
+                            .as_ref()
+                            .is_some_and(|r| r.message_id() == REPLIED)
+                    })
                     .count()
             })
             .unwrap_or_default()

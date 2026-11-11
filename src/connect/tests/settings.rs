@@ -106,14 +106,13 @@ fn a_sound_whose_download_cannot_be_sent_is_not_left_waiting() {
                 id: FileId(31),
                 size: 10,
                 expected_size: 10,
-                uploading: false,
-                local: crate::telegram::envelope::LocalFileState {
-                    path: String::new(),
-                    can_be_downloaded: true,
-                    is_downloading_active: false,
-                    is_downloading_completed: false,
-                    downloaded_size: 0,
-                },
+                local: crate::telegram::envelope::LocalFileState::from_parts(
+                    String::new(),
+                    true,
+                    false,
+                    false,
+                    0,
+                ),
             },
         }]);
     let resolved = driver.resolve_notification_sound(NotificationSoundKind::Custom(7));

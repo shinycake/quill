@@ -162,7 +162,7 @@ impl QuillApp {
         self.session().is_some_and(|session| {
             let stickers = &session.stickers.stickers;
             !stickers.suggestions.is_empty()
-                && self.composer_suggests(stickers.suggest_for.as_deref(), cx)
+                && self.composer_suggests(stickers.suggest_for.emoji(), cx)
         })
     }
 
@@ -285,7 +285,7 @@ impl QuillApp {
         };
         let premium_mark = self
             .session()
-            .filter(|s| sticker.requires_premium && s.premium_badges_shown())
+            .filter(|s| sticker.requires_premium() && s.premium_badges_shown())
             .map(|s| crate::ui::premium_mark::premium_mark(s.my_is_premium()));
         let cell = div()
             .id(SharedString::from(format!(

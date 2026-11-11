@@ -259,7 +259,7 @@ fn the_request_poll_button_opens_the_box_for_the_type_it_asks_for(cx: &mut TestA
             let chat = session.open_chat_id().map_or(1, |id| id.0);
             session.bots.reply_keyboards.by_chat.insert(
                 chat,
-                Some((
+                quill::state::KeyboardFetch::Known(Some((
                     MessageId(500),
                     ReplyKeyboard {
                         rows: vec![vec![KeyboardButton {
@@ -276,7 +276,7 @@ fn the_request_poll_button_opens_the_box_for_the_type_it_asks_for(cx: &mut TestA
                         force_reply: false,
                         placeholder: String::new(),
                     },
-                )),
+                ))),
             );
             cx.notify();
         });

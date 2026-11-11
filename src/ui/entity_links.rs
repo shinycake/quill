@@ -330,7 +330,7 @@ impl QuillApp {
         let replied = own
             .and_then(|message| message.reply_to.as_ref())
             .filter(|reply| reply.is_same_chat(chat_id))
-            .and_then(|reply| message(reply.message_id.0));
+            .and_then(|reply| message(reply.message_id().0));
         let target = [own, replied]
             .into_iter()
             .flatten()

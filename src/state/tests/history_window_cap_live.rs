@@ -13,14 +13,7 @@ fn file(id: i32) -> ParsedFile {
         id: FileId(id),
         size: 10,
         expected_size: 10,
-        uploading: false,
-        local: LocalFileState {
-            path: String::new(),
-            can_be_downloaded: true,
-            is_downloading_active: false,
-            is_downloading_completed: false,
-            downloaded_size: 0,
-        },
+        local: LocalFileState::from_parts(String::new(), true, false, false, 0),
     }
 }
 
@@ -32,13 +25,10 @@ fn live(chat: i64, id: i64, files: Vec<ParsedFile>) -> ParsedMessage {
         date: 0,
         is_outgoing: false,
         is_pinned: false,
-        topic_id: None,
-        thread_id: None,
         ephemeral: None,
         media_album_id: 0,
         author_signature: None,
         scheduling_state: None,
-        can_retry: false,
         send_state: Default::default(),
         content: MessageContent::Text("m".into()),
         files,
@@ -269,7 +259,7 @@ fn a_forum_topic_on_screen_drops_rows_far_from_its_reader() {
     session.topic_history_entry(ChatId(7), 3);
     for id in 1..=cap + 1 {
         let mut message = live(7, id, Vec::new());
-        message.topic_id = Some(3);
+        message.extras.topic = Some(crate::telegram::envelope::MessageTopic::Forum(3));
         session.apply_update_new_message(message);
     }
     let topic = &session.threads.topic_histories[&(7, 3)];
@@ -285,7 +275,7 @@ fn a_forum_topic_on_screen_drops_rows_far_from_its_reader() {
     );
     for id in cap + 2..=cap + 400 {
         let mut message = live(7, id, Vec::new());
-        message.topic_id = Some(3);
+        message.extras.topic = Some(crate::telegram::envelope::MessageTopic::Forum(3));
         session.apply_update_new_message(message);
     }
     let topic = &session.threads.topic_histories[&(7, 3)];
@@ -306,7 +296,7 @@ fn reply_strips_of_trimmed_topic_rows_go_when_only_the_topic_is_loaded() {
     let total = HISTORY_WINDOW_CAP as i64 * 2;
     for id in 1_000_000..1_000_000 + total {
         let mut message = live(7, id, Vec::new());
-        message.topic_id = Some(3);
+        message.extras.topic = Some(crate::telegram::envelope::MessageTopic::Forum(3));
         session.apply_update_new_message(message);
         session.histories.remove(&7);
         session.accept_replied_message(ChatId(7), MessageId(id - 500_000), live(7, 1, Vec::new()));

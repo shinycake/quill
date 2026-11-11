@@ -35,8 +35,7 @@ fn emoji_item(id: i64, set_id: i64, emoji: &str, file: FileId) -> StickerItem {
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,
-        requires_premium: false,
-        premium_animation: None,
+        premium: None,
     }
 }
 

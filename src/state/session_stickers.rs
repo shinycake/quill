@@ -28,9 +28,9 @@ impl Session {
 
     pub fn sticker_requires_premium(&self, file_id: FileId) -> bool {
         self.panel_sticker(file_id)
-            .is_some_and(|sticker| sticker.requires_premium)
+            .is_some_and(|sticker| sticker.requires_premium())
             || self.histories.values().flat_map(|history| history.messages.values()).chain(self.threads.topic_histories.values().flat_map(|history| history.messages.values())).any(|message| {
-                matches!(&message.content, MessageContent::Sticker(sticker) if sticker.file_id == file_id && sticker.requires_premium)
+                matches!(&message.content, MessageContent::Sticker(sticker) if sticker.file_id == file_id && sticker.requires_premium())
             })
     }
 
@@ -186,8 +186,7 @@ impl Session {
     /// Slice S12: drop the composer sticker suggestions.
     pub fn clear_sticker_suggestions(&mut self) {
         self.stickers.stickers.suggestions.clear();
-        self.stickers.stickers.suggest_for = None;
-        self.stickers.stickers.suggest_waiting_for_sets = false;
+        self.stickers.stickers.suggest_for = SuggestFor::Nothing;
     }
 
     /// Slice S12: store a `searchStickers` answer issued for the

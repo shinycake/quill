@@ -111,7 +111,7 @@ fn self_destruct_type_and_in_parsed() {
     ));
     let sd = timer.self_destruct.expect("timer parsed");
     assert_eq!(sd.kind, SelfDestructKind::Timer { secs: 60 });
-    assert_eq!(sd.expires_in_ms, 42_500);
+    assert_eq!(sd.expires_in_ms(), 42_500);
 
     let immediate = parse(&base(
         r#"{"@type":"messageSelfDestructTypeImmediately"}"#,
@@ -119,7 +119,7 @@ fn self_destruct_type_and_in_parsed() {
     ));
     let sd = immediate.self_destruct.expect("immediately parsed");
     assert_eq!(sd.kind, SelfDestructKind::Immediately);
-    assert_eq!(sd.remaining_secs(sd.fetched_at_ms), None);
+    assert_eq!(sd.remaining_secs(sd.fetched_at_ms()), None);
 
     let plain = parse(&base("null", "0"));
     assert_eq!(plain.self_destruct, None);
@@ -133,9 +133,9 @@ fn self_destruct_type_and_in_parsed() {
     // `remaining_secs` decays locally; garbage `self_destruct_in`
     // values degrade to "not scheduled".
     let sd = timer.self_destruct.unwrap();
-    assert_eq!(sd.remaining_secs(sd.fetched_at_ms), Some(43));
-    assert_eq!(sd.remaining_secs(sd.fetched_at_ms + 42_500), Some(0));
-    assert_eq!(sd.badge_label(sd.fetched_at_ms), "⏱ 43s left");
+    assert_eq!(sd.remaining_secs(sd.fetched_at_ms()), Some(43));
+    assert_eq!(sd.remaining_secs(sd.fetched_at_ms() + 42_500), Some(0));
+    assert_eq!(sd.badge_label(sd.fetched_at_ms()), "⏱ 43s left");
     let never = parse(&base(
         r#"{"@type":"messageSelfDestructTypeTimer","self_destruct_time":60}"#,
         "0",
@@ -144,7 +144,7 @@ fn self_destruct_type_and_in_parsed() {
         never
             .self_destruct
             .unwrap()
-            .badge_label(never.self_destruct.unwrap().fetched_at_ms),
+            .badge_label(never.self_destruct.unwrap().fetched_at_ms()),
         "⏱ 60s"
     );
     let nan = parse(&base(

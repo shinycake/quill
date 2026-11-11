@@ -215,7 +215,7 @@ on_screen_fields! {
     /// The search field above a profile's groups in common.
     common_groups: super::profile_panels::common_groups::CommonGroupsUi,
     /// The gallery's search field (`ui/shared_media_search_state.rs`).
-    media_search: super::shared_media_search_state::SharedMediaSearchUi,
+    media_search: super::shared_media_search_state::GallerySearch,
     /// Scroll positions of the shared-media grid tabs (`ui/shared_media_grid_state.rs`).
     shared_media_grid: super::shared_media_grid_state::SharedMediaGridUi,
     /// The Premium feature preview's clip player (`ui/premium_preview_state.rs`).
@@ -372,7 +372,7 @@ impl OnScreen {
             recent_hashtags: Default::default(),
             inline_members: super::inline_members_state::InlineMembersUi::new(),
             common_groups: Default::default(),
-            media_search: super::shared_media_search_state::SharedMediaSearchUi::new(window, cx),
+            media_search: super::shared_media_search_state::GallerySearch::new(),
             shared_media_grid: super::shared_media_grid_state::SharedMediaGridUi::new(),
             premium_preview: Default::default(),
             location_ui: Default::default(),

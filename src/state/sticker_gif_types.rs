@@ -211,8 +211,7 @@ pub struct StickerPanel {
     /// (`searchStickers` answers under `SuggestStickers`). `suggest_for`
     /// is the emoji they were requested for.
     pub suggestions: Vec<StickerItem>,
-    pub suggest_for: Option<String>,
-    pub suggest_waiting_for_sets: bool,
+    pub suggest_for: SuggestFor,
 }
 
 /// Saved GIFs (`getSavedAnimations`). tdesktop Gifs tab / Unigram animation drawer.
@@ -494,6 +493,36 @@ impl GifPanel {
 
     pub fn close(&mut self) {
         self.open = false;
+    }
+}
+
+/// The emoji the composer sticker suggestions are for, and whether they
+/// wait for the installed sets (`InstalledOnly` filters by them).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum SuggestFor {
+    #[default]
+    Nothing,
+    /// `getInstalledStickerSets` is out; the emoji is asked when it lands.
+    WaitingForSets(String),
+    /// `searchStickers` for this emoji went out or answered.
+    Asked(String),
+}
+
+impl SuggestFor {
+    /// The emoji the suggestions are for.
+    pub fn emoji(&self) -> Option<&str> {
+        match self {
+            Self::Nothing => None,
+            Self::WaitingForSets(emoji) | Self::Asked(emoji) => Some(emoji),
+        }
+    }
+
+    pub fn is_nothing(&self) -> bool {
+        matches!(self, Self::Nothing)
+    }
+
+    pub fn waiting_for_sets(&self) -> bool {
+        matches!(self, Self::WaitingForSets(_))
     }
 }
 

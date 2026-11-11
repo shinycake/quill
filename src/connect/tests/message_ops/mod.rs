@@ -125,7 +125,7 @@ fn driver_send_reply_shape_and_jump_to_replied() {
     );
     assert_eq!(
         driver
-            .jump_to_replied_message(reply.reply_to.as_ref().unwrap().message_id)
+            .jump_to_replied_message(reply.reply_to.as_ref().unwrap().message_id())
             .unwrap(),
         None
     );

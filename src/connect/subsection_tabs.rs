@@ -110,7 +110,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Some((ChatId(info.chat_id), info.forum_topic_id))
             }
             EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
-                message.topic_id.map(|topic| (message.chat_id, topic))
+                message.topic_id().map(|topic| (message.chat_id, topic))
             }
             _ => None,
         }

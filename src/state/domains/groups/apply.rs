@@ -739,22 +739,20 @@ impl Session {
                         .insert(chat_id, user_ids);
                 }
             }
-            // Phase 5.1: `supergroup.is_forum` via `updateSupergroup` (an
-            // update — applies whenever it arrives) or the `getSupergroup`
-            // response (gated on the pending purpose). Parity slice: the
-            // first active username is cached alongside, for the
-            // channel/supergroup header.
+            // `updateBasicGroup`: member count, the viewer's status and rights.
             GroupsPayload::UpdateBasicGroup {
                 basic_group_id,
                 member_count,
                 status,
-                can_restrict_members,
-                can_promote_members,
-                can_manage_tags,
-                can_change_info,
-                can_manage_video_chats,
                 is_active,
             } => {
+                let rights = status.rights();
+                let can_restrict_members = rights.is_some_and(|r| r.can_restrict_members);
+                let can_promote_members = rights.is_some_and(|r| r.can_promote_members);
+                let can_manage_tags = rights.is_some_and(|r| r.can_manage_tags);
+                let can_change_info = rights.map(|r| r.can_change_info);
+                let can_manage_video_chats = rights.map(|r| r.can_manage_video_chats);
+                let status = status.kind();
                 self.groups
                     .basic_group_member_counts
                     .insert(basic_group_id, member_count);
@@ -780,6 +778,7 @@ impl Session {
                     .basic_group_active
                     .insert(basic_group_id, is_active);
             }
+            // `updateSupergroup` applies whenever it arrives.
             GroupsPayload::UpdateSupergroup {
                 supergroup_id,
                 verification,
@@ -792,15 +791,6 @@ impl Session {
                 username,
                 usernames,
                 status,
-                can_restrict_members,
-                can_invite_users,
-                can_promote_members,
-                can_manage_tags,
-                can_manage_topics,
-                can_change_info,
-                can_send_welcome_messages,
-                can_manage_video_chats,
-                is_anonymous,
                 join_by_request,
                 is_broadcast_group,
                 sign_messages,
@@ -810,6 +800,17 @@ impl Session {
                 restricted,
                 direct_messages,
             } => {
+                let rights = status.rights();
+                let can_restrict_members = rights.map(|r| r.can_restrict_members);
+                let can_invite_users = rights.map(|r| r.can_invite_users);
+                let can_promote_members = rights.map(|r| r.can_promote_members);
+                let can_manage_tags = rights.map(|r| r.can_manage_tags);
+                let can_manage_topics = rights.map(|r| r.can_manage_topics);
+                let can_change_info = rights.map(|r| r.can_change_info);
+                let can_send_welcome_messages = rights.map(|r| r.can_send_welcome_messages);
+                let can_manage_video_chats = rights.map(|r| r.can_manage_video_chats);
+                let is_anonymous = status.is_anonymous();
+                let status = status.kind();
                 self.set_direct_messages_role(supergroup_id, direct_messages);
                 // `updateSupergroup` carries the viewer's own status, so a
                 // demotion or "Remain anonymous" turned off lands here.
@@ -885,7 +886,7 @@ impl Session {
                 })) = pending.map(|p| p.purpose)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
-                    let banned = member.status == ChannelMemberStatus::Banned;
+                    let banned = member.status() == ChannelMemberStatus::Banned;
                     self.set_direct_member_banned(chat_id, user_id, banned);
                 }
                 // Phase D3b: `getChatMember` for one administrator's rights
@@ -895,7 +896,7 @@ impl Session {
                     pending.map(|p| p.purpose)
                     && let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
-                    && let Some(rights) = member.admin_rights
+                    && let Some(rights) = member.admin_rights()
                 {
                     self.groups
                         .admin_rights
@@ -919,7 +920,7 @@ impl Session {
                 if let MessageSender::User { user_id } = member.member_id {
                     self.groups.admin_rights.remove(&(chat_id.0, user_id));
                     if self.direct_member_banned(chat_id, user_id).is_some() {
-                        let banned = member.status == ChannelMemberStatus::Banned;
+                        let banned = member.status() == ChannelMemberStatus::Banned;
                         self.set_direct_member_banned(chat_id, user_id, banned);
                     }
                 }

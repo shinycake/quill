@@ -128,7 +128,7 @@ impl Harness {
                 MessageContent::Text(text) => text.text.clone(),
                 _ => String::new(),
             };
-            Some((text, last.reply_to.as_ref().map(|reply| reply.message_id)))
+            Some((text, last.reply_to.as_ref().map(|reply| reply.message_id())))
         })
     }
 

@@ -342,8 +342,7 @@ fn seed_star_burst(session: &mut Session, sink: &Arc<dyn DiagnosticSink>, seq: &
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,
-        requires_premium: false,
-        premium_animation: None,
+        premium: None,
     }]);
 }
 

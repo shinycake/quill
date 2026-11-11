@@ -540,8 +540,7 @@ mod tests {
             thumb_file_id: None,
             thumb_width: 0,
             thumb_height: 0,
-            requires_premium: true,
-            premium_animation: None,
+            premium: Some(quill::telegram::envelope::PremiumSticker { animation: None }),
         }
     }
 

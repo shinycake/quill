@@ -41,7 +41,6 @@ impl Session {
         self.apply_quick_replies_ok(pending);
         self.apply_business_extra_ok(pending);
         self.apply_sticker_creator_ok(pending);
-        self.apply_suggested_post_ok(pending);
         self.apply_gift_market_ok(pending);
         self.apply_stories_ok(pending);
         self.apply_share_theme_ok(pending);

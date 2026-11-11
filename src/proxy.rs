@@ -667,6 +667,10 @@ pub enum ProxyFetch {
     /// The request could not be sent (or its answer was an error): nothing
     /// asks again by itself, only the dialog's open / Refresh (`Retry`).
     Failed,
+    /// The refetch of a stale list could not be sent. Like `Failed`, nothing
+    /// asks again by itself, but the held list is still out of date, so the
+    /// state stays busy and nothing plans on it.
+    FailedStale,
 }
 
 impl ProxyFetch {
@@ -782,7 +786,10 @@ impl ProxyState {
     /// The list is changing or about to: a mutation is out, or a fetch is
     /// owed or on its way.
     pub fn busy(&self) -> bool {
-        self.mutation.in_flight() || self.fetch.loading() || self.fetch.stale()
+        self.mutation.in_flight()
+            || self.fetch.loading()
+            || self.fetch.stale()
+            || self.fetch == ProxyFetch::FailedStale
     }
 
     /// Whether a proxy of `kind` may be switched to: a web proxy only when

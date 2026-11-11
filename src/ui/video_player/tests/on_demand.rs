@@ -116,8 +116,13 @@ fn set_local(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, file: i32, loc
         let session = app.demo_session.as_mut().expect("the demo session");
         assert!(session.media.files.contains_key(&file), "the clip's file");
         session.media.files.update(file, |file| {
-            file.local.is_downloading_completed = local;
-            file.local.is_downloading_active = false;
+            file.local = quill::telegram::envelope::LocalFileState::from_parts(
+                file.local.path().to_string(),
+                file.local.can_be_downloaded(),
+                false,
+                local,
+                file.local.downloaded_size(),
+            );
         });
     });
 }

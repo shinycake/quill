@@ -861,7 +861,14 @@ fn a_stale_proxy_list_whose_refetch_cannot_be_sent_is_not_asked_every_tick() {
     t.sender.refuse(&["getProxies"]);
     t.driver.session.settings.proxy.fetch = ProxyFetch::Stale;
     assert!(t.driver.refresh_proxies_if_stale().is_err());
-    assert_eq!(t.driver.session.settings.proxy.fetch, ProxyFetch::Failed);
+    assert_eq!(
+        t.driver.session.settings.proxy.fetch,
+        ProxyFetch::FailedStale
+    );
+    assert!(
+        t.driver.session.settings.proxy.busy(),
+        "the held list is not planned on"
+    );
     // The ticks that follow send nothing and report nothing.
     for _ in 0..3 {
         assert!(matches!(t.driver.refresh_proxies_if_stale(), Ok(None)));

@@ -361,7 +361,7 @@ fn replay_reply_to_message_quote_and_jump() {
         .messages
         .get(&60)
         .unwrap();
-    assert_eq!(reply.reply_to.as_ref().map(|r| r.message_id.0), Some(50));
+    assert_eq!(reply.reply_to.as_ref().map(|r| r.message_id().0), Some(50));
     assert_eq!(
         session.reply_quote_preview(reply).as_deref(),
         Some("hello already loaded")

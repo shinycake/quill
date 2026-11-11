@@ -121,8 +121,7 @@ mod hardening_tests {
     fn huge_timers_do_not_overflow() {
         let destruct = MessageSelfDestruct {
             kind: SelfDestructKind::Immediately,
-            expires_in_ms: i64::MAX,
-            fetched_at_ms: 0,
+            clock: super::SelfDestructClock::from_ms(i64::MAX, 0),
         };
         assert!(destruct.remaining_secs(0).is_some());
         let auto = parse_auto_delete_in(Some(&json!(1e300))).expect("finite positive");

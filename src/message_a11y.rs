@@ -177,7 +177,7 @@ fn reactions_line(message: &HistoryMessage) -> Option<String> {
 fn file_parts(id: FileId, file: &dyn Fn(FileId) -> Option<ParsedFile>) -> (String, Option<i64>) {
     let parsed = file(id);
     let state = match &parsed {
-        Some(parsed) if parsed.local.is_downloading_active => "Downloading",
+        Some(parsed) if parsed.local.is_downloading_active() => "Downloading",
         Some(parsed) if parsed.usable_path().is_some() => "Downloaded",
         _ => "Not downloaded",
     };

@@ -8,13 +8,27 @@ use crate::telegram::envelope::{ReplyKeyboard, ReplyMarkup};
 /// A keyboard TDLib says the chat shows.
 pub type ChatKeyboard = Option<(MessageId, ReplyKeyboard)>;
 
+/// Where a chat's keyboard stands.
+#[derive(Debug, Clone)]
+pub enum KeyboardFetch {
+    /// `chat.reply_markup_message_id` names a message to fetch.
+    Wanted(MessageId),
+    /// `getMessage` for it went out as `request`.
+    Loading {
+        request: RequestId,
+        message: MessageId,
+    },
+    /// The fetch failed; it is not asked again until TDLib names a message.
+    Failed(MessageId),
+    /// TDLib's answer (`None` = the keyboard was removed).
+    Known(ChatKeyboard),
+}
+
 #[derive(Debug, Default)]
 pub struct ReplyKeyboardState {
-    /// Chats TDLib reported a keyboard state for (`Some(None)` = removed).
-    pub by_chat: HashMap<i64, ChatKeyboard>,
-    /// `chat.reply_markup_message_id` per chat, for chats whose keyboard
-    /// message may need fetching.
-    pub markup_message_ids: HashMap<i64, i64>,
+    /// Per chat, what TDLib said about the keyboard and whether its
+    /// message is being fetched.
+    pub by_chat: HashMap<i64, KeyboardFetch>,
     /// `getRecentInlineBots` answer (`None` until fetched).
     pub recent_inline_bots: Option<Vec<i64>>,
 }
@@ -36,14 +50,66 @@ impl Session {
         self.bots
             .reply_keyboards
             .by_chat
-            .insert(chat_id.0, keyboard);
+            .insert(chat_id.0, KeyboardFetch::Known(keyboard));
+    }
+
+    /// `chat.reply_markup_message_id` from `updateNewChat`: the message to
+    /// fetch (the newest name wins), unless TDLib already told the keyboard
+    /// or the fetch runs.
+    pub(crate) fn note_reply_markup_message(&mut self, chat_id: ChatId, message: MessageId) {
+        self.bots
+            .reply_keyboards
+            .by_chat
+            .entry(chat_id.0)
+            .and_modify(|stage| {
+                // A newer name replaces one not yet fetched; a fetch out
+                // finishes first, and a known answer stands.
+                if matches!(stage, KeyboardFetch::Failed(_) | KeyboardFetch::Wanted(_)) {
+                    *stage = KeyboardFetch::Wanted(message);
+                }
+            })
+            .or_insert(KeyboardFetch::Wanted(message));
+    }
+
+    /// The fetch for the chat's keyboard message went out as `request`.
+    pub(crate) fn begin_reply_markup_fetch(&mut self, chat_id: ChatId, request: RequestId) {
+        if let Some(stage) = self.bots.reply_keyboards.by_chat.get_mut(&chat_id.0)
+            && let KeyboardFetch::Wanted(message) = *stage
+        {
+            *stage = KeyboardFetch::Loading { request, message };
+        }
+    }
+
+    /// The fetch `request` failed or never left: the chat falls back to its
+    /// loaded messages and does not ask again.
+    pub(crate) fn fail_reply_markup_fetch(&mut self, chat_id: ChatId, request: RequestId) {
+        if let Some(stage) = self.bots.reply_keyboards.by_chat.get_mut(&chat_id.0)
+            && let KeyboardFetch::Loading {
+                request: sent,
+                message,
+            } = *stage
+            && sent == request
+        {
+            *stage = KeyboardFetch::Failed(message);
+        }
+    }
+
+    /// Whether `request` is the keyboard fetch the chat waits for.
+    pub(crate) fn awaits_reply_markup(&self, chat_id: ChatId, request: RequestId) -> bool {
+        matches!(
+            self.bots.reply_keyboards.by_chat.get(&chat_id.0),
+            Some(KeyboardFetch::Loading { request: sent, .. }) if *sent == request
+        )
     }
 
     /// What TDLib last said about the chat's keyboard: `None` when it said
     /// nothing (fall back to the loaded messages), `Some(None)` for a removed
     /// keyboard.
     pub fn chat_reply_keyboard(&self, chat_id: ChatId) -> Option<&ChatKeyboard> {
-        self.bots.reply_keyboards.by_chat.get(&chat_id.0)
+        match self.bots.reply_keyboards.by_chat.get(&chat_id.0) {
+            Some(KeyboardFetch::Known(keyboard)) => Some(keyboard),
+            _ => None,
+        }
     }
 
     /// The keyboard to show in a chat: TDLib's own answer when it gave one
@@ -71,12 +137,13 @@ impl Session {
     /// reply-markup message, nothing was reported yet, and the message is
     /// not in the loaded history.
     pub fn reply_markup_message_to_fetch(&self, chat_id: ChatId) -> Option<MessageId> {
-        let id = *self
-            .bots
-            .reply_keyboards
-            .markup_message_ids
-            .get(&chat_id.0)?;
-        if id <= 0 || self.bots.reply_keyboards.by_chat.contains_key(&chat_id.0) {
+        let Some(KeyboardFetch::Wanted(MessageId(id))) =
+            self.bots.reply_keyboards.by_chat.get(&chat_id.0)
+        else {
+            return None;
+        };
+        let id = *id;
+        if id <= 0 {
             return None;
         }
         let loaded = self

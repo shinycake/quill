@@ -210,15 +210,15 @@ fn chat_members_list_parses_with_admin_rights() {
             assert_eq!(total_count, 2);
             assert_eq!(members.len(), 2);
             let admin = &members[0];
-            assert_eq!(admin.status, ChannelMemberStatus::Administrator);
-            let rights = admin.admin_rights.expect("admin rights parsed");
+            assert_eq!(admin.status(), ChannelMemberStatus::Administrator);
+            let rights = admin.admin_rights().expect("admin rights parsed");
             assert!(rights.can_promote_members);
             assert!(rights.can_invite_users);
             assert!(!rights.can_manage_topics);
             assert!(!rights.is_anonymous);
-            assert_eq!(admin.admin_can_invite_users, Some(true));
-            assert_eq!(members[1].status, ChannelMemberStatus::Member);
-            assert_eq!(members[1].admin_rights, None);
+            assert_eq!(admin.admin_can_invite_users(), Some(true));
+            assert_eq!(members[1].status(), ChannelMemberStatus::Member);
+            assert_eq!(members[1].admin_rights(), None);
         }
         other => panic!("unexpected {other:?}"),
     }
@@ -248,8 +248,8 @@ fn chat_admin_rights_round_trip() {
     let env = parse_envelope(json).unwrap();
     match env.payload {
         EnvelopePayload::Groups(GroupsPayload::ChatMember { member }) => {
-            assert_eq!(member.status, ChannelMemberStatus::Administrator);
-            assert_eq!(member.admin_rights, None);
+            assert_eq!(member.status(), ChannelMemberStatus::Administrator);
+            assert_eq!(member.admin_rights(), None);
         }
         other => panic!("unexpected {other:?}"),
     }
@@ -918,11 +918,10 @@ fn story_interactions_parse() {
             assert_eq!(first.actor, MessageSender::User { user_id: 777 });
             assert_eq!(first.interaction_date, 1700000100);
             assert_eq!(first.kind, StoryInteractionKind::View);
-            assert_eq!(first.reaction_emoji.as_deref(), Some("❤"));
+            assert_eq!(StoryReaction::emoji(&first.reaction), Some("❤"));
             let second = &interactions.interactions[1];
             assert_eq!(second.actor, MessageSender::Chat { chat_id: 11 });
-            assert_eq!(second.reaction_emoji, None);
-            assert_eq!(second.reaction_extra, None);
+            assert_eq!(second.reaction, None);
             assert_eq!(
                 interactions.interactions[2].kind,
                 StoryInteractionKind::Forward

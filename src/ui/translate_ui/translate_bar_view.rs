@@ -389,7 +389,7 @@ impl QuillApp {
                 self.translate.pump.insert(chat_id.0, scan);
                 return followed;
             };
-            let room = MAX_IN_FLIGHT.saturating_sub(session.messages.translate.jobs.len());
+            let room = MAX_IN_FLIGHT.saturating_sub(session.messages.translate.in_flight());
             let key = PumpKey {
                 chat: chat_id.0,
                 to: model.to,

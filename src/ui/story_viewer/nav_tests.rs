@@ -336,10 +336,6 @@ fn a_story_opened_over_the_viewer_does_not_inherit_the_reply_draft(cx: &mut Test
             caption: String::new(),
             caption_entities: Vec::new(),
             duration_label: None,
-            duration_secs: None,
-            video_file_id: None,
-            is_live: false,
-            live_call: None,
             areas: Vec::new(),
         };
         app.begin_story_viewer(vec![item], 0, cx);

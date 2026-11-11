@@ -48,7 +48,7 @@ impl QuillApp {
         session.premium_badges_shown()
             || !self
                 .panel_item(source, ix)
-                .is_some_and(|item| item.requires_premium)
+                .is_some_and(|item| item.requires_premium())
     }
 
     /// What this window's sticker tab lists from the session's found

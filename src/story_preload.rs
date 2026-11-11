@@ -61,7 +61,7 @@ pub fn plan(session: &Session, viewer: &StoryViewer) -> Vec<PreloadRequest> {
                     });
                 }
             }
-            StoryViewerKind::Video => {
+            StoryViewerKind::Video { .. } => {
                 if let Some(thumb) = item.display_file_ids.first() {
                     out.push(PreloadRequest {
                         file_id: *thumb,
@@ -69,7 +69,7 @@ pub fn plan(session: &Session, viewer: &StoryViewer) -> Vec<PreloadRequest> {
                         limit: 0,
                     });
                 }
-                if let Some(clip) = item.video_file_id {
+                if let Some(clip) = item.video_file_id() {
                     let hint = session
                         .stories
                         .stories
@@ -93,7 +93,7 @@ pub fn plan(session: &Session, viewer: &StoryViewer) -> Vec<PreloadRequest> {
                     });
                 }
             }
-            StoryViewerKind::Live | StoryViewerKind::Unsupported => {}
+            StoryViewerKind::Live(_) | StoryViewerKind::Unsupported => {}
         }
     }
     out
@@ -124,6 +124,13 @@ mod tests {
     }
 
     fn item(story_id: i32, kind: StoryViewerKind, file: i32, clip: Option<i32>) -> StoryViewerItem {
+        let kind = match kind {
+            StoryViewerKind::Video { duration_secs, .. } => StoryViewerKind::Video {
+                duration_secs,
+                clip: clip.map(FileId),
+            },
+            other => other,
+        };
         StoryViewerItem {
             chat_id: ChatId(7),
             story_id,
@@ -133,10 +140,6 @@ mod tests {
             caption: String::new(),
             caption_entities: Vec::new(),
             duration_label: None,
-            duration_secs: None,
-            video_file_id: clip.map(FileId),
-            is_live: false,
-            live_call: None,
             areas: Vec::new(),
         }
     }
@@ -146,7 +149,15 @@ mod tests {
             vec![
                 item(1, StoryViewerKind::Photo, 10, None),
                 item(2, StoryViewerKind::Photo, 20, None),
-                item(3, StoryViewerKind::Video, 30, Some(31)),
+                item(
+                    3,
+                    StoryViewerKind::Video {
+                        duration_secs: None,
+                        clip: None,
+                    },
+                    30,
+                    Some(31),
+                ),
                 item(4, StoryViewerKind::Photo, 40, None),
             ],
             1,

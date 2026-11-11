@@ -101,25 +101,20 @@ fn only_a_live_item_with_a_call_is_joined() {
     let mut item = StoryViewerItem {
         chat_id: ChatId(7),
         story_id: 6,
-        kind: StoryViewerKind::Live,
+        kind: StoryViewerKind::Live(LiveStoryCall {
+            group_call_id: 1,
+            is_rtmp_stream: true,
+        }),
         display_file_ids: Vec::new(),
         download_file_id: FileId(0),
         caption: String::new(),
         caption_entities: Vec::new(),
         duration_label: None,
-        duration_secs: None,
-        video_file_id: None,
-        is_live: true,
-        live_call: Some(LiveStoryCall {
-            group_call_id: 1,
-            is_rtmp_stream: true,
-        }),
         areas: Vec::new(),
     };
     assert_eq!(live_item(Some(&item)), Some((ChatId(7), 6)));
-    item.live_call = None;
-    assert_eq!(live_item(Some(&item)), None);
     item.kind = StoryViewerKind::Photo;
+    assert_eq!(live_item(Some(&item)), None);
     assert_eq!(live_item(None), None);
 }
 
@@ -841,8 +836,7 @@ fn burst_sticker(file: FileId) -> StickerItem {
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,
-        requires_premium: false,
-        premium_animation: None,
+        premium: None,
     }
 }
 

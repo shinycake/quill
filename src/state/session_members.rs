@@ -188,16 +188,16 @@ impl Session {
             // The status and the rights that belong to it land together, so
             // rights of an old status never outlive it.
             let rights = AdminRights {
-                post_messages: member.admin_can_post_messages,
-                invite_users: member.admin_can_invite_users,
-                change_info: member.admin_rights.map(|r| r.can_change_info),
-                send_welcome_messages: member.admin_rights.map(|r| r.can_send_welcome_messages),
-                promote_members: member.admin_rights.map(|r| r.can_promote_members),
-                restrict_members: member.admin_rights.map(|r| r.can_restrict_members),
-                pin_messages: member.admin_rights.map(|r| r.can_pin_messages),
+                post_messages: member.admin_can_post_messages(),
+                invite_users: member.admin_can_invite_users(),
+                change_info: member.admin_rights().map(|r| r.can_change_info),
+                send_welcome_messages: member.admin_rights().map(|r| r.can_send_welcome_messages),
+                promote_members: member.admin_rights().map(|r| r.can_promote_members),
+                restrict_members: member.admin_rights().map(|r| r.can_restrict_members),
+                pin_messages: member.admin_rights().map(|r| r.can_pin_messages),
             };
-            chat.my_member = OwnMember::of(Some(member.status), rights);
-            chat.set_my_restriction(member.restriction);
+            chat.my_member = OwnMember::of(Some(member.status()), rights);
+            chat.set_my_restriction(member.restriction());
         }
         self.drop_similar_strip_if_not_member(chat_id);
     }

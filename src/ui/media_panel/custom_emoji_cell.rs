@@ -130,7 +130,7 @@ impl QuillApp {
         // A Premium sticker carries the lock (or, with Premium, the star).
         let premium_mark = self
             .session()
-            .filter(|s| item.requires_premium && s.premium_badges_shown())
+            .filter(|s| item.requires_premium() && s.premium_badges_shown())
             .map(|s| crate::ui::premium_mark::premium_mark(s.my_is_premium()));
         let favorite = self.session().is_some_and(|s| {
             s.stickers

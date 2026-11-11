@@ -24,11 +24,10 @@ fn sweeping_a_shared_media_page_allows_the_next_page_request() {
     let mut session = ready_session();
     let chat = ChatId(5);
     let media = &mut session.media.shared_media;
-    media.open = true;
     media.chat_id = Some(chat);
     let tab = SharedMediaTab::default();
     let state = media.tab_state(tab);
-    state.status = SharedMediaTabStatus::Ready;
+    state.status = SharedMediaTabStatus::ready();
     state.next_from = MessageId(40);
     let (generation, _) = media.begin_fetch_more(tab).expect("page starts");
     session.request(
@@ -40,7 +39,9 @@ fn sweeping_a_shared_media_page_allows_the_next_page_request() {
     assert!(sweep(&mut session));
 
     assert!(session.requests.is_empty());
-    assert!(session.media.shared_media.tab_state(tab).can_load_more());
+    let state = session.media.shared_media.tab_state(tab);
+    assert!(state.more_error().is_some(), "the list shows its retry row");
+    assert!(state.more_askable());
 }
 
 #[test]

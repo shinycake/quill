@@ -469,7 +469,7 @@ impl Session {
         if !message.is_outgoing {
             self.messages
                 .pending_bot_messages
-                .remove(&(message.chat_id.0, message.topic_id.unwrap_or(0)));
+                .remove(&(message.chat_id.0, message.topic_id().unwrap_or(0)));
         }
         // Phase 8.1: decide before upserting; the queue is drained by
         // the UI for OS dispatch. The sound decision is made at the
@@ -508,7 +508,7 @@ impl Session {
                 session.thread_upsert(history_message(message.clone(), false));
             }
         });
-        let (chat_id, topic_id) = (message.chat_id, message.topic_id);
+        let (chat_id, topic_id) = (message.chat_id, message.topic_id());
         // Inline buttons ride the message and leave the chat's keyboard alone
         // (tdesktop `definesReplyKeyboard()` is false for them).
         let has_markup = message.reply_markup.as_ref().is_some_and(|markup| {

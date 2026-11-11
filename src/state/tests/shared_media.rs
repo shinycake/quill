@@ -33,7 +33,7 @@ fn shared_media_empty_ready_failed_and_stale_drop() {
         ),
     );
     let media = &session.media.shared_media.tabs[SharedMediaTab::Media.index()];
-    assert_eq!(media.status, SharedMediaTabStatus::Empty);
+    assert!(media.status.is_empty());
     assert!(media.items.is_empty());
     // Ready answer → Ready with items.
     let generation = session
@@ -57,7 +57,7 @@ fn shared_media_empty_ready_failed_and_stale_drop() {
         ),
     );
     let files = &session.media.shared_media.tabs[SharedMediaTab::Files.index()];
-    assert_eq!(files.status, SharedMediaTabStatus::Ready);
+    assert!(files.status.is_ready());
     assert_eq!(files.items.len(), 1);
     assert_eq!(files.items[0].label, "report.pdf");
     assert_eq!(
@@ -91,7 +91,7 @@ fn shared_media_empty_ready_failed_and_stale_drop() {
         ),
     );
     let music = &session.media.shared_media.tabs[SharedMediaTab::Music.index()];
-    assert_eq!(music.status, SharedMediaTabStatus::Idle);
+    assert!(music.status.is_idle());
     // Error → Failed with the server text.
     let generation = session
         .media
@@ -114,8 +114,8 @@ fn shared_media_empty_ready_failed_and_stale_drop() {
         ),
     );
     let links = &session.media.shared_media.tabs[SharedMediaTab::Links.index()];
-    assert_eq!(links.status, SharedMediaTabStatus::Failed);
-    assert!(!links.error.is_empty());
+    assert!(links.status.is_failed());
+    assert!(!links.error().is_empty());
 }
 
 #[test]
@@ -156,13 +156,13 @@ fn open_chat_closes_shared_media_gallery() {
     // the same-chat path leaves it open.
     let (mut session, _sink) = session();
     session.media.shared_media.open_for(ChatId(11));
-    assert!(session.media.shared_media.open);
+    assert!(session.media.shared_media.open());
     session.open_chat(ChatId(12));
-    assert!(!session.media.shared_media.open);
+    assert!(!session.media.shared_media.open());
     assert_eq!(session.media.shared_media.chat_id, None);
     session.media.shared_media.open_for(ChatId(12));
     session.open_chat(ChatId(12));
-    assert!(session.media.shared_media.open);
+    assert!(session.media.shared_media.open());
     assert_eq!(session.media.shared_media.chat_id, Some(ChatId(12)));
 }
 
@@ -204,7 +204,7 @@ fn shared_media_pages_older_messages_for_the_viewer() {
         &found_documents(extra, 4, 150, &[200, 150]),
     );
     let state = &session.media.shared_media.tabs[tab.index()];
-    assert_eq!(state.status, SharedMediaTabStatus::Ready);
+    assert!(state.status.is_ready());
     assert_eq!(state.next_from, MessageId(150));
     assert!(state.can_load_more());
     assert!(
@@ -237,7 +237,7 @@ fn shared_media_pages_older_messages_for_the_viewer() {
     let ids: Vec<i64> = state.items.iter().map(|item| item.message_id.0).collect();
     assert_eq!(ids, vec![200, 150, 120, 100]);
     assert_eq!(state.total_count, 4);
-    assert!(!state.loading_more);
+    assert!(!state.loading_more());
     assert!(!state.can_load_more(), "oldest message reached");
     assert!(session.media.shared_media.begin_fetch_more(tab).is_none());
 }
@@ -275,10 +275,15 @@ fn shared_media_older_page_failure_allows_a_retry_and_stale_pages_drop() {
         ),
     );
     let state = &session.media.shared_media.tabs[tab.index()];
-    assert_eq!(state.status, SharedMediaTabStatus::Ready, "list stays");
+    assert!(state.status.is_ready(), "list stays");
     assert_eq!(state.items.len(), 2);
+    assert!(state.more_error().is_some(), "the list shows a retry row");
     assert!(
-        state.can_load_more(),
+        !state.can_load_more(),
+        "a failed page is not retried on its own"
+    );
+    assert!(
+        state.more_askable(),
         "the failed page can be requested again"
     );
 
@@ -594,7 +599,7 @@ fn another_tabs_fetch_does_not_drop_a_tabs_older_page() {
     );
     let state = &session.media.shared_media.tabs[files.index()];
     assert_eq!(state.items.len(), 3, "the page still lands");
-    assert!(!state.loading_more);
+    assert!(!state.loading_more());
 }
 
 #[test]
@@ -616,7 +621,7 @@ fn a_new_first_page_supersedes_the_tabs_own_older_page() {
     session.media.shared_media.begin_search(files, "report");
     let generation = session.media.shared_media.begin_fetch(files);
     assert!(
-        !session.media.shared_media.tabs[files.index()].loading_more,
+        !session.media.shared_media.tabs[files.index()].loading_more(),
         "nothing waits on the superseded page"
     );
     apply_json(
@@ -636,8 +641,8 @@ fn a_new_first_page_supersedes_the_tabs_own_older_page() {
         .shared_media
         .fail(chat, files, generation, "x".into());
     let state = &session.media.shared_media.tabs[files.index()];
-    assert_eq!(state.status, SharedMediaTabStatus::Failed);
-    assert!(!state.loading_more);
+    assert!(state.status.is_failed());
+    assert!(!state.loading_more());
 }
 
 #[test]
@@ -664,6 +669,6 @@ fn dropping_a_search_leaves_other_tabs_requests_alone() {
         &found_documents(extra, 2, 0, &[200, 150]),
     );
     let state = &session.media.shared_media.tabs[links.index()];
-    assert_eq!(state.status, SharedMediaTabStatus::Ready);
+    assert!(state.status.is_ready());
     assert_eq!(state.items.len(), 2);
 }

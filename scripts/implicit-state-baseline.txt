@@ -20,7 +20,6 @@ ChecklistDialog::others_can_mark_tasks_as_done+error
 ChecklistDraft::others_can_mark_tasks_as_done
 ChecklistSend::others_can_mark_tasks_as_done
 CheckoutView::sending
-Clip::busy
 
 DestRow::saved
 DragSelect::pending
@@ -40,10 +39,9 @@ GiveawaySummary::finished
 HeaderFacts::is_saved_messages
 
 
-LinuxState::failed
 LiveInput::failed
-LocalFileState::is_downloading_active
-LocalFileState::is_downloading_completed
+
+LiveInput::failed
 Lookup::fade_started
 Lookup::pending
 
@@ -53,13 +51,13 @@ MiniAppWindow::closing_confirmation
 
 
 
-ParsedFile::uploading
+
 ParsedGroupCall::loaded_all_participants
 ParsedSession::is_password_pending
 PasswordBox::sending
 PasswordBox::sending+error
 
-PlayHead::started
+
 PlaybackHealth::output_failed
 
 
@@ -80,13 +78,11 @@ SettingsState::pending_attention
 SettingsState::pending_attention
 
 SettingsState::pending_attention
-SharedMediaTabState::loading_more
-SharedMediaTabState::loading_more+error
+
 
 
 State::started
 Step::started
-StickerPanel::suggest_waiting_for_sets
 
 StreamFacts::transport_failed
 Tempo::done

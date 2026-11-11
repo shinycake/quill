@@ -114,7 +114,7 @@ fn update_file_and_file_response_are_typed() {
     match response.payload {
         EnvelopePayload::Media(MediaPayload::File(parsed)) => {
             assert_eq!(parsed.id.0, 4);
-            assert!(parsed.local.is_downloading_active);
+            assert!(parsed.local.is_downloading_active());
             assert!(parsed.needs_download());
         }
         other => panic!("{other:?}"),
@@ -133,21 +133,14 @@ fn download_progress_uses_downloaded_size_over_expected_size() {
     let EnvelopePayload::Media(MediaPayload::File(parsed)) = parsed.payload else {
         panic!("expected File");
     };
-    assert_eq!(parsed.local.downloaded_size, 42);
+    assert_eq!(parsed.local.downloaded_size(), 42);
     assert_eq!(parsed.download_progress(), Some(0.42));
     // Unknown total → no percent (avoids a bogus 0%/100%).
     let no_total = ParsedFile {
         id: FileId(10),
         size: 0,
         expected_size: 0,
-        uploading: false,
-        local: LocalFileState {
-            path: String::new(),
-            can_be_downloaded: true,
-            is_downloading_active: true,
-            is_downloading_completed: false,
-            downloaded_size: 42,
-        },
+        local: LocalFileState::from_parts(String::new(), true, true, false, 42),
     };
     assert_eq!(no_total.download_progress(), None);
 }
@@ -201,7 +194,7 @@ fn mask_sticker_message_parses_as_a_sticker() {
             assert_eq!(sticker.emoji, "🎩");
             assert_eq!(sticker.set_id, 12);
             assert_eq!(sticker.display_file_id(), Some(FileId(51)));
-            assert!(!sticker.requires_premium);
+            assert!(!sticker.requires_premium());
             assert_eq!(message.content.preview(), "🎩");
         }
         other => panic!("{other:?}"),
@@ -742,4 +735,24 @@ fn sticker_set_emojis_stay_with_their_stickers() {
         }
         other => panic!("{other:?}"),
     }
+}
+
+#[test]
+fn a_file_being_sent_keeps_the_local_state_it_was_in() {
+    let partial = LocalFileState::from_parts("/tmp/p.bin", true, false, false, 7);
+    let sending = partial.clone().into_uploading();
+    assert!(sending.is_uploading());
+    assert_eq!(sending.path(), "/tmp/p.bin");
+    assert_eq!(sending.downloaded_size(), 7);
+    assert!(sending.can_be_downloaded());
+    assert!(!sending.is_downloading_completed());
+    assert!(sending.is_idle_incomplete());
+
+    let done = LocalFileState::from_parts("/tmp/c.bin", false, false, true, 9).into_uploading();
+    assert!(done.is_uploading() && done.is_downloading_completed());
+    assert_eq!(
+        done.clone().into_uploading(),
+        done,
+        "sending twice is sending"
+    );
 }

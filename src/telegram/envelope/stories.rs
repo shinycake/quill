@@ -243,14 +243,10 @@ pub struct ParsedStory {
     pub content: StoryContentView,
     pub caption: String,
     pub caption_entities: Vec<TextEntity>,
-    /// Phase 9.2: the user's own reaction on this story (`emoji`), `None`
-    /// when none is chosen or when the chosen reaction is a custom emoji /
-    /// paid reaction (same call as message reactions).
-    pub chosen_reaction_emoji: Option<String>,
-    /// Phase 9.2+: the non-emoji half of the user's chosen reaction
-    /// (`reactionTypeCustomEmoji` / `reactionTypePaid`) — `None` when the
-    /// chosen reaction is a plain emoji or absent.
-    pub chosen_reaction_extra: Option<StoryChosenExtraReaction>,
+    /// Phase 9.2: the user's own reaction on this story: an emoji, or the
+    /// custom-emoji / paid half (`reactionTypeCustomEmoji` /
+    /// `reactionTypePaid`); `None` when none is chosen.
+    pub chosen_reaction: Option<StoryReaction>,
     /// Phase 9.2: `storyInteractionInfo` — counters, meaningful only when
     /// `can_get_interactions`.
     pub interaction_info: Option<StoryInteractionInfoView>,
@@ -416,8 +412,7 @@ pub(crate) fn parse_story(value: &Value) -> Option<(ParsedStory, Vec<ParsedFile>
     let (area_link_url, area_reaction_emojis) = parse_story_area_texts(value.get("areas"));
     // Phase 9.2+: `chosen_reaction_type` splits into the emoji half and the
     // custom-emoji / paid half.
-    let (chosen_reaction_emoji, chosen_reaction_extra) =
-        parse_story_chosen_reaction(value.get("chosen_reaction_type"));
+    let chosen_reaction = parse_story_chosen_reaction(value.get("chosen_reaction_type"));
     Some((
         ParsedStory {
             id,
@@ -430,8 +425,7 @@ pub(crate) fn parse_story(value: &Value) -> Option<(ParsedStory, Vec<ParsedFile>
             content,
             caption,
             caption_entities,
-            chosen_reaction_emoji,
-            chosen_reaction_extra,
+            chosen_reaction,
             interaction_info: parse_story_interaction_info(value.get("interaction_info")),
             can_be_deleted: value
                 .get("can_be_deleted")
@@ -566,33 +560,60 @@ pub enum StoryChosenExtraReaction {
     Paid,
 }
 
-/// Phase 9.2+: `chosen_reaction_type` on a `story` — the emoji half plus the
-/// non-emoji half (`reactionTypeCustomEmoji` / `reactionTypePaid`, else
-/// `None`). `(None, None)` when there is no reaction.
-pub(crate) fn parse_story_chosen_reaction(
-    value: Option<&Value>,
-) -> (Option<String>, Option<StoryChosenExtraReaction>) {
-    let reaction_type = match value.filter(|value| !value.is_null()) {
-        Some(reaction_type) => reaction_type,
-        None => return (None, None),
-    };
+impl ParsedStory {
+    /// The chosen reaction when it is a plain emoji.
+    pub fn chosen_reaction_emoji(&self) -> Option<&str> {
+        StoryReaction::emoji(&self.chosen_reaction)
+    }
+
+    /// The chosen reaction when it is a custom emoji or paid.
+    pub fn chosen_reaction_extra(&self) -> Option<StoryChosenExtraReaction> {
+        StoryReaction::extra(&self.chosen_reaction)
+    }
+}
+
+/// The one reaction a viewer chose on a story: a plain emoji, or the
+/// non-emoji half (custom emoji / paid).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoryReaction {
+    Emoji(String),
+    Extra(StoryChosenExtraReaction),
+}
+
+impl StoryReaction {
+    /// The emoji of a plain reaction.
+    pub fn emoji(reaction: &Option<StoryReaction>) -> Option<&str> {
+        match reaction {
+            Some(StoryReaction::Emoji(emoji)) => Some(emoji),
+            _ => None,
+        }
+    }
+
+    /// The custom-emoji / paid half of a reaction.
+    pub fn extra(reaction: &Option<StoryReaction>) -> Option<StoryChosenExtraReaction> {
+        match reaction {
+            Some(StoryReaction::Extra(extra)) => Some(*extra),
+            _ => None,
+        }
+    }
+}
+
+/// Phase 9.2+: `chosen_reaction_type` on a `story` — the emoji, or the
+/// non-emoji half (`reactionTypeCustomEmoji` / `reactionTypePaid`); `None`
+/// when there is no reaction.
+pub(crate) fn parse_story_chosen_reaction(value: Option<&Value>) -> Option<StoryReaction> {
+    let reaction_type = value.filter(|value| !value.is_null())?;
     match reaction_type.get("@type").and_then(Value::as_str) {
-        Some("reactionTypeEmoji") => (
-            reaction_type
-                .get("emoji")
-                .and_then(Value::as_str)
-                .filter(|emoji| !emoji.is_empty())
-                .map(str::to_string),
-            None,
-        ),
-        Some("reactionTypeCustomEmoji") => (
-            None,
-            int64(reaction_type.get("custom_emoji_id"))
-                .filter(|id| *id > 0)
-                .map(StoryChosenExtraReaction::CustomEmoji),
-        ),
-        Some("reactionTypePaid") => (None, Some(StoryChosenExtraReaction::Paid)),
-        _ => (None, None),
+        Some("reactionTypeEmoji") => reaction_type
+            .get("emoji")
+            .and_then(Value::as_str)
+            .filter(|emoji| !emoji.is_empty())
+            .map(|emoji| StoryReaction::Emoji(emoji.to_string())),
+        Some("reactionTypeCustomEmoji") => int64(reaction_type.get("custom_emoji_id"))
+            .filter(|id| *id > 0)
+            .map(|id| StoryReaction::Extra(StoryChosenExtraReaction::CustomEmoji(id))),
+        Some("reactionTypePaid") => Some(StoryReaction::Extra(StoryChosenExtraReaction::Paid)),
+        _ => None,
     }
 }
 

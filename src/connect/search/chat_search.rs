@@ -28,8 +28,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Reopening the gallery for the same chat keeps the already-fetched
         // tabs (`SharedMediaState::open_for`); only a fresh open fetches the
         // active tab.
-        let reopening = self.session.media.shared_media.open
-            && self.session.media.shared_media.chat_id == Some(chat_id);
+        let reopening = self.session.media.shared_media.chat_id == Some(chat_id);
         let initial = self.session.main_profile_gallery_tab(chat_id);
         let tab = self
             .session
@@ -142,10 +141,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(()),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session
-                    .media
-                    .shared_media
-                    .fail_more(chat_id, tab, generation);
+                self.session.media.shared_media.fail_more(
+                    chat_id,
+                    tab,
+                    generation,
+                    crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_LOAD_MORE_MEDIA)
+                        .to_string(),
+                );
                 Err(err)
             }
         }

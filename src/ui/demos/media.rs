@@ -254,8 +254,7 @@ impl QuillApp {
                             thumb_file_id: None,
                             thumb_width: 0,
                             thumb_height: 0,
-                            requires_premium: false,
-                            premium_animation: None,
+                            premium: None,
                         })
                         .collect(),
                     cover_files: Vec::new(),
@@ -313,8 +312,8 @@ impl QuillApp {
         session.settings.media_prefs.autoplay_videos = false;
         for file in [81, 92] {
             session.media.files.update(file, |file| {
-                file.local.path.clear();
-                file.local.is_downloading_completed = false;
+                file.local =
+                    quill::telegram::envelope::LocalFileState::Absent { can_download: true };
             });
         }
     }
@@ -337,8 +336,8 @@ impl QuillApp {
             .cloned()
         {
             let mut waiting = local.clone();
-            waiting.local.path.clear();
-            waiting.local.is_downloading_completed = false;
+            waiting.local =
+                quill::telegram::envelope::LocalFileState::Absent { can_download: true };
             if let Some(session) = self.demo_session.as_mut() {
                 session.media.files.insert(waiting);
             }

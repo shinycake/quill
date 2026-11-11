@@ -74,16 +74,17 @@ impl QuillApp {
             state.status = if items.is_empty() {
                 SharedMediaTabStatus::Empty
             } else {
-                SharedMediaTabStatus::Ready
+                SharedMediaTabStatus::ready()
             };
             state.total_count = items.len() as i32;
             state.items = items;
             state.query = query.clone();
         }
-        self.media_search.key = Some((chat_id, SharedMediaTab::Files));
         self.media_search
-            .input
-            .update(cx, |input, cx| input.set_value(query, window, cx));
+            .reopen(Some((chat_id, SharedMediaTab::Files)), window, cx);
+        if let Some(input) = self.media_search.input() {
+            input.update(cx, |input, cx| input.set_value(query, window, cx));
+        }
         cx.notify();
     }
 }

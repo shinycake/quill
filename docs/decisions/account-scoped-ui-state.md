@@ -6785,6 +6785,66 @@ Thirty-four minor entries; each was proved against the integration branch first.
   once (the bar is optimistic here too, with `RequestRollback`), and the
   local hidden flag is already keyed by account.
 
+### Sweep fixes (is-11)
+
+Forty-two implicit-state entries; each stage that two or more fields kept in
+step by hand is one enum now, and the baseline lost the lines of every field
+converted (221 to 204, the rest belong to other bundles).
+
+| id | change |
+| --- | --- |
+| 05-256 | `ProxyList` (`Unasked`/`Loading{request}`/`Fresh`/`Stale`/`Failed`) and `ProxySave` (`Idle`/`Saving{request}`/`Failed`) replace `loading`/`stale`/`mutating`/`error`/`fetch_attempted`; the IPv6 error is its own line; a system step keeps the user's refused change inside `Saving::kept_error`. |
+| 05-274 | `KeyboardFetch` per chat (`Wanted`/`Loading{request}`/`Failed`/`Known`) replaces `by_chat` + `markup_message_ids`; a failed `getMessage` ends the fetch (test added). |
+| 05-272 | `ShareSearch::{Idle, Searching{query, local, server}}`, each half `Waiting(request)` or `Done`. |
+| 05-250 | Already `SponsoredReportFlow` on the integration branch (is-09); taken as is. |
+| 05-268, 06-023 | The greeting stickers and `installed_loaded` were already `Fetch` on the integration branch; `SuggestFor::{Nothing, WaitingForSets, Asked}` replaces `suggest_for` + `suggest_waiting_for_sets`, and its baseline line is gone. |
+| 05-269, 06-024 | Already `Fetch` + `GifList` on the integration branch (is-13); taken as is. |
+| 05-284, 06-036 | Skipped: `StoryPageOps` already tracks one `StoryPageOpState` per request (the request is the entry's key, loads and mutations never share a slot). |
+| 05-287 | `ForumTopicsMap` holds a list or a failure per forum. |
+| 06-030 | `Translation::Pending{job}` is the only record of a job; a late answer of a replaced job no longer overwrites the newer one. |
+| 06-014, 13-084 | `SharedMediaTabStatus::Ready{more: NextPage}` and `Failed(error)`; a failed next page shows a retry row (tdesktop shows "Load more" the same way); the `Asked` mark is gone. |
+| 06-015 | `SharedMediaState::open()` derives from `chat_id`. |
+| 13-051 | `GallerySearch::{Closed, Open(SearchField)}`; the debounce is a `Task` dropped with the field. |
+| 06-017 | `ForwardsPage::{Idle, Loading(request), Failed}`. |
+| 06-026, 06-027, 06-028 | `Stage` on a sticker clip, `PlayHead::{Waiting, Playing}`, `StripPull::{Collapsed, Revealing, Expanded}`. `Clip::delivered` stays: it marks the first frame handed out, not a stage. |
+| 06-022 | `ComposerStage::Failed` holds the error line (`local_error` is gone); `ComposerMode` is the integration branch's `Edit(chat, story)` / `Repost(chat, story)`. |
+| 06-038, 06-039 | `StoryPlayback::{Stopped, Running, Paused}`; `StoryViewerKind` carries the clip, the duration and the live call. |
+| 06-040 | A suggested post is busy while its approve or decline is a pending request. |
+| 06-035 | `AccentRead`; a lookup no longer starts a read, `refresh()` does. |
+| 06-046 | `BridgeFeed::{Injected, Routed, Closed}`. |
+| 06-042, 06-043 | `CallState::Ready(ReadyParams)`; the participant's video flags derive from the video infos. |
+| 06-045 | `ChatDraft{body: DraftBody, reply: Option<DraftReply>}`. |
+| 06-044, 06-059 | `MemberStatus` carries the administrator's rights, `can_be_edited`, the restriction and the owner's anonymity; the group payloads carry it instead of nine options. |
+| 06-054 | `MessageReplyTo::{Message, Story}`. |
+| 06-053 | `MessageTopic::{Forum, Thread, DirectMessages}`. |
+| 06-052 | `MessageSendState::Failed{can_retry}`. |
+| 06-058 | `SelfDestructClock::{NotOpened, Counting}`. |
+| 06-056 | `ChecklistTask::completion: Option<TaskCompletion>`. |
+| 06-055 | `LocalFileState::{Absent, Partial, Downloading, Complete, Uploading}`. |
+| 06-057, 06-067 | `StoryReaction::{Emoji, Extra}`. |
+| 06-060 | `PremiumSticker{animation}`. |
+| 06-066 | `GiftOfferState`. |
+| 06-068 | `CryptoStage::{Unbound, Bound}`; the request log is hidden exactly while bound. |
+
+Review fixes: a refused save or remove of a GIF marks the saved list, never
+the search grid (tested); a refused refetch of a stale proxy list is
+`ProxyList::FailedStale`, which keeps `settled()` false so the rotation and
+system-proxy planners wait (a failed answer settles as before; tested); a
+newer reply-markup message replaces one not yet fetched (tested). The
+bridge's `stopped` flag is documented as the feed's report from another
+thread. The shared-media "load more" line comes from the lang table.
+`CryptoStage` binds in one step. `LocalFileState::Uploading` wraps the state
+the file was in, so a file being sent that is not complete keeps its path
+and size (tested). Call parameters live in `CallState::Ready`: a hang-up in
+flight starts no media, and a failed `discardCall` puts the state back, so
+the next pass connects; `ready_at` is set from the update itself, as before.
+
+Behaviour changes worth a look: a newer `updateChatReplyMarkup` replaces a
+keyboard fetch still out (its answer is then dropped); a
+refused system proxy step no longer wipes the user's error; the accent is read
+once per `refresh()`; a hang-up in flight no longer shows the call's emoji
+fingerprint, because the key lives in the `Ready` state the hang-up replaces.
+
 ### Sweep fixes (is-14)
 
 Implicit-state conversions: each stage is one value, with a way out.
@@ -7970,3 +8030,16 @@ whose variants carry the data, with a way out of every stage.
   row and reaction picker too (they used to stack with the other panels).
   A failed apps list on the Apps tab shows "Couldn't load apps".
 
+### Sweep is-11, merged with the integration branch
+
+- **Integration forms kept** where bundles converted the same state: the call
+  `ready` stage and its parameters, `ProxyFetch`/`ProxyMutation`, the forum
+  topic map, the GIF panel lists. This bundle's versions of those were
+  dropped, with the call and proxy files that only followed them.
+- **Kept from this bundle:** the envelope accessors (`LocalFileState`,
+  `ParsedChatMember`, `StickerItem::premium`, `ChatDraft`), the reply target
+  enum, the share search, the sponsored report, the reply keyboard fetch,
+  the receive bridge stop report.
+- **A refused refetch of a stale proxy list** lands in
+  `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
+  busy (never planned on), and Refresh is the way out.

@@ -590,8 +590,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.chats_path_active()
             && suggest_emoji_for(text).is_none()
             && stickers.suggestions.is_empty()
-            && stickers.suggest_for.is_none()
-            && !stickers.suggest_waiting_for_sets
+            && stickers.suggest_for.is_nothing()
             && emoji.animated_emoji.is_none()
             && emoji.animated_emoji_for.is_none()
             && !self
@@ -642,12 +641,18 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .take_purpose(RequestPurpose::SuggestStickers),
             );
             self.session.stickers.stickers.suggestions.clear();
-            self.session.stickers.stickers.suggest_for = Some(emoji.to_string());
-            self.session.stickers.stickers.suggest_waiting_for_sets = true;
+            self.session.stickers.stickers.suggest_for =
+                crate::state::SuggestFor::WaitingForSets(emoji.to_string());
             return self.refresh_installed_sticker_sets();
         }
-        self.session.stickers.stickers.suggest_waiting_for_sets = false;
-        if self.session.stickers.stickers.suggest_for.as_deref() == Some(emoji) {
+        if self.session.stickers.stickers.suggest_for.emoji() == Some(emoji)
+            && !self
+                .session
+                .stickers
+                .stickers
+                .suggest_for
+                .waiting_for_sets()
+        {
             return Ok(None);
         }
         drop(
@@ -655,7 +660,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .requests
                 .take_purpose(RequestPurpose::SuggestStickers),
         );
-        self.session.stickers.stickers.suggest_for = Some(emoji.to_string());
+        self.session.stickers.stickers.suggest_for =
+            crate::state::SuggestFor::Asked(emoji.to_string());
         let extra = self.session.request(RequestPurpose::SuggestStickers, None);
         match self
             .sender
@@ -664,7 +670,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.stickers.stickers.suggest_for = None;
+                self.session.stickers.stickers.suggest_for = crate::state::SuggestFor::Nothing;
                 Err(err)
             }
         }

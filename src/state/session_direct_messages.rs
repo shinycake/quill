@@ -145,7 +145,7 @@ impl Session {
             .get(&chat_id.0)?
             .messages
             .get(&message_id.0)
-            .map(|message| message.extras.direct_messages_topic_id)
+            .map(|message| message.extras.direct_messages_topic_id())
             .filter(|topic| *topic != 0)
     }
 

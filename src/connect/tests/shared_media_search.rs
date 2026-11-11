@@ -78,7 +78,7 @@ fn searching_a_tab_sends_the_query_with_its_filter_and_pages_with_it() {
             .media
             .shared_media
             .tab_state(SharedMediaTab::Files);
-        state.status = SharedMediaTabStatus::Ready;
+        state.status = SharedMediaTabStatus::ready();
         state.next_from = MessageId(40);
     }
     driver

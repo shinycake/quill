@@ -143,7 +143,7 @@ fn a_switch_saves_the_typed_text_and_empties_the_composer(cx: &mut TestAppContex
         assert_eq!(app.open_chat_id(), None);
         let session = app.session().expect("session");
         let draft = session.draft_for(CHAT, DraftTopic::Chat).expect("saved");
-        assert_eq!(draft.text, "meet at 5");
+        assert_eq!(draft.text(), "meet at 5");
         assert!(!session.draft_is_dirty(CHAT, DraftTopic::Chat));
     });
 }
@@ -491,10 +491,6 @@ fn the_story_viewer_blocks_shortcuts_in_the_main_window_only(cx: &mut TestAppCon
         caption: String::new(),
         caption_entities: Vec::new(),
         duration_label: None,
-        duration_secs: None,
-        video_file_id: None,
-        is_live: false,
-        live_call: None,
         areas: Vec::new(),
     };
     app.update_in(&mut vcx, |app, window, cx| {

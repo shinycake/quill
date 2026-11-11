@@ -49,7 +49,7 @@ fn story_chosen_reaction_interactions_and_flags_parsed() {
     let env = parse_envelope(&json).unwrap();
     match env.payload {
         EnvelopePayload::Stories(StoriesPayload::Story { story, .. }) => {
-            assert_eq!(story.chosen_reaction_emoji.as_deref(), Some("❤"));
+            assert_eq!(story.chosen_reaction_emoji(), Some("❤"));
             let info = story.interaction_info.expect("interaction_info");
             assert!(info.any_nonzero());
             assert_eq!(info.view_count, 42);
@@ -76,8 +76,7 @@ fn story_reaction_absent_or_non_emoji_parses_to_none() {
         let env = parse_envelope(&reaction_json(reaction)).unwrap();
         match env.payload {
             EnvelopePayload::Stories(StoriesPayload::Story { story, .. }) => {
-                assert_eq!(story.chosen_reaction_emoji, None, "reaction {reaction}");
-                assert_eq!(story.chosen_reaction_extra, None, "reaction {reaction}");
+                assert_eq!(story.chosen_reaction, None, "reaction {reaction}");
             }
             other => panic!("{other:?}"),
         }

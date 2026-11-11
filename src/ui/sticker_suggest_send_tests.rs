@@ -60,8 +60,7 @@ fn sticker(id: i64) -> StickerItem {
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,
-        requires_premium: false,
-        premium_animation: None,
+        premium: None,
     }
 }
 
@@ -71,7 +70,7 @@ fn hold_suggestions(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             let stickers = &mut session.stickers.stickers;
-            stickers.suggest_for = Some(EMOJI.into());
+            stickers.suggest_for = quill::state::SuggestFor::Asked(EMOJI.into());
             stickers.suggestions = vec![sticker(1), sticker(2)];
             let emoji = &mut session.stickers.emoji;
             emoji.animated_emoji_for = Some(EMOJI.into());

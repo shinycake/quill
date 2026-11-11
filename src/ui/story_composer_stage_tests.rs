@@ -87,14 +87,14 @@ fn a_check_answer_reaches_only_the_composer_that_asked(cx: &mut TestAppContext) 
             app.stories.composer.stage, waiting,
             "still waiting for its own answer"
         );
-        assert_eq!(app.stories.composer.local_error, None);
+        assert_eq!(app.stories.composer.error(), None);
         answer_check(app, second, Err("Eligibility check failed".into()));
         // A stale answer arriving once more does not hide the right one.
         answer_check(app, first, Err("stale".into()));
         app.story_composer_upkeep(cx);
-        assert_eq!(app.stories.composer.stage, ComposerStage::Editing);
+        assert!(!app.stories.composer.stage.busy());
         assert_eq!(
-            app.stories.composer.local_error.as_deref(),
+            app.stories.composer.error(),
             Some("Eligibility check failed")
         );
     });
@@ -119,8 +119,8 @@ fn a_lost_check_leaves_checking_with_an_error(cx: &mut TestAppContext) {
         );
         answered(app, request);
         app.story_composer_upkeep(cx);
-        assert_eq!(app.stories.composer.stage, ComposerStage::Editing);
-        assert!(app.stories.composer.local_error.is_some());
+        assert!(!app.stories.composer.stage.busy());
+        assert!(app.stories.composer.error().is_some());
     });
 }
 
@@ -139,8 +139,8 @@ fn a_lost_post_leaves_posting_with_an_error(cx: &mut TestAppContext) {
         );
         answered(app, request);
         app.story_composer_upkeep(cx);
-        assert_eq!(app.stories.composer.stage, ComposerStage::Editing);
-        assert!(app.stories.composer.local_error.is_some());
+        assert!(!app.stories.composer.stage.busy());
+        assert!(app.stories.composer.error().is_some());
     });
 }
 
@@ -166,14 +166,14 @@ fn a_post_outcome_reaches_only_its_composer(cx: &mut TestAppContext) {
             app.stories.composer.stage,
             ComposerStage::Posting { request }
         );
-        assert_eq!(app.stories.composer.local_error, None);
+        assert_eq!(app.stories.composer.error(), None);
         record_outcome(app, StoryPostOutcome::Succeeded { request });
         app.story_composer_upkeep(cx);
         assert_eq!(app.stories.composer.stage, ComposerStage::Posted);
         // A second press of Post does nothing: no check, no second post.
         app.story_composer_post(cx);
         assert_eq!(app.stories.composer.stage, ComposerStage::Posted);
-        assert_eq!(app.stories.composer.local_error, None);
+        assert_eq!(app.stories.composer.error(), None);
     });
 }
 
@@ -192,11 +192,8 @@ fn a_failed_post_shows_why_and_frees_the_button(cx: &mut TestAppContext) {
             },
         );
         app.story_composer_upkeep(cx);
-        assert_eq!(app.stories.composer.stage, ComposerStage::Editing);
-        assert_eq!(
-            app.stories.composer.local_error.as_deref(),
-            Some("Posting failed: FLOOD")
-        );
+        assert!(!app.stories.composer.stage.busy());
+        assert_eq!(app.stories.composer.error(), Some("Posting failed: FLOOD"));
     });
 }
 
@@ -225,7 +222,7 @@ fn a_save_settles_by_its_own_request(cx: &mut TestAppContext) {
             },
             "the cover's failure is not the edit's"
         );
-        assert_eq!(app.stories.composer.local_error, None);
+        assert_eq!(app.stories.composer.error(), None);
         if let Some(session) = app.demo_session.as_deref_mut() {
             session.stories.manage.settle(RequestId(30), None);
         }
@@ -249,9 +246,9 @@ fn a_failed_save_shows_its_reason(cx: &mut TestAppContext) {
             manage.settle(RequestId(40), Some("Story update failed: GONE".into()));
         }
         app.story_composer_upkeep(cx);
-        assert_eq!(app.stories.composer.stage, ComposerStage::Editing);
+        assert!(!app.stories.composer.stage.busy());
         assert_eq!(
-            app.stories.composer.local_error.as_deref(),
+            app.stories.composer.error(),
             Some("Story update failed: GONE")
         );
         assert!(app.stories.composer.open);

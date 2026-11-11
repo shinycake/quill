@@ -554,7 +554,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .files
                 .get(&file_id.0)
                 .is_some_and(|file| {
-                    file.local.is_downloading_active && !file.local.is_downloading_completed
+                    file.local.is_downloading_active() && !file.local.is_downloading_completed()
                 });
         if file_id.0 == 0 || !(requested || untracked) {
             return Ok(false);

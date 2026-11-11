@@ -54,6 +54,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(RequestPurpose::GetProxies, None);
+        let was_stale = matches!(
+            self.session.settings.proxy.fetch,
+            ProxyFetch::Stale | ProxyFetch::FailedStale
+        );
         self.session.settings.proxy.fetch = ProxyFetch::Loading(extra);
         match self.sender.send_json(&get_proxies(extra)) {
             Ok(()) => Ok(extra),
@@ -61,7 +65,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 // Not retried by the tick, owed or not: the dialog's
                 // open / Refresh asks again.
-                self.session.settings.proxy.fetch = ProxyFetch::Failed;
+                self.session.settings.proxy.fetch = if was_stale {
+                    ProxyFetch::FailedStale
+                } else {
+                    ProxyFetch::Failed
+                };
                 Err(err)
             }
         }

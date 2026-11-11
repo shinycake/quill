@@ -719,7 +719,7 @@ impl QuillApp {
             });
         let tab = self.admin.member_dialog.as_ref().map(|dialog| dialog.tab);
         let set_by = self.member_set_by(member);
-        let status_label = match (tab, set_by, member.restriction) {
+        let status_label = match (tab, set_by, member.restriction()) {
             (Some(MemberTab::Restricted), Some(by), _) => {
                 tr_with(keys::CHANNEL_BANNED_STATUS_RESTRICTED_BY, &[("user", &by)])
             }
@@ -729,7 +729,7 @@ impl QuillApp {
             (_, _, Some(restriction)) => {
                 super::restricted_exceptions::restricted_row_status(restriction)
             }
-            _ => Self::member_status_label(member.status).to_string(),
+            _ => Self::member_status_label(member.status()).to_string(),
         };
         // Slice G1: show the admin custom title (`chatMember.tag`,
         // schema 1.8.67 line 2526) next to the status when set.

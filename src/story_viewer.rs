@@ -39,10 +39,18 @@ pub const STORY_PHOTO_DURATION: Duration = Duration::from_secs(5);
 /// The wall clock enters only as the `now` argument, so tests drive it
 /// without sleeping. Pausing shifts the start anchor (like Telegram
 /// Desktop's `PhotoPlayback::togglePaused`), freezing elapsed time.
-#[derive(Debug, Clone, Default)]
-pub struct StoryPlayback {
-    started: Option<Instant>,
-    paused_since: Option<Instant>,
+#[derive(Debug, Clone, Copy, Default)]
+pub enum StoryPlayback {
+    #[default]
+    Stopped,
+    Running {
+        started: Instant,
+    },
+    /// Frozen at `since`; resuming shifts `started` forward by the span.
+    Paused {
+        started: Instant,
+        since: Instant,
+    },
 }
 
 impl StoryPlayback {
@@ -51,8 +59,8 @@ impl StoryPlayback {
     /// constant (corrupt fixture data must not freeze the viewer).
     pub fn duration(item: &StoryViewerItem) -> Duration {
         match item.kind {
-            StoryViewerKind::Video => item
-                .duration_secs
+            StoryViewerKind::Video { .. } => item
+                .duration_secs()
                 .filter(|secs| *secs > 0)
                 .map(|secs| Duration::from_secs(secs as u64))
                 .unwrap_or(STORY_PHOTO_DURATION),
@@ -62,40 +70,40 @@ impl StoryPlayback {
 
     /// (Re)start the clock for the current story.
     pub fn start(&mut self, now: Instant) {
-        self.started = Some(now);
-        self.paused_since = None;
+        *self = Self::Running { started: now };
     }
 
     pub fn stop(&mut self) {
-        self.started = None;
-        self.paused_since = None;
+        *self = Self::Stopped;
     }
 
     pub fn is_running(&self) -> bool {
-        self.started.is_some()
+        !matches!(self, Self::Stopped)
     }
 
     /// Pause or resume. Resuming shifts `started` forward by the paused
     /// span, so `elapsed`/`finished` stay correct without extra bookkeeping.
     pub fn set_paused(&mut self, paused: bool, now: Instant) {
-        if paused {
-            if self.paused_since.is_none() && self.started.is_some() {
-                self.paused_since = Some(now);
-            }
-        } else if let Some(paused_since) = self.paused_since.take()
-            && let Some(started) = self.started.as_mut()
-        {
-            *started += now.saturating_duration_since(paused_since);
-        }
+        *self = match (*self, paused) {
+            (Self::Running { started }, true) => Self::Paused {
+                started,
+                since: now,
+            },
+            (Self::Paused { started, since }, false) => Self::Running {
+                started: started + now.saturating_duration_since(since),
+            },
+            (other, _) => other,
+        };
     }
 
     /// Elapsed display time for `item` at `now`, frozen while paused and
     /// clamped to the item's duration.
     pub fn elapsed(&self, item: &StoryViewerItem, now: Instant) -> Duration {
-        let Some(started) = self.started else {
-            return Duration::ZERO;
+        let (started, end) = match *self {
+            Self::Stopped => return Duration::ZERO,
+            Self::Running { started } => (started, now),
+            Self::Paused { started, since } => (started, since),
         };
-        let end = self.paused_since.unwrap_or(now);
         end.saturating_duration_since(started)
             .min(Self::duration(item))
     }
@@ -114,28 +122,35 @@ impl StoryPlayback {
     /// A live story never ends on a timer: it plays until the stream ends
     /// (tdesktop shows no progress for a video stream).
     pub fn finished(&self, item: &StoryViewerItem, now: Instant) -> bool {
-        item.kind != StoryViewerKind::Live
-            && self.is_running()
-            && self.elapsed(item, now) >= Self::duration(item)
+        !item.is_live() && self.is_running() && self.elapsed(item, now) >= Self::duration(item)
     }
 }
 
-/// Story media kinds the viewer renders this slice.
+/// Story media kinds the viewer renders this slice, each with what only
+/// it has.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoryViewerKind {
     Photo,
-    Video,
-    Live,
+    Video {
+        /// Whole-second `storyVideo.duration` (`schema/td_api.tl:6633`),
+        /// driving playback progress / auto-advance (Phase 9.6).
+        duration_secs: Option<i32>,
+        /// B14: the playable clip (`storyVideo.video`), so the viewer can
+        /// play it with the native player once it is local.
+        clip: Option<FileId>,
+    },
+    /// stories-live-play: what the viewer needs to join a live story — the
+    /// group call behind `storyContentLive`. `storyInfo.is_live` shows the
+    /// live placeholder (or the Join button).
+    Live(LiveStoryCall),
     Unsupported,
 }
 
 impl StoryViewerKind {
     pub fn label(&self) -> &'static str {
         match self {
-            StoryViewerKind::Photo => "Story",
-            StoryViewerKind::Video => "Story",
-            StoryViewerKind::Live => "Live story",
-            StoryViewerKind::Unsupported => "Story",
+            StoryViewerKind::Live(_) => "Live story",
+            _ => "Story",
         }
     }
 }
@@ -168,25 +183,46 @@ pub struct StoryViewerItem {
     pub caption_entities: Vec<TextEntity>,
     /// Video duration (`0:12`), shown when no visual is local.
     pub duration_label: Option<String>,
-    /// Whole-second `storyVideo.duration` (`schema/td_api.tl:6633`), driving
-    /// playback progress / auto-advance for video stories (Phase 9.6).
-    /// `None` for photos, live, and unsupported stories.
-    pub duration_secs: Option<i32>,
-    /// B14: the playable clip (`storyVideo.video`) of a video story, so the
-    /// viewer can play it with the native player once it is local.
-    pub video_file_id: Option<FileId>,
-    /// `storyInfo.is_live` — a live story shows the live placeholder
-    /// (or the Join button) even if a `storyVideo` thumbnail were present.
-    pub is_live: bool,
-    /// stories-live-play: `Some` for live stories — the group call the
-    /// viewer's Join button joins. `None` for photo/video/unsupported.
-    pub live_call: Option<LiveStoryCall>,
     /// Phase 9.8: clickable areas (`storyArea`, `schema/td_api.tl:6566`),
     /// positioned as media-size fractions; the UI hit-tests them.
     pub areas: Vec<StoryAreaView>,
 }
 
 impl StoryViewerItem {
+    /// Whole-second video duration; `None` for photos, live, and
+    /// unsupported stories.
+    pub fn duration_secs(&self) -> Option<i32> {
+        match self.kind {
+            StoryViewerKind::Video { duration_secs, .. } => duration_secs,
+            _ => None,
+        }
+    }
+
+    /// The playable clip of a video story.
+    pub fn video_file_id(&self) -> Option<FileId> {
+        match self.kind {
+            StoryViewerKind::Video { clip, .. } => clip,
+            _ => None,
+        }
+    }
+
+    pub fn is_video(&self) -> bool {
+        matches!(self.kind, StoryViewerKind::Video { .. })
+    }
+
+    /// A live story shows the live placeholder (or the Join button).
+    pub fn is_live(&self) -> bool {
+        matches!(self.kind, StoryViewerKind::Live(_))
+    }
+
+    /// The group call the viewer's Join button joins.
+    pub fn live_call(&self) -> Option<LiveStoryCall> {
+        match self.kind {
+            StoryViewerKind::Live(call) => Some(call),
+            _ => None,
+        }
+    }
+
     /// `(poster, story id)`, the story cache key.
     pub fn key(&self) -> (ChatId, i32) {
         (self.chat_id, self.story_id)
@@ -414,10 +450,6 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
                 caption: story.caption.clone(),
                 caption_entities: story.caption_entities.clone(),
                 duration_label: None,
-                duration_secs: None,
-                video_file_id: None,
-                is_live: false,
-                live_call: None,
                 areas: story.areas.clone(),
             }
         }
@@ -434,16 +466,15 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
             StoryViewerItem {
                 chat_id,
                 story_id: story.id,
-                kind: StoryViewerKind::Video,
+                kind: StoryViewerKind::Video {
+                    duration_secs: Some(*duration_secs),
+                    clip: (file_id.0 != 0).then_some(*file_id),
+                },
                 display_file_ids: (*thumb_file_id).into_iter().collect(),
                 download_file_id: download,
                 caption: story.caption.clone(),
                 caption_entities: story.caption_entities.clone(),
                 duration_label: Some(format_voice_duration(*duration_secs)),
-                duration_secs: Some(*duration_secs),
-                video_file_id: (file_id.0 != 0).then_some(*file_id),
-                is_live: false,
-                live_call: None,
                 areas: story.areas.clone(),
             }
         }
@@ -453,19 +484,15 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
         } => StoryViewerItem {
             chat_id,
             story_id: story.id,
-            kind: StoryViewerKind::Live,
+            kind: StoryViewerKind::Live(LiveStoryCall {
+                group_call_id: *group_call_id,
+                is_rtmp_stream: *is_rtmp_stream,
+            }),
             display_file_ids: Vec::new(),
             download_file_id: FileId(0),
             caption: story.caption.clone(),
             caption_entities: story.caption_entities.clone(),
             duration_label: None,
-            duration_secs: None,
-            video_file_id: None,
-            is_live: true,
-            live_call: Some(LiveStoryCall {
-                group_call_id: *group_call_id,
-                is_rtmp_stream: *is_rtmp_stream,
-            }),
             areas: story.areas.clone(),
         },
         StoryContentView::Unsupported => StoryViewerItem {
@@ -477,10 +504,6 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
             caption: story.caption.clone(),
             caption_entities: story.caption_entities.clone(),
             duration_label: None,
-            duration_secs: None,
-            video_file_id: None,
-            is_live: false,
-            live_call: None,
             areas: story.areas.clone(),
         },
     };
@@ -525,8 +548,7 @@ mod tests {
             content: StoryContentView::Photo { sizes },
             caption: caption.to_string(),
             caption_entities: Vec::new(),
-            chosen_reaction_emoji: None,
-            chosen_reaction_extra: None,
+            chosen_reaction: None,
             interaction_info: None,
             can_be_deleted: false,
             can_be_replied: false,
@@ -568,8 +590,7 @@ mod tests {
             },
             caption: String::new(),
             caption_entities: Vec::new(),
-            chosen_reaction_emoji: None,
-            chosen_reaction_extra: None,
+            chosen_reaction: None,
             interaction_info: None,
             can_be_deleted: false,
             can_be_replied: false,
@@ -615,8 +636,20 @@ mod tests {
             .collect()
     }
 
+    const VIDEO: StoryViewerKind = StoryViewerKind::Video {
+        duration_secs: None,
+        clip: None,
+    };
+    const LIVE: StoryViewerKind = StoryViewerKind::Live(LiveStoryCall {
+        group_call_id: 1,
+        is_rtmp_stream: false,
+    });
+
     fn item(kind: StoryViewerKind, story_id: i32) -> StoryViewerItem {
-        playback_item(kind, story_id, None)
+        StoryViewerItem {
+            kind,
+            ..playback_item(StoryViewerKind::Photo, story_id, None)
+        }
     }
 
     fn playback_item(
@@ -624,6 +657,13 @@ mod tests {
         story_id: i32,
         duration_secs: Option<i32>,
     ) -> StoryViewerItem {
+        let kind = match kind {
+            StoryViewerKind::Video { clip, .. } => StoryViewerKind::Video {
+                duration_secs,
+                clip,
+            },
+            other => other,
+        };
         StoryViewerItem {
             chat_id: ChatId(7),
             story_id,
@@ -633,10 +673,6 @@ mod tests {
             caption: String::new(),
             caption_entities: Vec::new(),
             duration_label: None,
-            duration_secs,
-            video_file_id: None,
-            is_live: false,
-            live_call: None,
             areas: Vec::new(),
         }
     }
@@ -652,10 +688,7 @@ mod tests {
 
     #[test]
     fn open_clamps_index_and_reports_position() {
-        let items = vec![
-            item(StoryViewerKind::Photo, 5),
-            item(StoryViewerKind::Video, 6),
-        ];
+        let items = vec![item(StoryViewerKind::Photo, 5), item(VIDEO, 6)];
         let viewer = StoryViewer::open(items, 9);
         assert!(viewer.is_open());
         assert_eq!(viewer.current().unwrap().story_id, 6);
@@ -765,7 +798,7 @@ mod tests {
         let items = collect_story_items(ChatId(7), &tray(7, &[10]), &stories);
         assert_eq!(items.len(), 1);
         let item = &items[0];
-        assert_eq!(item.kind, StoryViewerKind::Video);
+        assert!(item.is_video());
         assert_eq!(item.display_file_ids, vec![FileId(50)]);
         assert_eq!(item.download_file_id, FileId(50));
         assert_eq!(item.duration_label.as_deref(), Some("0:12"));
@@ -792,10 +825,9 @@ mod tests {
         let stories = cache(vec![live, unsupported]);
         let items = collect_story_items(ChatId(7), &tray(7, &[10, 11]), &stories);
         assert_eq!(items.len(), 2);
-        assert_eq!(items[0].kind, StoryViewerKind::Live);
-        assert!(items[0].is_live);
+        assert!(items[0].is_live());
         assert_eq!(
-            items[0].live_call,
+            items[0].live_call(),
             Some(LiveStoryCall {
                 group_call_id: 99,
                 is_rtmp_stream: false,
@@ -817,14 +849,14 @@ mod tests {
 
     #[test]
     fn video_uses_its_own_duration() {
-        let item = playback_item(StoryViewerKind::Video, 6, Some(9));
+        let item = playback_item(VIDEO, 6, Some(9));
         assert_eq!(StoryPlayback::duration(&item), Duration::from_secs(9));
     }
 
     #[test]
     fn broken_video_duration_falls_back_to_photo() {
         for secs in [0, -3] {
-            let item = playback_item(StoryViewerKind::Video, 6, Some(secs));
+            let item = playback_item(VIDEO, 6, Some(secs));
             assert_eq!(StoryPlayback::duration(&item), STORY_PHOTO_DURATION);
         }
     }
@@ -833,11 +865,11 @@ mod tests {
     fn collect_video_carries_duration_secs() {
         let stories = cache(vec![video_story(7, 10, Some(50), 51, 12)]);
         let items = collect_story_items(ChatId(7), &tray(7, &[10]), &stories);
-        assert_eq!(items[0].duration_secs, Some(12));
+        assert_eq!(items[0].duration_secs(), Some(12));
         assert_eq!(StoryPlayback::duration(&items[0]), Duration::from_secs(12));
         let stories = cache(vec![photo_story(7, 11, vec![size(1, 100, 100)], "")]);
         let items = collect_story_items(ChatId(7), &tray(7, &[11]), &stories);
-        assert_eq!(items[0].duration_secs, None);
+        assert_eq!(items[0].duration_secs(), None);
     }
 
     #[test]
@@ -855,7 +887,7 @@ mod tests {
         assert_eq!(playback.progress(&item, now + Duration::from_secs(30)), 1.0);
         assert!(playback.finished(&item, now + Duration::from_secs(30)));
         // A live story plays until its stream ends.
-        let live = playback_item(StoryViewerKind::Live, 6, None);
+        let live = playback_item(LIVE, 6, None);
         assert!(!playback.finished(&live, now + Duration::from_secs(300)));
     }
 

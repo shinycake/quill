@@ -844,8 +844,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             );
         }
         if installed_stickers_answer
-            && self.session.stickers.stickers.suggest_waiting_for_sets
-            && let Some(emoji) = self.session.stickers.stickers.suggest_for.take()
+            && let crate::state::SuggestFor::WaitingForSets(emoji) =
+                std::mem::take(&mut self.session.stickers.stickers.suggest_for)
         {
             self.update_sticker_suggestions(&emoji)?;
         }

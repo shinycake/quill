@@ -157,7 +157,7 @@ impl QuillApp {
                         MessageContent::Sticker(sticker) => {
                             // tdesktop `Sticker::mirrorHorizontal`.
                             let mirror = crate::ui::sticker_player::mirrors(
-                                sticker.premium_animation.is_some(),
+                                sticker.premium_animation().is_some(),
                                 quill::chat_wide::has_right_layout(message.is_outgoing, look.wide),
                             );
                             let (w, h) = crate::ui::message_media::sticker_box(

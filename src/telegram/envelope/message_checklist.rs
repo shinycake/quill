@@ -2,20 +2,25 @@ use super::*;
 use serde_json::Value;
 
 /// `checklistTask` (TDLib 1.8.67, `schema/td_api.tl:518`).
-/// `completed_by` is `None` while the task is open; `completion_date` is 0
-/// then.
+/// `completion` is `None` while the task is open.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChecklistTask {
     pub id: i32,
     pub text: String,
-    pub completed_by: Option<MessageSender>,
-    pub completion_date: i32,
+    pub completion: Option<TaskCompletion>,
+}
+
+/// A task marked done: who did it (unknown for a hidden sender) and when.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskCompletion {
+    pub by: Option<MessageSender>,
+    pub date: i32,
 }
 
 impl ChecklistTask {
     /// A task counts as done when the server stamped a completion date.
     pub fn is_done(&self) -> bool {
-        self.completion_date != 0
+        self.completion.is_some()
     }
 }
 
@@ -60,12 +65,17 @@ pub(crate) fn parse_checklist(value: &Value) -> Checklist {
                     .unwrap_or(0)
                     .sat_i32(),
                 text: parse_formatted_text(task.get("text")),
-                completed_by: parse_message_sender(task.get("completed_by")).ok(),
-                completion_date: task
-                    .get("completion_date")
-                    .and_then(Value::as_i64)
-                    .unwrap_or(0)
-                    .sat_i32(),
+                completion: {
+                    let date = task
+                        .get("completion_date")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(0)
+                        .sat_i32();
+                    (date != 0).then(|| TaskCompletion {
+                        by: parse_message_sender(task.get("completed_by")).ok(),
+                        date,
+                    })
+                },
             })
             .collect(),
         others_can_add_tasks: flag("others_can_add_tasks"),
@@ -124,11 +134,14 @@ mod tests {
         assert_eq!(content.list.tasks.len(), 2);
         assert!(content.list.tasks[0].is_done());
         assert_eq!(
-            content.list.tasks[0].completed_by,
+            content.list.tasks[0]
+                .completion
+                .as_ref()
+                .and_then(|done| done.by),
             Some(MessageSender::User { user_id: 9 })
         );
         assert!(!content.list.tasks[1].is_done());
-        assert_eq!(content.list.tasks[1].completed_by, None);
+        assert_eq!(content.list.tasks[1].completion, None);
         assert_eq!(content.list.done_count(), 1);
         assert!(content.list.can_add_tasks && content.list.can_mark_tasks_as_done);
     }

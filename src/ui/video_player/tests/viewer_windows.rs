@@ -86,8 +86,13 @@ fn chat_window_with_clip(
             &app.demo_ui.seq,
         );
         session.media.files.update(CLIP_FILE, |file| {
-            file.local.is_downloading_completed = local;
-            file.local.is_downloading_active = false;
+            file.local = quill::telegram::envelope::LocalFileState::from_parts(
+                file.local.path().to_string(),
+                file.local.can_be_downloaded(),
+                false,
+                local,
+                file.local.downloaded_size(),
+            );
         });
         if let Some(chat) = session.chats.get_mut(&CHAT.0) {
             chat.unread_count = 0;

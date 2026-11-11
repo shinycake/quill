@@ -287,7 +287,7 @@ impl QuillApp {
         } else {
             (row.status.display(), row.status.is_online())
         };
-        let badge = member_badge(row.member.status, &row.member.tag);
+        let badge = member_badge(row.member.status(), &row.member.tag);
         let id = row.user_id.unwrap_or_default();
         let mut line = div()
             .id(format!("inline-member-{id}"))

@@ -295,17 +295,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         match (current, content) {
             (None, None) => true,
             (Some(draft), Some(content)) => {
-                draft.text == content.text()
-                    && draft.rich.as_ref() == content.rich()
-                    && draft.reply_to_message_id == reply_to.map(|reply| reply.message_id)
+                draft.text() == content.text()
+                    && draft.rich() == content.rich()
+                    && draft.reply_to_message_id() == reply_to.map(|reply| reply.message_id)
                     // The same part of the message: TDLib may echo the
                     // formatting in another shape.
-                    && match (&draft.quote, reply_to.and_then(|reply| reply.quote.as_ref())) {
+                    && match (draft.quote(), reply_to.and_then(|reply| reply.quote.as_ref())) {
                         (None, None) => true,
                         (Some(saved), Some(quote)) => saved.same_part(quote),
                         _ => false,
                     }
-                    && draft.item == reply_to.map(|reply| reply.item.clone()).unwrap_or_default()
+                    && draft.item() == reply_to.map(|reply| reply.item.clone()).unwrap_or_default()
                     && draft.suggested_post == terms
             }
             _ => false,
@@ -350,14 +350,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                             || reply_to.is_some()
                             || terms.is_some()
                     })
-                    .map(|content| ChatDraft {
-                        text: content.text().to_string(),
-                        rich: content.rich().cloned(),
-                        reply_to_message_id: reply_to.map(|reply| reply.message_id),
-                        quote: reply_to.and_then(|reply| reply.quote.clone()),
-                        item: reply_to.map(|reply| reply.item.clone()).unwrap_or_default(),
-                        suggested_post: terms,
-                    });
+                    .map(|content| ChatDraft::of(content, reply_to, terms));
                 self.session.store_composer_draft(chat_id, topic, draft);
                 Ok(extra)
             }

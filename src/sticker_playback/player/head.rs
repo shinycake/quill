@@ -94,29 +94,35 @@ pub struct Pick {
 
 /// One view's position in its clip.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct PlayHead {
-    pos: Duration,
-    last: Option<Instant>,
-    started: bool,
+pub enum PlayHead {
+    /// Its first frame is not shown yet: the clock has not started.
+    #[default]
+    Waiting,
+    /// Playing: how far it played, and when it last moved.
+    Playing { pos: Duration, last: Instant },
 }
 
 impl PlayHead {
     /// Whether its first frame was shown.
     pub fn started(&self) -> bool {
-        self.started
+        matches!(self, Self::Playing { .. })
     }
 
     /// How far it played (while its view was drawn).
     pub fn pos(&self) -> Duration {
-        self.pos
+        match self {
+            Self::Waiting => Duration::ZERO,
+            Self::Playing { pos, .. } => *pos,
+        }
     }
 
     /// The first frame is on screen: the clock starts now.
     pub fn start(&mut self, now: Instant) {
-        if !self.started {
-            self.started = true;
-            self.pos = Duration::ZERO;
-            self.last = Some(now);
+        if !self.started() {
+            *self = Self::Playing {
+                pos: Duration::ZERO,
+                last: now,
+            };
         }
     }
 
@@ -135,20 +141,18 @@ impl PlayHead {
         high_rate: bool,
         display_hz: f64,
     ) -> Option<Pick> {
-        if self.started {
+        if let Self::Playing { pos, last } = self {
             // A paint can read an earlier time than the last one: time
             // counted once must not be counted again.
-            let now = self.last.map_or(now, |last| last.max(now));
-            if let Some(last) = self.last {
-                let gap = now.saturating_duration_since(last);
-                if gap <= PAUSE_GAP {
-                    self.pos = self.pos.saturating_add(gap);
-                }
+            let now = (*last).max(now);
+            let gap = now.saturating_duration_since(*last);
+            if gap <= PAUSE_GAP {
+                *pos = pos.saturating_add(gap);
             }
-            self.last = Some(now);
+            *last = now;
         }
-        let mut pick = pick(self.pos, mode, timeline, high_rate, display_hz)?;
-        if !self.started {
+        let mut pick = pick(self.pos(), mode, timeline, high_rate, display_hz)?;
+        if !self.started() {
             // Waiting for the first frame keeps the view ticking.
             pick.animating = !matches!(mode, PlayMode::At(_)) || pick.animating;
         }
@@ -166,9 +170,8 @@ impl PlayHead {
         high_rate: bool,
         display_hz: f64,
     ) -> bool {
-        if self
-            .last
-            .is_some_and(|last| at.saturating_duration_since(last) >= REPAINT_GAP)
+        if let Self::Playing { last, .. } = self
+            && at.saturating_duration_since(*last) >= REPAINT_GAP
         {
             return true;
         }

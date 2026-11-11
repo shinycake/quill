@@ -211,7 +211,7 @@ fn a_failed_stories_tab_ends_its_loading() {
         .ingest(copy_and_parse(&failed, &seq, &sink).unwrap())
         .unwrap();
     let tab = &driver.session.media.shared_media.tabs[SharedMediaTab::Stories.index()];
-    assert_eq!(tab.status, crate::state::SharedMediaTabStatus::Failed);
-    assert!(!tab.loading_more);
+    assert!(tab.status.is_failed());
+    assert!(!tab.loading_more());
     let _ = std::fs::remove_dir_all(dir);
 }

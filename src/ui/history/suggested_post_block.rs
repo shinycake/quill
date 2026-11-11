@@ -28,9 +28,9 @@ fn resolve_changes(session: &Session, message: &HistoryMessage) -> Option<Change
     let reply = message.reply_to.as_ref()?;
     let original = session
         .histories
-        .get(&reply.chat_id.0)?
+        .get(&reply.chat_id().0)?
         .messages
-        .get(&reply.message_id.0)?;
+        .get(&reply.message_id().0)?;
     let was = original.extras.suggested_post?.terms();
     Changes::resolve(Some(was), now, original.content == message.content)
 }

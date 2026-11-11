@@ -358,7 +358,11 @@ fn sending_drops_a_reply_to_a_message_deleted_since_the_last_frame(cx: &mut Test
                 h.messages
                     .iter()
                     .filter(|(id, _)| !before.contains(id))
-                    .filter(|(_, m)| m.reply_to.as_ref().is_some_and(|r| r.message_id == REPLIED))
+                    .filter(|(_, m)| {
+                        m.reply_to
+                            .as_ref()
+                            .is_some_and(|r| r.message_id() == REPLIED)
+                    })
                     .count()
             })
             .unwrap_or_default()

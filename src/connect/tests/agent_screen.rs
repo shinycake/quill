@@ -86,7 +86,7 @@ fn reads_refused_for_money_settle_like_tdlib_errors() {
             .shared_media
             .tabs
             .get(SharedMediaTab::Gifts.index())
-            .map(|tab| tab.status)
+            .map(|tab| tab.status.clone())
     };
     let stars = |driver: &ConnectDriver<Arc<RecordingSender>>| {
         driver
@@ -168,7 +168,7 @@ fn a_channel_and_a_profile_opened_by_the_agent_leave_nothing_pending() {
                 .shared_media
                 .tabs
                 .get(SharedMediaTab::Gifts.index())
-                .map(|tab| tab.status),
+                .map(|tab| tab.status.clone()),
             Some(SharedMediaTabStatus::Loading),
             "{chat:?}"
         );

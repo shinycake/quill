@@ -89,7 +89,7 @@ fn stored_draft(
     app.read_with(vcx, |app, _| {
         app.session()
             .and_then(|session| session.draft_for(chat, Default::default()))
-            .map(|draft| draft.text.clone())
+            .map(|draft| draft.text().to_string())
     })
 }
 

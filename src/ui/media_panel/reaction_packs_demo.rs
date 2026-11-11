@@ -39,8 +39,7 @@ impl QuillApp {
                     thumb_file_id: None,
                     thumb_width: 0,
                     thumb_height: 0,
-                    requires_premium: false,
-                    premium_animation: None,
+                    premium: None,
                 })
                 .collect();
             session.stickers.emoji.installed_sets.push(StickerSetInfo {

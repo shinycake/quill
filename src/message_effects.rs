@@ -66,7 +66,7 @@ impl MessageEffect {
                 }),
             EffectKind::Sticker { sticker } => sticker
                 .as_ref()
-                .and_then(|sticker| sticker.premium_animation)
+                .and_then(|sticker| sticker.premium_animation())
                 .filter(|file| file.0 != 0)
                 .map(|file| EffectAnimation {
                     file,

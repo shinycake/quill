@@ -148,7 +148,7 @@ impl QuillApp {
         if !session.accepts_composer_draft(chat_id, topic) {
             return None;
         }
-        session.draft_for(chat_id, topic)?.rich.as_ref()
+        session.draft_for(chat_id, topic)?.rich()
     }
 
     /// The draft's blocks drawn where the field is, capped at the field's

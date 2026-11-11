@@ -242,9 +242,9 @@ fn reply_from_another_chat_names_sender_and_chat() {
         ),
     );
     let reply = message(&session, 12).reply_to.unwrap();
-    assert_eq!(reply.origin_send_date, 1699000000);
-    assert!(matches!(reply.origin, Some(MessageOrigin::User { .. })));
-    assert!(reply.content.is_some());
+    assert_eq!(reply.origin_send_date(), 1699000000);
+    assert!(matches!(reply.origin(), Some(MessageOrigin::User { .. })));
+    assert!(reply.content().is_some());
     let header = session.reply_header(&message(&session, 12)).unwrap();
     assert_eq!(header.state, ReplyState::Ready);
     assert_eq!(header.external_chat.as_deref(), Some("Ada Lovelace"));

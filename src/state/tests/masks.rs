@@ -109,7 +109,7 @@ fn a_mask_set_answer_fills_the_strip_for_that_set() {
     let stickers = session.stickers.masks.set_stickers(11);
     assert_eq!(stickers.len(), 1);
     assert_eq!(stickers[0].emoji, "🎩");
-    assert!(!stickers[0].requires_premium);
+    assert!(!stickers[0].requires_premium());
 }
 
 #[test]

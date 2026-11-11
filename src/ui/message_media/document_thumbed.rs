@@ -38,7 +38,7 @@ pub(in crate::ui) fn thumbed_document_chip(
     let progress = file.and_then(|f| f.download_progress());
     let size = file.map(|f| f.display_size()).unwrap_or(0);
     let status = if downloading_now {
-        let done = file.map(|f| f.local.downloaded_size).unwrap_or(0);
+        let done = file.map(|f| f.local.downloaded_size()).unwrap_or(0);
         match (done > 0, size > 0) {
             (true, true) => format!("{} of {}", format_bytes(done), format_bytes(size)),
             _ => tr(keys::Q_MISC_DOWNLOADING).to_string(),

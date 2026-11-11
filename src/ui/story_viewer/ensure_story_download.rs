@@ -28,7 +28,7 @@ impl QuillApp {
             self.request_media_download(item.download_file_id, None, cx);
         }
         // B14: a video story also needs its clip to play.
-        if let Some(video_id) = item.video_file_id
+        if let Some(video_id) = item.video_file_id()
             && video_id != item.download_file_id
         {
             let roots = self.media_display_roots();
@@ -66,7 +66,7 @@ impl QuillApp {
                     .iter()
                     .copied()
                     .chain([item.download_file_id])
-                    .chain(item.video_file_id)
+                    .chain(item.video_file_id())
                     .collect()
             })
             .unwrap_or_default();
@@ -143,7 +143,8 @@ impl QuillApp {
                     }
                     match session.media.files.get(&file_id.0) {
                         Some(file)
-                            if file.usable_path().is_some() || file.local.is_downloading_active =>
+                            if file.usable_path().is_some()
+                                || file.local.is_downloading_active() =>
                         {
                             None
                         }

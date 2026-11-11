@@ -60,7 +60,7 @@ fn a_gifts_page_asked_before_the_gallery_reopened_is_dropped() {
     );
     let gifts = tab(&session, SharedMediaTab::Gifts);
     assert!(gifts.items.is_empty());
-    assert_eq!(gifts.status, SharedMediaTabStatus::Loading);
+    assert!(gifts.status.is_loading());
     assert_eq!(gifts.next_offset, "");
 }
 
@@ -95,7 +95,7 @@ fn a_stories_page_asked_before_the_gallery_reopened_is_dropped() {
     );
     let stories = tab(&session, SharedMediaTab::Stories);
     assert!(stories.items.is_empty());
-    assert_eq!(stories.status, SharedMediaTabStatus::Loading);
+    assert!(stories.status.is_loading());
     assert!(!session.stories.chat_page_stories.contains_key(&6));
 }
 
@@ -219,7 +219,7 @@ fn received_gifts_fill_the_gifts_tab_without_touching_the_gifts_dialog() {
         ),
     );
     let gifts = tab(&session, SharedMediaTab::Gifts);
-    assert_eq!(gifts.status, SharedMediaTabStatus::Ready);
+    assert!(gifts.status.is_ready());
     assert_eq!(gifts.items[0].label, "100 Stars — Happy birthday!");
     assert_eq!(gifts.items[1].label, "Plush Pepe #123");
     assert_eq!(gifts.items[0].action, SharedMediaAction::Gift);
@@ -299,7 +299,7 @@ fn chat_page_stories_fill_the_stories_tab_and_failures_hide_it() {
         ),
     );
     let stories = tab(&session, SharedMediaTab::Stories);
-    assert_eq!(stories.status, SharedMediaTabStatus::Ready);
+    assert!(stories.status.is_ready());
     assert_eq!(stories.items.len(), 2);
     assert_eq!(stories.items[0].action, SharedMediaAction::Story(5));
     assert_eq!(stories.total_count, 3);
@@ -334,8 +334,8 @@ fn chat_page_stories_fill_the_stories_tab_and_failures_hide_it() {
         ),
     );
     let gifts = tab(&session, SharedMediaTab::Gifts);
-    assert_eq!(gifts.status, SharedMediaTabStatus::Failed);
-    assert!(!gifts.error.is_empty());
+    assert!(gifts.status.is_failed());
+    assert!(!gifts.error().is_empty());
     assert_eq!(session.media.chat_media_counts[&6][&COUNT_KEY_GIFTS], 0);
     assert!(
         !session

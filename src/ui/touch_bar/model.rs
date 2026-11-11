@@ -360,7 +360,7 @@ impl PickerSticker {
                 .filter(|id| id.0 != 0)
                 .map(|id| (id, item.thumb_width, item.thumb_height)),
             display: item.display_file_id(),
-            premium: item.requires_premium,
+            premium: item.requires_premium(),
         }
     }
 }
@@ -389,7 +389,7 @@ pub(crate) fn sticker_items(
     sets: &[StickerSection<'_>],
     show_premium: bool,
 ) -> Vec<PickerItem> {
-    let listed = |item: &&StickerItem| show_premium || !item.requires_premium;
+    let listed = |item: &&StickerItem| show_premium || !item.requires_premium();
     let mut items = Vec::new();
     let favorites: Vec<&StickerItem> = favorites.iter().filter(listed).collect();
     if !favorites.is_empty() {

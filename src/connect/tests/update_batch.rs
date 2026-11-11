@@ -261,8 +261,7 @@ fn a_refused_custom_emoji_file_downloads_once_its_transfer_stops() {
             thumb_file_id: None,
             thumb_width: 0,
             thumb_height: 0,
-            requires_premium: false,
-            premium_animation: None,
+            premium: None,
         },
     );
     driver.session.open = crate::state::OpenView::of(Some(ChatId(4)));

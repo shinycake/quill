@@ -97,7 +97,7 @@ fn driver_story_reaction_set_remove_and_gates() {
         r#""chosen_reaction_type":{"@type":"reactionTypeEmoji","emoji":"👍"},"#,
     );
     let story = driver.session.stories.stories.get(&(7, 5)).unwrap();
-    assert_eq!(story.chosen_reaction_emoji.as_deref(), Some("👍"));
+    assert_eq!(story.chosen_reaction_emoji(), Some("👍"));
 
     let _ = std::fs::remove_dir_all(&dir);
 }

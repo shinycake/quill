@@ -116,6 +116,7 @@ impl QuillApp {
         if self.demo_session.is_some() {
             return;
         }
+        quill::system_accent::refresh();
         self.preferences.system_accent = SystemAccent::Read(quill::system_accent::read());
         if quill::system_accent::pending() && self.preferences.system_accent_poll.is_none() {
             // screen-scope: the system accent is an app-wide setting; it applies to whichever account is on screen.

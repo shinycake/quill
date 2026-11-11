@@ -197,14 +197,13 @@ fn closing_the_playlist_goes_back_to_the_gallery_under_it(cx: &mut TestAppContex
             .expect("demo session")
             .media
             .shared_media;
-        shared.open = true;
         shared.chat_id = Some(quill::ids::ChatId(5));
         app.close_playlist_ui(cx);
     });
     app.read_with(vcx, |app, _| {
         let shared = &app.session().expect("session").media.shared_media;
         assert_eq!(shared.playlist_user, None);
-        assert!(shared.open, "the gallery stays");
+        assert!(shared.open(), "the gallery stays");
         assert_eq!(shared.chat_id, Some(quill::ids::ChatId(5)));
     });
 }

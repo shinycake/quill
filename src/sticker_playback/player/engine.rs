@@ -45,9 +45,8 @@ pub(super) struct Clip {
     /// out for that one must not land in this one.
     pub(super) id: u64,
     pub(super) worker: usize,
-    /// Set until a worker takes it to open the clip.
-    pub(super) origin: Option<Origin>,
-    pub(super) state: ClipState,
+    /// Where it stands: waiting for a worker, opening, ready or drawing.
+    pub(super) stage: Stage,
     pub(super) store: Store,
     /// Frames decoded up front live only in the store: dropping it closes
     /// the clip.
@@ -55,9 +54,6 @@ pub(super) struct Clip {
     /// What its source holds besides the store (canvas, last frame).
     pub(super) source_bytes: usize,
     pub(super) wanted: VecDeque<u32>,
-    /// A worker is on it, and the frame it is drawing.
-    pub(super) busy: bool,
-    pub(super) drawing: Option<u32>,
     /// A frame of it was handed out.
     pub(super) delivered: bool,
     pub(super) used: Instant,
@@ -70,10 +66,67 @@ pub(super) struct Clip {
     pub(super) coarse: bool,
 }
 
+/// A clip's stage: one value for what the worker holding it is doing.
+pub(super) enum Stage {
+    /// Not taken yet: a worker takes `Origin` to open it.
+    Waiting(Origin),
+    /// A worker is opening (or decoding) it.
+    Opening,
+    /// Open, and no worker is on it.
+    Ready(ClipInfo),
+    /// Open, and a worker is drawing frame `index`.
+    Drawing {
+        info: ClipInfo,
+        index: u32,
+    },
+    Failed(String),
+}
+
+impl Stage {
+    /// What the UI sees: a clip not open yet is opening.
+    pub(super) fn state(&self) -> ClipState {
+        match self {
+            Self::Waiting(_) | Self::Opening => ClipState::Opening,
+            Self::Ready(info) | Self::Drawing { info, .. } => ClipState::Ready(*info),
+            Self::Failed(error) => ClipState::Failed(error.clone()),
+        }
+    }
+
+    /// A worker is on it.
+    pub(super) fn busy(&self) -> bool {
+        matches!(self, Self::Opening | Self::Drawing { .. })
+    }
+
+    fn drawing(&self) -> Option<u32> {
+        match self {
+            Self::Drawing { index, .. } => Some(*index),
+            _ => None,
+        }
+    }
+
+    fn info(&self) -> Option<&ClipInfo> {
+        match self {
+            Self::Ready(info) | Self::Drawing { info, .. } => Some(info),
+            _ => None,
+        }
+    }
+
+    pub(super) fn failed(&self) -> bool {
+        matches!(self, Self::Failed(_))
+    }
+
+    /// The frame came back: ready again. No effect on any other stage.
+    pub(super) fn frame_done(&mut self) {
+        if let Self::Drawing { info, .. } = self {
+            *self = Self::Ready(*info);
+        }
+    }
+}
+
 impl Clip {
     /// Notes that one of its frames took `draw` to draw.
     pub(super) fn note_draw(&mut self, draw: Duration) {
-        if let ClipState::Ready(info) = &self.state {
+        if let Some(info) = self.stage.info() {
             self.coarse |= self.draw_cost.note(draw, info.timeline);
         }
     }
@@ -233,12 +286,11 @@ impl State {
         }
         let mut changed = false;
         for clip in self.clips.values_mut().filter(|clip| clip.worker == index) {
-            if matches!(clip.state, ClipState::Failed(_)) {
+            if clip.stage.failed() {
                 continue;
             }
-            clip.state = ClipState::Failed("the sticker worker ended".to_string());
+            clip.stage = Stage::Failed("the sticker worker ended".to_string());
             clip.wanted.clear();
-            clip.drawing = None;
             changed = true;
         }
         changed
@@ -372,15 +424,12 @@ impl Engine {
             Clip {
                 id,
                 worker,
-                origin: Some(origin),
-                state: ClipState::Opening,
+                stage: Stage::Waiting(origin),
                 store: Store::default(),
                 store_only,
                 source_bytes: 0,
                 // Its first frame, for the still a view waits on.
                 wanted: VecDeque::from([0]),
-                busy: false,
-                drawing: None,
                 delivered: false,
                 used: Instant::now(),
                 served: 0,
@@ -398,7 +447,7 @@ impl Engine {
         lock_or_recover(&self.shared.state)
             .clips
             .get(key)
-            .map(|clip| clip.state.clone())
+            .map(|clip| clip.stage.state())
     }
 
     /// Whether `key` plays only at its file's own rate (its frames draw
@@ -430,11 +479,11 @@ impl Engine {
         };
         clip.used = Instant::now();
         clip.wanted.clear();
-        if matches!(clip.state, ClipState::Failed(_)) {
+        if clip.stage.failed() {
             return;
         }
         for index in frames.iter().copied() {
-            let pending = clip.drawing == Some(index)
+            let pending = clip.stage.drawing() == Some(index)
                 || rendered
                     .iter()
                     .any(|frame| frame.key == *key && frame.index == index);
@@ -442,7 +491,7 @@ impl Engine {
                 clip.wanted.push_back(index);
             }
         }
-        let work = !clip.wanted.is_empty() && !clip.busy;
+        let work = !clip.wanted.is_empty() && !clip.stage.busy();
         drop(state);
         if work {
             self.shared.work.notify_all();
@@ -539,9 +588,9 @@ impl State {
     }
 
     fn idle(&self) -> bool {
-        self.clips
-            .values()
-            .all(|clip| clip.origin.is_none() && !clip.busy && clip.wanted.is_empty())
+        self.clips.values().all(|clip| {
+            !matches!(clip.stage, Stage::Waiting(_)) && !clip.stage.busy() && clip.wanted.is_empty()
+        })
     }
 
     pub(super) fn close(&mut self, key: &ClipKey) {
@@ -582,7 +631,7 @@ impl State {
                 .iter()
                 .filter(|(key, clip)| {
                     *key != keep
-                        && !clip.busy
+                        && !clip.stage.busy()
                         && clip.store.bytes() > 0
                         && now.saturating_duration_since(clip.used) >= ON_SCREEN
                 })
@@ -639,12 +688,12 @@ impl State {
     pub(super) fn next_job(&mut self, me: usize) -> Option<Job> {
         let workers_decode = self.workers_decode;
         let opening = self.clips.iter().find_map(|(key, clip)| {
-            let own = match clip.origin {
-                Some(Origin::Lottie(_)) => true,
-                Some(Origin::Decoded(_)) => workers_decode,
-                None => false,
+            let own = match &clip.stage {
+                Stage::Waiting(Origin::Lottie(_)) => true,
+                Stage::Waiting(Origin::Decoded(_)) => workers_decode,
+                _ => false,
             };
-            (clip.worker == me && !clip.busy && own).then_some(*key)
+            (clip.worker == me && own).then_some(*key)
         });
         let in_a_row = self.frames_in_a_row.get(me).copied().unwrap_or(0);
         let frames_first = opening.is_none() || in_a_row < FRAMES_BEFORE_OPEN;
@@ -660,9 +709,11 @@ impl State {
         }
         let key = opening?;
         let clip = self.clips.get_mut(&key)?;
-        clip.busy = true;
         let id = clip.id;
-        match clip.origin.take()? {
+        let Stage::Waiting(origin) = std::mem::replace(&mut clip.stage, Stage::Opening) else {
+            return None;
+        };
+        match origin {
             Origin::Lottie(path) => Some(Job::Open { key, id, path }),
             Origin::Decoded(decode) => Some(Job::Decode {
                 key,
@@ -681,9 +732,8 @@ impl State {
             .iter()
             .filter(|(_, clip)| {
                 clip.worker == me
-                    && !clip.busy
                     && !clip.wanted.is_empty()
-                    && matches!(clip.state, ClipState::Ready(_))
+                    && matches!(clip.stage, Stage::Ready(_))
             })
             .min_by_key(|(_, clip)| clip.served)
             .map(|(key, _)| *key)?;
@@ -691,8 +741,10 @@ impl State {
         let served = self.served;
         let clip = self.clips.get_mut(&key)?;
         let index = clip.wanted.pop_front()?;
-        clip.busy = true;
-        clip.drawing = Some(index);
+        let Stage::Ready(info) = clip.stage else {
+            return None;
+        };
+        clip.stage = Stage::Drawing { info, index };
         clip.served = served;
         let stored = clip.store.get(index);
         Some(Job::Frame {
@@ -712,11 +764,12 @@ impl State {
         let (key, clip) = self
             .clips
             .iter_mut()
-            .find(|(_, clip)| !clip.busy && matches!(clip.origin, Some(Origin::Decoded(_))))?;
-        let Some(Origin::Decoded(decode)) = clip.origin.take() else {
+            .find(|(_, clip)| matches!(clip.stage, Stage::Waiting(Origin::Decoded(_))))?;
+        let Stage::Waiting(Origin::Decoded(decode)) =
+            std::mem::replace(&mut clip.stage, Stage::Opening)
+        else {
             return None;
         };
-        clip.busy = true;
         Some((*key, clip.id, decode, clip.cancel.clone()))
     }
 }

@@ -1,51 +1,99 @@
 //! Share box and "send as" state.
 use super::*;
 
-/// Share box search: the typed query, the in-flight `searchChats` /
-/// `searchChatsOnServer` requests and their answers.
+/// One half of the share box search: its request in flight, or its answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SearchPart {
+    Waiting(RequestId),
+    Done(Vec<i64>),
+}
+
+impl SearchPart {
+    fn ids(&self) -> &[i64] {
+        match self {
+            Self::Waiting(_) => &[],
+            Self::Done(ids) => ids,
+        }
+    }
+}
+
+/// Share box search: no query, or the trimmed query with its `searchChats`
+/// and `searchChatsOnServer` requests and answers.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ShareSearch {
-    /// Trimmed query the answers belong to.
-    pub query: String,
-    local_request: Option<RequestId>,
-    server_request: Option<RequestId>,
-    /// `searchChats` answer, in TDLib order.
-    pub local: Vec<i64>,
-    /// `searchChatsOnServer` answer, in TDLib order.
-    pub server: Vec<i64>,
+pub enum ShareSearch {
+    #[default]
+    Idle,
+    Searching {
+        /// Trimmed query the answers belong to.
+        query: String,
+        /// `searchChats` answer, in TDLib order.
+        local: SearchPart,
+        /// `searchChatsOnServer` answer, in TDLib order.
+        server: SearchPart,
+    },
 }
 
 impl ShareSearch {
     /// Start a new search; earlier answers and requests are dropped.
     pub fn begin(&mut self, query: &str, local: RequestId, server: RequestId) {
-        self.query = query.trim().to_string();
-        self.local_request = Some(local);
-        self.server_request = Some(server);
-        self.local.clear();
-        self.server.clear();
+        *self = Self::Searching {
+            query: query.trim().to_string(),
+            local: SearchPart::Waiting(local),
+            server: SearchPart::Waiting(server),
+        };
     }
 
     /// Forget the search (empty query).
     pub fn clear(&mut self) {
-        *self = Self::default();
+        *self = Self::Idle;
+    }
+
+    /// The query the answers belong to; empty when there is no search.
+    pub fn query(&self) -> &str {
+        match self {
+            Self::Idle => "",
+            Self::Searching { query, .. } => query,
+        }
+    }
+
+    /// `searchChats` answer so far.
+    pub fn local(&self) -> &[i64] {
+        match self {
+            Self::Idle => &[],
+            Self::Searching { local, .. } => local.ids(),
+        }
+    }
+
+    /// `searchChatsOnServer` answer so far.
+    pub fn server(&self) -> &[i64] {
+        match self {
+            Self::Idle => &[],
+            Self::Searching { server, .. } => server.ids(),
+        }
     }
 
     /// Take an answer when it belongs to the current search; late answers
     /// of an older query are ignored.
     pub fn accept(&mut self, request: RequestId, chat_ids: &[ChatId]) {
+        let Self::Searching { local, server, .. } = self else {
+            return;
+        };
         let ids = chat_ids.iter().map(|id| id.0).collect();
-        if self.local_request == Some(request) {
-            self.local_request = None;
-            self.local = ids;
-        } else if self.server_request == Some(request) {
-            self.server_request = None;
-            self.server = ids;
+        if *local == SearchPart::Waiting(request) {
+            *local = SearchPart::Done(ids);
+        } else if *server == SearchPart::Waiting(request) {
+            *server = SearchPart::Done(ids);
         }
     }
 
     /// Whether an answer is still outstanding.
     pub fn is_searching(&self) -> bool {
-        self.local_request.is_some() || self.server_request.is_some()
+        match self {
+            Self::Idle => false,
+            Self::Searching { local, server, .. } => {
+                matches!(local, SearchPart::Waiting(_)) || matches!(server, SearchPart::Waiting(_))
+            }
+        }
     }
 }
 
@@ -78,16 +126,16 @@ impl Session {
         {
             result.insert(0, saved);
         }
-        if query.trim().is_empty() || self.messages.share_search.query != query.trim() {
+        if query.trim().is_empty() || self.messages.share_search.query() != query.trim() {
             return result;
         }
         let mut seen: HashSet<i64> = result.iter().map(|chat| chat.id.0).collect();
         for id in self
             .messages
             .share_search
-            .local
+            .local()
             .iter()
-            .chain(self.messages.share_search.server.iter())
+            .chain(self.messages.share_search.server().iter())
         {
             if let Some(chat) = self.chats.get(id)
                 && Self::can_share_to(chat)

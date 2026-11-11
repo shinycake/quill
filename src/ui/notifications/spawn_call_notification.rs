@@ -425,7 +425,7 @@ impl QuillApp {
             let stored = self
                 .session()
                 .and_then(|session| session.draft_for(chat_id, topic))
-                .map(|draft| draft.text.clone());
+                .map(|draft| draft.text().to_string());
             if !flag.matches(chat_id, stored.as_deref()) {
                 continue;
             }

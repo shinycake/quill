@@ -475,7 +475,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.calls.add_people_search.query == query {
+        if self.session.calls.add_people_search.query() == query {
             return Ok(());
         }
         let mine = self

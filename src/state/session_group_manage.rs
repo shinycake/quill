@@ -76,7 +76,7 @@ impl Session {
                         .iter()
                         .filter(|m| {
                             matches!(
-                                m.status,
+                                m.status(),
                                 ChannelMemberStatus::Creator | ChannelMemberStatus::Administrator
                             )
                         })

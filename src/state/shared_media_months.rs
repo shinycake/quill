@@ -91,10 +91,7 @@ impl Session {
     /// gallery is closed or the tab has no calendar (GIFs).
     pub fn open_shared_media_calendar(&mut self, now: i64) -> Option<&HistoryCalendar> {
         let gallery = &self.media.shared_media;
-        let (chat_id, tab) = (
-            gallery.chat_id.filter(|_| gallery.open)?,
-            gallery.active_tab,
-        );
+        let (chat_id, tab) = (gallery.chat_id?, gallery.active_tab);
         let media = calendar_media(tab)?;
         let generation = self.next_calendar_generation();
         self.search.clear_date_jump_note();

@@ -20,15 +20,8 @@ pub enum GroupsPayload {
         member_count: i32,
         /// Own `basicGroup.status` (schema 1.8.67, line 2714); `Unknown`
         /// when missing. Gates member moderation and ownership transfer.
-        status: ChannelMemberStatus,
-        can_restrict_members: bool,
-        can_promote_members: bool,
-        can_manage_tags: bool,
-        /// B7: `rights.can_change_info` of an administrator status.
-        can_change_info: Option<bool>,
-        /// `rights.can_manage_video_chats` of an administrator status
-        /// (tdesktop `canManageGroupCall` for a basic group).
-        can_manage_video_chats: Option<bool>,
+        /// Own status with its rights block (`supergroup.status`).
+        status: MemberStatus,
         /// B7: `basicGroup.is_active` - false once upgraded to a
         /// supergroup.
         is_active: bool,
@@ -60,53 +53,9 @@ pub enum GroupsPayload {
         boost_level: i32,
         /// Phase A1: own `chatMemberStatus*` (`supergroup.status`, schema
         /// 1.8.67 line 2746 — "Current user status in the supergroup or
-        /// channel"). Drives slow-mode bypass (admins/creators are exempt).
-        status: ChannelMemberStatus,
-        /// Phase A1: `rights.can_restrict_members` from own
-        /// `chatMemberStatusAdministrator` (schema 1.8.67, lines 2500/1092);
-        /// `None` for any other status or a missing rights block.
-        /// `setChatSlowModeDelay` requires this right (line 13551).
-        can_restrict_members: Option<bool>,
-        /// Phase D3a: `rights.can_invite_users` from own
-        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092);
-        /// `None` for any other status or a missing rights block.
-        /// Invite-link management requires this right (or creator status).
-        can_invite_users: Option<bool>,
-        /// Phase D3b: `rights.can_promote_members` from own
-        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092);
-        /// `None` for any other status or a missing rights block.
-        /// Admin management requires this right (or creator status).
-        can_promote_members: Option<bool>,
-        /// Slice G1: `rights.can_manage_tags` from own
-        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092);
-        /// `None` for any other status or a missing rights block.
-        /// Changing another member's custom title requires this right
-        /// (or creator status); changing your own tag is always allowed.
-        can_manage_tags: Option<bool>,
-        /// Slice G2: `rights.can_manage_topics` from own
-        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092);
-        /// `None` for any other status or a missing rights block.
-        /// Forum topic management requires this right (or creator
-        /// status).
-        can_manage_topics: Option<bool>,
-        /// Slice G2: `rights.can_change_info` from own
-        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092);
-        /// `None` for any other status or a missing rights block.
-        /// `toggleSupergroupSignMessages` requires this right.
-        can_change_info: Option<bool>,
-        /// Slice G2: `rights.can_send_welcome_messages` from own
-        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1090);
-        /// `None` for any other status or a missing rights block.
-        /// Welcome-message management requires this right (or creator
-        /// status).
-        can_send_welcome_messages: Option<bool>,
-        /// `rights.can_manage_video_chats` from own
-        /// `chatMemberStatusAdministrator`; `None` for any other status or
-        /// a missing rights block. tdesktop `canManageGroupCall`.
-        can_manage_video_chats: Option<bool>,
-        /// The own status posts as the group (`rights.is_anonymous` of an
-        /// administrator, `is_anonymous` of the owner).
-        is_anonymous: bool,
+        /// channel"), with the administrator's rights block. Drives
+        /// slow-mode bypass (admins/creators are exempt).
+        status: MemberStatus,
         /// Slice G1: `supergroup.join_by_request` (schema 1.8.67, lines
         /// 2733/2746) — drives the "Approve new members" toggle.
         join_by_request: bool,
@@ -152,46 +101,8 @@ pub enum GroupsPayload {
         /// 2746): the channel shows its messages translated for everyone.
         has_automatic_translation: bool,
         username: String,
-        status: ChannelMemberStatus,
-        /// Phase A1: `rights.can_restrict_members` from own
-        /// `chatMemberStatusAdministrator` (schema 1.8.67, lines 2500/1092);
-        /// `None` for any other status or a missing rights block.
-        can_restrict_members: Option<bool>,
-        /// Phase D3a: `rights.can_invite_users` from own
-        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092);
-        /// `None` for any other status or a missing rights block.
-        /// Invite-link management requires this right (or creator status).
-        can_invite_users: Option<bool>,
-        /// Phase D3b: `rights.can_promote_members` from own
-        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092);
-        /// `None` for any other status or a missing rights block.
-        /// Admin management requires this right (or creator status).
-        can_promote_members: Option<bool>,
-        /// Slice G1: `rights.can_manage_tags` from own
-        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092);
-        /// `None` for any other status or a missing rights block.
-        /// Changing another member's custom title requires this right
-        /// (or creator status); changing your own tag is always allowed.
-        can_manage_tags: Option<bool>,
-        /// Slice G2: `rights.can_manage_topics` from own
-        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092);
-        /// `None` for any other status or a missing rights block.
-        can_manage_topics: Option<bool>,
-        /// Slice G2: `rights.can_change_info` from own
-        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092);
-        /// `None` for any other status or a missing rights block.
-        can_change_info: Option<bool>,
-        /// Slice G2: `rights.can_send_welcome_messages` from own
-        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1090);
-        /// `None` for any other status or a missing rights block.
-        can_send_welcome_messages: Option<bool>,
-        /// `rights.can_manage_video_chats` from own
-        /// `chatMemberStatusAdministrator`; `None` for any other status or
-        /// a missing rights block. tdesktop `canManageGroupCall`.
-        can_manage_video_chats: Option<bool>,
-        /// The own status posts as the group (`rights.is_anonymous` of an
-        /// administrator, `is_anonymous` of the owner).
-        is_anonymous: bool,
+        /// Own status with its rights block (`supergroup.status`).
+        status: MemberStatus,
         /// Slice G1: `supergroup.join_by_request` (schema 1.8.67, lines
         /// 2733/2746) — drives the "Approve new members" toggle.
         join_by_request: bool,

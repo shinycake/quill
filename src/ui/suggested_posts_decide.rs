@@ -124,13 +124,8 @@ impl QuillApp {
     /// The approve or decline of this post was sent and its answer has not
     /// come.
     fn publish_busy(&self, chat_id: ChatId, message_id: MessageId) -> bool {
-        self.session().is_some_and(|session| {
-            session
-                .payments
-                .suggested_posts
-                .busy
-                .contains(&(chat_id.0, message_id.0))
-        })
+        self.session()
+            .is_some_and(|session| session.suggested_post_busy(chat_id.0, message_id.0))
     }
 
     /// The Accept Terms box of a post that is no longer pending (decided

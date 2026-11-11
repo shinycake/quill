@@ -334,11 +334,11 @@ fn a_gallery_opened_in_a_chat_window_belongs_to_that_window() {
     assert!(matches!(opened, Ok(true)));
     let seen = h.driver.with_window_chat(BOB, |driver| {
         let gallery = &driver.session.media.shared_media;
-        (gallery.open, gallery.chat_id)
+        (gallery.open(), gallery.chat_id)
     });
     assert_eq!(seen, (true, Some(BOB)));
     let main = &h.driver.session.media.shared_media;
-    assert!(!main.open && main.chat_id.is_none());
+    assert!(!main.open() && main.chat_id.is_none());
 }
 
 #[test]

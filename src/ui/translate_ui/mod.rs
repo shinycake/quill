@@ -751,7 +751,7 @@ impl QuillApp {
                 .into_any_element(),
             // Pending, or the request could not be sent (demo, offline):
             // tdesktop's placeholder is a few grey lines.
-            Some(Translation::Pending) | None => {
+            Some(Translation::Pending { .. }) | None => {
                 let lines = (original.chars().count() / 40 + 1).clamp(1, 3);
                 div()
                     .id("translate-loading")

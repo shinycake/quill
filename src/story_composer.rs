@@ -219,12 +219,16 @@ pub enum ComposerStage {
     /// The story was posted: the composer says so and Post stays off, so
     /// the same media is not posted twice.
     Posted,
+    /// Nothing is out and the last press (or a pick) failed or was refused:
+    /// the composer shows the line and Post is live. Cleared on the next
+    /// edit.
+    Failed(String),
 }
 
 impl ComposerStage {
     /// A press of Post or Save is still being answered, or has been.
     pub fn busy(&self) -> bool {
-        !matches!(self, Self::Editing)
+        !matches!(self, Self::Editing | Self::Failed(_))
     }
 }
 
@@ -262,9 +266,6 @@ pub struct StoryComposer {
     pub reaction_emojis: String,
     /// Where the Post / Save press stands (`ComposerStage`).
     pub stage: ComposerStage,
-    /// UI-local validation / flow error (no valid media path yet, no
-    /// users selected, demo mode, …). Cleared on open.
-    pub local_error: Option<String>,
     /// What the composer posts: a new story, a repost or an edit.
     pub mode: ComposerMode,
     /// Phase 9.5: post on behalf of this chat (`getChatsToPostStories`,
@@ -322,6 +323,28 @@ impl StoryComposer {
         }
     }
 
+    /// UI-local validation / flow error (no valid media path yet, no users
+    /// selected, demo mode, …).
+    pub fn error(&self) -> Option<&str> {
+        match &self.stage {
+            ComposerStage::Failed(error) => Some(error),
+            _ => None,
+        }
+    }
+
+    /// Show `error`. A press still being answered keeps its stage.
+    pub fn set_error(&mut self, error: impl Into<String>) {
+        if !self.stage.busy() {
+            self.stage = ComposerStage::Failed(error.into());
+        }
+    }
+
+    pub fn clear_error(&mut self) {
+        if matches!(self.stage, ComposerStage::Failed(_)) {
+            self.stage = ComposerStage::Editing;
+        }
+    }
+
     pub fn close(&mut self) {
         *self = Self::default();
     }
@@ -340,7 +363,7 @@ impl StoryComposer {
             path: path.to_string(),
             kind,
         });
-        self.local_error = None;
+        self.clear_error();
         true
     }
 
@@ -442,13 +465,13 @@ mod tests {
     #[test]
     fn only_photos_and_videos_are_picked() {
         let mut composer = StoryComposer::open();
-        composer.local_error = Some("pick one".into());
+        composer.set_error("pick one");
         assert!(composer.pick_media(std::path::Path::new("/a/b.JPG")));
         assert_eq!(
             composer.media.as_ref().map(|m| m.kind),
             Some(StoryMediaKind::Photo)
         );
-        assert_eq!(composer.local_error, None);
+        assert_eq!(composer.error(), None);
         assert!(!composer.pick_media(std::path::Path::new("/a/notes.txt")));
         assert_eq!(
             composer.media.as_ref().map(|m| m.path.as_str()),

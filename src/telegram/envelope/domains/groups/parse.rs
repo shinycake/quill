@@ -31,16 +31,7 @@ pub(crate) fn parse_groups_payload(
             Ok(EnvelopePayload::Groups(GroupsPayload::UpdateBasicGroup {
                 basic_group_id: int53(group.get("id"))?,
                 member_count: int53(group.get("member_count")).unwrap_or(0).sat_i32(),
-                status: parse_channel_member_status(group.get("status"))
-                    .map(|(status, _)| status)
-                    .unwrap_or(ChannelMemberStatus::Unknown),
-                can_restrict_members: parse_restrict_members_right(group.get("status"))
-                    .unwrap_or(false),
-                can_promote_members: parse_promote_members_right(group.get("status"))
-                    .unwrap_or(false),
-                can_manage_tags: parse_manage_tags_right(group.get("status")).unwrap_or(false),
-                can_change_info: parse_change_info_right(group.get("status")),
-                can_manage_video_chats: parse_manage_video_chats_right(group.get("status")),
+                status: parse_member_status(group.get("status")).unwrap_or(MemberStatus::Unknown),
                 is_active: group
                     .get("is_active")
                     .and_then(Value::as_bool)
@@ -95,22 +86,8 @@ pub(crate) fn parse_groups_payload(
                 // 2746); unknown/missing → `Unknown` (gated, no bypass).
                 // `can_restrict_members` gates the slow-mode admin control
                 // (schema line 13551).
-                status: parse_channel_member_status(supergroup.get("status"))
-                    .map(|(status, _)| status)
-                    .unwrap_or(ChannelMemberStatus::Unknown),
-                can_restrict_members: parse_restrict_members_right(supergroup.get("status")),
-                can_invite_users: parse_invite_users_right(supergroup.get("status")),
-                can_promote_members: parse_promote_members_right(supergroup.get("status")),
-                can_manage_tags: parse_manage_tags_right(supergroup.get("status")),
-                // Slice G2: forum-topic / sign-messages / welcome-message
-                // rights (schema 1.8.67, lines 1090/1092).
-                can_manage_topics: parse_manage_topics_right(supergroup.get("status")),
-                can_change_info: parse_change_info_right(supergroup.get("status")),
-                can_send_welcome_messages: parse_send_welcome_messages_right(
-                    supergroup.get("status"),
-                ),
-                can_manage_video_chats: parse_manage_video_chats_right(supergroup.get("status")),
-                is_anonymous: parse_anonymous_status(supergroup.get("status")),
+                status: parse_member_status(supergroup.get("status"))
+                    .unwrap_or(MemberStatus::Unknown),
                 // Slice G1: `supergroup.join_by_request` /
                 // `supergroup.is_broadcast_group` (schema 1.8.67, lines
                 // 2733/2736/2746).
@@ -168,20 +145,7 @@ pub(crate) fn parse_groups_payload(
                 .unwrap_or(false),
             username: parse_first_active_username(value.get("usernames")),
             // Phase A1: own `chatMemberStatus*` (schema 1.8.67 line 2746).
-            status: parse_channel_member_status(value.get("status"))
-                .map(|(status, _)| status)
-                .unwrap_or(ChannelMemberStatus::Unknown),
-            can_restrict_members: parse_restrict_members_right(value.get("status")),
-            can_invite_users: parse_invite_users_right(value.get("status")),
-            can_promote_members: parse_promote_members_right(value.get("status")),
-            can_manage_tags: parse_manage_tags_right(value.get("status")),
-            // Slice G2: forum-topic / sign-messages / welcome-message
-            // rights (schema 1.8.67, lines 1090/1092).
-            can_manage_topics: parse_manage_topics_right(value.get("status")),
-            can_change_info: parse_change_info_right(value.get("status")),
-            can_send_welcome_messages: parse_send_welcome_messages_right(value.get("status")),
-            can_manage_video_chats: parse_manage_video_chats_right(value.get("status")),
-            is_anonymous: parse_anonymous_status(value.get("status")),
+            status: parse_member_status(value.get("status")).unwrap_or(MemberStatus::Unknown),
             // Slice G1: `supergroup.join_by_request` /
             // `supergroup.is_broadcast_group` (schema 1.8.67, lines
             // 2733/2736/2746).

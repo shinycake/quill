@@ -90,7 +90,7 @@ fn stored_rich(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<Ri
     app.read_with(vcx, |app, _| {
         app.session()
             .and_then(|session| session.draft_for(OPEN, Default::default()))
-            .and_then(|draft| draft.rich.clone())
+            .and_then(|draft| draft.rich().cloned())
     })
 }
 

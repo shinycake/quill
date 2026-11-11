@@ -144,10 +144,7 @@ impl Session {
                 self.set_chat_message_sender(chat_id.0, message_sender);
                 self.set_chat_translatable(chat_id.0, is_translatable);
                 if reply_markup_message_id.0 > 0 {
-                    self.bots
-                        .reply_keyboards
-                        .markup_message_ids
-                        .insert(chat_id.0, reply_markup_message_id.0);
+                    self.note_reply_markup_message(chat_id, reply_markup_message_id);
                 }
                 self.set_chat_action_bar(chat_id.0, action_bar);
                 self.set_business_bot_bar(chat_id.0, business_bot_bar);

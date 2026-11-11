@@ -193,7 +193,7 @@ mod tests {
         let seq = AtomicU64::new(0);
         // Simulate an in-flight suggestion: purpose registered, slot set.
         let extra = session.request(RequestPurpose::SuggestStickers, None);
-        session.stickers.stickers.suggest_for = Some("😀".into());
+        session.stickers.stickers.suggest_for = crate::state::SuggestFor::Asked("😀".into());
         apply_json(&mut session, &seq, &sink, &stickers_answer(extra.0));
         assert!(!session.stickers.stickers.suggestions.is_empty());
 
@@ -209,7 +209,7 @@ mod tests {
                 .requests
                 .has_purpose(RequestPurpose::SuggestStickers)
         );
-        assert!(session.stickers.stickers.suggest_for.is_none());
+        assert!(session.stickers.stickers.suggest_for.is_nothing());
         assert!(session.stickers.stickers.suggestions.is_empty());
 
         // A late answer for the taken request has no pending entry left,
