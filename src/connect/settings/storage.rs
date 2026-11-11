@@ -1,5 +1,6 @@
 //! Connect driver: storage statistics, auto-download presets and storage limits.
 use super::*;
+use crate::state::StorageClear;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase S2: `getStorageStatistics` for the storage-usage overlay —
@@ -155,7 +156,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         file_types: &[&str],
         chat_ids: &[i64],
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.storage_clearing {
+        if !self.chats_path_active() || self.session.settings.storage_clear.is_clearing() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(RequestPurpose::OptimizeStorage, None);
@@ -164,12 +165,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             chat_ids,
             ..OptimizeStorage::everything(50)
         };
-        self.session.settings.storage_freed = None;
-        self.session.settings.storage_clearing = true;
+        self.session.settings.storage_clear = StorageClear::Clearing;
         self.session.settings.data_storage_error = None;
         if let Err(err) = self.sender.send_json(&optimize_storage(extra, &params)) {
             self.session.requests.take(extra);
-            self.session.settings.storage_clearing = false;
+            self.session.settings.storage_clear = StorageClear::Idle;
             self.session.settings.data_storage_error =
                 Some("Couldn't clear the cache.".to_string());
             return Err(err);

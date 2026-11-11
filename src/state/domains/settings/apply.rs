@@ -188,8 +188,7 @@ impl Session {
                 // driver refetches the post-clear numbers on this same
                 // ingest.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::OptimizeStorage) {
-                    self.settings.storage_freed = Some(total_size);
-                    self.settings.storage_clearing = false;
+                    self.settings.storage_clear = StorageClear::Freed(total_size);
                     self.settings.storage_stats = None;
                     self.settings.storage_stats_loading = false;
                     self.settings.data_storage_error = None;

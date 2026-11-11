@@ -114,13 +114,13 @@ impl QuillApp {
         session: &Session,
         cx: &mut Context<Self>,
     ) -> Div {
-        if dialog.country_box.is_some()
+        if dialog.country_box().is_some()
             && let Some(view) =
                 self.country_box_view(CountryHost::Payment, tr(keys::PAYMENTS_ADDRESS_COUNTRY), cx)
         {
             return body.child(view);
         }
-        if let Some(card_form) = &dialog.card_form {
+        if let Some(card_form) = dialog.card_form() {
             return body.child(self.card_form_view(card_form, cx));
         }
         let total = price_parts_total(&invoice.price_parts);
@@ -370,11 +370,11 @@ impl QuillApp {
             let creds_ok = match &dialog.credential_choice {
                 PaymentCredentialChoice::Saved(_) => true,
                 PaymentCredentialChoice::NewCard => {
-                    dialog.new_card.is_some() || self.can_enter_new_card()
+                    dialog.new_card.card().is_some() || self.can_enter_new_card()
                 }
             };
             // The password prompt is tdesktop's modal box: answer it first.
-            terms_ok && order_ok && creds_ok && !dialog.password_prompt
+            terms_ok && order_ok && creds_ok && !dialog.new_card.needs_password()
         };
         let pay = Button::new("p1-payment-pay")
             .label(tr_with(
@@ -490,7 +490,7 @@ impl QuillApp {
         let PaymentFormTypeData::Regular(regular) = &form.form_type else {
             return;
         };
-        if dialog.password_prompt {
+        if dialog.new_card.needs_password() {
             return;
         }
         let invoice = &regular.invoice;
@@ -508,7 +508,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        let credentials = match (&dialog.credential_choice, &dialog.new_card) {
+        let credentials = match (&dialog.credential_choice, dialog.new_card.card()) {
             (PaymentCredentialChoice::Saved(id), _) => input_credentials_saved(id),
             (PaymentCredentialChoice::NewCard, Some(card)) => input_credentials_new(
                 card.credentials.data(),

@@ -110,19 +110,41 @@ impl FolderEditorDialog {
 /// What the Share Folder dialog shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FolderShareView {
-    /// The folder's invite links.
-    List,
+    /// The folder's invite links; `confirm_delete` is the link whose delete
+    /// is waiting for confirmation.
+    List { confirm_delete: Option<String> },
     /// Naming a link and choosing its chats; `None` creates a new link.
     Edit { link: Option<String> },
 }
 
+impl FolderShareView {
+    /// The list with no delete awaiting confirmation.
+    pub(crate) fn list() -> Self {
+        FolderShareView::List {
+            confirm_delete: None,
+        }
+    }
+}
+
 /// The link request the Share Folder box waits on. Only the answer to this
 /// request settles it; leaving the form lets go of it, so a late answer
-/// does not land in the next form.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// does not land in the next form. A failed request is `Failed`, the line
+/// the box shows; the next request or leaving the view clears it.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinkOp {
     Idle,
     Saving(RequestId),
+    Failed(String),
+}
+
+impl LinkOp {
+    /// The line a failed request left, for the box to draw.
+    pub(crate) fn error(&self) -> Option<&str> {
+        match self {
+            LinkOp::Failed(line) => Some(line),
+            LinkOp::Idle | LinkOp::Saving(_) => None,
+        }
+    }
 }
 
 /// Share Folder (tdesktop `boxes/filters/edit_filter_links.cpp`): the
@@ -135,12 +157,9 @@ pub struct FolderShareDialog {
     pub(crate) selected: HashSet<i64>,
     /// The create / edit / delete request the box waits on.
     pub(crate) op: LinkOp,
-    /// The link whose delete is waiting for confirmation.
-    pub(crate) confirm_delete: Option<String>,
     /// The link last copied to the clipboard, until the check mark times
     /// out.
     pub(crate) copied: CopyMark,
-    pub(crate) error: Option<String>,
 }
 
 impl FolderShareDialog {
@@ -153,13 +172,11 @@ impl FolderShareDialog {
         });
         Self {
             folder_id,
-            view: FolderShareView::List,
+            view: FolderShareView::list(),
             name_input,
             selected: HashSet::new(),
             op: LinkOp::Idle,
-            confirm_delete: None,
             copied: CopyMark::Idle,
-            error: None,
         }
     }
 }

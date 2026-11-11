@@ -36,6 +36,32 @@ pub enum AutoDownloadAnswer {
     Refused(RequestId),
 }
 
+/// The local storage clear (`optimizeStorage`): one at a time. `Clearing`
+/// leaves on its answer (`Freed`) or its error (`Idle`, the line on
+/// `data_storage_error`); `Freed` stays until the screen is reopened.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StorageClear {
+    #[default]
+    Idle,
+    Clearing,
+    /// Bytes the last confirmed clear freed: the screen shows "{size}
+    /// freed on your device!".
+    Freed(i64),
+}
+
+impl StorageClear {
+    pub fn is_clearing(self) -> bool {
+        self == StorageClear::Clearing
+    }
+
+    pub fn freed(self) -> Option<i64> {
+        match self {
+            StorageClear::Freed(bytes) => Some(bytes),
+            StorageClear::Idle | StorageClear::Clearing => None,
+        }
+    }
+}
+
 pub struct SettingsState {
     /// See [`AutoDownloadAnswer`].
     pub auto_download_answer: Option<AutoDownloadAnswer>,
@@ -131,11 +157,8 @@ pub struct SettingsState {
     /// Slice S4: last Data & Storage failure, shown on the screen
     /// (failures surface there, never as toasts — the S3 pattern).
     pub data_storage_error: Option<String>,
-    /// Batch 6: bytes the last confirmed `optimizeStorage` freed — the
-    /// screen shows "{size} freed on your device!" until reopened.
-    pub storage_freed: Option<i64>,
-    /// Batch 6: an `optimizeStorage` round trip is in flight.
-    pub storage_clearing: bool,
+    /// Batch 6: the `optimizeStorage` round trip and its result.
+    pub storage_clear: StorageClear,
     /// Batch 6: the local storage limits TDLib reports (`updateOption`).
     pub storage_limits: crate::storage_limits::StorageLimits,
     /// This session sent the first cache limits; the account counts as
@@ -377,8 +400,7 @@ impl SettingsState {
             auto_download_presets_loading: false,
             auto_download_answer: None,
             data_storage_error: None,
-            storage_freed: None,
-            storage_clearing: false,
+            storage_clear: StorageClear::Idle,
             storage_limits: Default::default(),
             storage_limits_seed_sent: false,
             privacy_data: Default::default(),
@@ -434,6 +456,14 @@ fn dedup_ids(mut list: Vec<i64>, more: Vec<i64>) -> Vec<i64> {
 }
 
 impl SettingsState {
+    /// The "freed" line goes when the screen is reopened; a clear still on
+    /// its way is not forgotten.
+    pub fn reset_storage_freed(&mut self) {
+        if matches!(self.storage_clear, StorageClear::Freed(_)) {
+            self.storage_clear = StorageClear::Idle;
+        }
+    }
+
     /// A preview download finished: whether a picker still waits for it.
     /// Either way the request is over.
     pub fn take_sound_preview(&mut self, sound_id: i64) -> bool {

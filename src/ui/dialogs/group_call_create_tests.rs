@@ -7,6 +7,7 @@
 //! records the join, and the tests play the server's part.
 use super::{CreateStep, GroupCallCreate};
 use crate::ui::app::QuillApp;
+use crate::ui::group_call_state::VideoChatCreate;
 use crate::ui::group_call_stream_layout::StreamJoinIntent;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::scheduled::picked_unix;
@@ -117,7 +118,7 @@ fn join_noted(
     app: &Entity<QuillApp>,
     vcx: &mut VisualTestContext,
 ) -> Option<Option<MessageSender>> {
-    app.read_with(vcx, |app, _| match app.group_call_screen.stream_join {
+    app.read_with(vcx, |app, _| match app.group_call_screen.stream_wish() {
         Some((StreamJoinIntent::Created { chat, join_as }, _)) if chat == CHANNEL => Some(join_as),
         _ => None,
     })
@@ -171,11 +172,13 @@ fn in_other_call(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, joined: bo
         }
         if !joined {
             // The join went out and waits for its answer.
-            app.group_call_screen.stream_joining =
-                Some(crate::ui::group_call_state::StreamJoining::new(
-                    OTHER_CALL,
-                    gpui_kit::Task::ready(()),
-                ));
+            app.group_call_screen.stream_watch =
+                crate::ui::group_call_state::StreamWatch::Joining(
+                    crate::ui::group_call_state::StreamJoining::new(
+                        OTHER_CALL,
+                        gpui_kit::Task::ready(()),
+                    ),
+                );
         }
         app.group_call_screen.window_closed_by_user = Some(OTHER_CALL);
     });
@@ -514,10 +517,9 @@ fn a_refused_create_toasts_and_drops_the_join(cx: &mut TestAppContext) {
     let before = toasts(&mut main);
     // The server refuses that `createVideoChat`.
     app.update(&mut main, |app, cx| {
-        let request = app
-            .group_call_boxes
-            .create_request
-            .expect("the create went out");
+        let VideoChatCreate::Sent(request) = app.group_call_boxes.create else {
+            panic!("the create went out");
+        };
         if let Some(session) = app.demo_session.as_mut() {
             // Another request's failure is not this one.
             session.calls.failed_creates.push(RequestId(request.0 + 1));
@@ -528,7 +530,9 @@ fn a_refused_create_toasts_and_drops_the_join(cx: &mut TestAppContext) {
     assert!(join_noted(&app, &mut main).is_some(), "not ours");
     assert_eq!(toasts(&mut main), before);
     app.update(&mut main, |app, cx| {
-        let request = app.group_call_boxes.create_request.expect("still waiting");
+        let VideoChatCreate::Sent(request) = app.group_call_boxes.create else {
+            panic!("still waiting");
+        };
         if let Some(session) = app.demo_session.as_mut() {
             session.calls.failed_creates.push(request);
         }
@@ -542,6 +546,44 @@ fn a_refused_create_toasts_and_drops_the_join(cx: &mut TestAppContext) {
             .session()
             .is_some_and(|s| s.calls.group_call_error.is_none())),
         "no error left for the next call"
+    );
+}
+
+#[gpui_kit::test]
+fn an_answered_create_ends_the_wait(cx: &mut TestAppContext) {
+    let (app, mut main) = open_main(cx);
+    manager(&app, &mut main);
+    begin(&app, &mut main, CreateKind::Now);
+    click(&mut main, "group-call-create-confirm");
+    let sent = app.read_with(&main, |app, _| app.group_call_boxes.create);
+    assert!(matches!(sent, VideoChatCreate::Sent(_)), "waiting on the server");
+    // Another request's answer is not this one's.
+    app.update(&mut main, |app, cx| {
+        if let (VideoChatCreate::Sent(request), Some(session)) =
+            (app.group_call_boxes.create, app.demo_session.as_mut())
+        {
+            session.calls.answered_creates.push(RequestId(request.0 + 1));
+        }
+        cx.notify();
+    });
+    frames(&mut main);
+    assert_eq!(
+        app.read_with(&main, |app, _| app.group_call_boxes.create),
+        sent
+    );
+    // Its own answer ends the wait: nothing stays to match a later failure.
+    app.update(&mut main, |app, cx| {
+        if let (VideoChatCreate::Sent(request), Some(session)) =
+            (app.group_call_boxes.create, app.demo_session.as_mut())
+        {
+            session.calls.answered_creates.push(request);
+        }
+        cx.notify();
+    });
+    frames(&mut main);
+    assert_eq!(
+        app.read_with(&main, |app, _| app.group_call_boxes.create),
+        VideoChatCreate::Idle
     );
 }
 

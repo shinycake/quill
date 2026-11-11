@@ -5,7 +5,7 @@ use super::app::QuillApp;
 use super::country_box::CountryHost;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
-use crate::ui::dialogs::poll::QuizLock;
+use crate::ui::dialogs::poll::{PollPage, QuizLock};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -516,7 +516,7 @@ impl QuillApp {
             .is_some_and(|dialog| dialog.is_dirty(cx));
         if dirty {
             if let Some(dialog) = self.chat_ui.poll_dialog.as_mut() {
-                dialog.confirming_discard = true;
+                dialog.page = PollPage::ConfirmDiscard;
             }
             cx.notify();
         } else {
@@ -717,10 +717,10 @@ impl QuillApp {
     #[inline(never)]
     fn poll_dialog_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.chat_ui.poll_dialog.as_ref()?;
-        if dialog.country_box.is_some() {
+        if dialog.country_box().is_some() {
             return self.poll_country_panel(cx);
         }
-        if dialog.deadline_box.is_some() {
+        if dialog.deadline_box().is_some() {
             return self.poll_deadline_panel(cx);
         }
         // The box scrolls as a whole when the window is short.
@@ -834,7 +834,7 @@ impl QuillApp {
     /// deadline pickers bring their own buttons, so they get none.
     pub(super) fn poll_box_footer(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.chat_ui.poll_dialog.as_ref()?;
-        if dialog.country_box.is_some() || dialog.deadline_box.is_some() {
+        if dialog.picker_open() {
             return None;
         }
         let footer = div()

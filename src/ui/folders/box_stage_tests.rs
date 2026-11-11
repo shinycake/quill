@@ -131,15 +131,14 @@ fn a_share_save_answer_lands_only_in_the_form_that_sent_it(cx: &mut TestAppConte
         answer(app, first, r#""@type":"chatFolderInviteLink","invite_link":"https://t.me/addlist/a","name":"","chat_ids":[1]"#);
         assert!(!app.settle_folder_share(cx), "not its answer");
         assert_eq!(
-            app.folders.share.as_ref().map(|d| d.op),
+            app.folders.share.as_ref().map(|d| d.op.clone()),
             Some(LinkOp::Saving(second))
         );
         // Its own refusal ends the wait and shows the error.
         answer(app, second, REFUSED);
         assert!(app.settle_folder_share(cx));
         let dialog = app.folders.share.as_ref().expect("open");
-        assert_eq!(dialog.op, LinkOp::Idle);
-        assert!(dialog.error.is_some());
+        assert!(matches!(dialog.op, LinkOp::Failed(_)));
     });
 }
 

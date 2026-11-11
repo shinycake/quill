@@ -20,22 +20,78 @@ pub struct PaymentDialog {
     pub(crate) state_input: Entity<TextareaState>,
     /// The shipping country's ISO code, picked in the country box.
     pub(crate) country_iso: String,
-    pub(crate) country_box: Option<crate::ui::country_box::CountryBox>,
     pub(crate) postal_input: Entity<TextareaState>,
     pub(crate) credential_choice: PaymentCredentialChoice,
     /// The card the provider tokenized, and whether to save it (tdesktop's
     /// `NewCredentials`). Kept only while the checkout is open.
-    pub(crate) new_card: Option<NewCard>,
-    /// The "New Card" form, while it is open over the checkout.
-    pub(crate) card_form: Option<crate::ui::payments::card_form::CardForm>,
-    /// "Turn on Two-Step Verification" after asking to save a card the
-    /// account cannot save yet (tdesktop's `askSetPassword`).
-    pub(crate) password_prompt: bool,
+    pub(crate) new_card: NewCardStage,
+    /// What fills the dialog: the checkout, or the country box or "New
+    /// Card" form open over it.
+    pub(crate) page: PaymentPage,
     pub(crate) terms_accepted: bool,
     pub(crate) allow_save_order: bool,
     /// Slice P1 fix-up: the dialog opens on Buy press before the form
     /// arrives — the saved order info prefills once, when the form lands.
-    pub(crate) prefilled: bool,
+    pub(crate) prefill: Prefill,
+}
+
+/// Whether the form's saved order info went into the inputs yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Prefill {
+    AwaitingForm,
+    Filled,
+}
+
+/// The checkout's page: the form itself, or one picker over it. A page
+/// leaves to the checkout: the pick, Cancel, or the dialog closing.
+pub(crate) enum PaymentPage {
+    Checkout,
+    Country(crate::ui::country_box::CountryBox),
+    CardForm(crate::ui::payments::card_form::CardForm),
+}
+
+/// The card entered in the "New Card" form. `NeedsPassword` is the same
+/// card after asking to save it when the account cannot save yet: "Turn on
+/// Two-Step Verification" (tdesktop's `askSetPassword`) waits on it and Pay
+/// stays off; choosing another method, dismissing the ask or setting the
+/// password leaves it for `Ready`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum NewCardStage {
+    None,
+    Ready(NewCard),
+    NeedsPassword(NewCard),
+}
+
+impl NewCardStage {
+    pub(crate) fn card(&self) -> Option<&NewCard> {
+        match self {
+            NewCardStage::Ready(card) | NewCardStage::NeedsPassword(card) => Some(card),
+            NewCardStage::None => None,
+        }
+    }
+
+    pub(crate) fn is_none(&self) -> bool {
+        matches!(self, NewCardStage::None)
+    }
+
+    pub(crate) fn needs_password(&self) -> bool {
+        matches!(self, NewCardStage::NeedsPassword(_))
+    }
+
+    /// Let go of the password ask; the card stays.
+    pub(crate) fn drop_password_prompt(&mut self) {
+        if let NewCardStage::NeedsPassword(card) = std::mem::replace(self, NewCardStage::None) {
+            *self = NewCardStage::Ready(card);
+        }
+    }
+
+    /// Ask for a password (when `ask`) before the card can be saved.
+    pub(crate) fn ask_password(&mut self, ask: bool) {
+        self.drop_password_prompt();
+        if ask && let NewCardStage::Ready(card) = std::mem::replace(self, NewCardStage::None) {
+            *self = NewCardStage::NeedsPassword(card);
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,15 +127,13 @@ impl PaymentDialog {
             city_input: input(cx, tr(keys::PAYMENTS_ADDRESS_CITY)),
             state_input: input(cx, tr(keys::Q_MONEY_STATE)),
             country_iso: String::new(),
-            country_box: None,
             postal_input: input(cx, tr(keys::Q_MONEY_POSTAL_CODE)),
             credential_choice: PaymentCredentialChoice::NewCard,
-            new_card: None,
-            card_form: None,
-            password_prompt: false,
+            new_card: NewCardStage::None,
+            page: PaymentPage::Checkout,
             terms_accepted: false,
             allow_save_order: true,
-            prefilled: false,
+            prefill: Prefill::AwaitingForm,
             // ponytail: no `validated` flag — the session's
             // `payment_validated: Option<ValidatedOrderInfoData>` is the
             // single source of truth for whether validation ran.
@@ -97,7 +151,7 @@ impl PaymentDialog {
         window: &mut Window,
         cx: &mut Context<QuillApp>,
     ) {
-        if self.prefilled {
+        if self.prefill == Prefill::Filled {
             return;
         }
         if let PaymentFormTypeData::Regular(regular) = &form.form_type {
@@ -106,7 +160,7 @@ impl PaymentDialog {
                 self.credential_choice = PaymentCredentialChoice::Saved(first.id.clone());
             }
         }
-        self.prefilled = true;
+        self.prefill = Prefill::Filled;
     }
 
     /// Prefill the order fields from the form's `saved_order_info`
@@ -127,6 +181,34 @@ impl PaymentDialog {
         set(&self.state_input, &addr.state);
         self.country_iso = addr.country_code.to_ascii_uppercase();
         set(&self.postal_input, &addr.postal_code);
+    }
+
+    pub(crate) fn card_form(&self) -> Option<&crate::ui::payments::card_form::CardForm> {
+        match &self.page {
+            PaymentPage::CardForm(form) => Some(form),
+            PaymentPage::Checkout | PaymentPage::Country(_) => None,
+        }
+    }
+
+    pub(crate) fn card_form_mut(&mut self) -> Option<&mut crate::ui::payments::card_form::CardForm> {
+        match &mut self.page {
+            PaymentPage::CardForm(form) => Some(form),
+            PaymentPage::Checkout | PaymentPage::Country(_) => None,
+        }
+    }
+
+    pub(crate) fn country_box(&self) -> Option<&crate::ui::country_box::CountryBox> {
+        match &self.page {
+            PaymentPage::Country(country_box) => Some(country_box),
+            PaymentPage::Checkout | PaymentPage::CardForm(_) => None,
+        }
+    }
+
+    pub(crate) fn country_box_mut(&mut self) -> Option<&mut crate::ui::country_box::CountryBox> {
+        match &mut self.page {
+            PaymentPage::Country(country_box) => Some(country_box),
+            PaymentPage::Checkout | PaymentPage::CardForm(_) => None,
+        }
     }
 
     /// Freeze the dialog inputs into an `orderInfo` (schema:4662).

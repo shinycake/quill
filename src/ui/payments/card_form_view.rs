@@ -68,7 +68,7 @@ impl QuillApp {
     /// be saved (see `checkout_can_save_credentials`).
     fn set_password_for_card(&mut self, cx: &mut Context<Self>) {
         if let Some(dialog) = self.payments.dialog.as_mut() {
-            dialog.password_prompt = false;
+            dialog.new_card.drop_password_prompt();
         }
         self.open_twofa(cx);
     }
@@ -80,8 +80,8 @@ impl QuillApp {
         let ask_password = self.needs_password_to_save();
         if let Some(dialog) = self.payments.dialog.as_mut() {
             let saving_new_card = choice == PaymentCredentialChoice::NewCard
-                && dialog.new_card.as_ref().is_some_and(|card| card.save);
-            dialog.password_prompt = saving_new_card && ask_password;
+                && dialog.new_card.card().is_some_and(|card| card.save);
+            dialog.new_card.ask_password(saving_new_card && ask_password);
             dialog.credential_choice = choice;
         }
         cx.notify();
@@ -89,7 +89,7 @@ impl QuillApp {
 
     fn dismiss_card_password_prompt(&mut self, cx: &mut Context<Self>) {
         if let Some(dialog) = self.payments.dialog.as_mut() {
-            dialog.password_prompt = false;
+            dialog.new_card.drop_password_prompt();
         }
         cx.notify();
     }
@@ -108,7 +108,7 @@ impl QuillApp {
             choices.push(Some(PaymentCredentialChoice::Saved(credential.id.clone())));
             titles.push(credential.title.clone());
         }
-        if let Some(card) = &dialog.new_card {
+        if let Some(card) = dialog.new_card.card() {
             choices.push(Some(PaymentCredentialChoice::NewCard));
             titles.push(card.credentials.title().to_string());
         }
@@ -143,7 +143,7 @@ impl QuillApp {
                         }
                     })),
             );
-        if dialog.password_prompt {
+        if dialog.new_card.needs_password() {
             section = section.child(self.card_password_prompt(cx));
         }
         section

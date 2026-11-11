@@ -333,7 +333,9 @@ impl QuillApp {
                 dialog.limit_by_country = on;
                 if !on {
                     dialog.country_codes.clear();
-                    dialog.country_box = None;
+                    if dialog.country_box().is_some() {
+                        dialog.show_form();
+                    }
                 }
             },
             cx,

@@ -74,7 +74,6 @@ GiveawaySummary::finished
 GramsHub::loaded
 GramsHub::loaded+error
 GramsHub::loading
-GroupCallUi::window_opening
 HdrViewer::in_flight
 HeaderFacts::is_saved_messages
 HistoryState::load_failed

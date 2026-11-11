@@ -196,7 +196,7 @@ fn start_streaming_ends_the_process_and_joins_the_new_call(cx: &mut TestAppConte
     assert!(main.debug_bounds("rtmp-start-go").is_none(), "box closed");
     assert!(
         app.read_with(&main, |app, _| matches!(
-            app.group_call_screen.stream_join,
+            app.group_call_screen.stream_wish(),
             Some((
                 StreamJoinIntent::Created {
                     chat: CHANNEL,

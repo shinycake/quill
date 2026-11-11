@@ -7,7 +7,7 @@
 
 use crate::ui::app::QuillApp;
 use crate::ui::country_box::{CountryBox, CountryHost};
-use crate::ui::dialogs::{NewCard, PaymentCredentialChoice};
+use crate::ui::dialogs::{NewCard, NewCardStage, PaymentCredentialChoice, PaymentPage};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::*;
 use quill::country_select::CountryMode;
@@ -223,7 +223,7 @@ impl QuillApp {
             notice: None,
         };
         if let Some(dialog) = self.payments.dialog.as_mut() {
-            dialog.card_form = Some(card_form);
+            dialog.page = PaymentPage::CardForm(card_form);
         }
         self.focus_card_field(CardField::Number, window, cx);
         cx.notify();
@@ -254,22 +254,19 @@ impl QuillApp {
     /// Cancel: back to the checkout, unless the card is being sent.
     pub(in crate::ui) fn close_card_form(&mut self, cx: &mut Context<Self>) {
         if let Some(dialog) = self.payments.dialog.as_mut()
-            && dialog
-                .card_form
-                .as_ref()
-                .is_none_or(|form| !form.is_tokenizing())
+            && dialog.card_form().is_some_and(|form| !form.is_tokenizing())
         {
-            dialog.card_form = None;
+            dialog.page = PaymentPage::Checkout;
         }
         cx.notify();
     }
 
     pub(in crate::ui) fn card_form(&self) -> Option<&CardForm> {
-        self.payments.dialog.as_ref()?.card_form.as_ref()
+        self.payments.dialog.as_ref()?.card_form()
     }
 
     fn card_form_mut(&mut self) -> Option<&mut CardForm> {
-        self.payments.dialog.as_mut()?.card_form.as_mut()
+        self.payments.dialog.as_mut()?.card_form_mut()
     }
 
     /// Focus `field` (tdesktop's `Field::setFocus`): the country field
@@ -598,14 +595,13 @@ impl QuillApp {
             return;
         };
         let save = dialog
-            .card_form
-            .as_ref()
+            .card_form()
             .and_then(|form| form.save)
             .unwrap_or(false);
-        dialog.new_card = Some(NewCard { credentials, save });
+        dialog.new_card = NewCardStage::Ready(NewCard { credentials, save });
         dialog.credential_choice = PaymentCredentialChoice::NewCard;
-        dialog.card_form = None;
-        dialog.password_prompt = save && ask_password;
+        dialog.page = PaymentPage::Checkout;
+        dialog.new_card.ask_password(save && ask_password);
         cx.notify();
     }
 

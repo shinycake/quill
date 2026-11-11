@@ -124,14 +124,14 @@ impl QuillApp {
         self.forget_storage_sliders();
         self.settings.storage_confirm = None;
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.settings.storage_freed = None;
+            live.driver.session.settings.reset_storage_freed();
             let _ = live.driver.maybe_fetch_storage_statistics();
             let _ = live.driver.fetch_auto_download_presets();
             let _ = live.driver.fetch_network_statistics();
         }
         self.privacy.extra.network_reset = Default::default();
         if let Some(demo) = self.demo_session.as_mut() {
-            demo.settings.storage_freed = None;
+            demo.settings.reset_storage_freed();
             if demo.settings.privacy_data.network.data().is_none() {
                 demo.settings.privacy_data.network =
                     quill::state::fetch::Fetch::Ready(super::data_extra::demo_network_usage());

@@ -400,7 +400,7 @@ fn the_checkout_prefills_in_the_window_that_hosts_it(cx: &mut TestAppContext) {
             app.payments
                 .dialog
                 .as_ref()
-                .map(|d| (d.prefilled, d.credential_choice.clone()))
+                .map(|d| (d.prefill == crate::ui::dialogs::Prefill::Filled, d.credential_choice.clone()))
         })
     };
     in_window(&h, h.main, None, cx, |app, window, cx| {

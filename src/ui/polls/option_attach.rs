@@ -8,7 +8,7 @@
 
 use super::super::app::QuillApp;
 use super::super::composer_field::emoji_token;
-use super::super::dialogs::{OptionAttach, OptionMediaSlot};
+use super::super::dialogs::{AttachMode, OptionAttach, OptionMediaSlot};
 use super::super::media_panel::PanelTab;
 use crate::ui::status_note::StatusNote;
 use gpui_base::input::InputContent;
@@ -140,7 +140,12 @@ impl QuillApp {
             .tooltip(tr(keys::Q_MEDIA_ATTACH_A_PICTURE_STICKER_OR))
             .on_click(cx.listener(move |this, _, _, cx| {
                 if let Some(attach) = this.attach_mut(target) {
-                    attach.menu_open = !attach.menu_open;
+                    attach.mode = match attach.mode {
+                        AttachMode::Idle => AttachMode::Menu,
+                        AttachMode::Menu => AttachMode::Idle,
+                        // The link field and the panel waits own the area.
+                        _ => return,
+                    };
                 }
                 cx.notify();
             }))
@@ -164,7 +169,7 @@ impl QuillApp {
             .gap_2()
             .px_2();
         let mut shown = false;
-        if let Some(input) = &attach.link_input {
+        if let Some(input) = attach.link_input() {
             shown = true;
             area = area
                 .child(
@@ -187,12 +192,12 @@ impl QuillApp {
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if let Some(attach) = this.attach_mut(target) {
-                                attach.link_input = None;
+                                attach.leave(|mode| matches!(mode, AttachMode::Link(_)));
                             }
                             cx.notify();
                         })),
                 );
-        } else if attach.emoji_wait {
+        } else if attach.awaiting_emoji() {
             shown = true;
             area = area
                 .child(
@@ -207,12 +212,12 @@ impl QuillApp {
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if let Some(attach) = this.attach_mut(target) {
-                                attach.emoji_wait = false;
+                                attach.leave(|mode| matches!(mode, AttachMode::AwaitEmoji));
                             }
                             this.close_media_panel(cx);
                         })),
                 );
-        } else if attach.sticker_wait {
+        } else if attach.awaiting_sticker() {
             shown = true;
             area = area
                 .child(
@@ -227,12 +232,12 @@ impl QuillApp {
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if let Some(attach) = this.attach_mut(target) {
-                                attach.sticker_wait = false;
+                                attach.leave(|mode| matches!(mode, AttachMode::AwaitSticker));
                             }
                             cx.notify();
                         })),
                 );
-        } else if attach.menu_open {
+        } else if matches!(attach.mode, AttachMode::Menu) {
             shown = true;
             let entry = |id: &'static str, label: &'static str| {
                 Button::new(format!("poll-option-{id}-{key}"))
@@ -325,7 +330,7 @@ impl QuillApp {
     fn set_poll_option_media(&mut self, target: AttachTarget, slot: OptionMediaSlot) {
         if let Some(attach) = self.attach_mut(target) {
             attach.media = slot;
-            attach.menu_open = false;
+            attach.leave(|mode| matches!(mode, AttachMode::Menu));
             attach.preview = None;
         }
     }
@@ -338,7 +343,7 @@ impl QuillApp {
     /// "Photo or video": pick a file, then read it off the UI thread.
     pub(super) fn pick_poll_option_file(&mut self, target: AttachTarget, cx: &mut Context<Self>) {
         if let Some(attach) = self.attach_mut(target) {
-            attach.menu_open = false;
+            attach.leave(|mode| matches!(mode, AttachMode::Menu));
         }
         // The row may move while the file panel is open: ask for its slot.
         let Some(slot) = self.attach_ref(target).map(|attach| attach.id) else {
@@ -464,12 +469,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         for attach in self.attach_slots() {
-            attach.sticker_wait = false;
+            attach.leave(|mode| matches!(mode, AttachMode::AwaitSticker));
         }
         if let Some(attach) = self.attach_mut(target) {
-            attach.menu_open = false;
-            attach.link_input = None;
-            attach.sticker_wait = true;
+            attach.mode = AttachMode::AwaitSticker;
         }
         self.open_media_panel(PanelTab::Stickers, cx);
     }
@@ -482,13 +485,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         for attach in self.attach_slots() {
-            attach.emoji_wait = false;
+            attach.leave(|mode| matches!(mode, AttachMode::AwaitEmoji));
         }
         if let Some(attach) = self.attach_mut(target) {
-            attach.menu_open = false;
-            attach.link_input = None;
-            attach.sticker_wait = false;
-            attach.emoji_wait = true;
+            attach.mode = AttachMode::AwaitEmoji;
         }
         self.open_media_panel(PanelTab::Emoji, cx);
     }
@@ -506,7 +506,7 @@ impl QuillApp {
         (0..rows)
             .map(AttachTarget::Row)
             .chain([AttachTarget::Added])
-            .find(|target| self.attach_ref(*target).is_some_and(|a| a.emoji_wait))
+            .find(|target| self.attach_ref(*target).is_some_and(|a| a.awaiting_emoji()))
             .and_then(|target| self.option_input(target))
     }
 
@@ -584,7 +584,7 @@ impl QuillApp {
         let target = (0..rows)
             .map(AttachTarget::Row)
             .chain([AttachTarget::Added])
-            .find(|target| self.attach_ref(*target).is_some_and(|a| a.sticker_wait));
+            .find(|target| self.attach_ref(*target).is_some_and(|a| a.awaiting_sticker()));
         let Some(target) = target else {
             return false;
         };
@@ -598,7 +598,7 @@ impl QuillApp {
             }),
         );
         if let Some(attach) = self.attach_mut(target) {
-            attach.sticker_wait = false;
+            attach.leave(|mode| matches!(mode, AttachMode::AwaitSticker));
         }
         cx.notify();
         true
@@ -629,9 +629,7 @@ impl QuillApp {
             input.focus(window, cx);
         });
         if let Some(attach) = self.attach_mut(target) {
-            attach.menu_open = false;
-            attach.sticker_wait = false;
-            attach.link_input = Some(input);
+            attach.mode = AttachMode::Link(input);
         }
         cx.notify();
     }
@@ -641,7 +639,7 @@ impl QuillApp {
     pub(super) fn finish_poll_option_link(&mut self, target: AttachTarget, cx: &mut Context<Self>) {
         let Some(url) = self
             .attach_ref(target)
-            .and_then(|attach| attach.link_input.as_ref())
+            .and_then(|attach| attach.link_input())
             .map(|input| input.read(cx).value().trim().to_string())
         else {
             return;
@@ -656,7 +654,7 @@ impl QuillApp {
             OptionMediaSlot::Ready(PollOptionInput::Link { url }),
         );
         if let Some(attach) = self.attach_mut(target) {
-            attach.link_input = None;
+            attach.leave(|mode| matches!(mode, AttachMode::Link(_)));
         }
         cx.notify();
     }
