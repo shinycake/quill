@@ -395,7 +395,11 @@ fn driver_mutation_confirmed_refetches_dropped_cache() {
             boost_extra.0
         ),
     );
-    assert!(!driver.session.groups.chat_boost_status.contains_key(&13));
+    assert_eq!(
+        driver.session.groups.boost_level_count(13),
+        None,
+        "the old level is dropped"
+    );
     assert!(
         sent_types().iter().any(|t| t == "getChatBoostStatus"),
         "boost status refetched after confirmed boost"
