@@ -279,7 +279,7 @@ pub use submit::{Submit, SubmitView};
 pub use thread_types::*;
 pub use topic_history::*;
 pub use updates_sync::*;
-pub use view_book::{Reported, ViewBook, ViewStage};
+pub use view_book::{ViewBook, ViewStage};
 pub use web_app_types::*;
 
 #[cfg(test)]
