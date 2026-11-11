@@ -46,7 +46,10 @@ fn a_venue_bot_answer_of_another_request_is_dropped() {
     sharing.venue_bot_resolved(7, Some(99));
     assert!(matches!(
         sharing.next_requests().first(),
-        Some(PickerRequest::Venues { bot_user_id: 99, .. })
+        Some(PickerRequest::Venues {
+            bot_user_id: 99,
+            ..
+        })
     ));
 }
 

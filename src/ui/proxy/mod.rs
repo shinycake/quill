@@ -1022,7 +1022,11 @@ mod tests {
             "MTPROTO · available (ping: 42 ms)"
         );
         assert_eq!(
-            row_subtitle(&e, Some(PingStatus::Checking), None),
+            row_subtitle(
+                &e,
+                Some(PingStatus::Checking(quill::ids::RequestId(1))),
+                None
+            ),
             "MTPROTO · checking…"
         );
         assert_eq!(

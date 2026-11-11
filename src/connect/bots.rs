@@ -3,7 +3,8 @@ use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::{BotsPurpose, CallbackButtonKey, CallbackPress, UsersPurpose};
 use crate::state::{
-    InlineBotResolve, InlineMore, InlineQueryFetch, InlineQuerySlot, LoginUrlRequest, RequestPurpose,
+    InlineBotResolve, InlineMore, InlineQueryFetch, InlineQuerySlot, LoginUrlRequest,
+    RequestPurpose,
 };
 use crate::telegram::envelope::ChatKind;
 use crate::telegram::requests::{
@@ -503,7 +504,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn maybe_fetch_recent_inline_bots(&mut self) -> Result<(), ConnectSendError> {
         // Asked once: a request out or an answer waits, a failed ask goes
         // out again with the next "@".
-        if !self.chats_path_active() || !self.session.bots.reply_keyboards.recent_inline_bots.can_ask()
+        if !self.chats_path_active()
+            || !self
+                .session
+                .bots
+                .reply_keyboards
+                .recent_inline_bots
+                .can_ask()
         {
             return Ok(());
         }
@@ -515,11 +522,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         recent.sent(extra);
         let sent = self.send_json_request(extra, &get_recent_inline_bots(extra));
         if sent.is_err() {
-            self.session
-                .bots
-                .reply_keyboards
-                .recent_inline_bots
-                .failed(Some(extra), "not sent", false);
+            self.session.bots.reply_keyboards.recent_inline_bots.failed(
+                Some(extra),
+                "not sent",
+                false,
+            );
         }
         sent.map(|_| ())
     }

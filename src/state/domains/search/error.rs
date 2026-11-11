@@ -83,13 +83,11 @@ impl Session {
                     .open_mut()
                     .and_then(|open| open.from_picker.as_mut())
                 {
-                    picker
-                        .members
-                        .failed(
-                            pending.map(|p| p.id),
-                            crate::state::request_errors::error_reason(&err),
-                            false,
-                        );
+                    picker.members.failed(
+                        pending.map(|p| p.id),
+                        crate::state::request_errors::error_reason(err),
+                        false,
+                    );
                 }
             }
             _ => {}

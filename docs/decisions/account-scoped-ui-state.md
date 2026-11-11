@@ -8043,3 +8043,45 @@ whose variants carry the data, with a way out of every stage.
 - **A refused refetch of a stale proxy list** lands in
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
+
+### Sweep fixes (r2-18)
+
+Round 2, `src/state` session files. Every register-r2 entry of the 23 files is
+listed; the rest of the bundle's files hold no other entry.
+
+| id | result |
+| --- | --- |
+| 05-082 | one exhaustive match: the permission, pin-order and archive-settings arms moved into `restore_optimistic(rollback, chat_id)`; `apply_error` calls it once and the wildcard is gone |
+| 05-071, 06-013 | `SavedPage` deleted: the request of a Saved Messages page is `OlderEnd::Asking(RequestId)` in the history's own older end (`ask_older`, `settle_older`); a view left and entered again drops the old answer |
+| 05-069 | `ChatSearchState` holds `ChatSearchSurface::{Closed, Open(OpenChatSearch)}`; opening on another chat and closing replace the value whole (chat, query, phase, results, paging, sender, media, member picker); the types moved to `chat_search_types.rs` |
+| 05-070 | `SearchState::clear_results` drops a `PaidPostSearch` confirmation with the results it was asked about |
+| 05-083 | `BotStopStage::Running { can_stop }`; `PendingBotMessage::can_stop()` is derived, the second field is gone |
+| 05-074 | `VenueBot::{Unsent, Resolving(request)}`; `venue_bot_resolved` and `venue_bot_failed` take the request and ignore any other |
+| 05-080 | `pending_attention` bool deleted: `attention_chats` queues the chats whose messages asked for attention and the drain turns it into the event; allow and baseline lines removed |
+| 05-072 | `InlineQueryFetch::Loading(RequestId)` and `InlineMore::{Ready, Asking(RequestId), Failed}` inside `Loaded` replace `more_failed`; answers and errors apply only to the request the slot holds (a late page of an older query no longer appends to the new list) |
+| 05-073 | `PollVotersFetch::Loading(RequestId)` and `VotersMore::Asking(RequestId)`; a late page after `updatePoll` dropped the entry is dropped |
+| 05-081 | kept: `loaded_all_participants` is TDLib's own report that the list is complete, replaced whole by every `updateGroupCall`, no request of ours in it; already allowed in `implicit-state-allow.txt`, so the duplicate baseline line is removed |
+| 05-085 | `apply_local_search_filter` goes through `begin_recents` / `begin_query` and the `accept_*` calls |
+| 05-077 | `MentionSearch::members` and `FromPicker::members` are `Fetch<Vec<_>>` (request in `Loading`, previous list as `stale`); the two `Option<RequestId>` fields are gone; a failed picker request lands in `Failed` and may be asked again |
+| 05-078 | `forget_screen_outcomes` clears `contacts_notice` |
+| 05-075 | `PingStatus::Checking(RequestId)`; `proxy_ping_requests` deleted |
+| 05-076 | kept: `proxy.error` is the user's last failure and deliberately outlives the stages (a system step or a background refetch does not wipe it: `a_system_step_succeeding_keeps_the_users_failed_change_error`), so it is a note, not part of one stage |
+| 05-079 | `ReplyTarget::Loading { request, attempts }` and `Retry { until, attempts }`: five failed asks end in `Missing`; a refused send keeps the count |
+| 06-006 | `recent_inline_bots` is `Fetch<Vec<i64>>`; the error arm lands in `Failed` and the next "@" asks again |
+| 06-012 | `date_jump_pending` deleted: `ChatSearchJump::Loading { message_id, then: JumpLanding }`; the date jump leaves with the jump stage (`clear_date_jump_ui` makes it a plain jump) |
+| 06-007 | the send-as list carries its request in `Loading`; answer and error go through `Fetch::answered` / `failed`, and an answer after the lists were dropped is ignored |
+| 06-004 | `begin_sponsored_hide` leaves a report in flight alone |
+| 06-010 | `StickerBatch::{Idle, Running, Finished}` replaces the four batch fields |
+| 06-011 | kept: `archived_offset` and `trending_offset` are written after the `has_purpose` guard that allows one request at a time, so the offset read when the answer lands is the in-flight request's own |
+| 06-014 | `fail_story_report_send` leaves a flow with a request out alone |
+| 06-005 | `RowForum::topics` is `RowTopics::{Loading, Listed(..)}`; the `loaded` bool and its baseline line are gone |
+| 06-003 | `leave_open_chat` closes a thread opened from the chat left as well as one living in it |
+| 06-023 | `begin_fetch_at_day` clears the tab's query with the results it replaces |
+
+- **New (new-01).** `finish_history_around` ends a search jump that has no
+  chat to load into (`Missing`) instead of leaving "Loading message..." up.
+- **Outside the bundle's files**, the smallest changes: `session_apply_error.rs`
+  (the rollback call), `domains/*/error.rs` and `apply.rs` (the new request
+  matches), `location_picker/mod.rs`, `proxy.rs`, `info_types.rs`,
+  `sticker_gif_types.rs`, the connect drivers and the UI readers of the
+  changed fields.

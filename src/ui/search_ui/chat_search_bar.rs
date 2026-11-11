@@ -11,7 +11,7 @@ impl QuillApp {
             .map(|s| s.search.chat_search.status())
             .unwrap_or(SearchStatus::Closed);
         let query = session
-            .map(|s| s.search.chat_search.query().clone())
+            .map(|s| s.search.chat_search.query().to_owned())
             .unwrap_or_default();
         let position = session
             .map(|s| s.search.chat_search.position_label())
@@ -27,7 +27,7 @@ impl QuillApp {
         let media = session
             .map(|s| s.search.chat_search.media())
             .unwrap_or_default();
-        let picker = session.and_then(|s| s.search.chat_search.from_picker().clone());
+        let picker = session.and_then(|s| s.search.chat_search.from_picker().cloned());
         let more_failed = session.is_some_and(|s| s.search.chat_search.more_failed());
         let hits: Vec<(MessageId, String, i32, bool)> = session
             .map(|s| {

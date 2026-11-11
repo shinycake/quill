@@ -246,9 +246,7 @@ impl Session {
             .sublist
             .as_mut()
             .filter(|view| view.topic_id == topic_id)
-            .filter(|view| {
-                pending.is_some_and(|p| view.history.older == OlderEnd::Asking(p.id))
-            })
+            .filter(|view| pending.is_some_and(|p| view.history.older == OlderEnd::Asking(p.id)))
         else {
             return;
         };

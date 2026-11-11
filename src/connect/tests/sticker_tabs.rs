@@ -622,7 +622,10 @@ fn sticker_batches_report_confirmed_partial_results_and_reject_overlapping_work(
     assert_eq!(driver.manage_sticker_sets(&[77, 88, 77], true).unwrap(), 2);
     assert_eq!(driver.session.stickers.stickers.batch.total(), 2);
     assert_eq!(driver.session.stickers.stickers.batch.completed(), 0);
-    assert_eq!(driver.session.stickers.stickers.batch.pending(), vec![77, 88]);
+    assert_eq!(
+        driver.session.stickers.stickers.batch.pending(),
+        vec![77, 88]
+    );
     assert!(driver.manage_sticker_sets(&[99], false).is_err());
     let ok = driver
         .session

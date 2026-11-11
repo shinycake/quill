@@ -426,7 +426,11 @@ impl ChatSearchState {
         let Some(open) = self.open_mut() else {
             return false;
         };
-        let Some(index) = open.hits.iter().position(|hit| hit.message_id == message_id) else {
+        let Some(index) = open
+            .hits
+            .iter()
+            .position(|hit| hit.message_id == message_id)
+        else {
             return false;
         };
         open.selected = Some(index);
@@ -438,7 +442,11 @@ impl ChatSearchState {
     pub fn position_label(&self) -> String {
         match (self.selected(), self.hits().len()) {
             (Some(i), n) if n > 0 => {
-                format!("{} of {}", i + 1, (self.total_count().max(0) as usize).max(n))
+                format!(
+                    "{} of {}",
+                    i + 1,
+                    (self.total_count().max(0) as usize).max(n)
+                )
             }
             _ => String::new(),
         }

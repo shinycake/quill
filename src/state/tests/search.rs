@@ -455,7 +455,10 @@ fn chat_search_happy_empty_stale_and_jump() {
     assert_eq!(session.search.chat_search.status(), SearchStatus::Ready);
     assert_eq!(session.search.chat_search.hits().len(), 2);
     assert_eq!(session.search.chat_search.selected(), Some(0));
-    assert_eq!(session.search.chat_search.hits()[0].preview, "CANARY_CHAT_hi");
+    assert_eq!(
+        session.search.chat_search.hits()[0].preview,
+        "CANARY_CHAT_hi"
+    );
     assert_eq!(
         session.begin_chat_search_jump(MessageId(101)),
         ChatSearchJumpNeed::AlreadyReady
@@ -563,25 +566,31 @@ fn chat_search_jump_missing_deleted_and_inaccessible() {
         &sink,
         r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[70],"is_permanent":true,"from_cache":false}"#,
     );
-    session.search.chat_search.open_mut().unwrap().hits.push(SearchMessageHit {
-        sender: None,
-        chat_id: ChatId(11),
-        message_id: MessageId(70),
-        preview: "gone".into(),
-        is_outgoing: false,
-        content: crate::telegram::envelope::MessageContent::Text("gone".into()),
-        author_signature: None,
-        reply_to: None,
-        forward_info: None,
-        extras: Default::default(),
-        interaction_info: None,
-        is_pinned: false,
-        media_album_id: 0,
-        reply_markup: None,
-        self_destruct: None,
-        auto_delete: None,
-        date: 0,
-    });
+    session
+        .search
+        .chat_search
+        .open_mut()
+        .unwrap()
+        .hits
+        .push(SearchMessageHit {
+            sender: None,
+            chat_id: ChatId(11),
+            message_id: MessageId(70),
+            preview: "gone".into(),
+            is_outgoing: false,
+            content: crate::telegram::envelope::MessageContent::Text("gone".into()),
+            author_signature: None,
+            reply_to: None,
+            forward_info: None,
+            extras: Default::default(),
+            interaction_info: None,
+            is_pinned: false,
+            media_album_id: 0,
+            reply_markup: None,
+            self_destruct: None,
+            auto_delete: None,
+            date: 0,
+        });
     assert_eq!(
         session.begin_chat_search_jump(MessageId(70)),
         ChatSearchJumpNeed::Missing
@@ -593,25 +602,31 @@ fn chat_search_jump_missing_deleted_and_inaccessible() {
         }
     );
 
-    session.search.chat_search.open_mut().unwrap().hits.push(SearchMessageHit {
-        sender: None,
-        chat_id: ChatId(11),
-        message_id: MessageId(80),
-        preview: "ghost".into(),
-        is_outgoing: false,
-        content: crate::telegram::envelope::MessageContent::Text("ghost".into()),
-        author_signature: None,
-        reply_to: None,
-        forward_info: None,
-        extras: Default::default(),
-        interaction_info: None,
-        is_pinned: false,
-        media_album_id: 0,
-        reply_markup: None,
-        self_destruct: None,
-        auto_delete: None,
-        date: 0,
-    });
+    session
+        .search
+        .chat_search
+        .open_mut()
+        .unwrap()
+        .hits
+        .push(SearchMessageHit {
+            sender: None,
+            chat_id: ChatId(11),
+            message_id: MessageId(80),
+            preview: "ghost".into(),
+            is_outgoing: false,
+            content: crate::telegram::envelope::MessageContent::Text("ghost".into()),
+            author_signature: None,
+            reply_to: None,
+            forward_info: None,
+            extras: Default::default(),
+            interaction_info: None,
+            is_pinned: false,
+            media_album_id: 0,
+            reply_markup: None,
+            self_destruct: None,
+            auto_delete: None,
+            date: 0,
+        });
     assert_eq!(
         session.begin_chat_search_jump(MessageId(80)),
         ChatSearchJumpNeed::LoadAround
@@ -1063,7 +1078,12 @@ fn a_late_next_page_of_an_older_query_is_dropped() {
         fetch: InlineQueryFetch::Loading(fresh),
     });
     apply_json(&mut session, &seq, &sink, &inline_page_json(fresh, "dog"));
-    apply_json(&mut session, &seq, &sink, &inline_page_json(stale_more, "cat"));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &inline_page_json(stale_more, "cat"),
+    );
     let Some(InlineQuerySlot {
         fetch: InlineQueryFetch::Loaded { results, more, .. },
         ..
@@ -1071,7 +1091,10 @@ fn a_late_next_page_of_an_older_query_is_dropped() {
     else {
         panic!("slot not loaded");
     };
-    assert_eq!(results.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), vec!["dog"]);
+    assert_eq!(
+        results.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+        vec!["dog"]
+    );
     assert_eq!(*more, InlineMore::Ready);
 }
 
@@ -1191,10 +1214,7 @@ fn the_in_chat_search_bar_is_replaced_whole_on_close_and_on_another_chat() {
     assert_eq!(search.chat_id(), Some(ChatId(2)));
     assert_eq!(search.status(), SearchStatus::Idle);
     assert!(search.sender().is_none() && search.from_picker().is_none());
-    assert_eq!(
-        search.media(),
-        crate::search_filters::SearchMediaKind::All
-    );
+    assert_eq!(search.media(), crate::search_filters::SearchMediaKind::All);
     search.set_sender(Some(MessageSender::User { user_id: 6 }));
     let generation = search.generation;
     search.close();
