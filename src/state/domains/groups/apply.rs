@@ -402,9 +402,10 @@ impl Session {
                             }
                         }
                         RequestPurpose::GetRevokedChatInviteLinks => {
-                            self.groups.revoked_invite_links.insert(
+                            self.groups.answer_revoked_links(
                                 chat_id.0,
-                                InviteLinkFetch::Loaded(InviteLinkList { total_count, links }),
+                                pending.id,
+                                InviteLinkList { total_count, links },
                             );
                         }
                         _ => {}
@@ -532,13 +533,12 @@ impl Session {
             // Phase D3b: `getChatAdministrators` answer — replaces the
             // cached admin list.
             GroupsPayload::ChatAdministrators { administrators } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatAdministrators)
-                    && let Some(pending) = pending
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::GetChatAdministrators
                     && let Some(chat_id) = pending.chat_id
                 {
                     self.groups
-                        .admin_lists
-                        .insert(chat_id.0, AdminListFetch::Loaded(administrators));
+                        .answer_administrators(chat_id.0, pending.id, administrators);
                 }
             }
             // Phase D3b / slice G1: `getSupergroupMembers` answer —

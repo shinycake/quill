@@ -12,7 +12,9 @@ use std::collections::HashSet;
 /// offers Retry or closing, and a Save waits for its own answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FolderLoad {
-    Loading,
+    /// `getChatFolder` is out as this request; the form fills from its
+    /// answer, or it ends in `Failed` with Retry.
+    Loading(RequestId),
     Failed(String),
     /// The form. `error` is the line the last Save or merge left on it
     /// (cleared by the next stage, so it never draws beside a load error).
@@ -78,6 +80,7 @@ impl FolderEditorDialog {
         window: &mut Window,
         cx: &mut Context<QuillApp>,
         folder_id: Option<i32>,
+        load: FolderLoad,
     ) -> Self {
         let name_input = cx.new(|cx| {
             TextareaState::new(window, cx)
@@ -103,11 +106,7 @@ impl FolderEditorDialog {
             editor: FolderEditor::new(),
             base: ChatFolderSpec::default(),
             name_input,
-            load: if folder_id.is_some() {
-                FolderLoad::Loading
-            } else {
-                FolderLoad::ready()
-            },
+            load,
             picker: None,
             picker_search,
         }

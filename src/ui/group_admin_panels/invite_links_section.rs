@@ -591,7 +591,7 @@ impl QuillApp {
                         )),
                 );
             }
-            Some(AdminListFetch::Loading) => {
+            Some(AdminListFetch::Loading(_)) => {
                 section = section.child(
                     div()
                         .flex()

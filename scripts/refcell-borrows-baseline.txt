@@ -70,7 +70,6 @@ QuillApp::build_call_confirm_dialog::body.borrow_mut 1
 QuillApp::build_call_swap_dialog::body.borrow_mut 1
 QuillApp::build_callback_password_dialog::body.borrow_mut 1
 QuillApp::build_cancel_edit_dialog::body.borrow_mut 1
-QuillApp::build_chat_appearance_dialog::body.borrow_mut 1
 QuillApp::build_chat_look_dialog::body.borrow_mut 1
 QuillApp::build_create_sticker_dialog::body.borrow_mut 1
 QuillApp::build_deep_link_dialog::body.borrow_mut 1
@@ -91,7 +90,6 @@ QuillApp::build_grams_dialog::body.borrow_mut 1
 QuillApp::build_grams_needed_dialog::body.borrow_mut 1
 QuillApp::build_grams_withdraw_dialog::body.borrow_mut 1
 QuillApp::build_group_call_create_dialog::body.borrow_mut 1
-QuillApp::build_group_settings_dialog::body.borrow_mut 1
 QuillApp::build_import_contacts_dialog::body.borrow_mut 1
 QuillApp::build_invite_link_custom_dialog::field.borrow_mut 1
 QuillApp::build_join_requests_dialog::body.borrow_mut 1

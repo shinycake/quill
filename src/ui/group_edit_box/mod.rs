@@ -123,9 +123,11 @@ pub(crate) enum SaveStage {
     Refused(String),
 }
 
-/// Where a box is, derived from its requests and TDLib's answers.
+/// Where a box is, derived on each call from its `SaveStage` and the
+/// session's requests and answers. It is a view, never stored: the stored
+/// stage is `SaveStage`, which holds the request ids.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum EditBoxState {
+pub(crate) enum EditBoxView {
     Editing,
     Saving,
     /// TDLib refused the title, the description, the link, or a step
@@ -140,11 +142,11 @@ pub(crate) enum EditBoxState {
 }
 
 impl GroupEditBox {
-    fn state(&self, session: Option<&Session>) -> EditBoxState {
+    fn state(&self, session: Option<&Session>) -> EditBoxView {
         let sent = match &self.saving {
-            SaveStage::Editing | SaveStage::TitleInvalid => return EditBoxState::Editing,
+            SaveStage::Editing | SaveStage::TitleInvalid => return EditBoxView::Editing,
             SaveStage::Refused(reason) => {
-                return EditBoxState::Failed {
+                return EditBoxView::Failed {
                     field: GroupInfoField::Settings,
                     reason: reason.clone(),
                 };
@@ -152,38 +154,38 @@ impl GroupEditBox {
             SaveStage::Saving(sent) => sent,
             SaveStage::Exiting(request) => {
                 let Some(session) = session else {
-                    return EditBoxState::Saved;
+                    return EditBoxView::Saved;
                 };
                 return if session.requests.get(*request).is_some() {
-                    EditBoxState::Saving
+                    EditBoxView::Saving
                 } else {
                     match session.requests.failure(*request) {
-                        Some(reason) => EditBoxState::Failed {
+                        Some(reason) => EditBoxView::Failed {
                             field: GroupInfoField::Settings,
                             reason: reason.to_string(),
                         },
-                        None => EditBoxState::Saved,
+                        None => EditBoxView::Saved,
                     }
                 };
             }
         };
         let Some(session) = session else {
-            return EditBoxState::Saved;
+            return EditBoxView::Saved;
         };
         if sent.iter().any(|id| session.requests.get(*id).is_some()) {
-            return EditBoxState::Saving;
+            return EditBoxView::Saving;
         }
         match session.groups.info_edit_errors.get(&self.chat_id.0) {
-            Some(error) if error.field != GroupInfoField::Photo => EditBoxState::Failed {
+            Some(error) if error.field != GroupInfoField::Photo => EditBoxView::Failed {
                 field: error.field,
                 reason: error.reason.clone(),
             },
             _ => match sent.iter().find_map(|id| session.requests.failure(*id)) {
-                Some(reason) => EditBoxState::Failed {
+                Some(reason) => EditBoxView::Failed {
                     field: GroupInfoField::Settings,
                     reason: reason.to_string(),
                 },
-                None => EditBoxState::Saved,
+                None => EditBoxView::Saved,
             },
         }
     }
@@ -191,7 +193,7 @@ impl GroupEditBox {
     /// Why TDLib refused the link of the last Save.
     pub(crate) fn username_failure(&self, session: Option<&Session>) -> Option<String> {
         match self.state(session) {
-            EditBoxState::Failed {
+            EditBoxView::Failed {
                 field: GroupInfoField::Username,
                 reason,
             } => Some(reason),
@@ -211,7 +213,7 @@ impl QuillApp {
     /// The open Edit box; one whose save went through counts as closed.
     pub(crate) fn group_edit_box(&self) -> Option<&GroupEditBox> {
         let edit = self.admin.group_edit_box.as_ref()?;
-        (edit.state(self.session()) != EditBoxState::Saved).then_some(edit)
+        (edit.state(self.session()) != EditBoxView::Saved).then_some(edit)
     }
 
     pub(crate) fn group_edit_box_mut(&mut self) -> Option<&mut GroupEditBox> {
@@ -219,7 +221,7 @@ impl QuillApp {
             .admin
             .group_edit_box
             .as_ref()
-            .is_some_and(|edit| edit.state(self.session()) == EditBoxState::Saved);
+            .is_some_and(|edit| edit.state(self.session()) == EditBoxView::Saved);
         if saved {
             return None;
         }
@@ -332,7 +334,7 @@ impl QuillApp {
     /// or Leave waits for it instead of replacing its stage).
     pub(in crate::ui) fn group_edit_box_saving(&self, chat: ChatId) -> bool {
         self.admin.group_edit_box.as_ref().is_some_and(|edit| {
-            edit.chat_id == chat && edit.state(self.session()) == EditBoxState::Saving
+            edit.chat_id == chat && edit.state(self.session()) == EditBoxView::Saving
         })
     }
 
@@ -359,7 +361,7 @@ impl QuillApp {
             .admin
             .group_edit_box
             .as_ref()
-            .is_some_and(|edit| edit.state(self.session()) == EditBoxState::Saved)
+            .is_some_and(|edit| edit.state(self.session()) == EditBoxView::Saved)
         {
             self.close_group_edit_box(cx);
             return;
@@ -396,7 +398,7 @@ impl QuillApp {
         let Some(edit) = self.group_edit_box() else {
             return;
         };
-        if edit.state(self.session()) == EditBoxState::Saving {
+        if edit.state(self.session()) == EditBoxView::Saving {
             return;
         }
         let chat_id = edit.chat_id;
@@ -508,9 +510,10 @@ impl QuillApp {
                 .into_any_element()
         };
         let failed = |wanted: GroupInfoField| match &state {
-            EditBoxState::Failed { field, reason } if *field == wanted => Some(error_line(
-                tr_with(keys::Q_PEOPLE_COULDNT_SAVE_REASON, &[("reason", reason)]),
-            )),
+            EditBoxView::Failed { field, reason } if *field == wanted => Some(error_line(tr_with(
+                keys::Q_PEOPLE_COULDNT_SAVE_REASON,
+                &[("reason", reason)],
+            ))),
             _ => None,
         };
         let title_error = (edit.saving == SaveStage::TitleInvalid)
@@ -610,7 +613,7 @@ impl QuillApp {
             }
             let saving = this
                 .group_edit_box()
-                .is_some_and(|edit| edit.state(this.session()) == EditBoxState::Saving);
+                .is_some_and(|edit| edit.state(this.session()) == EditBoxView::Saving);
             let panel_open = this
                 .group_edit_box()
                 .is_some_and(|edit| edit.sources.is_open());

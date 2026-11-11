@@ -116,7 +116,6 @@ unmatched:GifPanel::saved_answered 1
 unmatched:GifPanel::search_answered 1
 unmatched:LiveStoryState::set_donors 1
 unmatched:PaidReactions::set_senders 1
-unmatched:QuillApp::open_folder_delete 1
 unmatched:QuillApp::refresh_storage_usage 1
 unmatched:QuillApp::submit_default_auto_delete 1
 unmatched:SearchState::accept_recommended 1

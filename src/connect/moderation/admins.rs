@@ -22,7 +22,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if matches!(
             self.session.groups.admin_lists.get(&chat_id.0),
-            Some(AdminListFetch::Loading | AdminListFetch::Loaded(_))
+            Some(AdminListFetch::Loading(_) | AdminListFetch::Loaded(_))
         ) || self
             .session
             .requests
@@ -37,13 +37,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.session
-            .groups
-            .admin_lists
-            .insert(chat_id.0, AdminListFetch::Loading);
         let extra = self
             .session
             .request(RequestPurpose::GetChatAdministrators, Some(chat_id));
+        self.session
+            .groups
+            .admin_lists
+            .insert(chat_id.0, AdminListFetch::Loading(extra));
         if let Err(err) = self
             .sender
             .send_json(&get_chat_administrators(extra, chat_id.0))

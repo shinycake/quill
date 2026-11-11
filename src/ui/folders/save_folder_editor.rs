@@ -167,13 +167,8 @@ impl QuillApp {
                         &err,
                     )));
                 }
-            } else if let Some(demo) = self.demo_session.as_mut() {
-                // The screenshot demo has no server to ask: nothing to leave.
-                demo.chat_list
-                    .folder_chats_to_leave
-                    .entry(folder_id)
-                    .or_default()
-                    .succeed(Vec::new());
+            } else {
+                self.apply_demo_no_chats_to_leave(folder_id);
             }
         }
         cx.notify();
@@ -237,7 +232,7 @@ impl QuillApp {
         match result {
             // The toast waits for TDLib's answer (`settle_folder_deletes`).
             Ok(Some(request)) => {
-                self.folders.deletes.insert(confirm.folder_id, request);
+                self.folders.deletes.insert(request);
             }
             Ok(None) => self.set_note(StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_DELETED))),
             Err(err) => self.set_note(StatusNote::error(user_error_for(
@@ -260,21 +255,16 @@ impl QuillApp {
         if self.folders.deletes.is_empty() {
             return false;
         }
-        let waiting: Vec<(i32, quill::ids::RequestId)> = self
-            .folders
-            .deletes
-            .iter()
-            .map(|(folder, request)| (*folder, *request))
-            .collect();
+        let waiting: Vec<quill::ids::RequestId> = self.folders.deletes.iter().copied().collect();
         let mut changed = false;
-        for (folder_id, request) in waiting {
+        for request in waiting {
             let Some(answer) = self
                 .session_mut()
                 .and_then(|s| s.chat_list.dialog_answers.take(request))
             else {
                 continue;
             };
-            self.folders.deletes.remove(&folder_id);
+            self.folders.deletes.remove(&request);
             use quill::state::DialogAnswer;
             self.set_note(match answer {
                 DialogAnswer::Failed(line) => StatusNote::error(line),

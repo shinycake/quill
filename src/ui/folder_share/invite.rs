@@ -17,13 +17,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        // A check the new link replaces: its answer, if it came, goes.
-        if let Some(InviteStage::Checking(old)) = self.folders.invite.as_ref().map(|d| &d.stage) {
-            let old = *old;
-            if let Some(session) = self.session_mut_any() {
-                session.chat_list.dialog_answers.take(old);
-            }
-        }
+        self.drop_folder_invite_check();
         let stage = match self.live.as_mut() {
             Some(live) => match live.driver.check_folder_invite_link(&link) {
                 Ok(request) => InviteStage::Checking(request),
@@ -41,8 +35,24 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn close_folder_invite(&mut self, cx: &mut Context<Self>) {
+        self.drop_folder_invite_check();
         self.folders.invite = None;
         cx.notify();
+    }
+
+    /// A box still checking its link is going away or being replaced: its
+    /// request leaves the registry, so a later answer is noted by nobody,
+    /// and an answer that already arrived is taken and dropped.
+    fn drop_folder_invite_check(&mut self) {
+        let Some(InviteStage::Checking(old)) = self.folders.invite.as_ref().map(|d| &d.stage)
+        else {
+            return;
+        };
+        let old = *old;
+        if let Some(session) = self.session_mut_any() {
+            session.requests.take(old);
+            session.chat_list.dialog_answers.take(old);
+        }
     }
 
     /// Poll-loop half of the add-by-link box: take the answer of the check

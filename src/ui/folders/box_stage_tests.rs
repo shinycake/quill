@@ -63,7 +63,7 @@ fn the_folder_editor_closes_on_its_answer_and_shows_a_refusal(cx: &mut TestAppCo
     let (app, mut vcx) = open(cx);
     app.update_in(&mut vcx, |app, window, cx| {
         let request = sent(app, RequestPurpose::EditChatFolder, Some(5));
-        let mut dialog = FolderEditorDialog::new(window, cx, Some(5));
+        let mut dialog = FolderEditorDialog::new(window, cx, Some(5), FolderLoad::ready());
         dialog.load = FolderLoad::Saving(request);
         app.folders.editor = Some(dialog);
         // Another box's answer does not settle it.
@@ -98,11 +98,12 @@ fn a_failed_folder_fetch_ends_the_editor_in_the_error(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx);
     app.update_in(&mut vcx, |app, window, cx| {
         let request = sent(app, RequestPurpose::GetChatFolder, Some(5));
-        app.folders.editor = Some(FolderEditorDialog::new(window, cx, Some(5)));
-        assert_eq!(
-            app.folders.editor.as_ref().map(|d| d.load.clone()),
-            Some(FolderLoad::Loading)
-        );
+        app.folders.editor = Some(FolderEditorDialog::new(
+            window,
+            cx,
+            Some(5),
+            FolderLoad::Loading(request),
+        ));
         answer(app, request, REFUSED);
         app.maybe_prefill_folder_editor(window, cx);
         assert!(
@@ -208,7 +209,7 @@ fn a_save_after_the_folder_changed_goes_onto_the_fresh_folder(cx: &mut TestAppCo
             included_chat_ids: vec![1, 2],
             ..Default::default()
         };
-        let mut dialog = FolderEditorDialog::new(window, cx, Some(5));
+        let mut dialog = FolderEditorDialog::new(window, cx, Some(5), FolderLoad::ready());
         dialog.prefill_from_spec(&base, window, cx);
         dialog.editor.toggle_included(5);
         dialog.load = FolderLoad::Merging;
@@ -281,7 +282,7 @@ fn a_limit_box_leaves_the_folder_editor_without_an_error_line(cx: &mut TestAppCo
     let (app, mut vcx) = open(cx);
     app.update_in(&mut vcx, |app, window, cx| {
         let request = sent(app, RequestPurpose::CreateChatFolder, None);
-        let mut dialog = FolderEditorDialog::new(window, cx, None);
+        let mut dialog = FolderEditorDialog::new(window, cx, None, FolderLoad::ready());
         dialog.load = FolderLoad::Saving(request);
         app.folders.editor = Some(dialog);
         answer(
@@ -303,7 +304,7 @@ fn a_limit_box_leaves_the_folder_editor_without_an_error_line(cx: &mut TestAppCo
 fn a_save_waiting_for_the_fresh_folder_never_spins_without_a_request(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx);
     app.update_in(&mut vcx, |app, window, cx| {
-        let mut dialog = FolderEditorDialog::new(window, cx, Some(5));
+        let mut dialog = FolderEditorDialog::new(window, cx, Some(5), FolderLoad::ready());
         dialog.load = FolderLoad::Merging;
         app.folders.editor = Some(dialog);
         // The fetch is in flight: the stage waits and asks nothing more.
@@ -415,19 +416,19 @@ fn the_folder_delete_toast_waits_for_tdlibs_answer(cx: &mut TestAppContext) {
     app.update_in(&mut vcx, |app, _, cx| {
         let refused = sent(app, RequestPurpose::DeleteChatFolder, Some(5));
         let accepted = sent(app, RequestPurpose::DeleteChatFolder, Some(6));
-        app.folders.deletes.insert(5, refused);
-        app.folders.deletes.insert(6, accepted);
+        app.folders.deletes.insert(refused);
+        app.folders.deletes.insert(accepted);
         assert!(!app.settle_folder_deletes(cx), "nothing answered yet");
         assert_eq!(app.folders.deletes.len(), 2);
         answer(app, refused, REFUSED);
         assert!(app.settle_folder_deletes(cx));
         assert!(
-            !app.folders.deletes.contains_key(&5),
+            !app.folders.deletes.contains(&refused),
             "the answer ends its entry"
         );
         assert!(
-            app.folders.deletes.contains_key(&6),
-            "another folder's delete still waits"
+            app.folders.deletes.contains(&accepted),
+            "another delete still waits"
         );
         let said = app.connection.status_note().to_string();
         assert!(
@@ -496,5 +497,56 @@ fn a_delete_in_flight_keeps_the_list_and_takes_no_second_request(cx: &mut TestAp
         let dialog = app.folders.share.as_ref().expect("open");
         assert!(matches!(dialog.view, FolderShareView::List { .. }));
         assert!(matches!(dialog.view.op(), LinkOp::Failed(_)));
+    });
+}
+
+#[gpui_kit::test]
+fn two_deletes_of_one_folder_each_settle_on_their_own_answer(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let first = sent(app, RequestPurpose::DeleteChatFolder, Some(5));
+        let second = sent(app, RequestPurpose::DeleteChatFolder, Some(5));
+        app.folders.deletes.insert(first);
+        app.folders.deletes.insert(second);
+        answer(app, second, r#""@type":"ok""#);
+        assert!(app.settle_folder_deletes(cx));
+        assert!(
+            app.folders.deletes.contains(&first),
+            "the older delete still waits for its own answer"
+        );
+        answer(app, first, REFUSED);
+        assert!(app.settle_folder_deletes(cx));
+        assert!(app.folders.deletes.is_empty());
+    });
+}
+
+#[gpui_kit::test]
+fn a_replaced_link_check_leaves_no_request_and_no_answer_behind(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let old = sent(app, RequestPurpose::CheckChatFolderInviteLink, None);
+        app.folders.invite = Some(FolderInviteDialog::new(
+            "first".into(),
+            InviteStage::Checking(old),
+        ));
+        app.open_folder_invite("second".into(), cx);
+        let demo = app.demo_session.as_mut().expect("demo session");
+        assert!(demo.requests.get(old).is_none(), "the old check is dropped");
+        // Its answer comes after the new link opened the box: nobody waits.
+        answer(app, old, REFUSED);
+        let demo = app.demo_session.as_mut().expect("demo session");
+        assert!(
+            demo.chat_list.dialog_answers.take(old).is_none(),
+            "a late answer for a replaced check is not kept"
+        );
+        // Closing a box that still checks drops its request the same way.
+        let checking = sent(app, RequestPurpose::CheckChatFolderInviteLink, None);
+        app.folders.invite = Some(FolderInviteDialog::new(
+            "third".into(),
+            InviteStage::Checking(checking),
+        ));
+        app.close_folder_invite(cx);
+        let demo = app.demo_session.as_mut().expect("demo session");
+        assert!(demo.requests.get(checking).is_none());
     });
 }

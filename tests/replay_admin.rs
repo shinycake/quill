@@ -209,7 +209,7 @@ fn replay_admin_rights_lookup_and_demote() {
     session
         .groups
         .admin_lists
-        .insert(13, AdminListFetch::Loading);
+        .insert(13, AdminListFetch::Loading(demote_extra));
     apply_all_seq(
         &mut session,
         &sink,

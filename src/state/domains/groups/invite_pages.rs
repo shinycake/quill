@@ -127,14 +127,76 @@ impl crate::state::GroupsState {
         request: crate::ids::RequestId,
         list: crate::state::InviteLinkList,
     ) {
-        let newer = matches!(
-            self.invite_links.get(&chat),
-            Some(crate::state::InviteLinkFetch::Loading(waiting)) if *waiting != request
-        );
-        if !newer {
+        if waits_for(self.invite_links.get(&chat), request) {
             self.invite_links
                 .insert(chat, crate::state::InviteLinkFetch::Loaded(list));
         }
+    }
+
+    /// The `getChatInviteLinks` (revoked) answer of `request`: taken only
+    /// while the list waits for it, so a stale answer lands neither before
+    /// nor after a newer one.
+    pub(crate) fn answer_revoked_links(
+        &mut self,
+        chat: i64,
+        request: crate::ids::RequestId,
+        list: crate::state::InviteLinkList,
+    ) {
+        if waits_for(self.revoked_invite_links.get(&chat), request) {
+            self.revoked_invite_links
+                .insert(chat, crate::state::InviteLinkFetch::Loaded(list));
+        }
+    }
+
+    /// The `getChatAdministrators` answer of `request`, taken only while
+    /// the list waits for it.
+    pub(crate) fn answer_administrators(
+        &mut self,
+        chat: i64,
+        request: crate::ids::RequestId,
+        administrators: Vec<crate::state::ChatAdministratorEntry>,
+    ) {
+        let waiting = match self.admin_lists.get(&chat) {
+            None => true,
+            Some(crate::state::AdminListFetch::Loading(waiting)) => *waiting == request,
+            Some(_) => false,
+        };
+        if waiting {
+            self.admin_lists
+                .insert(chat, crate::state::AdminListFetch::Loaded(administrators));
+        }
+    }
+
+    /// The `getChatAdministrators` error of `request`: an older request's
+    /// error leaves a newer one waiting, and a loaded list stays.
+    pub(crate) fn fail_administrators(
+        &mut self,
+        chat: i64,
+        request: crate::ids::RequestId,
+        line: String,
+    ) {
+        let waiting = match self.admin_lists.get(&chat) {
+            None => true,
+            Some(crate::state::AdminListFetch::Loading(waiting)) => *waiting == request,
+            Some(_) => false,
+        };
+        if waiting {
+            self.admin_lists
+                .insert(chat, crate::state::AdminListFetch::Failed(line));
+        }
+    }
+}
+
+/// Whether a link list waits for `request`'s answer: it was never asked
+/// (nothing to protect) or it is `Loading` as this very request.
+pub(super) fn waits_for(
+    slot: Option<&crate::state::InviteLinkFetch>,
+    request: crate::ids::RequestId,
+) -> bool {
+    match slot {
+        None => true,
+        Some(crate::state::InviteLinkFetch::Loading(waiting)) => *waiting == request,
+        Some(_) => false,
     }
 }
 

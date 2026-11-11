@@ -27,8 +27,6 @@ use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::peer_color::{name_swatches, profile_swatches};
 use quill::telegram::envelope::ChatKind;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// The open box: the chat, the tab and the draft the swatches edit.
 pub(crate) struct ChatAppearanceDialog {
@@ -369,16 +367,7 @@ impl QuillApp {
                         })),
                 );
             dialog
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::dialog_body::one_shot_body(body))
                 .footer(footer)
                 .on_close(on_close)
         })

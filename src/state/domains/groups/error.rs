@@ -243,15 +243,13 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetChatInviteLinks) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && !matches!(
+                // An older request's error leaves a newer one waiting, and a
+                // list that already loaded stays.
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && super::invite_pages::waits_for(
                         self.groups.invite_links.get(&chat_id.0),
-                        Some(InviteLinkFetch::Loaded(_))
-                    )
-                    // An older request's error leaves a newer one waiting.
-                    && !matches!(
-                        (self.groups.invite_links.get(&chat_id.0), pending),
-                        (Some(InviteLinkFetch::Loading(waiting)), Some(p)) if *waiting != p.id
+                        pending.id,
                     )
                 {
                     self.groups.invite_links.insert(
@@ -351,10 +349,11 @@ impl Session {
                 ));
             }
             Some(RequestPurpose::GetRevokedChatInviteLinks) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && !matches!(
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && super::invite_pages::waits_for(
                         self.groups.revoked_invite_links.get(&chat_id.0),
-                        Some(InviteLinkFetch::Loaded(_))
+                        pending.id,
                     )
                 {
                     self.groups.revoked_invite_links.insert(
@@ -477,13 +476,13 @@ impl Session {
             // the fetch state so the panel shows an honest error
             // instead of spinning forever.
             Some(RequestPurpose::GetChatAdministrators) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.groups.admin_lists.insert(
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                {
+                    self.groups.fail_administrators(
                         chat_id.0,
-                        AdminListFetch::Failed(call_request_error_line(
-                            err,
-                            "Could not load administrators",
-                        )),
+                        pending.id,
+                        call_request_error_line(err, "Could not load administrators"),
                     );
                 }
             }

@@ -1021,3 +1021,111 @@ fn can_manage_admins_gate() {
     session.groups.supergroup_promote_right.insert(15, false);
     assert!(!session.chat_can_manage_admins(ChatId(15)));
 }
+
+/// A refresh asks again under a new id while the first ask is out. Whichever
+/// order the two answers arrive in, the list is the newer request's.
+#[test]
+fn a_refreshed_list_takes_only_the_newest_answer_in_either_order() {
+    let admins = |extra: RequestId, user: i64| {
+        format!(
+            r#"{{"@type":"chatAdministrators","@extra":"{}","administrators":[{{"@type":"chatAdministrator","user_id":{user},"custom_title":"","is_owner":false,"can_be_edited":true}}]}}"#,
+            extra.0
+        )
+    };
+    let listed = |session: &Session| match session.groups.admin_lists.get(&13) {
+        Some(AdminListFetch::Loaded(list)) => list.iter().map(|a| a.user_id).collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    for newest_first in [false, true] {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let older = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
+        let newer = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
+        session
+            .groups
+            .admin_lists
+            .insert(13, AdminListFetch::Loading(newer));
+        let order = if newest_first {
+            [(newer, 2), (older, 1)]
+        } else {
+            [(older, 1), (newer, 2)]
+        };
+        for (extra, user) in order {
+            apply_json(&mut session, &seq, &sink, &admins(extra, user));
+        }
+        assert_eq!(listed(&session), vec![2], "newest_first={newest_first}");
+    }
+}
+
+#[test]
+fn an_older_administrators_error_leaves_the_newer_ask_and_the_loaded_list() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let error = |extra: RequestId| {
+        format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_ADMIN_REQUIRED"}}"#,
+            extra.0
+        )
+    };
+    let older = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
+    let newer = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
+    session
+        .groups
+        .admin_lists
+        .insert(13, AdminListFetch::Loading(newer));
+    apply_json(&mut session, &seq, &sink, &error(older));
+    assert_eq!(
+        session.groups.admin_lists.get(&13),
+        Some(&AdminListFetch::Loading(newer)),
+        "an older error leaves the newer ask waiting"
+    );
+    apply_json(&mut session, &seq, &sink, &error(newer));
+    assert!(matches!(
+        session.groups.admin_lists.get(&13),
+        Some(AdminListFetch::Failed(_))
+    ));
+}
+
+#[test]
+fn a_refreshed_invite_link_list_takes_only_the_newest_answer_in_either_order() {
+    let answer = |extra: RequestId, total: i32| {
+        format!(
+            r#"{{"@type":"chatInviteLinks","@extra":"{}","total_count":{total},"invite_links":[]}}"#,
+            extra.0
+        )
+    };
+    for newest_first in [false, true] {
+        for purpose in [
+            RequestPurpose::GetChatInviteLinks,
+            RequestPurpose::GetRevokedChatInviteLinks,
+        ] {
+            let (mut session, sink) = session();
+            let seq = AtomicU64::new(0);
+            let older = session.request(purpose.clone(), Some(ChatId(13)));
+            let newer = session.request(purpose.clone(), Some(ChatId(13)));
+            let slot = if purpose == RequestPurpose::GetChatInviteLinks {
+                &mut session.groups.invite_links
+            } else {
+                &mut session.groups.revoked_invite_links
+            };
+            slot.insert(13, InviteLinkFetch::Loading(newer));
+            let order = if newest_first {
+                [(newer, 2), (older, 1)]
+            } else {
+                [(older, 1), (newer, 2)]
+            };
+            for (extra, total) in order {
+                apply_json(&mut session, &seq, &sink, &answer(extra, total));
+            }
+            let slot = if purpose == RequestPurpose::GetChatInviteLinks {
+                &session.groups.invite_links
+            } else {
+                &session.groups.revoked_invite_links
+            };
+            assert!(
+                matches!(slot.get(&13), Some(InviteLinkFetch::Loaded(l)) if l.total_count == 2),
+                "newest_first={newest_first} purpose={purpose:?}"
+            );
+        }
+    }
+}
