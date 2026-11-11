@@ -41,11 +41,15 @@ struct Shown {
     pixels: HdrPixels,
     /// 0.0 until the first draw attaches one.
     headroom: f32,
+    /// Re-reads the display headroom while the frame shows; it goes with
+    /// the frame (a step, a close or a newer picture drops it).
+    _poll: Task<()>,
 }
 
 /// The viewer's decode of the current picture file, one value. It leaves
-/// `Decoding` when the matching answer arrives or `reset` runs; an answer
-/// for another key is dropped.
+/// `Decoding` when the matching answer arrives or `reset` runs; the task
+/// (which owns the background job) goes with the stage, so a replaced
+/// decode stops instead of running to the end.
 #[derive(Default)]
 enum Decode {
     #[default]
@@ -55,6 +59,7 @@ enum Decode {
     Decoding {
         key: DecodeKey,
         showing: Option<Shown>,
+        _task: Task<()>,
     },
     /// No HDR data in the file.
     Sdr(DecodeKey),
@@ -107,20 +112,10 @@ impl Edr {
     }
 }
 
-/// The display headroom re-read while an HDR frame shows.
-#[derive(Default)]
-enum HeadroomPoll {
-    #[default]
-    Off,
-    /// The task ends itself (and this stage with it) when no frame shows.
-    Running { _task: Task<()> },
-}
-
 #[derive(Default)]
 pub(crate) struct HdrViewer {
     decode: Decode,
     edr: Edr,
-    poll: HeadroomPoll,
 }
 
 impl Decode {
@@ -223,6 +218,7 @@ impl HdrViewer {
         self.decode = Decode::Decoding {
             key,
             showing: Some(shown),
+            _task: Task::ready(()),
         };
         true
     }
@@ -281,7 +277,7 @@ impl QuillApp {
             }
         };
         if stale {
-            self.start_hdr_decode(path, long_edge, can_show, cx);
+            self.start_hdr_decode(path, long_edge, can_show, window, cx);
         }
         let hdr = &mut self.viewer.hdr;
         let display = hdr.display_headroom(headroom);
@@ -294,9 +290,7 @@ impl QuillApp {
             shown.pixels.frame.set_headroom(param);
             shown.headroom = display;
         }
-        let element = frame_element(&shown.pixels.frame, fit);
-        self.poll_viewer_headroom(window, cx);
-        element
+        frame_element(&shown.pixels.frame, fit)
     }
 
     /// The toolbar badge for the current picture. A rotated or flipped
@@ -315,31 +309,30 @@ impl QuillApp {
         path: &Path,
         long_edge: u32,
         can_show: bool,
+        window: &Window,
         cx: &mut Context<Self>,
     ) {
-        let hdr = &mut self.viewer.hdr;
         let key = (path.to_path_buf(), long_edge, can_show);
-        let showing = match std::mem::take(&mut hdr.decode) {
+        let showing = match std::mem::take(&mut self.viewer.hdr.decode) {
             Decode::Hdr { shown, .. } => Some(shown),
             Decode::Decoding { showing, .. } => showing,
             _ => None,
         };
-        hdr.decode = Decode::Decoding {
-            key: key.clone(),
-            showing,
-        };
         let path = path.to_path_buf();
         let job = cx.background_spawn(async move { run(&path, long_edge, can_show) });
-        self.spawn_scoped(cx, async move |this, cx| {
+        let answer_key = key.clone();
+        let task = self.spawn_scoped_in(window, cx, async move |this, cx| {
             let outcome = job.await;
-            let _ = this.update(cx, |app, cx| {
-                let hdr = &mut app.viewer.hdr;
+            let _ = this.update_in(cx, |app, window, cx| {
+                let key = answer_key;
                 // An answer for a key that is no longer the one decoding
-                // (reset, or a newer decode) is dropped.
-                if !matches!(&hdr.decode, Decode::Decoding { key: now, .. } if *now == key) {
+                // is dropped (the stage owns this task, so a replaced
+                // decode normally never gets here).
+                if !matches!(&app.viewer.hdr.decode, Decode::Decoding { key: now, .. } if *now == key)
+                {
                     return;
                 }
-                hdr.decode = match outcome {
+                let decode = match outcome {
                     Outcome::Sdr => Decode::Sdr(key),
                     Outcome::StandardRange => Decode::StandardRange(key),
                     Outcome::Hdr(pixels) => Decode::Hdr {
@@ -347,23 +340,27 @@ impl QuillApp {
                         shown: Shown {
                             pixels,
                             headroom: 0.0,
+                            _poll: Self::poll_viewer_headroom(app, window, cx),
                         },
                     },
                 };
+                app.viewer.hdr.decode = decode;
                 cx.notify();
             });
-        })
-        .detach();
+        });
+        self.viewer.hdr.decode = Decode::Decoding {
+            key,
+            showing,
+            _task: task,
+        };
     }
 
     /// While an HDR frame shows, re-read the display headroom (ten times a
     /// second at first, while the screen ramps into EDR, then once a
-    /// second) and repaint only when it changed.
-    fn poll_viewer_headroom(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if matches!(self.viewer.hdr.poll, HeadroomPoll::Running { .. }) {
-            return;
-        }
-        let task = self.spawn_scoped_in(window, cx, async move |this, cx| {
+    /// second) and repaint only when it changed. The task belongs to the
+    /// frame; it also ends by itself once no frame or picture shows.
+    fn poll_viewer_headroom(&self, window: &Window, cx: &mut Context<Self>) -> Task<()> {
+        self.spawn_scoped_in(window, cx, async move |this, cx| {
             let mut ticks = 0_u32;
             loop {
                 ticks = ticks.saturating_add(1);
@@ -376,7 +373,6 @@ impl QuillApp {
                 let keep = this.update_in(cx, |app, window, cx| {
                     let hdr = &mut app.screen.viewer.hdr;
                     if !hdr.has_frame() || app.screen.viewer.state.current().is_none() {
-                        hdr.poll = HeadroomPoll::Off;
                         return false;
                     }
                     let left_edr = hdr.edr == Edr::On && super::renderer_left_edr(window);
@@ -395,8 +391,7 @@ impl QuillApp {
                     break;
                 }
             }
-        });
-        self.viewer.hdr.poll = HeadroomPoll::Running { _task: task };
+        })
     }
 
     /// The account on screen leaves: its viewer (and the record of the
