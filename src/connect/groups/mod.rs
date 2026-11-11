@@ -157,17 +157,23 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         let Some(my_id) = self.session.my_user_id else {
-            if self.session.requests.has_purpose(RequestPurpose::GetMe) {
+            if !self.session.users_state.my_id_probe.is_idle()
+                || self.session.requests.has_purpose(RequestPurpose::GetMe)
+            {
                 return Ok(());
             }
             let extra = self.session.request(RequestPurpose::GetMe, None);
-            return self
-                .sender
-                .send_json(&get_me(extra))
-                .map(|_| ())
-                .inspect_err(|_| {
-                    self.session.requests.take(extra);
-                });
+            self.session.users_state.my_id_probe.begin();
+            if let Err(err) = self.sender.send_json(&get_me(extra)) {
+                self.session.requests.take(extra);
+                self.session
+                    .users_state
+                    .my_id_probe
+                    .fail_dropping_data("could not send the request");
+                return Err(err);
+            }
+            self.session.users_state.my_id_probe.sent(extra);
+            return Ok(());
         };
         if self.session.chats.get(&chat_id.0).is_some_and(|chat| {
             if chat.is_channel() {

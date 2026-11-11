@@ -522,6 +522,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let paid_prices_change = Self::changes_paid_prices(&owned.envelope.payload);
         let premium_change = Self::changes_viewer_premium(&owned.envelope.payload);
         let send_outcome = Self::send_outcome(&owned.envelope.payload);
+        let answer_extra = owned.envelope.extra;
         self.session.apply(owned);
         self.run_deferred_caption(send_outcome);
         // The answers captured above are stashed before any step that can
@@ -540,10 +541,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             *existing = rich;
         }
         if let Some((chat_id, message_id)) = full_rich_key {
-            self.session
-                .messages
-                .full_rich_loads
-                .remove(&ChatMessage::new(chat_id, message_id));
+            // Only the ask that waits for this answer ends the load.
+            let key = ChatMessage::new(chat_id, message_id);
+            let waits = answer_extra.is_some_and(|extra| {
+                self.session
+                    .messages
+                    .full_rich_loads
+                    .get(&key)
+                    .is_some_and(|load| load.waits_for(extra))
+            });
+            if waits {
+                self.session.messages.full_rich_loads.remove(&key);
+            }
         }
         // M1: stash the `getMessageLink` answer for the UI clipboard drain.
         if let Some((link, is_public)) = message_link_answer {
@@ -705,11 +714,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Slice (communities backend core): refetch the full-info pack
         // the state dropped after a confirmed `setCommunityName`.
         if let Some(community_id) = community_mutation_refetch
-            && !self
+            && self
                 .session
                 .groups
                 .community_full_infos
-                .contains_key(&community_id)
+                .wants_fetch(community_id)
         {
             let _ = self.get_community_full_info(community_id);
         }

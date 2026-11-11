@@ -621,7 +621,14 @@ fn driver_community_create_rename_refetch_chain() {
             .unwrap(),
         )
         .unwrap();
-    assert!(!driver.session.groups.community_full_infos.contains_key(&42));
+    assert!(
+        driver
+            .session
+            .groups
+            .community_full_infos
+            .fetch(42)
+            .is_some_and(|fetch| fetch.is_loading())
+    );
     let sent = recorder.snapshot().last().cloned().expect("request");
     let v: Value = serde_json::from_str(&sent).unwrap();
     assert_eq!(v["@type"], "getCommunityFullInfo");

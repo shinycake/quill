@@ -65,7 +65,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.threads.forum_topics.remove(&chat_id.0);
+        self.session.threads.forum_topics.outdate(chat_id.0);
         self.maybe_fetch_forum_topics(chat_id)
     }
 
@@ -87,14 +87,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.chat_has_topics(chat_id) {
             return Ok(());
         }
-        if self.session.threads.forum_topics.contains_key(&chat_id.0) {
-            return Ok(());
-        }
-        if self
-            .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::GetForumTopics, chat_id)
-        {
+        if !self.session.threads.forum_topics.wants_fetch(chat_id.0) {
             return Ok(());
         }
         let extra = self
@@ -119,6 +112,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         self.session.threads.forum_topics.begin(chat_id.0);
+        self.session.threads.forum_topics.sent(chat_id.0, extra);
         Ok(())
     }
 

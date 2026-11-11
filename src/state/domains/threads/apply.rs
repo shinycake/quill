@@ -52,7 +52,9 @@ impl Session {
                             topic,
                         );
                     }
-                    self.threads.forum_topics.insert(chat_id.0, topics);
+                    self.threads
+                        .forum_topics
+                        .answered(chat_id.0, pending.map(|p| p.id), topics);
                 }
             }
             // Slice G2: `createForumTopic` answers `forumTopicInfo` —

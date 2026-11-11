@@ -56,7 +56,60 @@ impl ForumTopicsMap {
         self.lists.entry(chat_id).or_default().begin();
     }
 
-    /// `getForumTopics` for `chat_id` failed.
+    /// The `begin` ask for `chat_id` went out as `request`: only its
+    /// answer or error acts.
+    pub fn sent(&mut self, chat_id: i64, request: RequestId) {
+        if let Some(list) = self.lists.get_mut(&chat_id) {
+            list.sent(request);
+        }
+    }
+
+    /// The topics changed on the server: what is held stays until the
+    /// refetch replaces it, and an ask in flight (it predates the change)
+    /// is no longer waited for. The chat list asks again.
+    pub fn outdate(&mut self, chat_id: i64) {
+        if let Some(list) = self.lists.get_mut(&chat_id) {
+            list.outdate();
+        }
+    }
+
+    /// A first page is owed: never asked, or outdated by a change.
+    pub fn wants_fetch(&self, chat_id: i64) -> bool {
+        self.lists.get(&chat_id).is_none_or(Fetch::wants_fetch)
+    }
+
+    /// `request` answered with `chat_id`'s first page: only the ask that
+    /// waits for it takes it.
+    pub fn answered(
+        &mut self,
+        chat_id: i64,
+        request: Option<RequestId>,
+        topics: Vec<ForumTopic>,
+    ) -> bool {
+        let unread = counted_unread(&topics);
+        let taken = self
+            .lists
+            .get_mut(&chat_id)
+            .is_some_and(|list| list.answered(request, topics));
+        if taken {
+            self.unread.insert(chat_id, unread);
+        }
+        taken
+    }
+
+    /// `request` was refused: only the ask that waits for it fails.
+    pub fn failed_request(
+        &mut self,
+        chat_id: i64,
+        request: Option<RequestId>,
+        error: impl Into<String>,
+    ) -> bool {
+        self.lists
+            .get_mut(&chat_id)
+            .is_some_and(|list| list.failed(request, error, false))
+    }
+
+    /// `getForumTopics` for `chat_id` never left.
     pub fn fail(&mut self, chat_id: i64, error: impl Into<String>) {
         self.lists.entry(chat_id).or_default().fail(error);
     }

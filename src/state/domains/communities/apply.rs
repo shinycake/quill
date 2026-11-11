@@ -217,14 +217,23 @@ impl Session {
         }
     }
 
-    /// A failed `getCommunityFullInfo`: not asked again in the background
-    /// until the community changes (`CommunitiesState::full_info_failed`).
-    pub(crate) fn note_community_full_info_failed(&mut self, pending: Option<&PendingRequest>) {
+    /// A failed `getCommunityFullInfo`: its fetch fails, and the
+    /// background asks wait until the community changes
+    /// (`CommunityFullInfos::forget_failure`).
+    pub(crate) fn note_community_full_info_failed(
+        &mut self,
+        err: &TdError,
+        pending: Option<&PendingRequest>,
+    ) {
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::GetCommunityFullInfo
             && let Some(community_id) = pending.community_id
         {
-            self.communities.full_info_failed.insert(community_id);
+            self.groups.community_full_infos.failed(
+                community_id,
+                Some(pending.id),
+                &error_reason(err),
+            );
         }
     }
 

@@ -6,29 +6,79 @@ use crate::new_chat::{CreateProgress, CreationOutcome, NewChatStage, TypeSaveSta
 use crate::profile_photo_sources::ChatPhotoInput;
 use crate::state::*;
 
-/// Whose create this is: the open dialog's, or one whose dialog was closed
-/// while it was out (it still finishes, but opens nothing and does not
-/// block the next dialog's Create).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum CreationAsker {
-    #[default]
-    Dialog,
-    Closed,
+/// Where one create request stands. Whose it is (the open dialog's, or one
+/// whose dialog was closed while it was out) is part of the stage: a
+/// closed one still finishes, but opens nothing and does not block the next
+/// dialog's Create.
+#[derive(Clone, Debug, PartialEq)]
+pub enum CreationStage {
+    /// Out; the open dialog reads the answer. `photo` is set once the chat
+    /// exists.
+    Out { photo: Option<ChatPhotoInput> },
+    /// Out, its dialog closed: the answer is not read.
+    OutClosed { photo: Option<ChatPhotoInput> },
+    /// The chat exists; its photo, invite link and opening are still to do
+    /// (the dialog reads the answer).
+    Made {
+        chat: ChatId,
+        photo: Option<ChatPhotoInput>,
+    },
+    /// The chat exists and nobody reads the answer: the follow-ups run,
+    /// then the entry goes.
+    MadeClosed {
+        chat: ChatId,
+        photo: Option<ChatPhotoInput>,
+    },
+    /// Answered and followed up: the dialog reads how it ended, then
+    /// abandons the entry.
+    Settled(CreationOutcome),
 }
 
 /// One create request.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct NewChatCreation {
-    /// `setChatPhoto` once the chat exists.
-    pub photo: Option<ChatPhotoInput>,
     /// A group opens as soon as it exists; a channel when its last step
     /// closes.
     pub open_when_created: bool,
     /// A supergroup or channel gets its primary invite link straight
     /// away, for the type step (tdesktop `checkInviteLink`).
     pub make_invite_link: bool,
-    pub outcome: Option<CreationOutcome>,
-    pub asker: CreationAsker,
+    pub stage: CreationStage,
+}
+
+impl NewChatCreation {
+    /// A create the open dialog just sent.
+    pub fn asked(
+        photo: Option<ChatPhotoInput>,
+        open_when_created: bool,
+        make_invite_link: bool,
+    ) -> Self {
+        Self {
+            open_when_created,
+            make_invite_link,
+            stage: CreationStage::Out { photo },
+        }
+    }
+
+    /// A create that ended as `outcome` and was followed up.
+    pub fn settled(outcome: CreationOutcome) -> Self {
+        Self {
+            open_when_created: false,
+            make_invite_link: false,
+            stage: CreationStage::Settled(outcome),
+        }
+    }
+
+    /// How the create ended, once it was answered.
+    pub fn outcome(&self) -> Option<CreationOutcome> {
+        match &self.stage {
+            CreationStage::Out { .. } | CreationStage::OutClosed { .. } => None,
+            CreationStage::Made { chat, .. } | CreationStage::MadeClosed { chat, .. } => {
+                Some(CreationOutcome::Created(*chat))
+            }
+            CreationStage::Settled(outcome) => Some(outcome.clone()),
+        }
+    }
 }
 
 /// A request of the type step's Save, from the send to its answer.
@@ -78,7 +128,7 @@ impl Session {
                     .new_chats
                     .creations
                     .get(request)
-                    .and_then(|creation| creation.outcome.clone());
+                    .and_then(NewChatCreation::outcome);
                 let progress = match outcome {
                     Some(CreationOutcome::Created(chat)) => CreateProgress::Created(chat),
                     Some(CreationOutcome::Failed { failure, reason }) => {

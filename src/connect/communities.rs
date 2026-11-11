@@ -423,7 +423,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .values()
             .filter(|community| community.have_access)
             .map(|community| community.id)
-            .filter(|id| !self.session.groups.community_full_infos.contains_key(id))
+            .filter(|id| self.session.groups.community_full_infos.wants_fetch(*id))
             .collect();
         let mut asked = false;
         for community_id in missing {
