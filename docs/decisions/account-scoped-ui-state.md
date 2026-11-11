@@ -6784,3 +6784,53 @@ Thirty-four minor entries; each was proved against the integration branch first.
   process-wide (`next_query_token`). 13-165: tdesktop toasts the hide at
   once (the bar is optimistic here too, with `RequestRollback`), and the
   local hidden flag is already keyed by account.
+
+### Sweep fixes (is-05)
+
+Implicit-state bundle: lists that were an `Option`/`Vec` beside `loading`,
+`loaded`, `error`, `stale` and a request id are one value each. Two shared
+seams carry most of it: `Paged<P>` (`src/state/paged.rs`; a paged list whose
+page in flight names its request, with `Outdated(Option<P>)` for "a change
+landed, ask again") and `Fetch<T>` (now with `Outdated(Option<T>)` and a
+sibling `Change` for one mutation at a time: idle, busy, failed with its
+line). A change that outdates a list drops the page asked before it, so a
+late answer never replaces the refetch.
+
+| ids | Fix |
+| --- | --- |
+| 02-181 | Passkeys: `ListStage` (never / asked / known / stale) replaces `known`, `requested_at`, `stale`; `PasskeyRemove` carries the removal's request and only its answer finishes it; sign-in is one `LoginStage` (idle, ceremony ready, cached options, checking, failed) and the app-config ask is a `Fetch<()>` |
+| 02-154 | Subscriptions: `StarSubscriptions { list: Paged, edit: SubsEdit }`; a cancel/rejoin `ok` outdates the list |
+| 02-172 | Profile, chat and background emoji icon lists and the wearable gifts are `Fetch<Vec<_>>`; a failed load shows its retry and is asked again |
+| 02-175 | Premium hub: Stars history and received gifts are `Paged` (a filter switch resets the list and drops the old filter's page), Premium, Business and sticker examples are `Fetch` |
+| 05-182 | Invite-link members: `MembersStage` (idle / loading(request) / failed) |
+| 02-185, 06-016 | Playlist: one `Paged<PlaylistData>`; a failed change outdates it |
+| 02-188 | Proxy: list is `Paged<ProxyList>`, the mutation lock is `ProxyMutation::InFlight(request)`, a ping slot is `Checking(request)` (no second map) |
+| 02-197 | Next-channel preload: `HistoryPreload` per chat (loading(request) / ready); its error drops the entry |
+| 13-034 | Sponsored report: `SponsoredReport` (idle / target / picking / outcome) replaces the flight, the target and the outcome |
+| 02-191 | Quick replies: `shortcuts_load: Fetch<()>` and `message_loads` per shortcut; a failure waits for the dialog to open again |
+| 02-193, 02-213 | Typed search: `TypedDebounce` (idle / pending, with the token) for the global and the in-chat search |
+| 02-216 | `Leg::Exceeded` carries "the free public-post searches are used" with the results it came with |
+| 02-215, 05-205 | Recommended channels: `Fetch<Vec<ChatId>>` |
+| 02-205 | Sessions, websites, account TTL and default auto-delete: `Fetch` plus `Change`; a successful terminate/disconnect outdates the list |
+| 02-208 | Storage limits: `StorageSeed` (unseeded / sent / seeded), persisted through `data_storage.storage_limits_seeded` |
+| 02-200, 05-016, 13-020 | Gift Stars: `open` folds into `GiftStage::Closed` |
+| 02-218 | Public forwards: `Paged<PublicForwardsPage>`; an empty answer is an answer |
+| 02-226 | Sticker batch: `StickerBatch` (idle / running / done) |
+| 02-227 | GIF panel: `saved: Fetch<Vec<_>>` and `GifSearchStage` (off / loading / failed / ready) |
+
+Already one value on the integration branch, no change: 02-156
+(`BankCardStage`), 02-176, 05-253 and 09-X019 (`PrivacyData::network` is a
+`Fetch`; errors are per control), 02-182 and 05-183 (`MorePage`), 06-034
+(`SystemStepState`), 02-204 (`read_date_stage`), 02-229 (`StickerSetStage`),
+03-011, 05-277 and 13-103 (`StoryViewersState::page`), 05-161 and 06-021
+(outcomes and checks are keyed by request), 06-019 (`StoryManageState`
+settles per request).
+
+Skipped: 02-230. `pending_live_story_join` is an `Option` that carries the
+group call and the `getGroupCall` request, and it leaves on ready, on the
+request ending, on a new join and on `leave_live_story`;
+`stories.live` (the viewer's content) and `calls.story_stream` (the call
+slot) are different owners, not stages of the join.
+
+Two bools stay with a reason in `scripts/implicit-state-allow.txt`:
+`pending_attention` is a dock-bounce event the notifier drains with `take`.
