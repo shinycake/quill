@@ -754,3 +754,19 @@ fn a_late_2fa_answer_leaves_the_newer_request_waiting() {
         Some("kept")
     );
 }
+
+#[test]
+fn an_older_account_request_does_not_settle_a_newer_one() {
+    let mut op = AccountOp::Mutating(RequestId(2));
+    assert!(!op.settle(Some(RequestId(1))), "another request's answer");
+    assert_eq!(op, AccountOp::Mutating(RequestId(2)));
+    op.fail(Some(RequestId(1)), "late".into());
+    assert_eq!(
+        op,
+        AccountOp::Mutating(RequestId(2)),
+        "its late failure too"
+    );
+    op.fail(Some(RequestId(2)), "refused".into());
+    assert_eq!(op.error(), Some("refused"));
+    assert!(!op.in_flight(), "a failure leaves the stage");
+}

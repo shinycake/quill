@@ -6784,3 +6784,48 @@ Thirty-four minor entries; each was proved against the integration branch first.
   process-wide (`next_query_token`). 13-165: tdesktop toasts the hide at
   once (the bar is optimistic here too, with `RequestRollback`), and the
   local hidden flag is already keyed by account.
+
+### Sweep fixes (is-12)
+
+Thirty-nine implicit-state entries. Each stage is one value now; the baseline
+lost the fields it replaced.
+
+| id | result |
+| --- | --- |
+| 07-016, 09-X050, 09-097, 09-059 | `ExportBox<Draft, Progress>` (`export_state.rs`) is `Options(draft)` or `Progress { seen }`. "Hidden" is `ExportView` on the export in the session, now also on `ChatExport` (a hidden chat export used to reappear after an account switch because its flag lived in the screen). The calendar page is `ExportPage::Calendar { field, month }` inside the draft. |
+| 07-019 | `LifecycleStage { Closed, Open, ConfirmDelete, ConfirmLogout }`: at most one inline confirm is armed. |
+| 07-020 | `AccountOp { Idle, Loading(id), Mutating(id), Failed(line) }` for the account TTL and Delete Account (answers settle by request id); `default_auto_delete: Fetch<i32>`. A TTL write can no longer start while the read is out. `AuthState::password_state_loading` is already `PasswordFlight`. |
+| 07-021 | Skipped: already `OpenNotice` + `AgeCheck`. |
+| 07-022, 09-095, 09-X049 | The scroll hook is set on every open of the page (setting it again replaces it), so `event_log_hooked` is gone; the poll is `EventLogPoll { Idle, Running(chat) }`. The keystroke counter and the autoload mark are tokens, not stages. |
+| 10-090 | `TextPromptKind::CustomTitle { chat_id, user_id }` and `CommunityName { community_id }` carry their owners; `UsernameDialog` has no `chat_id`. |
+| 10-091 | `GroupConfirmAction` variants carry their own chat (`DeleteChat { chat_id }`, `BlockUser { chat_id, block }`, ...); the chat-less ones have none, and no `ChatId(0)` placeholder is left. The dialog slot stays one per account (the shell shows one box at a time). |
+| 01-029 | `DebugConfirm { Closed, Asking { logs_on } }`. |
+| 07-037 | Skipped: already `ComposerStage`; `local_error` is a form validation line, not a stage. |
+| 07-038 | `CustomThemes { Unread, Reading { task }, Read(list) }`. |
+| 07-039 | `Omarchy { Unprobed, Absent, Found, Watching }`. |
+| 07-046 | `Standing { Current, Stale, Failed }` replaces `failed` + `stale`; `Fault { None, Seen, Unseen }` replaces `error` + `start_failed` (a later success clears an untold start failure, which the next build start did already). `track`, `building` and `sim_clock` stay: the old sound plays on while a seek builds, and the simulation is the demo backend. |
+| 07-047 | `DeviceLink { Down { failed_at }, Opening, Up(device) }` and `Watch { None, Running }` (the watch thread outlives a taken device by design). |
+| 08-039 | `ActiveTrack { None, Voice(id), Audio(id) }` and `Scrub { Idle, Dragging(secs) }`. The per-track data (`track_length`, `seek_slider`, `seek_hover`, the bar's chat and meta) is still separate and is cleared in `clear_playback_state`. |
+| 08-040, 12-007 | `PlaybackTick { Idle, Running { shown, task } }` and `BuildsWatch { Idle, Watching { task } }` hold their tasks. |
+| 08-046 | The registration consent is dropped in `AuthUi::follow_auth`, one place. |
+| 08-044 | Skipped: already `TermsPrompt` + `TermsStage`. |
+| 08-023 | `BotTexts { Loading { name, about, loads }, Loaded, Failed }` in the session and `EditStage { Loading, Editing(SaveCheck) }` in the box. |
+| 08-017 | Skipped: already `BotStopStage`; `can_stop` is what the bot reports. |
+| 08-027 | The driver marks the similar-bots section `Loading` as it sends; Loading draws a label, not the fetch button. |
+| 08-004, 08-032 | `BotLink { Loading, Empty, Connected(id) }` and `BotNotice { None, Warning, ConfirmLeave }`. |
+| 08-031 | Skipped: the section drafts outlive the view that edits them (Picker, Day, TimeZone and StickerPick edit their parent's draft) and are dropped in one place, `business_go` on the hub. |
+| 08-085 | `Loop { Off, On { sound, hold, phase } }` with `LoopPhase { Playing, Due(at) }`. |
+| 08-084 | `CueStage { Ringing, Connected, Ended }`. |
+| 08-080 | `RecentCallsPage { Idle, Loading(id), Failed }` and `RecentCallsClear { Idle, Clearing(id) }`. |
+| 08-087 | `PipWindowStage { Opening, Open(window) }`. |
+| 08-058 | `SlowModeTick { Idle, Ticking(chat) }`. |
+| 08-051 | Skipped: already `AppearanceStage`. |
+| 08-063 | `DropOnRow { hover, seen: Dragged { Nothing, Files(FileDrag), Forward }, freeze: Freeze { Thawed, Frozen }, preview }`. |
+| 08-066 | A topic list request that cannot be sent marks the forum failed in the session set the chooser already reads; `DropTopic::load_failed` is gone. |
+| 08-069 | Skipped: already `SidebarTab`. |
+| 08-070 | `PinGesture { Idle, Pressed, Dragging }` and `ChatPeek { Idle, Pressing, Open }`. |
+
+Tests: `an_older_account_request_does_not_settle_a_newer_one`,
+`a_hidden_export_stays_hidden_until_the_box_is_asked_for_again`, and the
+existing ones updated to the new shapes (similar bots now assert that the
+driver, not the UI, marks Loading).
