@@ -90,14 +90,11 @@ pub(crate) struct ComposerUi {
     /// session (TGX `TUTORIAL_INLINE_SEARCH_SECRECY`, which persists;
     /// Quill keeps it per session — documented divergence).
     pub(super) inline_bot_alert_shown: bool,
-    /// Files being dragged over the conversation, and what they hold
-    /// (`drop_zones`).
-    pub(super) drop_paths: Vec<std::path::PathBuf>,
-    pub(super) drop_state: Option<quill::drop_modes::DragState>,
+    /// Files being dragged over the conversation, what they hold, or a
+    /// demo's fixed state (`drop_zones`).
+    pub(super) drag_over: super::drop_zones::DragOver,
     /// The folder being zipped for "Send as archive" (`drop_zones`).
     pub(super) archive: super::drop_zones::ArchiveJob,
-    /// A demo's fixed drop-zone state (no real drag in a screenshot).
-    pub(super) drop_preview: Option<quill::drop_modes::DragState>,
     /// Phase A1: the open chat whose slow-mode countdown is ticking, with
     /// the 1s tick task that drives it. Replacing or clearing it drops the
     /// task. Mirrors `voice_tick`.
@@ -127,10 +124,8 @@ impl ComposerUi {
             shown_draft: None,
             placeholder_shown: None,
             inline_bot_alert_shown: false,
-            drop_paths: Vec::new(),
-            drop_state: None,
+            drag_over: Default::default(),
             archive: Default::default(),
-            drop_preview: None,
             slow_mode_tick: None,
             send_box: super::send_box_state::SendBoxUi::new(),
             text_limit: Default::default(),

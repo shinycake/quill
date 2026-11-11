@@ -32,6 +32,57 @@ pub(super) enum ArchiveJob {
     Building(SendSlot),
 }
 
+/// What a file drag over the conversation is known to hold: nothing, the
+/// paths being looked at on disk, or the zones they classify to. A demo's
+/// fixed state is its own variant, so a screenshot needs no real drag.
+#[derive(Default)]
+pub(super) enum DragOver {
+    #[default]
+    None,
+    /// Each path is looked at off the UI thread; the answer applies only
+    /// while the drag still holds these paths.
+    Probing(Vec<PathBuf>),
+    Ready(Vec<PathBuf>, DragState),
+    Fixed(DragState),
+}
+
+impl DragOver {
+    /// The drag already holds exactly `paths`.
+    fn is_over(&self, paths: &[PathBuf]) -> bool {
+        match self {
+            Self::Probing(held) | Self::Ready(held, _) => held == paths,
+            Self::None | Self::Fixed(_) => false,
+        }
+    }
+
+    /// The classification of `probed` arrived. True when the drag still
+    /// holds those paths (a state of `None`: no zone applies).
+    fn probed(&mut self, probed: Vec<PathBuf>, state: Option<DragState>) -> bool {
+        if !self.is_over(&probed) {
+            return false;
+        }
+        *self = match state {
+            Some(state) => Self::Ready(probed, state),
+            None => Self::Probing(probed),
+        };
+        true
+    }
+
+    fn state(&self) -> Option<DragState> {
+        match self {
+            Self::Ready(_, state) | Self::Fixed(state) => Some(*state),
+            Self::None | Self::Probing(_) => None,
+        }
+    }
+
+    /// The drag ended (dropped or left): a demo's fixed state stays.
+    fn end_drag(&mut self) {
+        if !matches!(self, Self::Fixed(_)) {
+            *self = Self::None;
+        }
+    }
+}
+
 impl QuillApp {
     /// Whether the open chat takes dropped files into its composer.
     pub(super) fn file_drop_enabled(&self) -> bool {
@@ -44,11 +95,10 @@ impl QuillApp {
 
     /// A file drag moved over the conversation: remember what it holds.
     pub(super) fn note_file_drag(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
-        if !self.file_drop_enabled() || self.composer_ui.drop_paths == paths {
+        if !self.file_drop_enabled() || self.composer_ui.drag_over.is_over(paths) {
             return;
         }
-        self.composer_ui.drop_paths = paths.to_vec();
-        self.composer_ui.drop_state = None;
+        self.composer_ui.drag_over = DragOver::Probing(paths.to_vec());
         // Each path is looked at on disk, which can stall on a network drive.
         let probed = paths.to_vec();
         self.run_off_ui_scoped_then(
@@ -57,8 +107,7 @@ impl QuillApp {
                 (probed, classify(&entries))
             },
             |this, (probed, state), cx| {
-                if this.composer_ui.drop_paths == probed {
-                    this.composer_ui.drop_state = state;
+                if this.composer_ui.drag_over.probed(probed, state) {
                     cx.notify();
                 }
             },
@@ -68,15 +117,15 @@ impl QuillApp {
 
     /// The zones to draw now: a live file drag, or a demo's fixed state.
     pub(super) fn visible_drop_state(&mut self, cx: &App) -> Option<DragState> {
-        if self.composer_ui.drop_preview.is_some() {
-            return self.composer_ui.drop_preview;
+        if let DragOver::Fixed(state) = self.composer_ui.drag_over {
+            return Some(state);
         }
         if !cx.has_active_drag() {
-            self.composer_ui.drop_state = None;
-            self.composer_ui.drop_paths.clear();
+            self.composer_ui.drag_over = DragOver::None;
         }
         self.composer_ui
-            .drop_state
+            .drag_over
+            .state()
             .filter(|_| self.file_drop_enabled())
     }
 
@@ -84,8 +133,7 @@ impl QuillApp {
     /// zones are off (editing): the usual attach, which picks media or
     /// documents by what was dropped.
     pub(super) fn drop_files_plain(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
-        self.composer_ui.drop_state = None;
-        self.composer_ui.drop_paths.clear();
+        self.composer_ui.drag_over.end_drag();
         if self.file_drop_enabled() || self.chat_ui.is_editing() {
             self.attach_dropped_files(paths, cx);
         }
@@ -98,8 +146,7 @@ impl QuillApp {
         paths: &[PathBuf],
         cx: &mut Context<Self>,
     ) {
-        self.composer_ui.drop_state = None;
-        self.composer_ui.drop_paths.clear();
+        self.composer_ui.drag_over.end_drag();
         if !self.file_drop_enabled() {
             return;
         }

@@ -46,7 +46,9 @@ register_demos![
     // A HEIC dragged over the chat: the drop zones it offers.
     DemoSpec::chat_list("ready-drop-heic").setup(|app, _, _| {
         let heic = quill::drop_modes::DragEntry::probe(std::path::Path::new("ridge.heic"));
-        app.composer_ui.drop_preview = quill::drop_modes::classify(&[heic]);
+        if let Some(state) = quill::drop_modes::classify(&[heic]) {
+            app.composer_ui.drag_over = crate::ui::drop_zones::DragOver::Fixed(state);
+        }
     }),
     // Ready chat draft with typos underlined (red wavy).
     DemoSpec::chat_list("ready-spellcheck").setup(|app, window, cx| app.demo_spellcheck(
