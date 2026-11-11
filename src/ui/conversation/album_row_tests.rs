@@ -1,6 +1,7 @@
-//! An album shows the reactions of its items under it, whichever item
-//! they sit on, and follows them as they come and go (Telegram Desktop
-//! `GroupedMedia` with `Element::_reactions`).
+//! An album row carries what a single message's bubble does: the reactions
+//! of its items (whichever item they sit on, following them as they come
+//! and go), its headers (reply quote, "Forwarded from") and its replies
+//! bar (Telegram Desktop `GroupedMedia` inside one `Message`).
 use super::*;
 
 const ALBUM: i64 = 56;
@@ -70,6 +71,13 @@ fn audio(id: i32, text: &str) -> String {
             r#"{{"@type":"messageAudio","audio":{{"@type":"audio","duration":30,"title":"T{id}","performer":"","file_name":"{id}.mp3","mime_type":"audio/mpeg","album_cover_minithumbnail":null,"album_cover_thumbnail":null,"external_album_covers":[],"audio":{file}}},"caption":{caption}}}"#
         ),
     )
+}
+
+/// `item` (an `updateNewMessage`) with more message fields
+/// (`,"reply_to":{…}`).
+fn with(item: String, fields: &str) -> String {
+    let body = item.strip_suffix("}}").unwrap_or(&item);
+    format!("{body}{fields}}}}}")
 }
 
 /// `updateMessageInteractionInfo` with one 😭 reaction, or none.
@@ -211,4 +219,80 @@ fn the_first_item_s_reactions_win_when_several_items_have_some(cx: &mut TestAppC
         vcx.debug_bounds("reaction-chips-205").is_none(),
         "one reaction row per album"
     );
+}
+
+const REPLY_TO_201: &str = r#","reply_to":{"@type":"messageReplyToMessage","chat_id":31,"message_id":201,"quote":null,"checklist_task_id":0,"poll_option_id":""}"#;
+const FORWARDED_FROM_BOB: &str = r#","forward_info":{"@type":"messageForwardInfo","origin":{"@type":"messageOriginUser","sender_user_id":22},"date":1790631000,"source":null,"public_service_announcement_type":""}"#;
+
+/// The headers of `head` open the bubble, above `below`.
+fn assert_headers_above(vcx: &mut VisualTestContext, head: &'static str, below: &'static str) {
+    let painted = [head, below].map(|id| vcx.debug_bounds(id));
+    let [Some(head_bounds), Some(below_bounds)] = painted else {
+        panic!("{head} and {below} are painted: {painted:?}");
+    };
+    assert!(
+        head_bounds.bottom() <= below_bounds.top(),
+        "the headers sit above {below}: {head_bounds:?} {below_bounds:?}"
+    );
+}
+
+#[gpui_kit::test]
+fn an_album_sent_as_a_reply_shows_the_quote_above_the_pictures(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    album(
+        &app,
+        vcx,
+        &[
+            with(photo(204, true, ""), REPLY_TO_201),
+            with(photo(205, true, ""), REPLY_TO_201),
+        ],
+    );
+    assert_headers_above(vcx, "row-headers-204", MOSAIC);
+}
+
+#[gpui_kit::test]
+fn a_forwarded_album_names_where_it_came_from(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    album(
+        &app,
+        vcx,
+        &[
+            with(photo(204, false, ""), FORWARDED_FROM_BOB),
+            with(video(205, false, "Look"), FORWARDED_FROM_BOB),
+        ],
+    );
+    assert_headers_above(vcx, "row-headers-204", MOSAIC);
+}
+
+#[gpui_kit::test]
+fn a_file_album_sent_as_a_reply_shows_the_quote_above_its_files(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    album(
+        &app,
+        vcx,
+        &[
+            with(document(204, ""), REPLY_TO_201),
+            with(document(205, ""), REPLY_TO_201),
+        ],
+    );
+    assert_headers_above(vcx, "row-headers-204", "file-album-item-204");
+}
+
+#[gpui_kit::test]
+fn an_album_with_replies_shows_its_replies_bar_under_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    album(&app, vcx, &[photo(204, false, ""), photo(205, false, "")]);
+    assert!(vcx.debug_bounds("reply-bar-204").is_none());
+    let replies = r#"{"@type":"updateMessageInteractionInfo","chat_id":31,"message_id":204,"interaction_info":{"@type":"messageInteractionInfo","view_count":0,"forward_count":0,"reply_info":{"@type":"messageReplyInfo","reply_count":2,"recent_replier_ids":[],"last_read_inbox_message_id":0,"last_read_outbox_message_id":0,"last_message_id":300}}}"#;
+    apply(&app, vcx, &[replies]);
+    frames(vcx);
+    let painted = [MOSAIC, "reply-bar-204"].map(|id| vcx.debug_bounds(id));
+    let [Some(mosaic), Some(bar)] = painted else {
+        panic!("the album and its replies bar are painted: {painted:?}");
+    };
+    assert!(mosaic.bottom() <= bar.top(), "the bar sits under the album");
 }

@@ -14,6 +14,8 @@ pub(in crate::ui) struct FileAlbum<'a> {
     pub(in crate::ui) sender_status: Option<AnyElement>,
     pub(in crate::ui) receipt: OutboxReceipt,
     pub(in crate::ui) sender_avatar: Option<SenderAvatar>,
+    /// "via @bot", "Forwarded from" and the reply quote (`row_header`).
+    pub(in crate::ui) header: Option<AnyElement>,
     pub(in crate::ui) look: BubbleLook,
 }
 
@@ -35,6 +37,7 @@ pub(in crate::ui) fn file_album_history_row(
         sender_status,
         receipt,
         sender_avatar,
+        header,
         look,
     } = album;
     let Some(first) = messages.first() else {
@@ -124,7 +127,8 @@ pub(in crate::ui) fn file_album_history_row(
     }
     chrome.sender_status = sender_status;
     // Reactions close the bubble and carry its time.
-    let footer_meta = FooterMeta::of(first, receipt, None, None);
+    let footer_meta = row_footer_meta(first, receipt, session, files, media_roots);
+    chrome.footer = message_footer_meta(&footer_meta);
     let chip_row = album_reactions_owner(messages).and_then(|owner| {
         message_reactions_row(owner, &footer_meta, false, session, files, media_roots, cx)
     });
@@ -132,6 +136,9 @@ pub(in crate::ui) fn file_album_history_row(
         chrome.footer = None;
     }
     let stack = stack.children(chip_row);
+    chrome.bottom_bar = messages
+        .iter()
+        .find_map(|message| row_reply_bar(message, session, media_roots, cx));
     chrome.actions = corner.mount(|| message_actions_button(first.chat_id, first.id, cx));
     session_bubble_quoted(
         first.chat_id,
@@ -140,7 +147,7 @@ pub(in crate::ui) fn file_album_history_row(
         String::new(),
         first.is_outgoing,
         Some(stack.into_any_element()),
-        None,
+        header,
         look,
     )
 }
