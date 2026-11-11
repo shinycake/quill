@@ -172,13 +172,12 @@ fn in_other_call(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, joined: bo
         }
         if !joined {
             // The join went out and waits for its answer.
-            app.group_call_screen.stream_watch =
-                crate::ui::group_call_state::StreamWatch::Joining(
-                    crate::ui::group_call_state::StreamJoining::new(
-                        OTHER_CALL,
-                        gpui_kit::Task::ready(()),
-                    ),
-                );
+            app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
+                crate::ui::group_call_state::StreamJoining::new(
+                    OTHER_CALL,
+                    gpui_kit::Task::ready(()),
+                ),
+            );
         }
         app.group_call_screen.window_closed_by_user = Some(OTHER_CALL);
     });
@@ -556,13 +555,19 @@ fn an_answered_create_ends_the_wait(cx: &mut TestAppContext) {
     begin(&app, &mut main, CreateKind::Now);
     click(&mut main, "group-call-create-confirm");
     let sent = app.read_with(&main, |app, _| app.group_call_boxes.create);
-    assert!(matches!(sent, VideoChatCreate::Sent(_)), "waiting on the server");
+    assert!(
+        matches!(sent, VideoChatCreate::Sent(_)),
+        "waiting on the server"
+    );
     // Another request's answer is not this one's.
     app.update(&mut main, |app, cx| {
         if let (VideoChatCreate::Sent(request), Some(session)) =
             (app.group_call_boxes.create, app.demo_session.as_mut())
         {
-            session.calls.answered_creates.push(RequestId(request.0 + 1));
+            session
+                .calls
+                .answered_creates
+                .push(RequestId(request.0 + 1));
         }
         cx.notify();
     });

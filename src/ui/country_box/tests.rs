@@ -29,12 +29,7 @@ fn search(app: &QuillApp, host: CountryHost, cx: &gpui_kit::App) -> String {
     let country_box = match host {
         CountryHost::Payment => app.payments.dialog.as_ref().unwrap().country_box(),
         CountryHost::PaymentCard => app.card_form().unwrap().country_box.as_ref(),
-        CountryHost::Poll => app
-            .chat_ui
-            .poll_dialog
-            .as_ref()
-            .unwrap()
-            .country_box(),
+        CountryHost::Poll => app.chat_ui.poll_dialog.as_ref().unwrap().country_box(),
     };
     country_box.unwrap().search.read(cx).value().to_string()
 }
@@ -52,7 +47,14 @@ fn the_shipping_country_is_picked_from_the_list(cx: &mut TestAppContext) {
         assert!(dialog.country_box().is_none());
 
         app.open_country_box(CountryHost::Payment, window, cx);
-        assert!(app.payments.dialog.as_ref().unwrap().country_box().is_some());
+        assert!(
+            app.payments
+                .dialog
+                .as_ref()
+                .unwrap()
+                .country_box()
+                .is_some()
+        );
         assert_eq!(search(app, CountryHost::Payment, cx), "");
 
         // Picking a row stores the code, ends the box, and the order

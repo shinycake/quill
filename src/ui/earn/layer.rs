@@ -131,14 +131,9 @@ impl QuillApp {
         self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(CLOSE_FADE).await;
             this.update(cx, |this, cx| {
-                if this
-                    .earn
-                    .fade
-                    .as_ref()
-                    .is_some_and(|fade| {
-                        matches!(fade, LayerFade::Closing { closes, .. } if *closes == close_id)
-                    })
-                {
+                if this.earn.fade.as_ref().is_some_and(
+                    |fade| matches!(fade, LayerFade::Closing { closes, .. } if *closes == close_id),
+                ) {
                     this.drop_earn_layer(cx);
                 }
             })

@@ -192,7 +192,8 @@ impl QuillApp {
                 this.close_earn_tx(cx);
             });
         app.update(cx, |this, cx| {
-            let (Some(tx), Some(session)) = (this.earn.tx_box.ton().cloned(), this.session()) else {
+            let (Some(tx), Some(session)) = (this.earn.tx_box.ton().cloned(), this.session())
+            else {
                 return dialog.on_close(on_close);
             };
             let incoming = tx.is_incoming();
@@ -262,7 +263,8 @@ impl QuillApp {
                 this.close_earn_tx(cx);
             });
         app.update(cx, |this, cx| {
-            let (Some(tx), Some(session)) = (this.earn.tx_box.star().cloned(), this.session()) else {
+            let (Some(tx), Some(session)) = (this.earn.tx_box.star().cloned(), this.session())
+            else {
                 return dialog.on_close(on_close);
             };
             let body = crate::ui::premium_ui::star_tx_facts(session, &tx, cx);

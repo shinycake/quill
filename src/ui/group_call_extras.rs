@@ -183,15 +183,19 @@ impl QuillApp {
         let want = (self.live.is_some() && config.enabled && self.group_call_joined())
             .then_some(config.key);
         let mut events = None;
-        let changed = self.group_call.global_ptt.hook.sync(want.as_deref(), |key| {
-            let (tx, rx) = std::sync::mpsc::channel::<KeyEdge>();
-            let sink: Sink = std::sync::Arc::new(move |edge| {
-                let _ = tx.send(edge);
+        let changed = self
+            .group_call
+            .global_ptt
+            .hook
+            .sync(want.as_deref(), |key| {
+                let (tx, rx) = std::sync::mpsc::channel::<KeyEdge>();
+                let sink: Sink = std::sync::Arc::new(move |edge| {
+                    let _ = tx.send(edge);
+                });
+                let handle = quill::calls::ptt_global::start_platform(key, sink)?;
+                events = Some(rx);
+                Ok(handle)
             });
-            let handle = quill::calls::ptt_global::start_platform(key, sink)?;
-            events = Some(rx);
-            Ok(handle)
-        });
         if events.is_some() || !self.group_call.global_ptt.hook.is_active() {
             self.group_call.global_ptt.listener = None;
         }

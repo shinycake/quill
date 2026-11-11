@@ -176,7 +176,10 @@ impl GroupCallScreen {
     /// it is tracked.
     pub(super) fn stream_wish(
         &self,
-    ) -> Option<(super::group_call_stream_layout::StreamJoinIntent, Option<i32>)> {
+    ) -> Option<(
+        super::group_call_stream_layout::StreamJoinIntent,
+        Option<i32>,
+    )> {
         match &self.stream_watch {
             StreamWatch::Wanted {
                 intent,

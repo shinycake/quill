@@ -645,9 +645,13 @@ impl QuillApp {
     /// a quarter turn and settles with a small overshoot (tdesktop plays
     /// the `starref_link` animation once in `CreateLinkIcon`).
     fn link_icon_motion(&self, cx: &mut Context<Self>) -> Transformation {
-        let elapsed = self.earn.link_shown.as_ref().map_or(LINK_PLAY, |(_, since)| {
-            crate::ui::motion::elapsed_since(*since, Instant::now())
-        });
+        let elapsed = self
+            .earn
+            .link_shown
+            .as_ref()
+            .map_or(LINK_PLAY, |(_, since)| {
+                crate::ui::motion::elapsed_since(*since, Instant::now())
+            });
         let t = if crate::ui::motion::interface_animations_off() {
             1.
         } else {

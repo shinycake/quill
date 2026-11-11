@@ -584,7 +584,10 @@ impl QuillApp {
         let target = (0..rows)
             .map(AttachTarget::Row)
             .chain([AttachTarget::Added])
-            .find(|target| self.attach_ref(*target).is_some_and(|a| a.awaiting_sticker()));
+            .find(|target| {
+                self.attach_ref(*target)
+                    .is_some_and(|a| a.awaiting_sticker())
+            });
         let Some(target) = target else {
             return false;
         };

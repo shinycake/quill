@@ -339,11 +339,11 @@ impl QuillApp {
     pub(super) fn apply_disk_reading(&mut self, free: Option<u64>, cx: &mut Context<Self>) {
         let shown = self.disk.free;
         let floors = self.disk.floors;
-        let (after, confirming) = self.disk.standing.state().confirmed(
-            free,
-            &floors,
-            self.disk.standing.confirming(),
-        );
+        let (after, confirming) =
+            self.disk
+                .standing
+                .state()
+                .confirmed(free, &floors, self.disk.standing.confirming());
         self.disk.free = free.or(shown);
         let mut running = false;
         let repaused = self

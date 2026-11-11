@@ -170,7 +170,12 @@ fn a_replaced_call_window_hiding_leaves_the_large_tile(cx: &mut TestAppContext) 
     frames(call);
     // Another window took the call's place, as a layout switch does.
     let replacement = main.update(|window, _| window.window_handle());
-    app.update(call, |app, _| app.group_call.window = crate::ui::group_call_state::CallWindow::Open { handle: replacement, visible: true });
+    app.update(call, |app, _| {
+        app.group_call.window = crate::ui::group_call_state::CallWindow::Open {
+            handle: replacement,
+            visible: true,
+        }
+    });
 
     call.simulate_visibility_change(WindowVisibility::Hidden);
     let large = app.read_with(call, |app, _| app.group_call_large_tile());

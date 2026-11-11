@@ -3,9 +3,9 @@
 //! rewards overview, the balances, the history and "Switch Off Ads".
 
 use super::chart::EarnChartKind;
-use crate::ui::earn_state::TxBox;
 use super::*;
 use crate::ui::chat_theme::{danger, success};
+use crate::ui::earn_state::TxBox;
 use crate::ui::premium_ui::star_tx_row;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;

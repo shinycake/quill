@@ -802,9 +802,9 @@ impl QuillApp {
                     return shown.contains(&a.effect.chat_id.0);
                 }
                 let badge_ok = match &a.kind {
-                    EffectKind::Message(play) => play
-                        .missing
-                        .is_none_or(|at| badge_within_grace(now, at)),
+                    EffectKind::Message(play) => {
+                        play.missing.is_none_or(|at| badge_within_grace(now, at))
+                    }
                     EffectKind::Emoji | EffectKind::Premium => true,
                 };
                 badge_ok

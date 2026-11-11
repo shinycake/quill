@@ -190,7 +190,9 @@ impl PaymentDialog {
         }
     }
 
-    pub(crate) fn card_form_mut(&mut self) -> Option<&mut crate::ui::payments::card_form::CardForm> {
+    pub(crate) fn card_form_mut(
+        &mut self,
+    ) -> Option<&mut crate::ui::payments::card_form::CardForm> {
         match &mut self.page {
             PaymentPage::CardForm(form) => Some(form),
             PaymentPage::Checkout | PaymentPage::Country(_) => None,

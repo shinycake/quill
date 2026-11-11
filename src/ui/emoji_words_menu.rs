@@ -10,7 +10,7 @@ use std::ops::Range;
 
 use super::actions::{EmojiWordBlock, EmojiWordSuggest, EmojiWordsOff};
 use super::app::QuillApp;
-use super::emoji_words_ui::AskedWord;
+use super::emoji_words_ui::{AskedWord, WordBar};
 use super::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -158,8 +158,7 @@ impl QuillApp {
         } else {
             let ui = &mut self.screen.composer_ui.emoji_words;
             ui.unhover(&mut self.screen.composer_ui.suggest);
-            ui.hovered = Some((word, items));
-            ui.pinned = true;
+            ui.bar = WordBar::Pinned((word, items));
         }
         cx.notify();
     }
@@ -172,8 +171,7 @@ impl QuillApp {
         }
         let ui = &mut self.screen.composer_ui.emoji_words;
         if ui
-            .hovered
-            .as_ref()
+            .hovered()
             .is_some_and(|(h, _)| h.normalized == action.word)
         {
             ui.unhover(&mut self.screen.composer_ui.suggest);

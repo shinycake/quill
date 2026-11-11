@@ -63,7 +63,10 @@ pub(crate) struct FrameUi {
     /// ticks for it, not for the app. Not `windows.scope`, which input in a
     /// chat window leaves in place for any window to draw under.
     pub(super) tick_view: std::cell::Cell<Option<EntityId>>,
-    pub(super) frame_clock_running: std::cell::Cell<bool>,
+    /// The frame clock's loop. It holds the task while the clock runs, and
+    /// the loop puts `Stopped` back when it ends (or the app goes and drops
+    /// it), so a stopped clock can never read as running.
+    pub(super) frame_clock: std::cell::RefCell<ClockLoop>,
     /// The main window's display and frame lead, for the frame clock's
     /// content grid (`frame_clock::ClockTiming`).
     pub(super) clock_timing: std::cell::Cell<Option<super::frame_clock::ClockTiming>>,
@@ -103,6 +106,18 @@ pub(crate) struct FrameUi {
     pub(super) draft_timer: super::draft_timer::DraftTimer,
 }
 
+/// Whether the frame clock's loop is going; the stage owns the task.
+pub(super) enum ClockLoop {
+    Stopped,
+    Running { _task: gpui_kit::Task<()> },
+}
+
+impl ClockLoop {
+    pub(super) fn is_running(&self) -> bool {
+        matches!(self, ClockLoop::Running { .. })
+    }
+}
+
 impl FrameUi {
     /// A new OS window took the main window's place (a lost GPU): what was
     /// handed to the old one went with it, so the next render hands it
@@ -132,7 +147,7 @@ impl FrameUi {
             media_roots_frame: Default::default(),
             frame_started: Default::default(),
             tick_view: Default::default(),
-            frame_clock_running: Default::default(),
+            frame_clock: std::cell::RefCell::new(ClockLoop::Stopped),
             clock_timing: Default::default(),
             main_refresh: Default::default(),
             layers_drawn: Default::default(),

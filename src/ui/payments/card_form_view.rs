@@ -81,7 +81,9 @@ impl QuillApp {
         if let Some(dialog) = self.payments.dialog.as_mut() {
             let saving_new_card = choice == PaymentCredentialChoice::NewCard
                 && dialog.new_card.card().is_some_and(|card| card.save);
-            dialog.new_card.ask_password(saving_new_card && ask_password);
+            dialog
+                .new_card
+                .ask_password(saving_new_card && ask_password);
             dialog.credential_choice = choice;
         }
         cx.notify();

@@ -49,17 +49,10 @@ Drawn::leaving
 DropTopic::load_failed
 EarnLimits::app_config_loaded
 EmojiPanel::mutation_failed
-EmojiStyleUi::started
-EmojiStyleUi::started+file_error
 FastShareFacts::sent
 FieldResult::finished
 FirstRunPrefs::completed
 FooterMeta::pending
-GifPanel::failed
-GifPanel::loaded
-GifPanel::loading
-GifPanel::search_failed
-GifPanel::search_loading
 GiftCodeLookup::loading
 GiftCodeLookup::loading+error
 GiftManageState::collections_loading

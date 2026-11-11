@@ -154,7 +154,10 @@ fn a_stream_pip_shows_the_live_badge_and_no_scrubber(cx: &mut TestAppContext) {
         let pip = view.read(cx);
         assert!(pip.is_live());
         assert!(pip.player().is_some_and(|own| own.same_as(&player)));
-        assert!(app.group_call.window.handle().is_none(), "the stream window closed");
+        assert!(
+            app.group_call.window.handle().is_none(),
+            "the stream window closed"
+        );
         let call = app
             .session()
             .and_then(|s| s.calls.active_group_call.as_ref())
@@ -235,7 +238,10 @@ fn closing_keeps_the_call_and_lets_the_stream_go(cx: &mut TestAppContext) {
             .and_then(|s| s.calls.active_group_call.as_ref())
             .expect("the call");
         assert!(call.is_joined, "closing PiP does not leave the call");
-        assert!(app.group_call.window.handle().is_none(), "the window stays closed");
+        assert!(
+            app.group_call.window.handle().is_none(),
+            "the window stays closed"
+        );
         assert!(app.group_call.stream.player.is_none(), "its player went");
     });
 }

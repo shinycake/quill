@@ -438,13 +438,13 @@ fn the_gif_tab_follows_its_windows_field(cx: &mut TestAppContext) {
     let _chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.stickers.gifs.search_mode = true;
+            session.stickers.gifs.search_begun();
             session.stickers.gifs.search_query = "cats".into();
         }
         app.set_window_scope(Some(OTHER));
         app.follow_gif_field(cx);
         assert!(
-            app.session().is_some_and(|s| !s.stickers.gifs.search_mode),
+            app.session().is_some_and(|s| !s.stickers.gifs.search_mode()),
             "an empty field shows the saved GIFs"
         );
     });
@@ -466,7 +466,7 @@ fn each_window_keeps_its_own_gif_section(cx: &mut TestAppContext) {
         let searching = |app: &crate::ui::app::QuillApp| {
             app.session().and_then(|s| {
                 let gifs = &s.stickers.gifs;
-                gifs.search_mode.then(|| gifs.search_query.clone())
+                gifs.search_mode().then(|| gifs.search_query.clone())
             })
         };
         app.choose_gif_section(GifSection::Emoji(EMOJI.into()), cx);
@@ -519,7 +519,7 @@ fn a_gif_tab_shows_its_section_without_a_press(cx: &mut TestAppContext) {
         let searching = |app: &crate::ui::app::QuillApp| {
             app.session().and_then(|s| {
                 let gifs = &s.stickers.gifs;
-                gifs.search_mode.then(|| gifs.search_query.clone())
+                gifs.search_mode().then(|| gifs.search_query.clone())
             })
         };
         let shown_found = |app: &crate::ui::app::QuillApp| {

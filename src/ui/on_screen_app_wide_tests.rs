@@ -138,7 +138,10 @@ fn call_ids_and_video_chat_boxes_do_not_carry_over(cx: &mut TestAppContext) {
         let group = &app.group_call_screen;
         assert_eq!(group.window_closed_by_user, None);
         assert!(!group.settings_open);
-        assert!(group.stream_wish().is_none(), "no join waits for B's call 1");
+        assert!(
+            group.stream_wish().is_none(),
+            "no join waits for B's call 1"
+        );
         assert_eq!(group.joining_call(), None, "no Join button waits for it");
         assert_eq!(group.composer.read(cx).value().to_string(), "");
     });

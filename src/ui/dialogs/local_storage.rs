@@ -112,7 +112,9 @@ impl QuillApp {
         let clearing = session
             .as_ref()
             .is_some_and(|s| s.settings.storage_clear.is_clearing());
-        let freed = session.as_ref().and_then(|s| s.settings.storage_clear.freed());
+        let freed = session
+            .as_ref()
+            .and_then(|s| s.settings.storage_clear.freed());
         let actions =
             self.local_storage_actions(cx, &categories_selected(self), selected_size, clearing);
         section = section.child(self.setting_spot(&["data.clear_cache"], actions, cx));

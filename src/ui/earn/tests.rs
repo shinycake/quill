@@ -292,13 +292,16 @@ fn park_a_join_box(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
             found: Vec::new(),
             join: None,
         };
-        session.payments.earn.open_or_park_join(quill::earn::JoinBox {
-            bot_user_id: 5,
-            info: Default::default(),
-            recipient: quill::earn::EarnPeer::User(1),
-            choose_recipient: true,
-            stage: quill::earn::JoinStage::Open,
-        });
+        session
+            .payments
+            .earn
+            .open_or_park_join(quill::earn::JoinBox {
+                bot_user_id: 5,
+                info: Default::default(),
+                recipient: quill::earn::EarnPeer::User(1),
+                choose_recipient: true,
+                stage: quill::earn::JoinStage::Open,
+            });
     });
 }
 

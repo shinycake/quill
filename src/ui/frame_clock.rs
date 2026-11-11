@@ -20,6 +20,7 @@
 
 use super::app::QuillApp;
 use super::frame_grid::{self, Lattice, Source, Vsync};
+use super::frame_state::ClockLoop;
 use gpui_kit::*;
 use std::cell::Cell;
 use std::rc::Rc;
@@ -306,15 +307,14 @@ impl QuillApp {
         if own_window_active {
             self.frame.own_window_tick.set(true);
         }
-        if self.frame.frame_clock_running.get() {
+        if self.frame.frame_clock.borrow().is_running() {
             return;
         }
-        self.frame.frame_clock_running.set(true);
         let fps = self.frame.animation_demand.get();
         // window-scope: the clock ticks every window's layers by entity id.
         // screen-scope: the frame clock is the app's; each tick draws
         // whichever account is on screen.
-        cx.spawn(async move |this, cx| {
+        let clock = cx.spawn(async move |this, cx| {
             let mut run = ClockRun::new(fps);
             loop {
                 let (wait, vsync) = this
@@ -394,9 +394,13 @@ impl QuillApp {
                     break;
                 }
             }
-            let _ = this.update(cx, |this, _| this.frame.frame_clock_running.set(false));
-        })
-        .detach();
+            // Nothing awaits below: dropping this task's own handle only
+            // ends the future once the clock reads as stopped.
+            let _ = this.update(cx, |this, _| {
+                *this.frame.frame_clock.borrow_mut() = ClockLoop::Stopped;
+            });
+        });
+        *self.frame.frame_clock.borrow_mut() = ClockLoop::Running { _task: clock };
     }
 
     fn tick_hidden(&self, view: EntityId, cx: &App) -> bool {
