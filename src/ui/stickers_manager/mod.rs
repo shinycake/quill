@@ -374,9 +374,7 @@ impl QuillApp {
             {
                 live.driver.fetch_archived_stickers(true).map(drop)
             }
-            (Kind::Masks, ManagerTab::Archived)
-                if session.stickers.masks.archived_more.is_some() =>
-            {
+            (Kind::Masks, ManagerTab::Archived) if session.stickers.masks.archived_has_more => {
                 live.driver.more_archived_masks().map(drop)
             }
             _ => return,

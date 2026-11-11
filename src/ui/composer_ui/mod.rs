@@ -170,7 +170,7 @@ impl QuillApp {
         if self.route_story_reply_gif(file_id, duration, (width, height), cx) {
             return;
         }
-        let chat_id = self.session().and_then(|session| session.open_chat);
+        let chat_id = self.session().and_then(|session| session.open_chat_id());
         let Some(chat_id) = chat_id else {
             return;
         };

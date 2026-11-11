@@ -209,7 +209,7 @@ fn message_is_pinned_update_and_newest_pinned() {
         &sink,
         r#"{"@type":"updateNewMessage","message":{"id":101,"chat_id":11,"is_outgoing":false,"is_pinned":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}}}}"#,
     );
-    session.open_chat = Some(ChatId(11));
+    session.open = crate::state::OpenView::of(Some(ChatId(11)));
     let pinned = session
         .histories
         .get(&11)
@@ -801,7 +801,7 @@ fn waiting_force_reply_in_unshown_chat_is_not_ready() {
     assert!(!session.bots.pending_force_replies.is_empty());
     assert!(!session.force_reply_ready());
     // Shown and loaded: a render has something to hand out.
-    session.open_chat = Some(ChatId(21));
+    session.open = crate::state::OpenView::of(Some(ChatId(21)));
     assert!(session.force_reply_ready());
 }
 

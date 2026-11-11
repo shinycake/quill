@@ -330,7 +330,7 @@ fn a_forward_goes_to_the_topic_its_draft_picked_and_not_to_the_open_one() {
             .unwrap();
     driver.select_chat(ChatId(8)).unwrap();
     // Another topic is open when Send runs.
-    driver.session.open_topic = Some(6);
+    driver.session.open = driver.session.open.with_topic(6);
     draft.topic_id = Some(5);
     driver
         .forward_messages_with_options(ChatId(8), &draft, &SendOptions::default())

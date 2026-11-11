@@ -306,7 +306,7 @@ fn photos(count: usize) -> Vec<ComposerAttachment> {
 /// each sent photo came from, and its album.
 fn newest_photos(app: &QuillApp, count: usize) -> Vec<(String, i64)> {
     let session = app.demo_session.as_ref().expect("demo session");
-    let chat = session.open_chat.expect("an open chat");
+    let chat = session.open_chat_id().expect("an open chat");
     let history = session.histories.get(&chat.0).expect("history");
     let newest: Vec<_> = history.ordered().into_iter().rev().take(count).collect();
     newest

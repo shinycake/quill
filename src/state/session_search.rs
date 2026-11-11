@@ -41,7 +41,7 @@ impl Session {
     }
 
     pub fn open_chat_search(&mut self) -> bool {
-        let Some(chat_id) = self.open_chat else {
+        let Some(chat_id) = self.open_chat_id() else {
             return false;
         };
         if !self

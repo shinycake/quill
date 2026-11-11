@@ -17,7 +17,7 @@ fn a_chat_in_an_active_window_does_not_notify_but_an_inactive_one_does() {
     apply_json(&mut session, &seq, &sink, CHAT_JSON);
     // The main window shows another chat and is not in front.
     session.app_active = false;
-    session.open_chat = None;
+    session.open = crate::state::OpenView::of(None);
     session.open_window_chat(ChatId(7));
 
     // Its window is the active one: the message is read on arrival
@@ -51,18 +51,18 @@ fn the_main_window_rule_is_unchanged_by_window_chats() {
 #[test]
 fn the_session_view_swap_is_symmetric() {
     let (mut session, _sink) = session();
-    session.open_chat = Some(ChatId(1));
-    session.open_topic = Some(5);
+    session.open = crate::state::OpenView::of(Some(ChatId(1)));
+    session.open = session.open.with_topic(5);
     let mut view = SessionView::of_chat(ChatId(2));
     session.swap_view(&mut view);
-    assert_eq!(session.open_chat, Some(ChatId(2)));
-    assert_eq!(session.open_topic, None);
-    assert_eq!(view.open_chat, Some(ChatId(1)));
-    assert_eq!(view.open_topic, Some(5));
+    assert_eq!(session.open_chat_id(), Some(ChatId(2)));
+    assert_eq!(session.open_forum_topic(), None);
+    assert_eq!(view.open.chat(), Some(ChatId(1)));
+    assert_eq!(view.open.topic(), Some(5));
     session.swap_view(&mut view);
-    assert_eq!(session.open_chat, Some(ChatId(1)));
-    assert_eq!(session.open_topic, Some(5));
-    assert_eq!(view.open_chat, Some(ChatId(2)));
+    assert_eq!(session.open_chat_id(), Some(ChatId(1)));
+    assert_eq!(session.open_forum_topic(), Some(5));
+    assert_eq!(view.open.chat(), Some(ChatId(2)));
 }
 
 const BOB_JSON: &str = r#"{"@type":"updateNewChat","chat":{"id":8,"title":"Bob","type":{"@type":"chatTypePrivate","user_id":8},"unread_count":0}}"#;
@@ -151,20 +151,20 @@ fn a_search_answer_for_a_closed_window_lands_in_no_view() {
 #[test]
 fn a_view_is_put_in_place_by_window_and_given_back() {
     let (mut session, _sink) = session();
-    session.open_chat = Some(ChatId(1));
-    session.open_topic = Some(5);
+    session.open = crate::state::OpenView::of(Some(ChatId(1)));
+    session.open = session.open.with_topic(5);
     session.open_window_chat(ChatId(2));
     assert!(session.enter_view(Some(ChatId(2))));
     assert_eq!(session.view_in_place(), Some(ChatId(2)));
     assert_eq!(
-        (session.open_chat, session.open_topic),
+        (session.open_chat_id(), session.open_forum_topic()),
         (Some(ChatId(2)), None)
     );
     // Requests registered meanwhile are the window's.
     let extra = session.request(RequestPurpose::GetChatPreview, Some(ChatId(2)));
     assert!(session.enter_view(None));
     assert_eq!(
-        (session.open_chat, session.open_topic),
+        (session.open_chat_id(), session.open_forum_topic()),
         (Some(ChatId(1)), Some(5))
     );
     assert_eq!(
@@ -182,7 +182,7 @@ fn a_view_is_put_in_place_by_window_and_given_back() {
     assert!(session.enter_view(Some(ChatId(2))));
     assert!(session.close_window_chat(ChatId(2)));
     assert_eq!(session.view_in_place(), None);
-    assert_eq!(session.open_chat, Some(ChatId(1)));
+    assert_eq!(session.open_chat_id(), Some(ChatId(1)));
 }
 
 const CAROL_JSON: &str = r#"{"@type":"updateNewChat","chat":{"id":9,"title":"Carol","type":{"@type":"chatTypePrivate","user_id":9},"unread_count":0}}"#;
@@ -210,7 +210,7 @@ fn an_answer_for_one_window_lands_there_while_another_window_is_in_place() {
         Some(ChatId(9)),
         "Carol's view stayed in place"
     );
-    assert_eq!(session.open_chat, Some(ChatId(9)));
+    assert_eq!(session.open_chat_id(), Some(ChatId(9)));
     assert_eq!(session.search.chat_search.status, SearchStatus::Searching);
     assert!(
         session.search.chat_search.hits.is_empty(),

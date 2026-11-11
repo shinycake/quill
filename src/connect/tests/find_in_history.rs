@@ -233,7 +233,7 @@ fn private_chats_and_channels_have_no_from_picker() {
         r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
     );
     for id in [8, 7] {
-        fx.driver.session.open_chat = Some(ChatId(id));
+        fx.driver.session.open = crate::state::OpenView::of(Some(ChatId(id)));
         assert!(fx.driver.session.open_chat_search());
         assert!(!fx.driver.session.chat_search_can_pick_sender(), "{id}");
         assert!(fx.driver.open_chat_search_from_picker().is_err());

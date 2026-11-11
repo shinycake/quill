@@ -10,7 +10,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let (Some(chat_id), Some(topic)) = (self.session.open_chat, self.session.open_topic) else {
+        let (Some(chat_id), Some(topic)) =
+            (self.session.open_chat_id(), self.session.open_forum_topic())
+        else {
             return Ok(None);
         };
         let Some(from) = self
@@ -57,7 +59,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// once it lands). `Ok(None)` when the window already ends at the
     /// latest: the UI only scrolls then.
     pub fn topic_jump_to_latest(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        let (Some(chat_id), Some(topic)) = (self.session.open_chat, self.session.open_topic) else {
+        let (Some(chat_id), Some(topic)) =
+            (self.session.open_chat_id(), self.session.open_forum_topic())
+        else {
             return Ok(None);
         };
         let short = self

@@ -362,7 +362,7 @@ impl QuillApp {
         };
         let playlist = session.and_then(|s| s.media.playlists.get(&user_id));
         let chat = session
-            .and_then(|s| s.open_chat)
+            .and_then(|s| s.open_chat_id())
             .unwrap_or(quill::ids::ChatId(0));
         // The track playing for this chat: the same file in another chat
         // shares the id, not the row.

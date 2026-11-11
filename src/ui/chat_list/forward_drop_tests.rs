@@ -67,7 +67,7 @@ fn banner(vcx: &mut VisualTestContext) -> bool {
 }
 
 fn open_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<ChatId> {
-    app.update(vcx, |app, _| app.session().and_then(|s| s.open_chat))
+    app.update(vcx, |app, _| app.session().and_then(|s| s.open_chat_id()))
 }
 
 fn dragging(vcx: &mut VisualTestContext) -> bool {

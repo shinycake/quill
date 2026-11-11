@@ -187,12 +187,11 @@ impl Session {
     /// its topic, thread, Saved Messages views, search and gallery close
     /// with it; the history itself stays loaded.
     pub fn leave_open_chat(&mut self) -> Option<ChatId> {
-        let prev = self.open_chat.take()?;
+        let prev = std::mem::take(&mut self.open).chat()?;
         self.clear_sponsored_placements(prev);
         self.chat_list.psa_about.hide();
         self.search.chat_search.close();
         self.media.shared_media.close();
-        self.open_topic = None;
         self.clear_date_jump_ui(Some(prev));
         self.threads.saved.close_views();
         if self
@@ -299,8 +298,8 @@ impl WindowViews {
 /// exchanged into place by [`Session::enter_view`].
 #[derive(Debug, Default)]
 pub struct SessionView {
-    pub open_chat: Option<ChatId>,
-    pub open_topic: Option<i32>,
+    /// The chat (and forum topic) this window shows.
+    pub open: OpenView,
     pub thread: Option<ThreadView>,
     pub saved_sublist: Option<SavedSublistView>,
     pub saved_tag_search: Option<SavedTagSearch>,
@@ -318,7 +317,7 @@ impl SessionView {
     /// A fresh view of `chat_id`: its plain history, nothing layered.
     pub fn of_chat(chat_id: ChatId) -> Self {
         Self {
-            open_chat: Some(chat_id),
+            open: OpenView::Chat { chat: chat_id },
             ..Self::default()
         }
     }
@@ -328,8 +327,7 @@ impl Session {
     /// Exchange the session's view with `view` (symmetric: calling it
     /// twice restores the original).
     pub(crate) fn swap_view(&mut self, view: &mut SessionView) {
-        std::mem::swap(&mut self.open_chat, &mut view.open_chat);
-        std::mem::swap(&mut self.open_topic, &mut view.open_topic);
+        std::mem::swap(&mut self.open, &mut view.open);
         std::mem::swap(&mut self.threads.thread, &mut view.thread);
         std::mem::swap(&mut self.threads.saved.sublist, &mut view.saved_sublist);
         std::mem::swap(

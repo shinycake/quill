@@ -212,7 +212,7 @@ fn typing_focus_moves_to_the_new_field_when_the_tab_changes(cx: &mut TestAppCont
 fn set_links_count(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, count: i32) {
     app.update_in(vcx, |app, _, cx| {
         if let Some(session) = app.demo_session.as_mut()
-            && let Some(chat) = session.open_chat
+            && let Some(chat) = session.open_chat_id()
         {
             session
                 .media

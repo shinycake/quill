@@ -201,7 +201,7 @@ impl QuillApp {
     pub(super) fn schedule_kind(&self) -> ScheduleKind {
         let saved = self
             .session()
-            .and_then(|s| s.open_chat.map(|id| s.is_saved_messages(id)))
+            .and_then(|s| s.open_chat_id().map(|id| s.is_saved_messages(id)))
             .unwrap_or(false);
         ScheduleKind::for_saved_messages(saved)
     }
@@ -223,7 +223,10 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return false;
         };
-        let Some(chat) = session.open_chat.and_then(|id| session.chats.get(&id.0)) else {
+        let Some(chat) = session
+            .open_chat_id()
+            .and_then(|id| session.chats.get(&id.0))
+        else {
             return false;
         };
         match chat.kind {
@@ -250,7 +253,7 @@ impl QuillApp {
             },
             ScheduleTarget::Share | ScheduleTarget::RescheduleSelected => None,
             ScheduleTarget::Reschedule(id) => self.session().and_then(|s| {
-                s.scheduled_in(s.open_chat?)
+                s.scheduled_in(s.open_chat_id()?)
                     .find(|m| m.id == id)
                     .and_then(|m| match m.scheduling_state {
                         Some(MessageSchedulingState::SendAtDate { send_date, .. }) => {
@@ -432,7 +435,7 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        let Some(chat_id) = live.driver.session.open_chat else {
+        let Some(chat_id) = live.driver.session.open_chat_id() else {
             return;
         };
         let sending_now = scheduling == ComposerScheduling::None;
@@ -541,7 +544,7 @@ impl QuillApp {
     /// has scheduled messages.
     pub(super) fn scheduled_messages_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         if !session.chat_has_scheduled_messages(chat_id) {
             return None;
         }
@@ -605,7 +608,7 @@ impl QuillApp {
         let mut selected = self.chat_ui.scheduled_selected.clone();
         let existing: Vec<MessageId> = self
             .session()
-            .and_then(|s| Some(s.scheduled_in(s.open_chat?).map(|m| m.id).collect()))
+            .and_then(|s| Some(s.scheduled_in(s.open_chat_id()?).map(|m| m.id).collect()))
             .unwrap_or_default();
         quill::selection_pin::prune_selected(&mut selected, &existing);
         selected
@@ -739,7 +742,14 @@ impl QuillApp {
         let kind = self.schedule_kind();
         let messages: Vec<ParsedMessage> = self
             .session()
-            .and_then(|session| Some(session.scheduled_in(session.open_chat?).cloned().collect()))
+            .and_then(|session| {
+                Some(
+                    session
+                        .scheduled_in(session.open_chat_id()?)
+                        .cloned()
+                        .collect(),
+                )
+            })
             .unwrap_or_default();
         let selected = self.selected_scheduled();
         let bar = (!selected.is_empty()).then(|| self.scheduled_selection_bar(selected.len(), cx));

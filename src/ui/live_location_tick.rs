@@ -24,7 +24,7 @@ impl QuillApp {
     /// countdown ticks.
     pub(super) fn ensure_live_location_tick(&mut self, cx: &mut Context<Self>) {
         let now = quill::local_time::now_unix();
-        let Some(chat_id) = self.session().and_then(|session| session.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|session| session.open_chat_id()) else {
             return;
         };
         // A running tick keeps itself alive: no need to scan the history
@@ -82,7 +82,7 @@ impl QuillApp {
     /// it is no longer the open chat or shows no running live location.
     fn live_location_wait(&self, chat_id: ChatId) -> Option<Duration> {
         let session = self.session()?;
-        if session.open_chat != Some(chat_id) {
+        if session.open_chat_id() != Some(chat_id) {
             return None;
         }
         session

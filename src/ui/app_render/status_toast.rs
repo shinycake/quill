@@ -160,7 +160,7 @@ impl QuillApp {
     /// height (a taller composer, with a reply or attachments, lifts it). A toast only shows with a session, when the footer
     /// line is absent (demos that pin the toast hide it).
     pub(super) fn toast_bottom(&self) -> Pixels {
-        let composer = if self.session().is_some_and(|s| s.open_chat.is_some()) {
+        let composer = if self.session().is_some_and(|s| s.open_chat_id().is_some()) {
             self.slices.composer_height()
         } else {
             px(0.)

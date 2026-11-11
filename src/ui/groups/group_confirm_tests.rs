@@ -99,7 +99,7 @@ fn a_chat_windows_menus_use_its_own_chat(cx: &mut TestAppContext) {
     let (main, window_chat) = (ChatId(chats[0]), ChatId(chats[1]));
     app.update(&mut vcx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.open_chat = Some(main);
+            session.open = quill::state::OpenView::of(Some(main));
         }
         assert_eq!(app.viewed_chat(), Some(main));
         app.windows.scope = Some(window_chat);

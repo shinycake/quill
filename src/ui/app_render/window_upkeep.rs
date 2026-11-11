@@ -270,7 +270,7 @@ impl QuillApp {
         let Some(session) = self.session_mut() else {
             return;
         };
-        let open_chat = session.open_chat;
+        let open_chat = session.open_chat_id();
         // The window that asked takes the answer, whichever windows show
         // the same chat; one whose window closed since has no taker.
         let here = session.view_in_place();

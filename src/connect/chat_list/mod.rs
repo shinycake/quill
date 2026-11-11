@@ -53,7 +53,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.open_chat == Some(chat_id) {
+        if self.session.open_chat_id() == Some(chat_id) {
             // Re-selecting the open chat leaves its reply thread.
             if self.session.threads.thread.is_some() {
                 self.session.close_thread();

@@ -138,14 +138,14 @@ fn a_chat_muted_by_the_scope_default_offers_a_direct_unmute(cx: &mut TestAppCont
 fn select_tone_opens_the_panel_for_the_row_chat_without_navigating(cx: &mut TestAppContext) {
     let (app, mut vcx, chat_id) = open(cx);
     let vcx = &mut vcx;
-    let open_before = app.update(vcx, |app, _| app.session().and_then(|s| s.open_chat));
+    let open_before = app.update(vcx, |app, _| app.session().and_then(|s| s.open_chat_id()));
     assert_ne!(open_before, Some(chat_id));
     show_menu(&app, vcx, chat_id);
     click(vcx, "chat-menu-mute");
     click(vcx, "chat-mute-tone");
     let (open_after, target, panel, picker) = app.update(vcx, |app, _| {
         (
-            app.session().and_then(|s| s.open_chat),
+            app.session().and_then(|s| s.open_chat_id()),
             app.notify.mute_chat(),
             app.notify.mute_box.is_some(),
             app.notify.mute_section() == crate::ui::notify_state::MuteSection::SoundPicker,

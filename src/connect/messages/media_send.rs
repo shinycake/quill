@@ -226,7 +226,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         reply_to: Option<SendReply>,
         play_once: bool,
     ) -> Result<RequestId, ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         let place = self.send_place(chat_id);
@@ -307,7 +307,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         draft: &crate::video::VideoNoteDraft,
         reply_to: Option<SendReply>,
     ) -> Result<RequestId, ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         let place = self.send_place(chat_id);

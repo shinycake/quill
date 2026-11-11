@@ -254,7 +254,7 @@ fn the_request_poll_button_opens_the_box_for_the_type_it_asks_for(cx: &mut TestA
     ] {
         app.update(&mut vcx, |app, cx| {
             let session = app.demo_session.as_mut().unwrap();
-            let chat = session.open_chat.map_or(1, |id| id.0);
+            let chat = session.open_chat_id().map_or(1, |id| id.0);
             session.bots.reply_keyboards.by_chat.insert(
                 chat,
                 Some((

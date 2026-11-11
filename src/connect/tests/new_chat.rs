@@ -123,7 +123,7 @@ fn a_channel_is_created_then_gets_photo_link_and_subscribers() {
     let link = rig.sent("replacePrimaryChatInviteLink");
     assert_eq!(link.len(), 1);
     assert_eq!(link[0]["chat_id"], CHANNEL);
-    assert_ne!(rig.driver.session.open_chat, Some(chat));
+    assert_ne!(rig.driver.session.open_chat_id(), Some(chat));
     let stage = NewChatStage::Creating {
         request: extra,
         back: crate::new_chat::NewChatBack::Info,
@@ -175,7 +175,7 @@ fn a_group_is_created_with_members_and_opened() {
         rig.outcome(extra),
         Some(CreationOutcome::Created(ChatId(GROUP)))
     );
-    assert_eq!(rig.driver.session.open_chat, Some(ChatId(GROUP)));
+    assert_eq!(rig.driver.session.open_chat_id(), Some(ChatId(GROUP)));
     assert!(rig.sent("setChatPhoto").is_empty());
     assert!(rig.sent("replacePrimaryChatInviteLink").is_empty());
 }
@@ -231,7 +231,7 @@ fn an_abandoned_create_neither_blocks_nor_opens_its_chat() {
         r#"{{"@type":"createdBasicGroupChat","chat_id":{GROUP},"failed_to_add_members":{{"@type":"failedToAddMembers","failed_to_add_members":[]}},"@extra":"{}"}}"#,
         extra.0
     ));
-    assert_ne!(rig.driver.session.open_chat, Some(ChatId(GROUP)));
+    assert_ne!(rig.driver.session.open_chat_id(), Some(ChatId(GROUP)));
     assert!(
         !rig.driver
             .session

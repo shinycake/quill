@@ -121,7 +121,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let Some(user_id) = self
             .session
-            .open_chat
+            .open_chat_id()
             .and_then(|chat_id| self.session.private_chat_user_id(chat_id))
         else {
             return Ok(());

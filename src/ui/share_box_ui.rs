@@ -243,7 +243,7 @@ impl QuillApp {
         };
         !self.chat_ui.is_editing()
             && self.forward_draft().is_some()
-            && self.session().and_then(|s| s.open_chat) == Some(dest)
+            && self.session().and_then(|s| s.open_chat_id()) == Some(dest)
     }
 
     /// Composer Send with the forward bar up: the typed text goes first as a

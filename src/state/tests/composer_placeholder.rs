@@ -78,7 +78,7 @@ fn bot_session(has_topics: bool, allows: bool) -> Session {
 fn an_open_topic_keeps_the_plain_placeholder() {
     let mut session = forum_session(&[(1, "General", true), (5, "Releases", false)]);
     session.open_chat(ChatId(FORUM));
-    session.open_topic = Some(5);
+    session.open = session.open.with_topic(5);
     assert_eq!(session.composer_topic(ChatId(FORUM), None), None);
     assert_eq!(
         session.composer_topic(ChatId(FORUM), Some(MessageId(90))),
@@ -203,7 +203,7 @@ fn a_bot_that_makes_its_own_topics_is_off_thread_outside_them() {
     let mut session = bot_session(true, false);
     session.open_chat(ChatId(41));
     assert!(session.bot_chat_off_thread(ChatId(41)));
-    session.open_topic = Some(2);
+    session.open = session.open.with_topic(2);
     assert!(!session.bot_chat_off_thread(ChatId(41)));
 }
 

@@ -196,7 +196,7 @@ fn bot_private_chat_topic_select_sends_exact_request() {
     );
 
     driver.select_topic(12).unwrap();
-    assert_eq!(driver.session.open_topic, Some(12));
+    assert_eq!(driver.session.open_forum_topic(), Some(12));
     let search = sent(&recorder, "searchChatMessages");
     let search = search.last().unwrap();
     assert_eq!(search["chat_id"], 41);
@@ -214,7 +214,7 @@ fn bot_private_chat_topic_select_sends_exact_request() {
             r#"{{"@type":"foundChatMessages","@extra":"{extra}","total_count":1,"next_from_message_id":0,"messages":[{{"id":700,"chat_id":41,"is_outgoing":false,"topic_id":{{"@type":"messageTopicForum","forum_topic_id":12}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"hi","entities":[]}}}}}}]}}"#
         ),
     );
-    assert_eq!(driver.session.open_topic, Some(12));
+    assert_eq!(driver.session.open_forum_topic(), Some(12));
     assert!(
         driver.session.threads.topic_histories[&(41, 12)]
             .messages

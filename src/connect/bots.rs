@@ -26,7 +26,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(());
         }
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Ok(());
         };
         let Some(user_id) = self.session.bot_user_id_for_chat(chat_id) else {
@@ -65,7 +65,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(());
         }
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Ok(());
         };
         let Some(user_id) = self.session.bot_user_id_for_chat(chat_id) else {
@@ -130,7 +130,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(());
         }
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Ok(());
         };
         if !matches!(
@@ -481,7 +481,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(());
         }
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Ok(());
         };
         let Some(message_id) = self.session.reply_markup_message_to_fetch(chat_id) else {

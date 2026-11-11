@@ -39,7 +39,7 @@ pub use send_place::SendPlace;
 impl<S: JsonSender> ConnectDriver<S> {
     /// Load another page of history for the open chat (`from_message_id` = oldest, or 0).
     pub fn fetch_history(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         self.fetch_history_for(chat_id)
@@ -142,7 +142,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Load the page after the window's newest message while the window
     /// stops short of the chat's latest message (`Session::history_has_newer`).
     pub fn fetch_history_newer(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         self.fetch_history_newer_for(chat_id)
@@ -197,7 +197,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// stops short of them (and drop the unread divider) and load the
     /// newest page.
     pub fn jump_to_latest(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         self.session.history_entry(chat_id).end_unread_open();
@@ -213,7 +213,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// read boundary when it is not loaded); otherwise jump to the latest
     /// (tdesktop `CornerButtons::downClick` → `ShowAtUnreadMsgId`).
     pub fn jump_down(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         match self.session.show_first_unread(chat_id) {

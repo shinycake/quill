@@ -264,10 +264,10 @@ fn typing_moves_with_the_topic_and_the_cancel_goes_where_the_action_went() {
         "type":{"@type":"chatTypeSupergroup","supergroup_id":107,"is_channel":false},
         "unread_count":0,"permissions":{"@type":"chatPermissions","can_send_basic_messages":true}}}));
     t.driver.select_chat(ChatId(-1_007)).unwrap();
-    t.driver.session.open_topic = Some(5);
+    t.driver.session.open = t.driver.session.open.with_topic(5);
     t.driver.sync_outgoing_typing("hi", false, 1_000).unwrap();
     // Another topic of the same chat, inside the 4 s interval.
-    t.driver.session.open_topic = Some(6);
+    t.driver.session.open = t.driver.session.open.with_topic(6);
     t.driver.sync_outgoing_typing("hi", false, 1_500).unwrap();
     let actions: Vec<(String, i64)> = t
         .sender

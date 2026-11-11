@@ -40,7 +40,7 @@ impl QuillApp {
     /// menu above it.
     pub(super) fn send_as_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         let sender = session.selected_message_sender(chat_id)?;
         let name = session.message_sender_title(sender);
         let photo = sender_photo(session, sender);
@@ -80,7 +80,7 @@ impl QuillApp {
 
     /// The menu's Retry after the list failed to load.
     fn retry_send_as(&mut self, cx: &mut Context<Self>) {
-        let chat = self.session().and_then(|s| s.open_chat);
+        let chat = self.session().and_then(|s| s.open_chat_id());
         if let (Some(chat), Some(live)) = (chat, self.live.as_mut()) {
             let _ = live.driver.get_chat_available_message_senders(chat);
         }
@@ -94,7 +94,7 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return false;
         };
-        session.open_chat.is_some_and(|chat| {
+        session.open_chat_id().is_some_and(|chat| {
             matches!(session.message_senders_fetch(chat), Fetch::Ready(list) if list.is_empty())
         })
     }
@@ -102,7 +102,7 @@ impl QuillApp {
     pub(super) fn toggle_send_as(&mut self, cx: &mut Context<Self>) {
         self.chat_ui.send_as_open = !self.chat_ui.send_as_open && !self.send_as_list_empty();
         if self.chat_ui.send_as_open {
-            let chat = self.session().and_then(|s| s.open_chat);
+            let chat = self.session().and_then(|s| s.open_chat_id());
             if let (Some(chat), Some(live)) = (chat, self.live.as_mut()) {
                 let _ = live.driver.get_chat_available_message_senders(chat);
             }
@@ -143,7 +143,7 @@ impl QuillApp {
     /// the current one ticked, premium-only ones dimmed with a lock.
     fn send_as_menu(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
-        let chat_id = session.and_then(|s| s.open_chat);
+        let chat_id = session.and_then(|s| s.open_chat_id());
         let current = chat_id.and_then(|id| session.and_then(|s| s.selected_message_sender(id)));
         let senders = match (session, chat_id) {
             (Some(session), Some(chat_id)) => session.available_message_senders(chat_id),

@@ -49,8 +49,10 @@ impl QuillApp {
                 Some(tr(keys::Q_CHAT_YOUR_ACCOUNT_IS_FROZEN_AND_2).to_string())
             }
             PaneMode::Ready if composer.is_none() => {
-                let open = self.session().and_then(|s| s.open_chat);
-                let in_topic = self.session().is_some_and(|s| s.open_topic.is_some());
+                let open = self.session().and_then(|s| s.open_chat_id());
+                let in_topic = self
+                    .session()
+                    .is_some_and(|s| s.open_forum_topic().is_some());
                 let is_channel = open.is_some_and(|id| {
                     self.session()
                         .and_then(|s| s.chats.get(&id.0).map(|c| c.is_channel()))
@@ -109,11 +111,14 @@ impl QuillApp {
         // B4: `chatPermissions.can_send_polls` (schema 1.8.67 line 1070)
         // gates the Poll composer entry; absent permissions = unknown =
         // allowed.
-        let polls_allowed = self.session().and_then(|s| s.open_chat).is_none_or(|id| {
-            self.session()
-                .and_then(|s| s.chats.get(&id.0))
-                .is_none_or(|c| chat_allows_polls(c.permissions.as_ref()))
-        });
+        let polls_allowed = self
+            .session()
+            .and_then(|s| s.open_chat_id())
+            .is_none_or(|id| {
+                self.session()
+                    .and_then(|s| s.chats.get(&id.0))
+                    .is_none_or(|c| chat_allows_polls(c.permissions.as_ref()))
+            });
         let top = part.top();
         let dust = top.then(|| self.vanish_overlay(cx)).flatten();
         let player_bar = top.then(|| self.player_bar(cx)).flatten();
@@ -209,7 +214,7 @@ impl QuillApp {
                                 // Selecting here: the header carries the buttons.
                                 && !self
                                     .session()
-                                    .and_then(|s| s.open_chat)
+                                    .and_then(|s| s.open_chat_id())
                                     .is_some_and(|chat| self.selecting_in(chat)),
                             |this| {
                                 this.when_some(self.forward_draft(), |this, draft| {
@@ -455,7 +460,7 @@ impl QuillApp {
     pub(in crate::ui) fn session_history(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         super::video_player::warm_decoder(cx);
         let session = self.session();
-        let open = session.and_then(|s| s.open_chat);
+        let open = session.and_then(|s| s.open_chat_id());
         let title = open
             .and_then(|id| session.and_then(|s| s.chats.get(&id.0).map(|c| c.title.clone())))
             .unwrap_or_else(|| tr(keys::Q_CHAT_NO_CHAT_SELECTED).into());
@@ -502,7 +507,7 @@ impl QuillApp {
         let tabs_used =
             open.is_some_and(|id| session.is_some_and(|s| s.subsection_tabs_used_for(id)));
         let tabs_left = self.subsection_tabs_column(cx);
-        let open_topic = session.and_then(|s| s.open_topic);
+        let open_topic = session.and_then(|s| s.open_forum_topic());
         let topic_info = open.and_then(|id| session.and_then(|s| s.open_topic_info(id)));
         let topic_history = match (open, open_topic) {
             (Some(id), Some(topic_id)) => {

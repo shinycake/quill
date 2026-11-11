@@ -341,7 +341,7 @@ impl QuillApp {
     /// is missing, follow a changed target language, stop when the bar is
     /// no longer offered). Returns whether anything changed.
     pub(in crate::ui) fn pump_translation(&mut self) -> bool {
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|s| s.open_chat_id()) else {
             return false;
         };
         let Some(current) = self

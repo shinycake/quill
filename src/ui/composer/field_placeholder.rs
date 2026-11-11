@@ -18,7 +18,7 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return PlaceholderFacts::default();
         };
-        let Some(chat) = session.open_chat else {
+        let Some(chat) = session.open_chat_id() else {
             return PlaceholderFacts::default();
         };
         let broadcast = session

@@ -1060,7 +1060,7 @@ fn a_topic_history_splices_like_the_open_chat(cx: &mut TestAppContext) {
             if let Some(chat) = session.chats.get_mut(&GROUP) {
                 chat.is_forum = Some(true);
             }
-            session.open_topic = Some(TOPIC);
+            session.open = session.open.with_topic(TOPIC);
             let history = topic_copy(session);
             session
                 .threads

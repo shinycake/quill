@@ -484,7 +484,7 @@ fn search_open_flushes_leaving_draft_and_media_send_drops_reply() {
             1_500,
         )
         .unwrap();
-    assert_eq!(driver.session.open_chat, Some(ChatId(8)));
+    assert_eq!(driver.session.open_chat_id(), Some(ChatId(8)));
     let saved = driver.session.chats.get(&7).unwrap().draft.clone().unwrap();
     assert_eq!(saved.text, "hello");
     assert_eq!(saved.reply_to_message_id, Some(MessageId(3)));

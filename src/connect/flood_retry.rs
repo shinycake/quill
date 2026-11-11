@@ -217,7 +217,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// The "Couldn't load messages · Retry" action: clear the failure and
     /// request the first page again.
     pub fn retry_history(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         self.retry_history_for(chat_id)

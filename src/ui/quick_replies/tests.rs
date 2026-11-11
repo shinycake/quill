@@ -289,7 +289,7 @@ fn type_slash(app: &Entity<QuillApp>, cx: &mut VisualTestContext, text: &str) {
     cx.update(|window, cx| {
         app.update(cx, |app, cx| {
             let session = app.demo_session.as_mut().expect("demo session");
-            let chat = session.open_chat.expect("open chat");
+            let chat = session.open_chat_id().expect("open chat");
             let user_id = quill::ids::UserId(chat.0);
             session.chats.get_mut(&chat.0).unwrap().kind =
                 quill::telegram::envelope::ChatKind::Private { user_id };

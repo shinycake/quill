@@ -266,7 +266,7 @@ impl QuillApp {
                 }
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            match session.open_chat {
+            match session.open_chat_id() {
                 Some(chat_id) => {
                     session.media.shared_media.open_for(chat_id);
                     self.set_note(StatusNote::silent(tr(keys::Q_OPS_SHARED_MEDIA)));

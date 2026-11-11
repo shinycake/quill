@@ -182,7 +182,7 @@ fn pending_turns_render_the_same_pixels_and_preview() {
 fn newest_sent_photo(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<String> {
     app.update_in(vcx, |app, _, _| {
         let session = app.demo_session.as_ref()?;
-        let chat = session.open_chat?;
+        let chat = session.open_chat_id()?;
         let newest = session.histories.get(&chat.0)?.ordered().last().copied()?;
         let quill::telegram::envelope::MessageContent::Photo(photo) = &newest.content else {
             return None;
@@ -314,7 +314,7 @@ fn a_held_send_whose_chat_closed_says_it_did_not_go(cx: &mut TestAppContext) {
         app.save_photo_editor(window, cx);
         app.submit_composer(String::new(), window, cx);
         let session = app.demo_session.as_mut().expect("demo session");
-        let open = session.open_chat.expect("an open chat");
+        let open = session.open_chat_id().expect("an open chat");
         let other = session
             .chats
             .keys()
@@ -441,7 +441,7 @@ fn tap_mid_render_then(
 fn a_tap_mid_render_then_a_chat_change_opens_nothing(cx: &mut TestAppContext) {
     tap_mid_render_then(cx, "away.png", 11, |app, _| {
         let session = app.demo_session.as_mut().expect("demo session");
-        let open = session.open_chat.expect("an open chat");
+        let open = session.open_chat_id().expect("an open chat");
         let other = session
             .chats
             .keys()

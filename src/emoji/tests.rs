@@ -100,7 +100,7 @@ fn message_custom_emoji_ids_to_resolve_scans_open_chat() {
     apply_json(&mut session, &seq, &sink, json);
     // Chat 4 isn't open: nothing to resolve.
     assert!(session.message_custom_emoji_ids_to_resolve().is_empty());
-    session.open_chat = Some(ChatId(4));
+    session.open = crate::state::OpenView::of(Some(ChatId(4)));
     // Deduped even though the entity repeats.
     assert_eq!(session.message_custom_emoji_ids_to_resolve(), vec![12345]);
     // Attempted ids are excluded.
@@ -180,7 +180,7 @@ fn open_chat_custom_emoji_files_cover_text_and_reactions() {
         &sink,
         r#"{"@type":"updateMessageInteractionInfo","chat_id":4,"message_id":9,"interaction_info":{"@type":"messageInteractionInfo","view_count":0,"forward_count":0,"reply_info":null,"reactions":{"@type":"messageReactions","reactions":[{"@type":"messageReaction","type":{"@type":"reactionTypeCustomEmoji","custom_emoji_id":"777"},"total_count":2,"is_chosen":true,"used_sender_id":null,"recent_sender_ids":[]}],"are_tags":false,"paid_reactors":[],"can_get_added_reactions":false}}}"#,
     );
-    session.open_chat = Some(ChatId(4));
+    session.open = crate::state::OpenView::of(Some(ChatId(4)));
     assert_eq!(session.open_chat_custom_emoji_ids(), vec![777, 12345]);
     let message = &session.histories[&4].messages[&9];
     assert_eq!(message.reaction_chips().len(), 1);

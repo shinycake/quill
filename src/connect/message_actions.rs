@@ -313,7 +313,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `ingest` jumps to it; viewing the row then reads it and TDLib
     /// lowers the chat's counter (`updateChatUnread*Count`).
     pub fn jump_to_unread_marker(&mut self, kind: UnreadJumpKind) -> Result<(), ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         if !self.chats_path_active() {
@@ -346,7 +346,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         kind: UnreadJumpKind,
     ) -> Result<(), ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         self.read_all_chat_unread_markers(chat_id, kind)

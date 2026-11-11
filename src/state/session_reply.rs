@@ -721,7 +721,10 @@ impl Session {
                 )));
             }
         }
-        if let Some(history) = self.open_chat.and_then(|chat| self.histories.get(&chat.0)) {
+        if let Some(history) = self
+            .open_chat_id()
+            .and_then(|chat| self.histories.get(&chat.0))
+        {
             for message in history.messages.values() {
                 if let Some(content) = message
                     .reply_to
@@ -784,7 +787,10 @@ impl Session {
 
     /// Custom emoji behind the reply strips of the open chat.
     pub fn reply_background_emoji_ids(&self) -> Vec<i64> {
-        let Some(history) = self.open_chat.and_then(|chat| self.histories.get(&chat.0)) else {
+        let Some(history) = self
+            .open_chat_id()
+            .and_then(|chat| self.histories.get(&chat.0))
+        else {
             return Vec::new();
         };
         history

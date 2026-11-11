@@ -671,7 +671,7 @@ fn driver_send_recorded_video_note_sends_input_message_video_note() {
         ),
         Err(ConnectSendError::InvalidRequest)
     );
-    driver.session.open_chat = Some(ChatId(11));
+    driver.session.open = crate::state::OpenView::of(Some(ChatId(11)));
     // A real file so `pick_send_path` accepts it; the thumbnail probe
     // may fail on garbage bytes (thumbnail is optional).
     let clip = dir.join("clip.mp4");
@@ -729,7 +729,7 @@ fn driver_send_recorded_video_note_to_ignores_the_open_chat() {
         thumbnail: None,
     };
     // Recorded in chat 11, finished after chat 12 was opened.
-    driver.session.open_chat = Some(ChatId(12));
+    driver.session.open = crate::state::OpenView::of(Some(ChatId(12)));
     let extra = driver
         .send_recorded_video_note_to(ChatId(11), &Default::default(), &draft, None)
         .expect("sends");
@@ -738,6 +738,6 @@ fn driver_send_recorded_video_note_to_ignores_the_open_chat() {
     assert_eq!(value["@type"], "sendMessage");
     assert_eq!(value["chat_id"], 11);
     assert_eq!(value["@extra"], extra.0.to_string());
-    assert_eq!(driver.session.open_chat, Some(ChatId(12)));
+    assert_eq!(driver.session.open_chat_id(), Some(ChatId(12)));
     let _ = std::fs::remove_dir_all(&dir);
 }

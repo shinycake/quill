@@ -106,7 +106,7 @@ fn a_created_channel_walks_type_and_subscribers(cx: &mut TestAppContext) {
     assert_eq!(step(&app, vcx), None);
     assert!(shell.read_with(vcx, |s, _| s.open_dialog != Some(DialogKind::CreateChat)));
     assert_eq!(
-        app.read_with(vcx, |app, _| app.session().and_then(|s| s.open_chat)),
+        app.read_with(vcx, |app, _| app.session().and_then(|s| s.open_chat_id())),
         Some(chat)
     );
 }

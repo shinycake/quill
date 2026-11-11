@@ -585,7 +585,7 @@ fn replay_pin_and_unpin_message_is_pinned() {
             r#"{"@type":"updateNewMessage","message":{"id":50,"chat_id":7,"is_outgoing":false,"is_pinned":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hello already here","entities":[]}}}}"#,
         ],
     );
-    session.open_chat = Some(quill::ids::ChatId(7));
+    session.open = quill::state::OpenView::of(Some(quill::ids::ChatId(7)));
     assert!(session.open_chat_pinned_message().is_none());
     let extra = session.request(RequestPurpose::PinChatMessage, Some(quill::ids::ChatId(7)));
     apply_all_seq(

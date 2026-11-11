@@ -542,7 +542,7 @@ impl Session {
                 {
                     // view-in-place: the answer applies in the view that asked
                     // (`lands_in_view`), so this is the asking window's chat.
-                    if self.open_chat != Some(chat_id) {
+                    if self.open_chat_id() != Some(chat_id) {
                         self.diagnostics.record(Diagnostic {
                             category: "reducer",
                             type_name: Some("sponsoredMessages".into()),

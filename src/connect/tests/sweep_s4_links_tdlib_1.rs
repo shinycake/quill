@@ -48,7 +48,7 @@ fn refused_parameters_leave_no_pending_entry() {
 #[test]
 fn a_gif_search_carries_the_asking_windows_chat() {
     let (_dir, mut driver, sender, _sink, _seq) = toggle_driver();
-    driver.session.open_chat = Some(ChatId(5));
+    driver.session.open = crate::state::OpenView::of(Some(ChatId(5)));
     driver.session.stickers.gifs.search_bot_username = "gif".into();
     driver.session.stickers.gifs.search_bot_user_id = Some(77);
     driver

@@ -351,7 +351,7 @@ fn a_sent_sticker_flies_from_the_panel_to_its_message_and_lands(cx: &mut TestApp
         session.view_generation = quill::ids::ViewGeneration(7);
     });
     let chat = app
-        .read_with(vcx, |app, _| app.session().and_then(|s| s.open_chat))
+        .read_with(vcx, |app, _| app.session().and_then(|s| s.open_chat_id()))
         .expect("the demo opens a chat");
     open_stickers(&app, vcx);
 

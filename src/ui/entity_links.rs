@@ -216,7 +216,9 @@ impl QuillApp {
                     ChatKind::Supergroup { .. } | ChatKind::BasicGroup { .. }
                 )
             })
-            && self.session().is_some_and(|s| s.open_chat == Some(chat_id));
+            && self
+                .session()
+                .is_some_and(|s| s.open_chat_id() == Some(chat_id));
         if in_chat {
             self.open_chat_search_ui(window, cx);
             let query = tag.to_string();
@@ -243,7 +245,7 @@ impl QuillApp {
         let Some(session) = session else {
             return;
         };
-        if session.open_chat != Some(chat_id) {
+        if session.open_chat_id() != Some(chat_id) {
             return;
         }
         let in_group = session.chats.get(&chat_id.0).is_some_and(|chat| {

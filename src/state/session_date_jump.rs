@@ -6,7 +6,7 @@ use crate::telegram::envelope::{CalendarDay, ParsedChatMember};
 impl Session {
     /// Open the calendar box for the open chat. `None` when no chat is open.
     pub fn open_history_calendar(&mut self, now: i64) -> Option<&HistoryCalendar> {
-        let chat_id = self.open_chat?;
+        let chat_id = self.open_chat_id()?;
         let media = if self.search.chat_search.is_open()
             && self.search.chat_search.chat_id == Some(chat_id)
         {
@@ -131,7 +131,7 @@ impl Session {
             .search
             .chat_search
             .chat_id
-            .or(self.open_chat)
+            .or(self.open_chat_id())
             .filter(|_| mode != DateJumpMode::Exact)
             .map(|chat_id| (chat_id, message_id, mode));
         let need = self.begin_chat_search_jump(message_id);
@@ -153,7 +153,7 @@ impl Session {
         self.search.date_jump_pending = None;
         // The view moved to another chat since the jump began: its window
         // is not the one the jump was for.
-        if self.search.chat_search.chat_id.or(self.open_chat) != Some(chat_id) {
+        if self.search.chat_search.chat_id.or(self.open_chat_id()) != Some(chat_id) {
             return;
         }
         let Some(history) = self.histories.get(&chat_id.0) else {
@@ -179,7 +179,7 @@ impl Session {
     /// "From: member" needs someone to choose from: basic groups and
     /// supergroups (not channels, private chats or Saved Messages).
     pub fn chat_search_can_pick_sender(&self) -> bool {
-        let Some(chat_id) = self.search.chat_search.chat_id.or(self.open_chat) else {
+        let Some(chat_id) = self.search.chat_search.chat_id.or(self.open_chat_id()) else {
             return false;
         };
         self.chats.get(&chat_id.0).is_some_and(|chat| {

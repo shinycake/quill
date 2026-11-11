@@ -24,8 +24,8 @@ impl Session {
                 direct_messages_chat_topic_id: topic,
             });
         }
-        if self.open_chat == Some(chat_id) {
-            self.open_topic.map(crate::ids::TopicId::forum)
+        if self.open_chat_id() == Some(chat_id) {
+            self.open_forum_topic().map(crate::ids::TopicId::forum)
         } else {
             None
         }

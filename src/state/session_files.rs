@@ -308,7 +308,7 @@ impl Session {
             )
             .flat_map(|history| history.messages.values());
         for message in self
-            .open_chat
+            .open_chat_id()
             .and_then(|id| self.histories.get(&id.0))
             .into_iter()
             .flat_map(|history| history.messages.values())
@@ -528,7 +528,7 @@ impl Session {
             }
         }
         // Sponsored rows in the open chat: content + sponsor thumbs at priority 1.
-        if let Some(chat_id) = self.open_chat
+        if let Some(chat_id) = self.open_chat_id()
             && let Some(entry) = self.messages.sponsored.get(&chat_id.0)
         {
             for message in &entry.messages {
@@ -566,7 +566,7 @@ impl Session {
     /// to exceed `AUTO_DOWNLOAD_MAX_BYTES` are skipped (TGX
     /// `canAutomaticallyDownload` download limit).
     pub fn auto_download_media_file_ids(&self) -> Vec<FileId> {
-        let Some(chat_id) = self.open_chat else {
+        let Some(chat_id) = self.open_chat_id() else {
             return Vec::new();
         };
         if self.settings.media_prefs.data_saver {

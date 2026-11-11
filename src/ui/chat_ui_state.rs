@@ -558,7 +558,7 @@ impl QuillApp {
     /// any slot change); an edit does not, since its message is the old
     /// topic's, and the slot's draft goes back into the field it held.
     pub(super) fn sync_chat_ui(&mut self, cx: &mut Context<Self>) {
-        let Some(chat) = self.session().and_then(|session| session.open_chat) else {
+        let Some(chat) = self.session().and_then(|session| session.open_chat_id()) else {
             // The reducer closed the chat (removed, left, kicked) with no
             // goodbye of the view's own: what was open for it goes, or it
             // came back with the chat the next time it opens.

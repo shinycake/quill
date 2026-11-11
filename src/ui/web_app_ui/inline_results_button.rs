@@ -13,7 +13,7 @@ impl QuillApp {
         url: &str,
         cx: &mut Context<Self>,
     ) {
-        let Some(chat_id) = self.session().and_then(|session| session.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|session| session.open_chat_id()) else {
             return;
         };
         self.start_web_app(

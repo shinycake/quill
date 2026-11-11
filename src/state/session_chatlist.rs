@@ -178,10 +178,11 @@ impl Session {
         // also bumps the generation, dropping in-flight fetches for the old
         // chat. Same-chat re-select never reaches this method (see
         // `ConnectDriver::select_chat`), so the gallery survives it.
-        if self.open_chat != Some(chat_id) {
+        if self.open_chat_id() != Some(chat_id) {
             self.media.shared_media.close();
         }
-        let previous = self.open_chat.replace(chat_id);
+        let before = std::mem::replace(&mut self.open, OpenView::Chat { chat: chat_id });
+        let previous = before.chat();
         // The Jump to date box and a date jump in the making belong to the
         // chat that was open.
         if let Some(left) = previous.filter(|previous| *previous != chat_id) {
@@ -191,7 +192,7 @@ impl Session {
         // Phase 5.1: switching chats leaves the topic view (re-selecting the
         // chat leaves it too); the topic's history is released against the
         // chat it was open in.
-        if let (Some(previous), Some(topic)) = (previous, self.open_topic.take()) {
+        if let (Some(previous), Some(topic)) = (previous, before.topic()) {
             self.release_topic_history(previous, topic);
         }
         // ... and the Saved Messages sublist / tag filter.

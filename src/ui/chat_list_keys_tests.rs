@@ -91,7 +91,7 @@ fn highlighted(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<Ch
 }
 
 fn open_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<ChatId> {
-    app.update(vcx, |app, _| app.session().and_then(|s| s.open_chat))
+    app.update(vcx, |app, _| app.session().and_then(|s| s.open_chat_id()))
 }
 
 fn list_focused(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {

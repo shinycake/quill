@@ -32,7 +32,7 @@ impl QuillApp {
     /// The chat a share can go to: the open chat when the user may post.
     pub(super) fn share_target(&self) -> Option<ChatId> {
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         session.chats.get(&chat_id.0)?.can_post().then_some(chat_id)
     }
 

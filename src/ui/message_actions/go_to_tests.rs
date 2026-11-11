@@ -44,7 +44,7 @@ fn preview_row_menu_opens_the_chat(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     let (open, other) = app.read_with(vcx, |app, _| {
         let session = app.session().expect("demo session");
-        let open = session.open_chat.expect("the demo opens a chat");
+        let open = session.open_chat_id().expect("the demo opens a chat");
         let other = session
             .histories
             .iter()
@@ -81,6 +81,6 @@ fn preview_row_menu_opens_the_chat(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
         assert!(app.chat_list.preview.is_none(), "the preview closes");
-        assert_eq!(app.session().and_then(|s| s.open_chat), Some(other));
+        assert_eq!(app.session().and_then(|s| s.open_chat_id()), Some(other));
     });
 }

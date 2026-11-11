@@ -330,7 +330,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         let ad = spot
             .card
             .then(|| session.sponsored_message(chat_id, spot.ad_id).cloned())
@@ -439,7 +439,7 @@ impl QuillApp {
         if !window_active || shown.is_empty() {
             return;
         }
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|s| s.open_chat_id()) else {
             return;
         };
         // Painted in another chat (it changed between the paint and this

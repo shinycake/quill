@@ -99,7 +99,7 @@ fn a_switch_closes_the_earn_layer(cx: &mut TestAppContext) {
         // Opened from Settings (My Stars), with no chat whose leave would
         // take the column.
         if let Some(session) = app.demo_session.as_mut() {
-            session.open_chat = None;
+            session.open = quill::state::OpenView::of(None);
         }
         let panel = EarnPanel::Revenue {
             peer: EarnPeer::User(11),

@@ -272,7 +272,7 @@ impl QuillApp {
             // one for the new chat (`move_upgraded_chat_window`).
             self.in_window_scope(None, cx, |app, cx| {
                 if let Some(live) = app.live.as_mut()
-                    && live.driver.session.open_chat == Some(old)
+                    && live.driver.session.open_chat_id() == Some(old)
                 {
                     let _ = live.driver.select_chat(new);
                     app.enter_chat_ui(new, cx);

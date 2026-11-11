@@ -141,7 +141,7 @@ fn the_date_box_goes_with_its_chat(cx: &mut TestAppContext) {
             .chats
             .keys()
             .copied()
-            .find(|id| Some(quill::ids::ChatId(*id)) != session.open_chat)
+            .find(|id| Some(quill::ids::ChatId(*id)) != session.open_chat_id())
             .map(quill::ids::ChatId)
             .expect("a second chat")
     });

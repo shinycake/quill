@@ -380,7 +380,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     pub(crate) fn close_open_chat(&mut self) -> Result<(), ConnectSendError> {
-        let Some(prev) = self.session.open_chat else {
+        let Some(prev) = self.session.open_chat_id() else {
             return Ok(());
         };
         // A chat that is also shown in its own window stays open in TDLib
@@ -416,7 +416,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// (`Session::message_ids_to_view`). Unread counts change only when
     /// `updateChatReadInbox` arrives.
     pub fn maybe_view_open_messages(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Ok(None);
         };
         self.maybe_view_messages_for(chat_id)
@@ -461,7 +461,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             source
         } else if self.session.thread_for_chat(chat_id).is_some() {
             "messageSourceMessageThreadHistory"
-        } else if self.session.open_chat == Some(chat_id) && self.session.open_topic.is_some() {
+        } else if self.session.open_chat_id() == Some(chat_id)
+            && self.session.open_forum_topic().is_some()
+        {
             "messageSourceForumTopicHistory"
         } else {
             "messageSourceChatHistory"
@@ -510,7 +512,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         leaving_reply: Option<SendReply>,
         now_ms: u64,
     ) -> Result<(), ConnectSendError> {
-        let Some(prev) = self.session.open_chat else {
+        let Some(prev) = self.session.open_chat_id() else {
             return Ok(());
         };
         if prev == next_chat {
@@ -527,7 +529,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// (groups only; private chats and channels have no one to mention).
     /// `None` clears the suggestions.
     pub fn search_mentions(&mut self, query: Option<&str>) -> Result<(), ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             self.session.messages.mention_search = None;
             return Ok(());
         };

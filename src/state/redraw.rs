@@ -57,7 +57,9 @@ impl Session {
     /// screen.
     pub fn note_rows_on_screen(&mut self, messages: Option<&[MessageId]>) {
         // view-in-place: the main window's frame reports its own rows.
-        let history = self.open_chat.and_then(|chat| self.histories.get(&chat.0));
+        let history = self
+            .open_chat_id()
+            .and_then(|chat| self.histories.get(&chat.0));
         self.messages.rows_on_screen = messages.map(|messages| RowsOnScreen {
             messages: messages.iter().copied().collect(),
             auto_download_files: messages

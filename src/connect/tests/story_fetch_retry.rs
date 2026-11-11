@@ -68,7 +68,7 @@ impl Harness {
         self.driver
             .ingest(copy_and_parse(&json, &self.seq, &self.sink).unwrap())
             .unwrap();
-        self.driver.session.open_chat = Some(ChatId(21));
+        self.driver.session.open = crate::state::OpenView::of(Some(ChatId(21)));
     }
 
     /// The `@extra` of the last `getStory` sent.

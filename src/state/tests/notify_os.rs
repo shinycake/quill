@@ -77,7 +77,7 @@ fn a_focused_open_chat_does_not_ask_for_attention() {
     let seq = AtomicU64::new(0);
     apply_json(&mut session, &seq, &sink, ADA_CHAT);
     session.app_active = true;
-    session.open_chat = Some(ChatId(7));
+    session.open = crate::state::OpenView::of(Some(ChatId(7)));
     apply_json(&mut session, &seq, &sink, JOINED);
     assert!(!session.settings.pending_attention);
 }

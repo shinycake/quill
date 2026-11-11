@@ -21,7 +21,7 @@ impl QuillApp {
                     .unwrap_or_default()
             })
             .unwrap_or_default();
-        let selected_topic = session.and_then(|s| s.open_topic);
+        let selected_topic = session.and_then(|s| s.open_forum_topic());
         let mut list = div()
             .id("forum-topics")
             .flex()
@@ -336,7 +336,7 @@ impl QuillApp {
         // view or the previous topic): save it there, then restore the new
         // topic's draft once the switch is done.
         self.flush_leaving_draft(cx);
-        let open_chat = self.session().and_then(|s| s.open_chat);
+        let open_chat = self.session().and_then(|s| s.open_chat_id());
         let mut opened = true;
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.select_topic(forum_topic_id);
@@ -346,7 +346,7 @@ impl QuillApp {
                 Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_OPEN_TOPIC)),
             });
         } else if let Some(session) = self.demo_session.as_mut()
-            && let Some(chat_id) = session.open_chat
+            && let Some(chat_id) = session.open_chat_id()
         {
             session.select_topic(chat_id, forum_topic_id);
         }

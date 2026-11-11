@@ -122,7 +122,7 @@ impl Session {
             last_read_inbox_message_id: Some(chat.last_read_inbox_message_id),
             // view-in-place: the main window's chat while it is active; a
             // chat window's is `shown_in_active_window`.
-            open_chat: self.open_chat,
+            open_chat: self.open_chat_id(),
             app_active: self.app_active,
             shown_in_active_window: self.active_window_chats.contains(&message.chat_id),
             view: self.settings.notify_view,
@@ -250,7 +250,7 @@ impl Session {
             chat_muted: self.effective_muted(chat),
             app_active: self.app_active,
             // view-in-place: as for messages above.
-            open_chat: self.open_chat,
+            open_chat: self.open_chat_id(),
             shown_in_active_window: self.active_window_chats.contains(&chat_id),
         });
         if let Some(notification) = notification {

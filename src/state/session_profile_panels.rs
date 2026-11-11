@@ -33,7 +33,7 @@ impl Session {
         ) {
             return None;
         }
-        self.open_chat
+        self.open_chat_id()
             .and_then(|id| self.chats.get(&id.0))
             .filter(shows)
             .or_else(|| self.chats.values().find(shows))

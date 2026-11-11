@@ -174,7 +174,7 @@ fn the_daily_limit_offers_increase_limit(cx: &mut TestAppContext) {
 fn a_box_opened_in_a_chat_window_survives_the_main_windows_frames(cx: &mut TestAppContext) {
     let (app, mut main) = open_main(cx);
     let chat = app
-        .read_with(&main, |app, _| app.session().and_then(|s| s.open_chat))
+        .read_with(&main, |app, _| app.session().and_then(|s| s.open_chat_id()))
         .expect("the demo opens a chat");
     app.update_in(&mut main, |app, window, cx| {
         app.open_chat_in_new_window(chat, window, cx)
@@ -213,7 +213,7 @@ fn a_box_opened_in_a_chat_window_survives_the_main_windows_frames(cx: &mut TestA
 fn a_chat_windows_box_takes_its_answer_and_toasts_in_its_own_frame(cx: &mut TestAppContext) {
     let (app, mut main) = open_main(cx);
     let chat = app
-        .read_with(&main, |app, _| app.session().and_then(|s| s.open_chat))
+        .read_with(&main, |app, _| app.session().and_then(|s| s.open_chat_id()))
         .expect("the demo opens a chat");
     app.update_in(&mut main, |app, window, cx| {
         app.open_chat_in_new_window(chat, window, cx)
@@ -266,7 +266,7 @@ fn a_chat_windows_box_takes_its_answer_and_toasts_in_its_own_frame(cx: &mut Test
 fn a_chat_windows_style_preview_takes_its_answer_in_its_own_frame(cx: &mut TestAppContext) {
     let (app, mut main) = open_main(cx);
     let chat = app
-        .read_with(&main, |app, _| app.session().and_then(|s| s.open_chat))
+        .read_with(&main, |app, _| app.session().and_then(|s| s.open_chat_id()))
         .expect("the demo opens a chat");
     app.update_in(&mut main, |app, window, cx| {
         app.open_chat_in_new_window(chat, window, cx)
@@ -325,7 +325,7 @@ fn a_chat_windows_style_preview_takes_its_answer_in_its_own_frame(cx: &mut TestA
 fn switch_topic(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, topic: i32) {
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.open_topic = Some(topic);
+            session.open = session.open.with_topic(topic);
         }
         cx.notify();
     });

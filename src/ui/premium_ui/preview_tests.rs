@@ -171,7 +171,7 @@ fn a_refused_hide_ads_opens_the_no_ads_preview(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
         let session = app.demo_session.as_mut().expect("demo session");
-        let chat_id = session.open_chat.unwrap_or(quill::ids::ChatId(1));
+        let chat_id = session.open_chat_id().unwrap_or(quill::ids::ChatId(1));
         session.payments.hub.promo_request = Some(quill::premium_hub::PromoRequest {
             feature: PremiumFeature::DisabledAds.into(),
             chat_id,

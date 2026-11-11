@@ -93,7 +93,7 @@ impl QuillApp {
             viewer_can_restrict: session.chat_can_restrict_members(chat_id),
             viewer_can_manage_tags: session.chat_can_manage_tags(chat_id),
             viewer_can_add: session.chat_can_add_members(chat_id),
-            chat_is_open: session.open_chat == Some(chat_id),
+            chat_is_open: session.open_chat_id() == Some(chat_id),
         })
     }
 

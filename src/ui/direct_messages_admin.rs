@@ -36,7 +36,7 @@ impl QuillApp {
     /// chats" / "No chats" in All, the person and "N messages" in a chat.
     pub(super) fn direct_admin_header(&self) -> Option<AdminHeader> {
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         if !session.is_direct_messages_admin(chat_id) {
             return None;
         }
@@ -72,7 +72,7 @@ impl QuillApp {
     /// `Section::SavedSublist`); everywhere else the chat menu.
     pub(super) fn header_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let open = self.session().and_then(|s| {
-            let chat_id = s.open_chat?;
+            let chat_id = s.open_chat_id()?;
             Some((chat_id, s.open_direct_topic(chat_id)?))
         });
         match open {

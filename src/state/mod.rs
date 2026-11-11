@@ -84,6 +84,7 @@ mod map_thumbs;
 mod media_library;
 mod member_list;
 mod notify_shown;
+mod open_view;
 pub mod optimistic;
 mod ownership_types;
 mod paging;
@@ -216,6 +217,7 @@ pub use media_library::{
 };
 pub use member_list::*;
 pub use notify_shown::{NotifyShown, ShownNotifications};
+pub use open_view::OpenView;
 pub use ownership_types::*;
 pub use photo_gallery::{PhotoActions, PhotoDelete, chat_gallery, user_gallery};
 pub use redraw::{RedrawNeed, RowsOnScreen, redraw_need};

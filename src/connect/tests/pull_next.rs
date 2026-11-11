@@ -81,7 +81,7 @@ fn preload_loads_history_around_the_read_position_and_pins() {
     assert!(driver.next_channel_history_ready(next));
     assert!(driver.next_channel_pinned_ready(next));
     // The chat was not opened, and its page is not shown anywhere.
-    assert_eq!(driver.session.open_chat, None);
+    assert_eq!(driver.session.open_chat_id(), None);
     assert!(
         driver
             .session

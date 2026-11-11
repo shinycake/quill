@@ -119,7 +119,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         // A topic already in the loaded list is selectable whatever the
@@ -149,10 +149,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        let Some(forum_topic_id) = self.session.open_topic else {
+        let Some(forum_topic_id) = self.session.open_forum_topic() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         let key = (chat_id.0, forum_topic_id);
@@ -219,7 +219,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// and request the first page again.
     pub fn retry_topic_history(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         if let (Some(chat_id), Some(forum_topic_id)) =
-            (self.session.open_chat, self.session.open_topic)
+            (self.session.open_chat_id(), self.session.open_forum_topic())
         {
             self.session
                 .clear_topic_load_failed(chat_id, forum_topic_id);

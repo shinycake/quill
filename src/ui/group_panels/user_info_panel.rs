@@ -177,7 +177,7 @@ impl QuillApp {
         // Primary actions as a row of labeled icon tiles
         // (`profile_panels::action_row`).
         let in_own_chat = session
-            .and_then(|s| s.open_chat.map(|chat| (s, chat)))
+            .and_then(|s| s.open_chat_id().map(|chat| (s, chat)))
             .is_some_and(|(s, chat)| s.private_chat_user_id(chat) == Some(user_id));
         if let Some(tiles) = self.profile_action_row(ProfilePeer::User(user_id), cx) {
             body = body.child(tiles);
@@ -213,7 +213,7 @@ impl QuillApp {
         // wallpaper, for the private chat open right now.
         if !is_self
             && in_own_chat
-            && let Some(chat) = session.and_then(|s| s.open_chat)
+            && let Some(chat) = session.and_then(|s| s.open_chat_id())
         {
             body = body.child(
                 action_row(

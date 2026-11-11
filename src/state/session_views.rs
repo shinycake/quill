@@ -63,8 +63,8 @@ impl Session {
         let in_place_window = self.view_in_place();
         let in_place = ShownView {
             window: in_place_window,
-            open_chat: self.open_chat,
-            open_topic: self.open_topic,
+            open_chat: self.open_chat_id(),
+            open_topic: self.open_forum_topic(),
             thread: self.threads.thread.as_ref(),
             saved_sublist: self.threads.saved.sublist.as_ref(),
             saved_tag_search: self.threads.saved.tag_search.as_ref(),
@@ -76,8 +76,8 @@ impl Session {
             .stored()
             .map(move |(key, view)| ShownView {
                 window: (Some(*key) != in_place_window).then_some(*key),
-                open_chat: view.open_chat,
-                open_topic: view.open_topic,
+                open_chat: view.open.chat(),
+                open_topic: view.open.topic(),
                 thread: view.thread.as_ref(),
                 saved_sublist: view.saved_sublist.as_ref(),
                 saved_tag_search: view.saved_tag_search.as_ref(),

@@ -52,7 +52,7 @@ fn shown(vcx: &mut VisualTestContext, selector: &'static str) -> bool {
 
 fn open_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> ChatId {
     app.read_with(vcx, |app, _| {
-        let Some(chat_id) = app.session().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = app.session().and_then(|s| s.open_chat_id()) else {
             panic!("demo has no open chat");
         };
         chat_id
@@ -267,7 +267,7 @@ fn the_mute_box_keeps_the_chat_it_was_opened_for(cx: &mut TestAppContext) {
     });
     frames(&mut vcx);
     app.read_with(&vcx, |app, _| {
-        assert_eq!(app.session().and_then(|s| s.open_chat), Some(other));
+        assert_eq!(app.session().and_then(|s| s.open_chat_id()), Some(other));
         assert_eq!(app.notify.mute_chat(), Some(first), "the box's own chat");
     });
 }

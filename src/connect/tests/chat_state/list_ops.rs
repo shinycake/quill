@@ -439,7 +439,7 @@ fn cl2_create_private_chat_answer_opens_through_select_chat() {
                 .unwrap(),
             )
             .unwrap();
-    assert_eq!(driver.session.open_chat, Some(ChatId(777001)));
+    assert_eq!(driver.session.open_chat_id(), Some(ChatId(777001)));
     assert!(
         driver.session.chats.contains_key(&777001),
         "created chat inserted into the model"
@@ -495,7 +495,11 @@ fn cl2_create_private_chat_refusal_opens_nothing() {
                 .unwrap(),
             )
             .unwrap();
-    assert_eq!(driver.session.open_chat, None, "nothing opened on refusal");
+    assert_eq!(
+        driver.session.open_chat_id(),
+        None,
+        "nothing opened on refusal"
+    );
     assert_eq!(
         driver.session.chats_state.chat_action_error.last(),
         Some("could not open Saved Messages (error 400)")

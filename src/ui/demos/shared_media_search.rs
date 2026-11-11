@@ -42,7 +42,7 @@ impl QuillApp {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        let Some(chat_id) = session.open_chat else {
+        let Some(chat_id) = session.open_chat_id() else {
             return;
         };
         session

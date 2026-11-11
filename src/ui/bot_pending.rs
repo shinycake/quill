@@ -23,7 +23,7 @@ impl QuillApp {
     #[inline(never)]
     fn pending_bot_reply_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         let (topic_id, draft) = super::bot_stream::open_chat_draft(session)?;
         if draft.expires_at_ms <= unix_ms_now() {
             return None;

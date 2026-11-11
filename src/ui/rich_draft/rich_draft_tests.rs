@@ -211,7 +211,7 @@ fn a_rich_draft_box_goes_with_its_chat(cx: &mut TestAppContext) {
     // "Send Without Formatting" is pressed on the box still shown.
     app.update(vcx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.open_chat = Some(other);
+            session.open = quill::state::OpenView::of(Some(other));
         }
         assert!(!app.chat_ui_is_current());
         let plain = app.take_rich_premium_choice();

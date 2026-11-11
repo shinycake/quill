@@ -478,11 +478,14 @@ impl QuillApp {
         // `chatPermissions.can_send_polls` is false (schema 1.8.67 line
         // 1070); this refuses a stale race (permissions changed after
         // the entry rendered).
-        let polls_allowed = self.session().and_then(|s| s.open_chat).is_none_or(|id| {
-            self.session()
-                .and_then(|s| s.chats.get(&id.0))
-                .is_none_or(|chat| chat_allows_polls(chat.permissions.as_ref()))
-        });
+        let polls_allowed = self
+            .session()
+            .and_then(|s| s.open_chat_id())
+            .is_none_or(|id| {
+                self.session()
+                    .and_then(|s| s.chats.get(&id.0))
+                    .is_none_or(|chat| chat_allows_polls(chat.permissions.as_ref()))
+            });
         if !polls_allowed {
             self.set_note(StatusNote::silent(tr(
                 keys::Q_MEDIA_POLLS_ARE_RESTRICTED_IN_THIS,
@@ -495,7 +498,7 @@ impl QuillApp {
         }
         let in_channel = self
             .session()
-            .and_then(|s| s.open_chat.and_then(|id| s.chats.get(&id.0)))
+            .and_then(|s| s.open_chat_id().and_then(|id| s.chats.get(&id.0)))
             .is_some_and(|chat| chat.is_channel());
         self.chat_ui.poll_dialog = Some(PollDialog::new(window, cx, in_channel, lock));
         cx.notify();
@@ -654,7 +657,7 @@ impl QuillApp {
             return;
         }
         let plan = self.session().and_then(|session| {
-            let chat_id = session.open_chat?;
+            let chat_id = session.open_chat_id()?;
             let chat = session.chats.get(&chat_id.0)?;
             chat.can_post().then_some(chat_id)
         });

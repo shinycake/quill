@@ -549,14 +549,14 @@ fn update_chat_photo_swaps_and_clears() {
 fn topic_selection_state() {
     let (mut session, _sink) = session();
     session.open_chat(ChatId(16));
-    assert_eq!(session.open_topic, None);
+    assert_eq!(session.open_forum_topic(), None);
     session.select_topic(ChatId(16), 2);
-    assert_eq!(session.open_topic, Some(2));
+    assert_eq!(session.open_forum_topic(), Some(2));
     session.deselect_topic();
-    assert_eq!(session.open_topic, None);
+    assert_eq!(session.open_forum_topic(), None);
     session.select_topic(ChatId(16), 2);
     session.open_chat(ChatId(17));
-    assert_eq!(session.open_topic, None);
+    assert_eq!(session.open_forum_topic(), None);
 }
 
 #[test]

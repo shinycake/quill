@@ -275,7 +275,7 @@ impl QuillApp {
         let (scope, history) = self.saved_history()?;
         let source = RowsSource {
             list: "saved-history",
-            chat: self.session().and_then(|s| s.open_chat),
+            chat: self.session().and_then(|s| s.open_chat_id()),
             scope,
             messages: Some(&history.messages),
             extra: 0,

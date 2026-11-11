@@ -19,7 +19,7 @@ fn update(chat: i64) -> String {
 #[test]
 fn incoming_click_queues_an_effect_in_the_open_chat() {
     let (mut session, _sink) = session();
-    session.open_chat = Some(ChatId(5));
+    session.open = crate::state::OpenView::of(Some(ChatId(5)));
     apply(&mut session, &update(5));
     let taken = session.stickers.interactions.take_pending();
     assert_eq!(taken.len(), 1);
@@ -31,7 +31,7 @@ fn incoming_click_queues_an_effect_in_the_open_chat() {
 #[test]
 fn a_click_in_another_chat_plays_nothing() {
     let (mut session, _sink) = session();
-    session.open_chat = Some(ChatId(6));
+    session.open = crate::state::OpenView::of(Some(ChatId(6)));
     apply(&mut session, &update(5));
     assert!(session.stickers.interactions.take_pending().is_empty());
 }
@@ -41,7 +41,7 @@ fn a_click_in_another_chat_plays_nothing() {
 #[test]
 fn a_click_in_a_chat_window_queues_its_effect() {
     let (mut session, _sink) = session();
-    session.open_chat = Some(ChatId(6));
+    session.open = crate::state::OpenView::of(Some(ChatId(6)));
     session.open_window_chat(ChatId(5));
     apply(&mut session, &update(5));
     let taken = session.stickers.interactions.take_pending();

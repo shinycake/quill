@@ -214,7 +214,7 @@ fn a_chat_the_reducer_closed_does_not_keep_its_bars(cx: &mut TestAppContext) {
     open_chat_surfaces(&app, &mut vcx);
     app.update(&mut vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.open_chat = None;
+            session.open = quill::state::OpenView::of(None);
         }
         cx.notify();
     });
