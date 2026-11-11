@@ -21,7 +21,7 @@ use quill::lang::{keys, tr, tr_with};
 use quill::moderation::{GroupFlavor, OwnerCandidate, owner_choices};
 use quill::state::{MemberListFilter, OwnerLookup, SupergroupMembersFetch, transfer_block_reason};
 use quill::telegram::envelope::{CanTransferOwnershipResult, MessageSender, ParsedChatMember};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// The member lists the Pick step draws from.
@@ -639,12 +639,9 @@ impl QuillApp {
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body)));
+                    let body = Rc::new(Cell::new(Some(body)));
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))
@@ -663,3 +660,8 @@ crate::ui::shell::register_dialogs! {
     )
     .close(|app, _, cx| app.close_ownership_dialog(cx)),
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "ownership_tests.rs"]
+mod tests;

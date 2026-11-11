@@ -222,13 +222,44 @@ fn a_giveaway_launch_in_flight_is_never_forgotten_by_a_form() {
     for seen in [
         GiveawayLaunch::Launched,
         GiveawayLaunch::Paid,
-        GiveawayLaunch::Verifying,
         GiveawayLaunch::Failed { reason: "x".into() },
     ] {
         launches.set(5, seen);
         launches.for_form(5);
         assert_eq!(launches.stage(5), &GiveawayLaunch::Idle);
     }
+}
+
+/// 10-023: closing the form during the provider's verification, and opening
+/// it again, keeps Start refused until the user ends the verification.
+#[test]
+fn a_giveaway_waiting_on_verification_survives_the_form_closing() {
+    use crate::state::{GiveawayLaunch, GiveawayLaunches};
+    let mut launches = GiveawayLaunches::default();
+    launches.set(5, GiveawayLaunch::Verifying);
+    launches.for_form(5);
+    launches.for_form(5);
+    assert!(launches.is_done_for(5) && launches.is_verifying_for(5));
+    launches.end_verification(6);
+    assert!(
+        launches.is_verifying_for(5),
+        "another chat's does not end it"
+    );
+    launches.end_verification(5);
+    assert_eq!(launches.stage(5), &GiveawayLaunch::Idle);
+}
+
+/// 10-024: editing the form dismisses a failed launch's line, and only that.
+#[test]
+fn editing_the_form_dismisses_a_failed_launch_but_not_one_in_flight() {
+    use crate::state::{GiveawayLaunch, GiveawayLaunches};
+    let mut launches = GiveawayLaunches::default();
+    launches.set(5, GiveawayLaunch::Failed { reason: "x".into() });
+    launches.dismiss_failure(5);
+    assert!(launches.failure_for(5).is_none());
+    launches.set(5, GiveawayLaunch::Launching { request: 3 });
+    launches.dismiss_failure(5);
+    assert!(launches.is_launching_for(5));
 }
 
 /// Each chat has its own launch stage: a second launch does not overwrite

@@ -26,7 +26,7 @@ use quill::composer::{
     session_allows_paid_media,
 };
 use quill::lang::{keys, tr, tr_with};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::path::Path;
 use std::rc::Rc;
 
@@ -599,16 +599,13 @@ impl QuillApp {
                         ),
                 )
                 .into_any_element();
-            let body = Rc::new(RefCell::new(Some(body)));
+            let body = Rc::new(Cell::new(Some(body)));
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(keys::Q_OPS_PAID_CONTENT)))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))

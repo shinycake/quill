@@ -128,7 +128,10 @@ pub enum GiveawayLaunch {
     Paid,
     /// The payment of a new giveaway waits on the provider's verification
     /// page (3-D Secure). The form stays done: Start must not buy a second
-    /// one while that is pending. It ends with the form.
+    /// one while that is pending, so closing and reopening the form keeps
+    /// it. It ends when the user says the verification is over
+    /// ([`GiveawayLaunches::end_verification`], "Start over" on the form) or
+    /// with the session.
     Verifying,
     /// The launch failed, with the line its form shows.
     Failed { reason: String },
@@ -187,8 +190,33 @@ impl GiveawayLaunches {
     /// What `chat_id`'s form starts from when it opens or closes. A launch
     /// still in flight is never forgotten: only its answer ends it, and the
     /// form of its chat must keep Start disabled. An answer already seen is.
+    /// A payment waiting on its verification is unresolved at the provider
+    /// too, so it is kept the same way.
     pub fn for_form(&mut self, chat_id: i64) {
-        if !self.is_launching_for(chat_id) {
+        if !matches!(
+            self.stage(chat_id),
+            GiveawayLaunch::Launching { .. } | GiveawayLaunch::Verifying
+        ) {
+            self.0.remove(&chat_id);
+        }
+    }
+
+    /// Whether `chat_id`'s payment waits on its verification page.
+    pub fn is_verifying_for(&self, chat_id: i64) -> bool {
+        matches!(self.stage(chat_id), GiveawayLaunch::Verifying)
+    }
+
+    /// The user says `chat_id`'s verification is over (finished elsewhere or
+    /// given up): the form takes a new giveaway again.
+    pub fn end_verification(&mut self, chat_id: i64) {
+        if self.is_verifying_for(chat_id) {
+            self.0.remove(&chat_id);
+        }
+    }
+
+    /// The failure of `chat_id`'s launch was dismissed (the form changed).
+    pub fn dismiss_failure(&mut self, chat_id: i64) {
+        if matches!(self.stage(chat_id), GiveawayLaunch::Failed { .. }) {
             self.0.remove(&chat_id);
         }
     }
