@@ -63,6 +63,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             _ => return Err(ConnectSendError::InvalidRequest),
         };
+        // A second click while the accept is out sends nothing more.
+        if let Some(accepted) = self.session.calls.progress.accept_request(call_id) {
+            return Ok(accepted);
+        }
         let extra = self
             .session
             .request(CallsPurpose::AcceptCall { call_id }.into(), None);
@@ -74,7 +78,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.calls.progress.answer(call_id);
+        self.session.calls.progress.answer(call_id, extra);
         if let Some(engine) = self.call_engine.as_deref_mut() {
             // TDLib remains the call-state source of truth; this only marks
             // the already-tracked engine-side call accepted.
@@ -284,7 +288,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.start_engine_for_tracked_call();
             return Err(err);
         }
-        self.session.calls.progress.answer(call_id);
+        self.session.calls.progress.answer(call_id, extra);
         if let Some(engine) = self.call_engine.as_deref_mut() {
             let _ = engine.accept_call(call_id);
         }

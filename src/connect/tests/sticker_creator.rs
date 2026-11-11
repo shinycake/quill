@@ -418,3 +418,54 @@ fn a_refresh_answered_during_a_move_asks_again() {
     assert!(driver.sync_sticker_set_view().unwrap().is_some());
     drop(dir);
 }
+
+/// r2-14, 13-027: an installed-sets request sent before the edit may hold the
+/// old sets; the refetch drops it and sends a new one instead of trusting it.
+#[test]
+fn the_refetch_after_an_edit_replaces_a_list_request_asked_before_it() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    open_owned_set(&mut driver, &seq, &sink, true);
+    let before = driver.refresh_installed_sticker_sets().unwrap().unwrap();
+    let rename = driver.rename_sticker_set(77, "Cats").unwrap();
+    feed(&mut driver, &seq, &sink, ok(rename));
+    driver.sync_sticker_set_view().unwrap();
+    assert!(
+        driver.session.requests.get(before).is_none(),
+        "the request asked before the edit is dropped"
+    );
+    let asked = recorder
+        .snapshot()
+        .iter()
+        .filter(|json| json.contains("\"@type\":\"getInstalledStickerSets\""))
+        .count();
+    assert_eq!(asked, 3, "the early one, then regular and custom emoji");
+    drop(dir);
+}
+
+/// r2-14, 13-029: a refused refresh ends the ask (with a note) instead of
+/// being rebuilt and refused again on every poll.
+#[test]
+fn a_refused_set_refresh_is_not_asked_again_from_every_poll() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    open_owned_set(&mut driver, &seq, &sink, true);
+    let rename = driver.rename_sticker_set(77, "Cats").unwrap();
+    feed(&mut driver, &seq, &sink, ok(rename));
+    assert!(edits(&driver).refresh_needed());
+    // The installed lists are not what is refused here.
+    driver.session.stickers.creator_refetch_sets = false;
+    recorder.refuse_sends(true);
+    assert!(driver.sync_sticker_set_view().is_err());
+    assert!(!edits(&driver).refresh_needed(), "the ask is over");
+    assert!(!driver.session.stickers.creator_notes.is_empty());
+    recorder.refuse_sends(false);
+    assert!(driver.sync_sticker_set_view().unwrap().is_none());
+    drop(dir);
+}

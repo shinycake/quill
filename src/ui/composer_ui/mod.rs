@@ -72,7 +72,7 @@ pub(super) fn apply_ready_sticker_playback(
 ) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let root = super::demo::demo_media_allowlist();
-    session.stickers.stickers.stickers.clear();
+    session.stickers.stickers.selection.stickers.clear();
     for (id, name, format) in [
         (44, "demo-sticker.tgs", "stickerFormatTgs"),
         (45, "demo-sticker.webm", "stickerFormatWebm"),
@@ -87,6 +87,7 @@ pub(super) fn apply_ready_sticker_playback(
         session
             .stickers
             .stickers
+            .selection
             .stickers
             .push(quill::telegram::envelope::StickerItem {
                 custom_emoji_id: None,

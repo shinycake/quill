@@ -60,8 +60,8 @@ fn s8_sticker_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.stickers.found_sets.len(), 1);
-    assert_eq!(with_purpose.stickers.stickers.found_sets[0].id, 78);
+    assert_eq!(with_purpose.stickers.stickers.search.sets.len(), 1);
+    assert_eq!(with_purpose.stickers.stickers.search.sets[0].id, 78);
     assert!(with_purpose.stickers.stickers.sets.is_empty());
 
     // A removeFavoriteSticker `ok` clears the favorites cache.
@@ -329,10 +329,18 @@ fn attached_sticker_sets_fail_the_box_and_drop_an_earlier_answer() {
     let seq = AtomicU64::new(0);
     let purpose = RequestPurpose::Stickers(StickersPurpose::GetAttachedStickerSets { file_id: 1 });
     let ask = |session: &mut Session| {
-        session.stickers.sticker_set_view = Some(StickerSetView::loading(0));
         let extra = session.request(purpose, None);
-        session.stickers.stickers.attached_request = Some(extra);
+        let mut view = StickerSetView::loading(0);
+        view.stage = StickerSetViewStage::LookingUp(extra);
+        session.stickers.sticker_set_view = Some(view);
         extra
+    };
+    let stage = |session: &Session| {
+        session
+            .stickers
+            .sticker_set_view
+            .as_ref()
+            .map(|v| v.stage.clone())
     };
     let failed = ask(&mut session);
     apply_json(
@@ -344,14 +352,7 @@ fn attached_sticker_sets_fail_the_box_and_drop_an_earlier_answer() {
             failed.0
         ),
     );
-    assert_eq!(
-        session
-            .stickers
-            .sticker_set_view
-            .as_ref()
-            .map(|v| v.stage.clone()),
-        Some(StickerSetViewStage::Failed)
-    );
+    assert_eq!(stage(&session), Some(StickerSetViewStage::Failed));
 
     let earlier = ask(&mut session);
     let later = ask(&mut session);
@@ -363,11 +364,16 @@ fn attached_sticker_sets_fail_the_box_and_drop_an_earlier_answer() {
     };
     apply_json(&mut session, &seq, &sink, &sets(earlier));
     assert_eq!(
-        session.stickers.stickers.attached_answer, None,
+        stage(&session),
+        Some(StickerSetViewStage::LookingUp(later)),
         "an earlier ask's answer"
     );
     apply_json(&mut session, &seq, &sink, &sets(later));
-    assert_eq!(session.stickers.stickers.attached_answer, Some(None));
+    assert_eq!(
+        stage(&session),
+        Some(StickerSetViewStage::Failed),
+        "no sets: the box says so"
+    );
 }
 
 /// A box already showing its set keeps it when a refetch fails (one sent
@@ -423,12 +429,12 @@ fn an_update_during_the_request_survives_its_answer_and_asks_again() {
     gifs.saved_asked();
     // `updateSavedAnimations` while the request is out: the answer may
     // predate the change.
-    gifs.stale = true;
+    gifs.saved_outdated();
     gifs.saved_answered(vec![saved_gif(1)]);
-    assert!(gifs.loaded() && gifs.stale, "the list is asked for again");
+    assert!(gifs.saved_is_outdated(), "the list is asked for again");
     assert_eq!(gifs.animations.len(), 1, "the list does not blank");
     // A failure keeps the list and counts as loaded until the next opening.
-    gifs.stale = false;
+    gifs.saved_asked();
     gifs.saved_failed();
     assert!(gifs.failed() && gifs.loaded());
     assert_eq!(gifs.animations.len(), 1);

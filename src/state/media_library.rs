@@ -161,6 +161,12 @@ pub enum MessageReactionsState {
         message_id: MessageId,
     },
     Ready(MessageReactionOptions),
+    /// The reactions Telegram offers changed after the answer (or while it
+    /// was asked for): the strip is hidden and asked for again.
+    Outdated {
+        chat_id: ChatId,
+        message_id: MessageId,
+    },
     /// The request failed or the answer held no reaction: no strip.
     Unavailable {
         chat_id: ChatId,
@@ -209,11 +215,37 @@ impl MessageReactionsState {
                 chat_id,
                 message_id,
             }
+            | Self::Outdated {
+                chat_id,
+                message_id,
+            }
             | Self::Unavailable {
                 chat_id,
                 message_id,
             } => Some((*chat_id, *message_id)),
             Self::Ready(o) => Some((o.chat_id, o.message_id)),
+        }
+    }
+
+    /// What Telegram offers changed: the message the state is about (if
+    /// any) is asked for again, whatever stage it was in.
+    pub fn outdate(&mut self) {
+        if let Some((chat_id, message_id)) = self.target() {
+            *self = Self::Outdated {
+                chat_id,
+                message_id,
+            };
+        }
+    }
+
+    /// The message whose options are owed a refetch.
+    pub fn outdated_target(&self) -> Option<(ChatId, MessageId)> {
+        match self {
+            Self::Outdated {
+                chat_id,
+                message_id,
+            } => Some((*chat_id, *message_id)),
+            _ => None,
         }
     }
 

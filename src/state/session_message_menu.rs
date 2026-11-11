@@ -206,6 +206,12 @@ impl StickerSetView {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StickerSetViewStage {
     Loading,
+    /// "Attached Stickers" asked `getAttachedStickerSets` under this
+    /// request (the view's set id is 0, there is no set yet): only its
+    /// answer or error leaves the stage.
+    LookingUp(RequestId),
+    /// The lookup found this set: the driver opens it next.
+    AttachedFound(i64),
     Ready {
         title: String,
         /// The set's short name, for its `t.me` link (empty if unknown).
@@ -306,6 +312,29 @@ impl Session {
         if let Some(view) = self.stickers.sticker_set_view.as_mut()
             && view.set_id == set_id
             && matches!(view.stage, StickerSetViewStage::Loading)
+        {
+            view.stage = StickerSetViewStage::Failed;
+        }
+    }
+
+    /// The "Attached Stickers" lookup `request` answered with the first of
+    /// its sets (`None`: the media has none). Only the box still waiting
+    /// for this very request takes it.
+    pub(crate) fn accept_attached_sticker_sets(&mut self, request: RequestId, first: Option<i64>) {
+        if let Some(view) = self.stickers.sticker_set_view.as_mut()
+            && view.stage == StickerSetViewStage::LookingUp(request)
+        {
+            view.stage = match first {
+                Some(set_id) => StickerSetViewStage::AttachedFound(set_id),
+                None => StickerSetViewStage::Failed,
+            };
+        }
+    }
+
+    /// The "Attached Stickers" lookup `request` failed.
+    pub(crate) fn fail_attached_sticker_sets(&mut self, request: RequestId) {
+        if let Some(view) = self.stickers.sticker_set_view.as_mut()
+            && view.stage == StickerSetViewStage::LookingUp(request)
         {
             view.stage = StickerSetViewStage::Failed;
         }

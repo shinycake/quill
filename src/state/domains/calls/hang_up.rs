@@ -28,8 +28,8 @@ pub struct HangUp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HangUpFrom {
     Unanswered,
-    /// `CallProgress::Answered`.
-    Answered,
+    /// `CallProgress::Answered`, by this `acceptCall`.
+    Answered(RequestId),
 }
 
 /// How far the active 1:1 call got on this side, one value: ringing (or
@@ -45,7 +45,7 @@ pub enum CallProgress {
     /// `acceptCall` went out for this incoming call. Its state stays
     /// `Pending` until TDLib's `updateCall`, but it no longer rings: a
     /// close hangs it up.
-    Answered { call_id: i32 },
+    Answered { call_id: i32, accept: RequestId },
     /// The `discardCall` in flight, which owns the `HangingUp` phase.
     HangingUp(HangUp),
 }
@@ -53,7 +53,19 @@ pub enum CallProgress {
 impl CallProgress {
     pub fn answered_call(&self) -> Option<i32> {
         match self {
-            Self::Answered { call_id } => Some(*call_id),
+            Self::Answered { call_id, .. } => Some(*call_id),
+            _ => None,
+        }
+    }
+
+    /// The `acceptCall` already out for `call_id`: a second click answers
+    /// nothing new.
+    pub fn accept_request(&self, call_id: i32) -> Option<RequestId> {
+        match self {
+            Self::Answered {
+                call_id: answered,
+                accept,
+            } if *answered == call_id => Some(*accept),
             _ => None,
         }
     }
@@ -72,24 +84,25 @@ impl CallProgress {
         }
     }
 
-    /// `acceptCall` went out for `call_id`.
-    pub fn answer(&mut self, call_id: i32) {
+    /// `acceptCall` went out for `call_id` as `accept`.
+    pub fn answer(&mut self, call_id: i32, accept: RequestId) {
         if !matches!(self, Self::HangingUp(_)) {
-            *self = Self::Answered { call_id };
+            *self = Self::Answered { call_id, accept };
         }
     }
 
-    /// A failed `acceptCall`: the call keeps ringing.
-    pub fn answer_failed(&mut self, call_id: i32) {
-        if self.answered_call() == Some(call_id) {
+    /// A failed `acceptCall`: the call keeps ringing. Only the accept the
+    /// progress holds clears it, so a late error of an earlier one does not.
+    pub fn answer_failed(&mut self, call_id: i32, accept: RequestId) {
+        if self.accept_request(call_id) == Some(accept) {
             *self = Self::Idle;
         }
     }
 
     /// The `discardCall` for `hang_up.call_id` went out.
     pub fn hang_up_sent(&mut self, mut hang_up: HangUp) {
-        hang_up.from = if self.answered_call() == Some(hang_up.call_id) {
-            HangUpFrom::Answered
+        hang_up.from = if let Some(accept) = self.accept_request(hang_up.call_id) {
+            HangUpFrom::Answered(accept)
         } else {
             HangUpFrom::Unanswered
         };
@@ -107,8 +120,9 @@ impl CallProgress {
         }
         let hang_up = hang_up.clone();
         *self = match hang_up.from {
-            HangUpFrom::Answered => Self::Answered {
+            HangUpFrom::Answered(accept) => Self::Answered {
                 call_id: hang_up.call_id,
+                accept,
             },
             HangUpFrom::Unanswered => Self::Idle,
         };
@@ -119,7 +133,7 @@ impl CallProgress {
     pub fn call_ended(&mut self, call_id: i32) {
         let ours = match self {
             Self::Idle => false,
-            Self::Answered { call_id: id } => *id == call_id,
+            Self::Answered { call_id: id, .. } => *id == call_id,
             Self::HangingUp(hang_up) => hang_up.call_id == call_id,
         };
         if ours {

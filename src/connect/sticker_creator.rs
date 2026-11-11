@@ -197,14 +197,20 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let extra = self.session.request(purpose, None);
-        if let Err(err) = self.sender.send_json(&get_sticker_set(extra, set_id)) {
+        let sent = self.sender.send_json(&get_sticker_set(extra, set_id));
+        if sent.is_err() {
             self.session.requests.take(extra);
-            return Err(err);
+            // The refresh is over either way: a refused one is not asked
+            // again from every poll; the box keeps what it shows and says so.
+            self.session.stickers.creator_notes.push_back(
+                crate::lang::tr(crate::lang::keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN)
+                    .to_string(),
+            );
         }
         if let Some(view) = self.session.stickers.sticker_set_view.as_mut() {
             view.edits.refreshed();
         }
-        Ok(Some(extra))
+        sent.map(|()| Some(extra))
     }
 
     /// An edit renamed, changed or deleted a set: fetch both installed
@@ -215,31 +221,31 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         self.session.take_sticker_set_refetch();
-        if !self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetInstalledStickerSets)
-        {
-            self.sticker_request(
-                RequestPurpose::GetInstalledStickerSets,
-                crate::telegram::requests::get_installed_sticker_sets,
-            )
-            .inspect_err(|_| {
-                // Try again on the next poll.
-                self.session.stickers.creator_refetch_sets = true;
-            })?;
-        }
-        if !self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetInstalledEmojiSets)
-        {
-            self.emoji_set_request(
-                RequestPurpose::GetInstalledEmojiSets,
-                crate::telegram::requests_emoji::get_installed_emoji_sets,
-            )
-            .inspect_err(|_| self.session.stickers.creator_refetch_sets = true)?;
-        }
+        // A list request already out was asked before the edit and may hold
+        // the old sets: it is dropped, and the one sent now answers.
+        drop(
+            self.session
+                .requests
+                .take_purpose(RequestPurpose::GetInstalledStickerSets),
+        );
+        self.sticker_request(
+            RequestPurpose::GetInstalledStickerSets,
+            crate::telegram::requests::get_installed_sticker_sets,
+        )
+        .inspect_err(|_| {
+            // Try again on the next poll.
+            self.session.stickers.creator_refetch_sets = true;
+        })?;
+        drop(
+            self.session
+                .requests
+                .take_purpose(RequestPurpose::GetInstalledEmojiSets),
+        );
+        self.emoji_set_request(
+            RequestPurpose::GetInstalledEmojiSets,
+            crate::telegram::requests_emoji::get_installed_emoji_sets,
+        )
+        .inspect_err(|_| self.session.stickers.creator_refetch_sets = true)?;
         Ok(())
     }
 }

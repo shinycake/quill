@@ -81,9 +81,9 @@ fn seed(app: &mut QuillApp, premium: bool) {
         category("Premium", EmojiCategorySource::Premium),
         category("Smile", EmojiCategorySource::Search(vec!["😀".into()])),
     ]);
-    session.stickers.stickers.found_stickers = vec![sticker(1, true), sticker(2, false)];
+    session.stickers.stickers.search.stickers = vec![sticker(1, true), sticker(2, false)];
     // What the Premium category asked for (a demo has no client to ask).
-    session.stickers.stickers.searched = StickerSearch::Category(EmojiCategorySource::Premium);
+    session.stickers.stickers.search.query = StickerSearch::Category(EmojiCategorySource::Premium);
 }
 
 fn open_stickers(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
@@ -218,7 +218,7 @@ fn a_category_does_not_list_another_windows_search(cx: &mut TestAppContext) {
     app.update(vcx, |app, _| {
         seed(app, true);
         let session = app.demo_session.as_mut().expect("demo session");
-        session.stickers.stickers.searched = StickerSearch::Typed("cat".into());
+        session.stickers.stickers.search.query = StickerSearch::Typed("cat".into());
     });
     open_stickers(&app, vcx);
     app.update(vcx, |app, cx| {
@@ -232,7 +232,8 @@ fn a_category_does_not_list_another_windows_search(cx: &mut TestAppContext) {
     // The category's own answer lists.
     app.update(vcx, |app, cx| {
         let session = app.demo_session.as_mut().expect("demo session");
-        session.stickers.stickers.searched = StickerSearch::Category(EmojiCategorySource::Premium);
+        session.stickers.stickers.search.query =
+            StickerSearch::Category(EmojiCategorySource::Premium);
         session.revision += 1;
         cx.notify();
     });
@@ -264,7 +265,7 @@ fn an_animated_sticker_with_no_thumbnail_shows_its_first_frame(cx: &mut TestAppC
             ..sticker(file, false)
         };
         let session = app.demo_session.as_mut().expect("demo session");
-        session.stickers.stickers.found_stickers = vec![
+        session.stickers.stickers.search.stickers = vec![
             animated(bare),
             StickerItem {
                 thumb_file_id: Some(FileId(41)),

@@ -294,6 +294,20 @@ pub(crate) enum DeviceListing {
     Listed,
 }
 
+/// The account folder's owner for the signed-in user: checked once, and
+/// saved until the owner file is on disk.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum OwnerClaim {
+    /// Not checked yet.
+    #[default]
+    Unclaimed,
+    /// Checked, and the owner file names this user.
+    Claimed(i64),
+    /// Checked (what the folder held is settled), but the owner file could
+    /// not be written: the next ingest writes it again.
+    Unsaved(i64),
+}
+
 pub struct ConnectDriver<S: JsonSender> {
     pub session: Session,
     pub(crate) sender: S,
@@ -362,9 +376,9 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) call_sound_watch: Option<(i32, crate::calls::stream_audio::watch::PlaybackWatch)>,
     pub(crate) credentials: TelegramCredentials,
     pub(crate) paths: AccountPaths,
-    /// The Telegram user this client was last checked against the account
-    /// folder's owner (`account_data::claim`).
-    pub(crate) claimed_owner: Option<i64>,
+    /// Where this client stands with the account folder's owner file
+    /// (`account_data::claim`).
+    pub(crate) owner_claim: OwnerClaim,
     pub(crate) database_key: DatabaseKey,
     /// Last `chatActionTyping` we sent (Unigram `_lastTypingTime`).
     pub(crate) outgoing_typing: Option<OutgoingTyping>,

@@ -95,7 +95,14 @@ impl QuillApp {
             &self.demo_ui.sink,
             &self.demo_ui.seq,
         );
-        let Some(template) = session.stickers.stickers.stickers.first().cloned() else {
+        let Some(template) = session
+            .stickers
+            .stickers
+            .selection
+            .stickers
+            .first()
+            .cloned()
+        else {
             return;
         };
         let sink: Arc<dyn quill::diagnostics::DiagnosticSink> = self.demo_ui.sink.clone();

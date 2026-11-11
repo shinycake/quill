@@ -228,6 +228,9 @@ fn add_offer_carries_the_complete_terms() {
     assert_eq!(info["price"]["@type"], "suggestedPostPriceStar");
     assert_eq!(info["price"]["star_count"], 50);
     assert_eq!(info["send_date"], 1_900_000_000);
+    // The first offer is answered before the next one goes out.
+    let extra = sent["@extra"].as_str().unwrap_or_default().to_string();
+    f.ingest(&format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#));
     f.driver
         .add_offer(
             CHAT,
@@ -468,4 +471,28 @@ fn an_offer_update_keeps_the_approve_busy_until_it_answers() {
     f.driver
         .approve_suggested_post(CHAT, MessageId(5 << 20), 0)
         .unwrap();
+}
+
+/// A second submit of the offer box before the first answer sends nothing;
+/// the answer frees the message for the next offer.
+#[test]
+fn a_second_offer_waits_for_the_first_answer() {
+    let mut f = Fixture::new();
+    f.open_direct_messages(false);
+    let message = MessageId(3 << 20);
+    f.driver.add_offer(CHAT, message, stars(900, 0)).unwrap();
+    assert!(f.driver.session.suggested_offer_busy(CHAT.0, message.0));
+    assert!(f.driver.add_offer(CHAT, message, stars(950, 0)).is_err());
+    let sent = |f: &Fixture| f.sent("addOffer").len();
+    assert_eq!(sent(&f), 1);
+    let extra = f.last("addOffer")["@extra"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    f.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"BAD"}}"#
+    ));
+    assert!(!f.driver.session.suggested_offer_busy(CHAT.0, message.0));
+    f.driver.add_offer(CHAT, message, stars(950, 0)).unwrap();
+    assert_eq!(sent(&f), 2);
 }

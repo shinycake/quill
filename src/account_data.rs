@@ -226,6 +226,15 @@ pub struct Claimed {
     pub owner_error: Option<std::io::Error>,
 }
 
+/// Write `user_id` as the folder's owner. [`claim`] has already settled what
+/// the folder held; a save that failed there is tried again with this alone,
+/// so a retry never drops what the new owner has made since.
+pub fn save_owner(app_root: &Path, key: &AccountKey, user_id: i64) -> std::io::Result<()> {
+    let paths = AccountPaths::for_root(app_root, key);
+    std::fs::create_dir_all(&paths.root)?;
+    crate::settings::write_json_atomic(&paths.root.join(OWNER_FILE), &Owner { user_id })
+}
+
 /// A client of `key` learned it is signed in as `user_id`. When the folder
 /// was last signed in as someone else, what they left is dropped first. An
 /// owner that cannot be read (no file, a corrupt one) with leftovers in the
@@ -250,9 +259,7 @@ pub fn claim(app_root: &Path, key: &AccountKey, user_id: i64, origin: SignInOrig
     if someone_else {
         forget(app_root, key);
     }
-    let owner_error = std::fs::create_dir_all(&paths.root)
-        .and_then(|()| crate::settings::write_json_atomic(&file, &Owner { user_id }))
-        .err();
+    let owner_error = save_owner(app_root, key, user_id).err();
     Claimed {
         dropped: someone_else,
         owner_error,

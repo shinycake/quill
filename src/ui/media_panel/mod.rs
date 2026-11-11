@@ -376,7 +376,7 @@ impl QuillApp {
             StickerSource::Set(id) => session.media.media_library.get(&id)?.get(ix),
             StickerSource::Recent => session.stickers.stickers.recent.get(ix),
             StickerSource::Favorites => session.stickers.stickers.favorites.get(ix),
-            StickerSource::Found => session.stickers.stickers.found_stickers.get(ix),
+            StickerSource::Found => session.stickers.stickers.search.stickers.get(ix),
             StickerSource::CustomEmoji => session.stickers.emoji.custom_emoji_stickers.get(ix),
         }
     }
@@ -488,7 +488,7 @@ impl QuillApp {
         let stickers = (tab == PanelTab::Stickers)
             .then(|| self.wanted_sticker_search(query))
             .flatten()
-            .filter(|wanted| session.stickers.stickers.searched != *wanted);
+            .filter(|wanted| session.stickers.stickers.search.query != *wanted);
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -619,9 +619,9 @@ impl QuillApp {
             // The session's results only while they are for this query or
             // category (another window may have searched since).
             let found = if self.wanted_sticker_search(query).as_ref()
-                == Some(&session.stickers.stickers.searched)
+                == Some(&session.stickers.stickers.search.query)
             {
-                session.stickers.stickers.found_stickers.len()
+                session.stickers.stickers.search.stickers.len()
             } else {
                 0
             };

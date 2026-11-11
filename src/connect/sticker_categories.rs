@@ -1,7 +1,7 @@
 //! Connect driver: the sticker panel's category strip (tdesktop
 //! `SearchWithGroups` over `Data::EmojiStatuses::stickerGroupsValue`).
 use super::*;
-use crate::state::{RequestPurpose, StickerSearch};
+use crate::state::RequestPurpose;
 use crate::telegram::EmojiCategorySource;
 use crate::telegram::requests::{get_premium_stickers, get_sticker_categories, search_stickers};
 
@@ -52,11 +52,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .requests
                 .take_purpose(RequestPurpose::SearchStickers),
         );
-        let stickers = &mut self.session.stickers.stickers;
-        stickers.search_offset = 0;
-        stickers.search_has_more = false;
-        stickers.searched = StickerSearch::Category(source.clone());
-        stickers.found_stickers.clear();
+        self.session.stickers.stickers.search =
+            crate::state::StickerSearchResults::category(source.clone());
         self.sticker_request(RequestPurpose::SearchStickers, |id| {
             if matches!(source, EmojiCategorySource::Premium) {
                 get_premium_stickers(id, CATEGORY_LIMIT)

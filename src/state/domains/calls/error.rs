@@ -47,7 +47,9 @@ impl Session {
             Some(RequestPurpose::Calls(CallsPurpose::AcceptCall { call_id })) => {
                 // The call was never answered and keeps ringing, so a
                 // close must leave it to ring.
-                self.calls.progress.answer_failed(call_id);
+                if let Some(pending) = pending {
+                    self.calls.progress.answer_failed(call_id, pending.id);
+                }
                 // An answer that fails after its call went must not land on
                 // the next one (tdesktop drops the request with its call).
                 if self.calls.active_call.as_ref().map(|call| call.id) == Some(call_id) {

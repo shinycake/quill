@@ -310,26 +310,36 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(());
         }
+        // An entry leaves its queue only once its send went out: a refused
+        // send keeps it and the ones after it for the next ingest.
         let created = std::mem::take(&mut self.session.calls.created_call_discards);
-        for (call_id, is_video) in created {
+        let mut created = created.into_iter();
+        while let Some((call_id, is_video)) = created.next() {
             let extra = self.session.request(RequestPurpose::DiscardCall, None);
             if let Err(err) = self
                 .sender
                 .send_json(&discard_call_request(extra, call_id, false, 0, is_video))
             {
                 self.session.requests.take(extra);
+                let calls = &mut self.session.calls;
+                calls.created_call_discards.push((call_id, is_video));
+                calls.created_call_discards.extend(created);
                 return Err(err);
             }
         }
         let queued: Vec<(i32, i64, bool)> =
             std::mem::take(&mut self.session.calls.busy_decline_queue);
-        for (call_id, user_id, is_video) in queued {
+        let mut queued = queued.into_iter();
+        while let Some((call_id, user_id, is_video)) = queued.next() {
             let extra = self.session.request(RequestPurpose::DiscardCall, None);
             if let Err(err) = self
                 .sender
                 .send_json(&discard_call_request(extra, call_id, false, 0, is_video))
             {
                 self.session.requests.take(extra);
+                let calls = &mut self.session.calls;
+                calls.busy_decline_queue.push((call_id, user_id, is_video));
+                calls.busy_decline_queue.extend(queued);
                 return Err(err);
             }
             // ponytail: cap the banner list — it is drained by the UI.

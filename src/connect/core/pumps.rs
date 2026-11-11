@@ -49,24 +49,40 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(me) = self.session.my_user_id else {
             return;
         };
-        if self.claimed_owner == Some(me) {
-            return;
-        }
-        self.claimed_owner = Some(me);
+        let retry = match self.owner_claim {
+            OwnerClaim::Claimed(claimed) if claimed == me => return,
+            OwnerClaim::Unsaved(claimed) => claimed == me,
+            OwnerClaim::Claimed(_) | OwnerClaim::Unclaimed => false,
+        };
         // `<app root>/accounts/<key>`.
         let Some(app_root) = self.paths.root.parent().and_then(std::path::Path::parent) else {
+            self.owner_claim = OwnerClaim::Unsaved(me);
             return;
         };
-        let claimed = crate::account_data::claim(
-            app_root,
-            &self.session.account,
-            me,
-            self.session.sign_in_origin,
-        );
-        if let Some(err) = claimed.owner_error {
-            // Not silent: without the owner file the next start cannot tell
-            // whose the folder is, so it drops what is in it.
-            eprintln!("quill: could not save the account owner: {err}");
+        let owner_error = if retry {
+            // What the folder held was settled by the first try: only the
+            // owner file is left to write.
+            crate::account_data::save_owner(app_root, &self.session.account, me).err()
+        } else {
+            crate::account_data::claim(
+                app_root,
+                &self.session.account,
+                me,
+                self.session.sign_in_origin,
+            )
+            .owner_error
+        };
+        match owner_error {
+            None => self.owner_claim = OwnerClaim::Claimed(me),
+            Some(err) => {
+                // Not silent: without the owner file the next start cannot
+                // tell whose the folder is, so it drops what is in it. The
+                // next ingest writes it again; the line shows once.
+                if !retry {
+                    eprintln!("quill: could not save the account owner: {err}");
+                }
+                self.owner_claim = OwnerClaim::Unsaved(me);
+            }
         }
     }
 }

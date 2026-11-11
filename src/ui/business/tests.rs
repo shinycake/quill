@@ -560,7 +560,7 @@ fn the_start_page_takes_a_sticker_from_the_panel(cx: &mut TestAppContext) {
     };
     app.update(vcx, |app, _| {
         let panel = &mut app.demo_session.as_mut().unwrap().stickers.stickers;
-        panel.stickers.push(sticker.clone());
+        panel.selection.stickers.push(sticker.clone());
     });
     open(&app, vcx);
     // Outside the picker a click is not taken.

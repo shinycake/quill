@@ -526,3 +526,24 @@ fn a_failing_owner_write_does_not_wipe_twice() {
     std::fs::remove_dir_all(&owner).unwrap();
     forget(&root, &key);
 }
+
+/// A save that failed during the claim is written again alone: what the new
+/// owner made since stays, where a second claim would take it for leftovers.
+#[test]
+fn a_failed_owner_write_is_saved_again_without_dropping_anything() {
+    let _serial = crate::locks::lock_or_recover(&SERIAL);
+    let root = root();
+    let key = AccountKey::new("account-954").unwrap();
+    let paths = AccountPaths::for_root(&root, &key);
+    let owner = paths.root.join(OWNER_FILE);
+    let _ = std::fs::remove_file(&owner);
+    std::fs::create_dir_all(&owner).unwrap();
+    assert!(save_owner(&root, &key, 100).is_err());
+    std::fs::remove_dir_all(&owner).unwrap();
+    fill(&root, &key);
+    save_owner(&root, &key, 100).unwrap();
+    assert!(owner.exists());
+    assert_eq!(left_behind(&root, &key).len(), 10, "nothing was dropped");
+    assert!(!claim_as(&root, &key, 100).dropped);
+    forget(&root, &key);
+}

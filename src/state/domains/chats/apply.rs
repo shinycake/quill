@@ -276,7 +276,7 @@ impl Session {
                     .ready()
                     .is_some_and(|options| options.chat_id.0 == chat_id)
                 {
-                    self.stickers.reaction_options_stale = true;
+                    self.stickers.message_reaction_options.outdate();
                 }
             }
             // Batch 8: `updateChatActionBar` (schema 1.8.67, line 10526).

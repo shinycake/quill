@@ -22,7 +22,7 @@ impl Session {
             StickersPayload::UpdateActiveEmojiReactions { emojis } => {
                 self.stickers.active_reactions = emojis.clone();
                 self.stickers.active_emoji_reactions = emojis;
-                self.stickers.reaction_options_stale = true;
+                self.stickers.message_reaction_options.outdate();
             }
             StickersPayload::StickerSets { sets, .. } => {
                 for set in &sets {
@@ -36,12 +36,11 @@ impl Session {
                 ) {
                     // B11: "Attached Stickers" of a photo or video, for the
                     // request the box waits for.
-                    if pending.map(|p| p.id).is_some()
-                        && pending.map(|p| p.id) == self.stickers.stickers.attached_request
-                    {
-                        self.stickers.stickers.attached_request = None;
-                        self.stickers.stickers.attached_answer =
-                            Some(sets.first().map(|set| set.id));
+                    if let Some(pending) = pending {
+                        self.accept_attached_sticker_sets(
+                            pending.id,
+                            sets.first().map(|set| set.id),
+                        );
                     }
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetInstalledStickerSets)
@@ -96,15 +95,15 @@ impl Session {
             // refetches) or store the pushed value.
             StickersPayload::UpdateRecentStickers { is_attached } => {
                 if !is_attached {
-                    self.stickers.stickers.recent_stale = true;
+                    self.stickers.stickers.lists.recent.outdate();
                 }
             }
             StickersPayload::UpdateFavoriteStickers => {
-                self.stickers.stickers.favorites_stale = true
+                self.stickers.stickers.lists.favorites.outdate();
             }
             StickersPayload::UpdateTrendingStickerSets { is_regular } => {
                 if is_regular {
-                    self.stickers.stickers.trending_stale = true;
+                    self.stickers.stickers.lists.trending.outdate();
                 } else {
                     // The shown tab asks again; any other is asked when
                     // it is selected.
@@ -298,7 +297,7 @@ impl Session {
                 }
             }
             StickersPayload::UpdateSavedAnimations { .. } => {
-                self.stickers.gifs.stale = true;
+                self.stickers.gifs.saved_outdated();
             }
             // Slice S9: `updateAnimationSearchParameters` (schema 1.8.67,
             // line 11064) — server-pushed; store the provider name and the

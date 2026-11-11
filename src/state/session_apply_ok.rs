@@ -320,7 +320,7 @@ impl Session {
             self.finish_set_change(set_id, SetChange::of(installed, archived), true);
             for sets in [
                 &mut self.stickers.stickers.trending,
-                &mut self.stickers.stickers.found_sets,
+                &mut self.stickers.stickers.search.sets,
             ] {
                 for set in sets.iter_mut().filter(|set| set.id == set_id) {
                     set.is_installed = installed;
@@ -332,9 +332,7 @@ impl Session {
             self.stickers.stickers.archived_has_more = false;
             self.stickers.stickers.archived_next_offset = 0;
             if self.stickers.stickers.tab == StickerTab::Archived {
-                self.stickers.stickers.selected_set_id = None;
-                self.stickers.stickers.set = StickerSetStage::Idle;
-                self.stickers.stickers.stickers.clear();
+                self.stickers.stickers.selection = StickerSelection::default();
             }
         }
         self.finish_mask_mutation(pending.map(|p| p.purpose));
