@@ -9008,3 +9008,37 @@ Touched outside the bundle's files, as small as possible: `src/connect/{invite_a
 `src/ui/folders_state.rs`, `src/ui/shell.rs` (the ask expiry), `src/ui/deep_links.rs`, `src/ui/search_ui/mod.rs`
 and the readers of the chat list view (`folder_tabs`, `folder_extras`, `chat_list_keys`, `shortcut_pack`, `pull_next_ui`,
 `stories_pull_ui`, `folders/save_folder_editor`, `empty_state_demo`).
+
+### Sweep fixes (r2-42)
+
+| id | what | fix |
+| --- | --- | --- |
+| 14-021 | widget canvas read/put_image added to an unchecked position | saturating i64 positions, checked `w*h*4`, and `put_image` skips a size its pixel buffer cannot hold |
+| 14-022 | `wait_for_cancelable_child` left a child unreaped on a `try_wait` error or a poisoned slot | on the integration branch's `Extraction` stage: every lock site (`cancel`, `is_cancelled`, publish, poll) recovers a poisoned lock through one `stage()` helper, and a `try_wait` error kills and reaps the child before returning |
+| 14-072 | `BgraPool` `released` bool beside `buffers` | one enum, `Recycling(buffers)` or `Released`; released holds none by construction |
+| 14-073 | NV12 rotation-0 arm split by zero-byte chunks for width 0 | an empty plane returns before the split |
+| 14-029 | `State::tap` plus `AudioShared::detached` kept in step; `AudioTap::sounding` mirrored `AudioShared::starved` | the sound's life is the queue value (`Open` or `Detached`); the output's state is `AudioShared::starved` alone, which `AudioTap::sounding()` reads (the tap field is gone) |
+| 14-051 | an unreadable trust file read as empty and written over | `Trust::Read` or `Trust::Unreadable`; unreadable is never saved over, and the next change reads it again and merges |
+| 14-035 | a PIN sent while none was asked answered the next ask | `ask_pin` drops stale PINs before it sends `NeedPin` |
+| 14-065 | unchecked `Instant + timeout` | `checked_add` with a fallback (a year, in `hid_macos` and `hybrid/flow` alike) |
+| 14-038 | `Initiator::ephemeral` as a "first message sent" flag | typestate: `initial_message` consumes the `Initiator` and returns `AwaitingResponse`, the only holder of `process_response` |
+| 14-023 | passkey flow tests waited on the wall clock | `Ceremony::wait` blocks on the worker's channel, the flow reads `Environment::now` (a manual clock in tests), the probe test uses a zero probe |
+| file-complete | `video_decode/tests.rs`, `ceremony_tests.rs`, `fake.rs` slept and read the wall clock | `wait_until` and `pull_sound` count turns (`yield_now`), no clock; ceremony tests use `Ceremony::wait`, the key's `held` flag, and a `ManualPace` behind `Link::pace` (the device wait reads `Pace`, `SystemPace` in production) |
+
+- **Tests.** `a_pin_sent_while_none_was_asked_does_not_answer_the_next_ask`,
+  `an_unreadable_file_is_never_saved_over`,
+  `load_tells_a_missing_file_from_a_corrupt_one`,
+  `a_zero_width_picture_turns_to_nothing`, the canvas edge tests, and
+  `the_code_expires_with_the_request` on the manual clock.
+
+- **Tests deleted.** `a_paused_player_decodes_only_its_queue` and
+  `an_idle_player_sleeps_long_but_wakes_when_a_picture_is_taken` only proved
+  "nothing happens" with a sleep and the wake with an elapsed time; the
+  queue bounds are `decoding_stops_at_the_queue_bounds`, and the wake on
+  `take_frame` has no deterministic observer. `the_sound_buffer_is_bounded`
+  now waits for the queue to reach its cap and bounds the decode calls at
+  that moment.
+- **Tests added.** `a_forgotten_account_stays_forgotten_when_the_file_reads_again`;
+  `no_key_until_the_timeout` runs `run_register` on a `ManualPace`
+  (exactly four looks).
+- **Fresh review.** Every touched file re-read: 0 findings left.
