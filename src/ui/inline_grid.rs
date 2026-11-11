@@ -494,8 +494,7 @@ impl QuillApp {
         if order.is_empty() {
             return;
         }
-        let Some(&target) = order.get(self.chat_ui.inline.selected().min(order.len() - 1))
-        else {
+        let Some(&target) = order.get(self.chat_ui.inline.selected().min(order.len() - 1)) else {
             return;
         };
         let Some(row) = mosaic

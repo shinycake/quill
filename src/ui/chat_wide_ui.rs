@@ -54,9 +54,9 @@ impl QuillApp {
         if !self.history.measure.get().is_measured() {
             self.history
                 .measure
-                .set(HistoryMeasure::Seeded(HistoryWidth::new(history_pane_width(
-                    pane,
-                ))));
+                .set(HistoryMeasure::Seeded(HistoryWidth::new(
+                    history_pane_width(pane),
+                )));
         }
     }
 

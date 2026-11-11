@@ -47,7 +47,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.chat_list.menu = None;
-        self.chat_list.peek = crate::ui::chat_list_state::PeekPreview::Open(ChatPreviewState { chat_id, anchor });
+        self.chat_list.peek =
+            crate::ui::chat_list_state::PeekPreview::Open(ChatPreviewState { chat_id, anchor });
         // Live fetch for unopened chats; already-loaded history renders
         // immediately. Demo/no-driver sessions skip the network.
         if let Some(live) = self.live.as_mut() {

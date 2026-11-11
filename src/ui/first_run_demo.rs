@@ -2,17 +2,16 @@
 //! experimental notice and the highlights.
 #![deny(clippy::indexing_slicing)]
 
-use super::connect_ui::ConnectUiStatus;
+use super::connect_ui::ConnectStage;
 use super::first_run_state::{CARD_IN, FirstRun};
 use super::screenshot_demo::{DemoSpec, register_demos};
 use quill::telegram::envelope::AuthorizationState;
 use std::time::Instant;
 
-fn signed_out() -> (ConnectUiStatus, String, AuthorizationState) {
+fn signed_out() -> (ConnectStage, String) {
     (
-        ConnectUiStatus::DemoWaitPhone,
+        ConnectStage::Shown(AuthorizationState::WaitPhoneNumber),
         "screenshot demo — first run (no live Telegram)".into(),
-        AuthorizationState::WaitPhoneNumber,
     )
 }
 

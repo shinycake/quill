@@ -18,8 +18,7 @@ impl QuillApp {
     pub(in crate::ui) fn composer_send_options(&self) -> SendOptions {
         let send = self.pending_send();
         SendOptions {
-            disable_notification: self.composer_effective_silent()
-                || self.composer_ui.once.silent,
+            disable_notification: self.composer_effective_silent() || self.composer_ui.once.silent,
             scheduling: send.scheduling,
             schedule_repeat_period: match send.scheduling {
                 ComposerScheduling::SendAtDate(_) => send.schedule_repeat,

@@ -658,20 +658,17 @@ impl QuillApp {
                 })
                 .collect();
             let press = self.chat_list.pin.take_press(drag.chat_id.0).unwrap_or(y);
-            self.chat_list.pin = quill::pin_reorder::PinReorder::begin(
-                ids,
-                heights,
-                drag.chat_id.0,
-                press,
-                now,
-            )
-            .map_or(crate::ui::chat_list_state::PinStage::Idle, |mut reorder| {
-                reorder.drag_to(y, now);
-                crate::ui::chat_list_state::PinStage::Dragging(crate::ui::chat_list_state::PinDrag {
-                    archived: drag.archived,
-                    reorder,
-                })
-            });
+            self.chat_list.pin =
+                quill::pin_reorder::PinReorder::begin(ids, heights, drag.chat_id.0, press, now)
+                    .map_or(crate::ui::chat_list_state::PinStage::Idle, |mut reorder| {
+                        reorder.drag_to(y, now);
+                        crate::ui::chat_list_state::PinStage::Dragging(
+                            crate::ui::chat_list_state::PinDrag {
+                                archived: drag.archived,
+                                reorder,
+                            },
+                        )
+                    });
             // A reorder is not a long press: no peek preview over the drag.
             self.chat_list.peek = crate::ui::chat_list_state::PeekPreview::Idle;
         }

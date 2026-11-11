@@ -7,7 +7,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::connect_ui::ConnectUiStatus;
+use super::connect_ui::ConnectStage;
 use super::demo::seed_ready_chats_session;
 use gpui_kit::{Context, Window};
 use quill::composer::ComposerAttachment;
@@ -23,7 +23,7 @@ pub(crate) type DemoSetup = fn(&mut QuillApp, &mut Window, &mut Context<QuillApp
 /// Composer attachments the demo starts with.
 pub(crate) type DemoAttachments = fn() -> Vec<ComposerAttachment>;
 /// Signed-out demos: connect status, status note and auth state.
-pub(crate) type DemoSignedOut = fn() -> (ConnectUiStatus, String, AuthorizationState);
+pub(crate) type DemoSignedOut = fn() -> (ConnectStage, String);
 
 /// How a demo app starts.
 pub(crate) enum DemoStart {
@@ -188,25 +188,17 @@ impl ScreenshotDemo {
         self.0.auth_inputs
     }
 
-    /// Session seed, connect status, status note and auth state.
-    pub(super) fn start(
-        self,
-    ) -> (
-        Option<DemoSeed>,
-        ConnectUiStatus,
-        String,
-        AuthorizationState,
-    ) {
+    /// Session seed, connect stage and status note.
+    pub(super) fn start(self) -> (Option<DemoSeed>, ConnectStage, String) {
         match self.0.start {
             DemoStart::Ready { seed, note } => (
                 Some(seed),
-                ConnectUiStatus::DemoReadyChats,
+                ConnectStage::Shown(AuthorizationState::Ready),
                 note.into(),
-                AuthorizationState::Ready,
             ),
             DemoStart::SignedOut(start) => {
-                let (status, note, auth) = start();
-                (None, status, note, auth)
+                let (stage, note) = start();
+                (None, stage, note)
             }
         }
     }

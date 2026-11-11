@@ -1,7 +1,6 @@
 //! Connection status, the status line and presence sync.
 #![deny(clippy::indexing_slicing)]
 
-use super::connect_ui::ConnectUiStatus;
 use super::status_note::{NoteKind, StatusNote};
 use super::toast_queue::ToastQueue;
 use std::time::Instant;
@@ -10,7 +9,6 @@ use std::time::Instant;
 /// status note and the toasts, presence sync. A field of `OnScreen`; the
 /// connection count itself is the app's ([`ConnectGeneration`]).
 pub(crate) struct ConnectionUi {
-    pub(super) status: ConnectUiStatus,
     /// The current note, the toasts on screen and waiting, and the visible
     /// one's timer. Every note write names its kind through `set_note`, so
     /// a toast never depends on the words.
@@ -22,9 +20,8 @@ pub(crate) struct ConnectionUi {
 }
 
 impl ConnectionUi {
-    pub(super) fn new(connect_status: ConnectUiStatus, status_note: String) -> Self {
+    pub(super) fn new(status_note: String) -> Self {
         Self {
-            status: connect_status,
             toasts: ToastQueue::with_note(StatusNote::new(NoteKind::Silent, status_note)),
             status_traced: String::new(),
             presence: Default::default(),
@@ -165,7 +162,7 @@ mod tests {
     }
 
     fn connection() -> ConnectionUi {
-        ConnectionUi::new(super::ConnectUiStatus::Live, String::new())
+        ConnectionUi::new(String::new())
     }
 
     #[test]

@@ -424,7 +424,8 @@ impl QuillApp {
         if !self.chat_ui.inline.is_open() || count == 0 {
             return false;
         }
-        let stepped = quill::inline_grid::step_selection(self.chat_ui.inline.selected(), delta, count);
+        let stepped =
+            quill::inline_grid::step_selection(self.chat_ui.inline.selected(), delta, count);
         self.chat_ui.inline.select(stepped);
         self.scroll_inline_selection_into_view(cx);
         cx.notify();

@@ -70,7 +70,11 @@ impl QuillApp {
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            let revoke = this.chat_list.global.clear_calls.is_some_and(|clear| clear.revoke);
+            let revoke = this
+                .chat_list
+                .global
+                .clear_calls
+                .is_some_and(|clear| clear.revoke);
             let body = div()
                 .id("clear-calls")
                 .flex()

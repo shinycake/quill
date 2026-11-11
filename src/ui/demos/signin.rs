@@ -3,7 +3,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
-use crate::ui::connect_ui::ConnectUiStatus;
+use crate::ui::connect_ui::ConnectStage;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use quill::auth::StartupFailure;
 use quill::telegram::envelope::{AuthorizationState, ConnectionState};
@@ -11,36 +11,32 @@ use quill::telegram::envelope::{AuthorizationState, ConnectionState};
 register_demos![
     DemoSpec::signed_out("need-tdjson", || {
         (
-            ConnectUiStatus::Blocked,
+            ConnectStage::Blocked(StartupFailure::Library),
             String::new(),
-            AuthorizationState::StartupFailed(StartupFailure::Library),
         )
     })
     .auth_inputs(false),
     DemoSpec::signed_out("wait-code", || {
         (
-            ConnectUiStatus::DemoWaitCode,
-            "screenshot demo — WaitCode (injected auth, no live Telegram)".into(),
-            AuthorizationState::WaitCode {
+            ConnectStage::Shown(AuthorizationState::WaitCode {
                 code_length: Some(5),
                 delivery: Default::default(),
-            },
+            }),
+            "screenshot demo — WaitCode (injected auth, no live Telegram)".into(),
         )
     }),
     DemoSpec::signed_out("wait-password", || {
         (
-            ConnectUiStatus::DemoWaitPassword,
-            "screenshot demo — WaitPassword (injected auth, no live Telegram)".into(),
-            AuthorizationState::WaitPassword {
+            ConnectStage::Shown(AuthorizationState::WaitPassword {
                 has_recovery_email: true,
-            },
+            }),
+            "screenshot demo — WaitPassword (injected auth, no live Telegram)".into(),
         )
     }),
     DemoSpec::signed_out("wait-phone", || {
         (
-            ConnectUiStatus::DemoWaitPhone,
+            ConnectStage::Shown(AuthorizationState::WaitPhoneNumber),
             "screenshot demo — WaitPhoneNumber (injected auth, no live Telegram)".into(),
-            AuthorizationState::WaitPhoneNumber,
         )
     })
     .setup(|app, _, _| app.demo_phone_countries()),
@@ -48,9 +44,8 @@ register_demos![
     // strip shows its "Proxy settings" link.
     DemoSpec::signed_out("wait-phone-proxy", || {
         (
-            ConnectUiStatus::DemoWaitPhone,
+            ConnectStage::Shown(AuthorizationState::WaitPhoneNumber),
             "screenshot demo — WaitPhoneNumber via proxy (injected auth, no live Telegram)".into(),
-            AuthorizationState::WaitPhoneNumber,
         )
     })
     .setup(|app, _, _| {
@@ -67,13 +62,12 @@ register_demos![
     }),
     DemoSpec::signed_out("wait-premium", || {
         (
-            ConnectUiStatus::DemoWaitPhone,
-            "screenshot demo — WaitPremiumPurchase (injected auth, no live Telegram)".into(),
-            AuthorizationState::WaitPremiumPurchase {
+            ConnectStage::Shown(AuthorizationState::WaitPremiumPurchase {
                 premium_day_count: 365,
                 support_email_address: "premium-support@example.invalid".into(),
                 support_email_subject: "Premium sign-in".into(),
-            },
+            }),
+            "screenshot demo — WaitPremiumPurchase (injected auth, no live Telegram)".into(),
         )
     }),
 ];

@@ -392,14 +392,16 @@ impl QuillApp {
         // Backspace right after puts the typed text back
         // (`revertFormatReplace`).
         let caret = self.composer.read(cx).selected_range().start;
-        self.composer_ui.echo.arm(super::composer_field::MarkdownRevert {
-            text: new_text.to_string(),
-            caret,
-            restore: Some((
-                replace.range.start..replace.range.start + replace.with.len(),
-                original,
-            )),
-        });
+        self.composer_ui
+            .echo
+            .arm(super::composer_field::MarkdownRevert {
+                text: new_text.to_string(),
+                caret,
+                restore: Some((
+                    replace.range.start..replace.range.start + replace.with.len(),
+                    original,
+                )),
+            });
         Some(new_text)
     }
 

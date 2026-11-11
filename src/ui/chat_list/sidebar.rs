@@ -334,12 +334,7 @@ impl QuillApp {
         }
         // Pinned-drag animation: keep frames coming while rows slide, drop
         // the state once everything settled.
-        if let Some(reorder) = self
-            .chat_list
-            .pin
-            .drag()
-            .map(|drag| &drag.reorder)
-        {
+        if let Some(reorder) = self.chat_list.pin.drag().map(|drag| &drag.reorder) {
             let now = std::time::Instant::now();
             // A deactivated window never gets the release: the drag ends
             // there, unsaved, instead of redrawing at 60 Hz for good.

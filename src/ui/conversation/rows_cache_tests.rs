@@ -464,9 +464,11 @@ fn an_unpainted_history_is_seeded_from_its_pane_until_the_probe_measures(cx: &mu
     };
     app.read_with(vcx, |app, _| {
         // The harness already painted once; start as a fresh history.
-        app.history.measure.set(crate::ui::history_anchor::HistoryMeasure::Seeded(
-            HistoryWidth::default(),
-        ));
+        app.history
+            .measure
+            .set(crate::ui::history_anchor::HistoryMeasure::Seeded(
+                HistoryWidth::default(),
+            ));
         app.seed_history_width(403.);
     });
     assert_eq!(width(&app, vcx), HistoryWidth::new(400.));
@@ -474,11 +476,13 @@ fn an_unpainted_history_is_seeded_from_its_pane_until_the_probe_measures(cx: &mu
     assert_eq!(width(&app, vcx), HistoryWidth::WIDE);
     // Once the history measured itself, a seed no longer overrides it.
     app.read_with(vcx, |app, _| {
-        app.history.measure.set(crate::ui::history_anchor::HistoryMeasure::Measured {
-            width: HistoryWidth::WIDE,
-            layout: quill::chat_wide::ChatLayout::Normal,
-            pane: gpui_kit::px(0.),
-        });
+        app.history
+            .measure
+            .set(crate::ui::history_anchor::HistoryMeasure::Measured {
+                width: HistoryWidth::WIDE,
+                layout: quill::chat_wide::ChatLayout::Normal,
+                pane: gpui_kit::px(0.),
+            });
         app.seed_history_width(380.);
     });
     assert_eq!(width(&app, vcx), HistoryWidth::WIDE);
