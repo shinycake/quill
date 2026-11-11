@@ -42,8 +42,6 @@ HeaderFacts::is_saved_messages
 LiveInput::failed
 
 LiveInput::failed
-Lookup::fade_started
-Lookup::pending
 
 MediaMenuFacts::downloading
 

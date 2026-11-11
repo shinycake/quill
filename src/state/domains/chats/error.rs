@@ -22,13 +22,11 @@ impl Session {
             // Only the search the link preview waits for: an earlier
             // link's failure never shows under a later one.
             Some(RequestPurpose::SearchBackground) => {
-                if self
-                    .chats_state
-                    .background_search
-                    .waits_for(pending.map(|p| p.id))
+                if let Some(id) = pending.map(|p| p.id)
+                    && self.chats_state.background_search.waits_for(Some(id))
                 {
-                    self.chats_state.background_search = BackgroundSearch::Idle;
-                    self.chats_state.background_error = Some(error_reason(err));
+                    self.chats_state.background_search =
+                        BackgroundSearch::Failed(id, error_reason(err));
                 }
             }
             Some(RequestPurpose::GetInstalledBackgrounds) => {

@@ -39,10 +39,7 @@ impl QuillApp {
             return;
         }
         // Presses queued while a decode runs build on the pending target.
-        let mut target = self
-            .viewer
-            .reorient
-            .target();
+        let mut target = self.viewer.reorient.target();
         change(&mut target);
         if target.is_identity() {
             self.viewer.reorient.reset(target);
@@ -601,7 +598,8 @@ impl QuillApp {
                         let done =
                             !this.viewer.state.is_open() || this.viewer.visibility.is_hidden();
                         // Never mid-drag (a seek, volume or speed thumb).
-                        let held = this.viewer.pointer.over_controls() || this.viewer.controls.dragging();
+                        let held =
+                            this.viewer.pointer.over_controls() || this.viewer.controls.dragging();
                         if !done && controls_should_hide(idle, held) {
                             this.viewer.visibility.hide(std::time::Instant::now());
                             this.redraw_viewer_after_fade(cx);

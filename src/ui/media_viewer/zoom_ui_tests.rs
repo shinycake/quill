@@ -190,18 +190,27 @@ fn a_drag_released_off_the_picture_stops_panning(cx: &mut TestAppContext) {
         app.viewer.pointer = crate::ui::viewer_parts::Pointer::Panning((100., 100.));
         app.viewer_drag_moved((90., 95.), true, cx);
     });
-    let (panned, drag) = app.read_with(vcx, |app, _| (app.viewer.zoom.pan, app.viewer.pointer.anchor()));
+    let (panned, drag) = app.read_with(vcx, |app, _| {
+        (app.viewer.zoom.pan, app.viewer.pointer.anchor())
+    });
     assert_eq!(drag, Some((90., 95.)), "a held drag pans and follows");
     app.update_in(vcx, |app, _, cx| {
         app.viewer_drag_moved((40., 40.), false, cx)
     });
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.viewer.pointer.anchor(), None, "the release ended the drag");
+        assert_eq!(
+            app.viewer.pointer.anchor(),
+            None,
+            "the release ended the drag"
+        );
         assert_eq!(app.viewer.zoom.pan, panned, "no pan without the button");
     });
     app.update_in(vcx, |app, _, cx| {
         app.viewer.pointer = crate::ui::viewer_parts::Pointer::Panning((1., 1.));
         app.close_media_viewer(cx);
     });
-    assert_eq!(app.read_with(vcx, |app, _| app.viewer.pointer.anchor()), None);
+    assert_eq!(
+        app.read_with(vcx, |app, _| app.viewer.pointer.anchor()),
+        None
+    );
 }

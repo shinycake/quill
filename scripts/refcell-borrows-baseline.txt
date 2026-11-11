@@ -163,7 +163,6 @@ QuillApp::build_twofa_dialog::body.borrow_mut 1
 QuillApp::build_username_dialog::body.borrow_mut 1
 QuillApp::build_video_editor_dialog::body.borrow_mut 1
 QuillApp::build_wallet_notice_dialog::body.borrow_mut 1
-QuillApp::build_wallpaper_preview_dialog::body.borrow_mut 1
 QuillApp::build_web_app_confirm_dialog::body.borrow_mut 1
 QuillApp::build_websites_dialog::body.borrow_mut 1
 QuillApp::build_welcome_dialog::body.borrow_mut 1
@@ -250,7 +249,6 @@ SizedLoad::new::state.borrow_mut 1
 SizedLoad::use_by::state.borrow_mut 1
 StreamSound::start_with::slot.borrow 1
 TrayReads::forget::photo_sizes.borrow_mut 1
-Wallpaper::with_stored_rotation::r.borrow 1
 WindowZoom::fire_resize::resize.borrow_mut 1
 WindowZoom::register::list.borrow_mut 1
 ZoomWindow::on_resize::resize.borrow_mut 1
@@ -292,8 +290,6 @@ display_grid::grids.borrow_mut 1
 display_of::displays.borrow 1
 drawn::cache.borrow_mut 2
 edge_shade::shades.borrow_mut 1
-end_finished_fades::f.borrow_mut 1
-fade_layer::f.borrow_mut 1
 finish_dialog::body.borrow_mut 1
 finish_tracked::body.borrow_mut 1
 fit::window.borrow_mut 1
@@ -312,8 +308,6 @@ install::sheets.borrow_mut 1
 install::sync.borrow 1
 last_target::last.borrow 1
 locate::running.borrow_mut 1
-lookup::cache.borrow_mut 1
-lookup::s.borrow_mut 1
 mark_revealed::reveals.borrow_mut 1
 may_be_visible::slices.borrow 1
 measured::cache.borrow_mut 2
@@ -340,7 +334,6 @@ preview_images::p.borrow_mut 1
 push_message::active.borrow_mut 1
 push_premium::active.borrow_mut 1
 release_media_tile::tile.borrow_mut 1
-release_unshown::cache.borrow_mut 1
 remember::slot.borrow_mut 1
 remember_gpu_gone::gone.borrow_mut 1
 report_gpu_gone::gone.borrow_mut 1
@@ -352,14 +345,12 @@ retry_later::retry.borrow_mut 2
 reveal_fade::reveals.borrow 1
 revealing::reveals.borrow 1
 reverse_geocode::pending.borrow_mut 1
-rotate::r.borrow_mut 1
 see::seen.borrow_mut 1
 seen::badges.borrow 1
 set::slot.borrow_mut 1
 set_app::slot.borrow_mut 1
 set_display::displays.borrow_mut 1
 set_zoom::list.borrow_mut 1
-settle::f.borrow_mut 1
 share_output_with_video::slot.borrow_mut 1
 shared::playing.borrow 1
 shown_unwatched::badges.borrow 1

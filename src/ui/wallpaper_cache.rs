@@ -23,7 +23,7 @@
 use super::image_budget;
 use super::wallpaper::Wallpaper;
 use super::wallpaper_board::{Board, Job};
-use super::wallpaper_source::{Rendered, Sources};
+use super::wallpaper_source::{Picture, Rendered, Sources};
 use gpui_kit::*;
 use quill::locks::LockExt;
 use smallvec::SmallVec;
@@ -201,10 +201,29 @@ struct Shown {
     window: WindowId,
 }
 
-/// A crossfade from the picture a wallpaper showed before it turned.
+/// A crossfade from the pictures a wallpaper showed before it turned: one
+/// per window showing it (each made for that window's size).
 struct Fade {
-    from: Composite,
+    from: SmallVec<[(WindowId, Composite); 1]>,
     start: Instant,
+}
+
+impl Fade {
+    fn new(start: Instant) -> Self {
+        Self {
+            from: SmallVec::new(),
+            start,
+        }
+    }
+
+    /// `window`'s old picture (a window that showed the wallpaper before
+    /// has its own).
+    fn set(&mut self, window: WindowId, picture: Composite) {
+        match self.from.iter_mut().find(|(w, _)| *w == window) {
+            Some(slot) => slot.1 = picture,
+            None => self.from.push((window, picture)),
+        }
+    }
 }
 
 impl Cache {
@@ -301,7 +320,12 @@ impl Cache {
 pub(super) fn release_unshown(main: WindowId, cx: &mut App) {
     end_finished_fades();
     let open: Vec<WindowId> = cx.windows().iter().map(|w| w.window_id()).collect();
-    let gone = CACHE.with(|cache| cache.borrow_mut().take_unshown(main, &open));
+    let gone = CACHE.with(|cache| {
+        cache
+            .try_borrow_mut()
+            .map(|mut cache| cache.take_unshown(main, &open))
+            .unwrap_or_default()
+    });
     if super::frame_clock::trace_ticks() && !gone.is_empty() {
         let bytes: usize = gone
             .iter()
@@ -348,13 +372,17 @@ fn settle(
         && let Some(from) = cache.peek(previous.key, shown.window)
     {
         FADES.with(|f| {
-            f.borrow_mut().insert(
-                shown.identity,
-                Fade {
-                    from: from.clone(),
-                    start: Instant::now(),
-                },
-            )
+            let Ok(mut fades) = f.try_borrow_mut() else {
+                return;
+            };
+            let now = Instant::now();
+            let fade = fades
+                .entry(shown.identity)
+                .or_insert_with(|| Fade::new(now));
+            if fade_opacity(fade.start.elapsed()).is_none() {
+                *fade = Fade::new(now);
+            }
+            fade.set(shown.window, from.clone());
         });
         return (Some(from), true);
     }
@@ -366,8 +394,9 @@ fn settle(
 /// the old window-sized picture until that wallpaper showed again.
 fn end_finished_fades() {
     FADES.with(|f| {
-        f.borrow_mut()
-            .retain(|_, fade| fade_opacity(fade.start.elapsed()).is_some())
+        if let Ok(mut fades) = f.try_borrow_mut() {
+            fades.retain(|_, fade| fade_opacity(fade.start.elapsed()).is_some());
+        }
     });
 }
 
@@ -381,7 +410,7 @@ fn fade_opacity(elapsed: Duration) -> Option<f32> {
 pub(super) fn fade_layer(wallpaper: &Wallpaper) -> Option<AnyElement> {
     let identity = wallpaper.identity();
     let (from, opacity) = FADES.with(|f| {
-        let mut fades = f.borrow_mut();
+        let mut fades = f.try_borrow_mut().ok()?;
         let fade = fades.get(&identity)?;
         match fade_opacity(fade.start.elapsed()) {
             Some(opacity) => Some((fade.from.clone(), opacity)),
@@ -402,6 +431,12 @@ pub(super) fn fade_layer(wallpaper: &Wallpaper) -> Option<AnyElement> {
                 canvas(
                     |_, _, _| {},
                     move |bounds, _, window, _| {
+                        // Each window fades out from the picture made for
+                        // its own size.
+                        let id = window.window_handle().window_id();
+                        let Some((_, from)) = from.iter().find(|(w, _)| *w == id) else {
+                            return;
+                        };
                         let _ = window.paint_image(
                             bounds,
                             from.image_bounds(bounds),
@@ -421,11 +456,32 @@ pub(super) fn fade_layer(wallpaper: &Wallpaper) -> Option<AnyElement> {
 /// What a canvas paints this frame.
 pub(super) struct Lookup {
     pub composite: Option<Composite>,
-    /// Ask for another frame: a newer image is on its way, or this one is
-    /// new.
-    pub pending: bool,
+    pub stage: LookStage,
+}
+
+/// Where a slot's picture is: settled, or why the canvas asks for another
+/// frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum LookStage {
+    /// The picture is ready and was shown before.
+    Settled,
+    /// A newer image is on its way.
+    Rendering,
+    /// The picture is new: one more frame lets the idle trim schedule.
+    JustMade,
     /// A crossfade started: the history must render its overlay.
-    pub fade_started: bool,
+    FadeStarted,
+}
+
+impl Lookup {
+    /// Ask for another frame.
+    fn pending(&self) -> bool {
+        self.stage != LookStage::Settled
+    }
+
+    fn fade_started(&self) -> bool {
+        self.stage == LookStage::FadeStarted
+    }
 }
 
 /// The image for `wallpaper` at `width` x `height` pixels in `slot`.
@@ -455,21 +511,33 @@ fn lookup(
         } else {
             settle(cache, slot, shown, composite)
         };
-        Lookup {
-            composite,
-            pending: fade_started || made,
-            fade_started,
-        }
+        let stage = if fade_started {
+            LookStage::FadeStarted
+        } else if made {
+            LookStage::JustMade
+        } else {
+            LookStage::Settled
+        };
+        Lookup { composite, stage }
     };
     CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
+        let Ok(mut cache) = cache.try_borrow_mut() else {
+            return Lookup {
+                composite: None,
+                stage: LookStage::Rendering,
+            };
+        };
         if let Some(found) = cache.get(key, window) {
             return ready(&mut cache, found, false);
         }
         let shared = shared();
         if !shared.threaded {
             let rendered = render_guarded(|| {
-                INLINE_SOURCES.with(|s| s.borrow_mut().render(wallpaper, width, height))
+                INLINE_SOURCES.with(|s| {
+                    s.try_borrow_mut()
+                        .ok()
+                        .and_then(|mut sources| sources.render(wallpaper, width, height))
+                })
             });
             let retry_at = retry_time(wallpaper, rendered.as_ref(), Instant::now());
             let composite = rendered.and_then(|r| to_composite(r, width, height));
@@ -511,8 +579,7 @@ fn lookup(
         shared.wake.notify_one();
         Lookup {
             composite: stale,
-            pending: true,
-            fade_started: false,
+            stage: LookStage::Rendering,
         }
     })
 }
@@ -523,7 +590,7 @@ fn lookup(
 /// colours alone has no file to wait for.
 fn retry_time(wallpaper: &Wallpaper, rendered: Option<&Rendered>, now: Instant) -> Option<Instant> {
     let incomplete = match rendered {
-        Some(r) => !r.complete,
+        Some(r) => !r.is_whole(),
         None => matches!(
             wallpaper,
             Wallpaper::Pattern { .. } | Wallpaper::Image { .. }
@@ -533,7 +600,7 @@ fn retry_time(wallpaper: &Wallpaper, rendered: Option<&Rendered>, now: Instant) 
 }
 
 fn to_composite(rendered: Rendered, width: u32, height: u32) -> Option<Composite> {
-    let Rendered { raster, x, y, .. } = rendered;
+    let Picture { raster, x, y } = rendered.into_picture();
     let size = (raster.width, raster.height);
     let buffer = image::RgbaImage::from_raw(raster.width, raster.height, raster.bgra)?;
     Some(Composite {
@@ -583,7 +650,7 @@ pub(super) fn wallpaper_layer(
                 (width, height),
                 window.window_handle().window_id(),
             );
-            if found.fade_started
+            if found.fade_started()
                 && let Slot::History(entity) = slot
             {
                 cx.notify(entity);
@@ -604,7 +671,7 @@ pub(super) fn wallpaper_layer(
                     false,
                 );
             }
-            if lookup.pending {
+            if lookup.pending() {
                 window.request_animation_frame();
             }
         },
@@ -776,7 +843,11 @@ mod tests {
         let start = Instant::now()
             .checked_sub(Duration::from_secs(1))
             .expect("a second since boot");
-        FADES.with(|f| f.borrow_mut().insert(9, Fade { from, start }));
+        FADES.with(|f| {
+            let mut fade = Fade::new(start);
+            fade.set(window(MAIN), from);
+            f.borrow_mut().insert(9, fade)
+        });
         begin_frame();
         begin_frame();
 
@@ -785,6 +856,43 @@ mod tests {
         assert_eq!(gone.len(), 1);
         assert_eq!(Arc::strong_count(&gone[0]), 1, "nothing else holds it");
         assert!(FADES.with(|f| f.borrow().is_empty()));
+    }
+
+    /// Two windows showing one wallpaper each fade out from the picture
+    /// made for their own size.
+    #[test]
+    fn two_windows_fade_from_their_own_pictures() {
+        use super::{FADES, settle};
+        FADES.with(|f| f.borrow_mut().clear());
+        let mut cache = Cache::default();
+        let (main_old, chat_old) = (composite(1), composite(2));
+        cache.insert(10, Some(main_old.clone()), window(MAIN));
+        cache.insert(11, Some(chat_old.clone()), window(CHAT));
+        let shown = |key, in_window| Shown {
+            key,
+            identity: 5,
+            area: (10, 10),
+            window: window(in_window),
+        };
+        settle(&mut cache, 1, shown(10, MAIN), None);
+        settle(&mut cache, 2, shown(11, CHAT), None);
+        let main = settle(&mut cache, 1, shown(20, MAIN), None);
+        let chat = settle(&mut cache, 2, shown(21, CHAT), None);
+        if quill::power_saving::reduce_motion_now() {
+            return;
+        }
+        assert!(main.1 && chat.1, "both windows start a fade");
+        FADES.with(|f| {
+            let fades = f.borrow();
+            let fade = fades.get(&5).expect("one fade per wallpaper");
+            assert_eq!(fade.from.len(), 2);
+            for (id, old) in [(MAIN, &main_old), (CHAT, &chat_old)] {
+                let picture = fade.from.iter().find(|(w, _)| *w == window(id));
+                let (_, picture) = picture.expect("a picture per window");
+                assert!(Arc::ptr_eq(&picture.image, &old.image));
+            }
+        });
+        FADES.with(|f| f.borrow_mut().clear());
     }
 
     #[test]

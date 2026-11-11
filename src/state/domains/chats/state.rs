@@ -24,15 +24,17 @@ pub enum BackgroundSearch {
     Idle,
     /// This search is out.
     Waiting(RequestId),
-    /// The search's answer.
-    Found(Background),
+    /// The answer to this search.
+    Found(RequestId, Background),
+    /// This search failed, with the reason.
+    Failed(RequestId, String),
 }
 
 impl BackgroundSearch {
     /// The background the search found, once it answered.
     pub fn found(&self) -> Option<&Background> {
         match self {
-            BackgroundSearch::Found(background) => Some(background),
+            BackgroundSearch::Found(_, background) => Some(background),
             _ => None,
         }
     }
