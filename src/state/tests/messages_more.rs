@@ -753,7 +753,12 @@ fn scheduling_edit_error_keeps_the_entry_and_surfaces() {
         ),
     );
     assert_eq!(session.messages.scheduled_messages.len(), 1);
-    let err = session.messages.resend_error.expect("error surfaced");
+    let err = session
+        .messages
+        .resend_error
+        .take_all()
+        .pop()
+        .expect("error surfaced");
     assert!(err.contains("Could not send the message now"), "{err}");
 }
 
@@ -847,4 +852,37 @@ fn an_answer_for_a_gone_account_settles_the_awaited_request_as_failed() {
         session.acks.take(id),
         Some(crate::state::Answer::Failed(_))
     ));
+}
+
+#[test]
+fn force_replies_of_two_chats_in_one_batch_both_wait_for_their_windows() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    for (chat, id) in [(21, 401), (22, 402), (21, 403)] {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{chat},"is_outgoing":false,"reply_markup":{{"@type":"replyMarkupForceReply","input_field_placeholder":""}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"x","entities":[]}}}}}}}}"#
+            ),
+        );
+    }
+    // One per chat: the newer message of chat 21 replaced its older one,
+    // and chat 22's was not overwritten.
+    assert_eq!(session.bots.pending_force_replies.len(), 2);
+    assert_eq!(
+        session.bots.pending_force_replies.get(&ChatId(21)),
+        Some(&ForceReplyTarget {
+            chat_id: ChatId(21),
+            message_id: MessageId(403),
+        })
+    );
+    assert_eq!(
+        session.bots.pending_force_replies.get(&ChatId(22)),
+        Some(&ForceReplyTarget {
+            chat_id: ChatId(22),
+            message_id: MessageId(402),
+        })
+    );
 }

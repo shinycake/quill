@@ -840,8 +840,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             if can_get_link {
                 let _ = self.send_message_link_request(chat_id, message_id);
             } else {
-                self.session.messages.message_link_error =
-                    Some("message link not available for this message".into());
+                self.session
+                    .messages
+                    .message_link_error
+                    .push("message link not available for this message".into());
             }
         }
         if let Some((chat_id, message_id, actions)) = audience_gate {
@@ -940,7 +942,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         .requests
                         .take_purpose(RequestPurpose::GetStickerSet),
                 );
-                self.session.stickers.stickers.loading_set = false;
+                self.session.stickers.stickers.set = crate::state::StickerSetStage::Idle;
                 self.fetch_archived_stickers(false)?;
             }
         }

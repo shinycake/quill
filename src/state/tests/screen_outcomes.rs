@@ -17,18 +17,18 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
         giveaway_chat_id: None,
     });
     session.messages.message_link_result = Some("https://t.me/c/1/2".into());
-    session.messages.message_link_error = Some("no link".into());
-    session.messages.resend_error = Some("resend".into());
-    session.messages.ai_error = Some("ai".into());
-    session.messages.message_action_note = Some("banned".into());
+    session.messages.message_link_error.push("no link".into());
+    session.messages.resend_error.push("resend".into());
+    session.messages.ai_error.push("ai".into());
+    session.messages.message_action_note.push("banned".into());
     session.chats_state.chat_action_error = Some("pin".into());
     session.chats_state.report_chat_outcome = Some("chat reported".into());
     session.groups.invite_link_error = Some("link".into());
 
     session.payments.receipt_error = Some("receipt".into());
     session.payments.unlocked_notice = Some("unlocked".into());
-    session.messages.send_permission_error = Some("no rights".into());
-    session.messages.flood_notice = Some("slow down".into());
+    session.messages.send_permission_error.push("no rights".into());
+    session.messages.flood_notice.push("slow down".into());
     session.bots.last_callback_answer = Some(CallbackAnswer {
         answer: CallbackQueryAnswer {
             text: String::new(),
@@ -52,18 +52,18 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
 
     assert!(session.payments.receipt_error.is_none());
     assert!(session.payments.unlocked_notice.is_none());
-    assert!(session.messages.send_permission_error.is_none());
-    assert!(session.messages.flood_notice.is_none());
+    assert!(session.messages.send_permission_error.is_empty());
+    assert!(session.messages.flood_notice.is_empty());
     assert!(session.bots.last_callback_answer.is_none());
     assert!(session.bots.last_login_url_info.is_none());
     assert!(session.bots.login_url_request.is_none());
 
     assert!(session.payments.verification_url.is_none());
     assert!(session.messages.message_link_result.is_none());
-    assert!(session.messages.message_link_error.is_none());
-    assert!(session.messages.resend_error.is_none());
-    assert!(session.messages.ai_error.is_none());
-    assert!(session.messages.message_action_note.is_none());
+    assert!(session.messages.message_link_error.is_empty());
+    assert!(session.messages.resend_error.is_empty());
+    assert!(session.messages.ai_error.is_empty());
+    assert!(session.messages.message_action_note.is_empty());
     assert!(session.chats_state.chat_action_error.is_none());
     assert!(session.chats_state.report_chat_outcome.is_none());
     assert!(session.groups.invite_link_error.is_none());

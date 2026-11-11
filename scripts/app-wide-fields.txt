@@ -31,6 +31,7 @@ preferences.keybindings_applied | whether the keymap was installed, once per pro
 preferences.appearance_applied | the theme, accent and font last applied to the windows
 preferences.app_theme * | the app theme: custom themes, palettes, the theme editor, Omarchy; files on disk, not per account
 preferences.system_accent | the OS accent color
+preferences.send_to * | the Explorer "Send to" shortcut belongs to the machine: read once, written off the UI thread, whichever account is on screen
 preferences.system_accent_probed | whether the OS accent was read
 preferences.font_picker | the font family picker entity
 preferences.accent_picker | the accent color picker entity

@@ -20,7 +20,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
-use quill::state::{MasksTab, RequestPurpose, StickerTab, StickersPurpose};
+use quill::state::{MasksTab, StickerTab, StickersPurpose};
 use quill::stickers_manager::ManagerEdits;
 use quill::telegram::envelope::StickerSetInfo;
 use rows::RowState;
@@ -96,20 +96,20 @@ impl QuillApp {
                     StickerTab::Archived => ManagerTab::Archived,
                     _ => ManagerTab::Installed,
                 };
-                let purpose = match tab {
-                    ManagerTab::Installed => RequestPurpose::GetInstalledStickerSets,
-                    ManagerTab::Trending => RequestPurpose::GetTrendingStickerSets,
-                    ManagerTab::Archived => RequestPurpose::GetArchivedStickerSets,
+                let list = match tab {
+                    ManagerTab::Installed => &panel.lists.installed,
+                    ManagerTab::Trending => &panel.lists.trending,
+                    ManagerTab::Archived => &panel.lists.archived,
                 };
-                let loading = session.requests.has_purpose(purpose)
-                    || tab == ManagerTab::Installed && !panel.installed_loaded;
+                let loading =
+                    list.is_loading() || tab == ManagerTab::Installed && !panel.installed_loaded;
                 (
                     tab,
                     panel.sets.clone(),
                     panel.trending.clone(),
                     panel.archived.clone(),
                     loading,
-                    panel.failed,
+                    panel.lists.tab_error(panel.tab).is_some(),
                 )
             }
             Kind::Masks => {

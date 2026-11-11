@@ -725,7 +725,8 @@ impl QuillApp {
 
     /// Slice B2: START press — `sendBotStartMessage` with the deep-link
     /// parameter (schema 1.8.67, line 12216); the button clears like
-    /// Telegram X's `hideActionButton` after the send.
+    /// Telegram X's `hideActionButton` once TDLib answers (the reducer drops
+    /// the parameter then, so a refusal keeps it).
     pub(super) fn press_bot_start(
         &mut self,
         chat_id: ChatId,
@@ -738,10 +739,7 @@ impl QuillApp {
                 .driver
                 .send_bot_start_message(chat_id, bot_id, &parameter)
             {
-                Ok(Some(_)) => {
-                    live.driver.session.bots.bot_start_params.remove(&chat_id.0);
-                    StatusNote::silent(tr(keys::Q_MEDIA_STARTING_BOT))
-                }
+                Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_STARTING_BOT)),
                 Ok(None) => StatusNote::silent(tr(keys::Q_MEDIA_REQUEST_ALREADY_IN_FLIGHT)),
                 Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
             }

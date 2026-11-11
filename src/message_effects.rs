@@ -14,6 +14,7 @@ use crate::ids::{FileId, RequestId};
 use crate::telegram::envelope::{ParsedFile, StickerFormat, StickerItem, parse_sticker_value};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
 /// How an effect looks and what it plays.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -180,6 +181,30 @@ pub fn parse_available_effect_ids(value: &Value) -> (Vec<i64>, Vec<i64>) {
     (ids("reaction_effect_ids"), ids("sticker_effect_ids"))
 }
 
+/// The first wait after a failed `getMessageEffect` that may pass; it
+/// doubles per failure up to [`LOOKUP_RETRY_MAX`].
+pub const LOOKUP_RETRY_FIRST: Duration = Duration::from_secs(5);
+pub const LOOKUP_RETRY_MAX: Duration = Duration::from_secs(5 * 60);
+
+/// One effect's `getMessageEffect`, before its answer arrives. An effect
+/// with no entry has not been asked for (or its ask was dropped).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EffectLookup {
+    /// Sent; `failures` is how many earlier asks failed.
+    Loading { failures: u32 },
+    /// The server says the effect does not exist: nothing to wait for.
+    Gone,
+    /// An ask failed with an error that may pass (rate limit, network,
+    /// timeout): asked again once `until` is over.
+    Waiting { until: Instant, failures: u32 },
+}
+
+fn lookup_wait(failures: u32) -> Duration {
+    LOOKUP_RETRY_FIRST
+        .saturating_mul(2u32.saturating_pow(failures.saturating_sub(1).min(16)))
+        .min(LOOKUP_RETRY_MAX)
+}
+
 /// The effects the session knows.
 #[derive(Debug, Default)]
 pub struct MessageEffects {
@@ -187,10 +212,8 @@ pub struct MessageEffects {
     /// `updateAvailableMessageEffects`, in the server's order.
     reaction_ids: Vec<i64>,
     sticker_ids: Vec<i64>,
-    /// Asked for and not answered yet.
-    requested: HashSet<i64>,
-    /// `getMessageEffect` failed (404 for an effect that is gone).
-    failed: HashSet<i64>,
+    /// Where each effect not yet described stands.
+    lookups: HashMap<i64, EffectLookup>,
     /// Bumped when an effect arrives, so a view can tell it changed.
     revision: u64,
     /// Which messages have not played their effect here yet.
@@ -205,16 +228,45 @@ impl MessageEffects {
     }
 
     pub fn accept(&mut self, effect: MessageEffect) {
-        self.requested.remove(&effect.id);
-        self.failed.remove(&effect.id);
+        self.lookups.remove(&effect.id);
         self.by_id.insert(effect.id, effect);
         self.revision += 1;
     }
 
-    pub fn fail(&mut self, id: i64) {
-        self.requested.remove(&id);
-        self.failed.insert(id);
+    /// `getMessageEffect` failed for `id` with `code`. Only a not-found or
+    /// invalid answer means the effect is gone; any other error is asked
+    /// for again after a wait that doubles per failure.
+    pub fn fail(&mut self, id: i64, code: i32, now: Instant) {
+        let failures = match self.lookups.get(&id) {
+            Some(EffectLookup::Loading { failures } | EffectLookup::Waiting { failures, .. }) => {
+                *failures
+            }
+            _ => 0,
+        };
+        let lookup = if matches!(code, 400 | 404) {
+            EffectLookup::Gone
+        } else {
+            let failures = failures.saturating_add(1);
+            EffectLookup::Waiting {
+                until: now.checked_add(lookup_wait(failures)).unwrap_or(now),
+                failures,
+            }
+        };
+        self.lookups.insert(id, lookup);
         self.revision += 1;
+    }
+
+    /// The ask for `id` could not be sent: wait before the next one.
+    pub fn fail_send(&mut self, id: i64, now: Instant) {
+        self.fail(id, 0, now);
+    }
+
+    /// Lookups marked as sent whose request is no longer pending (dropped
+    /// by a reconnect, or answered by nothing) are asked for again.
+    pub fn forget_dropped(&mut self, pending: &HashSet<i64>) {
+        self.lookups.retain(|id, lookup| {
+            !matches!(lookup, EffectLookup::Loading { .. }) || pending.contains(id)
+        });
     }
 
     pub fn get(&self, id: i64) -> Option<&MessageEffect> {
@@ -223,7 +275,7 @@ impl MessageEffects {
 
     /// `getMessageEffect` failed for `id`: there is nothing to wait for.
     pub fn is_gone(&self, id: i64) -> bool {
-        self.failed.contains(&id)
+        self.lookups.get(&id) == Some(&EffectLookup::Gone)
     }
 
     pub fn revision(&self) -> u64 {
@@ -244,22 +296,30 @@ impl MessageEffects {
         !(self.reaction_ids.is_empty() && self.sticker_ids.is_empty())
     }
 
-    /// Of `ids`, those worth a `getMessageEffect` now.
-    pub fn wanted(&self, ids: impl IntoIterator<Item = i64>) -> Vec<i64> {
+    /// Of `ids`, those worth a `getMessageEffect` at `now`.
+    pub fn wanted(&self, ids: impl IntoIterator<Item = i64>, now: Instant) -> Vec<i64> {
         let mut seen = HashSet::new();
         ids.into_iter()
             .filter(|id| *id != 0)
             .filter(|id| {
                 !self.by_id.contains_key(id)
-                    && !self.requested.contains(id)
-                    && !self.failed.contains(id)
+                    && match self.lookups.get(id) {
+                        None => true,
+                        Some(EffectLookup::Waiting { until, .. }) => now >= *until,
+                        Some(EffectLookup::Loading { .. } | EffectLookup::Gone) => false,
+                    }
                     && seen.insert(*id)
             })
             .collect()
     }
 
+    /// The ask for `id` went out.
     pub fn mark_requested(&mut self, id: i64) {
-        self.requested.insert(id);
+        let failures = match self.lookups.get(&id) {
+            Some(EffectLookup::Waiting { failures, .. }) => *failures,
+            _ => 0,
+        };
+        self.lookups.insert(id, EffectLookup::Loading { failures });
     }
 
     /// The effects the picker lists, as tdesktop's `LookupPossibleEffects`:
@@ -386,16 +446,43 @@ mod tests {
     fn only_unknown_effects_are_asked_for_once() {
         let mut effects = MessageEffects::default();
         effects.set_available(vec![1, 2], vec![3]);
+        let now = Instant::now();
         assert_eq!(
-            effects.wanted(effects.available_ids().collect::<Vec<_>>()),
+            effects.wanted(effects.available_ids().collect::<Vec<_>>(), now),
             vec![1, 2, 3]
         );
         effects.mark_requested(1);
         let (loaded, _) = parse_message_effect(&reaction_effect("2", false)).unwrap();
         effects.accept(loaded);
-        effects.fail(3);
-        assert!(effects.wanted([1, 2, 3, 0]).is_empty());
-        assert_eq!(effects.wanted([4, 4, 5]), vec![4, 5]);
+        effects.fail(3, 404, now);
+        assert!(effects.wanted([1, 2, 3, 0], now).is_empty());
+        assert_eq!(effects.wanted([4, 4, 5], now), vec![4, 5]);
+    }
+
+    #[test]
+    fn an_error_that_may_pass_is_asked_again_after_a_growing_wait() {
+        let mut effects = MessageEffects::default();
+        let start = Instant::now();
+        effects.mark_requested(7);
+        effects.fail(7, 429, start);
+        assert!(!effects.is_gone(7), "a rate limit is not a not-found");
+        assert!(effects.wanted([7], start).is_empty());
+        let first = start + LOOKUP_RETRY_FIRST;
+        assert_eq!(effects.wanted([7], first), vec![7]);
+        effects.mark_requested(7);
+        effects.fail(7, 500, first);
+        assert!(effects.wanted([7], first + LOOKUP_RETRY_FIRST).is_empty());
+        assert_eq!(effects.wanted([7], first + LOOKUP_RETRY_FIRST * 2), vec![7]);
+    }
+
+    #[test]
+    fn a_dropped_ask_is_asked_again() {
+        let mut effects = MessageEffects::default();
+        effects.mark_requested(7);
+        effects.mark_requested(8);
+        effects.forget_dropped(&HashSet::from([8]));
+        let now = Instant::now();
+        assert_eq!(effects.wanted([7, 8], now), vec![7]);
     }
 
     #[test]

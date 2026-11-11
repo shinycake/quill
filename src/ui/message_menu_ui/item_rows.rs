@@ -375,7 +375,7 @@ mod demo_facts {
             "author" => (CHANNEL, POST),
             _ => (GROUP, POLL),
         };
-        session.messages.message_menu_actions = Some((
+        session.messages.menu_actions.set(
             chat,
             message,
             MessageActions {
@@ -385,7 +385,7 @@ mod demo_facts {
                 can_get_author: mode == "author",
                 ..MessageActions::default()
             },
-        ));
+        );
         if mode == "poll" {
             session.messages.poll_option_menu = Some(PollOptionMenu {
                 chat_id: GROUP,

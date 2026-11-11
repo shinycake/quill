@@ -458,8 +458,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let allowed = self
             .session
             .messages
-            .message_menu_actions
-            .is_some_and(|(c, m, a)| c == chat_id && m == message_id && a.can_delete_reactions);
+            .menu_actions
+            .get(chat_id, message_id)
+            .is_some_and(|a| a.can_delete_reactions);
         if !allowed {
             return Ok(None);
         }

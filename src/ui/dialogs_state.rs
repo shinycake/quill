@@ -78,6 +78,8 @@ pub(crate) struct DialogUi {
     pub(super) business_hours: super::profile_business::BusinessHoursUi,
     /// The Disable Sharing box for this private chat.
     pub(super) disable_sharing: Option<quill::ids::ChatId>,
+    /// The Add-bot and Share-game boxes waiting for their request's answer.
+    pub(super) box_send: super::bots_box_send::BoxSend,
 }
 
 /// The Business page saves its edits through the old client before it
@@ -123,6 +125,7 @@ impl DialogUi {
             bot_verify_dialog: None,
             bot_edit_dialog: None,
             bot_create_dialog: None,
+            box_send: Default::default(),
             quick_replies_dialog: None,
             business_dialog: None,
             edit_profile_dialog: None,

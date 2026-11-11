@@ -15,16 +15,39 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let wanted = self.session.stickers.effects.wanted(ids);
+        // An ask whose request is gone (a reconnect dropped it) is open again.
+        let pending: std::collections::HashSet<i64> = self
+            .session
+            .requests
+            .pending
+            .values()
+            .filter_map(|pending| match pending.purpose {
+                RequestPurpose::Stickers(StickersPurpose::GetMessageEffect { effect_id }) => {
+                    Some(effect_id)
+                }
+                _ => None,
+            })
+            .collect();
+        self.session.stickers.effects.forget_dropped(&pending);
+        let now = std::time::Instant::now();
+        let wanted = self.session.stickers.effects.wanted(ids, now);
         let mut sent = Vec::new();
         for effect_id in wanted {
             let extra = self.session.request(
                 RequestPurpose::Stickers(StickersPurpose::GetMessageEffect { effect_id }),
                 None,
             );
-            self.session.stickers.effects.mark_requested(effect_id);
             let json = get_message_effect(extra, effect_id);
-            sent.push(self.send_json_request(extra, &json)?);
+            match self.send_json_request(extra, &json) {
+                Ok(request) => {
+                    self.session.stickers.effects.mark_requested(effect_id);
+                    sent.push(request);
+                }
+                Err(err) => {
+                    self.session.stickers.effects.fail_send(effect_id, now);
+                    return Err(err);
+                }
+            }
         }
         Ok(sent)
     }

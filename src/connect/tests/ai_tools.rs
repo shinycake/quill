@@ -226,7 +226,9 @@ fn ai_flood_premium_error_surfaces_premium_line() {
         .session
         .messages
         .ai_error
-        .take()
+        .take_all()
+        .into_iter()
+        .next()
         .expect("AI error stored");
     assert!(err.contains("Premium"), "premium line surfaced, got: {err}");
     // Never applied as a success.

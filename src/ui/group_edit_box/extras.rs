@@ -216,7 +216,9 @@ impl QuillApp {
                     cx.notify();
                 })),
         );
-        if session.stickers.stickers.failed || session.stickers.emoji.failed {
+        if session.stickers.stickers.lists.installed.error().is_some()
+            || session.stickers.emoji.failed
+        {
             section = section.child(
                 div()
                     .text_sm()

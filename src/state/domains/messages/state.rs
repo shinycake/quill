@@ -9,8 +9,7 @@ pub struct MessagesState {
     pub mention_search: Option<MentionSearch>,
     pub rows_on_screen: Option<RowsOnScreen>,
     /// What the open message context menu may offer (`messageProperties`).
-    pub message_menu_actions:
-        Option<(ChatId, MessageId, crate::telegram::envelope::MessageActions)>,
+    pub menu_actions: MenuActions,
     /// The chips under a message before a reaction request changed them,
     /// put back if TDLib refuses it.
     pub reaction_undo: std::collections::HashMap<
@@ -33,7 +32,7 @@ pub struct MessagesState {
     /// One-shot result of an admin moderation call from the delete box
     /// (ban, delete all, report spam); the UI drains it into the status
     /// note.
-    pub message_action_note: Option<String>,
+    pub message_action_note: Notes,
     /// M1: parsed `messageLink.link` from the last `getMessageLink` response
     /// (one-shot; the UI copies it to the clipboard and clears it).
     pub message_link_result: Option<String>,
@@ -45,7 +44,7 @@ pub struct MessagesState {
     /// `messageProperties.can_get_link == false` or the `getMessageLink`
     /// request errors. The UI drains it into the status note so the
     /// click never silently does nothing.
-    pub message_link_error: Option<String>,
+    pub message_link_error: Notes,
     /// Slice msg-richtext-ai-tools: one-shot `fixTextWithAi` /
     /// `composeTextWithAi` answer for the open chat's composer. The UI
     /// drains it (replacing the draft) on the next frame. The first id is
@@ -62,7 +61,7 @@ pub struct MessagesState {
     /// Slice msg-richtext-ai-tools: one-shot; set when an AI request
     /// errors. The UI drains it into the status note so the click never
     /// silently does nothing.
-    pub ai_error: Option<String>,
+    pub ai_error: Notes,
     /// MED4: `getOption("message_caption_length_max")` via `updateOption`
     /// (TDLib 1.8.67, `schema/td_api.tl:10926`); default 1024 is TDLib's
     /// compiled default. Guards caption edits and media-send captions.
@@ -99,17 +98,17 @@ pub struct MessagesState {
     /// request. The UI drains it into the status note — previously the
     /// error fell into the `_ => {}` swallower and the user saw
     /// "transcription requested" followed by silence.
-    pub recognize_speech_error: Option<String>,
+    pub recognize_speech_error: Notes,
     /// M1 fix-up: one-shot; set when a `resendMessages` request errors.
     /// The UI drains it into the status note — previously the error fell
     /// into the `_ => {}` swallower and the user saw "retrying send…"
     /// followed by silence.
-    pub resend_error: Option<String>,
-    pub send_permission_error: Option<String>,
+    pub resend_error: Notes,
+    pub send_permission_error: Notes,
     /// Q1: one-shot; "Too many attempts. Try again in N seconds." after a
     /// user action (send, edit, join, ...) hit a rate limit. The UI drains
     /// it into the status note; the composer text is left untouched.
-    pub flood_notice: Option<String>,
+    pub flood_notice: Notes,
     /// M1: `getChatScheduledMessages` results — scheduled sends, with
     /// `scheduling_state` showing the planned send time. Rows of every chat
     /// asked for: read one chat's through `Session::scheduled_in`.
@@ -189,19 +188,19 @@ impl MessagesState {
         Self {
             mention_search: None,
             rows_on_screen: None,
-            message_menu_actions: None,
+            menu_actions: MenuActions::default(),
             reaction_undo: Default::default(),
             poll_option_menu: None,
             message_report: None,
             message_audience: None,
             wanted_reactor_tab: None,
-            message_action_note: None,
+            message_action_note: Notes::default(),
             message_link_result: None,
             message_link_public: false,
-            message_link_error: None,
+            message_link_error: Notes::default(),
             ai_composer_text: None,
             ai_composer_blocks: None,
-            ai_error: None,
+            ai_error: Notes::default(),
             message_caption_length_max: 1024,
             paid_media_star_max: crate::composer::PAID_MEDIA_MAX_STARS,
             message_text_length_max: 4096,
@@ -211,10 +210,10 @@ impl MessagesState {
             instant_view_urls: HashMap::new(),
             composer_previews: Default::default(),
             composer_preview_urls: HashMap::new(),
-            recognize_speech_error: None,
-            resend_error: None,
-            send_permission_error: None,
-            flood_notice: None,
+            recognize_speech_error: Notes::default(),
+            resend_error: Notes::default(),
+            send_permission_error: Notes::default(),
+            flood_notice: Notes::default(),
             scheduled_messages: Vec::new(),
             reply_targets: HashMap::new(),
             composer_reply_fetch: HashMap::new(),

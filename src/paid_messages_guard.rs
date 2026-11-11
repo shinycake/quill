@@ -21,11 +21,12 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 /// Requests that create messages, and where their messages are counted.
-const SENDING: [&str; 4] = [
+const SENDING: [&str; 5] = [
     "sendMessage",
     "sendMessageAlbum",
     "forwardMessages",
     "sendInlineQueryResultMessage",
+    "resendMessages",
 ];
 
 /// A request waiting for the user to confirm paying.
@@ -86,6 +87,11 @@ fn set_paid(request: &mut Value, total: i64) {
     let Some(map) = request.as_object_mut() else {
         return;
     };
+    // `resendMessages` carries the price at the top, not in `options`.
+    if map.get("@type").and_then(Value::as_str) == Some("resendMessages") {
+        map.insert("paid_message_star_count".into(), total.into());
+        return;
+    }
     let options = map.entry("options").or_insert(Value::Null);
     if !options.is_object() {
         *options = serde_json::json!({"@type": "messageSendOptions"});
@@ -103,7 +109,7 @@ fn sending(request: &Value) -> Option<(i64, i64)> {
     let chat_id = request.get("chat_id")?.as_i64()?;
     let count = match kind {
         "sendMessageAlbum" => request.get("input_message_contents")?.as_array()?.len(),
-        "forwardMessages" => request.get("message_ids")?.as_array()?.len(),
+        "forwardMessages" | "resendMessages" => request.get("message_ids")?.as_array()?.len(),
         _ => 1,
     };
     Some((chat_id, count.max(1) as i64))
@@ -123,7 +129,10 @@ impl PaidGuard {
     /// confirmation.
     pub fn screen(&self, request: &str) -> Option<String> {
         // Cheap test first: most requests are not sends.
-        if !request.contains("\"@type\":\"send") && !request.contains("\"@type\":\"forwardM") {
+        if !request.contains("\"@type\":\"send")
+            && !request.contains("\"@type\":\"forwardM")
+            && !request.contains("\"@type\":\"resendM")
+        {
             return Some(request.to_string());
         }
         let Ok(mut value) = serde_json::from_str::<Value>(request) else {
@@ -140,11 +149,14 @@ impl PaidGuard {
             return Some(request.to_string());
         }
         let total = price * messages;
-        let carried = value
-            .get("options")
-            .and_then(|o| o.get("paid_message_star_count"))
-            .and_then(Value::as_i64)
-            .unwrap_or(0);
+        let carried = match value.get("@type").and_then(Value::as_str) {
+            Some("resendMessages") => value.get("paid_message_star_count"),
+            _ => value
+                .get("options")
+                .and_then(|o| o.get("paid_message_star_count")),
+        }
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
         if carried == total || state.trusted.get(&chat_id).is_some_and(|t| *t >= price) {
             set_paid(&mut value, total);
             return Some(value.to_string());
@@ -221,6 +233,30 @@ mod tests {
         let held = g.take_held().expect("held");
         let v: Value = serde_json::from_str(&held.with_price()).unwrap();
         assert_eq!(v["options"]["paid_message_star_count"], 25);
+    }
+
+    /// A retry of a failed send in a paid chat is priced like the send:
+    /// held until the user agrees, and the total rides at the top of the
+    /// request.
+    #[test]
+    fn a_resend_goes_through_the_paid_guard() {
+        let resend = |chat: i64| {
+            json!({"@type":"resendMessages","@extra":"6","chat_id":chat,
+                "message_ids":[4,5],"quote":null,"paid_message_star_count":0})
+            .to_string()
+        };
+        let g = guard(10, None);
+        assert_eq!(g.screen(&resend(7)), None, "held for confirmation");
+        let held = g.take_held().expect("held");
+        assert_eq!((held.per_message, held.messages), (10, 2));
+        let sent: Value = serde_json::from_str(&held.with_price()).unwrap();
+        assert_eq!(sent["paid_message_star_count"], 20);
+        let g = guard(10, Some(10));
+        let sent: Value = serde_json::from_str(&g.screen(&resend(7)).unwrap()).unwrap();
+        assert_eq!(sent["paid_message_star_count"], 20);
+        // A free chat is untouched.
+        let free = resend(8);
+        assert_eq!(g.screen(&free), Some(free));
     }
 
     #[test]

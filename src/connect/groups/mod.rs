@@ -37,7 +37,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || !self.session.chat_can_set_sticker_set(chat_id) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.stickers.stickers.failed = false;
+        self.session.stickers.stickers.lists.installed.clear_error();
         self.session.stickers.emoji.failed = false;
         for (purpose, build) in [
             (

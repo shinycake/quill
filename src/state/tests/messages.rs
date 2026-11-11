@@ -164,6 +164,8 @@ fn resend_error_surfaces_instead_of_silence() {
     let err = session
         .messages
         .resend_error
+        .take_all()
+        .pop()
         .expect("resend error surfaced");
     assert!(err.contains("Could not retry the send"), "{err}");
 }
@@ -185,6 +187,8 @@ fn message_link_error_surfaces_instead_of_silence() {
     let err = session
         .messages
         .message_link_error
+        .take_all()
+        .pop()
         .expect("message link error surfaced");
     assert!(err.contains("Could not get message link"), "{err}");
 }
@@ -206,6 +210,8 @@ fn recognize_speech_error_surfaces_instead_of_silence() {
     let err = session
         .messages
         .recognize_speech_error
+        .take_all()
+        .pop()
         .expect("recognize speech error surfaced");
     assert!(err.contains("Could not transcribe this message"), "{err}");
 }

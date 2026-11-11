@@ -95,9 +95,9 @@ fn menu_properties_chain_the_viewer_and_reactor_lookups() {
     let actions = driver
         .session
         .messages
-        .message_menu_actions
-        .expect("properties")
-        .2;
+        .menu_actions
+        .get(ChatId(-100), MessageId(50))
+        .expect("properties");
     assert!(actions.can_report_chat && actions.can_get_viewers);
 
     answer(
@@ -405,7 +405,7 @@ fn admin_moderation_sends_each_checked_action() {
         r#"{"@type":"ok"}"#,
     );
     assert_eq!(
-        driver.session.messages.message_action_note.as_deref(),
+        driver.session.messages.message_action_note.last(),
         Some("messages deleted")
     );
     answer(
@@ -421,7 +421,7 @@ fn admin_moderation_sends_each_checked_action() {
             .session
             .messages
             .message_action_note
-            .as_deref()
+            .last()
             .is_some_and(|note| note.starts_with("could not report the spam"))
     );
 }
@@ -564,10 +564,11 @@ fn message_properties_carry_the_new_rights() {
             extra.0
         ),
     );
-    let (_, _, actions) = driver
+    let actions = driver
         .session
         .messages
-        .message_menu_actions
+        .menu_actions
+        .get(ChatId(7), MessageId(5))
         .expect("properties");
     assert!(actions.can_set_fact_check);
     assert!(actions.can_be_replied_in_another_chat);

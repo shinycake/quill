@@ -17,12 +17,35 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         purpose: RequestPurpose,
         chat_id: Option<ChatId>,
-        build: impl FnOnce(&str) -> String,
-    ) -> Result<RequestId, ConnectSendError> {
+        build: impl Fn(&str) -> String,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         self.quick_replies_ready()?;
+        // The same change is not sent twice while the first is on its way:
+        // a double click on Add must not create the message twice. The
+        // answer (or error) ends it.
+        let is_change = purpose == RequestPurpose::Settings(SettingsPurpose::MutateQuickReplies);
+        let probe = if is_change { build("") } else { String::new() };
+        if is_change {
+            let requests = &self.session.requests;
+            let state = &mut self.session.settings.quick_replies;
+            state
+                .changing
+                .retain(|request, _| requests.get(*request).is_some());
+            if state.changing.values().any(|sent| *sent == probe) {
+                return Ok(None);
+            }
+        }
         let extra = self.session.request(purpose, chat_id);
         let json = build(&extra.as_extra());
-        self.send_json_request(extra, &json)
+        let request = self.send_json_request(extra, &json)?;
+        if is_change {
+            self.session
+                .settings
+                .quick_replies
+                .changing
+                .insert(request, probe);
+        }
+        Ok(Some(request))
     }
 
     /// `loadQuickReplyShortcuts`, once per session unless a load failed.
@@ -156,16 +179,37 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         shortcut_id: i32,
     ) -> Result<(), ConnectSendError> {
+        // A shortcut being sent to a chat is not sent there again until its
+        // answer (or error) ends that request: a double tap would deliver
+        // every message twice.
+        let requests = &self.session.requests;
         let state = &mut self.session.settings.quick_replies;
+        state
+            .sending
+            .retain(|request, _| requests.get(*request).is_some());
+        if state
+            .sending
+            .values()
+            .any(|key| *key == (chat_id, shortcut_id))
+        {
+            return Ok(());
+        }
         state.next_sending_id = state.next_sending_id.wrapping_add(1).max(1);
         let sending_id = state.next_sending_id;
-        self.send_quick_reply_request(
+        let sent = self.send_quick_reply_request(
             // The `messages` answer is stored like an album send's, and a
             // refusal gets the same send-permission notice.
             RequestPurpose::SendMessageAlbum,
             Some(chat_id),
             |extra| qr::send_request(extra, chat_id.0, shortcut_id, sending_id),
-        )
-        .map(|_| ())
+        )?;
+        if let Some(request) = sent {
+            self.session
+                .settings
+                .quick_replies
+                .sending
+                .insert(request, (chat_id, shortcut_id));
+        }
+        Ok(())
     }
 }

@@ -6,7 +6,7 @@ use super::*;
 /// A request lost to logout is settled through those handlers so its busy
 /// marker clears, but nobody asked it to fail: its note would show while the
 /// account signs out, and again after the next login in this Session.
-pub(super) struct UserNotes([Option<String>; 12]);
+pub(super) struct UserNotes([Option<String>; 7], [Notes; 5]);
 
 impl Session {
     /// The account is going away (logout, close): no answer can land any
@@ -30,37 +30,39 @@ impl Session {
     }
 
     pub(super) fn take_user_notes(&self) -> UserNotes {
-        UserNotes([
-            self.chats_state.chat_action_error.clone(),
-            self.messages.message_action_note.clone(),
-            self.messages.message_link_error.clone(),
-            self.messages.resend_error.clone(),
-            self.messages.send_permission_error.clone(),
-            self.messages.flood_notice.clone(),
-            self.payments.note.clone(),
+        UserNotes(
+            [
+                self.chats_state.chat_action_error.clone(),
+                self.payments.note.clone(),
             self.users_state.contacts_notice.clone(),
             self.groups.invite_link_error.clone(),
             self.calls.group_call_error.clone(),
             self.calls.error.clone(),
-            self.settings.account_error.clone(),
-        ])
+                self.settings.account_error.clone(),
+            ],
+            [
+                self.messages.message_action_note.clone(),
+                self.messages.message_link_error.clone(),
+                self.messages.resend_error.clone(),
+                self.messages.send_permission_error.clone(),
+                self.messages.flood_notice.clone(),
+            ],
+        )
     }
 
     pub(super) fn restore_user_notes(&mut self, notes: UserNotes) {
-        let [
-            chat_action,
-            message_action,
-            message_link,
-            resend,
-            send_permission,
-            flood,
-            payments,
-            contacts,
-            invite_link,
-            group_call,
-            calls,
-            account,
-        ] = notes.0;
+        let UserNotes(
+            [
+                chat_action,
+                payments,
+                contacts,
+                invite_link,
+                group_call,
+                calls,
+                account,
+            ],
+            [message_action, message_link, resend, send_permission, flood],
+        ) = notes;
         self.chats_state.chat_action_error = chat_action;
         self.messages.message_action_note = message_action;
         self.messages.message_link_error = message_link;

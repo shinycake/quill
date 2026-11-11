@@ -239,6 +239,7 @@ mod bot_stream_demo;
 mod bot_verify_dialog;
 mod bot_verify_icon;
 mod bots;
+mod bots_box_send;
 mod bots_extras;
 mod bubble_header;
 mod business;

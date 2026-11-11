@@ -149,6 +149,7 @@ mod suggested_posts;
 mod support;
 mod sweep_s3;
 mod sweep_s3_payments_1;
+mod sweep_s3_messages_1;
 mod threads;
 mod ton_wallet;
 mod ton_wallet_own;

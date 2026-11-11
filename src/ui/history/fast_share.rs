@@ -54,9 +54,9 @@ pub(super) fn facts(message: &HistoryMessage, session: Option<&Session>) -> Opti
     };
     let properties_forwardable = session
         .messages
-        .message_menu_actions
-        .filter(|(chat, id, _)| *chat == message.chat_id && *id == message.id)
-        .is_none_or(|(_, _, actions)| actions.can_be_forwarded);
+        .menu_actions
+        .get(message.chat_id, message.id)
+        .is_none_or(|actions| actions.can_be_forwarded);
     Some(FastShareFacts {
         chat,
         sent: !message.pending() && message.id.0 > 0,

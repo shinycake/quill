@@ -386,8 +386,9 @@ impl QuillApp {
         // message allows it (`messageProperties.can_delete_reactions`).
         let can_delete_reactions = session
             .messages
-            .message_menu_actions
-            .is_some_and(|(c, m, a)| c == chat_id && m == message_id && a.can_delete_reactions);
+            .menu_actions
+            .get(chat_id, message_id)
+            .is_some_and(|a| a.can_delete_reactions);
         let items = &self.frame.menu.items;
         let person = |ix: u64,
                       sender: MessageSender,

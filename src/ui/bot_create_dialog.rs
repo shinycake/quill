@@ -224,7 +224,16 @@ impl QuillApp {
     }
 
     fn close_bot_create(&mut self, cx: &mut Context<Self>) {
+        // While "Creating..." the box may close: the bot is created on the
+        // server all the same, and `poll_bot_create` reports the answer
+        // (toast, chat, share) whether or not the box is still there.
+        let creating = self
+            .dialogs
+            .bot_create_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.submitted);
         if self.dialogs.bot_create_dialog.take().is_some()
+            && !creating
             && let Some(live) = self.live.as_mut()
         {
             live.driver.reset_create_bot();
@@ -243,6 +252,7 @@ impl QuillApp {
         let typed = dialog.username.read(cx).value().to_string();
         let manager_id = dialog.manager_id;
         let via_link = dialog.via_link;
+        let share = dialog.share;
         if name.is_empty()
             || name.chars().count() > NAME_MAX
             || owned_bots::username_problem(&typed).is_some()
@@ -276,8 +286,9 @@ impl QuillApp {
                 cx.background_executor()
                     .timer(Duration::from_millis(150))
                     .await;
-                let Ok(done) = this.update(cx, |this, cx| this.poll_bot_create(&name, &full, cx))
-                else {
+                let Ok(done) = this.update(cx, |this, cx| {
+                    this.poll_bot_create(&name, &full, manager_id, share, cx)
+                }) else {
                     break;
                 };
                 if done {
@@ -289,36 +300,30 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Watch the `createBot` answer; `true` when it is settled.
+    /// Watch the `createBot` answer; `true` when it is settled. The box
+    /// may have been closed meanwhile: the answer is reported all the same.
     pub(super) fn poll_bot_create(
         &mut self,
         name: &str,
         full: &str,
+        manager_id: i64,
+        share: Option<ManagedBotShare>,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.dialogs.bot_create_dialog.is_none() {
-            return true;
-        }
         let Some(create) = self.session().map(|s| s.bots.owned.create.clone()) else {
             return true;
         };
         if let Some(new_bot_id) = create.created {
-            let share = self
-                .dialogs
-                .bot_create_dialog
-                .as_ref()
-                .and_then(|d| d.share);
-            let manager_id = self
-                .dialogs
-                .bot_create_dialog
-                .as_ref()
-                .map(|d| d.manager_id);
-            let manager = manager_id
-                .and_then(|id| self.session().and_then(|s| s.user(id)))
+            let manager = self
+                .session()
+                .and_then(|s| s.user(manager_id))
                 .map(|u| u.first_name.clone())
                 .unwrap_or_default();
             // The shell closes the kit dialog with its flag, in whichever
-            // window hosts it.
+            // window hosts it. The answer is in: the dialog may go.
+            if let Some(dialog) = self.dialogs.bot_create_dialog.as_mut() {
+                dialog.submitted = false;
+            }
             self.close_bot_create(cx);
             // tdesktop reports the new bot to the requesting bot.
             if let (Some(share), Some(live)) = (share, self.live.as_mut()) {
@@ -344,9 +349,13 @@ impl QuillApp {
             return true;
         }
         if create.creating.is_none() {
-            // Failed: the dialog shows the reason and takes another try.
+            // Failed: the dialog shows the reason and takes another try; a
+            // closed box has nowhere to show it, so it is a toast. No error
+            // means the state was reset for another box: nothing to report.
             if let Some(dialog) = self.dialogs.bot_create_dialog.as_mut() {
                 dialog.submitted = false;
+            } else if let Some(error) = create.error {
+                self.set_note(StatusNote::error(error));
             }
             cx.notify();
             return true;
@@ -485,6 +494,7 @@ impl QuillApp {
                     Button::new("bot-create-cancel")
                         .label(tr(keys::CANCEL))
                         .ghost()
+                        .disabled(submitted)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_bot_create(cx);
                             this.close_kit_dialog_if_done(DialogKind::BotCreate, window, cx);

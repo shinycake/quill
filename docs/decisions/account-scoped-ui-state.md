@@ -5291,3 +5291,95 @@ land and the typed form was gone.
 - **Skipped.** 08-072: `set_pinned_chat_order` already refuses an order
   whose id set differs from the current pinned set
   (`cl2_set_pinned_chat_order_id_mismatch_is_noop`).
+### Sweep fixes (s3-messages-1)
+
+- **The sticker panel has a stage per list and one for the set.**
+  `StickerPanel::failed`, `loading_sets`, `loading_set`, `set_request`,
+  `failed_set_id` and `loaded_set_id` are gone. `StickerPanel::lists` holds one
+  `Fetch<()>` per tab (installed, recent, favorites, trending, archived,
+  search): begun when the request goes out, ended by its answer in
+  `apply_stickers_payload` or its error in `apply_stickers_error`, so one
+  tab's failure no longer shows on another and a started request no longer
+  clears an earlier failure (02-225). A failed change (favorite add or remove,
+  clear recent, reorder, set install or removal) is a `creator_note` toast, not
+  a list failure (05-137). `StickerPanel::set` is `StickerSetStage` (`Idle`,
+  `Loading { set_id, request }`, `Ready`, `Failed`): an answer or error applies
+  only to the request the panel waits for, choosing another set asks for it at
+  once instead of waiting for the first answer, and a failed set is asked again
+  when the panel opens again (05-266). `refresh_stale_panels` clears each stale
+  flag only after its refetch went out, so a locked window or a refused send
+  keeps the rest (02-223). The category strip is `Fetch<Vec<EmojiCategory>>`
+  (`Failed` on an error answer, cleared when the panel opens again, never asked
+  again from a render) (02-220). A refused manager step is reported by the
+  manager's own failure note (`StickersManager::failure`), not a second
+  `creator_note` (02-221; the merge kept that design).
+- **Status choices stop with their panel.** `PickerUi`'s farewell (kept
+  from the earlier sweep at merge time) closes the GIF gate and the status
+  choices (03-033; 02-052 is the same bug: the chat look box's
+  `chat_status_open` is already closed by `DialogUi`'s farewell).
+- **Lookups that may pass are asked again.** `MessageEffects::lookups` holds
+  each effect as `Loading`, `Gone` or `Waiting { until }`: only 400 and 404 are
+  terminal, every other error and a refused send wait 5 s, doubling to 5 min,
+  and an ask whose request is gone is asked again (03-091, 03-092).
+  `ReplyTarget::Retry { until }` does the same for `getRepliedMessage`: the
+  strip keeps "Loading…" instead of "Deleted message" (05-258).
+- **AI answers are matched to their ask.** At merge time the earlier
+  sweep's design stayed: the asking window takes the answer and
+  `ChatUi::ai_ask` holds the asked markup, so the answer applies only while
+  the composer still shows it, else a note says the draft changed (02-146,
+  05-106). `AiComposer` and `note_ai_ask` were dropped.
+- **Notes queue.** `Notes` (state/domains/messages/notes.rs) replaces the seven
+  `Option<String>` one-shot slots; the drains show every note, oldest first
+  (05-103).
+- **Answers match what asked.** The Report flow keeps the request in
+  `Checking(request)` and `Sending(request)`; an answer or error of a
+  closed flow's request changes nothing (05-236). `MenuActions` keeps
+  `getMessageProperties` answers by (chat, message), so a gallery row's ask no
+  longer overwrites the menu's; a failed ask hides the gated rows, and the
+  reducer refreshes a ticked gallery row from each answer (05-104). A
+  failed `getSharingProtection` opens the "Send Request?" box instead of
+  turning protection off (05-105; tdesktop's source was not at hand, so this is
+  the safe choice, and `noforwards-requests.md` says so). A START parameter
+  leaves `bot_start_params` when TDLib answers the start message, so a refusal
+  keeps it (08-026).
+- **Forced replies per chat.** Kept at merge time: `pending_force_replies`
+  holds one target per chat and `arm_force_reply_here` arms the window's own
+  chat; a target no window shows waits until one does, then arms and
+  dismisses its standalone keyboard (05-215). `ForceReplies` was dropped.
+- **Failed sends are not forgotten.** A draft save that cannot be sent is kept
+  as the pending draft for the next flush, typing or chat leave (02-026). A
+  caption chosen for a pending upload keeps the caption it replaced, puts it
+  back with a note when the edit cannot be sent, and goes with its message
+  when that leaves the history (02-145). The bot editor drops its half-started
+  state when the second load cannot be sent (02-164). A pasted image goes into
+  a folder of the private work root (`quill-send-photos`, swept, removed at
+  exit), made new with mode 0600 (02-004). The same quick-reply change or send
+  is not sent twice while the first is on its way (02-190). `stop_poll` uses
+  `loaded_message` like the other poll calls (02-195). `resendMessages` goes
+  through the paid guard (07-002). `createForumTopic` also lets the chat list
+  row ask for its topics again (05-169). A failed game button press is noted
+  (05-036).
+- **Boxes close on the answer.** The Add-bot and Share-game boxes stay in
+  `BoxSend::Sending { request }` and close on the answer (`Session::acks`,
+  settled in `apply`); an administrator's start payload goes after the promotion's
+  answer; an error leaves the box open with the reason (08-011). A send belongs
+  to the box that made it: closing the box (`close_profile_dialog`) forgets the
+  send (`RequestAcks::forget`), and an answer, or the confirm button's disabled
+  state, applies only while the open box has the same kind and chat, so the next
+  box for another chat is neither held nor closed by it. The Create Bot dialog
+  can be closed while "Creating…" (the state is not reset then); `poll_bot_create`
+  carries the manager and share it needs, so the answer still toasts, opens the
+  chat and shares when the box is gone, and a failure toasts its reason
+  (08-021). The sticker panel and the manager read loading from
+  `StickerPanel::lists`, not `requests.has_purpose`; the lists' data stay in
+  their own vectors (moving six differently shaped vectors inside the `Fetch`
+  was not cheap). The two English strings left in the answers ("could not
+  change the caption", "Could not load sticker categories") are lang keys. The
+  Send To switch is `SendToMenu` (`Unread`, `Reading`, `Known`,
+  `Applying { want, queued }`): the shell is read once off the UI thread and a
+  click during a write waits, so the last click decides (04-087).
+- **Tests.** `connect/tests/sweep_s3_messages_1.rs` (a sender that refuses
+  sends), `ai_tools`, `message_menu`, `quick_replies`, `private_sharing`,
+  `deferred_caption`, the effect and reply-target units, `paid_messages_guard`,
+  `notes` and `send_to_menu_section`. None waits on time: waits
+  are compared against explicit instants.

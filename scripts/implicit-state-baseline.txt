@@ -60,7 +60,6 @@ EmojiBarUi::sets_asked
 EmojiPanel::failed
 EmojiPanel::installed_loaded
 EmojiPanel::mutation_failed
-EmojiPanel::sticker_categories_asked
 EmojiStyleUi::started
 EmojiStyleUi::started+file_error
 FastShareFacts::sent
@@ -222,11 +221,8 @@ StarPacksState::loading+error
 State::started
 StealthFacts::requested
 Step::started
-StickerPanel::failed
 StickerPanel::greeting_loaded
 StickerPanel::installed_loaded
-StickerPanel::loading_set
-StickerPanel::loading_sets
 StickerPanel::suggest_waiting_for_sets
 StickerSetView::files_requested
 StorageScroll::pending

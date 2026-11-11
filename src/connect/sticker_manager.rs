@@ -151,12 +151,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                 // Nothing went out (the same change was already pending):
                 // go on with the next step.
                 Ok(None) => continue,
+                // Only the step that did not go out is lost (`next_step` took
+                // it off its commit), as with a refused answer; the saved
+                // changes behind it stay queued and go out with the next
+                // answer. The failure is reported once (`manager.failure`).
                 Err(err) => {
-                    // The step could not go out: the rest of it is lost,
-                    // and the caller says so (`pump_sticker_manager`,
-                    // `commit_sticker_manager`).
                     self.session.stickers.manager.note_send_failure();
-                    self.session.stickers.manager.commits.clear();
                     Err(err)
                 }
             };

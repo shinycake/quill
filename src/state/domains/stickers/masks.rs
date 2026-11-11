@@ -133,7 +133,7 @@ impl Session {
         {
             self.stickers.masks.failed = true;
             if let Some(pending) = pending {
-                self.stickers.manager.note_commit_failure(pending.id);
+                let _ = self.stickers.manager.note_commit_failure(pending.id);
             }
         }
     }

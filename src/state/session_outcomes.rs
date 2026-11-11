@@ -22,14 +22,14 @@ impl Session {
         }
         let messages = &mut self.messages;
         messages.message_link_result = None;
-        messages.message_link_error = None;
+        messages.message_link_error.clear();
         messages.last_forward = None;
-        messages.recognize_speech_error = None;
-        messages.ai_error = None;
-        messages.resend_error = None;
-        messages.message_action_note = None;
-        messages.send_permission_error = None;
-        messages.flood_notice = None;
+        messages.recognize_speech_error.clear();
+        messages.ai_error.clear();
+        messages.resend_error.clear();
+        messages.message_action_note.clear();
+        messages.send_permission_error.clear();
+        messages.flood_notice.clear();
         self.groups.community_error = None;
         self.groups.invite_link_error = None;
         self.chats_state.chat_action_error = None;

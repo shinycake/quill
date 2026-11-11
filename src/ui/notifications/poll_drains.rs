@@ -64,10 +64,11 @@ impl QuillApp {
         // `messageProperties.can_get_link` (or a failed `getMessageLink`)
         // and a failed `resendMessages` surface here instead of silently
         // doing nothing.
-        if let Some(err) = self
+        for err in self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.messages.message_link_error.take())
+            .map(|live| live.driver.session.messages.message_link_error.take_all())
+            .unwrap_or_default()
         {
             self.set_note(StatusNote::error(err));
             progressed = true;
@@ -116,10 +117,17 @@ impl QuillApp {
         // MED2 fix-up: a refused `recognizeSpeech` surfaces in the status
         // note instead of silently doing nothing after
         // "transcription requested".
-        if let Some(err) = self
+        for err in self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.messages.recognize_speech_error.take())
+            .map(|live| {
+                live.driver
+                    .session
+                    .messages
+                    .recognize_speech_error
+                    .take_all()
+            })
+            .unwrap_or_default()
         {
             self.set_note(StatusNote::error(err));
             progressed = true;
@@ -127,18 +135,20 @@ impl QuillApp {
         // Slice msg-richtext-ai-tools: a failed AI request surfaces in
         // the status note instead of silently doing nothing after "AI
         // working…".
-        if let Some(err) = self
+        for err in self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.messages.ai_error.take())
+            .map(|live| live.driver.session.messages.ai_error.take_all())
+            .unwrap_or_default()
         {
             self.set_note(StatusNote::error(err));
             progressed = true;
         }
-        if let Some(err) = self
+        for err in self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.messages.resend_error.take())
+            .map(|live| live.driver.session.messages.resend_error.take_all())
+            .unwrap_or_default()
         {
             self.set_note(StatusNote::error(err));
             progressed = true;
@@ -166,10 +176,11 @@ impl QuillApp {
         }
         // Ban / delete-all / report-spam from the delete box, and "Save to
         // Profile": their outcome lands in the status note.
-        if let Some(note) = self
+        for note in self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.messages.message_action_note.take())
+            .map(|live| live.driver.session.messages.message_action_note.take_all())
+            .unwrap_or_default()
         {
             self.set_note(StatusNote::info(note));
             progressed = true;
@@ -294,18 +305,26 @@ impl QuillApp {
             self.set_note(StatusNote::info(note));
             progressed = true;
         }
-        if let Some(notice) = self
+        for notice in self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.messages.send_permission_error.take())
+            .map(|live| {
+                live.driver
+                    .session
+                    .messages
+                    .send_permission_error
+                    .take_all()
+            })
+            .unwrap_or_default()
         {
             self.set_note(StatusNote::error(notice));
             progressed = true;
         }
-        if let Some(notice) = self
+        for notice in self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.messages.flood_notice.take())
+            .map(|live| live.driver.session.messages.flood_notice.take_all())
+            .unwrap_or_default()
         {
             self.set_note(StatusNote::error(notice));
             progressed = true;

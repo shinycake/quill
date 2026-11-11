@@ -48,12 +48,15 @@ pub struct CommitFailure {
 impl StickersManager {
     /// The request `failed` was answered with an error: it is a failure of
     /// the oldest saved change only when it was that change's own step.
-    pub fn note_commit_failure(&mut self, failed: RequestId) {
+    /// True when it was (the failure is then reported by the manager).
+    pub fn note_commit_failure(&mut self, failed: RequestId) -> bool {
         if let Some(front) = self.commits.front()
             && front.sent == Some(failed)
         {
             self.failure = Some(CommitFailure { masks: front.masks });
+            return true;
         }
+        false
     }
 
     /// A step of the oldest saved change could not go out at all.

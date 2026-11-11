@@ -148,7 +148,12 @@ impl Session {
                 },
             );
         }
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCallbackQueryAnswer) {
+        if matches!(
+            pending.map(|p| p.purpose),
+            Some(
+                RequestPurpose::GetCallbackQueryAnswer | RequestPurpose::GetCallbackQueryAnswerGame
+            )
+        ) {
             // TDLib returns error 502 when the bot misses the query
             // timeout: surface it as an answer note (no TDLib text is
             // echoed) so the press gets visible feedback.

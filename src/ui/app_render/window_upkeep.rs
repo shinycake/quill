@@ -60,6 +60,8 @@ impl QuillApp {
         // Words with emoji: picked again when the text, caret or answers move.
         self.sync_emoji_words(cx);
         self.apply_ai_composer_answer(window, cx);
+        // The Add-bot and Share-game boxes close on their request's answer.
+        self.pump_box_send(window, cx);
         // The AI compose box and the apply-in-place shortcut opened over
         // this window's composer: their answers and toasts.
         self.ai_compose_window_upkeep(window, cx);

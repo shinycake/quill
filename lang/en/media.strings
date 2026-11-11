@@ -261,6 +261,7 @@
 "qll_media_could_not_add_the_tasks" = "Couldn't add the tasks";
 "qll_media_could_not_archive_the_sticker" = "Couldn't archive the sticker set";
 "qll_media_could_not_change_the_bot" = "Couldn't change the bot";
+"qll_media_could_not_change_the_caption" = "Couldn't change the caption";
 "qll_media_could_not_change_the_profile" = "Could not change the profile post";
 "qll_media_could_not_change_the_sticker" = "Couldn't change the sticker set";
 "qll_media_could_not_change_the_stories" = "Could not change the stories list";
@@ -281,6 +282,7 @@
 "qll_media_could_not_load_more_voters" = "Couldn't load more voters";
 "qll_media_could_not_load_poll_stats" = "Couldn't load poll stats";
 "qll_media_could_not_load_public_shares" = "Couldn't load public shares";
+"qll_media_could_not_load_sticker_categories" = "Couldn't load sticker categories. Retry the action.";
 "qll_media_could_not_load_sticker_suggestions" = "Couldn't load sticker suggestions";
 "qll_media_could_not_load_sticker_tab" = "Couldn't load sticker tab";
 "qll_media_could_not_load_story_reactions" = "Couldn't load story reactions";

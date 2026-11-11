@@ -142,7 +142,7 @@ fn account_loss_resets_the_loading_flags_of_pending_lookups() {
 #[test]
 fn logout_does_not_leave_failure_notes_of_dropped_user_actions() {
     let mut session = ready_session();
-    session.messages.message_action_note = Some("earlier note".into());
+    session.messages.message_action_note.push("earlier note".into());
     session.request(RequestPurpose::SetChatMessageSender, Some(ChatId(5)));
     session.request(RequestPurpose::SendMessage, Some(ChatId(5)));
 
@@ -150,11 +150,11 @@ fn logout_does_not_leave_failure_notes_of_dropped_user_actions() {
 
     assert!(session.requests.is_empty());
     assert_eq!(
-        session.messages.message_action_note.as_deref(),
+        session.messages.message_action_note.last(),
         Some("earlier note"),
         "no 'could not change the sender' note from the dropped request"
     );
-    assert!(session.messages.flood_notice.is_none());
+    assert!(session.messages.flood_notice.is_empty());
 }
 
 /// A request lost to its TTL is the user's to hear about; only logout is
@@ -165,5 +165,5 @@ fn a_swept_user_action_still_says_it_failed() {
     let id = session.request(RequestPurpose::SetChatMessageSender, Some(ChatId(5)));
     let pending = session.requests.take(id).expect("registered");
     session.settle_lost_request(pending);
-    assert!(session.messages.message_action_note.is_some());
+    assert!(!session.messages.message_action_note.is_empty());
 }

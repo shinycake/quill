@@ -28,6 +28,7 @@ impl QuillApp {
             .stickers
             .emoji
             .sticker_categories
+            .data()?
             .get(index)?;
         Some(match &category.source {
             EmojiCategorySource::Premium if category.name.is_empty() => {
@@ -64,6 +65,7 @@ impl QuillApp {
             .stickers
             .emoji
             .sticker_categories
+            .data()?
             .get(index)?;
         Some(StickerSearch::Category(category.source.clone()))
     }
@@ -80,10 +82,10 @@ impl QuillApp {
     /// until the categories are known. Asks for them (once) and for their
     /// icons.
     pub(super) fn sticker_category_strip(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let asked = self
+        let idle = self
             .session()
-            .is_some_and(|s| s.stickers.emoji.sticker_categories_asked);
-        if !asked && self.live.is_some() {
+            .is_some_and(|s| s.stickers.emoji.sticker_categories.is_idle());
+        if idle && self.live.is_some() {
             self.defer_screen(cx, move |this, _| {
                 if let Some(live) = this.live.as_mut() {
                     let _ = live.driver.fetch_sticker_categories();
@@ -91,7 +93,7 @@ impl QuillApp {
             });
         }
         let session = self.session()?;
-        let categories = &session.stickers.emoji.sticker_categories;
+        let categories = session.stickers.emoji.sticker_categories.data()?;
         if categories.is_empty() {
             return None;
         }
