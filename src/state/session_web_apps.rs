@@ -163,7 +163,7 @@ impl Session {
             Some(RequestPurpose::Bots(BotsPurpose::ToggleBotEmojiStatusAccess { .. })) => {
                 self.bots.web_apps.emoji_access = pending.map(|p| EmojiAccessAnswer {
                     request: p.id,
-                    done: true,
+                    result: EmojiAccessResult::Granted,
                 });
             }
             Some(RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu {
@@ -249,7 +249,7 @@ impl Session {
                 }
                 self.bots.web_apps.emoji_access = Some(EmojiAccessAnswer {
                     request: p.id,
-                    done: false,
+                    result: EmojiAccessResult::Refused,
                 });
             }
             RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot { .. }) => {

@@ -73,7 +73,14 @@ pub enum WriteAccessResult {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EmojiAccessAnswer {
     pub request: crate::ids::RequestId,
-    pub done: bool,
+    pub result: EmojiAccessResult,
+}
+
+/// What `toggleBotCanManageEmojiStatus` came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmojiAccessResult {
+    Granted,
+    Refused,
 }
 
 /// The outcome of one contact-card send for a mini app's phone request.

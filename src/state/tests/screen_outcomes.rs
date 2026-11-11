@@ -67,7 +67,7 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
         });
     session.bots.web_apps.emoji_access = Some(crate::state::EmojiAccessAnswer {
         request: crate::ids::RequestId(5),
-        done: true,
+        result: crate::state::EmojiAccessResult::Granted,
     });
     session
         .bots

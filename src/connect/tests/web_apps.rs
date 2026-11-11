@@ -313,7 +313,7 @@ fn emoji_status_access_follows_the_switch_and_comes_back_on_failure() {
         h.driver.session.bots.web_apps.emoji_access,
         Some(crate::state::EmojiAccessAnswer {
             request: extra,
-            done: false
+            result: crate::state::EmojiAccessResult::Refused
         })
     );
 
@@ -330,7 +330,7 @@ fn emoji_status_access_follows_the_switch_and_comes_back_on_failure() {
         h.driver.session.bots.web_apps.emoji_access,
         Some(crate::state::EmojiAccessAnswer {
             request: extra,
-            done: true
+            result: crate::state::EmojiAccessResult::Granted
         })
     );
 }

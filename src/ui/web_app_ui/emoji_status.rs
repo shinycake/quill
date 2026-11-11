@@ -270,7 +270,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.bots.web_apps.emoji_access.take());
         if let Some(answer) = access {
-            let done = answer.done;
+            let done = answer.result == quill::state::EmojiAccessResult::Granted;
             let waiting =
                 self.mini_apps.window.as_ref().is_some_and(|window| {
                     window.emoji.access == AccessStage::Granting(answer.request)
