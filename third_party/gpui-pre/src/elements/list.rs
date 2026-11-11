@@ -800,6 +800,29 @@ impl ListState {
         Some((above.max(Pixels::ZERO), below.max(Pixels::ZERO), viewport))
     }
 
+    /// Quill: the height of each item in `range` (clamped to the list),
+    /// measured items at their height and the others at the mean height of
+    /// the measured ones. `None` while no item is measured.
+    pub fn estimated_item_heights(&self, range: Range<usize>) -> Option<Vec<Pixels>> {
+        let state = self.0.borrow();
+        let total = state.items.summary();
+        if total.rendered_count == 0 {
+            return None;
+        }
+        let mean = total.height / total.rendered_count as f32;
+        let end = range.end.min(total.count);
+        let start = range.start.min(end);
+        Some(
+            state
+                .items
+                .iter()
+                .skip(start)
+                .take(end - start)
+                .map(|item| item.size().map_or(mean, |size| size.height))
+                .collect(),
+        )
+    }
+
     /// Returns the current scroll offset adjusted for the scrollbar.
     ///
     /// The returned offset has a negative `y` component representing
