@@ -228,7 +228,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         "ttl-picker",
         |app| app.notify.ttl_picker.is_some(),
         |app, _, cx| {
-            app.notify.ttl_picker = None;
+            app.close_ttl_picker();
             cx.notify();
         }
     ),

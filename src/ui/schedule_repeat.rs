@@ -25,7 +25,7 @@ impl QuillApp {
     /// Whether the picker for `target` offers a repeat period.
     pub(super) fn repeat_offered(&self, target: ScheduleTarget) -> bool {
         match target {
-            ScheduleTarget::Composer => true,
+            ScheduleTarget::Composer | ScheduleTarget::ComposerThenSend { .. } => true,
             ScheduleTarget::Share => self.forward_draft().is_some_and(|draft| draft.count() == 1),
             ScheduleTarget::Reschedule(_) | ScheduleTarget::RescheduleSelected => false,
         }

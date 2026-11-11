@@ -230,8 +230,9 @@ impl Render for ChatWindowView {
             let capture_blocked = app.capture_block_wanted();
             (body, app.autoscroll_layer(cx), capture_blocked)
         });
-        if capture_blocked != self.capture_blocked {
-            super::super::capture_block::apply_sharing(window, capture_blocked);
+        if capture_blocked != self.capture_blocked
+            && super::super::capture_block::apply_sharing(window, capture_blocked)
+        {
             self.capture_blocked = capture_blocked;
         }
         let disk_bar = app.update(cx, |app, cx| {

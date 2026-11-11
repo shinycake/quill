@@ -23,12 +23,11 @@ use quill::chat_appearance::{
     FeatureLevels, name_color_level, profile_color_level,
 };
 use quill::ids::{ChatId, RequestId};
+use quill::state::RequestPurpose;
 use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::peer_color::{name_swatches, profile_swatches};
 use quill::telegram::envelope::ChatKind;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// The open box: the chat, the tab and the draft the swatches edit.
 pub(crate) struct ChatAppearanceDialog {
@@ -39,9 +38,10 @@ pub(crate) struct ChatAppearanceDialog {
 }
 
 /// Where Apply stands. Each request of the plan answers under its own id
-/// (`ChatsState::appearance_answers`); editing the draft, closing the box
-/// or the account going away ends the stage, and a late answer finds
-/// nothing to match.
+/// (`ChatsState::appearance_answers`). While `Applying` the draft is
+/// locked (`edit_chat_appearance` refuses); closing the box or the account
+/// going away ends the stage, and a late refusal is shown as a note by
+/// `drain_chat_appearance`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum AppearanceStage {
     Editing,
@@ -107,6 +107,61 @@ impl QuillApp {
             .chat_boost_status
             .get(&chat_id.0)
             .map(|(level, _)| *level)
+    }
+
+    /// The level line: the level, "checking" while the status request is
+    /// out, or "unavailable" with Retry once it ended without an answer.
+    fn chat_appearance_level_line(
+        &self,
+        chat_id: ChatId,
+        level: Option<i32>,
+        group_word: &str,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let line = div().flex().items_center().gap_2().text_sm();
+        let muted = cx.theme().muted_foreground;
+        if let Some(level) = level {
+            return line.text_color(muted).child(tr_with(
+                keys::Q_MISC_THIS_IS_AT_BOOST_LEVEL,
+                &[("group_word", group_word), ("level", &level.to_string())],
+            ));
+        }
+        let asking = self.session().is_some_and(|session| {
+            session
+                .requests
+                .has_purpose_for_chat(RequestPurpose::GetChatBoostStatus, chat_id)
+        });
+        if asking {
+            return line.text_color(muted).child(tr_with(
+                keys::Q_MISC_CHECKING_THIS_S_BOOST_LEVEL,
+                &[("group_word", group_word)],
+            ));
+        }
+        line.child(
+            div()
+                .flex_1()
+                .text_color(muted)
+                .child(tr(keys::Q_MONEY_BOOST_STATUS_UNAVAILABLE)),
+        )
+        .child(
+            Button::new("chat-appearance-level-retry")
+                .label(tr(keys::Q_MONEY_RETRY))
+                .ghost()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.chat_appearance_retry_level(chat_id, cx);
+                })),
+        )
+    }
+
+    fn chat_appearance_retry_level(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && live.driver.fetch_chat_boost_status(chat_id).is_err()
+        {
+            self.set_note(StatusNote::error(tr(
+                keys::Q_PEOPLE_COULD_NOT_LOAD_BOOST_STATUS,
+            )));
+        }
+        cx.notify();
     }
 
     fn chat_appearance_features(&self, chat_id: ChatId, kind: ChatAppearanceKind) -> FeatureLevels {
@@ -187,7 +242,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
         edit: impl FnOnce(&mut ChatAppearanceDraft, ChatAppearanceTab),
     ) {
-        if let Some(dialog) = self.dialogs.chat_appearance_dialog.as_mut() {
+        if let Some(dialog) = self.dialogs.chat_appearance_dialog.as_mut()
+            && !matches!(dialog.stage, AppearanceStage::Applying { .. })
+        {
             let tab = dialog.tab;
             edit(&mut dialog.draft, tab);
             dialog.stage = AppearanceStage::Editing;
@@ -276,14 +333,11 @@ impl QuillApp {
     /// Poll-loop half of Apply: settle the stage with the answers to the
     /// requests it waits for. Answers for anything else are dropped.
     pub(super) fn drain_chat_appearance(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(AppearanceStage::Applying { waiting, failed }) = self
+        let stage = self
             .dialogs
             .chat_appearance_dialog
             .as_ref()
-            .map(|d| d.stage.clone())
-        else {
-            return false;
-        };
+            .map(|d| d.stage.clone());
         let Some(session) = self.session_mut() else {
             return false;
         };
@@ -291,6 +345,21 @@ impl QuillApp {
         if answers.is_empty() {
             return false;
         }
+        let Some(AppearanceStage::Applying { waiting, failed }) = stage else {
+            // The box was closed (or is not applying): nothing waits for
+            // these answers, but a refusal is still told.
+            let refused = answers
+                .take_all()
+                .into_iter()
+                .any(|(_, answer)| answer.is_err());
+            if refused {
+                self.set_note(StatusNote::error(
+                    tr(keys::Q_MISC_COULD_NOT_CHANGE_THE_APPEARANCE).to_string(),
+                ));
+                cx.notify();
+            }
+            return refused;
+        };
         let answered = answers.take_for(&waiting);
         if answered.is_empty() {
             return false;
@@ -370,16 +439,7 @@ impl QuillApp {
                         })),
                 );
             dialog
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::dialog_once_body::once_dialog_body(body))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -758,16 +818,7 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_3()
-            .child(div().text_sm().text_color(muted).child(match level {
-                Some(level) => tr_with(
-                    keys::Q_MISC_THIS_IS_AT_BOOST_LEVEL,
-                    &[("group_word", group_word), ("level", &level.to_string())],
-                ),
-                None => tr_with(
-                    keys::Q_MISC_CHECKING_THIS_S_BOOST_LEVEL,
-                    &[("group_word", group_word)],
-                ),
-            }))
+            .child(self.chat_appearance_level_line(chat_id, level, group_word, cx))
             .child(tabs)
             .child(preview)
             .child(swatches);

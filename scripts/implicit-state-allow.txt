@@ -8,3 +8,4 @@ ActiveGroupCall::loaded_all_participants+screen_share_error TDLib's groupCall.lo
 
 MiniAppWindow::closing_confirmation the mini app's own setting (`web_app_setup_closing_behavior`: ask before closing), set and cleared by the app; not a stage of anything Quill runs
 MediaFacts::in_saved_messages the message's chat is Saved Messages: a fact about where the message lives, read once when the menu opens, not a stage of anything
+ChatSwipeFacts::is_saved the chat is the user's own (Saved Messages), which cannot be muted: a fact about the chat read once per label, not a stage of anything

@@ -75,12 +75,24 @@ pub(super) fn scheduled_message_label(message: &ParsedMessage, kind: ScheduleKin
 pub(super) enum ScheduleTarget {
     /// The composer's next send.
     Composer,
+    /// The composer's text, sent as soon as the time is confirmed (the
+    /// "Schedule" shortcut; tdesktop's schedule box sends on Schedule),
+    /// carrying `effect` (the "Send with Effect" card's Schedule item;
+    /// zero for none).
+    ComposerThenSend { effect: i64 },
     /// An already scheduled message (`editMessageSchedulingState`).
     Reschedule(MessageId),
     /// Every message ticked in the scheduled-messages dialog.
     RescheduleSelected,
     /// The share box's destinations (`forwardMessages` scheduling state).
     Share,
+}
+
+impl ScheduleTarget {
+    /// The time goes to the composer's next send.
+    pub(super) fn is_composer(self) -> bool {
+        matches!(self, Self::Composer | Self::ComposerThenSend { .. })
+    }
 }
 
 /// The date+time picker popup (tdesktop's `ChooseDateTimeBox`).
@@ -90,12 +102,6 @@ pub(super) struct SchedulePicker {
     pub error: Option<&'static str>,
     /// The "Repeat" choice in seconds (zero: never), Premium only.
     pub repeat: i32,
-    /// Send the composer's message as soon as the time is confirmed (the
-    /// "Schedule" shortcut; tdesktop's schedule box sends on Schedule).
-    pub send_after: bool,
-    /// With `send_after`: the effect that send carries (the "Send with
-    /// Effect" card's Schedule item); zero for none.
-    pub send_effect: i64,
     /// For the composer: the chat the picker was opened in, which the
     /// chosen time goes to.
     pub slot: Option<SendSlot>,
@@ -247,7 +253,10 @@ impl QuillApp {
     ) {
         let now = WallClock::of(cx).now();
         let existing = match target {
-            ScheduleTarget::Composer => match self.pending_send().scheduling {
+            ScheduleTarget::Composer | ScheduleTarget::ComposerThenSend { .. } => match self
+                .pending_send()
+                .scheduling
+            {
                 ComposerScheduling::SendAtDate { date, .. } => Some(date),
                 _ => None,
             },
@@ -265,7 +274,7 @@ impl QuillApp {
         };
         // The change dialog starts from the repeat chosen before.
         let repeat = match target {
-            ScheduleTarget::Composer => self.pending_send().scheduling.repeat_period(),
+            target if target.is_composer() => self.pending_send().scheduling.repeat_period(),
             _ => 0,
         };
         let initial = existing
@@ -273,7 +282,7 @@ impl QuillApp {
             .unwrap_or_else(|| default_schedule_time(now));
         let date = new_date_time_picker(window, cx, initial, MAX_SCHEDULE_SECS);
         let slot = match target {
-            ScheduleTarget::Composer => self.send_slot(),
+            target if target.is_composer() => self.send_slot(),
             _ => None,
         };
         self.chat_ui.schedule_picker = Some(SchedulePicker {
@@ -281,8 +290,6 @@ impl QuillApp {
             date,
             error: None,
             repeat,
-            send_after: false,
-            send_effect: 0,
             slot,
         });
         cx.notify();
@@ -335,26 +342,19 @@ impl QuillApp {
         let kind = self.schedule_kind();
         // The Repeat choice counts for Premium only (the locked button never
         // sets it, and a lapsed subscription drops it).
-        let (repeat, send_after, send_effect, picker_slot) = self
+        let (repeat, picker_slot) = self
             .chat_ui
             .schedule_picker
             .take()
-            .map(|picker| {
-                (
-                    picker.repeat,
-                    picker.send_after,
-                    picker.send_effect,
-                    picker.slot,
-                )
-            })
-            .unwrap_or((0, false, 0, None));
+            .map(|picker| (picker.repeat, picker.slot))
+            .unwrap_or((0, None));
         let scheduling = if self.repeat_allowed(target) {
             scheduling.repeating(repeat)
         } else {
             scheduling.repeating(0)
         };
         match target {
-            ScheduleTarget::Composer => {
+            ScheduleTarget::Composer | ScheduleTarget::ComposerThenSend { .. } => {
                 // The picker's own chat, which may no longer be on screen.
                 let open = self.send_slot();
                 let Some(slot) = picker_slot.or_else(|| open.clone()) else {
@@ -364,7 +364,12 @@ impl QuillApp {
                     send.scheduling = scheduling;
                 });
                 // Sending now would send another chat's text.
-                let send_after = send_after && open.as_ref() == Some(&slot);
+                let send_effect = match target {
+                    ScheduleTarget::ComposerThenSend { effect } if open.as_ref() == Some(&slot) => {
+                        Some(effect)
+                    }
+                    _ => None,
+                };
                 self.set_note(match (scheduling, kind) {
                     (ComposerScheduling::SendAtDate { date, .. }, ScheduleKind::Reminder) => {
                         StatusNote::silent(tr_with(
@@ -387,9 +392,9 @@ impl QuillApp {
                     _ => StatusNote::info(tr(keys::Q_OPS_WILL_SEND_WHEN_THE_CONTACT)),
                 });
                 cx.notify();
-                if send_after {
+                if let Some(effect) = send_effect {
                     let once = super::composer_sends::SendOnce {
-                        effect: send_effect,
+                        effect,
                         ..Default::default()
                     };
                     self.send_composer_after_schedule(once, window, cx);

@@ -48,7 +48,6 @@ pub enum HeaderEntry {
 #[derive(Debug, Clone, Copy)]
 pub struct HeaderFacts<'a> {
     pub kind: &'a ChatKind,
-    pub is_saved_messages: bool,
     /// The private chat is the user's own (Saved Messages) chat.
     pub is_self: bool,
     pub is_bot: bool,
@@ -106,7 +105,7 @@ pub fn header_entries(facts: &HeaderFacts<'_>) -> Vec<HeaderEntry> {
     if facts.can_create_topic {
         out.push(HeaderEntry::NewTopic);
     }
-    if let Some(label) = crate::chatlist_menu::profile_label(facts.kind, facts.is_saved_messages) {
+    if let Some(label) = crate::chatlist_menu::profile_label(facts.kind, facts.is_self) {
         out.push(HeaderEntry::ViewProfile(label));
     }
     if facts.has_view_toggle {
@@ -185,7 +184,6 @@ mod tests {
     fn facts(kind: &ChatKind) -> HeaderFacts<'_> {
         HeaderFacts {
             kind,
-            is_saved_messages: false,
             is_self: false,
             is_bot: false,
             live: true,

@@ -20,8 +20,6 @@ use quill::lang::{keys, tr, tr_with, trn};
 use quill::local_time::{civil_local, day_label, hhmm, now_unix};
 use quill::state::JoinRequestFetch;
 use quill::telegram::envelope::{ChatActionBar, ChatKind};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 mod join_requests;
 
@@ -333,8 +331,9 @@ impl QuillApp {
                 .driver
                 .reset_chat_notification_settings(chat_id)
                 .is_ok();
-            let _ = live.driver.dismiss_chat_action_bar(chat_id);
-            if !(moved && reset) {
+            if moved && reset {
+                let _ = live.driver.dismiss_chat_action_bar(chat_id);
+            } else {
                 self.set_note(StatusNote::error(tr(
                     keys::Q_CHAT_COULD_NOT_UNARCHIVE_THE_CHAT,
                 )));
@@ -556,16 +555,7 @@ impl QuillApp {
                     keys::Q_CHAT_BLOCK_2,
                     &[("name", &name.to_string())],
                 )))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::dialog_once_body::once_dialog_body(body))
                 .footer(footer)
                 .on_close(on_close)
         })

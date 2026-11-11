@@ -10,9 +10,7 @@ BarFacts::bot_start_pending
 CallSnap::connecting
 CallSummary::busy
 
-ChatSwipeFacts::is_saved
 
-ChatSwipeFacts::is_saved
 
 Checklist::others_can_mark_tasks_as_done
 ChecklistDialog::others_can_mark_tasks_as_done
@@ -36,7 +34,6 @@ GiveawaySummary::finished
 
 
 GiveawaySummary::finished
-HeaderFacts::is_saved_messages
 
 
 LiveInput::failed

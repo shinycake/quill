@@ -589,7 +589,7 @@ impl QuillApp {
     pub(super) fn close_ttl_picker_of_left_chat(&mut self, next: Option<ChatId>) {
         let left = self.chat_ui.chat.filter(|chat| Some(*chat) != next);
         if left.is_some() && self.notify.ttl_picker == left {
-            self.notify.ttl_picker = None;
+            self.close_ttl_picker();
         }
     }
 
