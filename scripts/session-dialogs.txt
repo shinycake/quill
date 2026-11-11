@@ -18,7 +18,6 @@ CallLinkLeave | cancel_call_link_leave | `calls.call_link_stage`
 CallSwap | - | a second call prompts only during a call, and a switch closes a client that is in a call (retire_live_to_background)
 ChatExport | - | the box's flag is `dialogs.chat_export_dialog` (screen); the progress box shows an export the account is still running, which comes back with it
 CollectibleInfo | close_collectible_info | `payments.hub.collectible`
-CreateChat | - | the box is `admin.create_chat_dialog` (screen); the session holds only the creation step
 DropTopic | - | the chooser is `chat_list.drop_topic` (screen)
 EarnJoin | close_earn_boxes | `payments.earn.join_box`
 EarnLink | close_earn_boxes | `payments.earn.link_box`

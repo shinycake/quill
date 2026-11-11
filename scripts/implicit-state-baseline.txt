@@ -95,8 +95,6 @@ LinuxState::failed
 LiveInput::failed
 LocalFileState::is_downloading_active
 LocalFileState::is_downloading_completed
-LoginState::config_requested
-LoginState::config_requested+error
 Lookup::fade_started
 Lookup::pending
 ManagerView::failed
@@ -104,8 +102,6 @@ ManagerView::loading
 MasksPanel::archived_loaded
 MasksPanel::failed
 MasksPanel::installed_loaded
-MediaFacts::downloading
-MediaFacts::in_saved_messages
 MediaMenuFacts::downloading
 MediaState::disk_paused_saved_changed
 MembersView::loading
@@ -113,8 +109,6 @@ MiniAppWindow::closing_confirmation
 MiniAppWindow::data_sent
 MiniAppWindow::waiting_write_access
 MutedSpeechHint::done
-NewChatView::busy
-NewChatView::busy+failure
 OutputState::opening
 OwnershipState::check_in_flight
 OwnershipState::check_in_flight+check_error
@@ -122,7 +116,6 @@ Paged::loaded
 Paged::loading
 Paged::loading+error
 PaidMessages::trust_loaded
-PanelMotion::opening
 ParsedFile::uploading
 ParsedGroupCall::loaded_all_participants
 ParsedSession::is_password_pending
@@ -179,9 +172,6 @@ SharedMediaTabState::loading_more+error
 Shown::waiting_for_input
 SignInUi::tick_armed
 SignInUi::tick_armed+error_clock
-StageFacts::create_pending
-StageFacts::type_failed
-StageFacts::type_pending
 StarPacksState::loaded
 StarPacksState::loading
 StarPacksState::loading+error

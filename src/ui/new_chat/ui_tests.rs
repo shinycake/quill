@@ -150,7 +150,7 @@ fn cancel_closes_the_box_while_the_create_request_is_out(cx: &mut TestAppContext
                 progress: CreateProgress::InFlight,
             };
         }
-        assert!(app.new_chat_view().is_some_and(|view| view.busy));
+        assert!(app.new_chat_view().is_some_and(|view| view.busy()));
     });
     frames(vcx);
     // Offline, the request never answers: Cancel must still work.

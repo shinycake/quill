@@ -290,7 +290,7 @@ impl QuillApp {
         let Some(dialog) = self.new_chat_dialog() else {
             return;
         };
-        if self.new_chat_view().is_some_and(|view| view.busy) {
+        if self.new_chat_view().is_some_and(|view| view.busy()) {
             return;
         }
         let kind = dialog.kind;

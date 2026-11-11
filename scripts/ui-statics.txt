@@ -79,7 +79,6 @@ src/ui/presence.rs LAST_INPUT_MS | the app's last input, any window
 src/ui/tray_settings.rs WINDOW_SKIPS_TASKBAR | an app setting
 src/ui/window_control.rs CONNECTION | the X connection
 src/ui/first_run_ui.rs WRITING | a file write lock
-src/ui/appearance/new_accent_picker.rs WATCHING | a one-time watcher
 src/ui/notifications/debug_notification.rs CHECKED | a one-time check
 
 # Test platform hooks inside test-only modules.

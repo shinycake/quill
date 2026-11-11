@@ -191,21 +191,44 @@ pub enum CreationOutcome {
     },
 }
 
+/// What the step is doing: nothing, a request of its own out (the confirm
+/// button waits), or the refusal of the create it returned from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ViewState {
+    Idle,
+    Waiting,
+    Refused {
+        failure: CreateFailure,
+        reason: String,
+    },
+}
+
 /// What the dialog shows for `stage`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NewChatView {
     pub step: NewChatStep,
+    pub state: ViewState,
+}
+
+impl NewChatView {
     /// A request of this step is out: its confirm button waits.
-    pub busy: bool,
+    pub fn busy(&self) -> bool {
+        self.state == ViewState::Waiting
+    }
+
     /// The refused create, shown on the step it returned to.
-    pub failure: Option<(CreateFailure, String)>,
+    pub fn failure(&self) -> Option<(CreateFailure, &str)> {
+        match &self.state {
+            ViewState::Refused { failure, reason } => Some((*failure, reason)),
+            _ => None,
+        }
+    }
 }
 
 pub fn view(kind: NewChatKind, stage: &NewChatStage) -> NewChatView {
     let plain = |step| NewChatView {
         step,
-        busy: false,
-        failure: None,
+        state: ViewState::Idle,
     };
     match stage {
         NewChatStage::Info => plain(NewChatStep::Info),
@@ -223,21 +246,25 @@ pub fn view(kind: NewChatKind, stage: &NewChatStage) -> NewChatView {
                 CreateProgress::Created(chat) => plain(NewChatStep::Done(*chat)),
                 CreateProgress::Refused { failure, reason } => NewChatView {
                     step: back,
-                    busy: false,
-                    failure: Some((*failure, reason.clone())),
+                    state: ViewState::Refused {
+                        failure: *failure,
+                        reason: reason.clone(),
+                    },
                 },
                 CreateProgress::InFlight => NewChatView {
                     step: back,
-                    busy: true,
-                    failure: None,
+                    state: ViewState::Waiting,
                 },
                 CreateProgress::Lost => plain(back),
             }
         }
         NewChatStage::Type { chat, save } => NewChatView {
             step: NewChatStep::Type(*chat),
-            busy: matches!(save, TypeSaveStage::Saving(_)),
-            failure: None,
+            state: if matches!(save, TypeSaveStage::Saving(_)) {
+                ViewState::Waiting
+            } else {
+                ViewState::Idle
+            },
         },
         NewChatStage::Subscribers { chat } => plain(NewChatStep::Subscribers(*chat)),
     }
@@ -350,7 +377,7 @@ mod tests {
             &creating(NewChatBack::Members, CreateProgress::InFlight),
         );
         assert_eq!(waiting.step, NewChatStep::Members);
-        assert!(waiting.busy);
+        assert!(waiting.busy());
         assert_eq!(
             view(
                 kind,
@@ -368,7 +395,7 @@ mod tests {
             &creating(NewChatBack::Members, CreateProgress::Lost),
         );
         assert_eq!(shown.step, NewChatStep::Members);
-        assert!(!shown.busy && shown.failure.is_none());
+        assert!(!shown.busy() && shown.failure().is_none());
     }
 
     #[test]
@@ -389,14 +416,14 @@ mod tests {
         };
         let busy = view(kind, &saving);
         assert_eq!(busy.step, NewChatStep::Type(CHAT));
-        assert!(busy.busy);
+        assert!(busy.busy());
         let refused = NewChatStage::Type {
             chat: CHAT,
             save: TypeSaveStage::Refused("USERNAME_INVALID".into()),
         };
         let shown = view(kind, &refused);
         assert_eq!(shown.step, NewChatStep::Type(CHAT));
-        assert!(!shown.busy);
+        assert!(!shown.busy());
     }
 
     #[test]
@@ -408,10 +435,10 @@ mod tests {
         let shown = view(NewChatKind::Megagroup, &creating(NewChatBack::Info, failed));
         assert_eq!(shown.step, NewChatStep::Info);
         assert_eq!(
-            shown.failure,
-            Some((CreateFailure::Restricted, "nope".into()))
+            shown.failure(),
+            Some((CreateFailure::Restricted, "nope"))
         );
-        assert!(!shown.busy);
+        assert!(!shown.busy());
     }
 
     #[test]
