@@ -8,8 +8,8 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::state::{
-    GROUPS_IN_COMMON_PAGE, InfoPanelTarget, ProfileChatsFetch, ProfileChatsKind, RequestPurpose,
-    Session,
+    GROUPS_IN_COMMON_PAGE, InfoPanelTarget, MorePage, ProfileChatsFetch, ProfileChatsKind,
+    RequestPurpose, Session,
 };
 use quill::telegram::client::copy_and_parse;
 use std::sync::Arc;
@@ -55,7 +55,10 @@ fn apply_common_groups(session: &mut Session, sink: &Arc<MemorySink>, seq: &Atom
         .collect();
     session.users_state.profile_chat_lists.insert(
         (ProfileChatsKind::GroupsInCommon, USER),
-        ProfileChatsFetch::Loaded(first_page),
+        ProfileChatsFetch::Loaded {
+            ids: first_page,
+            more: MorePage::Idle,
+        },
     );
 }
 

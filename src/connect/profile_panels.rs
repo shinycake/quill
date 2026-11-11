@@ -4,8 +4,8 @@
 use super::*;
 use crate::ids::{ChatId, RequestId};
 use crate::state::{
-    GROUPS_IN_COMMON_PAGE, ProfileChatsFetch, ProfileChatsKind, ProfilePhotosFetch, RequestPurpose,
-    UsersPurpose,
+    GROUPS_IN_COMMON_PAGE, MorePage, ProfileChatsFetch, ProfileChatsKind, ProfilePhotosFetch,
+    RequestPurpose, UsersPurpose,
 };
 use crate::telegram::requests::{
     create_private_chat, get_chat_similar_chats, get_groups_in_common,
@@ -35,7 +35,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if matches!(
             self.session.users_state.profile_chat_lists.get(&(kind, id)),
-            Some(ProfileChatsFetch::Loading | ProfileChatsFetch::Loaded(_))
+            Some(ProfileChatsFetch::Loading(_) | ProfileChatsFetch::Loaded { .. })
         ) {
             return Ok(None);
         }
@@ -61,10 +61,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session
             .users_state
             .profile_chat_lists
-            .insert((kind, id), ProfileChatsFetch::Loading);
-        if kind == ProfileChatsKind::GroupsInCommon {
-            self.session.users_state.common_groups_paging.remove(&id);
-        }
+            .insert((kind, id), ProfileChatsFetch::Loading(extra));
         match self.send_json_request(extra, &json) {
             Ok(extra) => Ok(Some(extra)),
             Err(err) => {
@@ -131,37 +128,35 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let key = (ProfileChatsKind::GroupsInCommon, user_id);
         let Some(last) = (match self.session.users_state.profile_chat_lists.get(&key) {
-            Some(ProfileChatsFetch::Loaded(ids)) => ids.last().copied(),
+            Some(ProfileChatsFetch::Loaded {
+                ids,
+                more: MorePage::Idle,
+            }) => ids.last().copied(),
             _ => None,
         }) else {
             return Ok(None);
         };
-        let paging = self.session.common_groups_paging(user_id);
-        if paging.exhausted || paging.loading_more {
-            return Ok(None);
-        }
         let purpose = RequestPurpose::GetProfileChats(key.0);
         let extra = self.session.request_for_user(purpose, user_id);
         let json = get_groups_in_common(extra, user_id, last, GROUPS_IN_COMMON_LIMIT);
-        self.session
-            .users_state
-            .common_groups_paging
-            .entry(user_id)
-            .or_default()
-            .loading_more = true;
+        self.set_common_groups_more(user_id, MorePage::Loading(extra));
         match self.send_json_request(extra, &json) {
             Ok(extra) => Ok(Some(extra)),
             Err(err) => {
-                if let Some(paging) = self
-                    .session
-                    .users_state
-                    .common_groups_paging
-                    .get_mut(&user_id)
-                {
-                    paging.loading_more = false;
-                }
+                self.set_common_groups_more(user_id, MorePage::Idle);
                 Err(err)
             }
+        }
+    }
+
+    fn set_common_groups_more(&mut self, user_id: i64, page: MorePage) {
+        if let Some(ProfileChatsFetch::Loaded { more, .. }) = self
+            .session
+            .users_state
+            .profile_chat_lists
+            .get_mut(&(ProfileChatsKind::GroupsInCommon, user_id))
+        {
+            *more = page;
         }
     }
 

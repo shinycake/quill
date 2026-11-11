@@ -253,7 +253,7 @@ impl QuillApp {
         if session.my_is_premium() || !session.premium_possible() {
             return None;
         }
-        let ProfileChatsFetch::Loaded(list) = session
+        let ProfileChatsFetch::Loaded { ids: list, .. } = session
             .users_state
             .profile_chat_lists
             .get(&(ProfileChatsKind::SimilarChats, chat_id.0))?

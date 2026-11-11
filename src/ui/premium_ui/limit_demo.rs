@@ -48,7 +48,7 @@ pub(super) fn seed_premium_limits_session(sink: Arc<MemorySink>) -> Session {
     let users = &mut session.users_state;
     users.profile_chat_lists.insert(
         (ProfileChatsKind::SimilarChats, SIMILAR_SOURCE_CHANNEL),
-        ProfileChatsFetch::Loaded(SIMILAR.iter().map(|(id, _)| *id).collect()),
+        ProfileChatsFetch::complete(SIMILAR.iter().map(|(id, _)| *id).collect()),
     );
     users
         .similar_chat_totals

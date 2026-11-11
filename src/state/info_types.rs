@@ -48,22 +48,46 @@ pub const GROUPS_IN_COMMON_PAGE: usize = 40;
 /// The list gets a search field once it holds more than this many groups.
 pub const GROUPS_IN_COMMON_SEARCH_MIN: usize = 20;
 
-/// Paging of one user's groups in common.
+/// The next page of a loaded profile chat list (groups in common are the
+/// only list that pages; the others are `Exhausted` from the start).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct CommonGroupsPaging {
-    /// The last page came back short: nothing more to load.
-    pub exhausted: bool,
-    /// A follow-up page is in flight.
-    pub loading_more: bool,
+pub enum MorePage {
+    /// More may exist and none is asked for.
+    #[default]
+    Idle,
+    /// This request asks for the next page; only its answer (or failure)
+    /// touches the list.
+    Loading(RequestId),
+    /// The last page came back short, or a follow-up failed: nothing more
+    /// to load.
+    Exhausted,
 }
 
-/// B10: fetch state of one `ProfileChatsKind` list. `Loading` is the
-/// in-flight guard; `Failed` keeps the reason for a Retry row.
+impl MorePage {
+    pub fn loading(self) -> bool {
+        matches!(self, Self::Loading(_))
+    }
+}
+
+/// B10: fetch state of one `ProfileChatsKind` list. `Loading` names the
+/// request it waits for, so an answer or failure of an older request (the
+/// panel was reopened meanwhile) never lands; `Failed` keeps the reason
+/// for a Retry row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProfileChatsFetch {
-    Loading,
-    Loaded(Vec<i64>),
+    Loading(RequestId),
+    Loaded { ids: Vec<i64>, more: MorePage },
     Failed(String),
+}
+
+impl ProfileChatsFetch {
+    /// A list that holds all of `ids` and has no further page.
+    pub fn complete(ids: Vec<i64>) -> Self {
+        Self::Loaded {
+            ids,
+            more: MorePage::Exhausted,
+        }
+    }
 }
 
 /// B10: one profile photo in the gallery (`chatPhoto`). Both files are

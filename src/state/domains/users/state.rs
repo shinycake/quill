@@ -12,7 +12,6 @@ pub struct UsersState {
     /// `updateNewChat` before the `chats` answer.
     pub profile_chat_lists: HashMap<(ProfileChatsKind, i64), ProfileChatsFetch>,
     /// Paging of the groups in common list, by user id.
-    pub common_groups_paging: HashMap<i64, CommonGroupsPaging>,
     /// `chats.total_count` of a `getChatSimilarChats` answer, by channel
     /// chat id: more similar channels exist than the list shows (the
     /// non-Premium list is capped), which the strip's "More Channels" tile
@@ -155,7 +154,6 @@ impl UsersState {
         Self {
             saves: SaveWatch::default(),
             profile_chat_lists: HashMap::new(),
-            common_groups_paging: HashMap::new(),
             similar_chat_totals: HashMap::new(),
             user_profile_photos: HashMap::new(),
             chat_current_photos: HashMap::new(),

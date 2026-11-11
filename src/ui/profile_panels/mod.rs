@@ -229,7 +229,7 @@ impl QuillApp {
             .text_color(cx.theme().muted_foreground)
             .child(title);
         match session.users_state.profile_chat_lists.get(&(kind, key))? {
-            ProfileChatsFetch::Loaded(ids) => {
+            ProfileChatsFetch::Loaded { ids, .. } => {
                 let rows: Vec<AnyElement> = ids
                     .iter()
                     .filter_map(|id| self.profile_chat_row(id_prefix, *id, cx))
@@ -272,7 +272,7 @@ impl QuillApp {
                     )
                     .into_any_element(),
             ),
-            ProfileChatsFetch::Loading => None,
+            ProfileChatsFetch::Loading(_) => None,
         }
     }
 

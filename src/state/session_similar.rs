@@ -167,7 +167,7 @@ impl Session {
         if !strip.expanded {
             return None;
         }
-        let ProfileChatsFetch::Loaded(list) = self
+        let ProfileChatsFetch::Loaded { ids: list, .. } = self
             .users_state
             .profile_chat_lists
             .get(&(ProfileChatsKind::SimilarChats, chat_id.0))?

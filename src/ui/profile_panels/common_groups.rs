@@ -7,7 +7,7 @@
 use super::*;
 use gpui_kit::TestSupportExt;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
-use quill::state::GROUPS_IN_COMMON_SEARCH_MIN;
+use quill::state::{GROUPS_IN_COMMON_SEARCH_MIN, MorePage};
 
 /// The search field above the list, made when the profile opens.
 #[derive(Default)]
@@ -92,7 +92,7 @@ impl QuillApp {
                 cx,
             );
         }
-        let paging = session.common_groups_paging(user_id);
+        let more_page = session.common_groups_more(user_id);
         let count = i64::try_from(ids.len()).unwrap_or(i64::MAX);
         let heading = div()
             .px_2()
@@ -121,8 +121,8 @@ impl QuillApp {
                 .filter_map(|id| self.profile_chat_row("info-common-group", *id, cx))
                 .collect();
         let empty_search = rows.is_empty() && !query.trim().is_empty();
-        let more = (!paging.exhausted).then(|| {
-            if paging.loading_more {
+        let more = (more_page != MorePage::Exhausted).then(|| {
+            if more_page.loading() {
                 div()
                     .px_2()
                     .py_1p5()
