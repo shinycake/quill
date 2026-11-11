@@ -3,8 +3,9 @@
 //! the gate is "not shutting down", not "auth Ready".
 use super::*;
 use crate::ids::RequestId;
+use crate::lang::{keys, tr};
 use crate::proxy::{
-    PingStatus, ProxyDraft, ProxyEntry, ProxyFetch, RotationAction, SystemStepState,
+    PingStatus, ProxyDraft, ProxyEntry, ProxySave, RotationAction, SystemStepState,
 };
 use crate::proxy_sync::{ProxySyncStep, plan_proxy_sync};
 use crate::settings::save_proxy_prefs;
@@ -30,8 +31,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let proxy = &self.session.settings.proxy;
-        let wanted = (proxy.list.is_none() && !proxy.fetch_attempted) || proxy.stale;
-        if !wanted || proxy.fetch.loading() {
+        if !proxy.list.wanted() {
             return Ok(None);
         }
         // Background refetch: the box's error line is the user's, and a
@@ -41,11 +41,16 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Explicit refresh (the dialog's open / Refresh).
     pub fn fetch_proxies(&mut self) -> Result<RequestId, ConnectSendError> {
-        self.session.settings.proxy.error = None;
         // A fetch already out is the one to wait for, not a second one.
-        if let ProxyFetch::Loading(out) = self.session.settings.proxy.fetch {
+        if let Some(out) = self.session.settings.proxy.list.in_flight() {
             return Ok(out);
         }
+        let proxy = &mut self.session.settings.proxy;
+        proxy.list.clear_error();
+        if let ProxySave::Failed(_) = proxy.save {
+            proxy.save = ProxySave::Idle;
+        }
+        proxy.ipv6_error = None;
         self.send_get_proxies()
     }
 
@@ -54,13 +59,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(RequestPurpose::GetProxies, None);
-        self.session.settings.proxy.fetch = ProxyFetch::Loading(extra);
-        self.session.settings.proxy.fetch_attempted = true;
+        self.session.settings.proxy.list.begin(extra);
         match self.sender.send_json(&get_proxies(extra)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.proxy.fetch = ProxyFetch::Idle;
+                self.session
+                    .settings
+                    .proxy
+                    .list
+                    .fail(tr(keys::Q_OPS_ERR_REFUSED));
                 Err(err)
             }
         }
@@ -71,7 +79,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn refresh_proxies_if_stale(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         // `parity:data-proxy-web`: carriers TDLib opened or closed.
         self.run_carrier_work();
-        if !self.session.settings.proxy.stale {
+        if !matches!(
+            self.session.settings.proxy.list,
+            crate::proxy::ProxyList::Stale(_)
+        ) {
             return Ok(None);
         }
         self.maybe_fetch_proxies()
@@ -87,15 +98,33 @@ impl<S: JsonSender> ConnectDriver<S> {
         by: Option<&SystemProxyStep>,
         build: impl FnOnce(RequestId) -> String,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.proxy_path_active() || self.session.settings.proxy.mutating {
+        if !self.proxy_path_active()
+            || matches!(
+                self.session.settings.proxy.save,
+                ProxySave::Saving { .. }
+            )
+        {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(RequestPurpose::MutateProxy, None);
-        self.session.settings.proxy.mutating = true;
         let proxy = &mut self.session.settings.proxy;
         match by {
-            None => proxy.error = None,
+            None => {
+                proxy.save = ProxySave::Saving {
+                    request: extra,
+                    kept_error: None,
+                };
+                proxy.ipv6_error = None;
+            }
             Some(step) => {
+                let kept_error = match std::mem::take(&mut proxy.save) {
+                    ProxySave::Failed(line) => Some(line),
+                    _ => None,
+                };
+                proxy.save = ProxySave::Saving {
+                    request: extra,
+                    kept_error,
+                };
                 proxy.system_step = SystemStepState::InFlight {
                     step: step.clone(),
                     at: std::time::Instant::now(),
@@ -107,7 +136,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.proxy.mutating = false;
+                self.session.settings.proxy.save.settle(extra, None);
                 Err(err)
             }
         }
@@ -278,7 +307,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Settings(SettingsPurpose::SetPreferIpv6 { on }),
             None,
         );
-        self.session.settings.proxy.error = None;
+        self.session.settings.proxy.ipv6_error = None;
         match self.sender.send_json(&set_prefer_ipv6(extra, on)) {
             Ok(()) => Ok(extra),
             Err(err) => {
@@ -313,7 +342,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return true;
         }
         let proxy = &self.session.settings.proxy;
-        if proxy.mutating || proxy.stale || proxy.fetch.loading() {
+        if !proxy.settled() {
             return false;
         }
         let Some(current) = proxy.all_entries() else {
@@ -349,7 +378,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return false;
         }
         let proxy = &self.session.settings.proxy;
-        if proxy.list.is_none() || proxy.mutating || proxy.stale || proxy.fetch.loading() {
+        if proxy.list.data().is_none() || !proxy.settled() {
             return false;
         }
         let step = plan_system_proxy(

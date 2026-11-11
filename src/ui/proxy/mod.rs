@@ -738,7 +738,7 @@ impl QuillApp {
             ProxyMode::Custom => 2,
         };
         let mut body = div().flex().flex_col().gap_2();
-        if let Some(error) = state.error.clone() {
+        if let Some(error) = state.error() {
             body = body.child(div().text_xs().text_color(danger()).child(tr_with(
                 keys::Q_PREFS_ERROR_2,
                 &[("error", &error.to_string())],
@@ -853,7 +853,7 @@ impl QuillApp {
                 body.child(this.setting_spot(
                     list_ids,
                     div().py_3().text_sm().text_color(text_muted()).child(
-                        if state.fetch.loading() {
+                        if state.list.loading() {
                             tr(keys::Q_PREFS_LOADING)
                         } else {
                             tr(keys::PROXY_DESCRIPTION)

@@ -448,11 +448,15 @@ impl Session {
             }
             MessagesPayload::Message(message) => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatReplyMarkupMessage) {
-                    self.set_chat_reply_keyboard(
-                        message.chat_id,
-                        Some(message.id),
-                        message.reply_markup.clone(),
-                    );
+                    // An update that named the keyboard while this ran
+                    // is newer than the fetched message.
+                    if pending.is_some_and(|p| self.awaits_reply_markup(message.chat_id, p.id)) {
+                        self.set_chat_reply_keyboard(
+                            message.chat_id,
+                            Some(message.id),
+                            message.reply_markup.clone(),
+                        );
+                    }
                     return;
                 }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatMessageByDate) {

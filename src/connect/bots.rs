@@ -492,8 +492,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         let extra = self.session.request(purpose, Some(chat_id));
-        self.send_json_request(extra, &get_message(extra, chat_id, message_id))
-            .map(|_| ())
+        self.session.begin_reply_markup_fetch(chat_id, extra);
+        let sent = self.send_json_request(extra, &get_message(extra, chat_id, message_id));
+        if sent.is_err() {
+            self.session.fail_reply_markup_fetch(chat_id, extra);
+        }
+        sent.map(|_| ())
     }
 
     /// `getRecentInlineBots`, once per session, when the user types "@".

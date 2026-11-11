@@ -137,6 +137,40 @@ fn chat_reply_markup_message_id_is_fetched_when_not_loaded() {
 }
 
 #[test]
+fn a_failed_keyboard_fetch_is_not_asked_again_on_reselect() {
+    let mut h = Harness::new();
+    h.ingest(
+        r#"{"@type":"updateNewChat","chat":{"id":8,"title":"Bot","type":{"@type":"chatTypePrivate","user_id":8},"unread_count":0,"reply_markup_message_id":55}}"#,
+    );
+    h.driver.session.open_chat(ChatId(8));
+    h.driver.maybe_fetch_reply_markup().expect("request");
+    let v = sent_request(&h.recorder, "getMessage");
+    assert_eq!(
+        h.driver.session.reply_markup_message_to_fetch(ChatId(8)),
+        None,
+        "in flight"
+    );
+    h.ingest(&format!(
+        r#"{{"@extra":"{}","@type":"error","code":400,"message":"Message not found"}}"#,
+        v["@extra"].as_str().unwrap()
+    ));
+    assert_eq!(
+        h.driver.session.reply_markup_message_to_fetch(ChatId(8)),
+        None,
+        "the failure ends the fetch"
+    );
+    h.driver.maybe_fetch_reply_markup().expect("nothing to send");
+    assert_eq!(
+        h.recorder
+            .snapshot()
+            .iter()
+            .filter(|j| j.contains("getMessage"))
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn share_requests_use_the_keyboard_button_source() {
     let mut h = Harness::new();
     h.driver

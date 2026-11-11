@@ -24,7 +24,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.messages.share_search.clear();
             return Ok(());
         }
-        if self.session.messages.share_search.query == query {
+        if self.session.messages.share_search.query() == query {
             return Ok(());
         }
         let local = self.session.request(RequestPurpose::SearchShareChats, None);

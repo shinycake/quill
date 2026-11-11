@@ -52,7 +52,7 @@ mod tests {
 
     fn state(list: Vec<ProxyEntry>) -> ProxyState {
         ProxyState {
-            list: Some(list),
+            list: crate::proxy::ProxyList::Fresh(list),
             ..ProxyState::default()
         }
     }

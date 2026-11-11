@@ -37,6 +37,15 @@ impl Session {
                     .chat_action_error
                     .push(format!("could not load similar bots (error {})", err.code));
             }
+            // The chat shows the keyboard among its loaded messages and
+            // does not ask again at every re-select.
+            Some(RequestPurpose::GetChatReplyMarkupMessage) => {
+                if let Some(pending) = pending
+                    && let Some(chat) = pending.chat_id
+                {
+                    self.fail_reply_markup_fetch(chat, pending.id);
+                }
+            }
             Some(RequestPurpose::SetMessageSenderBotVerification) => {
                 self.chats_state
                     .chat_action_error

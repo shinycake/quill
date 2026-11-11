@@ -542,7 +542,7 @@ fn add_people_searches_the_server_and_lists_people_outside_your_contacts() {
     assert_eq!(view.empty, Some(crate::state::AddPeopleEmpty::NoResults));
     // Clearing the field forgets the search.
     harness.1.search_add_people("").expect("cleared");
-    assert!(harness.1.session.calls.add_people_search.query.is_empty());
+    assert!(harness.1.session.calls.add_people_search.query().is_empty());
     let _ = std::fs::remove_dir_all(&harness.0);
 }
 
@@ -666,7 +666,7 @@ fn the_invite_toast_goes_with_its_conference_and_the_account() {
         r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateLoggingOut"}}"#,
     );
     assert_eq!(harness.1.session.calls.invite_results, None);
-    assert!(harness.1.session.calls.add_people_search.query.is_empty());
+    assert!(harness.1.session.calls.add_people_search.query().is_empty());
     let _ = std::fs::remove_dir_all(&harness.0);
 }
 
@@ -684,7 +684,7 @@ fn ending_the_search_works_offline_and_ends_with_the_call() {
         Err(ConnectSendError::InvalidRequest)
     );
     assert_eq!(driver.search_add_people(""), Ok(()));
-    assert!(driver.session.calls.add_people_search.query.is_empty());
+    assert!(driver.session.calls.add_people_search.query().is_empty());
     let _ = std::fs::remove_dir_all(&dir);
     drop((sink, seq));
 
@@ -699,7 +699,7 @@ fn ending_the_search_works_offline_and_ends_with_the_call() {
         ),
     );
     assert!(harness.1.session.calls.active_call.is_none());
-    assert!(harness.1.session.calls.add_people_search.query.is_empty());
+    assert!(harness.1.session.calls.add_people_search.query().is_empty());
     let _ = std::fs::remove_dir_all(&harness.0);
 }
 

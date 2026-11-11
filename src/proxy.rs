@@ -649,45 +649,172 @@ impl SystemStepState {
     }
 }
 
-/// Whether a `getProxies` is awaited, and which one.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum ProxyFetch {
+/// The cached `getProxies` list and where its refresh stands. The last
+/// answer stays held while a refetch runs or after one fails.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ProxyList {
+    /// Nothing known and nothing asked: the driver asks.
     #[default]
-    Idle,
-    /// This request is the one whose answer replaces the list.
-    Loading(RequestId),
+    Unasked,
+    /// This request is the one whose answer replaces the list. A
+    /// mutation's success drops it (its answer may predate the change).
+    Loading {
+        request: RequestId,
+        known: Option<Vec<ProxyEntry>>,
+    },
+    /// The latest answer.
+    Fresh(Vec<ProxyEntry>),
+    /// A mutation succeeded: the list is out of date and the driver
+    /// refetches it.
+    Stale(Option<Vec<ProxyEntry>>),
+    /// The fetch failed. It is not asked again by itself; the next change
+    /// or Refresh asks.
+    Failed {
+        error: String,
+        known: Option<Vec<ProxyEntry>>,
+    },
 }
 
-impl ProxyFetch {
-    pub fn loading(self) -> bool {
-        matches!(self, Self::Loading(_))
+impl ProxySave {
+    /// The change `request` answered: back to idle, or to the error the
+    /// user's own change left when a system step ran over it. `failed` is
+    /// the line to show when the user's own change was refused. Returns
+    /// whether `request` was the change in flight.
+    pub fn settle(&mut self, request: RequestId, failed: Option<String>) -> bool {
+        match std::mem::take(self) {
+            Self::Saving {
+                request: sent,
+                kept_error,
+            } if sent == request => {
+                *self = match (failed, kept_error) {
+                    (Some(line), _) => Self::Failed(line),
+                    (None, Some(kept)) => Self::Failed(kept),
+                    (None, None) => Self::Idle,
+                };
+                true
+            }
+            other => {
+                *self = other;
+                false
+            }
+        }
+    }
+}
+
+impl ProxyList {
+    /// The newest answer held, whatever the stage.
+    pub fn data(&self) -> Option<&[ProxyEntry]> {
+        match self {
+            Self::Unasked => None,
+            Self::Fresh(list) => Some(list),
+            Self::Loading { known, .. }
+            | Self::Stale(known)
+            | Self::Failed { known, .. } => known.as_deref(),
+        }
+    }
+
+    fn take_data(&mut self) -> Option<Vec<ProxyEntry>> {
+        match std::mem::take(self) {
+            Self::Unasked => None,
+            Self::Fresh(list) => Some(list),
+            Self::Loading { known, .. }
+            | Self::Stale(known)
+            | Self::Failed { known, .. } => known,
+        }
+    }
+
+    pub fn loading(&self) -> bool {
+        matches!(self, Self::Loading { .. })
+    }
+
+    /// The `getProxies` in flight, if any.
+    pub fn in_flight(&self) -> Option<RequestId> {
+        match self {
+            Self::Loading { request, .. } => Some(*request),
+            _ => None,
+        }
     }
 
     /// `request` is the fetch the list waits for.
-    pub fn answers(self, request: RequestId) -> bool {
-        self == Self::Loading(request)
+    pub fn answers(&self, request: RequestId) -> bool {
+        self.in_flight() == Some(request)
     }
+
+    /// The driver should ask: never asked, or changed under us.
+    pub fn wanted(&self) -> bool {
+        matches!(self, Self::Unasked | Self::Stale(_))
+    }
+
+    /// The failed fetch's error line.
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            Self::Failed { error, .. } => Some(error),
+            _ => None,
+        }
+    }
+
+    /// A `getProxies` went out as `request`.
+    pub fn begin(&mut self, request: RequestId) {
+        *self = Self::Loading {
+            request,
+            known: self.take_data(),
+        };
+    }
+
+    /// The fetch failed, or never left.
+    pub fn fail(&mut self, error: impl Into<String>) {
+        *self = Self::Failed {
+            error: error.into(),
+            known: self.take_data(),
+        };
+    }
+
+    /// A mutation succeeded: what is held is out of date.
+    pub fn mark_stale(&mut self) {
+        *self = Self::Stale(self.take_data());
+    }
+
+    /// Forget a failure, keeping the data (never asks by itself).
+    pub fn clear_error(&mut self) {
+        if let Self::Failed { .. } = self {
+            *self = match self.take_data() {
+                Some(list) => Self::Fresh(list),
+                None => Self::Unasked,
+            };
+        }
+    }
+}
+
+/// Where the user's last change (add / edit / enable / remove) stands.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ProxySave {
+    #[default]
+    Idle,
+    /// Sent as this request, not answered. A system-proxy step carries the
+    /// user's own refused change in `kept_error`: that step's outcome does
+    /// not wipe it.
+    Saving {
+        request: RequestId,
+        kept_error: Option<String>,
+    },
+    /// TDLib refused it; the box shows this line until the next change.
+    Failed(String),
 }
 
 /// Everything the proxy UI and driver cache (`Session::proxy`).
 #[derive(Debug, Clone, Default)]
 pub struct ProxyState {
-    /// `getProxies` answer without the system proxy's entries; `None`
-    /// until the first one arrives.
-    pub list: Option<Vec<ProxyEntry>>,
+    /// `getProxies` answer without the system proxy's entries, and where
+    /// its refresh stands.
+    pub list: ProxyList,
     /// The system proxy's entries (`crate::system_proxy`), oldest first:
     /// never listed, shared or rotated.
     pub system: Vec<ProxyEntry>,
-    /// The `getProxies` the list waits for. Only that request's answer or
-    /// failure lands; a mutation's success drops it (its answer may
-    /// predate the change).
-    pub fetch: ProxyFetch,
-    /// The list changed under us (an add / edit / enable / remove
-    /// succeeded): refetch the authoritative answer.
-    pub stale: bool,
-    /// A mutation is in flight.
-    pub mutating: bool,
-    pub error: Option<String>,
+    /// The user's own change (the proxy box, a rotation, a mirror of the
+    /// account on screen).
+    pub save: ProxySave,
+    /// The "Try connecting through IPv6" change TDLib refused.
+    pub ipv6_error: Option<String>,
     /// The system proxy step's own outcome (not `error`).
     pub system_step: SystemStepState,
     /// Per-proxy-id ping results.
@@ -695,9 +822,6 @@ pub struct ProxyState {
     /// Option `prefer_ipv6` (tdesktop "Try connecting through IPv6").
     pub prefer_ipv6: bool,
     pub prefs: ProxyPrefs,
-    /// First `getProxies` was sent (so a failed one is not retried in a
-    /// tight loop).
-    pub fetch_attempted: bool,
     /// Auto-switch: when the connection last stopped being usable (ms).
     pub disconnected_since_ms: Option<u64>,
     /// The enabled web proxy whose last carrier failed or was refused;
@@ -709,8 +833,28 @@ pub struct ProxyState {
 }
 
 impl ProxyState {
+    /// The error line the box draws: a refused change, else a failed
+    /// fetch, else a refused IPv6 change. None while a change is out.
+    pub fn error(&self) -> Option<&str> {
+        match &self.save {
+            ProxySave::Failed(error) => Some(error),
+            ProxySave::Saving { kept_error, .. } => kept_error.as_deref(),
+            ProxySave::Idle => self
+                .list
+                .error()
+                .or(self.ipv6_error.as_deref()),
+        }
+    }
+
+    /// No change is out and the list is neither stale nor being fetched:
+    /// what it holds can be planned on.
+    pub fn settled(&self) -> bool {
+        !matches!(self.save, ProxySave::Saving { .. })
+            && !matches!(self.list, ProxyList::Stale(_) | ProxyList::Loading { .. })
+    }
+
     pub fn entries(&self) -> &[ProxyEntry] {
-        self.list.as_deref().unwrap_or(&[])
+        self.list.data().unwrap_or(&[])
     }
 
     /// Whether a proxy of `kind` may be switched to: a web proxy only when
@@ -736,7 +880,7 @@ impl ProxyState {
     /// background accounts mirror (`crate::proxy_sync`). `None` until the
     /// first `getProxies` answer.
     pub fn all_entries(&self) -> Option<Vec<ProxyEntry>> {
-        let mut all = self.list.clone()?;
+        let mut all = self.list.data()?.to_vec();
         all.extend(self.system.iter().cloned());
         Some(all)
     }
@@ -851,7 +995,7 @@ mod tests {
 
     fn state(list: Vec<ProxyEntry>, auto: bool) -> ProxyState {
         ProxyState {
-            list: Some(list),
+            list: ProxyList::Fresh(list),
             prefs: ProxyPrefs {
                 auto_switch: auto,
                 auto_switch_secs: 10,
