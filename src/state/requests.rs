@@ -498,6 +498,13 @@ pub struct PendingRequest {
     pub secret_chat_id: Option<i32>,
     /// The invite link a `ProcessLinkJoinRequests` acts on.
     pub invite_link: Option<String>,
+    /// The string id of the thing an id-less `ok` is for (the terms an
+    /// `AcceptTermsOfService` accepts, the received gift a `SellGift`
+    /// sells), so the answer settles that one and not what the user picked
+    /// or was sent meanwhile.
+    pub subject_id: Option<String>,
+    /// The user ids a `SetCloseFriends` saved, applied when its `ok` lands.
+    pub user_ids: Option<Vec<i64>>,
     /// Slice G1: rollback for requests the driver applies optimistically
     /// at send time (`setChatPermissions`,
     /// `toggleSupergroupJoinByRequest`, `setSupergroupUsername`). On a
@@ -571,6 +578,8 @@ impl RequestRegistry {
             scope: None,
             secret_chat_id: None,
             invite_link: None,
+            subject_id: None,
+            user_ids: None,
             rollback: None,
             window: self.window,
             created_at: Instant::now(),

@@ -138,9 +138,6 @@ impl Session {
                 | RequestPurpose::SetChatActiveStoriesList
                 | RequestPurpose::ToggleStoryIsPostedToChatPage),
             ) => {
-                if purpose == RequestPurpose::SetCloseFriends {
-                    self.stories.close_friends_pending = None;
-                }
                 if purpose == RequestPurpose::GetCloseFriends
                     && let Some(pending) = pending
                 {

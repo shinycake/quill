@@ -24,23 +24,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    /// B14: `setCloseFriends` with the full new list; the ids are staged
-    /// in `Session::close_friends_pending` and applied on `ok`.
+    /// B14: `setCloseFriends` with the full new list; the ids ride on the
+    /// request (`PendingRequest::user_ids`) and are applied on its `ok`.
     pub fn set_close_friends(&mut self, user_ids: &[i64]) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::SetCloseFriends;
-        let extra = self.session.request(purpose, None);
-        self.session.stories.close_friends_pending = Some(user_ids.to_vec());
+        let extra = self.session.request_for_user_ids(purpose, user_ids);
         self.session
             .begin_story_page_op(story_page_op_label(purpose), extra);
         let json = set_close_friends_request(extra, user_ids);
-        let sent = self.send_story_page(purpose, extra, &json);
-        if sent.is_err() {
-            self.session.stories.close_friends_pending = None;
-        }
-        sent
+        self.send_story_page(purpose, extra, &json)
     }
 
     /// B14: `setChatActiveStoriesList` — hide (`archive`) or unhide a

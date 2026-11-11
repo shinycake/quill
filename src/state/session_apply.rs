@@ -14,6 +14,18 @@ impl Session {
                 seq: Some(owned.seq),
                 note: "out-of-order-ignored",
             });
+            // The answer is dropped, but what asked for it must not wait
+            // for good (a download's count, a mutation's spinner): it is
+            // settled as lost, the way a swept request is.
+            if let Some(pending) = owned.envelope.extra.and_then(|id| self.requests.take(id))
+                && pending.account_generation == self.account_generation
+            {
+                self.acks.settle(
+                    pending.id,
+                    Answer::Failed("The answer arrived out of order".into()),
+                );
+                self.settle_lost_request(pending);
+            }
             return;
         }
         self.expire_pending_bot_messages(unix_ms_now());

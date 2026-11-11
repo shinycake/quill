@@ -237,8 +237,13 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::AcceptTermsOfService)
         ) {
-            self.settings.notices.terms = None;
-            self.settings.notices.terms_accept = crate::state::fetch::Fetch::Idle;
+            // Only the terms that were accepted: newer ones pushed while
+            // the request was out stay for the user to answer.
+            let accepted = pending.and_then(|p| p.subject_id.as_deref());
+            if self.settings.notices.terms.as_ref().map(|t| t.id.as_str()) == accepted {
+                self.settings.notices.terms = None;
+                self.settings.notices.terms_accept = crate::state::fetch::Fetch::Idle;
+            }
         }
         // Batch 6: a 2FA step answered `ok` (cancel reset, login email
         // code check).
@@ -293,8 +298,13 @@ impl Session {
             Some(RequestPurpose::SellGift) => {
                 self.payments.hub.gift_mutating = false;
                 self.payments.hub.gifts_error = None;
-                self.payments.hub.gift_convert_confirm = None;
-                self.payments.hub.gift_selected = None;
+                // The panel and the box close only when they are still the
+                // sold gift's: the user may have opened another meanwhile.
+                let sold = pending.and_then(|p| p.subject_id.as_deref());
+                if self.payments.hub.gift_selected.as_deref() == sold {
+                    self.payments.hub.gift_convert_confirm = None;
+                    self.payments.hub.gift_selected = None;
+                }
                 self.payments.hub.gifts_stale = true;
                 self.payments.hub.tx_loaded = false;
             }
@@ -503,10 +513,10 @@ impl Session {
                 }
                 self.succeed_story_page_op(pending);
             }
-            // B14: `setCloseFriends` confirmed — the staged ids are the
+            // B14: `setCloseFriends` confirmed — the ids it carried are the
             // new list.
             Some(RequestPurpose::SetCloseFriends) => {
-                if let Some(ids) = self.stories.close_friends_pending.take() {
+                if let Some(ids) = pending.and_then(|p| p.user_ids.clone()) {
                     self.stories.close_friends = CloseFriendsList::Ready(ids);
                 }
                 self.succeed_story_page_op(pending);

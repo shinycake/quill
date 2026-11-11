@@ -281,6 +281,36 @@ fn terms_of_service_accept_round_trip() {
 }
 
 #[test]
+fn accepting_old_terms_does_not_clear_newer_terms() {
+    let mut f = fixture();
+    let terms = |id: &str| {
+        format!(
+            r#"{{"@type":"updateTermsOfService","terms_of_service_id":"{id}","terms_of_service":{{"@type":"termsOfService","text":{{"@type":"formattedText","text":"Be nice.","entities":[]}},"min_user_age":0,"show_popup":true}}}}"#
+        )
+    };
+    ingest(&mut f.1, &f.4, &f.3, &terms("tos-1"));
+    f.1.accept_terms().unwrap();
+    let extra = last_request(&f.2)["@extra"].as_str().unwrap().to_string();
+    ingest(&mut f.1, &f.4, &f.3, &terms("tos-2"));
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
+        &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
+    );
+    assert_eq!(
+        f.1.session
+            .settings
+            .notices
+            .terms
+            .as_ref()
+            .map(|t| t.id.as_str()),
+        Some("tos-2")
+    );
+    cleanup(f);
+}
+
+#[test]
 fn terms_accept_failure_keeps_the_prompt_with_an_error() {
     let mut f = fixture();
     ingest(

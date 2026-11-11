@@ -599,9 +599,17 @@ fn b14_close_friends_load_and_save_round_trip() {
     assert_eq!(session.stories.close_friends.ids(), Some(&vec![31, 33]));
     assert!(session.stories.page_op.is_none());
 
-    // `setCloseFriends` applies the staged ids on `ok`.
-    session.stories.close_friends_pending = Some(vec![33]);
-    let extra = session.request(RequestPurpose::SetCloseFriends, None);
+    // `setCloseFriends` applies the ids the request carried on `ok`: the
+    // first save's ok does not take the second save's.
+    let first = session.request_for_user_ids(RequestPurpose::SetCloseFriends, &[31]);
+    let extra = session.request_for_user_ids(RequestPurpose::SetCloseFriends, &[33]);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, first.0),
+    );
+    assert_eq!(session.stories.close_friends.ids(), Some(&vec![31]));
     apply_json(
         &mut session,
         &seq,
@@ -609,7 +617,6 @@ fn b14_close_friends_load_and_save_round_trip() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
     assert_eq!(session.stories.close_friends.ids(), Some(&vec![33]));
-    assert!(session.stories.close_friends_pending.is_none());
 }
 
 #[test]
@@ -617,8 +624,7 @@ fn b14_close_friends_error_drops_staged_ids() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.stories.close_friends = CloseFriendsList::Ready(vec![31]);
-    session.stories.close_friends_pending = Some(vec![31, 32]);
-    let extra = session.request(RequestPurpose::SetCloseFriends, None);
+    let extra = session.request_for_user_ids(RequestPurpose::SetCloseFriends, &[31, 32]);
     session.begin_story_page_op(
         crate::story_page::story_page_op_label(RequestPurpose::SetCloseFriends),
         extra,
@@ -633,7 +639,6 @@ fn b14_close_friends_error_drops_staged_ids() {
         ),
     );
     assert_eq!(session.stories.close_friends.ids(), Some(&vec![31]));
-    assert!(session.stories.close_friends_pending.is_none());
     assert!(matches!(
         session.stories.page_op.as_ref().map(|op| &op.state),
         Some(crate::story_page::StoryPageOpState::Failed(_))

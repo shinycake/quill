@@ -178,8 +178,6 @@ pub struct StoriesState {
     /// B14: the close-friends list (`getCloseFriends` / `setCloseFriends`);
     /// `None` until loaded.
     pub close_friends: CloseFriendsList,
-    /// B14: ids sent by an in-flight `setCloseFriends`, applied on `ok`.
-    pub close_friends_pending: Option<Vec<i64>>,
     /// Paging of the main story list.
     pub main_paging: ActiveStoriesPaging,
     /// Paging of the hidden story list.
@@ -231,7 +229,6 @@ impl StoriesState {
             archived_stories: HashMap::new(),
             page_op: None,
             close_friends: CloseFriendsList::NotLoaded,
-            close_friends_pending: None,
             main_paging: ActiveStoriesPaging::default(),
             hidden_paging: ActiveStoriesPaging::default(),
             custom_emoji_retry: None,

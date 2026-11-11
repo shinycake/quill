@@ -872,14 +872,19 @@ fn driver_b14_close_friends_hide_profile_and_share() {
     let v: Value = serde_json::from_str(&recorder.snapshot().last().cloned().unwrap()).unwrap();
     assert_eq!(v["@type"], "getCloseFriends");
 
-    // setCloseFriends stages the ids until `ok`.
+    // setCloseFriends carries the ids on the request until `ok`.
     driver.set_close_friends(&[4, 8]).unwrap();
     let v: Value = serde_json::from_str(&recorder.snapshot().last().cloned().unwrap()).unwrap();
     assert_eq!(v["@type"], "setCloseFriends");
     assert_eq!(v["user_ids"], serde_json::json!([4, 8]));
-    assert_eq!(
-        driver.session.stories.close_friends_pending,
-        Some(vec![4, 8])
+    let extra = v["@extra"].as_str().unwrap_or_default();
+    assert!(
+        driver
+            .session
+            .requests
+            .pending
+            .values()
+            .any(|p| p.user_ids == Some(vec![4, 8]) && p.id.0.to_string() == extra)
     );
 
     // Hide / unhide.

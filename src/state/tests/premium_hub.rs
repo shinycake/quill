@@ -106,6 +106,38 @@ fn gift_mutation_ok_marks_the_list_stale_and_errors_release_the_lock() {
 }
 
 #[test]
+fn a_sold_gifts_answer_leaves_another_selected_gift_open() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let sell = |session: &mut Session, id: &str| {
+        session.payments.hub.gift_selected = Some("g2".into());
+        session.payments.hub.gift_convert_confirm = Some("g2".into());
+        session.request_for_subject(RequestPurpose::SellGift, id)
+    };
+    let extra = sell(&mut session, "g1");
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+    );
+    assert_eq!(session.payments.hub.gift_selected.as_deref(), Some("g2"));
+    assert_eq!(
+        session.payments.hub.gift_convert_confirm.as_deref(),
+        Some("g2")
+    );
+    let extra = sell(&mut session, "g2");
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+    );
+    assert!(session.payments.hub.gift_selected.is_none());
+    assert!(session.payments.hub.gift_convert_confirm.is_none());
+}
+
+#[test]
 fn premium_features_apply_to_their_request() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
