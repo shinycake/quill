@@ -145,6 +145,14 @@ impl ChatListState {
             .unwrap_or_default()
     }
 
+    /// The folder tab was left: a retry waiting out a failed page stops.
+    /// Opening the folder again asks for its page at once.
+    pub fn folder_left(&mut self, folder_id: i32) {
+        if let Some(paging) = self.folder_paging.get_mut(&folder_id) {
+            paging.page_ok();
+        }
+    }
+
     /// A folder's `loadChats` page went through.
     pub(crate) fn folder_page_ok(&mut self, folder_id: i32) {
         if let Some(paging) = self.folder_paging.get_mut(&folder_id) {

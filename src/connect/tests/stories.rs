@@ -965,3 +965,19 @@ fn a_refused_tray_refresh_stays_queued_until_it_is_sent() {
     assert_eq!(h.sent("getChatActiveStories"), 1);
     assert!(h.driver.session.stories.tray_refresh.is_empty());
 }
+
+/// The tray refresh goes out as the update that queued it lands, and a
+/// refused one waits for the next ingest, not for a frame.
+#[test]
+fn a_posted_story_refreshes_its_tray_as_the_update_lands() {
+    let mut h = super::live_story::harness();
+    let update = r#"{"@type":"updateStoryPostSucceeded","story":{"@type":"story","id":7,"poster_chat_id":11,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}},"old_story_id":6}"#;
+    h.recorder.refuse_sends(true);
+    h.ingest(update);
+    assert_eq!(h.sent("getChatActiveStories"), 0);
+    assert!(h.driver.session.stories.tray_refresh.contains(&11));
+    h.recorder.refuse_sends(false);
+    h.ingest(r#"{"@type":"updateOption","name":"x","value":{"@type":"optionValueEmpty"}}"#);
+    assert_eq!(h.sent("getChatActiveStories"), 1);
+    assert!(h.driver.session.stories.tray_refresh.is_empty());
+}

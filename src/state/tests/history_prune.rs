@@ -307,8 +307,8 @@ fn a_dropped_chat_forgets_its_translations() {
     assert!(!session.histories.contains_key(&1), "the oldest went");
     assert!(!translated(&session, 1, 5));
     assert!(!translated(&session, 1, 80));
-    assert!(translated(&session, 2, 5), "a kept tail keeps them");
-    assert!(translated(&session, 2, 80));
+    assert!(!translated(&session, 2, 5), "row 5 left with the tail trim");
+    assert!(translated(&session, 2, 80), "a kept tail keeps its rows");
     session.finish_translation(late, Translation::failed("late"));
     assert!(!translated(&session, 1, 7), "a late answer finds no job");
     assert_eq!(

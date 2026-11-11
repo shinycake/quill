@@ -294,6 +294,49 @@ impl Session {
         }
     }
 
+    /// A chat's history shrank to a tail: the finished translations (and
+    /// failures) of messages it no longer holds go with them. A request
+    /// still out keeps its entry, which its answer finds.
+    pub(crate) fn prune_message_translations(&mut self, chat_id: ChatId) {
+        let held = |session: &Session, message: i64| {
+            session
+                .histories
+                .get(&chat_id.0)
+                .is_some_and(|history| history.messages.contains_key(&message))
+                || session
+                    .threads
+                    .topic_histories
+                    .iter()
+                    .any(|((chat, _), topic)| {
+                        *chat == chat_id.0 && topic.messages.contains_key(&message)
+                    })
+                || session.views_shown().any(|view| {
+                    view.thread.is_some_and(|thread| {
+                        thread.chat_id == chat_id && thread.history.messages.contains_key(&message)
+                    })
+                })
+        };
+        let gone: Vec<MessageTranslationKey> = self
+            .messages
+            .translate
+            .messages
+            .iter()
+            .filter(|((chat, message, _), translation)| {
+                *chat == chat_id.0
+                    && !matches!(translation, Translation::Pending { .. })
+                    && !held(self, *message)
+            })
+            .map(|(key, _)| key.clone())
+            .collect();
+        if gone.is_empty() {
+            return;
+        }
+        for key in gone {
+            self.messages.translate.messages.remove(&key);
+        }
+        self.messages.translate.revision += 1;
+    }
+
     /// Whether the translated chat's pump should ask for `message_id` into
     /// `to`: nothing was asked yet, or the asks failed fewer than
     /// `TRANSLATE_PUMP_ATTEMPTS` times (`ConnectDriver::translate_message`

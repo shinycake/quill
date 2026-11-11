@@ -74,6 +74,12 @@ impl QuillApp {
             self.chat_list.selected.clear();
             self.chat_list.pin.end_drag();
         }
+        // A folder nobody views stops waiting out a failed page.
+        if let Some(left) = self.folders.tab.filter(|_| self.folders.tab != tab)
+            && let Some(session) = self.session_mut()
+        {
+            session.chat_list.folder_left(left);
+        }
         self.chat_list.filter = filter;
         self.folders.tab = tab;
     }

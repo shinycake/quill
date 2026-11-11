@@ -636,6 +636,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             self.session.auth_state.password_state.refetching(request);
         }
+        // Phase 9.2: `updateStoryPostSucceeded` queued poster chats whose
+        // active stories should be refreshed (an own story posted from
+        // another client appears in the tray this way). Asked as the update
+        // lands; a refused send stays queued for the next ingest, never
+        // for every frame.
+        self.refresh_story_trays();
         if let Some(chat_id) = unpinned_all {
             self.session
                 .messages

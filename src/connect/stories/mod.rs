@@ -77,8 +77,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Phase 9.1: refresh one chat's active stories (`getChatActiveStories`).
     /// The response is `chatActiveStories`, handled like the update.
     /// Asks for the active stories of every chat the reducer queued
-    /// (`StoriesState::tray_refresh`). A chat whose send failed stays
-    /// queued for the next pass.
+    /// (`StoriesState::tray_refresh`). Run by the ingest that queued them;
+    /// a chat whose send failed stays queued for the next ingest.
     pub fn refresh_story_trays(&mut self) {
         let chats: Vec<i64> = self.session.stories.tray_refresh.iter().copied().collect();
         for chat_id in chats {
