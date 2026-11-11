@@ -312,9 +312,10 @@ pub enum WithdrawStep {
     Checking,
     /// tdesktop's password box: "Two-step verification".
     Password { error: Option<String> },
-    /// The password went out under the withdrawal's `request`. Its answer
-    /// ends the withdrawal; its error returns to `Password` with the line.
-    PasswordSending,
+    /// The password went out as this request. Its answer ends the
+    /// withdrawal; its error returns to `Password` with the line; an
+    /// answer of an earlier attempt matches neither.
+    PasswordSending(crate::ids::RequestId),
     /// tdesktop `TransferPasswordError`: no password (`later` false) or a
     /// password or session that is too fresh (`later` true).
     SecurityCheck { later: bool },
@@ -334,6 +335,17 @@ pub struct Withdraw {
 impl Withdraw {
     pub fn waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
         request.is_some() && self.request == request
+    }
+
+    /// Whether `request` is the answer the current step waits for: the
+    /// password-less try while `Checking`, the password's own request
+    /// while `PasswordSending`; no other step takes an answer.
+    pub fn takes_answer(&self, request: Option<crate::ids::RequestId>) -> bool {
+        match self.step {
+            WithdrawStep::Checking => self.waits_for(request),
+            WithdrawStep::PasswordSending(sent) => request == Some(sent) && self.waits_for(request),
+            WithdrawStep::Password { .. } | WithdrawStep::SecurityCheck { .. } => false,
+        }
     }
 }
 

@@ -301,7 +301,7 @@ impl Session {
                 // An answer to an attempt the user cancelled (or one
                 // before this attempt) opens nothing.
                 let id = pending.map(|p| p.id);
-                if earn.withdraw.as_ref().is_some_and(|w| w.waits_for(id)) {
+                if earn.withdraw.as_ref().is_some_and(|w| w.takes_answer(id)) {
                     earn.withdraw = None;
                     if !url.is_empty() {
                         earn.open_url = Some(url);
@@ -531,7 +531,7 @@ impl Session {
             }
             EarnPurpose::AdAccountUrl { .. } => {}
             EarnPurpose::WithdrawalUrl { with_password } => {
-                if earn.withdraw.as_ref().is_some_and(|w| w.waits_for(request)) {
+                if earn.withdraw.as_ref().is_some_and(|w| w.takes_answer(request)) {
                     Self::apply_withdrawal_error(earn, err, with_password, &reason);
                 }
             }

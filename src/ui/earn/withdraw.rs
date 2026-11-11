@@ -377,8 +377,8 @@ impl QuillApp {
                     }
                     (tr(keys::Q_MONEY_SECURITY_CHECK), body, footer)
                 }
-                step @ (WithdrawStep::Password { .. } | WithdrawStep::PasswordSending) => {
-                    let sending = step == WithdrawStep::PasswordSending;
+                step @ (WithdrawStep::Password { .. } | WithdrawStep::PasswordSending(_)) => {
+                    let sending = matches!(step, WithdrawStep::PasswordSending(_));
                     let error = match step {
                         WithdrawStep::Password { error } => error,
                         _ => None,

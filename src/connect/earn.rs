@@ -373,7 +373,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             step: WithdrawStep::Checking,
             request: None,
         });
-        let result = self.send_withdrawal(target, "");
+        let result = self.send_withdrawal(target, "").map(|_| ());
         if result.is_err() {
             self.session.payments.earn.withdraw = None;
         }
@@ -387,18 +387,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(withdraw) = self.session.payments.earn.withdraw.as_mut() else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if password.is_empty() || withdraw.step == WithdrawStep::PasswordSending {
+        if password.is_empty() || matches!(withdraw.step, WithdrawStep::PasswordSending(_)) {
             return Ok(());
         }
-        withdraw.step = WithdrawStep::PasswordSending;
         let target = withdraw.target;
-        let result = self.send_withdrawal(target, password);
-        if result.is_err()
-            && let Some(withdraw) = self.session.payments.earn.withdraw.as_mut()
-        {
-            withdraw.step = WithdrawStep::Password { error: None };
+        // The step carries the request, so it is entered once the send
+        // went out; a failed send leaves the box as it was.
+        let request = self.send_withdrawal(target, password)?;
+        if let Some(withdraw) = self.session.payments.earn.withdraw.as_mut() {
+            withdraw.step = WithdrawStep::PasswordSending(request);
         }
-        result
+        Ok(())
     }
 
     /// Send the URL request and record it on the withdrawal, so only its
@@ -407,12 +406,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         target: WithdrawTarget,
         password: &str,
-    ) -> Result<(), ConnectSendError> {
+    ) -> Result<RequestId, ConnectSendError> {
         let request = self.send_withdrawal_request(target, password)?;
         if let Some(withdraw) = self.session.payments.earn.withdraw.as_mut() {
             withdraw.request = Some(request);
         }
-        Ok(())
+        Ok(request)
     }
 
     fn send_withdrawal_request(
