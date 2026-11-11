@@ -477,8 +477,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Err(ConnectSendError::InvalidRequest);
         }
+        let sent =
+            self.password_op_send(PasswordOp::RequestRecoveryCode, request_password_recovery)?;
+        // Only a request that went out drops the "code sent to" step: a
+        // refused one leaves the emailed code's dialog where it was.
         self.session.auth_state.twofa_flow.recovery_code_sent_to = None;
-        self.password_op_send(PasswordOp::RequestRecoveryCode, request_password_recovery)
+        Ok(sent)
     }
 
     /// Batch 6: `recoverPassword` (schema 1.8.67, line 11479) with the
@@ -535,10 +539,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if email.trim().is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.auth_state.twofa_flow.login_email_code_sent_to = None;
-        self.password_op_send(PasswordOp::SetLoginEmail, |extra| {
+        let sent = self.password_op_send(PasswordOp::SetLoginEmail, |extra| {
             set_login_email_address(extra, email.trim())
-        })
+        })?;
+        self.session.auth_state.twofa_flow.login_email_code_sent_to = None;
+        Ok(sent)
     }
 
     /// Batch 6: `resendLoginEmailAddressCode` (schema 1.8.67, line 11446).
@@ -582,13 +587,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if password.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.auth_state.last_auth_error = None;
-        let extra = self
-            .session
-            .request(RequestPurpose::CheckAuthenticationPassword, None);
-        self.sender
-            .send_json(&check_authentication_password(extra, password))?;
-        Ok(extra)
+        self.login_request(RequestPurpose::CheckAuthenticationPassword, |extra| {
+            check_authentication_password(extra, password)
+        })
     }
 
     /// Slice A10: send `requestAuthenticationPasswordRecovery` when auth
@@ -605,13 +606,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         ) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.auth_state.last_auth_error = None;
-        let extra = self
-            .session
-            .request(RequestPurpose::RequestAuthenticationPasswordRecovery, None);
-        self.sender
-            .send_json(&request_authentication_password_recovery(extra))?;
-        Ok(extra)
+        self.login_request(
+            RequestPurpose::RequestAuthenticationPasswordRecovery,
+            |extra| request_authentication_password_recovery(extra),
+        )
     }
 
     /// Slice A10: send `recoverAuthenticationPassword` with the emailed
@@ -625,12 +623,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if code.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.auth_state.last_auth_error = None;
-        let extra = self
-            .session
-            .request(RequestPurpose::RecoverAuthenticationPassword, None);
-        self.sender
-            .send_json(&recover_authentication_password(extra, code))?;
-        Ok(extra)
+        self.login_request(RequestPurpose::RecoverAuthenticationPassword, |extra| {
+            recover_authentication_password(extra, code)
+        })
     }
 }

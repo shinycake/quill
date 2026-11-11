@@ -37,8 +37,15 @@ impl Saver {
             return;
         };
         let state = self.staged.lock().ok().and_then(|mut s| s.take());
-        if let Some(state) = state {
-            let _ = write_json_atomic(path, &state);
+        if let Some(state) = state
+            && let Err(err) = write_json_atomic(path, &state)
+        {
+            // Back in the slot (unless a newer geometry was staged meanwhile),
+            // so the next save and the quit flush try it again.
+            if let Ok(mut staged) = self.staged.lock() {
+                staged.get_or_insert(state);
+            }
+            super::deferred::note_write_failure(err);
         }
     }
 }
@@ -106,5 +113,30 @@ mod tests {
         std::fs::remove_file(&path).ok();
         saver.write_staged(&path);
         assert!(!path.exists(), "a state is written once");
+    }
+
+    #[test]
+    fn a_failed_write_keeps_the_state_staged_and_reports_it() {
+        let dir = crate::scratch::process_dir("quill-window-save-failed");
+        let blocker = dir.join("not-a-folder");
+        std::fs::write(&blocker, b"x").ok();
+        let path = blocker.join("window_state.json");
+        let saver = Saver {
+            staged: Mutex::new(None),
+            write: Mutex::new(()),
+        };
+        let _ = crate::settings::take_deferred_write_failure();
+        saver.stage(state(3.));
+        saver.write_staged(&path);
+        assert!(crate::settings::take_deferred_write_failure().is_some());
+        saver.stage(state(4.));
+        saver.write_staged(&path);
+        let staged = saver.staged.lock().ok().and_then(|s| s.clone());
+        assert_eq!(staged.map(|s| s.x), Some(4.), "the newest state stays");
+        let good = dir.join("window_state.json");
+        saver.write_staged(&good);
+        assert!(good.exists(), "written once the disk takes it");
+        std::fs::remove_file(&good).ok();
+        std::fs::remove_file(&blocker).ok();
     }
 }

@@ -542,6 +542,28 @@ fn forgot_password_requests_a_code_then_recovers_with_a_new_password() {
 }
 
 #[test]
+fn a_refused_request_keeps_the_code_sent_to_step() {
+    let mut f = fixture();
+    seed_password_state(&mut f, PASSWORD_STATE_ON);
+    f.1.session.auth_state.twofa_flow.recovery_code_sent_to = Some("i***@example.com".into());
+    f.1.session.auth_state.twofa_flow.login_email_code_sent_to = Some("m***@example.com".into());
+    // Another 2FA request is out: both starters are refused.
+    f.1.refresh_password_state().unwrap();
+    assert_invalid(f.1.request_twofa_recovery_code());
+    assert_invalid(f.1.set_login_email("me@example.com"));
+    let flow = &f.1.session.auth_state.twofa_flow;
+    assert_eq!(
+        flow.recovery_code_sent_to.as_deref(),
+        Some("i***@example.com")
+    );
+    assert_eq!(
+        flow.login_email_code_sent_to.as_deref(),
+        Some("m***@example.com")
+    );
+    cleanup(f);
+}
+
+#[test]
 fn recovering_with_an_empty_password_reports_removal() {
     let mut f = fixture();
     seed_password_state(&mut f, PASSWORD_STATE_ON);

@@ -14,34 +14,38 @@ use super::*;
 /// deletion. `Ok(false)`: it was not registered (already removed).
 /// Refuses to remove the last remaining account.
 pub fn begin_remove_account(app_root: &Path, key: &AccountKey) -> Result<bool, RemoveAccountError> {
-    let mut registry = load_registry(app_root);
-    if !registry.accounts.iter().any(|r| &r.key == key) {
-        return Ok(false);
-    }
-    if registry.accounts.len() <= 1 {
-        return Err(RemoveAccountError::LastAccount);
-    }
-    registry.accounts.retain(|r| &r.key != key);
-    if registry.active.as_ref() == Some(key) {
-        registry.active = registry.accounts.first().map(|r| r.key.clone());
-    }
-    if !registry.pending_deletes.contains(key) {
-        registry.pending_deletes.push(key.clone());
-    }
-    save_registry(app_root, &registry)?;
-    Ok(true)
+    let mut removed = false;
+    update_registry(app_root, |registry| {
+        if !registry.accounts.iter().any(|r| &r.key == key) {
+            return Ok(false);
+        }
+        if registry.accounts.len() <= 1 {
+            return Err(RemoveAccountError::LastAccount);
+        }
+        registry.accounts.retain(|r| &r.key != key);
+        if registry.active.as_ref() == Some(key) {
+            registry.active = registry.accounts.first().map(|r| r.key.clone());
+        }
+        if !registry.pending_deletes.contains(key) {
+            registry.pending_deletes.push(key.clone());
+        }
+        removed = true;
+        Ok(true)
+    })?;
+    Ok(removed)
 }
 
 /// Record `keys`' folders for deletion; their accounts stay in the list
 /// (the lock-screen log out: every account signs in again).
 pub fn mark_for_deletion(app_root: &Path, keys: &[AccountKey]) -> std::io::Result<()> {
-    let mut registry = load_registry(app_root);
-    for key in keys {
-        if !registry.pending_deletes.contains(key) {
-            registry.pending_deletes.push(key.clone());
+    update_registry(app_root, |registry| {
+        for key in keys {
+            if !registry.pending_deletes.contains(key) {
+                registry.pending_deletes.push(key.clone());
+            }
         }
-    }
-    save_registry(app_root, &registry)
+        Ok(true)
+    })
 }
 
 /// Folders recorded for deletion and not deleted yet.
@@ -77,12 +81,13 @@ pub fn delete_account_folder(app_root: &Path, key: &AccountKey) -> std::io::Resu
 
 /// `key`'s folder is gone: forget the record.
 pub fn finish_pending_delete(app_root: &Path, key: &AccountKey) -> std::io::Result<()> {
-    let mut registry = load_registry(app_root);
-    if !registry.pending_deletes.contains(key) {
-        return Ok(());
-    }
-    registry.pending_deletes.retain(|pending| pending != key);
-    save_registry(app_root, &registry)
+    update_registry(app_root, |registry| {
+        if !registry.pending_deletes.contains(key) {
+            return Ok(false);
+        }
+        registry.pending_deletes.retain(|pending| pending != key);
+        Ok(true)
+    })
 }
 
 #[cfg(test)]
