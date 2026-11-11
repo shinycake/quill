@@ -123,7 +123,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetAuthorizationState, None);
-        self.sender.send_json(&get_authorization_state(extra))?;
+        if let Err(err) = self.sender.send_json(&get_authorization_state(extra)) {
+            // Nothing went out: no answer will come for a registered request.
+            self.session.requests.take(extra);
+            return Err(err);
+        }
         self.maybe_send_parameters()?;
         Ok(extra)
     }

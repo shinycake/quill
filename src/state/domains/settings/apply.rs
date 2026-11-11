@@ -34,22 +34,15 @@ impl Session {
                 // a later read clears them too.
                 self.settings.notified.mark_active(chat_ids);
             }
-            // Phase C2i: `getUserPrivacySettingRules` answer — map the
-            // rule list to the simple Everybody / Contacts / Nobody
-            // choice (`None` when the account has custom rules the UI
-            // cannot represent; the radios then show nothing selected).
-            // Slice S3: the Privacy-screen keys keep the full parsed
-            // detail (exception lists) instead.
+            // `getUserPrivacySettingRules` answer for a Privacy-screen key:
+            // the full parsed detail (exception lists).
             SettingsPayload::UserPrivacySettingRules { rules } => {
-                if let Some(purpose) = pending.map(|p| p.purpose) {
-                    match purpose {
-                        RequestPurpose::Settings(SettingsPurpose::GetPrivacyRules { key }) => {
-                            let detail = PrivacyRuleDetail::from_rules(&rules);
-                            self.settings
-                                .finish_privacy_load(key, pending.map(|p| p.id), detail);
-                        }
-                        _ => {}
-                    }
+                if let Some(RequestPurpose::Settings(SettingsPurpose::GetPrivacyRules { key })) =
+                    pending.map(|p| p.purpose)
+                {
+                    let detail = PrivacyRuleDetail::from_rules(&rules);
+                    self.settings
+                        .finish_privacy_load(key, pending.map(|p| p.id), detail);
                 }
             }
             // Slice S3: `updateUserPrivacySettingRules` (:10871) — rules
