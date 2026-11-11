@@ -172,7 +172,7 @@ pub struct StatsState {
     /// The post whose statistics are open (one at a time).
     pub message: Option<MessageStatsState>,
     /// Fetched previews of recent posts, keyed by (chat id, message id).
-    pub posts: HashMap<(i64, i64), Option<StatsPostPreview>>,
+    pub posts: HashMap<(i64, i64), PostSlot>,
     /// How many recent posts are listed, keyed by chat.
     pub recent_shown: HashMap<i64, usize>,
 }
@@ -196,6 +196,9 @@ impl StatsState {
         self.pages.remove(&chat_id);
         self.recent_shown.remove(&chat_id);
         self.zoomed.clear();
+        // A failed post fetch is asked again when the panel opens.
+        self.posts
+            .retain(|(chat, _), slot| *chat != chat_id || !matches!(slot, PostSlot::Failed));
     }
 
     /// How many recent posts the overview lists.
@@ -342,7 +345,7 @@ impl StatsState {
     pub(crate) fn accept_post(&mut self, chat_id: i64, message_id: i64, message: &ParsedMessage) {
         self.posts.insert(
             (chat_id, message_id),
-            Some(preview(
+            PostSlot::Ready(preview(
                 &message.content,
                 message.date,
                 message.interaction_info.as_ref(),
@@ -350,10 +353,28 @@ impl StatsState {
         );
     }
 
-    /// A post that could not be fetched (deleted): its row is skipped.
-    pub(crate) fn post_missing(&mut self, chat_id: i64, message_id: i64) {
-        self.posts.insert((chat_id, message_id), None);
+    /// A post's fetch failed: gone for good (`missing`, TDLib's not-found)
+    /// skips its row; any other failure (a flaky connection, a log-out)
+    /// skips it until the panel is opened again.
+    pub(crate) fn post_failed(&mut self, chat_id: i64, message_id: i64, missing: bool) {
+        let slot = if missing {
+            PostSlot::Missing
+        } else {
+            PostSlot::Failed
+        };
+        self.posts.insert((chat_id, message_id), slot);
     }
+}
+
+/// A recent post fetched for the statistics rows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PostSlot {
+    Ready(StatsPostPreview),
+    /// Fetched and gone (deleted): the row is skipped for good.
+    Missing,
+    /// The fetch failed for another reason: the row is skipped until
+    /// `StatsState::reset` (the panel opens) lets it ask again.
+    Failed,
 }
 
 /// What is known about a post a statistics row shows.
@@ -382,8 +403,8 @@ impl Session {
             ));
         }
         match self.groups.stats.posts.get(&(chat_id, message_id)) {
-            Some(Some(preview)) => PostLookup::Ready(preview.clone()),
-            Some(None) => PostLookup::Missing,
+            Some(PostSlot::Ready(preview)) => PostLookup::Ready(preview.clone()),
+            Some(PostSlot::Missing | PostSlot::Failed) => PostLookup::Missing,
             None => PostLookup::Unknown,
         }
     }

@@ -283,9 +283,11 @@ fn recent_post_previews_are_fetched_once() {
         extra,
         r#"{"@type":"message","id":9437184,"chat_id":-100,"date":1727740800,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Launch day","entities":[]}},"interaction_info":{"@type":"messageInteractionInfo","view_count":1200,"forward_count":7}}"#,
     );
-    let preview = rig.driver.session.groups.stats.posts[&(-100, 9 << 20)]
-        .clone()
-        .expect("preview");
+    let crate::state::PostSlot::Ready(preview) =
+        rig.driver.session.groups.stats.posts[&(-100, 9 << 20)].clone()
+    else {
+        panic!("preview");
+    };
     assert_eq!(preview.text, "Launch day");
     assert_eq!(preview.views, 1200);
     assert_eq!(preview.forwards, 7);
@@ -295,9 +297,34 @@ fn recent_post_previews_are_fetched_once() {
         .unwrap()
         .unwrap();
     rig.error(missing);
+    // A refusal that is not "not found" is asked again once the panel opens.
     assert_eq!(
         rig.driver.session.groups.stats.posts[&(-100, 10 << 20)],
-        None
+        crate::state::PostSlot::Failed
+    );
+    rig.driver.session.groups.stats.reset(-100);
+    assert!(
+        !rig.driver
+            .session
+            .groups
+            .stats
+            .posts
+            .contains_key(&(-100, 10 << 20))
+    );
+    // Not found: gone for good.
+    let gone = rig
+        .driver
+        .fetch_stats_post(ChatId(-100), MessageId(11 << 20))
+        .unwrap()
+        .unwrap();
+    rig.answer(
+        gone,
+        r#"{"@type":"error","code":404,"message":"Message not found"}"#,
+    );
+    rig.driver.session.groups.stats.reset(-100);
+    assert_eq!(
+        rig.driver.session.groups.stats.posts[&(-100, 11 << 20)],
+        crate::state::PostSlot::Missing
     );
 }
 
@@ -449,7 +476,7 @@ fn the_open_panel_downloads_recent_post_thumbnails() {
     );
     session.groups.stats.posts.insert(
         (-100, 9 << 20),
-        Some(StatsPostPreview {
+        crate::state::PostSlot::Ready(StatsPostPreview {
             text: "Photo".into(),
             date: 1,
             views: 1,
