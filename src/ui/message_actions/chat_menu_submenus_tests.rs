@@ -387,7 +387,10 @@ fn clear_history_is_hidden_when_the_server_allows_none(cx: &mut TestAppContext) 
 fn menu_and_submenu_at(
     x: f32,
     cx: &mut TestAppContext,
-) -> (gpui_kit::Bounds<gpui_kit::Pixels>, gpui_kit::Bounds<gpui_kit::Pixels>) {
+) -> (
+    gpui_kit::Bounds<gpui_kit::Pixels>,
+    gpui_kit::Bounds<gpui_kit::Pixels>,
+) {
     let (app, mut vcx, chat_id) = open(cx);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
