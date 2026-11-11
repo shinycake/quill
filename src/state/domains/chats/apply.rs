@@ -462,13 +462,15 @@ impl Session {
             ChatsPayload::Background(background) => {
                 self.upsert_background_files(&background);
                 match pending.map(|p| p.purpose) {
-                    Some(
-                        RequestPurpose::SetDefaultBackground
-                        | RequestPurpose::SetDefaultBackgroundLocal,
-                    ) => {
+                    Some(RequestPurpose::Chats(
+                        ChatsPurpose::SetDefaultBackground { for_dark_theme }
+                        | ChatsPurpose::SetDefaultBackgroundLocal { for_dark_theme },
+                    )) => {
+                        // Filed under the theme the request was sent for,
+                        // not the one the app shows when it lands.
                         self.chats_state
                             .default_backgrounds
-                            .insert(self.chats_state.background_set_for_dark, background);
+                            .insert(for_dark_theme, background);
                         if let Some(id) = pending.map(|p| p.id) {
                             self.chats_state
                                 .background_answers

@@ -87,6 +87,22 @@ pub enum ExportError {
     Other(String),
 }
 
+/// The password box's request: only the answer or error of the request it
+/// holds acts on the box (the first, `createTemporaryPassword`, hands over
+/// to the URL request), so a late answer of an export the user left does
+/// not open Fragment or close another picker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExportSend {
+    Idle,
+    Out(crate::ids::RequestId),
+}
+
+impl ExportSend {
+    pub fn is_out(self) -> bool {
+        matches!(self, Self::Out(_))
+    }
+}
+
 /// Where the picker is. The picker is one dialog; each later step replaces
 /// its content, and Cancel on a step goes back to `Pick`, the way
 /// tdesktop's boxes stack over the contacts list.
@@ -120,11 +136,11 @@ pub enum TransferStage {
     /// Since TDLib 1.8.69 the probe stops in TDLib unless a temporary
     /// password exists, so a too fresh password shows up on Submit.
     Probing,
-    /// "Two-step verification": the password box. `sending` while
+    /// "Two-step verification": the password box. `send` is `Out` while
     /// `createTemporaryPassword` or the URL request after it is out; the
     /// password itself is never kept here.
     Password {
-        sending: bool,
+        send: ExportSend,
         error: Option<ExportError>,
     },
     /// "Security check" (tdesktop `TransferPasswordError`): no password
@@ -177,7 +193,21 @@ impl TransferPicker {
     /// Whether the export request with the password is out (the buttons
     /// wait).
     pub fn exporting(&self) -> bool {
-        matches!(self.stage, TransferStage::Password { sending: true, .. })
+        matches!(
+            self.stage,
+            TransferStage::Password {
+                send: ExportSend::Out(_),
+                ..
+            }
+        )
+    }
+
+    /// Whether `request` is the export request this picker waits for.
+    pub fn export_waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(
+            self.stage,
+            TransferStage::Password { send: ExportSend::Out(waiting), .. } if Some(waiting) == request
+        )
     }
 
     /// Whether either export request (the probe or the real one) is out.
@@ -288,7 +318,7 @@ impl TransferPicker {
             }
             (ProbeOutcome::TooFresh, _) => TransferStage::SecurityCheck { later: true },
             (ProbeOutcome::Other, _) => TransferStage::Password {
-                sending: false,
+                send: ExportSend::Idle,
                 error: None,
             },
         };
@@ -299,7 +329,7 @@ impl TransferPicker {
     pub fn probe_answered(&mut self) {
         if self.stage == TransferStage::Probing {
             self.stage = TransferStage::Password {
-                sending: false,
+                send: ExportSend::Idle,
                 error: None,
             };
         }
@@ -308,7 +338,15 @@ impl TransferPicker {
     /// A fresh password state arrived: with no password set, the idle
     /// password box becomes the security check.
     pub fn password_state_known(&mut self, has_password: bool) {
-        if !has_password && matches!(self.stage, TransferStage::Password { sending: false, .. }) {
+        if !has_password
+            && matches!(
+                self.stage,
+                TransferStage::Password {
+                    send: ExportSend::Idle,
+                    ..
+                }
+            )
+        {
             self.stage = TransferStage::SecurityCheck { later: false };
         }
     }

@@ -732,3 +732,17 @@ pub enum DeepLinkState {
     /// TDLib calls the link unknown: the UI asks `getDeepLinkInfo` for it.
     Unknown { link: String },
 }
+
+impl DeepLinkState {
+    /// The flow generation of a stage that belongs to one; answers of an
+    /// older flow are dropped by comparing it.
+    pub fn generation(&self) -> Option<u64> {
+        match self {
+            Self::InvitePreview { generation, .. }
+            | Self::ResolvingInfo { generation }
+            | Self::Info { generation, .. }
+            | Self::ResolvingChat { generation, .. } => Some(*generation),
+            Self::ChatReady { .. } | Self::ShowText(_) | Self::Ui(_) | Self::Unknown { .. } => None,
+        }
+    }
+}

@@ -20,10 +20,10 @@ impl ChatsPurpose {
             | Self::RemoveBusinessBotFromChat
             | Self::CreatePrivateChat
             | Self::EnsurePrivateChat
-            | Self::SetDefaultBackground
+            | Self::SetDefaultBackground { .. }
             | Self::DeleteDefaultBackground { .. }
             | Self::RemoveInstalledBackground { .. }
-            | Self::SetDefaultBackgroundLocal
+            | Self::SetDefaultBackgroundLocal { .. }
             | Self::SetChatBackground
             | Self::DeleteChatBackground
             | Self::SetChatTheme

@@ -3,7 +3,7 @@
 //! lists stale and the connect driver refetches them from the server.
 use crate::earn::EarnErrorHint;
 use crate::gift_manage::{
-    ExportError, GiftListFetch, GiftManagePayload, GiftManageState, ProbeOutcome, TransferPicker,
+    ExportError, ExportSend, GiftListFetch, GiftManagePayload, GiftManageState, ProbeOutcome,
     TransferStage,
 };
 use crate::lang::{keys, tr_with};
@@ -55,7 +55,9 @@ impl Session {
             }
             (GiftManagePayload::Collection(_), PaymentsPurpose::ChangeGiftCollection) => {
                 self.payments.gifts_manage.collections_stale = true;
-                self.payments.gifts_manage.flow = None;
+                self.payments
+                    .gifts_manage
+                    .close_flow_answered_by(PaymentsPurpose::ChangeGiftCollection);
                 self.payments.hub.gift_mutating = false;
                 self.payments.hub.gifts_error = None;
                 self.payments.hub.gifts_stale = true;
@@ -68,7 +70,7 @@ impl Session {
                 hub.gifts_stale = true;
                 hub.tx_loaded = false;
                 let manage = &mut self.payments.gifts_manage;
-                manage.flow = None;
+                manage.close_flow_answered_by(PaymentsPurpose::UpgradeGift);
                 manage.note = Some(if summary.title.is_empty() {
                     "Gift upgraded.".to_string()
                 } else {
@@ -100,7 +102,7 @@ impl Session {
             (
                 GiftManagePayload::TemporaryPassword { has_password },
                 PaymentsPurpose::GiftExportTempPassword,
-            ) => self.apply_gift_export_temp_password(has_password),
+            ) => self.apply_gift_export_temp_password(has_password, pending.map(|p| p.id)),
             _ => {}
         }
     }
@@ -122,30 +124,39 @@ impl Session {
             PaymentsPurpose::TransferGift => {
                 hub.gift_mutating = false;
                 hub.gifts_error = None;
-                hub.gift_selected = None;
                 hub.gifts_stale = true;
                 hub.tx_loaded = false;
                 // tdesktop `ShowGiftTransferredToast`, then the recipient's
-                // chat (`showPeerHistory`).
-                manage.transferred = match (manage.transfer(), pending.map(|p| p.id)) {
-                    (Some(picker), Some(request)) => picker.transferred_by(request),
+                // chat (`showPeerHistory`). Only the picker that sent this
+                // transfer closes and names its recipient; another flow
+                // open by now stays.
+                let sent_by = match (manage.transfer(), pending.map(|p| p.id)) {
+                    (Some(picker), Some(request)) => picker
+                        .transferred_by(request)
+                        .map(|done| (done, picker.id.clone())),
                     _ => None,
                 };
-                manage.flow = None;
+                if let Some((done, gift_id)) = sent_by {
+                    manage.transferred = Some(done);
+                    manage.flow = None;
+                    if hub.gift_selected.as_deref() == Some(gift_id.as_str()) {
+                        hub.gift_selected = None;
+                    }
+                }
                 manage.note = Some("Gift transferred.".into());
             }
             PaymentsPurpose::SetGiftResalePrice => {
                 hub.gift_mutating = false;
                 hub.gifts_error = None;
                 hub.gifts_stale = true;
-                manage.flow = None;
+                manage.close_flow_answered_by(PaymentsPurpose::SetGiftResalePrice);
                 manage.note = Some("Resale price updated.".into());
             }
             PaymentsPurpose::DeleteGiftCollection => {
                 hub.gift_mutating = false;
                 hub.gifts_error = None;
                 hub.gifts_stale = true;
-                manage.flow = None;
+                manage.close_flow_answered_by(PaymentsPurpose::DeleteGiftCollection);
                 manage.active_collection = 0;
                 manage.collections_stale = true;
                 manage.note = Some("Collection deleted.".into());
@@ -210,7 +221,6 @@ impl Session {
                 hub.gift_selected = None;
             }
         }
-        manage.flow = None;
         manage.collections_stale = true;
         // The list may have been reopened while the request was out: the
         // server's list stays the source of truth.
@@ -220,9 +230,12 @@ impl Session {
 
     /// The `httpUrl` of `getUpgradedGiftWithdrawalUrl`: tdesktop opens it
     /// and closes the picker (`ExportOnBlockchain`).
-    pub(crate) fn apply_gift_export_url(&mut self, url: String) {
+    pub(crate) fn apply_gift_export_url(&mut self, url: String, request: Option<RequestId>) {
         let manage = &mut self.payments.gifts_manage;
-        if !manage.transfer().is_some_and(TransferPicker::exporting) {
+        if !manage
+            .transfer()
+            .is_some_and(|picker| picker.export_waits_for(request))
+        {
             return;
         }
         manage.flow = None;
@@ -234,16 +247,19 @@ impl Session {
     /// The temporary password for "Send via Blockchain" exists: the driver
     /// asks for the URL next. Without one (TDLib should not answer that
     /// way) the box says the server failed.
-    fn apply_gift_export_temp_password(&mut self, has_password: bool) {
+    fn apply_gift_export_temp_password(&mut self, has_password: bool, request: Option<RequestId>) {
         let manage = &mut self.payments.gifts_manage;
-        if !manage.transfer().is_some_and(TransferPicker::exporting) {
+        if !manage
+            .transfer()
+            .is_some_and(|picker| picker.export_waits_for(request))
+        {
             return;
         }
         if has_password {
             manage.export_unlocked = true;
         } else if let Some(picker) = manage.transfer_mut() {
             picker.stage = TransferStage::Password {
-                sending: false,
+                send: ExportSend::Idle,
                 error: Some(ExportError::ServerError),
             };
         }
@@ -294,13 +310,21 @@ impl Session {
     /// fresh password opens the security check (`PrePasswordErrorBox`);
     /// anything else, which tdesktop toasts, also shows under the field so
     /// it is not hidden behind the picker.
-    fn apply_gift_export_error(manage: &mut GiftManageState, err: &TdError, reason: &str) {
-        if !manage.transfer().is_some_and(TransferPicker::exporting) {
+    fn apply_gift_export_error(
+        manage: &mut GiftManageState,
+        err: &TdError,
+        reason: &str,
+        request: Option<RequestId>,
+    ) {
+        if !manage
+            .transfer()
+            .is_some_and(|picker| picker.export_waits_for(request))
+        {
             return;
         }
         let stage = match password_check_failure(err, reason) {
             PasswordCheckFailure::Field(error) => TransferStage::Password {
-                sending: false,
+                send: ExportSend::Idle,
                 error: Some(error),
             },
             PasswordCheckFailure::SecurityCheck { later } => TransferStage::SecurityCheck { later },
@@ -353,7 +377,7 @@ impl Session {
                 ));
             }
             PaymentsPurpose::GiftExportTempPassword | PaymentsPurpose::GiftExportUrl => {
-                Self::apply_gift_export_error(manage, err, &reason)
+                Self::apply_gift_export_error(manage, err, &reason, pending.map(|p| p.id))
             }
             PaymentsPurpose::GiftExportProbe => self.apply_gift_export_probe_error(err),
             PaymentsPurpose::SendStarGift => {

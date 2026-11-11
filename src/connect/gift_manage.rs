@@ -347,7 +347,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn export_picked_gift(&mut self, password: &str) -> Result<RequestId, ConnectSendError> {
         let Some(TransferPicker {
             id,
-            stage: TransferStage::Password { sending: false, .. },
+            stage:
+                TransferStage::Password {
+                    send: ExportSend::Idle,
+                    ..
+                },
             ..
         }) = self.session.payments.gifts_manage.transfer().cloned()
         else {
@@ -361,10 +365,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Payments(PaymentsPurpose::GiftExportTempPassword),
             None,
         );
-        self.set_export_sending(true);
+        self.set_export_send(ExportSend::Out(extra));
         let json = rq::create_temporary_password(extra, password);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.set_export_sending(false);
+            self.set_export_send(ExportSend::Idle);
             return Err(err);
         }
         Ok(extra)
@@ -387,27 +391,25 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         };
         if let Err(err) = self.export_allowed(&id) {
-            self.set_export_sending(false);
+            self.set_export_send(ExportSend::Idle);
             return Err(err);
         }
         let extra = self.session.request(
             RequestPurpose::Payments(PaymentsPurpose::GiftExportUrl),
             None,
         );
+        self.set_export_send(ExportSend::Out(extra));
         let json = rq::get_upgraded_gift_withdrawal_url(extra, &id);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.set_export_sending(false);
+            self.set_export_send(ExportSend::Idle);
             return Err(err);
         }
         Ok(())
     }
 
-    fn set_export_sending(&mut self, sending: bool) {
+    fn set_export_send(&mut self, send: ExportSend) {
         if let Some(picker) = self.session.payments.gifts_manage.transfer_mut() {
-            picker.stage = TransferStage::Password {
-                sending,
-                error: None,
-            };
+            picker.stage = TransferStage::Password { send, error: None };
         }
     }
 
