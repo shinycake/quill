@@ -272,62 +272,7 @@ impl Session {
             // `maybe_continue_boost` in connect.rs). Only while the box of
             // that chat waits for them: a box that closed has nothing to
             // hand them to.
-            GroupsPayload::ChatBoostSlots { slots } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBoostSlotsForBoost)
-                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && let Some(state) = self
-                        .groups
-                        .boost_box
-                        .as_mut()
-                        .filter(|state| state.chat_id == chat_id.0)
-                    && pending.is_some_and(|p| state.waits_for(p.id))
-                    && matches!(
-                        state.phase,
-                        crate::boost_box::BoostPhase::Working(
-                            crate::boost_box::BoostWork::Slots { .. }
-                        )
-                    )
-                {
-                    state.phase = crate::boost_box::BoostPhase::Working(
-                        crate::boost_box::BoostWork::SlotsReady(slots),
-                    );
-                }
-                // Slice G2: `boostChat` answers `chatBoostSlots` as well
-                // (schema 1.8.67, line 13922) — drop the cached status so
-                // the dialog refetches it.
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::BoostChat)
-                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                {
-                    self.groups.chat_boost_status.remove(&chat_id.0);
-                    self.groups.chat_boost_details.remove(&chat_id.0);
-                    // The boost box goes back to its counters, with a line
-                    // about boosts that moved here (`lng_boost_reassign_done`).
-                    if let Some(state) = self
-                        .groups
-                        .boost_box
-                        .as_mut()
-                        .filter(|state| state.chat_id == chat_id.0)
-                        .filter(|state| pending.is_some_and(|p| state.waits_for(p.id)))
-                    {
-                        let moved = match std::mem::replace(
-                            &mut state.phase,
-                            crate::boost_box::BoostPhase::Main,
-                        ) {
-                            crate::boost_box::BoostPhase::Working(
-                                crate::boost_box::BoostWork::Boosting { reassign, .. },
-                            ) => reassign,
-                            _ => None,
-                        };
-                        state.note = moved.map(|moved| {
-                            crate::boost_box::reassign_done_text(
-                                moved.count,
-                                moved.groups,
-                                moved.channels,
-                            )
-                        });
-                    }
-                }
-            }
+            GroupsPayload::ChatBoostSlots { slots } => self.accept_chat_boost_slots(slots, pending),
             // Phase D2: `getChatStatistics` answer — the response carries
             // no chat id, so it is correlated via the pending request's
             // `chat_id`.
