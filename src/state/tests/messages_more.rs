@@ -774,3 +774,33 @@ fn has_scheduled_messages_tracks_chat_and_update() {
     );
     assert!(session.chat_has_scheduled_messages(ChatId(15)));
 }
+
+const FORCE_21: &str = r#"{"@type":"updateNewMessage","message":{"id":306,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupForceReply","input_field_placeholder":""},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#;
+
+#[test]
+fn waiting_force_reply_in_unshown_chat_is_not_ready() {
+    // A target for a chat no window shows waits without asking for a
+    // render (the poll loop would redraw the window on every batch).
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    apply_json(&mut session, &seq, &sink, FORCE_21);
+    assert!(!session.bots.pending_force_replies.is_empty());
+    assert!(!session.force_reply_ready());
+    // Shown and loaded: a render has something to hand out.
+    session.open_chat = Some(ChatId(21));
+    assert!(session.force_reply_ready());
+}
+
+#[test]
+fn later_markup_message_drops_the_waiting_force_reply() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    apply_json(&mut session, &seq, &sink, FORCE_21);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewMessage","message":{"id":307,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupRemoveKeyboard","is_personal":false},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"y","entities":[]}}}}"#,
+    );
+    assert!(session.bots.pending_force_replies.is_empty());
+}

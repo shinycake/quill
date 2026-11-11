@@ -485,6 +485,7 @@ impl Session {
             }
         });
         let (chat_id, topic_id) = (message.chat_id, message.topic_id);
+        let (is_outgoing_msg, has_markup) = (message.is_outgoing, message.reply_markup.is_some());
         if self.route_new_message_into_window(&message) {
             self.upsert_message(message, false);
         } else {
@@ -504,6 +505,12 @@ impl Session {
             }
         }
         self.trim_live_windows(chat_id, topic_id);
+        // A later bot message carrying any markup replaces the chat's
+        // keyboard, so a force reply still waiting for its chat is gone
+        // (tdesktop takes it from the chat's current keyboard on open).
+        if !is_outgoing_msg && has_markup {
+            self.bots.pending_force_replies.remove(&chat_id);
+        }
         if let Some(target) = force_reply {
             self.bots
                 .pending_force_replies

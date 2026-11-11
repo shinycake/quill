@@ -446,7 +446,7 @@ impl QuillApp {
         }
         // A forced reply arms the composer at the next render
         // (`flush_notifications`): draw it now, whatever the updates were.
-        let deliver = !live.driver.session.bots.pending_force_replies.is_empty();
+        let deliver = live.driver.session.force_reply_ready();
         // Parity slice: the selected folder tab may have been deleted or
         // removed remotely (`updateChatFolders`); fall back to Main.
         if let Some(folder_id) = self.screen.folders.tab
