@@ -324,8 +324,6 @@ one_shot::body.borrow_mut 2
 open_chat_window::built.borrow_mut 1
 open_chat_window::built_out.borrow_mut 1
 open_if_ready::first.borrow_mut 1
-open_pip_window::slot.borrow_mut 1
-open_pip_window::slot_in.borrow_mut 1
 paint_stamp::scoped.borrow 1
 paint_stamp_in::scope.borrow 1
 paint_text_specks::painted.borrow_mut 1

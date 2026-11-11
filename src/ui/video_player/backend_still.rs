@@ -71,7 +71,7 @@ impl Drop for StillBackend {
 impl Backend for StillBackend {
     fn status(&mut self) -> BackendStatus {
         BackendStatus {
-            health: EngineHealth::Open(Flow::Running),
+            health: EngineHealth::Open(Flow::Steady),
             position: self.position,
             duration: self.duration,
             buffered: self.duration.map(|end| vec![0.0..end]).unwrap_or_default(),

@@ -135,7 +135,7 @@ pub(super) fn live_status(snapshot: &LiveSnapshot, gaps: &ArrivalGaps, now: Inst
                 .is_some_and(|(_, at)| now.saturating_duration_since(at) >= gaps.stall_after()),
         sender: snapshot.state,
         end: match snapshot.end.as_ref() {
-            None => FeedEnd::Running,
+            None => FeedEnd::Live,
             Some(LiveEnd::Failed(_)) => FeedEnd::Failed,
             Some(_) => FeedEnd::Ended,
         },
@@ -152,7 +152,7 @@ pub(super) fn stall_check_at(
     now: Instant,
 ) -> Option<Instant> {
     let waiting = matches!(status.sender, Some(LiveState::Paused | LiveState::Inactive));
-    if status.end != FeedEnd::Running || waiting {
+    if status.end != FeedEnd::Live || waiting {
         return None;
     }
     if status.stalled {

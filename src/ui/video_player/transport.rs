@@ -148,7 +148,7 @@ impl Transport {
 pub(crate) enum EngineHealth {
     /// The file is still opening.
     #[default]
-    Opening,
+    NotOpen,
     /// The file can't play.
     Failed,
     /// Open; how the clock and the picture are doing.
@@ -159,7 +159,7 @@ pub(crate) enum EngineHealth {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Flow {
     #[default]
-    Running,
+    Steady,
     /// The picture is stalled while the clock should run.
     Stalled,
     /// The backend stopped at the end of the clip.
@@ -173,13 +173,13 @@ impl EngineHealth {
         if failed {
             Self::Failed
         } else if !ready {
-            Self::Opening
+            Self::NotOpen
         } else if at_end {
             Self::Open(Flow::AtEnd)
         } else if stalled {
             Self::Open(Flow::Stalled)
         } else {
-            Self::Open(Flow::Running)
+            Self::Open(Flow::Steady)
         }
     }
 }
@@ -214,7 +214,7 @@ pub(crate) struct LiveStatus {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum FeedEnd {
     #[default]
-    Running,
+    Live,
     /// The feed ended.
     Ended,
     /// The engine failed.
@@ -515,7 +515,7 @@ impl TransportMachine {
                 self.fail(now);
                 return None;
             }
-            EngineHealth::Opening => None,
+            EngineHealth::NotOpen => None,
             EngineHealth::Open(flow) => Some(flow),
         };
         if let Some(duration) = status.duration.filter(|d| d.is_finite() && *d > 0.0) {
@@ -590,11 +590,11 @@ impl TransportMachine {
         let state = match (status.end, status.sender) {
             (FeedEnd::Failed, _) => PlayState::Failed,
             (FeedEnd::Ended, _) => PlayState::Ended,
-            (FeedEnd::Running, Some(LiveState::Paused)) => PlayState::Paused,
-            (FeedEnd::Running, Some(LiveState::Inactive)) => PlayState::Ready,
-            (FeedEnd::Running, _) if !status.has_frame => PlayState::Opening,
-            (FeedEnd::Running, _) if status.stalled => PlayState::Buffering,
-            (FeedEnd::Running, _) => PlayState::Playing,
+            (FeedEnd::Live, Some(LiveState::Paused)) => PlayState::Paused,
+            (FeedEnd::Live, Some(LiveState::Inactive)) => PlayState::Ready,
+            (FeedEnd::Live, _) if !status.has_frame => PlayState::Opening,
+            (FeedEnd::Live, _) if status.stalled => PlayState::Buffering,
+            (FeedEnd::Live, _) => PlayState::Playing,
         };
         self.move_to(
             state,
@@ -647,7 +647,7 @@ mod tests {
 
     fn ready(position: f64) -> BackendStatus {
         BackendStatus {
-            health: EngineHealth::Open(Flow::Running),
+            health: EngineHealth::Open(Flow::Steady),
             position,
             duration: Some(10.0),
             ..BackendStatus::default()
@@ -789,7 +789,7 @@ mod tests {
         machine.set_looping(true);
         machine.play(t0);
         let unknown = BackendStatus {
-            health: EngineHealth::Open(Flow::Running),
+            health: EngineHealth::Open(Flow::Steady),
             ..BackendStatus::default()
         };
         machine.observe(&unknown, t0);
@@ -987,10 +987,10 @@ mod tests {
     fn an_engine_reading_is_one_stage_with_failure_first() {
         use super::EngineHealth as H;
         assert_eq!(H::read(true, true, true, true), H::Failed);
-        assert_eq!(H::read(false, false, true, true), H::Opening);
+        assert_eq!(H::read(false, false, true, true), H::NotOpen);
         assert_eq!(H::read(true, false, true, true), H::Open(Flow::AtEnd));
         assert_eq!(H::read(true, false, true, false), H::Open(Flow::Stalled));
-        assert_eq!(H::read(true, false, false, false), H::Open(Flow::Running));
+        assert_eq!(H::read(true, false, false, false), H::Open(Flow::Steady));
     }
 
     #[test]
