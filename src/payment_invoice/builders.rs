@@ -25,12 +25,13 @@ pub const STARS_CURRENCY: &str = "XTR";
 
 /// A Premium gift option in the send-gift dialog. Only a user who is not
 /// the account itself can get Premium; `text` is cut to `text_limit`
-/// characters (`gift_text_length_max`, 0 when unknown).
+/// characters (`gift_text_length_max`); when the limit is not known yet the
+/// text is kept whole, and TDLib refuses a text that is too long.
 pub fn premium_gift_invoice(
     option: &PremiumGiftOption,
     recipient: &GiftRecipient,
     text: &str,
-    text_limit: usize,
+    text_limit: Option<usize>,
 ) -> Option<InputInvoice> {
     premium_gift(option, recipient, text, text_limit, false)
 }
@@ -43,7 +44,7 @@ pub fn premium_gift_stars_invoice(
     option: &PremiumGiftOption,
     recipient: &GiftRecipient,
     text: &str,
-    text_limit: usize,
+    text_limit: Option<usize>,
 ) -> Option<InputInvoice> {
     premium_gift(option, recipient, text, text_limit, true)
 }
@@ -52,7 +53,7 @@ fn premium_gift(
     option: &PremiumGiftOption,
     recipient: &GiftRecipient,
     text: &str,
-    text_limit: usize,
+    text_limit: Option<usize>,
     by_stars: bool,
 ) -> Option<InputInvoice> {
     let MessageSender::User { user_id } = recipient.sender else {
@@ -66,7 +67,11 @@ fn premium_gift(
     if recipient.is_self || option.month_count <= 0 || amount <= 0 {
         return None;
     }
-    let text: String = text.trim().chars().take(text_limit).collect();
+    let text: String = text
+        .trim()
+        .chars()
+        .take(text_limit.unwrap_or(usize::MAX))
+        .collect();
     Some(InputInvoice::Telegram(
         TelegramPaymentPurpose::PremiumGift {
             currency,

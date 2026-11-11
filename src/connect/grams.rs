@@ -173,7 +173,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Ok(extra)
             }
             Err(err) => {
+                // A tab switch or a refetch that never left ends in the
+                // error line, not in an empty list.
                 grams.loading = false;
+                grams.error =
+                    Some(crate::lang::tr(crate::lang::keys::Q_GRAMS_COULD_NOT_LOAD).to_string());
                 Err(err)
             }
         }

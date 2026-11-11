@@ -96,7 +96,7 @@ fn charging_user_is_asked_once_and_gates_the_composer() {
         ),
     );
     assert_eq!(
-        f.1.session.payments.paid_messages.gate_answer(501),
+        f.1.session.payments.paid_messages.gate_answer(501, false),
         Some(CanSend::HasPaidMessages { stars: 25 })
     );
     assert_eq!(

@@ -198,6 +198,7 @@ impl QuillApp {
                 .primary()
                 .flex_1()
                 .disabled(!enabled || locked)
+                .loading(session.payments.earn.is_checking_withdrawal())
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.earn_withdraw_stars(peer, window, cx)
                 }));

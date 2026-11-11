@@ -51,7 +51,6 @@ ChecklistDraft::others_can_mark_tasks_as_done
 ChecklistSend::others_can_mark_tasks_as_done
 CheckoutView::sending
 Clip::busy
-CollectibleLookup::loading
 CommonGroupsPaging::loading_more
 ComposerUi::draft_restore_pending
 ConnectDriver::parameters_sent
@@ -84,7 +83,6 @@ GifPanel::search_loading
 GiftCodeLookup::loading
 GiftCodeLookup::loading+error
 GiftManageState::collections_loading
-GiftManageState::limits_asked
 GiftMarketState::auction_loading
 GiftPurchase::completed
 GiftPurchase::loading
@@ -160,7 +158,6 @@ PasswordBox::sending
 PasswordBox::sending+error
 PaymentsState::form_loading
 PaymentsState::form_loading+receipt_error
-PaymentsState::star_subscriptions_loading
 PaymentsState::verification_started
 PeerColorDialog::sent
 PendingBotMessage::stop_failed

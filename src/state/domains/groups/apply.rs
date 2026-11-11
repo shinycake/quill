@@ -404,7 +404,7 @@ impl Session {
                     state.boosts.extend(boosts);
                     state.total_count = total_count;
                     state.next_offset = next_offset;
-                    state.page = BoostsPage::Idle;
+                    state.stage = BoostsStage::Ready;
                 }
             }
             // `getChatBoostLink` answer.

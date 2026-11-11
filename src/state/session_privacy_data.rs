@@ -75,9 +75,13 @@ impl Session {
                 if purpose == Some(RequestPurpose::CanSendMessageToUser)
                     && let Some(user_id) = pending.and_then(|p| p.user_id)
                 {
-                    self.payments
-                        .paid_messages
-                        .record_answer(user_id, *answer, unix_ms_now());
+                    let premium = self.my_is_premium();
+                    self.payments.paid_messages.record_answer(
+                        user_id,
+                        *answer,
+                        unix_ms_now(),
+                        premium,
+                    );
                 }
                 true
             }
@@ -229,11 +233,16 @@ impl Session {
                     err,
                 ));
             }
-            RequestPurpose::CanSendMessageToUser
-            | RequestPurpose::GetPaidMessageRevenue
-            | RequestPurpose::LoadDirectMessagesChat => {
-                // Nothing to show: the chat stays free and the Remove Fee
-                // box hides the refund line.
+            RequestPurpose::CanSendMessageToUser => {
+                // The chat stays as it was; the next open asks again.
+                if let Some(user_id) = pending.and_then(|p| p.user_id) {
+                    self.payments
+                        .paid_messages
+                        .ask_failed(user_id, unix_ms_now());
+                }
+            }
+            RequestPurpose::GetPaidMessageRevenue | RequestPurpose::LoadDirectMessagesChat => {
+                // Nothing to show: the Remove Fee box hides the refund line.
             }
             RequestPurpose::AllowUnpaidMessages | RequestPurpose::SetDirectMessagesGroup => {
                 // The failure lands on the save it answers (its target is

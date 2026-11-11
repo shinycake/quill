@@ -25,7 +25,7 @@ fn a_contact_is_asked_for_their_packs_and_the_answer_lands() {
     driver.choose_stars_gift_user(42, "Ada").unwrap();
     let request = sent_request(&recorder, "getStarGiftPaymentOptions");
     assert_eq!(request["user_id"], 42);
-    assert!(driver.session.payments.stars_gift.loading());
+    assert!(driver.session.payments.stars_gift.is_loading());
     let answer = json!({
         "@type": "starPaymentOptions", "@extra": request["@extra"],
         "options": [{"@type": "starPaymentOption", "currency": "USD", "amount": 199,
@@ -35,9 +35,9 @@ fn a_contact_is_asked_for_their_packs_and_the_answer_lands() {
         .ingest(copy_and_parse(&answer.to_string(), &seq, &sink).unwrap())
         .unwrap();
     let gift = &driver.session.payments.stars_gift;
-    assert!(!gift.loading());
-    assert_eq!(gift.target.as_ref().map(|t| t.user_id), Some(42));
-    assert_eq!(gift.options[0].star_count, 100);
+    assert!(!gift.is_loading());
+    assert_eq!(gift.target().map(|t| t.user_id), Some(42));
+    assert_eq!(gift.options()[0].star_count, 100);
     // The packs for a gift never land in the "Buy more Stars" list.
     assert!(driver.session.payments.star_packs.options.is_empty());
     driver.close_stars_gift();
@@ -91,7 +91,7 @@ fn a_late_answer_for_another_contact_is_dropped() {
         .ingest(copy_and_parse(&answer.to_string(), &seq, &sink).unwrap())
         .unwrap();
     let gift = &driver.session.payments.stars_gift;
-    assert!(gift.loading(), "Bob's answer is still awaited");
-    assert!(gift.options.is_empty());
-    assert_eq!(gift.target.as_ref().map(|t| t.user_id), Some(43));
+    assert!(gift.is_loading(), "Bob's answer is still awaited");
+    assert!(gift.options().is_empty());
+    assert_eq!(gift.target().map(|t| t.user_id), Some(43));
 }

@@ -60,7 +60,7 @@ impl QuillApp {
             let paid = &mut session.payments.paid;
             match paid.refusal(chat_id.0, message_id.0, stars, balance) {
                 None => {
-                    paid.add(chat_id.0, message_id.0, stars, sender, now);
+                    paid.add(chat_id.0, message_id.0, stars, sender, now, None);
                     Ok(())
                 }
                 Some(refusal) => Err(refusal.message().to_string()),

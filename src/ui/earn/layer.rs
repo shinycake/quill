@@ -89,6 +89,8 @@ impl QuillApp {
         }
         let restore = self.earn.restore.take();
         if let Some(live) = self.live.as_mut() {
+            // A withdrawal still checking has no box to cancel it from.
+            live.driver.cancel_withdrawal();
             live.driver.set_info_panel(restore);
         } else if let Some(session) = self.demo_session.as_mut() {
             session.users_state.open_info_panel = restore;

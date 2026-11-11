@@ -431,11 +431,17 @@ impl Session {
                         live.pending_reaction = None;
                     }
                 }
-                live.note = Some(format!("Stars were not sent: {reason}"));
+                live.note = Some(crate::lang::tr_with(
+                    crate::lang::keys::Q_MONEY_STARS_NOT_SENT_REASON,
+                    &[("reason", &reason)],
+                ));
             }
             LiveStoryPurpose::CommitPendingReactions { .. } => {
                 live.committed_stars = 0;
-                live.note = Some(format!("Stars were not sent: {reason}"));
+                live.note = Some(crate::lang::tr_with(
+                    crate::lang::keys::Q_MONEY_STARS_NOT_SENT_REASON,
+                    &[("reason", &reason)],
+                ));
             }
             LiveStoryPurpose::SendComment { .. } => {
                 live.note = Some(format!("Could not send the comment: {reason}"));

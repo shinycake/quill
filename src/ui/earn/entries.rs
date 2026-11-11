@@ -407,10 +407,9 @@ impl QuillApp {
     /// (tdesktop asks when the profile or the edit box opens).
     pub(super) fn earn_balances_upkeep(&mut self) {
         let Some(target) = self.session().and_then(|s| s.users_state.open_info_panel) else {
-            // The profile is closed: a balance that failed asks again on the
-            // next visit.
-            if let Some(live) = self.live.as_mut() {
-                live.driver.session.payments.earn.forget_failed_balances();
+            // A failed ask is asked again at the next profile open.
+            if let Some(earn) = self.earn_mut() {
+                earn.forget_failed_balances();
             }
             return;
         };
@@ -456,12 +455,13 @@ impl QuillApp {
             let _ = live.driver.ensure_earn_app_config();
         }
         if let Some((peer, ton, stars)) = ask
-            && live
+            && !live
                 .driver
                 .session
                 .payments
                 .earn
-                .balances_unasked(peer, ton, stars)
+                .balance_asks
+                .contains_key(&peer)
         {
             let _ = live.driver.fetch_earn_balances(peer, ton, stars);
         }

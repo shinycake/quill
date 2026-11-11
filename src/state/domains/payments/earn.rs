@@ -44,9 +44,8 @@ impl Session {
             }
             Some(EarnPurpose::StarBalance { peer }) => {
                 self.payments.earn.star_balances.insert(peer, page.balance);
-                if let Some(asked) = self.payments.earn.balance_fetch.get_mut(&peer) {
-                    asked.stars.succeed(());
-                }
+                let id = pending.map(|p| p.id);
+                self.payments.earn.settle_balance(peer, id);
             }
             _ => {}
         }
@@ -88,9 +87,7 @@ impl Session {
             }
             (EarnPayload::TonStats(stats), Some(EarnPurpose::TonBalance { peer })) => {
                 earn.ton_balances.insert(peer, stats.amounts);
-                if let Some(asked) = earn.balance_fetch.get_mut(&peer) {
-                    asked.ton.succeed(());
-                }
+                earn.settle_balance(peer, pending.map(|p| p.id));
             }
             (
                 EarnPayload::TonTransactions(page_data),
@@ -125,7 +122,7 @@ impl Session {
                 } else {
                     earn.join.as_mut().map(|join| &mut join.found)
                 };
-                if let Some(list) = list {
+                if let Some(list) = list.filter(|l| l.load.waits_for(pending.map(|p| p.id))) {
                     if !append {
                         list.programs.clear();
                     }
@@ -147,7 +144,12 @@ impl Session {
                 EarnPayload::ConnectedList(found),
                 Some(EarnPurpose::ConnectedPrograms { append }),
             ) => {
-                if let Some(list) = earn.join.as_mut().map(|join| &mut join.mine) {
+                if let Some(list) = earn
+                    .join
+                    .as_mut()
+                    .map(|join| &mut join.mine)
+                    .filter(|l| l.load.waits_for(pending.map(|p| p.id)))
+                {
                     if !append {
                         list.programs.clear();
                     }
@@ -260,7 +262,7 @@ impl Session {
             choose_recipient,
             joining: false,
         };
-        if choose_recipient && earn.recipients_loading > 0 {
+        if choose_recipient && earn.recipients.is_loading() {
             earn.pending_join = Some(join);
         } else {
             earn.join_box = Some(join);
@@ -338,7 +340,7 @@ impl Session {
             .filter(|id| self.earn_can_post_in_channel(id.0))
             .map(|id| EarnPeer::Chat(id.0))
             .collect();
-        self.add_earn_recipients(channels);
+        self.add_earn_recipients(channels, pending.map(|p| p.id));
         true
     }
 
@@ -351,7 +353,10 @@ impl Session {
         if earn_purpose(pending) != Some(EarnPurpose::RecipientBots) {
             return false;
         }
-        self.add_earn_recipients(user_ids.iter().map(|id| EarnPeer::User(*id)).collect());
+        self.add_earn_recipients(
+            user_ids.iter().map(|id| EarnPeer::User(*id)).collect(),
+            pending.map(|p| p.id),
+        );
         true
     }
 
@@ -396,24 +401,34 @@ impl Session {
         })
     }
 
-    fn add_earn_recipients(&mut self, more: Vec<EarnPeer>) {
+    /// One of the two recipient lists answered (or failed, which counts as
+    /// empty). Only the attempt's own requests count: after a failed send
+    /// the stage is `Failed` and a late answer changes nothing.
+    fn add_earn_recipients(&mut self, more: Vec<EarnPeer>, request: Option<RequestId>) {
         let me = self.my_user_id;
         let earn = &mut self.payments.earn;
-        let list = earn.recipients.get_or_insert_with(Vec::new);
-        if let Some(me) = me
-            && !list.contains(&EarnPeer::User(me))
-        {
-            list.insert(0, EarnPeer::User(me));
+        let Recipients::Loading { waiting, found } = &mut earn.recipients else {
+            return;
+        };
+        let Some(at) = request.and_then(|id| waiting.iter().position(|w| *w == id)) else {
+            return;
+        };
+        waiting.remove(at);
+        found.extend(more);
+        if !waiting.is_empty() {
+            return;
         }
-        for peer in more {
+        let mut list = Vec::new();
+        if let Some(me) = me {
+            list.push(EarnPeer::User(me));
+        }
+        for peer in std::mem::take(found) {
             if !list.contains(&peer) {
                 list.push(peer);
             }
         }
-        earn.recipients_loading = earn.recipients_loading.saturating_sub(1);
-        if earn.recipients_loading == 0
-            && let Some(join) = earn.pending_join.take()
-        {
+        earn.recipients = Recipients::Ready(list);
+        if let Some(join) = earn.pending_join.take() {
             earn.join_box = Some(join);
         }
     }
@@ -448,7 +463,10 @@ impl Session {
                         page.ton_unavailable = true;
                         page.ton = Load::Idle;
                     } else {
-                        page.ton = Load::Failed(format!("Couldn't load the revenue: {reason}"));
+                        page.ton = Load::Failed(crate::lang::tr_with(
+                            crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_REVENUE_REASON,
+                            &[("reason", &reason)],
+                        ));
                         // tdesktop toasts the error too.
                         earn.notes.push(reason.clone());
                     }
@@ -459,7 +477,10 @@ impl Session {
                     earn.self_stats = Some(false);
                 }
                 if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
-                    page.stars = Load::Failed(format!("Couldn't load the revenue: {reason}"));
+                    page.stars = Load::Failed(crate::lang::tr_with(
+                        crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_REVENUE_REASON,
+                        &[("reason", &reason)],
+                    ));
                     // tdesktop toasts the error too.
                     earn.notes.push(reason.clone());
                 }
@@ -476,15 +497,8 @@ impl Session {
             }
             // Settled either way, so the gates do not ask again each frame.
             EarnPurpose::AppConfig => earn.limits.app_config_loaded = true,
-            EarnPurpose::TonBalance { peer } => {
-                if let Some(asked) = earn.balance_fetch.get_mut(&peer) {
-                    asked.ton.fail(reason.clone());
-                }
-            }
-            EarnPurpose::StarBalance { peer } => {
-                if let Some(asked) = earn.balance_fetch.get_mut(&peer) {
-                    asked.stars.fail(reason.clone());
-                }
+            EarnPurpose::TonBalance { peer } | EarnPurpose::StarBalance { peer } => {
+                earn.fail_balance(peer, request);
             }
             EarnPurpose::AdAccountUrl { .. } => {}
             EarnPurpose::WithdrawalUrl { with_password } => {
@@ -508,12 +522,12 @@ impl Session {
                     earn.join.as_mut().map(|j| &mut j.found)
                 };
                 if let Some(list) = list {
-                    list.load.fail();
+                    list.load.fail_request(request);
                 }
             }
             EarnPurpose::ConnectedPrograms { .. } => {
                 if let Some(join) = earn.join.as_mut() {
-                    join.mine.load.fail();
+                    join.mine.load.fail_request(request);
                 }
             }
             EarnPurpose::ConnectedProgram {
@@ -539,7 +553,7 @@ impl Session {
             }
             EarnPurpose::RecipientChats | EarnPurpose::RecipientBots => {
                 // tdesktop treats a failed list as empty.
-                self.add_earn_recipients(Vec::new());
+                self.add_earn_recipients(Vec::new(), request);
             }
         }
     }

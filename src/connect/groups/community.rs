@@ -2,14 +2,6 @@
 use super::*;
 
 impl<S: JsonSender> ConnectDriver<S> {
-    /// Slice (communities backend core): `createCommunity` (schema 1.8.67,
-    /// line 11806) — creates a community from an owned chat (owned basic
-    /// group / supergroup / channel, or a chat with an owned bot; basic
-    /// groups are auto-upgraded to supergroups). Empty names are refused
-    /// client-side (`Err(InvalidRequest)`); the chat must exist or the
-    /// call is refused with `Ok(None)`. The response is `communityId`
-    /// (the update `updateCommunity` is guaranteed to arrive first); the
-    /// ingest chain resolves the id into `getCommunityFullInfo`.
     /// A `createCommunity` for this chat is out (a second Create is that
     /// one, not a lost chat).
     pub fn community_create_out(&self, chat_id: ChatId) -> bool {
@@ -18,6 +10,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .has_purpose_for_chat(RequestPurpose::CreateCommunity, chat_id)
     }
 
+    /// Slice (communities backend core): `createCommunity` (schema 1.8.67,
+    /// line 11806) — creates a community from an owned chat (owned basic
+    /// group / supergroup / channel, or a chat with an owned bot; basic
+    /// groups are auto-upgraded to supergroups). Empty names are refused
+    /// client-side (`Err(InvalidRequest)`); the chat must exist or the
+    /// call is refused with `Ok(None)`. The response is `communityId`
+    /// (the update `updateCommunity` is guaranteed to arrive first); the
+    /// ingest chain resolves the id into `getCommunityFullInfo`.
     pub fn create_community(
         &mut self,
         chat_id: ChatId,

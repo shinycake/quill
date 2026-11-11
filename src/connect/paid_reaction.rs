@@ -4,7 +4,7 @@
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::paid_reaction::PaidSender;
-use crate::state::{PaymentsPurpose, RequestPurpose};
+use crate::state::{NoticeKind, PaymentsPurpose, RequestPurpose};
 use crate::telegram::requests::{
     add_pending_paid_message_reaction, commit_pending_paid_message_reactions,
     get_chat_available_paid_message_reaction_senders, get_star_payment_options,
@@ -45,7 +45,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session
             .payments
             .paid
-            .add(chat_id.0, message_id.0, stars, sender, now_ms);
+            .add(chat_id.0, message_id.0, stars, sender, now_ms, Some(extra));
         Ok(())
     }
 
@@ -85,7 +85,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Commits every Star reaction whose Undo window is over. Returns
-    /// whether anything was sent (the toast needs a redraw).
+    /// whether anything was due (the toast needs a redraw). A reaction stays
+    /// until TDLib answers its commit; one that cannot be sent is released
+    /// and the user told, never retried on its own.
     pub fn paid_reaction_tick(&mut self, now_ms: u64) -> bool {
         let due = self.session.payments.paid.due(now_ms);
         let any = !due.is_empty();
@@ -103,9 +105,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             let paid = &mut self.session.payments.paid;
             if sent {
                 paid.begin_commit(pending.chat_id, pending.message_id, extra);
-            } else {
-                paid.send_failed(pending.chat_id, pending.message_id);
-                paid.note = Some("Stars were not sent".to_string());
+            } else if paid.commit_unsent(pending.chat_id, pending.message_id) {
+                self.session.payments.notify(
+                    NoticeKind::Error,
+                    crate::lang::tr(crate::lang::keys::Q_MONEY_STARS_NOT_SENT),
+                );
             }
         }
         any

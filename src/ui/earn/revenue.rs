@@ -362,6 +362,10 @@ impl QuillApp {
                     .primary()
                     .w_full()
                     .disabled(!enabled)
+                    .loading(
+                        self.earn_state()
+                            .is_some_and(|e| e.is_checking_withdrawal()),
+                    )
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.earn_withdraw(WithdrawTarget::Ton { chat_id }, cx);
                     })),

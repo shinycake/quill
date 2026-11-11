@@ -17,39 +17,37 @@ pub struct BoostsListState {
     pub boosts: Vec<ParsedChatBoost>,
     /// Empty once the last page arrived.
     pub next_offset: String,
-    /// The newest page request; replies with another id are stale.
-    pub page: BoostsPage,
+    /// Where the newest page stands. Loaded rows stay under every stage, so
+    /// a failed next page keeps the list and shows its error under it.
+    pub stage: BoostsStage,
 }
 
-/// Where the boosts list's newest page is.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum BoostsPage {
-    /// Nothing in flight: the list as it stands.
-    #[default]
-    Idle,
-    /// A page was asked for; its answer is the only one that lands.
-    Loading { request: RequestId },
-    /// The page failed; "Show more" asks again.
+/// The newest `getChatBoosts` page of a list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BoostsStage {
+    /// The page is out under this request (a first page or an append);
+    /// replies with another id are stale.
+    Loading(RequestId),
+    Ready,
+    /// The page failed or was not sent; the text is drawn under the rows.
     Failed(String),
 }
 
 impl BoostsListState {
-    /// A page is being asked for.
     pub fn loading(&self) -> bool {
-        matches!(self.page, BoostsPage::Loading { .. })
+        matches!(self.stage, BoostsStage::Loading(_))
     }
 
-    /// The line of a failed page.
     pub fn error(&self) -> Option<&str> {
-        match &self.page {
-            BoostsPage::Failed(error) => Some(error),
+        match &self.stage {
+            BoostsStage::Failed(error) => Some(error),
             _ => None,
         }
     }
 
-    /// Whether `request` is the page this list waits for.
-    pub(crate) fn waits_for(&self, request: RequestId) -> bool {
-        self.page == BoostsPage::Loading { request }
+    /// `request` is the page this list waits for.
+    pub fn waits_for(&self, request: RequestId) -> bool {
+        self.stage == BoostsStage::Loading(request)
     }
 }
 

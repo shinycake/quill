@@ -553,6 +553,7 @@ fn pay_sends_only_in_the_chat_and_account_it_was_asked_in(cx: &mut TestAppContex
             A.0,
             CanSend::HasPaidMessages { stars: 25 },
             1,
+            false,
         );
         // Another chat by the time Pay is pressed: nothing is sent there.
         assert!(app.paid_send_waits(A, "hello", cx));

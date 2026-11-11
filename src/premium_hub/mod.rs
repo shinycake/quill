@@ -853,7 +853,11 @@ impl PremiumHub {
         self.gifts_loading = false;
         self.gifts_error = None;
         self.gifts_loaded = true;
-        self.gifts_stale = false;
+        // Only a first page answers a refetch; an appended page of the old
+        // list leaves the list stale.
+        if !append {
+            self.gifts_stale = false;
+        }
         self.gifts_total = page.total_count;
         self.gifts_offset = page.next_offset;
         if append {

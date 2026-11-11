@@ -383,13 +383,13 @@ fn a_failed_balance_waits_for_the_next_visit_instead_of_asking_every_frame() {
     error(&mut p, "getStarTransactions", "FLOOD_WAIT_3");
     // The failure is not forgotten while the profile stays open: the
     // upkeep sees it asked and sends nothing.
-    assert!(!p.0.session.payments.earn.balances_unasked(peer, true, true));
+    assert!(p.0.session.payments.earn.balance_asks.contains_key(&peer));
     p.0.fetch_earn_balances(peer, true, true).unwrap();
     assert_eq!(count(&p.1, "getChatRevenueStatistics"), 1);
     assert_eq!(count(&p.1, "getStarTransactions"), 1);
     // Leaving the profile lets the next visit ask again.
     p.0.session.payments.earn.forget_failed_balances();
-    assert!(p.0.session.payments.earn.balances_unasked(peer, true, true));
+    assert!(!p.0.session.payments.earn.balance_asks.contains_key(&peer));
     p.0.fetch_earn_balances(peer, true, true).unwrap();
     assert_eq!(count(&p.1, "getChatRevenueStatistics"), 2);
     assert_eq!(count(&p.1, "getStarTransactions"), 2);
@@ -577,7 +577,7 @@ fn own_page_waits_for_recipients_and_keeps_postable_channels() {
     let join = earn.join_box.as_ref().unwrap();
     assert!(join.choose_recipient);
     assert_eq!(
-        earn.recipients.as_deref().unwrap(),
+        earn.recipients.list().unwrap(),
         &[
             EarnPeer::User(ME),
             EarnPeer::Chat(CHANNEL),

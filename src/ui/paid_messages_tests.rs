@@ -39,7 +39,7 @@ fn charge_in_chat(app: &mut QuillApp, stars: i64) {
     session
         .payments
         .paid_messages
-        .record_answer(11, CanSend::HasPaidMessages { stars }, 1);
+        .record_answer(11, CanSend::HasPaidMessages { stars }, 1, false);
 }
 
 #[gpui_kit::test]
@@ -126,7 +126,7 @@ fn restricted_user_replaces_the_composer_with_the_premium_bar(cx: &mut TestAppCo
         session
             .payments
             .paid_messages
-            .record_answer(11, CanSend::RestrictsNewChats, 1);
+            .record_answer(11, CanSend::RestrictsNewChats, 1, false);
         assert_eq!(session.send_gate(ChatId(11)), SendGate::PremiumRequired);
         assert_eq!(app.bottom_action(), Some(BottomBar::PremiumRequired));
     });

@@ -26,8 +26,7 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCollectibleInfo)
                     && let Some(lookup) = self.payments.hub.collectible.as_mut()
                 {
-                    lookup.loading = false;
-                    lookup.info = Some(info);
+                    lookup.answer(extra, info);
                 }
             }
             PaymentsPayload::PaymentForm(form) => {
@@ -83,9 +82,19 @@ impl Session {
                         if let Some(chat_id) = paid.invoice.giveaway_chat_id() {
                             self.payments.giveaway.launch = GiveawayLaunch::Paid { chat_id };
                         }
+                        if !shown && self.payments.unlocked_notice.is_none() {
+                            // The checkout was closed while it paid.
+                            self.payments.notify(
+                                NoticeKind::Info,
+                                crate::lang::tr(crate::lang::keys::Q_MONEY_PAYMENT_SUCCESS_NOTE),
+                            );
+                        }
                         if shown {
                             self.payments.form_paid = true;
-                            self.payments.note = Some("✅ Payment successful".to_string());
+                            self.payments.note = Some(format!(
+                                "✅ {}",
+                                crate::lang::tr(crate::lang::keys::Q_MONEY_PAYMENT_SUCCESS_NOTE)
+                            ));
                         }
                     } else if !result.verification_url.is_empty() {
                         // Schema: the URL is for additional payment
@@ -106,7 +115,14 @@ impl Session {
                             self.payments.verification_started = true;
                         }
                     } else if shown {
-                        self.payments.note = Some("Payment failed".to_string());
+                        self.payments.note = Some(
+                            crate::lang::tr(crate::lang::keys::Q_MONEY_PAYMENT_FAILED).to_string(),
+                        );
+                    } else {
+                        self.payments.notify(
+                            NoticeKind::Error,
+                            crate::lang::tr(crate::lang::keys::Q_MONEY_PAYMENT_FAILED),
+                        );
                     }
                 }
             }
@@ -172,9 +188,10 @@ impl Session {
             }
             PaymentsPayload::PaymentReceipt(receipt) => {
                 // Slice P1: `getPaymentReceipt` answer (matched by `@extra`).
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPaymentReceipt) {
-                    self.payments.receipt = Some(receipt);
-                    self.payments.receipt_open = true;
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPaymentReceipt)
+                    && self.payments.receipt.waits_for(extra)
+                {
+                    self.payments.receipt = ReceiptStage::Open(receipt);
                 }
             }
             PaymentsPayload::StarSubscriptions(subs) => {
@@ -186,10 +203,14 @@ impl Session {
                     && let RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions {
                         append,
                     }) = p.purpose
+                    && self.payments.star_subscriptions_request == Some(p.id)
                 {
-                    self.payments.star_subscriptions_loading = false;
+                    self.payments.star_subscriptions_request = None;
                     self.payments.star_subscriptions_error = None;
-                    self.payments.star_subscriptions_stale = false;
+                    // Only a first page answers a refetch.
+                    if !append {
+                        self.payments.star_subscriptions_stale = false;
+                    }
                     self.payments.star_subscriptions_offset = subs.next_offset.clone();
                     if append && let Some(existing) = self.payments.star_subscriptions.as_mut() {
                         existing.star_amount = subs.star_amount;
@@ -284,12 +305,7 @@ impl Session {
             }
             PaymentsPayload::StarPackOptions(options) => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarGiftOptions) {
-                    let gift = &mut self.payments.stars_gift;
-                    if gift.asked.is_some() && gift.asked == pending.map(|p| p.id) {
-                        gift.asked = None;
-                        gift.error = None;
-                        gift.options = options;
-                    }
+                    self.payments.stars_gift.answer(extra, options);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarPackOptions) {
                     let packs = &mut self.payments.star_packs;
                     packs.loading = false;

@@ -102,7 +102,9 @@ impl SendGiftState {
 #[derive(Debug, Clone, Default)]
 pub struct GiftManageState {
     pub limits: GiftLimits,
-    pub limits_asked: bool,
+    /// The `getOption` batch behind `limits`: a failed one is asked again
+    /// at the next gifts open.
+    pub limits_ask: crate::state::fetch::BatchAsk,
     pub collections: Vec<GiftCollection>,
     pub collections_loading: bool,
     pub collections_stale: bool,
@@ -165,5 +167,9 @@ impl GiftManageState {
         self.flow = None;
         self.deleting = None;
         self.note = None;
+        // A result nobody took belongs to the list that was closed.
+        self.deleted = false;
+        self.transferred = None;
+        self.export_url = None;
     }
 }

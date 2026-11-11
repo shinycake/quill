@@ -94,8 +94,8 @@ impl QuillApp {
     /// Slice P1: close the receipt dialog.
     pub(super) fn close_payment_receipt(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.payments.receipt = None;
-            live.driver.session.payments.receipt_open = false;
+            // box-host: closing the receipt, nothing to host
+            live.driver.session.payments.receipt = quill::state::ReceiptStage::Closed;
         }
         cx.notify();
     }
@@ -418,7 +418,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.payments.receipt_open = false;
+            live.driver.session.payments.receipt = quill::state::ReceiptStage::Closed;
             live.driver.fetch_payment_receipt(chat_id, message_id)
         });
         if !matches!(sent, Some(Ok(_))) {
@@ -800,7 +800,7 @@ crate::ui::shell::register_dialogs! {
 
     PaymentReceipt => DialogSpec::new(
         3600,
-        |app| app.session().is_some_and(|s| s.payments.receipt_open),
+        |app| app.session().is_some_and(|s| s.payments.receipt.is_open()),
         QuillApp::build_payment_receipt_dialog,
     )
 

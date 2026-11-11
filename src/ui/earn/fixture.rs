@@ -268,7 +268,8 @@ pub(in crate::ui) fn seed_affiliate_join(
     join.found.load = quill::earn::PageLoad::Ready;
     let earn = &mut session.payments.earn;
     earn.join = Some(join);
-    earn.recipients = Some(vec![EarnPeer::User(777), EarnPeer::Chat(DEMO_CHANNEL)]);
+    earn.recipients =
+        quill::earn::Recipients::Ready(vec![EarnPeer::User(777), EarnPeer::Chat(DEMO_CHANNEL)]);
 }
 
 /// The own bot's setup page with no program yet.

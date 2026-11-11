@@ -4168,6 +4168,82 @@ the edit drew); a fetch that cannot be sent ends in `Failed`, not in nothing
   window in place (`with_window_chat`), so a chat window's topic and gallery
   are its own; tests for both.
 
+### Sweep fixes (s3-payments-1)
+
+- **A stage that has not left is not entered.** The checkout's form,
+  validate and pay requests are stored only after the send went out
+  (02-153); a gift-limits batch, a peer's balances, and the earn page's
+  loads are `BatchAsk` / per-peer values set from the sends that went out
+  (`state/fetch.rs`), and a send that fails ends them in `Failed`, never in a
+  spinner (03-025, 03-063, 02-046, 03-024, 09-064). A failed batch is not
+  asked again by itself (no request per frame); the next open forgets it
+  (`forget_failed_balances` where the profile upkeep runs, `may_ask` at the
+  gifts open). The recipients of an affiliate program are `Recipients`
+  (`Unasked`, `Loading { waiting, found }`, `Ready`, `Failed`): both
+  requests are recorded as they are sent, a refused send makes it `Failed`
+  and late answers of that attempt change nothing (03-023).
+- **Answers are matched to what asked.** `PageLoad::Loading` carries its
+  request; a program list takes only that page's answer or error, so a sort
+  change or a restarted list never takes an older page (02-047, 03-026). The
+  collectible lookup is `LookupStage` (`Unsent`, `Loading(request)`, `Ready`,
+  `Failed`), so a replaced lookup's answer or error is not the new one's
+  (02-001, 02-157). The Gift Stars packs are `GiftStage::Packs { target,
+  load: PackLoad }` with the asking request inside `Loading`; Back and close
+  drop it (02-201). The receipt dialog is `ReceiptStage` (`Closed`,
+  `Loading(request)`, `Open`): Esc forgets the request, so a late answer does
+  not reopen it (05-109). A Stars subscriptions page, and a received-gifts
+  page, settle only for the request in flight; an appended page does not
+  clear "stale", and a refetch waits for a page in flight (02-155, 02-174).
+  `BoostsListState` is one `BoostsStage` (`Loading(request)`, `Ready`,
+  `Failed`) and the Show more page is `Loading` too (02-126). A star
+  reaction keeps each tap's request (`PaidTap`), so a refused tap rolls back
+  only its own Stars, never a newer entry's (04-058).
+- **A failed next page keeps the rows.** Boosts, invite-link members and
+  link join requests keep what is loaded and show their error when only the
+  next page did not leave; a first page shows its error. A join-request
+  search that cannot be sent restores the list, query and request it was
+  going to replace (02-128).
+- **Results with nobody to show them are told.** `PaymentsState::notices` is
+  a queue the poll drains into the status bar. A payment answered after its
+  checkout closed (05-110), a gift sent or refused after its box closed
+  (03-065), a commit of Star reactions that TDLib refused, and an add, undo
+  or commit that failed (11-p7-004) all land there. A reaction is `PaidStage`
+  (`Waiting`, `Committing(request)`, `Undoing(request)`; one design, merged
+  with the integration branch's): it stays until TDLib answers its commit or
+  undo. A refused commit or undo, and a commit that cannot be sent, release
+  the Stars and tell the user once; nothing is sent again on its own, so a
+  low balance cannot loop (02-159). A paid send the guard holds
+  leaves the guard only after the send went out (02-162).
+- **Locks are not reset by an open.** Reopening the gifts box keeps
+  `gift_mutating` of a toggle or sale still out; its own answer clears it
+  (02-173, 10-014). `open_gift_resale`, `start_gift_resale_buy` and
+  `open_gift_craft` refuse while a purchase or craft is in flight (02-065): a
+  new `CraftSession` never orphans a craft whose answer is out.
+  A failed first page of the Stars history, the gifts list or Grams ends in
+  the error line, not an empty box (04-040).
+- **An auction follow is `AuctionFollow`** (`None`, `Following { gift_id,
+  request }`, `Failed(gift_id)`): a refused open is not asked again every
+  frame while the same bid box shows; closing it follows afresh. The
+  `Farewell` of `GiftMarketUi` already closes the follow on an account switch
+  (03-062, 02-066).
+- **The gate follows the viewer's Premium.** `PaidMessages::gates` is
+  `GateFetch` per user (`Asking { before }`, `Known { viewer_premium }`,
+  `Failed { before }`): the open chat asks again when `is_premium` changes,
+  and an error answer ends the ask, so the next open asks at once instead of
+  after 30 s. `before` is the answer ahead of the ask (`Prior`, with the
+  Premium it was given under). A failed refresh keeps it, so a known price
+  does not vanish and the next send is still confirmed (04-056). Under
+  another Premium only "restricts new chats" and "ok" are old; a price stands,
+  so buying Premium keeps the guard's prices (04-053). The send path does not
+  refuse while nothing is known: tdesktop shows no such state, so the
+  smallest safe choice was to leave the composer as it was.
+- **Smaller.** The Premium gift message is kept whole when
+  `gift_text_length_max` is not known yet (04-060). The Collect and Withdraw
+  buttons show a spinner while the first withdrawal request is out, and
+  closing the earn layer cancels it (09-066). The gift transfer upkeep runs
+  in the window of the transfer box, else of the gifts box it started from,
+  and `reset_for_owner` drops one-shot results nobody took (03-068).
+
 - Re-review of s12-ui. 10-119: both cancels also run over the round trips
   that chat windows keep in their own slots
   (`ChatWindows::cancel_slot_inline_openings`), so a start-bot pressed in a

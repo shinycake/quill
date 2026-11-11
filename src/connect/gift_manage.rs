@@ -90,15 +90,24 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// collections.
     pub(super) fn begin_gift_manage(&mut self, owner: MessageSender) {
         self.session.payments.gifts_manage.reset_for_owner();
-        if !self.session.payments.gifts_manage.limits_asked {
-            self.session.payments.gifts_manage.limits_asked = true;
+        if self.session.payments.gifts_manage.limits_ask.may_ask() {
+            let mut waiting = Vec::new();
+            let mut refused = false;
             for option in GiftOption::ALL {
                 let extra = self.session.request(
                     RequestPurpose::Payments(PaymentsPurpose::GetGiftOption(option)),
                     None,
                 );
-                let _ = self.send_json_request(extra, &rq::get_option(extra, option.name()));
+                match self.send_json_request(extra, &rq::get_option(extra, option.name())) {
+                    Ok(_) => waiting.push(extra),
+                    Err(_) => {
+                        refused = true;
+                        break;
+                    }
+                }
             }
+            self.session.payments.gifts_manage.limits_ask =
+                crate::state::fetch::BatchAsk::sent(waiting, refused);
         }
         let _ = self.fetch_gift_collections(owner);
     }
