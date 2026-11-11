@@ -5,7 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::fragment_password::{PasswordBox, SecurityCheck};
+use super::fragment_password::{PasswordBox, PasswordEntry, SecurityCheck};
 use super::gift_market_ui::collectible_tile;
 use super::gift_resale_buy::attribute_row;
 use super::gift_transfer_ui::{balance_hint, transfer_price};
@@ -513,8 +513,7 @@ fn password_view(
         id: "gift-transfer",
         input: &app.payments.gift_export_password,
         description: tr(keys::GIFT_TRANSFER_PASSWORD_DESCRIPTION),
-        sending,
-        error,
+        entry: PasswordEntry::of(sending, error),
         on_submit: QuillApp::submit_gift_export_password,
         on_cancel: QuillApp::transfer_step_back,
         on_forgot: QuillApp::forgot_gift_export_password,

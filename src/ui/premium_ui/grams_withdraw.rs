@@ -11,7 +11,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
-use crate::ui::fragment_password::{PasswordBox, SecurityCheck, Showing};
+use crate::ui::fragment_password::{PasswordBox, PasswordEntry, SecurityCheck, Showing};
 use crate::ui::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
@@ -213,8 +213,7 @@ impl QuillApp {
                         id: "grams-withdraw",
                         input: &this.payments.grams_withdraw_password,
                         description: tr(keys::BOT_EARN_BALANCE_PASSWORD_DESCRIPTION),
-                        sending: request.is_some(),
-                        error: error.as_ref(),
+                        entry: PasswordEntry::of(request.is_some(), error.as_ref()),
                         on_submit: QuillApp::submit_grams_withdraw_password,
                         on_cancel: QuillApp::cancel_grams_withdraw,
                         on_forgot: QuillApp::forgot_grams_withdraw_password,

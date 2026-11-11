@@ -21,11 +21,9 @@ ChecklistDraft::others_can_mark_tasks_as_done
 ChecklistSend::others_can_mark_tasks_as_done
 CheckoutView::sending
 
-DestRow::saved
 DragSelect::pending
 Drawn::leaving
 
-DestRow::saved
 DragSelect::pending
 Drawn::leaving
 FastShareFacts::sent
@@ -54,8 +52,6 @@ MiniAppWindow::closing_confirmation
 
 ParsedGroupCall::loaded_all_participants
 ParsedSession::is_password_pending
-PasswordBox::sending
-PasswordBox::sending+error
 
 
 PlaybackHealth::output_failed

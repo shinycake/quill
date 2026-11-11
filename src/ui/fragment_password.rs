@@ -32,6 +32,27 @@ fn footer() -> Div {
     div().flex().justify_end().gap_2()
 }
 
+/// Where the password box stands: waiting for the password, its answer
+/// pending, or refused. The answer pending hides an earlier refusal.
+#[derive(Clone, Copy)]
+pub(super) enum PasswordEntry<'a> {
+    Idle,
+    Sending,
+    Failed(&'a ExportError),
+}
+
+impl<'a> PasswordEntry<'a> {
+    /// The entry for a caller that keeps whether its request is out and
+    /// the last refusal.
+    pub(super) fn of(sending: bool, error: Option<&'a ExportError>) -> Self {
+        match (sending, error) {
+            (true, _) => Self::Sending,
+            (false, Some(error)) => Self::Failed(error),
+            (false, None) => Self::Idle,
+        }
+    }
+}
+
 /// tdesktop `PasscodeBox` in check mode: the field, the error or the hint
 /// under it, "Forgot password?" and the description; Cancel and Submit.
 pub(super) struct PasswordBox<'a> {
@@ -39,8 +60,7 @@ pub(super) struct PasswordBox<'a> {
     pub(super) id: &'static str,
     pub(super) input: &'a Entity<InputState>,
     pub(super) description: &'static str,
-    pub(super) sending: bool,
-    pub(super) error: Option<&'a ExportError>,
+    pub(super) entry: PasswordEntry<'a>,
     pub(super) on_submit: BoxAction,
     pub(super) on_cancel: BoxAction,
     pub(super) on_forgot: BoxAction,
@@ -57,12 +77,16 @@ impl PasswordBox<'_> {
             id,
             input,
             description,
-            sending,
-            error,
+            entry,
             on_submit,
             on_cancel,
             on_forgot,
         } = self;
+        let sending = matches!(entry, PasswordEntry::Sending);
+        let error = match entry {
+            PasswordEntry::Failed(error) => Some(error),
+            PasswordEntry::Idle | PasswordEntry::Sending => None,
+        };
         let muted = cx.theme().muted_foreground;
         let state = session.auth_state.password_state.as_ref();
         let hint = state
