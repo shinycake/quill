@@ -887,7 +887,7 @@ impl Session {
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
                     let banned = member.status() == ChannelMemberStatus::Banned;
-                    self.set_direct_member_banned(chat_id, user_id, banned);
+                    self.answer_direct_member(chat_id, user_id, pending.map(|p| p.id), banned);
                 }
                 // Phase D3b: `getChatMember` for one administrator's rights
                 // (edit dialog). Only an administrator status carries a

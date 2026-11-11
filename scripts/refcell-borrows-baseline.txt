@@ -16,16 +16,6 @@ ChatWindows::image_cache_in_place::slot.borrow 1
 ChatWindows::image_caches::slot.borrow 1
 ChatWindows::main_covered::slot.borrow 1
 ChatWindows::note_place::slot.borrow_mut 1
-ContextMenuItems::begin::keys.borrow_mut 1
-ContextMenuItems::begin::parents.borrow_mut 1
-ContextMenuItems::claim::handles.borrow 1
-ContextMenuItems::claim::handles.borrow_mut 1
-ContextMenuItems::claim::keys.borrow_mut 1
-ContextMenuItems::live::handles.borrow 1
-ContextMenuItems::live::keys.borrow 1
-ContextMenuItems::mark_submenu_parent::parents.borrow_mut 1
-ContextMenuItems::parent_of::parents.borrow 1
-ContextMenuItems::submenu_of::parents.borrow 1
 EffectNotes::drop::badges.borrow_mut 1
 EffectNotes::drop::replays.borrow_mut 1
 FrameUi::forget_native_window::window_title_shown.borrow_mut 1
@@ -274,7 +264,6 @@ close_frame::slices.borrow_mut 1
 close_frame::whole.borrow_mut 1
 connection::slot.borrow 1
 connection::slot.borrow_mut 1
-context_menu_item::keys.borrow 1
 corner_mask::masks.borrow_mut 2
 current::current.borrow 2
 current_agent::agent.borrow 1

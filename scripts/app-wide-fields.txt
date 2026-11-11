@@ -98,10 +98,10 @@ takeover.wake_at | when the takeover banner next redraws
 connect.generation | which prepared connection may open
 connect.closed_noted | the generation whose close was noted
 disk.stage | the disk space level, a doubted drop below close and a call holding the on-screen client at Full, for the data folder
-disk.free | the free space last read
+disk.seen | what the last reading found: the free space and whether the data folder can be written
 disk.floors | the floors for that level
 disk.waited | how long the disk has been short
-disk.unwritable | the data folder cannot be written
+disk._watcher | the disk poll, which ends with the disk state
 disk.screen_refused | the on-screen client was refused for space; `disk.on_screen` names it
 disk.full_notices | how many full-disk notices were shown
 disk.cache_folder | the cache folder measured

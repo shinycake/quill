@@ -17,6 +17,7 @@ mod communities;
 mod composer_placeholder;
 mod composer_targets;
 mod connection_indicator;
+mod direct_member_status;
 mod direct_messages;
 mod downloads;
 mod downloads_derived;

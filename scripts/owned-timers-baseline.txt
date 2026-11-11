@@ -45,7 +45,6 @@ detached:request_video_frame 1
 detached:run_screenshot_demo 2
 detached:spawn_menu_sync 1
 detached:start_sweeper 1
-detached:watch 1
 detached:watch_closed_windows 2
 detached:watch_saver 1
 poll:QuillApp::after_closing 1

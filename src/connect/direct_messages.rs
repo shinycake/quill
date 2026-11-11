@@ -192,17 +192,37 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::Groups(GroupsPurpose::GetDirectMessagesMember { user_id });
-        if self
+        // Known, or asked and not answered yet: nothing to ask. A failed
+        // check is asked again.
+        let status = self
             .session
-            .direct_member_banned(channel, user_id)
-            .is_some()
-            || self.session.requests.has_purpose_for_chat(purpose, channel)
-        {
+            .threads
+            .direct
+            .kicked
+            .entry((channel.0, user_id))
+            .or_default();
+        if status.data().is_some() || status.is_loading() {
             return Ok(None);
         }
+        status.begin();
         let extra = self.session.request(purpose, Some(channel));
+        if let Some(status) = self
+            .session
+            .threads
+            .direct
+            .kicked
+            .get_mut(&(channel.0, user_id))
+        {
+            status.sent(extra);
+        }
         let json = get_chat_member(extra, channel, user_id);
-        self.send_json_request(extra, &json).map(Some)
+        match self.send_json_request(extra, &json) {
+            Ok(request) => Ok(Some(request)),
+            Err(err) => {
+                self.session.fail_direct_member(channel, user_id, extra);
+                Err(err)
+            }
+        }
     }
 
     /// "Ban user from channel" / "Unban user in channel": the conversation's

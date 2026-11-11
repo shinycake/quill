@@ -573,6 +573,13 @@ impl Session {
                     );
                 }
             }
+            Some(RequestPurpose::Groups(GroupsPurpose::GetDirectMessagesMember { user_id })) => {
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                {
+                    self.fail_direct_member(chat_id, user_id, pending.id);
+                }
+            }
             Some(RequestPurpose::Groups(GroupsPurpose::GetAdminRights { user_id })) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                     self.groups.admin_rights.insert(

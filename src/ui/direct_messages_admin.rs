@@ -100,6 +100,11 @@ impl QuillApp {
         let ban_status =
             ban.and_then(|(channel, user)| session.direct_member_banned(channel, user));
         let banned = ban_status.unwrap_or(false);
+        // A check that failed says so and asks again when picked, instead
+        // of reading "Checking" for good.
+        let check_failed = ban.is_some_and(|(channel, user)| {
+            ban_status.is_none() && session.direct_member_check_failed(channel, user)
+        });
         let info = if free {
             tr_with(keys::CONTEXT_FEE_FREE, &[("name", &short)])
         } else {
@@ -127,11 +132,14 @@ impl QuillApp {
                         let owner = owner.clone();
                         menu = menu.item(
                             PopupMenuItem::new(match ban_status {
+                                None if check_failed => {
+                                    tr(keys::Q_DIRECT_COULDNT_CHECK_THE_MEMBER_TRY_AGAIN)
+                                }
                                 None => tr(keys::Q_OPS_CHECKING),
                                 Some(true) => tr(keys::CONTEXT_MONOFORUM_UNBAN),
                                 Some(false) => tr(keys::CONTEXT_MONOFORUM_BAN),
                             })
-                            .disabled(ban_status.is_none())
+                            .disabled(ban_status.is_none() && !check_failed)
                             .icon(if banned {
                                 IconName::UserCheck
                             } else {
@@ -139,7 +147,15 @@ impl QuillApp {
                             })
                             .on_click(move |_, _, cx| {
                                 let _ = owner.update(cx, |this, cx| {
-                                    this.direct_ban_ui(chat_id, topic_id, channel, user, !banned);
+                                    if check_failed {
+                                        if let Some(live) = this.live.as_mut() {
+                                            let _ = live.driver.fetch_direct_member(channel, user);
+                                        }
+                                    } else {
+                                        this.direct_ban_ui(
+                                            chat_id, topic_id, channel, user, !banned,
+                                        );
+                                    }
                                     cx.notify();
                                 });
                             }),

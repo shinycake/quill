@@ -65,7 +65,7 @@ fn shown(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> (bool, bool, u6
 fn a_ui_test_never_reads_the_real_disk(cx: &mut TestAppContext) {
     let (app, vcx) = new_app(cx);
     vcx.run_until_parked();
-    app.read_with(&vcx, |app, _| assert_eq!(app.disk.free, None));
+    app.read_with(&vcx, |app, _| assert_eq!(app.disk.seen.free, None));
 }
 
 #[gpui_kit::test]
