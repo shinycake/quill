@@ -186,7 +186,7 @@ impl Session {
                         LiveStoryPurpose::GetBursts,
                     )))
                 {
-                    self.set_live_bursts(stickers);
+                    self.set_live_bursts(stickers, pending.map(|p| p.id));
                 }
             }
             StickersPayload::EmojiKeywords { keywords } => {

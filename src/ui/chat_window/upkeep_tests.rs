@@ -113,7 +113,7 @@ fn an_ai_answer_for_a_chat_window_lands_in_its_composer(cx: &mut TestAppContext)
     });
     h.app.update(cx, |app, _| {
         if let Some(session) = app.session_mut() {
-            session.messages.ai_composer_text = Some((Some(OTHER), OTHER, "fixed text".into()));
+            session.messages.ai_composer_text = vec![(Some(OTHER), OTHER, "fixed text".into())];
         }
     });
     // The main window's frame leaves another window's answer alone.
@@ -144,7 +144,7 @@ fn an_ai_answer_goes_to_the_window_that_asked(cx: &mut TestAppContext) {
     // does not take the answer.
     h.app.update(cx, |app, _| {
         if let Some(session) = app.session_mut() {
-            session.messages.ai_composer_text = Some((None, OTHER, "fixed text".into()));
+            session.messages.ai_composer_text = vec![(None, OTHER, "fixed text".into())];
         }
     });
     draw(chat_window, cx);
@@ -155,7 +155,7 @@ fn an_ai_answer_goes_to_the_window_that_asked(cx: &mut TestAppContext) {
     );
     assert!(h.app.read_with(cx, |app, _| {
         app.session()
-            .is_some_and(|session| session.messages.ai_composer_text.is_some())
+            .is_some_and(|session| !session.messages.ai_composer_text.is_empty())
     }));
 }
 

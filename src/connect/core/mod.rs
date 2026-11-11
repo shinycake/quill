@@ -554,10 +554,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         // drain. A late answer for a chat the user has since left is
         // dropped by the UI (chat-id check), never applied blindly.
         if let Some((window, chat_id, text)) = ai_text_answer {
-            self.session.messages.ai_composer_text = Some((window, chat_id, text));
+            self.session
+                .messages
+                .ai_composer_text
+                .push((window, chat_id, text));
         }
         if let Some((window, chat_id, rich, note)) = ai_rich_answer {
-            self.session.messages.ai_composer_blocks = Some((window, chat_id, rich, note));
+            self.session
+                .messages
+                .ai_composer_blocks
+                .push((window, chat_id, rich, note));
         }
         // A5: stash the `checkChatUsername` verdict for the
         // edit-profile dialog.
@@ -620,9 +626,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Slice S4: persist per-network settings seeded from
         // `getAutoDownloadSettingsPresets` (the reducer cannot touch the
         // filesystem, so it marks them dirty instead).
-        if self.session.settings.data_storage_dirty {
+        if self.session.settings.data_storage_dirty && self.save_data_storage_prefs().is_ok() {
+            // Kept while the save fails: the next ingest writes again.
             self.session.settings.data_storage_dirty = false;
-            let _ = self.save_data_storage_prefs();
         }
         if cleared_download_cache {
             let _ = self.maybe_fetch_storage_statistics();
@@ -643,9 +649,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(chat_id) = pins_changed.filter(|chat| self.session.chat_is_shown(*chat)) {
             let _ = self.fetch_pinned_messages(chat_id);
         }
-        self.run_post_ingest_pumps(active_call_before, bridge_signaling, group_calls_before)?;
-        // Slice G2: chain `boostChat` once the slots answer arrives.
-        self.maybe_continue_boost()?;
+        // A refused send here is returned at the end: the one-shot work below
+        // (the Ready kickoff, the next chat page) has no second chance.
+        let pumped = self
+            .run_post_ingest_pumps(active_call_before, bridge_signaling, group_calls_before)
+            .and(self.maybe_continue_boost());
         // A channel's boost level moved: refresh the status shown for it.
         self.refresh_moved_boost_statuses();
         // Slice G2: refetch caches the state dropped after a confirmed
@@ -949,7 +957,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // Unigram ChatSearchViewModel: first hit → LoadMessageSliceAsync.
             self.jump_selected_chat_search_hit()?;
         }
-        Ok(())
+        pumped
     }
 
     fn maybe_send_parameters(&mut self) -> Result<(), ConnectSendError> {

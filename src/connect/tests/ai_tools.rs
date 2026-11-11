@@ -36,6 +36,30 @@ fn ai_harness() -> AiHarness {
 }
 
 #[test]
+fn two_ai_answers_in_one_batch_both_wait_for_their_drain() {
+    let (dir, mut driver, _recorder, _sink, dyn_sink, seq) = ai_harness();
+    for (chat, text) in [(7, "first"), (7, "second")] {
+        let extra = driver.fix_text_with_ai(ChatId(chat), "teh").expect("fix");
+        let json = format!(
+            r#"{{"@type":"fixedText","text":{{"@type":"formattedText","text":"{text}","entities":[]}},"diff_text":{{"@type":"diffText","text":"","entities":[]}},"@extra":"{id}"}}"#,
+            id = extra.0,
+        );
+        driver
+            .ingest(copy_and_parse(&json, &seq, &dyn_sink).expect("parse"))
+            .expect("ingest");
+    }
+    let texts: Vec<&str> = driver
+        .session
+        .messages
+        .ai_composer_text
+        .iter()
+        .map(|(_, _, text)| text.as_str())
+        .collect();
+    assert_eq!(texts, ["first", "second"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn fix_text_with_ai_applies_fixed_text() {
     let (dir, mut driver, recorder, _sink, dyn_sink, seq) = ai_harness();
     let extra = driver
@@ -54,7 +78,7 @@ fn fix_text_with_ai_applies_fixed_text() {
     driver.ingest(owned).expect("ingest fixedText");
     assert_eq!(
         driver.session.messages.ai_composer_text,
-        Some((None, ChatId(7), "the draft".to_string()))
+        vec![(None, ChatId(7), "the draft".to_string())]
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -81,7 +105,7 @@ fn create_rich_message_with_ai_round_trips_blocks() {
         .session
         .messages
         .ai_composer_blocks
-        .take()
+        .pop()
         .expect("blocks stored");
     assert_eq!(chat_id, ChatId(7));
     assert_eq!(note, "AI created the draft");
@@ -131,7 +155,7 @@ fn rich_ai_draft_notes_match_the_method() {
             .session
             .messages
             .ai_composer_blocks
-            .as_ref()
+            .last()
             .map(|(_, _, _, note)| *note),
         Some("AI fixed the draft")
     );
@@ -145,7 +169,7 @@ fn rich_ai_draft_notes_match_the_method() {
             .session
             .messages
             .ai_composer_blocks
-            .as_ref()
+            .last()
             .map(|(_, _, _, note)| *note),
         Some("AI rewrote the draft")
     );
@@ -232,6 +256,6 @@ fn ai_flood_premium_error_surfaces_premium_line() {
         .expect("AI error stored");
     assert!(err.contains("Premium"), "premium line surfaced, got: {err}");
     // Never applied as a success.
-    assert!(driver.session.messages.ai_composer_text.is_none());
+    assert!(driver.session.messages.ai_composer_text.is_empty());
     let _ = std::fs::remove_dir_all(&dir);
 }

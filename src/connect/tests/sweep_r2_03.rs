@@ -247,3 +247,48 @@ fn a_failed_owner_save_is_retried_by_the_next_ingest_without_a_new_claim() {
     assert!(folder.join("owner.json").exists());
     let _ = std::fs::remove_dir_all(&app);
 }
+
+#[test]
+fn a_commit_that_did_not_go_out_keeps_the_stars_pending_with_a_new_window() {
+    use crate::paid_reaction::ACCUMULATE_MS;
+    let mut h = super::live_story::watching();
+    h.ingest(&super::live_story::LIVE_CALL.replace("JOINED", "true"));
+    h.driver.add_live_story_reaction(2, 1_000).unwrap();
+    h.recorder.refuse(Some("commitPendingLiveStoryReactions"));
+    let due = 1_000 + ACCUMULATE_MS;
+    assert!(h.driver.live_story_reaction_tick(due));
+    let live = h.driver.session.stories.live.as_ref().unwrap();
+    assert_eq!(live.pending_reaction.map(|p| p.stars), Some(2));
+    assert_eq!(
+        live.pending_reaction.map(|p| p.commit_at_ms),
+        Some(due + ACCUMULATE_MS)
+    );
+    assert!(
+        live.effects.is_empty(),
+        "no burst for Stars that did not go out"
+    );
+    // Not asked again until the new window is over.
+    assert!(!h.driver.live_story_reaction_tick(due + 1));
+    h.recorder.refuse(None);
+    assert!(h.driver.live_story_reaction_tick(due + ACCUMULATE_MS));
+    assert_eq!(h.sent("commitPendingLiveStoryReactions"), 1);
+}
+
+#[test]
+fn a_failed_data_storage_save_keeps_the_dirty_mark_for_the_next_ingest() {
+    let dir = std::env::temp_dir().join(format!("quill-r2-03-ds-{}", std::process::id()));
+    let mut t = Flaky::new();
+    let good = t.driver.paths.clone();
+    // The settings folder's place is taken by a file: the write fails.
+    let blocked = dir.join("blocked");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(&blocked, b"in the way").unwrap();
+    t.driver.paths.root = blocked;
+    t.driver.session.settings.data_storage_dirty = true;
+    t.feed(json!({"@type":"updateOption","name":"my_id","value":{"@type":"optionValueInteger","value":7}}));
+    assert!(t.driver.session.settings.data_storage_dirty);
+    t.driver.paths = good;
+    t.feed(json!({"@type":"updateOption","name":"my_id","value":{"@type":"optionValueInteger","value":7}}));
+    assert!(!t.driver.session.settings.data_storage_dirty);
+    let _ = std::fs::remove_dir_all(&dir);
+}

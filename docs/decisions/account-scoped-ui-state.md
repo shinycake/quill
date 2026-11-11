@@ -8043,3 +8043,38 @@ whose variants carry the data, with a way out of every stage.
 - **A refused refetch of a stale proxy list** lands in
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
+
+### Sweep fixes (r2-03)
+
+Round 2, files `connect/{call_screen, composer, gift_manage, premium_hub,
+profile_tabs, ton_wallet}.rs`, `connect/core/{mod, pumps}.rs`,
+`connect/group_calls/live_story.rs`, `connect/groups/group_type.rs`,
+`connect/messages/mod.rs`.
+
+| id | result |
+|---|---|
+| 02-015 | A new microphone, level-tap or screen-share failure is put on the call by `pump_call_media` (edge detected on the text): the group call's `group_call_error` line while joined, else `ActiveCall::media_note`, which the 1:1 call window draws and which dies with the call. |
+| 02-029 | The installed-sets answer replaces `suggest_for` only when it is `WaitingForSets`; `Asked(emoji)` stays. |
+| 02-030 | Both sends call `cancel_pending_draft_of(chat_id)`: another slot's waiting save (and its dirty mark) is left alone. |
+| 02-045, 05-030, 02-046 | `CollectionsFetch::Stale` stays until the send went out (`Loading` is set there); a refused first ask in `begin_gift_manage` leaves `Stale`, so the next ingest asks again. |
+| 02-056 | `ConnectDriver::claimed_owner` is `OwnerClaim { Unclaimed, Saved(user), Unsaved(user) }`. A failed owner-file write is retried by the next ingest with `account_data::write_owner` only: a second `claim` would take the new user's own files for leftovers and drop them. |
+| 02-067 | Undo takes the pending Stars only after the removal went out. |
+| 02-070 | `UsernameCheck::Checking` carries the check's `RequestId` (the generation counter and its purpose payload are gone); only that request's answer or error ends it, and a refused second check leaves the first one answerable. |
+| 02-081 | An older page that failed on a window that holds messages is no longer asked for from the list's paint; Retry, a new message, or a scroll away from the top edge (`preload_history_by_scroll`) clears it. |
+| 02-087, 02-049 | `PremiumHub::close_gifts` drops owner, list, page, notice and a stale mark in one place (`reset_gifts_list` is shared with opening and switching collection). A change in flight keeps its lock until its own answer. |
+| 02-088 | A refused remove or reorder marks the playlist outdated (`playlist_change_unsent`), so it loads again. |
+| 07-013, 02-108 | `open_money_page` runs every ask and returns the first error: a refused explorer, state or rates send no longer skips the history page. |
+| 02-013 | A refused pause send puts `screen_share_paused` back, as the error arm does, so the next edge goes out. No automatic resend: an error answer reverts the same mark and a resend would loop on a server error. |
+| 02-016, 02-017 | `Share::Waiting { pick, since }` replaces `Picked { wait: EngineWait }`; the wait has a deadline in `next_deadline`. The level tap's 5 s reopen is not added: the pump does not leave a failed tap when no call wants it, so a deadline would spin. |
+| 02-018 | With no call left, a pick or an ended share's error is dropped. |
+| 02-033 | `data_storage_dirty` is cleared only after the save returned Ok. |
+| 02-034 | A refused send in the post-ingest pumps or boost is returned at the end of `ingest`, after the Ready kickoff and paging. |
+| 02-035 | The AI composer answers are queues; a window takes its own, answers of closed windows are dropped. |
+| 02-068 | `LiveBursts::{Unasked, Requested(RequestId), Loaded, Failed}`, asked from its own step in `maybe_join_live_story`; a failure waits for the next Join instead of every ingest. |
+| 02-074 | A commit that did not go out puts the Stars back as pending with a new Undo window, and no burst effect is queued for them. |
+
+- **Not done:** 02-014 (the capture's visibility and what Telegram was told
+  are two facts; 02-013 makes the told one honest), 02-048 (needs the gift
+  id inside the shared `ListOp`, used by other lists), 02-050 and 02-096
+  (whole-dialog enums over the send-gift and hub dialogs; no bug beyond what
+  is listed above).

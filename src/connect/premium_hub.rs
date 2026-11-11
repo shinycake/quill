@@ -125,13 +125,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let hub = &mut self.session.payments.hub;
         hub.gifts_open = true;
         hub.gifts_owner = Some(owner);
-        hub.gifts.clear();
-        hub.gifts_total = 0;
-        hub.gifts_offset.clear();
-        hub.gifts_page = PageStage::Idle;
-        hub.gift_notice = None;
-        hub.gift_view.select(None);
-        hub.gift_view.confirm_convert(None);
+        hub.reset_gifts_list();
         // The `Mutating` view is not reset: a toggle or sale still out keeps its
         // lock until its own answer (another request would pay twice).
         hub.gifts_op.refetched();

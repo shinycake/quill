@@ -63,13 +63,15 @@ pub struct MessagesState {
     /// the window that asked (`None`: the main window): only that window
     /// takes the answer, even when another shows the same chat; the chat
     /// id guards against applying to a chat the window has since left.
-    pub ai_composer_text: Option<(Option<ChatId>, ChatId, String)>,
+    /// A queue: two windows' answers landing in one batch both wait for
+    /// their own window's drain.
+    pub ai_composer_text: Vec<(Option<ChatId>, ChatId, String)>,
     /// Slice msg-richtext-ai-tools: one-shot `composeRichMessageWithAi`
     /// / `createRichMessageWithAi` / `fixRichMessageWithAi` answer for
     /// the open chat's composer. Same drain contract as
     /// `ai_composer_text`. The UI writes the blocks back as editor markup
     /// (`blocks_to_markup`); the note distinguishes create / fix / rewrite.
-    pub ai_composer_blocks: Option<(Option<ChatId>, ChatId, RichMessageContent, &'static str)>,
+    pub ai_composer_blocks: Vec<(Option<ChatId>, ChatId, RichMessageContent, &'static str)>,
     /// Slice msg-richtext-ai-tools: one-shot; set when an AI request
     /// errors. The UI drains it into the status note so the click never
     /// silently does nothing.
@@ -211,8 +213,8 @@ impl MessagesState {
             message_action_note: Notes::default(),
             message_link: None,
             message_link_error: Notes::default(),
-            ai_composer_text: None,
-            ai_composer_blocks: None,
+            ai_composer_text: Vec::new(),
+            ai_composer_blocks: Vec::new(),
             ai_error: Notes::default(),
             message_caption_length_max: 1024,
             paid_media_star_max: crate::composer::PAID_MEDIA_MAX_STARS,

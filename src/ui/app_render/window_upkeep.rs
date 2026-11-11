@@ -286,23 +286,19 @@ impl QuillApp {
         // The window that asked takes the answer, whichever windows show
         // the same chat; one whose window closed since has no taker.
         let here = session.view_in_place();
-        let ours = |window: Option<ChatId>, session: &quill::state::Session| {
-            window == here || window.is_some_and(|chat| !session.window_chats.contains(&chat))
-        };
-        let ai_text = match session.messages.ai_composer_text.as_ref() {
-            Some((window, ..)) if ours(*window, session) => {
-                session.messages.ai_composer_text.take()
-            }
-            _ => None,
-        }
-        .filter(|(window, ..)| *window == here);
-        let ai_blocks = match session.messages.ai_composer_blocks.as_ref() {
-            Some((window, ..)) if ours(*window, session) => {
-                session.messages.ai_composer_blocks.take()
-            }
-            _ => None,
-        }
-        .filter(|(window, ..)| *window == here);
+        let open: Vec<ChatId> = session.window_chats.iter().copied().collect();
+        let ai_text = take_ai_answer(
+            &mut session.messages.ai_composer_text,
+            |answer| answer.0,
+            here,
+            &open,
+        );
+        let ai_blocks = take_ai_answer(
+            &mut session.messages.ai_composer_blocks,
+            |answer| answer.0,
+            here,
+            &open,
+        );
         // The answer is for the draft that was asked about: text typed
         // since, a message sent meanwhile or an edit begun after the ask
         // keeps the field as it is.
@@ -343,4 +339,21 @@ impl QuillApp {
             self.set_note(StatusNote::info(note));
         }
     }
+}
+
+/// This window's AI answer out of the queue (the first one). Answers of
+/// windows that closed since are dropped; those of other open windows wait
+/// for their own frame.
+fn take_ai_answer<T>(
+    queue: &mut Vec<T>,
+    window_of: impl Fn(&T) -> Option<ChatId>,
+    here: Option<ChatId>,
+    open: &[ChatId],
+) -> Option<T> {
+    queue.retain(|answer| {
+        let window = window_of(answer);
+        window == here || window.is_none_or(|chat| open.contains(&chat))
+    });
+    let at = queue.iter().position(|answer| window_of(answer) == here)?;
+    Some(queue.remove(at))
 }

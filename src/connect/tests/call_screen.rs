@@ -248,6 +248,33 @@ fn a_refused_pause_edge_puts_the_tile_back_without_a_box_error() {
 }
 
 #[test]
+fn a_pause_edge_that_did_not_go_out_leaves_the_call_unpaused_for_the_next_edge() {
+    let (dir, mut driver, _engine, screens) = group_driver();
+    driver.session.calls.active_group_call = Some(sharing_group_call());
+    driver.choose_call_screen_source(SourceId("window:42".into()), false);
+    pump_until_screen_answers(&mut driver);
+    let sink = sink_of(&screens);
+    driver
+        .sender
+        .refuse(Some("toggleGroupCallScreenSharingIsPaused"));
+    sink.push_event(CaptureEvent::Paused);
+    pump_until_screen_answers(&mut driver);
+    assert!(driver.call_screen().paused());
+    let call = driver.session.calls.active_group_call.as_ref().unwrap();
+    assert!(!call.screen_share_paused, "Telegram never heard of it");
+    // The window comes back and hides again: the edge goes out this time.
+    driver.sender.refuse(None);
+    sink.push_event(CaptureEvent::Resumed);
+    pump_until_screen_answers(&mut driver);
+    sink.push_event(CaptureEvent::Paused);
+    pump_until_screen_answers(&mut driver);
+    let toggles = sent_of(&driver, "toggleGroupCallScreenSharingIsPaused");
+    assert_eq!(toggles.len(), 2, "each edge goes out again");
+    assert_eq!(toggles[1]["is_paused"], true);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
 fn a_closed_window_ends_the_share() {
     let (dir, mut driver, _engine, screens) = group_driver();
     driver.session.calls.active_group_call = Some(sharing_group_call());
@@ -275,6 +302,12 @@ fn a_refused_capture_ends_the_share_with_its_error() {
     pump_until_screen_answers(&mut driver);
     assert_eq!(driver.call_screen().error(), Some("no access"));
     assert_eq!(sent_of(&driver, "endGroupCallScreenSharing").len(), 1);
+    // The call ends: the failure and a later pick do not outlive it.
+    driver.session.calls.active_group_call = None;
+    driver.choose_call_screen_source(SourceId("display:2".into()), false);
+    driver.pump_call_screen(Instant::now());
+    assert_eq!(driver.call_screen().error(), None);
+    assert!(driver.call_screen().chosen().is_none());
     std::fs::remove_dir_all(dir).ok();
 }
 

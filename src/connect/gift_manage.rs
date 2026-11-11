@@ -172,13 +172,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         manage.flow = None;
         manage.note = None;
         let hub = &mut self.session.payments.hub;
-        hub.gifts.clear();
-        hub.gifts_total = 0;
-        hub.gifts_offset.clear();
-        hub.gifts_page = crate::premium_hub::page_stage::PageStage::Idle;
-        hub.gift_notice = None;
-        hub.gift_view.select(None);
-        hub.gift_view.confirm_convert(None);
+        hub.reset_gifts_list();
         self.fetch_received_gifts_page(false).map(Some)
     }
 

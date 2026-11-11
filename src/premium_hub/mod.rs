@@ -842,6 +842,14 @@ impl PremiumHub {
     pub fn close_gifts(&mut self) {
         self.gifts_open = false;
         self.gifts_owner = None;
+        self.reset_gifts_list();
+        self.gifts_op.refetched();
+    }
+
+    /// The list of one owner and collection starts over: the one place that
+    /// knows which fields describe it (opening, switching collection and
+    /// closing all go through here).
+    pub fn reset_gifts_list(&mut self) {
         self.gifts.clear();
         self.gifts_total = 0;
         self.gifts_offset.clear();
@@ -849,7 +857,6 @@ impl PremiumHub {
         self.gift_notice = None;
         self.gift_view.select(None);
         self.gift_view.confirm_convert(None);
-        self.gifts_op.refetched();
     }
 
     pub fn apply_gifts(&mut self, page: GiftsPage, append: bool) {
