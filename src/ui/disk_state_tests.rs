@@ -310,9 +310,9 @@ fn a_client_opened_on_a_low_disk_holds_automatic_downloads_at_once(cx: &mut Test
         credentials,
         prepared,
     );
-    assert!(!driver.session.media.disk_holds_auto_downloads);
+    assert!(!driver.session.media.disk.holds_auto_downloads());
     app.read_with(&vcx, |app, _| app.disk.seed(&mut driver));
-    assert!(driver.session.media.disk_holds_auto_downloads);
+    assert!(driver.session.media.disk.holds_auto_downloads());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

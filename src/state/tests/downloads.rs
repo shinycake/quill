@@ -269,9 +269,9 @@ fn a_low_disk_holds_every_automatic_download() {
     let (mut session, _sink) = session();
     session.chats.insert(13, placeholder_chat(ChatId(13)));
     assert!(session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_PHOTO));
-    session.media.disk_holds_auto_downloads = true;
+    session.media.disk = crate::state::DiskPressure::Full;
     assert!(!session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_PHOTO));
-    session.media.disk_holds_auto_downloads = false;
+    session.media.disk = crate::state::DiskPressure::Healthy;
     assert!(session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_PHOTO));
 }
 

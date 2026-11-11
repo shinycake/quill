@@ -15,9 +15,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub(super) fn save_disk_pause(&mut self, file_id: i32) {
         if let Some((chat, message)) = self.session.media.downloads.origin_of(file_id) {
             let saved = &mut self.session.settings.data_storage.disk_paused;
-            if saved.insert((chat.0, message)) {
-                self.session.media.disk_paused_saved_changed = true;
-            }
+            saved.insert((chat.0, message));
         }
     }
 
@@ -25,9 +23,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub(super) fn forget_disk_pause(&mut self, file_id: i32) {
         if let Some((chat, message)) = self.session.media.downloads.origin_of(file_id) {
             let saved = &mut self.session.settings.data_storage.disk_paused;
-            if saved.remove(&(chat.0, message)) {
-                self.session.media.disk_paused_saved_changed = true;
-            }
+            saved.remove(&(chat.0, message));
         }
     }
 
@@ -75,8 +71,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     pub(super) fn save_disk_pauses_if_changed(&mut self) {
-        if std::mem::take(&mut self.session.media.disk_paused_saved_changed) {
-            let _ = self.save_data_storage_prefs();
+        let now = self.session.settings.data_storage.disk_paused.clone();
+        if now != self.session.media.disk_paused_persisted && self.save_data_storage_prefs().is_ok()
+        {
+            self.session.media.disk_paused_persisted = now;
         }
     }
 }

@@ -101,7 +101,6 @@ MasksPanel::installed_loaded
 MediaFacts::downloading
 MediaFacts::in_saved_messages
 MediaMenuFacts::downloading
-MediaState::disk_paused_saved_changed
 MembersView::loading
 MiniAppWindow::closing_confirmation
 MiniAppWindow::data_sent

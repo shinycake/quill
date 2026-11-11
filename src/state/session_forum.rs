@@ -254,14 +254,15 @@ impl Session {
     /// owner or download state changed since the last call (plus one full
     /// pass after a new session or an auth change). Drains the due set.
     pub fn take_due_chat_list_photos(&mut self) -> Vec<FileId> {
-        if std::mem::take(&mut self.media.avatar_rescan) {
-            self.media.avatar_downloads_due.clear();
-            let mut ids = self.chat_list_photo_file_ids();
-            ids.sort_by_key(|id| id.0);
-            ids.dedup();
-            return ids;
-        }
-        let due = std::mem::take(&mut self.media.avatar_downloads_due);
+        let due = match self.media.avatar_due.take() {
+            AvatarDue::Everything => {
+                let mut ids = self.chat_list_photo_file_ids();
+                ids.sort_by_key(|id| id.0);
+                ids.dedup();
+                return ids;
+            }
+            AvatarDue::Some(due) => due,
+        };
         due.into_iter()
             .filter(|id| self.media.avatar_file_refs.contains_key(id))
             .map(FileId)
@@ -287,14 +288,14 @@ impl Session {
         }
         if let Some(new) = new {
             *self.media.avatar_file_refs.entry(new).or_default() += 1;
-            self.media.avatar_downloads_due.insert(new);
+            self.media.avatar_due.insert(new);
         }
     }
 
     /// A file's download state changed; queue it if it is an avatar.
     pub(crate) fn note_avatar_file_changed(&mut self, file_id: i32) {
         if self.media.avatar_file_refs.contains_key(&file_id) {
-            self.media.avatar_downloads_due.insert(file_id);
+            self.media.avatar_due.insert(file_id);
         }
     }
 

@@ -167,7 +167,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     // Not sent: keep this and the rest due for the next ingest.
                     self.session
                         .media
-                        .avatar_downloads_due
+                        .avatar_due
                         .extend(ids.get(index..).unwrap_or_default().iter().map(|id| id.0));
                     return Err(err);
                 }
@@ -417,8 +417,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             DiskState::Full => Some(0),
         };
         let media = &mut self.session.media;
-        media.disk_holds_auto_downloads = state != DiskState::Healthy;
-        media.disk_room = room;
+        media.disk = match state {
+            DiskState::Healthy => crate::state::DiskPressure::Healthy,
+            DiskState::Low => crate::state::DiskPressure::Low { room },
+            DiskState::Full => crate::state::DiskPressure::Full,
+        };
         if !self.chats_path_active() {
             return Ok(0);
         }
@@ -483,7 +486,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// disk is low. Always true otherwise.
     pub fn download_fits_disk(&self, file_id: FileId) -> bool {
         let media = &self.session.media;
-        let Some(room) = media.disk_room else {
+        let Some(room) = media.disk.room() else {
             return true;
         };
         media
