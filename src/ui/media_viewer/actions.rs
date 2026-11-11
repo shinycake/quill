@@ -42,12 +42,10 @@ impl QuillApp {
         let mut target = self
             .viewer
             .reorient
-            .pending()
-            .unwrap_or(self.viewer.orientation);
+            .target();
         change(&mut target);
         if target.is_identity() {
-            self.viewer.orientation = target;
-            self.viewer.reorient.reset();
+            self.viewer.reorient.reset(target);
             cx.notify();
             return;
         }
@@ -91,10 +89,7 @@ impl QuillApp {
         }
         match image {
             Some(image) => {
-                self.viewer.orientation = target;
-                self.viewer
-                    .reorient
-                    .finish((path, target.code(), image.into()));
+                self.viewer.reorient.finish(target, (path, image.into()));
             }
             None => {
                 self.viewer.reorient.cancel();
@@ -358,7 +353,7 @@ impl QuillApp {
         let no_files = quill::state::FileMap::default();
         let files = self.session().map_or(&no_files, |s| &s.media.files);
         let roots = self.media_display_roots();
-        let orientation = self.viewer.orientation;
+        let orientation = self.viewer.reorient.orientation();
         let Some(path) = viewer_display_path(&item, files, &roots) else {
             self.set_note(StatusNote::error(tr(
                 keys::Q_AV_DOWNLOAD_THE_PHOTO_FIRST_TO_2,
@@ -563,7 +558,7 @@ impl QuillApp {
         over_controls: bool,
         cx: &mut Context<Self>,
     ) {
-        self.viewer.over_controls = over_controls;
+        self.viewer.pointer.moved(over_controls);
         self.viewer_note_activity(cx);
     }
 
@@ -606,7 +601,7 @@ impl QuillApp {
                         let done =
                             !this.viewer.state.is_open() || this.viewer.visibility.is_hidden();
                         // Never mid-drag (a seek, volume or speed thumb).
-                        let held = this.viewer.over_controls || this.viewer.controls.dragging();
+                        let held = this.viewer.pointer.over_controls() || this.viewer.controls.dragging();
                         if !done && controls_should_hide(idle, held) {
                             this.viewer.visibility.hide(std::time::Instant::now());
                             this.redraw_viewer_after_fade(cx);

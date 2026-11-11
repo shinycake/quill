@@ -20,6 +20,44 @@ fn closing_the_viewer_drops_a_timestamp_start(cx: &mut gpui_kit::TestAppContext)
 }
 
 #[gpui_kit::test]
+fn stepping_to_another_item_drops_a_timestamp_start(cx: &mut gpui_kit::TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    add_photo(&app, vcx, 8801);
+    add_photo(&app, vcx, 8802);
+    open(&app, vcx, 8801);
+    let key = ChatMessage::new(ChatId(11), MessageId(8801));
+    app.update(vcx, |app, cx| {
+        app.viewer.pending_seek = Some((key, 45.0));
+        // The call that armed it (an open, a quality change) keeps it.
+        app.reset_viewer_item_state(cx);
+        assert_eq!(app.viewer.pending_seek, Some((key, 45.0)));
+        app.step_media_viewer(1, cx);
+        assert_eq!(app.viewer.pending_seek, None);
+    });
+}
+
+#[gpui_kit::test]
+fn stepping_ends_a_pan_but_not_a_rest_on_a_control(cx: &mut gpui_kit::TestAppContext) {
+    use crate::ui::viewer_parts::Pointer;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    add_photo(&app, vcx, 8801);
+    add_photo(&app, vcx, 8802);
+    open(&app, vcx, 8801);
+    app.update(vcx, |app, cx| {
+        app.viewer.pointer = Pointer::Panning((1., 1.));
+        app.step_media_viewer(1, cx);
+        assert_eq!(app.viewer.pointer, Pointer::Away);
+        app.viewer_note_pointer(true, cx);
+        app.step_media_viewer(-1, cx);
+        assert_eq!(app.viewer.pointer, Pointer::OverControls);
+        app.close_media_viewer(cx);
+        assert_eq!(app.viewer.pointer, Pointer::Away);
+    });
+}
+
+#[gpui_kit::test]
 fn closing_the_forward_picker_drops_share_at(cx: &mut gpui_kit::TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;

@@ -303,7 +303,7 @@ impl QuillApp {
     /// picture draws the SDR image, so it reads as standard range.
     pub(crate) fn viewer_hdr_badge(&self) -> Option<HdrBadge> {
         match self.viewer.hdr.badge()? {
-            HdrBadge::Shown if !self.viewer.orientation.is_identity() => {
+            HdrBadge::Shown if !self.viewer.reorient.orientation().is_identity() => {
                 Some(HdrBadge::StandardRange)
             }
             badge => Some(badge),
@@ -384,7 +384,7 @@ impl QuillApp {
                     // EDR (drawn at SDR) does not read as changed forever.
                     let drawn = hdr.decode.frame().map_or(0.0, |shown| shown.headroom);
                     if left_edr
-                        || app.screen.viewer.orientation.is_identity()
+                        || app.screen.viewer.reorient.orientation().is_identity()
                             && hdr.display_headroom(super::headroom(window)) != drawn
                     {
                         cx.notify();
@@ -416,7 +416,7 @@ impl QuillApp {
     /// picture draws the SDR image).
     pub(crate) fn sync_viewer_hdr(&mut self, window: &Window) {
         let want = self.viewer.state.current().is_some()
-            && self.viewer.orientation.is_identity()
+            && self.viewer.reorient.orientation().is_identity()
             && self.viewer.hdr.has_frame();
         let hdr = &mut self.viewer.hdr;
         if hdr.edr == Edr::On && super::renderer_left_edr(window) {

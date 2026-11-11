@@ -31,9 +31,10 @@ pub(crate) struct ViewerUi {
     /// The viewer's media frame for the current window size (zoom/pan
     /// math works in it).
     pub(super) frame: (f32, f32),
-    /// Parity slice 5: drag-pan anchor — last mouse position in px while the
-    /// left button is held over the zoomed visual.
-    pub(super) drag: Option<(f32, f32)>,
+    /// The pointer over the viewer: panning the zoomed picture (the anchor
+    /// is the last mouse position), resting on a control (they must not
+    /// auto-hide), or elsewhere.
+    pub(super) pointer: super::viewer_parts::Pointer,
     /// Wheel and trackpad scrolling toward the next item.
     pub(super) wheel: WheelNav,
     /// A horizontal trackpad swipe pulling the next or previous arrow in.
@@ -49,13 +50,11 @@ pub(crate) struct ViewerUi {
     /// Draws the viewer's picture above the cached viewer slice, so a new
     /// video frame redraws only the picture (`media_viewer::layer`).
     pub(super) video_layer: Option<Entity<super::media_viewer::ViewerVideoLayer>>,
-    /// MED1: photo rotation and mirror flips (photos only; reset on
-    /// open/step). Rendered from `viewer_rotated`.
-    pub(super) orientation: quill::media_viewer::ViewerOrientation,
-    /// MED1: re-oriented render of the viewer photo, keyed
-    /// `(path, orientation code)`; decoded eagerly by Rotate/Flip so the
-    /// overlay render stays allocation-free. A decode of a new orientation
-    /// replaces `orientation` when it lands; a late one is dropped.
+    /// MED1: photo rotation and mirror flips (reset on open/step) with the
+    /// re-oriented render of the viewer photo; decoded eagerly by
+    /// Rotate/Flip so the overlay render stays allocation-free. A decode of
+    /// a new orientation replaces the one shown when it lands; a late one
+    /// is dropped.
     pub(super) reorient: super::viewer_parts::Reorient,
     /// HDR rendition of the current picture file (macOS).
     pub(super) hdr: super::hdr_image::HdrViewer,
@@ -72,8 +71,6 @@ pub(crate) struct ViewerUi {
     pub(super) last_activity: std::time::Instant,
     /// Toolbar, arrows and caption: up, or faded out after the idle wait.
     pub(super) visibility: super::viewer_parts::ControlsVisibility,
-    /// The pointer rests on a control, so they must not auto-hide.
-    pub(super) over_controls: bool,
     /// The video controller's sliders, drag previews, scrubber hover and
     /// the Space-hold boost (`video_player::controls`).
     pub(super) controls: super::video_player::controls::VideoControlsState,
@@ -107,20 +104,18 @@ impl ViewerUi {
             photo_editor: Default::default(),
             zoom: ViewerZoom::new(),
             frame: (720.0, 480.0),
-            drag: None,
+            pointer: Default::default(),
             wheel: WheelNav::default(),
             swipe: SwipeNav::default(),
             clip: Default::default(),
             pip: None,
             video_layer: None,
-            orientation: Default::default(),
             reorient: Default::default(),
             hdr: Default::default(),
             open_gen: 0,
             pending_seek: None,
             last_activity: std::time::Instant::now(),
             visibility: Default::default(),
-            over_controls: false,
             album_pin: Default::default(),
             controls: Default::default(),
         }

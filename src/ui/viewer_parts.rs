@@ -129,9 +129,9 @@ impl ViewerClip {
     }
 }
 
-/// A rotated or flipped decode of the viewer photo: its path, the
-/// orientation code it was made for and the pixels.
-pub(super) type Rotated = (PathBuf, u8, super::owned_image::OwnedImage);
+/// A rotated or flipped decode of the viewer photo: its path and the
+/// pixels, made for the orientation of the stage that holds it.
+pub(super) type Rotated = (PathBuf, super::owned_image::OwnedImage);
 
 /// The next rotate/flip decode token.
 fn next_token() -> u64 {
@@ -139,45 +139,68 @@ fn next_token() -> u64 {
     TOKENS.fetch_add(1, Ordering::Relaxed) + 1
 }
 
-/// The photo turn: nothing, a decode of `target` running (the previous
-/// picture stays until it lands), or the decoded picture. Replaced whole
+/// The turn and flips of the viewer item, and the decode of the next one:
+/// the orientation shown (with nothing decoded, as a video's turn is), a
+/// decode of `target` running (the previous picture stays until it
+/// lands), or the decoded picture. The shown orientation lives in every
+/// stage, so it and its pixels are never compared by hand. Replaced whole
 /// when the viewer moves on, so a late decode finds no matching token.
-#[derive(Default)]
 pub(super) enum Reorient {
-    #[default]
-    Idle,
+    Idle(ViewerOrientation),
     Decoding {
+        orientation: ViewerOrientation,
         target: ViewerOrientation,
         token: u64,
         shown: Option<Rotated>,
     },
-    Ready(Rotated),
+    Ready {
+        orientation: ViewerOrientation,
+        rotated: Rotated,
+    },
+}
+
+impl Default for Reorient {
+    fn default() -> Self {
+        Self::Idle(ViewerOrientation::default())
+    }
 }
 
 impl Reorient {
-    /// The picture to draw: the decoded one (or the one before it while a
-    /// new turn decodes).
-    pub(super) fn shown(&self) -> Option<&Rotated> {
+    /// The orientation on screen.
+    pub(super) fn orientation(&self) -> ViewerOrientation {
         match self {
-            Self::Idle => None,
-            Self::Decoding { shown, .. } => shown.as_ref(),
-            Self::Ready(rotated) => Some(rotated),
+            Self::Idle(orientation)
+            | Self::Decoding { orientation, .. }
+            | Self::Ready { orientation, .. } => *orientation,
         }
     }
 
-    /// The orientation a running decode is producing.
-    pub(super) fn pending(&self) -> Option<ViewerOrientation> {
+    /// The picture to draw: the decoded one (or the one before it while a
+    /// new turn decodes), made for `orientation()`.
+    pub(super) fn shown(&self) -> Option<&Rotated> {
         match self {
-            Self::Decoding { target, .. } => Some(*target),
-            Self::Idle | Self::Ready(_) => None,
+            Self::Idle(_) => None,
+            Self::Decoding { shown, .. } => shown.as_ref(),
+            Self::Ready { rotated, .. } => Some(rotated),
+        }
+    }
+
+    /// What queued presses build on: the running decode's target, else the
+    /// orientation on screen.
+    pub(super) fn target(&self) -> ViewerOrientation {
+        match self {
+            Self::Decoding { target, .. } => *target,
+            Self::Idle(orientation) | Self::Ready { orientation, .. } => *orientation,
         }
     }
 
     /// Start decoding `target`; returns the token its answer must carry.
     pub(super) fn begin(&mut self, target: ViewerOrientation) -> u64 {
         let token = next_token();
+        let orientation = self.orientation();
         let shown = std::mem::take(self).into_shown();
         *self = Self::Decoding {
+            orientation,
             target,
             token,
             shown,
@@ -191,26 +214,80 @@ impl Reorient {
 
     /// Drop a running decode, keeping the picture it would replace.
     pub(super) fn cancel(&mut self) {
+        let orientation = self.orientation();
         *self = match std::mem::take(self).into_shown() {
-            Some(rotated) => Self::Ready(rotated),
-            None => Self::Idle,
+            Some(rotated) => Self::Ready {
+                orientation,
+                rotated,
+            },
+            None => Self::Idle(orientation),
         };
     }
 
-    pub(super) fn finish(&mut self, rotated: Rotated) {
-        *self = Self::Ready(rotated);
+    /// The decode landed: `orientation` and its picture show together.
+    pub(super) fn finish(&mut self, orientation: ViewerOrientation, rotated: Rotated) {
+        *self = Self::Ready {
+            orientation,
+            rotated,
+        };
     }
 
-    /// Nothing is turned and nothing decodes.
-    pub(super) fn reset(&mut self) {
-        *self = Self::Idle;
+    /// Show `orientation` with nothing decoded and nothing decoding.
+    pub(super) fn reset(&mut self, orientation: ViewerOrientation) {
+        *self = Self::Idle(orientation);
     }
 
     fn into_shown(self) -> Option<Rotated> {
         match self {
-            Self::Idle => None,
+            Self::Idle(_) => None,
             Self::Decoding { shown, .. } => shown,
-            Self::Ready(rotated) => Some(rotated),
+            Self::Ready { rotated, .. } => Some(rotated),
+        }
+    }
+}
+
+/// Where the pointer is in the viewer: nowhere that matters, on a control
+/// (they stay up), or holding the zoomed picture to pan it. One value, so
+/// a step, a zoom reset or a close ends a pan without a hand reset of the
+/// controls flag.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub(super) enum Pointer {
+    #[default]
+    Away,
+    OverControls,
+    /// The last mouse position in px while the left button is held.
+    Panning((f32, f32)),
+}
+
+impl Pointer {
+    pub(super) fn anchor(self) -> Option<(f32, f32)> {
+        match self {
+            Self::Panning(at) => Some(at),
+            Self::Away | Self::OverControls => None,
+        }
+    }
+
+    pub(super) fn over_controls(self) -> bool {
+        matches!(self, Self::OverControls)
+    }
+
+    /// The pointer moved onto a control or off them; a pan goes on (it
+    /// ends with the button).
+    pub(super) fn moved(&mut self, over_controls: bool) {
+        if !matches!(self, Self::Panning(_)) {
+            *self = if over_controls {
+                Self::OverControls
+            } else {
+                Self::Away
+            };
+        }
+    }
+
+    /// The button went up, or the item changed: a pan ends, a pointer on a
+    /// control stays there.
+    pub(super) fn end_pan(&mut self) {
+        if matches!(self, Self::Panning(_)) {
+            *self = Self::Away;
         }
     }
 }

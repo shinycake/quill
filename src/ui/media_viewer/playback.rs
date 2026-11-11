@@ -625,14 +625,14 @@ impl QuillApp {
             .viewer
             .zoom
             .toggle_natural(self.screen.viewer.frame);
-        self.viewer.drag = None;
+        self.viewer.pointer.end_pan();
         cx.notify();
     }
 
     /// Parity slice 5: reset zoom/pan to fit (double-click, Reset button).
     pub(in crate::ui) fn viewer_reset_zoom(&mut self, cx: &mut Context<Self>) {
         self.viewer.zoom.reset();
-        self.viewer.drag = None;
+        self.viewer.pointer.end_pan();
         cx.notify();
     }
 }

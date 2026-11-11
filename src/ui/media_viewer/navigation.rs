@@ -2,6 +2,7 @@
 //! files it shows.
 
 use super::*;
+use crate::ui::viewer_parts::Pointer;
 use std::time::Instant;
 
 impl QuillApp {
@@ -204,16 +205,12 @@ impl QuillApp {
     /// item. Shared by open, step, and "the current item was deleted".
     pub(in crate::ui) fn reset_viewer_item_state(&mut self, cx: &mut Context<Self>) {
         self.viewer.zoom.reset();
-        self.viewer.drag = None;
+        self.viewer.pointer.end_pan();
         self.viewer.wheel.new_item();
         self.viewer.swipe.new_item();
         self.viewer_leave_video_fullscreen();
         // MED1: orientation and playback error are per-item state.
-        self.viewer.orientation = Default::default();
-        self.viewer.reorient.reset();
-        self.viewer.hdr.reset();
-        self.viewer.clip.clear_error();
-        self.viewer.extra.share_at = None;
+        let mut orientation = ViewerOrientation::default();
         if let Some(item) = self.viewer.state.current()
             && let Some(turns) = self
                 .viewer
@@ -221,14 +218,30 @@ impl QuillApp {
                 .rotations
                 .get(&(item.chat_id.0, item.message_id.0))
         {
-            self.viewer.orientation.turns = *turns;
+            orientation.turns = *turns;
         }
+        self.viewer.reorient.reset(orientation);
+        self.viewer.hdr.reset();
+        self.viewer.clip.clear_error();
+        self.viewer.extra.share_at = None;
         self.apply_viewer_quality_pref();
         self.viewer.extra.loop_pause = LoopPause::Free;
         self.stop_viewer_video();
         self.ensure_viewer_download(cx);
         self.download_viewer_strip_thumbs();
         self.maybe_autoplay_viewer_video(cx);
+        // A timestamp start belongs to the item it was set for (the open or
+        // the quality change that called this): stepping to another item
+        // drops it, so coming back later starts from 0.
+        let current = self
+            .viewer
+            .state
+            .current()
+            .map(|item| quill::ids::ChatMessage::new(item.chat_id, item.message_id));
+        let _ = self
+            .viewer
+            .pending_seek
+            .take_if(|(key, _)| Some(*key) != current);
         // What TDLib allows for this message (Delete in the toolbar).
         // Profile photos and poll option media are not messages; an
         // earlier group or channel photo has its service message.
@@ -269,11 +282,11 @@ impl QuillApp {
         // A turned photo is a full-size picture of its own (up to about
         // 20 MB, and as much again on the GPU); opening the next item
         // replaced it, but nothing did until then.
-        self.viewer.reorient.reset();
+        self.viewer.reorient.reset(Default::default());
         self.viewer.hdr.reset();
-        self.viewer.over_controls = false;
-        // A pan held when the viewer closed ends with it.
-        self.viewer.drag = None;
+        // A pan held or a control rested on when the viewer closed ends
+        // with it.
+        self.viewer.pointer = Default::default();
         cx.notify();
     }
 
@@ -287,16 +300,16 @@ impl QuillApp {
         held: bool,
         cx: &mut Context<Self>,
     ) {
-        let Some((lx, ly)) = self.viewer.drag else {
+        let Some((lx, ly)) = self.viewer.pointer.anchor() else {
             return;
         };
         if !held {
-            self.viewer.drag = None;
+            self.viewer.pointer.end_pan();
             cx.notify();
             return;
         }
         self.viewer_pan_drag(pos.0 - lx, pos.1 - ly, cx);
-        self.viewer.drag = Some(pos);
+        self.viewer.pointer = Pointer::Panning(pos);
     }
 
     pub(in crate::ui) fn step_media_viewer(&mut self, delta: i32, cx: &mut Context<Self>) {
