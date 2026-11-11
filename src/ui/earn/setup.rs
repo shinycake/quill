@@ -239,7 +239,7 @@ impl QuillApp {
         let sliders = self
             .earn
             .sliders
-            .as_ref()
+            .as_deref()
             .filter(|s| s.bot_user_id == setup.bot_user_id && s.program == setup.program);
         if let Some(SetupSliders {
             commission: (slider, stops),
