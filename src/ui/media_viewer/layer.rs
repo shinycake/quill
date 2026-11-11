@@ -38,6 +38,11 @@ pub(super) struct ViewerGeometry {
     /// The media at the current zoom, and its pan inside the box.
     pub(super) zoomed: (f32, f32),
     pub(super) pan: (f32, f32),
+    /// The part of the window the Dock, taskbar or panels leave visible;
+    /// the chrome keeps to it.
+    pub(super) safe: quill::media_viewer::ViewRect,
+    /// The video controller's home spot and the area it may be dragged in.
+    pub(super) controller: super::controller_drag::ControllerFrame,
 }
 
 /// What the video layer draws.
@@ -178,19 +183,22 @@ impl QuillApp {
     ) -> ViewerGeometry {
         let viewport = window.viewport_size();
         let viewport = (f32::from(viewport.width), f32::from(viewport.height));
+        let cover = super::screen_cover::window_cover(window, cx);
+        let safe = cover.safe_area(viewport);
         let fullscreen = self.viewer.extra.video_fullscreen.is_on();
         let caption = if fullscreen {
             None
         } else {
-            let width = geometry::lane_width(viewport.0);
+            let width = geometry::lane_width(safe.w);
             self.viewer_caption_layout(item, width, window, cx)
         };
         let frame = geometry::ViewerFrame {
             viewport,
+            cover,
             video: item.kind == MediaViewerKind::Video,
             caption: caption.map_or(0.0, |caption| caption.plate_h),
             fullscreen,
-            strip: self.viewer_group_strip(viewport.0).is_some(),
+            strip: self.viewer_group_strip(safe.w).is_some(),
         };
         let area = geometry::fit_area(frame);
         let fit = area.size;
@@ -224,6 +232,11 @@ impl QuillApp {
             ),
             zoomed: (media.0 * zoom.zoom, media.1 * zoom.zoom),
             pan: zoom.pan,
+            safe,
+            controller: super::controller_drag::ControllerFrame {
+                home: geometry::controller_home(frame),
+                area: safe,
+            },
         }
     }
 
