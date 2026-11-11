@@ -21,13 +21,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Settings > Calls' microphone test. While the device opens, a click
-/// cancels: the test shows as running from the click on, and an answer for
-/// a start that is no longer current is dropped, closing the device.
+/// cancels: the test shows as running from the click on, and the stage owns
+/// the opening task, so leaving it drops the task and the device it opens.
 #[derive(Default)]
 pub(crate) enum MicTestRun {
     #[default]
     Off,
-    Opening(u64),
+    Opening(#[allow(dead_code)] Task<()>),
     On(MicTest),
     /// The device failed while the test ran; the reason shows until the
     /// next click on Stop test.
@@ -182,18 +182,14 @@ impl QuillApp {
     }
 
     fn open_mic_test(&mut self, cx: &mut Context<Self>) {
-        self.call_boxes.mic_test_starts = self.call_boxes.mic_test_starts.wrapping_add(1);
-        let start = self.call_boxes.mic_test_starts;
-        self.call_boxes.mic_test = MicTestRun::Opening(start);
         let open = self.call_boxes.open_mic_test.clone();
         let opening = cx.background_spawn(async move { open() });
-        self.spawn_screen(cx, async move |this, cx| {
+        let task = self.spawn_screen(cx, async move |this, cx| {
             let opened = opening.await;
             let _ = this.update(cx, |this, cx| {
-                if !matches!(this.call_boxes.mic_test, MicTestRun::Opening(s) if s == start) {
-                    if let Ok(stale) = opened {
-                        cx.background_spawn(async move { drop(stale) }).detach();
-                    }
+                // Only the stage's own task gets here: a stop or a close
+                // dropped the task (and the device) before this ran.
+                if !matches!(this.call_boxes.mic_test, MicTestRun::Opening(_)) {
                     return;
                 }
                 match opened {
@@ -205,8 +201,8 @@ impl QuillApp {
                 }
                 cx.notify();
             });
-        })
-        .detach();
+        });
+        self.call_boxes.mic_test = MicTestRun::Opening(task);
     }
 
     fn start_mic_test(&mut self, source: Box<dyn LevelSource + Send>, cx: &mut Context<Self>) {

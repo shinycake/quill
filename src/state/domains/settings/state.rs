@@ -166,13 +166,13 @@ impl ListEdit {
     }
 }
 
-/// The device-link round trip (`confirmQrCodeAuthentication`).
+/// The answer of the device-link round trip (`confirmQrCodeAuthentication`).
+/// The request in flight is `sessions_op`'s (it locks the sessions page);
+/// this holds only how that request ended, for the screen that sent it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum DeviceLogin {
     #[default]
     Idle,
-    /// The confirmation this request carries is in flight.
-    InFlight(RequestId),
     /// That request ended; the screen that sent it takes the result once.
     Done {
         request: RequestId,
@@ -181,8 +181,9 @@ pub enum DeviceLogin {
 }
 
 impl DeviceLogin {
-    pub fn in_flight(self) -> bool {
-        matches!(self, Self::InFlight(_))
+    /// The screen that asked went away: nobody takes the answer.
+    pub fn discard(&mut self) {
+        *self = Self::Idle;
     }
 
     /// The result of the confirmation `asked` sent, once: the stage returns
@@ -624,10 +625,10 @@ fn dedup_ids(mut list: Vec<i64>, more: Vec<i64>) -> Vec<i64> {
 }
 
 impl SettingsState {
-    /// The device link is out: the sessions buttons stay disabled (a
-    /// terminate in flight is `sessions_op`).
+    /// A terminate or a device link is out (`sessions_op`): the sessions
+    /// buttons stay disabled.
     pub fn sessions_busy(&self) -> bool {
-        self.sessions_op.is_mutating() || self.device_login.in_flight()
+        self.sessions_op.is_mutating()
     }
 
     /// The Data & Storage failure line: the presets fetch, the cache clear

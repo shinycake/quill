@@ -529,7 +529,8 @@ pub enum PollVotersFetch {
 /// page-next keeps the loaded page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum InlineQueryFetch {
-    Loading,
+    /// The first page is out as this request; only its answer fills the slot.
+    Loading(crate::ids::RequestId),
     Loaded {
         inline_query_id: i64,
         button: Option<InlineQueryResultsButton>,
@@ -553,18 +554,28 @@ pub struct InlineQuerySlot {
     pub more_failed: Option<String>,
 }
 
+impl InlineBotResolve {
+    /// The username this is for.
+    pub fn username(&self) -> &str {
+        match self {
+            Self::Resolving { username, .. }
+            | Self::Resolved { username, .. }
+            | Self::Failed { username, .. } => username,
+        }
+    }
+}
+
 /// Bots slice: `@botname` → bot user id resolution for inline mode.
 /// `is_inline` is `Some` when the bot was found in the local user cache
 /// (`ParsedUser.is_inline`); `None` when it came from `searchPublicChat`
 /// (the chat answer carries no user object — the query attempt itself is
-/// the capability check, and its error surfaces honestly). `generation`
-/// correlates the in-flight request with its answer (see
-/// `RequestPurpose::ResolveInlineBot`).
+/// the capability check, and its error surfaces honestly). `request` is
+/// the lookup the answer must come from.
 #[derive(Debug, Clone, PartialEq)]
 pub enum InlineBotResolve {
     Resolving {
         username: String,
-        generation: u64,
+        request: crate::ids::RequestId,
     },
     Resolved {
         username: String,

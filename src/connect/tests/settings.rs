@@ -764,7 +764,7 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
     assert!(driver.session.settings.sessions_op.is_mutating());
     assert_eq!(
         driver.session.settings.device_login,
-        crate::state::DeviceLogin::InFlight(request)
+        crate::state::DeviceLogin::Idle
     );
     driver
         .ingest(response(
@@ -780,6 +780,16 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         }
     );
     assert!(!driver.session.settings.sessions_op.is_mutating());
+    // The screen that asked went away: nobody takes the answer.
+    driver.session.settings.device_login.discard();
+    assert_eq!(
+        driver
+            .session
+            .settings
+            .device_login
+            .take_result_for(request),
+        None
+    );
     assert!(
         recorder.snapshot()[sent..]
             .iter()

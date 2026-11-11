@@ -27,7 +27,10 @@ impl Session {
                 (true, Some(slot)) => {
                     slot.chat_id == chat_id
                         && slot.bot_user_id == bot_user_id
-                        && matches!(slot.fetch, InlineQueryFetch::Loading)
+                        && matches!(
+                            slot.fetch,
+                            InlineQueryFetch::Loading(asked) if Some(asked) == pending.map(|p| p.id)
+                        )
                 }
                 (false, Some(slot)) => {
                     slot.chat_id == chat_id

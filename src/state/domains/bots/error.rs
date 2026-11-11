@@ -77,6 +77,11 @@ impl Session {
                         Some(slot)
                             if slot.chat_id == chat_id
                                 && slot.bot_user_id == bot_user_id
+                                && matches!(
+                                    slot.fetch,
+                                    InlineQueryFetch::Loading(asked)
+                                        if Some(asked) == pending.map(|p| p.id)
+                                )
                     );
                 if !first_page
                     && let Some(slot) = self.bots.inline_query.as_mut()
@@ -93,24 +98,14 @@ impl Session {
                     ));
                 }
             }
-            // Bots slice: a failed `@botname` lookup lands in the
-            // resolve slot so the composer shows an honest hint;
-            // stale failures (a newer username is already being
-            // resolved) are ignored via the generation guard.
-            Some(RequestPurpose::Bots(BotsPurpose::ResolveInlineBot { generation })) => {
-                let stale = !matches!(
-                    &self.bots.inline_bot_resolve,
-                    Some(InlineBotResolve::Resolving {
-                        generation: slot_generation,
-                        ..
-                    }) if *slot_generation == generation
-                );
-                if !stale {
-                    let username = match &self.bots.inline_bot_resolve {
-                        Some(InlineBotResolve::Resolving { username, .. }) => username.clone(),
-                        _ => String::new(),
-                    };
-                    self.bots.inline_bot_resolve = Some(InlineBotResolve::Failed {
+            // Bots slice: a failed `@botname` lookup lands on the entry
+            // that waits for this request, so the composer shows an honest
+            // hint; an entry replaced since (a newer lookup) is untouched.
+            Some(RequestPurpose::Bots(BotsPurpose::ResolveInlineBot)) => {
+                if let Some(asked) = pending
+                    && let Some(username) = self.bots.inline_bot_asked(asked.id).map(str::to_string)
+                {
+                    self.bots.set_inline_bot(InlineBotResolve::Failed {
                         reason: format!("could not find @{username} (error {})", err.code),
                         username,
                     });

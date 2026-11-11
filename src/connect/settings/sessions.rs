@@ -17,7 +17,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let id = self
             .session
             .request(RequestPurpose::ConfirmDeviceLogin, None);
-        self.session.settings.device_login = DeviceLogin::InFlight(id);
+        self.session.settings.device_login = DeviceLogin::Idle;
         self.session.settings.sessions_op.begin(id);
         self.session.settings.sessions.clear_error();
         let request = zeroize::Zeroizing::new(

@@ -203,12 +203,12 @@ fn resolve_inline_bot_private_chat_resolves_with_cached_inline_flag() {
         },
     );
     let extra = session.request(
-        RequestPurpose::Bots(BotsPurpose::ResolveInlineBot { generation: 1 }),
+        RequestPurpose::Bots(BotsPurpose::ResolveInlineBot),
         None,
     );
-    session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolving {
+    session.bots.set_inline_bot(InlineBotResolve::Resolving {
         username: "gif".into(),
-        generation: 1,
+        request: extra,
     });
     apply_json(
         &mut session,
@@ -220,8 +220,8 @@ fn resolve_inline_bot_private_chat_resolves_with_cached_inline_flag() {
         ),
     );
     assert_eq!(
-        session.bots.inline_bot_resolve,
-        Some(InlineBotResolve::Resolved {
+        session.bots.inline_bot("gif"),
+        Some(&InlineBotResolve::Resolved {
             username: "gif".into(),
             user_id: 77,
             is_inline: Some(true),
@@ -246,12 +246,12 @@ fn resolve_inline_bot_non_bot_username_fails() {
         },
     );
     let extra = session.request(
-        RequestPurpose::Bots(BotsPurpose::ResolveInlineBot { generation: 1 }),
+        RequestPurpose::Bots(BotsPurpose::ResolveInlineBot),
         None,
     );
-    session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolving {
+    session.bots.set_inline_bot(InlineBotResolve::Resolving {
         username: "alice".into(),
-        generation: 1,
+        request: extra,
     });
     apply_json(
         &mut session,
@@ -264,29 +264,61 @@ fn resolve_inline_bot_non_bot_username_fails() {
     );
     assert!(
         matches!(
-            &session.bots.inline_bot_resolve,
+            session.bots.inline_bot("alice"),
             Some(InlineBotResolve::Failed { reason, .. }) if reason.contains("not a bot")
         ),
         "{:?}",
-        session.bots.inline_bot_resolve
+        session.bots.inline_bots
     );
 }
 
-/// Bots slice: a stale `searchPublicChat` answer (an older
-/// generation — the user kept typing a new username) must not
-/// overwrite the newer resolution.
+/// Bots slice: two lookups at once (two windows, two usernames) each land
+/// on their own entry; an answer for a request nothing waits for is dropped.
+#[test]
+fn resolve_inline_bot_answers_land_on_their_own_username() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let first = session.request(RequestPurpose::Bots(BotsPurpose::ResolveInlineBot), None);
+    let second = session.request(RequestPurpose::Bots(BotsPurpose::ResolveInlineBot), None);
+    for (username, request) in [("gif", first), ("gifs", second)] {
+        session.bots.set_inline_bot(InlineBotResolve::Resolving {
+            username: username.into(),
+            request,
+        });
+    }
+    // The newer lookup answers first, then the older one: both land.
+    for (request, user_id) in [(second, 78), (first, 77)] {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"updateNewChat","@extra":"{}","chat":{{"id":5,"title":"gif","type":{{"@type":"chatTypePrivate","user_id":{user_id}}},"unread_count":0}}}}"#,
+                request.0,
+            ),
+        );
+    }
+    assert!(matches!(
+        session.bots.inline_bot("gif"),
+        Some(InlineBotResolve::Resolved { user_id: 77, .. })
+    ));
+    assert!(matches!(
+        session.bots.inline_bot("gifs"),
+        Some(InlineBotResolve::Resolved { user_id: 78, .. })
+    ));
+}
+
+/// Bots slice: an answer for a lookup that a newer one for the same
+/// username replaced must not overwrite the newer entry.
 #[test]
 fn resolve_inline_bot_stale_answer_ignored() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    let extra = session.request(
-        RequestPurpose::Bots(BotsPurpose::ResolveInlineBot { generation: 1 }),
-        None,
-    );
-    // A newer resolve already replaced the slot.
-    session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolving {
-        username: "gifs".into(),
-        generation: 2,
+    let old = session.request(RequestPurpose::Bots(BotsPurpose::ResolveInlineBot), None);
+    let newer = session.request(RequestPurpose::Bots(BotsPurpose::ResolveInlineBot), None);
+    session.bots.set_inline_bot(InlineBotResolve::Resolving {
+        username: "gif".into(),
+        request: newer,
     });
     apply_json(
         &mut session,
@@ -294,14 +326,14 @@ fn resolve_inline_bot_stale_answer_ignored() {
         &sink,
         &format!(
             r#"{{"@type":"updateNewChat","@extra":"{}","chat":{{"id":5,"title":"gif","type":{{"@type":"chatTypePrivate","user_id":77}},"unread_count":0}}}}"#,
-            extra.0,
+            old.0,
         ),
     );
     assert_eq!(
-        session.bots.inline_bot_resolve,
-        Some(InlineBotResolve::Resolving {
-            username: "gifs".into(),
-            generation: 2,
+        session.bots.inline_bot("gif"),
+        Some(&InlineBotResolve::Resolving {
+            username: "gif".into(),
+            request: newer,
         })
     );
 }
@@ -313,12 +345,12 @@ fn resolve_inline_bot_error_fails_slot() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(
-        RequestPurpose::Bots(BotsPurpose::ResolveInlineBot { generation: 3 }),
+        RequestPurpose::Bots(BotsPurpose::ResolveInlineBot),
         None,
     );
-    session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolving {
+    session.bots.set_inline_bot(InlineBotResolve::Resolving {
         username: "nosuchbot".into(),
-        generation: 3,
+        request: extra,
     });
     apply_json(
         &mut session,
@@ -331,11 +363,11 @@ fn resolve_inline_bot_error_fails_slot() {
     );
     assert!(
         matches!(
-            &session.bots.inline_bot_resolve,
+            session.bots.inline_bot("nosuchbot"),
             Some(InlineBotResolve::Failed { username, .. }) if username == "nosuchbot"
         ),
         "{:?}",
-        session.bots.inline_bot_resolve
+        session.bots.inline_bots
     );
 }
 

@@ -217,9 +217,6 @@ pub(crate) struct ChatUi {
     /// composer: closed, or open with its highlighted row and what its
     /// query waits for (the 100ms debounce timer of TGX, or the session).
     pub(super) inline: super::inline_stage::InlineMode,
-    /// This window's copy of the session's resolution of the trigger's bot
-    /// (the session has one slot any window's trigger replaces).
-    pub(super) inline_bot: Option<quill::state::InlineBotResolve>,
     /// "Save as HTML" with "Ask where to save" on: the folder picker of
     /// this chat's selection, while it is open.
     pub(super) html_save: super::selection_html::HtmlSave,

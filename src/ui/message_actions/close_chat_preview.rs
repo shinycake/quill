@@ -858,7 +858,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.composer_ui.inline_bot_alert_shown && self.open_chat_is_secret() {
+        if !self.inline_warning_confirmed() && self.open_chat_is_secret() {
             self.chat_ui.bot_alert = crate::ui::inline_mode::BotAlert::Switch(query.to_string());
             cx.notify();
             return;
@@ -873,7 +873,7 @@ impl QuillApp {
 
     /// Phase S2: confirm the secret-chat inline-bot warning (TGX's single
     /// `Confirm`, `ALERT_NO_CANCEL`) — insert the stashed `SwitchInline`
-    /// query and don't ask again this session.
+    /// query and don't ask again for this account's session.
     pub(in crate::ui) fn confirm_inline_bot_alert(
         &mut self,
         window: &mut Window,
@@ -890,7 +890,7 @@ impl QuillApp {
             crate::ui::inline_mode::BotAlert::Typed => String::new(),
             crate::ui::inline_mode::BotAlert::Switch(query) => query,
         };
-        self.composer_ui.inline_bot_alert_shown = true;
+        self.confirm_inline_warning();
         if !query.is_empty() {
             let next =
                 quill::composer::insert_switch_inline_text(&self.composer_markup(cx), &query);

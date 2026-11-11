@@ -94,14 +94,18 @@ pub struct BotsState {
     /// Bots slice: the single active `getInlineQueryResults` fetch (the
     /// composer has one active inline query, so a slot — not a map).
     pub inline_query: Option<InlineQuerySlot>,
-    /// Bots slice: `@botname` → bot user id resolution for inline mode.
-    /// Set by the driver before `searchPublicChat`; the answer (or error)
-    /// resolves it. The composer has one active trigger, so a single
-    /// slot — not a map.
-    pub inline_bot_resolve: Option<InlineBotResolve>,
-    /// Bots slice: generation counter for `ResolveInlineBot` request
-    /// correlation (bumped per resolve; see the purpose docs).
-    pub inline_bot_resolve_seq: u64,
+    /// Bots slice: `@botname` → bot user id resolution for inline mode, by
+    /// lowercase username. Every window reads its own trigger's entry, so
+    /// one window's lookup never replaces another's. Set by the driver
+    /// before `searchPublicChat`; the answer (or error) lands on the entry
+    /// whose `Resolving` holds that request.
+    pub inline_bots: HashMap<String, InlineBotResolve>,
+    /// The secret-chat inline-bot warning was confirmed for this account
+    /// (TGX `TUTORIAL_INLINE_SEARCH_SECRECY`, which persists; Quill keeps it
+    /// for the session — documented divergence). It is the account's, so
+    /// every window and chat of it reads the same answer and another
+    /// account starts unconfirmed. The box being asked is `ChatUi::bot_alert`.
+    pub inline_warning_confirmed: bool,
     /// Editing an owned bot and creating a managed one.
     pub owned: OwnedBotsState,
     /// Message widgets: TDLib's answers to their queries and public data
@@ -109,7 +113,41 @@ pub struct BotsState {
     pub widget_answers: Vec<crate::message_widget::WidgetAnswer>,
 }
 
+/// Usernames kept in [`BotsState::inline_bots`]; older settled ones go first.
+const INLINE_BOTS_KEPT: usize = 16;
+
 impl BotsState {
+    /// What is known of the inline bot `@username`.
+    pub fn inline_bot(&self, username: &str) -> Option<&InlineBotResolve> {
+        self.inline_bots.get(&username.to_ascii_lowercase())
+    }
+
+    /// Records `resolve` for its username, replacing that username's entry.
+    pub fn set_inline_bot(&mut self, resolve: InlineBotResolve) {
+        let key = resolve.username().to_ascii_lowercase();
+        if self.inline_bots.len() >= INLINE_BOTS_KEPT && !self.inline_bots.contains_key(&key) {
+            let old = self
+                .inline_bots
+                .iter()
+                .find(|(_, entry)| !matches!(entry, InlineBotResolve::Resolving { .. }))
+                .map(|(name, _)| name.clone());
+            if let Some(old) = old {
+                self.inline_bots.remove(&old);
+            }
+        }
+        self.inline_bots.insert(key, resolve);
+    }
+
+    /// The entry waiting for `request`'s answer, if it still waits.
+    pub fn inline_bot_asked(&self, request: crate::ids::RequestId) -> Option<&str> {
+        self.inline_bots.values().find_map(|entry| match entry {
+            InlineBotResolve::Resolving {
+                username, request: r
+            } if *r == request => Some(username.as_str()),
+            _ => None,
+        })
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             bot_user_ids: HashSet::new(),
@@ -130,8 +168,8 @@ impl BotsState {
             pending_force_replies: std::collections::HashMap::new(),
             reply_keyboards: ReplyKeyboardState::default(),
             inline_query: None,
-            inline_bot_resolve: None,
-            inline_bot_resolve_seq: 0,
+            inline_bots: HashMap::new(),
+            inline_warning_confirmed: false,
             owned: OwnedBotsState::default(),
             widget_answers: Vec::new(),
         }

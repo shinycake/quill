@@ -92,18 +92,14 @@ impl Session {
         // username is not a bot. The user object may already
         // have arrived via `updateUser` — re-scan the cache for
         // the inline capability (`None` = unknown; the query
-        // attempt itself is the capability check). The generation
-        // guard drops stale answers (a newer username is already
-        // resolving).
+        // attempt itself is the capability check). Only the request the
+        // entry waits for answers it.
         if let Some(p) = pending.as_ref()
-            && let RequestPurpose::Bots(BotsPurpose::ResolveInlineBot { generation }) = p.purpose
-            && let Some(InlineBotResolve::Resolving {
-                username,
-                generation: slot_generation,
-            }) = self.bots.inline_bot_resolve.as_ref()
-            && *slot_generation == generation
+            && p.purpose == RequestPurpose::Bots(BotsPurpose::ResolveInlineBot)
+            && let Some(username) = self.bots.inline_bot_asked(p.id).map(str::to_string)
         {
-            match &kind {
+            let username = &username;
+            let resolved = match &kind {
                 ChatKind::Private { user_id } => {
                     // Any public username resolves to a private
                     // chat — confirm it is actually a bot. The
@@ -112,29 +108,23 @@ impl Session {
                     // unknown (the query attempt itself is then
                     // the capability check).
                     match self.users.get(&user_id.0) {
-                        Some(user) if !user.is_bot => {
-                            self.bots.inline_bot_resolve = Some(InlineBotResolve::Failed {
-                                username: username.clone(),
-                                reason: format!("@{username} is not a bot"),
-                            });
-                        }
-                        user => {
-                            let is_inline = user.map(|u| u.is_inline);
-                            self.bots.inline_bot_resolve = Some(InlineBotResolve::Resolved {
-                                username: username.clone(),
-                                user_id: user_id.0,
-                                is_inline,
-                            });
-                        }
+                        Some(user) if !user.is_bot => InlineBotResolve::Failed {
+                            username: username.clone(),
+                            reason: format!("@{username} is not a bot"),
+                        },
+                        user => InlineBotResolve::Resolved {
+                            username: username.clone(),
+                            user_id: user_id.0,
+                            is_inline: user.map(|u| u.is_inline),
+                        },
                     }
                 }
-                _ => {
-                    self.bots.inline_bot_resolve = Some(InlineBotResolve::Failed {
-                        username: username.clone(),
-                        reason: format!("@{username} is not a bot"),
-                    });
-                }
-            }
+                _ => InlineBotResolve::Failed {
+                    username: username.clone(),
+                    reason: format!("@{username} is not a bot"),
+                },
+            };
+            self.bots.set_inline_bot(resolved);
         }
         // `parity:platform-deep-links`: the `searchPublicChat` /
         // `createPrivateChat` answer for a deep-link follow-up. Any chat
