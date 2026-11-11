@@ -483,7 +483,9 @@ impl PaidReactions {
 
     /// Whether a commit or undo still waits for TDLib.
     pub fn in_flight(&self) -> bool {
-        self.pending.iter().any(|p| p.stage != PaidStage::Waiting)
+        self.pending
+            .iter()
+            .any(|p| matches!(p.stage, PaidStage::Committing(_) | PaidStage::Undoing(_)))
     }
 
     /// How long until a countdown shows another second or a reaction is
