@@ -26,8 +26,13 @@ impl Session {
                 }
             }
             Some(RequestPurpose::ValidateOrderInfo) => {
-                if extra.is_some() && self.payments.validate_request == extra {
-                    self.payments.validate_request = None;
+                if extra.is_some()
+                    && matches!(
+                        &self.payments.order_info,
+                        OrderInfoStage::Validating { request, .. } if Some(*request) == extra
+                    )
+                {
+                    self.payments.order_info = OrderInfoStage::Unvalidated;
                     self.payments.form_loading = false;
                     self.payments.note = Some(format!("Payment failed: {}", error_reason(err)));
                 }
@@ -117,18 +122,22 @@ impl Session {
                 );
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::CommitPaidReaction { .. })) => {
-                // TDLib refused the commit: the entry is done, and the
-                // user is told (the toast is gone with it).
-                if extra.is_some_and(|id| self.payments.paid.commit_settled(id)) {
-                    self.payments.notify(
-                        NoticeKind::Error,
-                        format!("Stars were not sent: {}", error_reason(err)),
-                    );
+                // TDLib refused the commit: its Stars are released and
+                // nothing is sent again; the user is told.
+                if let Some(id) = extra {
+                    self.payments.paid.refused(id);
                 }
+                self.payments.notify(
+                    NoticeKind::Error,
+                    format!("Stars were not sent: {}", error_reason(err)),
+                );
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::RemovePendingPaidReaction {
                 ..
             })) => {
+                if let Some(id) = extra {
+                    self.payments.paid.refused(id);
+                }
                 self.payments.notify(
                     NoticeKind::Error,
                     format!("Couldn't undo the Stars: {}", error_reason(err)),

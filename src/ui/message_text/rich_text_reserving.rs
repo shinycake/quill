@@ -99,7 +99,10 @@ fn text_at(
 ) -> AnyElement {
     let runs = styled_runs(text, entities);
     let mut column = div()
-        .id(("msg-rich-text", msg_key.1 * 2 + is_caption as u64))
+        .id((
+            "msg-rich-text",
+            msg_key.1.wrapping_mul(2).wrapping_add(is_caption as u64),
+        ))
         .text_size(font)
         .flex()
         .flex_col()
@@ -326,8 +329,30 @@ pub(in crate::ui) fn message_text_block(
     reserve: Option<Pixels>,
     // How wide the bubble may get: the link preview card fits it.
     room: crate::ui::history::bubble_width::BubbleRoom,
+    // A streamed bot reply appearing line by line (`bot_stream`).
+    reveal: Option<crate::ui::text_reveal::TextReveal>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
+    if reveal.is_some() {
+        return crate::ui::text_reveal::revealing(reveal, || {
+            message_text_block(
+                msg_key,
+                text,
+                files,
+                downloading,
+                media_roots,
+                custom_emoji,
+                animated_emoji,
+                revealed,
+                font,
+                big_emoji,
+                reserve,
+                room,
+                None,
+                cx,
+            )
+        });
+    }
     let row_id = msg_key.1;
     let font = if big_emoji && text.link_preview.is_none() {
         match quill::emoji_catalog::big_emoji_count_with_entities(&text.text, &text.entities) {

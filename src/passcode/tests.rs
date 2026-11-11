@@ -536,3 +536,143 @@ fn a_laptop_wake_after_a_planned_sleep_locks_on_the_next_check() {
     assert!(autolock_due(effective, timeout_secs));
     assert_eq!(effective, 3_600_000);
 }
+
+/// An OS store whose delete fails for one account, after others succeeded.
+struct FailingDelete {
+    inner: MemorySecretStore,
+    fail: AccountKey,
+}
+
+impl SecretStore for FailingDelete {
+    fn get(&self, a: &AccountKey) -> Result<Option<DatabaseKey>, SecretStoreError> {
+        self.inner.get(a)
+    }
+    fn put(&self, a: &AccountKey, k: &DatabaseKey) -> Result<(), SecretStoreError> {
+        self.inner.put(a, k)
+    }
+    fn delete(&self, a: &AccountKey) -> Result<(), SecretStoreError> {
+        if *a == self.fail {
+            return Err(SecretStoreError::Locked);
+        }
+        self.inner.delete(a)
+    }
+}
+
+#[test]
+fn enable_failing_midway_keeps_every_database_key() {
+    let root = temp_root("enable-midway");
+    let a = acct("primary");
+    let b = acct("account-1");
+    let store = FailingDelete {
+        inner: MemorySecretStore::new(),
+        fail: b.clone(),
+    };
+    let key_a = DatabaseKey::generate();
+    let key_b = DatabaseKey::generate();
+    store.put(&a, &key_a).unwrap();
+    store.put(&b, &key_b).unwrap();
+    let state = Arc::new(UnlockState::new());
+    let result = enable(&root, &store, &[a.clone(), b.clone()], "pass", FAST, &state);
+    assert!(result.is_err());
+    assert!(!is_enabled(&root));
+    assert_eq!(store.get(&a).unwrap().unwrap().as_bytes(), key_a.as_bytes());
+    assert_eq!(store.get(&b).unwrap().unwrap().as_bytes(), key_b.as_bytes());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// Delete fails for `fail`; once it has, every put fails too.
+struct StuckStore {
+    inner: MemorySecretStore,
+    fail: AccountKey,
+    put_locked: std::sync::atomic::AtomicBool,
+}
+
+impl SecretStore for StuckStore {
+    fn get(&self, a: &AccountKey) -> Result<Option<DatabaseKey>, SecretStoreError> {
+        self.inner.get(a)
+    }
+    fn put(&self, a: &AccountKey, k: &DatabaseKey) -> Result<(), SecretStoreError> {
+        if self.put_locked.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(SecretStoreError::Locked);
+        }
+        self.inner.put(a, k)
+    }
+    fn delete(&self, a: &AccountKey) -> Result<(), SecretStoreError> {
+        if *a == self.fail {
+            self.put_locked
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            return Err(SecretStoreError::Locked);
+        }
+        self.inner.delete(a)
+    }
+}
+
+#[test]
+fn enable_with_an_unrestorable_key_still_clears_the_accounts_after_it() {
+    let root = temp_root("enable-stuck");
+    let (a, b, c) = (acct("primary"), acct("account-1"), acct("account-2"));
+    let store = StuckStore {
+        inner: MemorySecretStore::new(),
+        fail: b.clone(),
+        put_locked: std::sync::atomic::AtomicBool::new(false),
+    };
+    for account in [&a, &b, &c] {
+        store.inner.put(account, &DatabaseKey::generate()).unwrap();
+    }
+    let state = Arc::new(UnlockState::new());
+    let accounts = [a.clone(), b.clone(), c.clone()];
+    enable(&root, &store, &accounts, "pass", FAST, &state).unwrap();
+    assert!(is_enabled(&root));
+    assert!(store.get(&a).unwrap().is_none());
+    assert!(store.get(&b).unwrap().is_some());
+    assert!(store.get(&c).unwrap().is_none());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// Delete fails for `stuck` and put fails for `no_put`; the rest work.
+struct PartlyStuck {
+    inner: MemorySecretStore,
+    stuck: AccountKey,
+    no_put: AccountKey,
+}
+
+impl SecretStore for PartlyStuck {
+    fn get(&self, a: &AccountKey) -> Result<Option<DatabaseKey>, SecretStoreError> {
+        self.inner.get(a)
+    }
+    fn put(&self, a: &AccountKey, k: &DatabaseKey) -> Result<(), SecretStoreError> {
+        if *a == self.no_put {
+            return Err(SecretStoreError::Locked);
+        }
+        self.inner.put(a, k)
+    }
+    fn delete(&self, a: &AccountKey) -> Result<(), SecretStoreError> {
+        if *a == self.stuck {
+            return Err(SecretStoreError::Locked);
+        }
+        self.inner.delete(a)
+    }
+}
+
+#[test]
+fn enable_with_a_partly_restored_put_back_leaves_no_key_in_the_store_it_can_clear() {
+    let root = temp_root("enable-partly");
+    let (a, b, c) = (acct("primary"), acct("account-1"), acct("account-2"));
+    let store = PartlyStuck {
+        inner: MemorySecretStore::new(),
+        stuck: c.clone(),
+        no_put: a.clone(),
+    };
+    for account in [&a, &b, &c] {
+        store.inner.put(account, &DatabaseKey::generate()).unwrap();
+    }
+    let state = Arc::new(UnlockState::new());
+    let accounts = [a.clone(), b.clone(), c.clone()];
+    enable(&root, &store, &accounts, "pass", FAST, &state).unwrap();
+    assert!(is_enabled(&root));
+    // B was put back, then removed again: it is not plain in the store
+    // while the passcode is on.
+    assert!(store.get(&b).unwrap().is_none());
+    assert!(store.get(&a).unwrap().is_none());
+    let _ = std::fs::remove_dir_all(root);
+}

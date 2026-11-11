@@ -51,7 +51,7 @@ fn sent_count(recorder: &RecordingSender, type_name: &str) -> usize {
 
 #[test]
 fn a_tap_is_held_then_committed_after_the_window() {
-    let (mut driver, recorder, _sink, _seq) = driver_parts();
+    let (mut driver, recorder, sink, seq) = driver_parts();
     driver
         .add_paid_reaction(ChatId(-100), MessageId(7), 1, None, 1_000)
         .unwrap();
@@ -71,8 +71,15 @@ fn a_tap_is_held_then_committed_after_the_window() {
     let commit = sent_request(&recorder, "commitPendingPaidMessageReactions");
     assert_eq!(commit["message_id"], 7);
     assert!(!driver.session.payments.paid.has_pending());
-    // The Stars stay reserved until TDLib answers the commit.
+    // Still reserved until TDLib answers.
     assert_eq!(driver.session.payments.paid.total_pending(), 1);
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &serde_json::json!({"@type": "ok", "@extra": commit["@extra"]}).to_string(),
+    );
+    assert_eq!(driver.session.payments.paid.total_pending(), 0);
     // Only once.
     assert!(!driver.paid_reaction_tick(u64::MAX));
 }
@@ -121,6 +128,68 @@ fn undo_removes_the_pending_stars_and_nothing_commits() {
     assert_eq!(
         sent_count(&recorder, "removePendingPaidMessageReactions"),
         1
+    );
+}
+
+#[test]
+fn a_refused_commit_releases_the_stars_and_the_next_tap_starts_fresh() {
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    driver
+        .add_paid_reaction(ChatId(-100), MessageId(7), 4, None, 0)
+        .unwrap();
+    assert!(driver.paid_reaction_tick(ACCUMULATE_MS));
+    let commit = sent_request(&recorder, "commitPendingPaidMessageReactions");
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &serde_json::json!({
+            "@type": "error", "@extra": commit["@extra"], "code": 400, "message": "NO_STARS"
+        })
+        .to_string(),
+    );
+    // A refused commit is not tried again on its own: the Stars are let go
+    // and the note says why.
+    let paid = &driver.session.payments.paid;
+    assert_eq!(paid.pending_stars(-100, 7), 0);
+    assert!(paid.note.is_some());
+    assert!(!driver.paid_reaction_tick(2 * ACCUMULATE_MS));
+    assert_eq!(
+        sent_count(&recorder, "commitPendingPaidMessageReactions"),
+        1
+    );
+    driver
+        .add_paid_reaction(ChatId(-100), MessageId(7), 1, None, ACCUMULATE_MS + 10)
+        .unwrap();
+    assert_eq!(driver.session.payments.paid.pending_stars(-100, 7), 1);
+}
+
+#[test]
+fn a_refused_undo_is_not_committed_later() {
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    driver
+        .add_paid_reaction(ChatId(-100), MessageId(7), 2, None, 0)
+        .unwrap();
+    driver
+        .undo_paid_reaction(ChatId(-100), MessageId(7))
+        .unwrap();
+    let undo = sent_request(&recorder, "removePendingPaidMessageReactions");
+    assert!(!driver.session.payments.paid.has_pending());
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &serde_json::json!({
+            "@type": "error", "@extra": undo["@extra"], "code": 500, "message": "FLOOD"
+        })
+        .to_string(),
+    );
+    assert_eq!(driver.session.payments.paid.pending_stars(-100, 7), 0);
+    assert!(driver.session.payments.paid.note.is_some());
+    assert!(!driver.paid_reaction_tick(2 * ACCUMULATE_MS));
+    assert_eq!(
+        sent_count(&recorder, "commitPendingPaidMessageReactions"),
+        0
     );
 }
 

@@ -49,13 +49,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
-    /// The toast's Undo: forgets the waiting Stars and tells TDLib.
+    /// The toast's Undo: tells TDLib; the Stars leave on its answer.
     pub fn undo_paid_reaction(
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
     ) -> Result<(), ConnectSendError> {
-        if !self.session.payments.paid.undo(chat_id.0, message_id.0) {
+        if self
+            .session
+            .payments
+            .paid
+            .pending_stars(chat_id.0, message_id.0)
+            == 0
+        {
             return Ok(());
         }
         let extra = self.session.request(
@@ -65,37 +71,44 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(chat_id),
         );
         let json = remove_pending_paid_message_reactions(extra, chat_id, message_id);
-        self.send_json_request(extra, &json).map(|_| ())
+        // The Stars leave the list on TDLib's answer: a send that failed, or
+        // an error answer, leaves them waiting (and their Undo on screen).
+        if let Err(err) = self.send_json_request(extra, &json) {
+            self.session.payments.paid.note = Some("Could not undo the Stars".to_string());
+            return Err(err);
+        }
+        self.session
+            .payments
+            .paid
+            .begin_undo(chat_id.0, message_id.0, extra);
+        Ok(())
     }
 
     /// Commits every Star reaction whose Undo window is over. Returns
     /// whether anything was due (the toast needs a redraw). A reaction stays
-    /// until TDLib answers its commit; one whose commit cannot be sent
-    /// starts its Undo window again, and the user is told once.
+    /// until TDLib answers its commit; one that cannot be sent is released
+    /// and the user told, never retried on its own.
     pub fn paid_reaction_tick(&mut self, now_ms: u64) -> bool {
         let due = self.session.payments.paid.due(now_ms);
         let any = !due.is_empty();
-        for (chat, message) in due {
-            let (chat_id, message_id) = (ChatId(chat), MessageId(message));
+        for pending in due {
+            let chat_id = ChatId(pending.chat_id);
+            let message_id = MessageId(pending.message_id);
             let extra = self.session.request(
                 RequestPurpose::Payments(PaymentsPurpose::CommitPaidReaction {
-                    message_id: message,
+                    message_id: pending.message_id,
                 }),
                 Some(chat_id),
             );
             let json = commit_pending_paid_message_reactions(extra, chat_id, message_id);
-            if self.send_json_request(extra, &json).is_ok() {
-                self.session.payments.paid.committing(chat, message, extra);
-            } else if self
-                .session
-                .payments
-                .paid
-                .commit_unsent(chat, message, now_ms)
-            {
-                self.session.payments.notify(
-                    NoticeKind::Error,
-                    "Stars were not sent. Trying again; Undo takes them back.",
-                );
+            let sent = self.send_json_request(extra, &json).is_ok();
+            let paid = &mut self.session.payments.paid;
+            if sent {
+                paid.begin_commit(pending.chat_id, pending.message_id, extra);
+            } else if paid.commit_unsent(pending.chat_id, pending.message_id) {
+                self.session
+                    .payments
+                    .notify(NoticeKind::Error, "Stars were not sent");
             }
         }
         any

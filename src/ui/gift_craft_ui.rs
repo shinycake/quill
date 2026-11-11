@@ -151,10 +151,10 @@ impl QuillApp {
     pub(super) fn open_craft_info(&mut self, gift: CraftGift, cx: &mut Context<Self>) {
         let gate = gift.gate(true, now_unix());
         if let Some(notice) = gate_notice(gate) {
-            self.gift_market.push(notice);
+            self.open_market_box(notice);
         } else if gate == CraftGate::Ready {
             self.gift_market.craft_primary = Some(gift);
-            self.gift_market.push(MarketBox::CraftInfo);
+            self.open_market_box(MarketBox::CraftInfo);
         }
         self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         cx.notify();
@@ -319,6 +319,13 @@ impl QuillApp {
             )
         });
         if crafting {
+            return;
+        }
+        // Closing the boxes while the forge runs leaves the craft in
+        // flight: its outcome still opens the result box.
+        if self.gift_market.forge_started.is_some()
+            || self.craft_session().is_some_and(|craft| craft.crafting)
+        {
             return;
         }
         self.gift_market.craft_primary = None;
@@ -653,6 +660,7 @@ impl QuillApp {
             .ghost()
             .on_click(cx.listener(|this, _, window, cx| {
                 this.gift_market.stack.clear();
+                this.forget_failed_previews();
                 this.after_craft_pop();
                 cx.notify();
                 this.close_kit_dialog_if_done(DialogKind::GiftMarket, window, cx);

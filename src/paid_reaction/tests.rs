@@ -7,18 +7,17 @@ fn a_tap_waits_for_the_accumulate_period() {
     assert_eq!(paid.add(1, 10, QUICK_AMOUNT, None, 1_000, None), Some(1));
     assert!(paid.has_pending());
     assert!(paid.due(1_000 + ACCUMULATE_MS - 1).is_empty());
-    assert_eq!(paid.due(1_000 + ACCUMULATE_MS), vec![(1, 10)]);
-    // Due is not done: the entry stays until its commit is answered.
-    assert!(paid.has_pending());
-    paid.committing(1, 10, RequestId(5));
-    assert!(!paid.has_pending(), "no toast while it commits");
+    let due = paid.due(1_000 + ACCUMULATE_MS);
+    assert_eq!(due.len(), 1);
     assert_eq!(
         paid.total_pending(),
         1,
         "still reserved against the balance"
     );
-    assert!(paid.commit_settled(RequestId(5)));
-    assert_eq!(paid.total_pending(), 0);
+    // Due, but still waiting until its commit request goes out.
+    assert!(paid.has_pending());
+    paid.begin_commit(1, 10, RequestId(1));
+    assert!(!paid.has_pending());
 }
 
 #[test]
@@ -81,10 +80,9 @@ fn the_latest_sender_choice_wins() {
     paid.add(1, 10, 1, None, 0, None);
     paid.add(1, 10, 50, Some(PaidSender::Anonymous), 10, None);
     paid.add(1, 10, 1, None, 20, None);
-    assert_eq!(paid.due(u64::MAX), vec![(1, 10)]);
-    let entry = paid.toast().unwrap();
-    assert_eq!(entry.sender, Some(PaidSender::Anonymous));
-    assert_eq!(entry.stars, 52);
+    let due = paid.due(u64::MAX);
+    assert_eq!(due[0].sender, Some(PaidSender::Anonymous));
+    assert_eq!(due[0].stars, 52);
 }
 
 #[test]
@@ -103,7 +101,7 @@ fn a_refused_tap_takes_back_only_its_own_stars() {
 fn a_late_refusal_does_not_touch_a_newer_entry_of_the_same_message() {
     let mut paid = PaidReactions::default();
     paid.add(1, 10, 3, None, 0, Some(RequestId(1)));
-    paid.committing(1, 10, RequestId(9));
+    paid.begin_commit(1, 10, RequestId(9));
     // The tap after the commit went out waits in its own entry.
     paid.add(1, 10, 2, None, 6_000, Some(RequestId(2)));
     assert_eq!(paid.pending_stars(1, 10), 5);
@@ -119,17 +117,13 @@ fn a_late_refusal_does_not_touch_a_newer_entry_of_the_same_message() {
 }
 
 #[test]
-fn an_unsent_commit_keeps_its_stars_and_restarts_the_window() {
+fn an_unsent_commit_releases_its_stars_and_is_not_retried() {
     let mut paid = PaidReactions::default();
     paid.add(1, 10, 3, None, 0, None);
-    assert!(
-        paid.commit_unsent(1, 10, 6_000),
-        "the first failure is told"
-    );
-    assert!(paid.due(6_000).is_empty());
-    assert_eq!(paid.due(6_000 + ACCUMULATE_MS), vec![(1, 10)]);
-    assert!(!paid.commit_unsent(1, 10, 12_000), "told once");
-    assert_eq!(paid.pending_stars(1, 10), 3);
+    assert!(paid.commit_unsent(1, 10), "an entry was waiting");
+    assert_eq!(paid.total_pending(), 0);
+    assert!(paid.due(u64::MAX).is_empty());
+    assert!(!paid.commit_unsent(1, 10), "told once");
 }
 
 #[test]
@@ -254,4 +248,61 @@ fn the_next_change_is_the_soonest_of_every_waiting_reaction() {
     paid.add(1, 11, 1, None, 300, None);
     assert_eq!(paid.next_change_ms(300), Some(200));
     assert_eq!(paid.next_change_ms(ACCUMULATE_MS), Some(0));
+}
+
+#[test]
+fn a_commit_keeps_its_stars_reserved_until_tdlib_answers() {
+    let mut paid = PaidReactions::default();
+    paid.add(1, 10, 5, None, 0, None);
+    assert_eq!(paid.due(ACCUMULATE_MS).len(), 1);
+    paid.begin_commit(1, 10, RequestId(7));
+    assert!(!paid.has_pending());
+    assert!(paid.due(u64::MAX).is_empty());
+    assert_eq!(paid.total_pending(), 5);
+    assert!(paid.in_flight());
+    // An answer to some other request settles nothing.
+    paid.settled(RequestId(8));
+    assert_eq!(paid.total_pending(), 5);
+    paid.settled(RequestId(7));
+    assert_eq!(paid.total_pending(), 0);
+    assert!(!paid.in_flight());
+}
+
+#[test]
+fn a_refused_commit_releases_the_stars_and_never_retries() {
+    let mut paid = PaidReactions::default();
+    paid.add(1, 10, 5, None, 0, None);
+    paid.due(ACCUMULATE_MS);
+    paid.begin_commit(1, 10, RequestId(7));
+    // A tap while the commit is out is a separate waiting entry.
+    assert_eq!(paid.add(1, 10, 2, None, ACCUMULATE_MS + 100, None), Some(2));
+    assert_eq!(paid.total_pending(), 7);
+    paid.refused(RequestId(7));
+    // Only the newer tap is still held; the refused Stars are free.
+    assert_eq!(paid.total_pending(), 2);
+    assert!(!paid.in_flight());
+}
+
+#[test]
+fn a_low_balance_commit_error_does_not_loop() {
+    let mut paid = PaidReactions::default();
+    paid.add(1, 10, 5, None, 0, None);
+    assert_eq!(paid.due(ACCUMULATE_MS).len(), 1);
+    paid.begin_commit(1, 10, RequestId(1));
+    paid.refused(RequestId(1));
+    assert_eq!(paid.total_pending(), 0);
+    assert!(paid.due(u64::MAX).is_empty());
+    assert!(paid.next_change_ms(ACCUMULATE_MS * 3).is_none());
+}
+
+#[test]
+fn a_refused_undo_releases_the_stars_and_does_not_commit() {
+    let mut paid = PaidReactions::default();
+    paid.add(1, 10, 3, None, 0, None);
+    paid.begin_undo(1, 10, RequestId(4));
+    assert!(paid.toast().is_none());
+    assert_eq!(paid.total_pending(), 3);
+    paid.refused(RequestId(4));
+    assert_eq!(paid.total_pending(), 0);
+    assert!(paid.due(u64::MAX).is_empty());
 }

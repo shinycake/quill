@@ -96,7 +96,7 @@ impl QuillApp {
                     .filter(|send| send.open)
                     .and_then(|send| send.recipient.clone());
             }
-            self.gift_market.push(MarketBox::Resale);
+            self.open_market_box(MarketBox::Resale);
             self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         } else {
             self.set_note(StatusNote::error(tr(

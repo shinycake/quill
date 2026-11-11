@@ -1,6 +1,6 @@
 //! The checkout's lifetime: closing it, and the payments it sent.
 use crate::ids::RequestId;
-use crate::state::{PaymentInFlight, Session};
+use crate::state::{OrderInfoStage, PaymentInFlight, Session};
 
 impl Session {
     /// The checkout closed: its form and answers go. A `sendPaymentForm`
@@ -12,9 +12,8 @@ impl Session {
         let payments = &mut self.payments;
         payments.form_loading = false;
         payments.form_request = None;
-        payments.validate_request = None;
         payments.note = None;
-        payments.validated = None;
+        payments.order_info = OrderInfoStage::Unvalidated;
         payments.shipping_id = None;
         payments.form = None;
         payments.request = None;

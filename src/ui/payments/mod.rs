@@ -42,7 +42,19 @@ impl QuillApp {
     /// keeps its own invoice and form (`PaymentsState::paying`), so its
     /// answer still lands on the payment that was made.
     pub(super) fn close_payment_dialog(&mut self, cx: &mut Context<Self>) {
+        // A giveaway that was paid is paid: its form closes with the
+        // checkout, so Start cannot pay for it a second time.
+        let paid_giveaway = self.session().is_some_and(|s| {
+            s.payments.form_paid
+                && s.payments
+                    .request
+                    .as_ref()
+                    .is_some_and(|r| r.invoice.is_giveaway())
+        });
         self.payments.dialog = None;
+        if paid_giveaway && self.giveaway.form.is_some() {
+            self.close_giveaway_form(cx);
+        }
         if let Some(live) = self.live.as_mut() {
             live.driver.session.close_checkout();
         }
@@ -64,6 +76,17 @@ impl QuillApp {
             .window_of_box(crate::ui::shell::DialogKind::PaymentForm);
         self.as_asked_by(asker, |this| this.open_link(&step.url, cx));
         if step.closes_checkout {
+            // The payment is in the provider's hands: the giveaway form
+            // has done its job, so Start cannot buy the giveaway again.
+            let for_this_form = step.giveaway_chat_id.is_some_and(|chat| {
+                self.giveaway
+                    .form
+                    .as_ref()
+                    .is_some_and(|form| form.draft.boosted_chat_id == chat)
+            });
+            if for_this_form {
+                self.close_giveaway_form(cx);
+            }
             self.close_payment_dialog(cx);
         }
     }
@@ -243,7 +266,8 @@ impl QuillApp {
                     })),
             );
         }
-        if let Some(validated) = &session.payments.validated
+        let typed_order = dialog.order(cx);
+        if let Some(validated) = session.payments.order_info.validated_for(&typed_order)
             && !validated.shipping_options.is_empty()
         {
             // Phase 6: kit RadioGroup (was: buttons with a ◉/○ prefix).
@@ -337,7 +361,12 @@ impl QuillApp {
         }
         let can_pay = {
             let terms_ok = invoice.terms_url.is_empty() || dialog.terms_accepted;
-            let order_ok = !needs_order || session.payments.validated.is_some();
+            let order_ok = !needs_order
+                || session
+                    .payments
+                    .order_info
+                    .validated_for(&typed_order)
+                    .is_some();
             let creds_ok = match &dialog.credential_choice {
                 PaymentCredentialChoice::Saved(_) => true,
                 PaymentCredentialChoice::NewCard => {
@@ -443,13 +472,13 @@ impl QuillApp {
             (
                 session.payments.form.clone(),
                 session.payments.request.clone(),
-                session.payments.validated.clone(),
+                session.payments.order_info.clone(),
                 session.payments.shipping_id.clone(),
                 session.payments.form_paid,
             )
         });
         let dialog = self.payments.dialog.as_ref();
-        let (Some((Some(form), Some(request), validated, shipping_id, false)), Some(dialog)) =
+        let (Some((Some(form), Some(request), order_info, shipping_id, false)), Some(dialog)) =
             (snapshot, dialog)
         else {
             self.set_note(StatusNote::silent(tr(
@@ -469,6 +498,9 @@ impl QuillApp {
             || invoice.need_phone_number
             || invoice.need_email_address
             || invoice.need_shipping_address;
+        // Only the answer to the fields now typed counts: an edit after
+        // Continue (or a Continue still out) is validated again.
+        let validated = order_info.validated_for(&dialog.order(cx));
         if needs_order && validated.is_none() {
             self.set_note(StatusNote::silent(tr(
                 keys::Q_MONEY_VALIDATE_THE_ORDER_INFO_FIRST,
@@ -485,7 +517,6 @@ impl QuillApp {
             (PaymentCredentialChoice::NewCard, None) => return,
         };
         let order_info_id = validated
-            .as_ref()
             .map(|validated| validated.order_info_id.as_str())
             .unwrap_or("");
         let shipping_option_id = shipping_id.as_deref().unwrap_or("");

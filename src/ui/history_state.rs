@@ -94,6 +94,8 @@ pub(crate) struct HistoryUi {
     /// (ready files, downloading files) at the last history render; a
     /// change remeasures the virtualized rows (media grew in place).
     pub(super) media_signature: (u64, usize),
+    /// The channel's ads drawn in the main history (`sponsored_spots`).
+    pub(super) sponsored: super::sponsored_spots::SponsoredInHistory,
     /// The last jump the scroller landed on, as `(jump serial, message)`:
     /// it lands once per jump, so a second jump to the same message lands
     /// again, and a highlight that stays set is not scrolled to each frame.
@@ -242,6 +244,7 @@ impl HistoryUi {
             #[cfg(test)]
             follow_revision_in_tests: false,
             media_signature: (0, 0),
+            sponsored: Default::default(),
             last_highlight: None,
             highlight_fade: None,
             reaction_fly: None,

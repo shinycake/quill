@@ -3,8 +3,8 @@
 //! lists stale and the connect driver refetches them from the server.
 use crate::earn::EarnErrorHint;
 use crate::gift_manage::{
-    ExportError, GiftListFetch, GiftManagePayload, GiftManageState, GiftTransferred, ProbeOutcome,
-    TransferPicker, TransferStage,
+    ExportError, GiftListFetch, GiftManagePayload, GiftManageState, ProbeOutcome, TransferPicker,
+    TransferStage,
 };
 use crate::lang::{keys, tr_with};
 use crate::state::*;
@@ -99,18 +99,6 @@ impl Session {
         }
     }
 
-    /// TDLib answered a Star reaction's commit: the reaction is done.
-    pub(crate) fn apply_paid_reaction_ok(&mut self, pending: Option<&PendingRequest>) {
-        if let Some(pending) = pending
-            && matches!(
-                pending.purpose,
-                RequestPurpose::Payments(PaymentsPurpose::CommitPaidReaction { .. })
-            )
-        {
-            self.payments.paid.commit_settled(pending.id);
-        }
-    }
-
     /// An `ok` for one of the gift management requests.
     pub(crate) fn apply_gift_manage_ok(&mut self, pending: Option<&PendingRequest>) {
         let Some(RequestPurpose::Payments(purpose)) = pending.map(|p| p.purpose) else {
@@ -133,16 +121,8 @@ impl Session {
                 hub.tx_loaded = false;
                 // tdesktop `ShowGiftTransferredToast`, then the recipient's
                 // chat (`showPeerHistory`).
-                manage.transferred = match manage.transfer() {
-                    Some(TransferPicker {
-                        gift_name,
-                        stage: TransferStage::ConfirmPeer { user_id, name },
-                        ..
-                    }) => Some(GiftTransferred {
-                        gift_name: gift_name.clone(),
-                        recipient: name.clone(),
-                        user_id: *user_id,
-                    }),
+                manage.transferred = match manage.transferring.take() {
+                    Some((request, done)) if Some(request) == pending.map(|p| p.id) => Some(done),
                     _ => None,
                 };
                 manage.flow = None;

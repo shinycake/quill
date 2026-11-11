@@ -52,7 +52,10 @@ fn payment_request_survives_form_and_validated_answers() {
     );
     // Continue: `validateOrderInfo` sent, request context refreshed.
     let extra = session.request(RequestPurpose::ValidateOrderInfo, Some(ChatId(51)));
-    session.payments.validate_request = Some(extra);
+    session.payments.order_info = OrderInfoStage::Validating {
+        request: extra,
+        order: Default::default(),
+    };
     session.payments.request = Some(PaymentRequest {
         invoice: crate::payment_invoice::InputInvoice::Message {
             chat_id: ChatId(51),
@@ -68,7 +71,7 @@ fn payment_request_survives_form_and_validated_answers() {
             extra.0
         ),
     );
-    assert!(session.payments.validated.is_some());
+    assert!(session.payments.order_info.validated().is_some());
     assert_eq!(session.payments.shipping_id.as_deref(), Some("ship1"));
     assert!(
         session.payments.request.is_some(),
@@ -384,4 +387,176 @@ fn a_verification_step_closes_only_its_own_checkout() {
     assert_eq!(step.url, "https://pay.example.com/3ds");
     assert!(!step.closes_checkout, "B's checkout stays open");
     assert!(session.payments.shows(&b));
+}
+
+fn validated_json(extra: RequestId, order_info_id: &str) -> String {
+    format!(
+        r#"{{"@type":"validatedOrderInfo","@extra":"{}","order_info_id":"{order_info_id}","shipping_options":[]}}"#,
+        extra.0
+    )
+}
+
+/// Continue on edited fields: the earlier order id is gone at once, an
+/// answer to the earlier Continue is dropped, and only the answer to the
+/// last one is promoted (with the fields that were sent).
+#[test]
+fn an_earlier_order_id_never_outlives_a_new_continue() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let first = session.request(RequestPurpose::ValidateOrderInfo, Some(ChatId(51)));
+    let addr1 = crate::telegram::envelope::OrderInfoData {
+        name: "addr1".into(),
+        ..Default::default()
+    };
+    session.payments.order_info = OrderInfoStage::Validating {
+        request: first,
+        order: addr1.clone(),
+    };
+    apply_json(&mut session, &seq, &sink, &validated_json(first, "oid1"));
+    assert_eq!(
+        session
+            .payments
+            .order_info
+            .validated()
+            .map(|v| v.order_info_id.as_str()),
+        Some("oid1")
+    );
+    // Edit and press Continue again: the old id leaves when the request does.
+    let second = session.request(RequestPurpose::ValidateOrderInfo, Some(ChatId(51)));
+    let addr2 = crate::telegram::envelope::OrderInfoData {
+        name: "addr2".into(),
+        ..addr1.clone()
+    };
+    session.payments.order_info = OrderInfoStage::Validating {
+        request: second,
+        order: addr2.clone(),
+    };
+    assert!(session.payments.order_info.validated().is_none());
+    // A late answer to the first one does not resurrect it.
+    apply_json(&mut session, &seq, &sink, &validated_json(first, "oid1"));
+    assert!(session.payments.order_info.validated().is_none());
+    apply_json(&mut session, &seq, &sink, &validated_json(second, "oid2"));
+    match &session.payments.order_info {
+        OrderInfoStage::Validated { order, info } => {
+            assert_eq!(order, &addr2);
+            assert_eq!(info.order_info_id, "oid2");
+        }
+        other => panic!("not validated: {other:?}"),
+    }
+}
+
+/// A rejected Continue leaves nothing validated to pay with.
+#[test]
+fn a_rejected_continue_leaves_the_order_unvalidated() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request(RequestPurpose::ValidateOrderInfo, Some(ChatId(51)));
+    session.payments.order_info = OrderInfoStage::Validating {
+        request: extra,
+        order: Default::default(),
+    };
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"SHIPPING_NOT_AVAILABLE"}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(session.payments.order_info, OrderInfoStage::Unvalidated);
+    assert!(session.payments.note.is_some());
+}
+
+fn giveaway_invoice(chat: i64) -> crate::payment_invoice::InputInvoice {
+    crate::payment_invoice::InputInvoice::Telegram(
+        crate::payment_invoice::TelegramPaymentPurpose::StarGiveaway {
+            parameters: serde_json::json!({"boosted_chat_id": chat}),
+            currency: "USD".into(),
+            amount: 100,
+            winner_count: 5,
+            star_count: 500,
+        },
+    )
+}
+
+/// A giveaway paid after its checkout was closed (3-D Secure, or Esc while
+/// `sendPaymentForm` was out) still finishes its form: it is Paid, not Idle.
+#[test]
+fn a_paid_giveaway_finishes_its_form_even_with_the_checkout_closed() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.payments.request = Some(PaymentRequest {
+        invoice: giveaway_invoice(-100),
+    });
+    let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(51)));
+    session.payment_sent(extra);
+    assert!(session.payments.giveaway_paying(-100));
+    assert!(!session.payments.giveaway_paying(-200));
+    session.close_checkout();
+    assert!(session.payments.giveaway_paying(-100), "still out");
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"paymentResult","@extra":"{}","success":true,"verification_url":""}}"#,
+            extra.0
+        ),
+    );
+    assert!(!session.payments.giveaway_paying(-100));
+    assert!(session.payments.giveaway.launch.is_done_for(-100));
+    assert!(!session.payments.giveaway.launch.is_done_for(-200));
+}
+
+/// The 3-D Secure step of a giveaway payment names the chat whose form
+/// closes with the checkout.
+#[test]
+fn a_giveaway_verification_step_names_its_chat() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.payments.request = Some(PaymentRequest {
+        invoice: giveaway_invoice(-100),
+    });
+    let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(51)));
+    session.payment_sent(extra);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"paymentResult","@extra":"{}","success":false,"verification_url":"https://pay.example.com/3ds"}}"#,
+            extra.0
+        ),
+    );
+    let step = session.payments.verification_url.clone().expect("step");
+    assert!(step.closes_checkout);
+    assert_eq!(step.giveaway_chat_id, Some(-100));
+}
+
+/// Esc on the checkout while `sendPaymentForm` is out, then a 3-D Secure
+/// answer: the giveaway is still Verifying, so Start cannot buy it twice.
+#[test]
+fn a_giveaway_verification_with_the_checkout_closed_keeps_start_refused() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.payments.request = Some(PaymentRequest {
+        invoice: giveaway_invoice(-100),
+    });
+    let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(51)));
+    session.payment_sent(extra);
+    session.close_checkout();
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"paymentResult","@extra":"{}","success":false,"verification_url":"https://pay.example.com/3ds"}}"#,
+            extra.0
+        ),
+    );
+    let step = session.payments.verification_url.clone().expect("step");
+    assert!(!step.closes_checkout);
+    assert!(session.payments.giveaway.launch.is_done_for(-100));
+    assert!(!session.payments.giveaway.launch.is_done_for(-200));
 }

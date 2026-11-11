@@ -20,7 +20,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::local_path::sandboxed_display_path;
 use quill::story_extras::{
-    CloseFriendsEdit, can_save_story, story_link, video_finished, video_progress,
+    CloseFriendsEdit, CloseFriendsStage, can_save_story, story_link, video_finished, video_progress,
 };
 use quill::story_viewer::StoryViewerKind;
 use quill::telegram::envelope::{ChatKind, StoryListView};
@@ -44,7 +44,7 @@ impl QuillApp {
         self.stories.viewer_ui().reply_open
             || self.stories.viewer_ui().report_open
             || self.stories.viewer_ui().share_open
-            || self.stories.viewer_ui().close_friends_edit.is_some()
+            || self.stories.viewer_ui().close_friends.is_open()
             || self.stories.viewer_ui().privacy_edit.is_some()
             || self.stories.viewer_ui().cover.is_some()
             // The live story's comment field, while it has the keyboard.
@@ -418,7 +418,7 @@ impl QuillApp {
         self.stories
             .with_viewer_ui(|open| open.share_open = !open.share_open);
         self.stories
-            .with_viewer_ui(|open| open.close_friends_edit = None);
+            .with_viewer_ui(|open| open.close_friends = CloseFriendsStage::Closed);
         if self.stories.viewer_ui().share_open {
             self.stories
                 .more_search
@@ -454,22 +454,19 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let loading = self.live.as_mut().and_then(|live| {
+        if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_contacts();
-            live.driver.get_close_friends().ok().flatten()
-        });
-        if let Some(request) = loading {
-            self.stories
-                .with_viewer_ui(|open| open.page_op = Some(request));
+            let _ = live.driver.get_close_friends();
         }
-        let current = self
+        let loaded = self
             .session()
-            .and_then(|s| s.stories.close_friends.clone())
-            .unwrap_or_default();
-        self.stories
-            .with_viewer_ui(|open| open.close_friends_edit = Some(CloseFriendsEdit::new(&current)));
-        self.stories
-            .with_viewer_ui(|open| open.close_friends_saving = false);
+            .and_then(|s| s.stories.close_friends.ids().cloned());
+        self.stories.with_viewer_ui(|open| {
+            open.close_friends = CloseFriendsStage::Loading;
+            if let Some(list) = &loaded {
+                open.close_friends.loaded(list);
+            }
+        });
         self.stories.with_viewer_ui(|open| open.share_open = false);
         self.stories
             .more_search
@@ -481,7 +478,7 @@ impl QuillApp {
         if let Some(edit) = self
             .stories
             .viewer_ui_mut()
-            .and_then(|open| open.close_friends_edit.as_mut())
+            .and_then(|open| open.close_friends.edit_mut())
         {
             edit.toggle(user_id);
         }
@@ -490,12 +487,12 @@ impl QuillApp {
 
     /// Send the edited list with `setCloseFriends`.
     pub(super) fn save_close_friends(&mut self, cx: &mut Context<Self>) {
-        let Some(edit) = self.stories.viewer_ui().close_friends_edit.as_ref() else {
+        let CloseFriendsStage::Editing(edit) = &self.stories.viewer_ui().close_friends else {
             return;
         };
         if !edit.changed() {
             self.stories
-                .with_viewer_ui(|open| open.close_friends_edit = None);
+                .with_viewer_ui(|open| open.close_friends = CloseFriendsStage::Closed);
             self.refresh_story_pause(cx);
             return;
         }
@@ -503,7 +500,11 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => match live.driver.set_close_friends(&ids) {
                 Ok(request) => self.stories.with_viewer_ui(|open| {
-                    open.close_friends_saving = true;
+                    if let CloseFriendsStage::Editing(edit) =
+                        std::mem::take(&mut open.close_friends)
+                    {
+                        open.close_friends = CloseFriendsStage::Saving(edit);
+                    }
                     open.page_op = Some(request);
                 }),
                 Err(_) => {
@@ -545,30 +546,44 @@ impl QuillApp {
     /// Per-tick upkeep of the editor: adopt the loaded list while the user
     /// has not touched it, close after a confirmed save.
     pub(super) fn tick_close_friends(&mut self, cx: &mut Context<Self>) {
-        let loaded = self.session().and_then(|s| s.stories.close_friends.clone());
+        let loaded = self
+            .session()
+            .and_then(|s| s.stories.close_friends.ids().cloned());
+        // The list's own load, matched to its request.
+        let load_failed = self
+            .session()
+            .is_some_and(|s| s.stories.close_friends.failed_without_list());
         let failed = self
             .viewer_story_page_op()
             .is_some_and(|op| matches!(op.state, quill::story_page::StoryPageOpState::Failed(_)));
         let Some(loaded) = loaded else {
+            // No list yet: a failed request ends the wait with a retry.
+            if load_failed && let Some(open) = self.stories.viewer_ui_mut() {
+                open.close_friends.load_failed();
+            }
             return;
         };
         let Some(open) = self.stories.viewer_ui_mut() else {
             return;
         };
-        let Some(edit) = open.close_friends_edit.as_mut() else {
-            return;
-        };
-        if open.close_friends_saving {
-            if CloseFriendsEdit::new(&loaded).ids() == edit.ids() {
-                open.close_friends_saving = false;
-                open.close_friends_edit = None;
-                open.notice = Some(tr(keys::Q_MEDIA_CLOSE_FRIENDS_UPDATED).into());
-                self.refresh_story_pause(cx);
-            } else if failed {
-                open.close_friends_saving = false;
+        match &mut open.close_friends {
+            CloseFriendsStage::Closed | CloseFriendsStage::Failed => {}
+            CloseFriendsStage::Loading => open.close_friends.loaded(&loaded),
+            CloseFriendsStage::Saving(edit) => {
+                if CloseFriendsEdit::new(&loaded).ids() == edit.ids() {
+                    open.close_friends = CloseFriendsStage::Closed;
+                    open.notice = Some(tr(keys::Q_MEDIA_CLOSE_FRIENDS_UPDATED).into());
+                    self.refresh_story_pause(cx);
+                } else if failed {
+                    let edit = edit.clone();
+                    open.close_friends = CloseFriendsStage::Editing(edit);
+                }
             }
-        } else if !edit.changed() && CloseFriendsEdit::new(&loaded) != *edit {
-            *edit = CloseFriendsEdit::new(&loaded);
+            CloseFriendsStage::Editing(edit) => {
+                if !edit.changed() && CloseFriendsEdit::new(&loaded) != *edit {
+                    *edit = CloseFriendsEdit::new(&loaded);
+                }
+            }
         }
     }
 
@@ -582,7 +597,7 @@ impl QuillApp {
         if self.stories.viewer_ui().share_open {
             column = column.child(self.story_share_panel(cx));
         }
-        if self.stories.viewer_ui().close_friends_edit.is_some() {
+        if self.stories.viewer_ui().close_friends.is_open() {
             column = column.child(self.close_friends_panel(cx));
         }
         if let Some(notice) = self.stories.viewer_ui().notice.clone() {
@@ -687,8 +702,47 @@ impl QuillApp {
 
     /// The close-friends editor: contact checkboxes, Save and Cancel.
     fn close_friends_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(edit) = self.stories.viewer_ui().close_friends_edit.as_ref() else {
-            return div().into_any_element();
+        let stage = &self.stories.viewer_ui().close_friends;
+        let Some(edit) = stage.edit() else {
+            let failed = matches!(stage, CloseFriendsStage::Failed);
+            let mut buttons = div().flex().gap_2();
+            if failed {
+                buttons = buttons.child(
+                    Button::new("story-close-friends-retry")
+                        .label(tr(keys::Q_PEOPLE_RETRY))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.open_close_friends_editor(window, cx);
+                        })),
+                );
+            }
+            return div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(chrome::secondary())
+                        .child(if failed {
+                            tr(keys::Q_MEDIA_COULD_NOT_LOAD_CLOSE_FRIENDS)
+                        } else {
+                            tr(keys::Q_MEDIA_LOADING)
+                        }),
+                )
+                .child(
+                    buttons.child(
+                        Button::new("story-close-friends-load-cancel")
+                            .label(tr(keys::CANCEL))
+                            .custom(chrome::ghost(cx))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.stories.with_viewer_ui(|open| {
+                                    open.close_friends = CloseFriendsStage::Closed
+                                });
+                                this.refresh_story_pause(cx);
+                            })),
+                    ),
+                )
+                .into_any_element();
         };
         let query = self.stories.more_search.read(cx).value().to_string();
         let rows = self.g1_contact_rows(&query, cx);
@@ -722,7 +776,7 @@ impl QuillApp {
                     })),
             );
         }
-        let saving = self.stories.viewer_ui().close_friends_saving;
+        let saving = matches!(stage, CloseFriendsStage::Saving(_));
         div()
             .flex()
             .flex_col()
@@ -764,8 +818,9 @@ impl QuillApp {
                             .label(tr(keys::CANCEL))
                             .custom(chrome::ghost(cx))
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.stories
-                                    .with_viewer_ui(|open| open.close_friends_edit = None);
+                                this.stories.with_viewer_ui(|open| {
+                                    open.close_friends = CloseFriendsStage::Closed
+                                });
                                 this.refresh_story_pause(cx);
                             })),
                     ),

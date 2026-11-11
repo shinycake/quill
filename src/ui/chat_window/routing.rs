@@ -269,3 +269,8 @@ mod tests;
 #[cfg(feature = "demo-capture")]
 #[path = "routing_carry_tests.rs"]
 mod carry_tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "inline_return_slot_tests.rs"]
+mod inline_return_slot_tests;

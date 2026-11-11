@@ -2,8 +2,8 @@
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::payment_invoice::InputInvoice;
-use crate::state::BankCardLookup;
 use crate::state::PaymentsPurpose;
+use crate::state::{BankCardLookup, OrderInfoStage};
 use crate::state::{PaymentRequest, RequestPurpose};
 use crate::telegram::envelope::OrderInfoData;
 use crate::telegram::requests::{
@@ -60,7 +60,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.payments.request = Some(PaymentRequest {
             invoice: invoice.clone(),
         });
-        self.session.payments.validate_request = Some(extra);
+        // Stored only once the send went out; the earlier order id and
+        // shipping choice are for other fields.
+        self.session.payments.shipping_id = None;
+        self.session.payments.order_info = OrderInfoStage::Validating {
+            request: extra,
+            order: order.clone(),
+        };
         Ok(sent)
     }
 
@@ -77,6 +83,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         credentials: serde_json::Value,
         tip_amount: i64,
     ) -> Result<RequestId, ConnectSendError> {
+        // A second Pay before the answer must not pay twice.
+        if self.session.payments.is_paying(invoice) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let extra = self.payment_extra(invoice, RequestPurpose::SendPaymentForm)?;
         let json = send_payment_form_request(
             extra,

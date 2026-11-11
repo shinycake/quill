@@ -757,7 +757,7 @@ impl QuillApp {
             || self.stories.viewer_ui().stats_open
             || self.stories.viewer_ui().privacy_edit.is_some()
             || self.stories.viewer_ui().cover.is_some()
-            || self.stories.viewer_ui().close_friends_edit.is_some()
+            || self.stories.viewer_ui().close_friends.is_open()
             || self.stories.viewer_ui().menu_open
             || self.stories.stealth_box.is_some()
             // Edit and Repost open the composer over the viewer: the story

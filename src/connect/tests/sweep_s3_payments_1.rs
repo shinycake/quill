@@ -258,7 +258,7 @@ fn an_older_program_page_does_not_land_on_the_list_a_sort_reset() {
 }
 
 #[test]
-fn a_commit_that_cannot_be_sent_keeps_the_stars_and_tells_once() {
+fn a_commit_that_cannot_be_sent_releases_the_stars_and_is_not_retried() {
     use crate::ids::{ChatId, MessageId};
     let mut t = Flaky::new();
     t.driver
@@ -270,26 +270,16 @@ fn a_commit_that_cannot_be_sent_keeps_the_stars_and_tells_once() {
             .paid_reaction_tick(crate::paid_reaction::ACCUMULATE_MS)
     );
     let paid = &t.driver.session.payments.paid;
-    assert_eq!(paid.pending_stars(-100, 7), 3, "TDLib still holds them");
-    assert!(paid.has_pending(), "the toast and its Undo are back");
+    assert_eq!(paid.total_pending(), 0, "the Stars are let go");
     assert_eq!(t.driver.session.payments.notices.len(), 1);
-    // The window restarted; the next try is one window later, and the
-    // user is not told again.
-    assert!(
-        !t.driver
-            .paid_reaction_tick(crate::paid_reaction::ACCUMULATE_MS + 1)
-    );
-    let later = 2 * crate::paid_reaction::ACCUMULATE_MS;
-    assert!(t.driver.paid_reaction_tick(later));
-    assert_eq!(t.driver.session.payments.notices.len(), 1);
+    // No later window sends it again, with the sender working or not.
     t.sender.refuse(&[]);
     assert!(
-        t.driver
-            .paid_reaction_tick(3 * crate::paid_reaction::ACCUMULATE_MS)
+        !t.driver
+            .paid_reaction_tick(10 * crate::paid_reaction::ACCUMULATE_MS)
     );
-    assert_eq!(t.sender.count("commitPendingPaidMessageReactions"), 1);
-    t.answer("commitPendingPaidMessageReactions", json!({"@type": "ok"}));
-    assert_eq!(t.driver.session.payments.paid.total_pending(), 0);
+    assert_eq!(t.sender.count("commitPendingPaidMessageReactions"), 0);
+    assert_eq!(t.driver.session.payments.notices.len(), 1);
 }
 
 #[test]

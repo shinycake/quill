@@ -246,7 +246,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn transfer_picked_gift(&mut self) -> Result<RequestId, ConnectSendError> {
         let Some(TransferPicker {
             id,
-            stage: TransferStage::ConfirmPeer { user_id, .. },
+            gift_name,
+            stage: TransferStage::ConfirmPeer { user_id, name },
             ..
         }) = self.session.payments.gifts_manage.transfer().cloned()
         else {
@@ -270,9 +271,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let to = MessageSender::User { user_id };
-        self.mutate_own_gifts(PaymentsPurpose::TransferGift, |extra, _| {
+        let extra = self.mutate_own_gifts(PaymentsPurpose::TransferGift, |extra, _| {
             rq::transfer_gift(extra, &id, to, star_count)
-        })
+        })?;
+        self.session.payments.gifts_manage.transferring = Some((
+            extra,
+            crate::gift_manage::GiftTransferred {
+                gift_name,
+                recipient: name,
+                user_id,
+            },
+        ));
+        Ok(extra)
     }
 
     /// Whether the export of gift `id` may be asked for now: an unlocked
@@ -530,6 +540,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         let recipient = recipient.ok_or(ConnectSendError::InvalidRequest)?;
         let with_premium = !recipient.is_self && !recipient.is_channel;
         let send = &mut self.session.payments.gifts_manage.send;
+        // A `sendGift` is out: its answer belongs to this dialog. Reopening
+        // for the same recipient shows that stage again; another recipient
+        // waits for the answer instead of dropping it.
+        if send.sending() {
+            if send.recipient.as_ref() != Some(&recipient) {
+                return Err(ConnectSendError::InvalidRequest);
+            }
+            // box-host: the UI's open names the window (`open_send_gift*`)
+            send.open = true;
+            return Ok(());
+        }
         *send = SendGiftState {
             open: true,
             recipient: Some(recipient),

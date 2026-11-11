@@ -403,6 +403,11 @@ pub struct ChatSponsoredMessages {
     /// When the response arrived (tdesktop `lastReceived`): refetches inside
     /// `SPONSORED_REFETCH_AFTER` are skipped.
     pub fetched_at: Option<std::time::Instant>,
+    /// The ads placed in the history so far, in placement order (tdesktop
+    /// `Entry::item`): each sits after the message it was placed under and
+    /// stays there as newer messages arrive. An ad not listed here is not in
+    /// the history yet. Cleared when the chat is left (`clearItems`).
+    pub placed: Vec<SponsoredPlacement>,
 }
 
 /// tdesktop `kRequestTimeLimit`: a chat's sponsored messages are not

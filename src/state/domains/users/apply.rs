@@ -59,8 +59,7 @@ impl Session {
                     self.users_state.contacts_error = false;
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCloseFriends) {
                     // B14: `getCloseFriends` answer.
-                    self.stories.close_friends = Some(user_ids);
-                    self.clear_story_page_op(pending);
+                    self.stories.close_friends = CloseFriendsList::Ready(user_ids);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetRecentInlineBots) {
                     self.bots.reply_keyboards.recent_inline_bots = Some(user_ids);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBotSimilarBots)
@@ -208,6 +207,7 @@ impl Session {
                     crate::peer_qr::theme::ThemeOwner::User(user_id.0),
                     share_theme,
                 );
+                let bot_info = self.received_bot_info(bot_info);
                 self.bots.bot_info.insert(user_id.0, bot_info);
                 self.cache_profile_photo_files(&extras);
                 let photo_file_id = photo.map(|file| {

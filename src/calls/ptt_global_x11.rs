@@ -153,6 +153,13 @@ pub fn start(key: &str, sink: Sink) -> Result<Handle, StartError> {
                 }
             }
         }
+        // The stream ended (or was cut): releases may have been lost, so a
+        // held key ends here.
+        for (_, filter) in &mut filters {
+            if let Some(edge) = filter.resync() {
+                sink(edge);
+            }
+        }
         let _ = control.record_free_context(context);
         let _ = control.flush();
     })

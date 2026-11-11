@@ -583,13 +583,10 @@ fn b14_close_friends_load_and_save_round_trip() {
         &sink,
         r#"{"@type":"users","@extra":"no-such","total_count":1,"user_ids":[9]}"#,
     );
-    assert!(session.stories.close_friends.is_none());
+    assert!(session.stories.close_friends.ids().is_none());
 
     let extra = session.request(RequestPurpose::GetCloseFriends, None);
-    session.begin_story_page_check(
-        crate::story_page::story_page_op_label(RequestPurpose::GetCloseFriends),
-        extra,
-    );
+    session.stories.close_friends.begin_load(extra);
     apply_json(
         &mut session,
         &seq,
@@ -599,7 +596,7 @@ fn b14_close_friends_load_and_save_round_trip() {
             extra.0
         ),
     );
-    assert_eq!(session.stories.close_friends, Some(vec![31, 33]));
+    assert_eq!(session.stories.close_friends.ids(), Some(&vec![31, 33]));
     assert!(session.stories.page_op.is_none());
 
     // `setCloseFriends` applies the staged ids on `ok`.
@@ -611,7 +608,7 @@ fn b14_close_friends_load_and_save_round_trip() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert_eq!(session.stories.close_friends, Some(vec![33]));
+    assert_eq!(session.stories.close_friends.ids(), Some(&vec![33]));
     assert!(session.stories.close_friends_pending.is_none());
 }
 
@@ -619,7 +616,7 @@ fn b14_close_friends_load_and_save_round_trip() {
 fn b14_close_friends_error_drops_staged_ids() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.stories.close_friends = Some(vec![31]);
+    session.stories.close_friends = CloseFriendsList::Ready(vec![31]);
     session.stories.close_friends_pending = Some(vec![31, 32]);
     let extra = session.request(RequestPurpose::SetCloseFriends, None);
     session.begin_story_page_op(
@@ -635,7 +632,7 @@ fn b14_close_friends_error_drops_staged_ids() {
             extra.0
         ),
     );
-    assert_eq!(session.stories.close_friends, Some(vec![31]));
+    assert_eq!(session.stories.close_friends.ids(), Some(&vec![31]));
     assert!(session.stories.close_friends_pending.is_none());
     assert!(matches!(
         session.stories.page_op.as_ref().map(|op| &op.state),
@@ -780,4 +777,35 @@ fn story_custom_emoji_stickers_are_bounded() {
         );
     }
     assert!(session.stories.custom_emoji_stickers.contains_key(&total));
+}
+
+/// A later story-page op overwrites the viewer's single op; the
+/// close-friends load failure is still its own, matched to its request.
+#[test]
+fn close_friends_load_failure_survives_a_later_story_page_op() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let load = session.request(RequestPurpose::GetCloseFriends, None);
+    session.stories.close_friends.begin_load(load);
+    // Another op takes the viewer's page op before the failure lands.
+    let other = session.request(RequestPurpose::SetChatActiveStoriesList, None);
+    session.begin_story_page_op("hiding", other);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"X"}}"#,
+            load.0
+        ),
+    );
+    assert!(session.stories.close_friends.failed_without_list());
+    // An error for another request leaves a new load alone.
+    let again = session.request(RequestPurpose::GetCloseFriends, None);
+    session.stories.close_friends.begin_load(again);
+    session.stories.close_friends.fail_load(load);
+    assert!(matches!(
+        session.stories.close_friends,
+        CloseFriendsList::Loading { .. }
+    ));
 }

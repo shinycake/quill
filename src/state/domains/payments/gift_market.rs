@@ -325,9 +325,10 @@ impl Session {
                     market.follow = AuctionFollow::Failed(gift_id);
                 }
             }
-            GiftMarketPurpose::CloseAuction
-            | GiftMarketPurpose::AcquiredGifts { .. }
-            | GiftMarketPurpose::UpgradePreview { .. } => {}
+            GiftMarketPurpose::CloseAuction | GiftMarketPurpose::AcquiredGifts { .. } => {}
+            GiftMarketPurpose::UpgradePreview { gift_id } => {
+                market.failed_previews.insert(gift_id);
+            }
         }
     }
 

@@ -1,7 +1,7 @@
 //! Connect driver: bots, callback queries, login URLs.
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
-use crate::state::{BotsPurpose, UsersPurpose};
+use crate::state::{BotsPurpose, CallbackButtonKey, CallbackPress, UsersPurpose};
 use crate::state::{
     InlineBotResolve, InlineQueryFetch, InlineQuerySlot, LoginUrlRequest, RequestPurpose,
 };
@@ -285,7 +285,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra =
             self.callback_query_extra(chat_id, message_id, RequestPurpose::GetCallbackQueryAnswer)?;
         let json = get_callback_query_answer(extra, chat_id, message_id, data);
-        self.send_json_request(extra, &json)
+        self.send_callback_press(
+            extra,
+            &json,
+            chat_id,
+            message_id,
+            CallbackButtonKey::Data(data.to_vec()),
+        )
     }
 
     /// B1: password-protected callback button —
@@ -305,7 +311,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         )?;
         let json =
             get_callback_query_answer_with_password(extra, chat_id, message_id, password, data);
-        self.send_json_request(extra, &json)
+        self.send_callback_press(
+            extra,
+            &json,
+            chat_id,
+            message_id,
+            CallbackButtonKey::Data(data.to_vec()),
+        )
     }
 
     /// B1: game button — `callbackQueryPayloadGame` with the `game.short_name`
@@ -322,7 +334,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::GetCallbackQueryAnswerGame,
         )?;
         let json = get_callback_query_answer_game(extra, chat_id, message_id, game_short_name);
-        self.send_json_request(extra, &json)
+        self.send_callback_press(extra, &json, chat_id, message_id, CallbackButtonKey::Game)
     }
 
     /// Slice bots-games: `getGameHighScores` (TDLib 1.8.67,
@@ -378,6 +390,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_json_request(extra, &json)
     }
 
+    /// The session holds one login-URL context, which the answer reads: a
+    /// second button waits until the first one's answer is in.
+    fn refuse_login_url_overlap(&self) -> Result<(), ConnectSendError> {
+        let requests = &self.session.requests;
+        if requests.has_purpose(RequestPurpose::GetLoginUrlInfo)
+            || requests.has_purpose(RequestPurpose::GetLoginUrl)
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        Ok(())
+    }
+
     /// B1: resolve a login-URL button (`getLoginUrlInfo`, schema 1.8.67,
     /// line 12985). `fallback_url` is the button's raw URL, kept in the
     /// session so a TDLib error degrades to a plain URL-button press.
@@ -388,6 +412,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         button_id: i64,
         fallback_url: &str,
     ) -> Result<RequestId, ConnectSendError> {
+        self.refuse_login_url_overlap()?;
         let extra =
             self.callback_query_extra(chat_id, message_id, RequestPurpose::GetLoginUrlInfo)?;
         self.session.bots.login_url_request = Some(LoginUrlRequest {
@@ -410,6 +435,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         request: &LoginUrlRequest,
         allow_write_access: bool,
     ) -> Result<RequestId, ConnectSendError> {
+        self.refuse_login_url_overlap()?;
         let extra = self.callback_query_extra(
             request.chat_id,
             request.message_id,
@@ -533,6 +559,26 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Shared gate for callback-query sends: real (non-pending) messages in
     /// a supported chat. Returns the reserved `@extra`.
+    /// Send a callback query and remember the button it came from, so the
+    /// button shows it is waiting until the request ends.
+    fn send_callback_press(
+        &mut self,
+        extra: RequestId,
+        json: &str,
+        chat_id: ChatId,
+        message_id: MessageId,
+        button: CallbackButtonKey,
+    ) -> Result<RequestId, ConnectSendError> {
+        let sent = self.send_json_request(extra, json)?;
+        self.session.note_callback_press(CallbackPress {
+            request: extra,
+            chat_id,
+            message_id,
+            button,
+        });
+        Ok(sent)
+    }
+
     pub(crate) fn callback_query_extra(
         &mut self,
         chat_id: ChatId,

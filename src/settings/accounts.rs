@@ -113,6 +113,21 @@ fn file_stamp(path: &Path) -> Option<(std::time::SystemTime, u64)> {
     Some((meta.modified().ok()?, meta.len()))
 }
 
+/// Registry files whose last read failed on an existing file. A save to one
+/// refuses, so the default shown for it never replaces the real list; the
+/// next successful load of it clears the entry.
+static UNREADABLE: std::sync::Mutex<std::collections::BTreeSet<PathBuf>> =
+    std::sync::Mutex::new(std::collections::BTreeSet::new());
+
+fn note_read(path: &Path, readable: bool) {
+    let mut unreadable = crate::locks::lock_or_recover(&UNREADABLE);
+    if readable {
+        unreadable.remove(path);
+    } else {
+        unreadable.insert(path.to_path_buf());
+    }
+}
+
 /// Load the registry; missing or corrupt ⇒ `[primary]` (never a hard error).
 fn load_registry(app_root: &Path) -> AccountRegistry {
     let path = registry_path(app_root);
@@ -144,8 +159,12 @@ fn load_registry(app_root: &Path) -> AccountRegistry {
         // appears. (A file that appeared in between was read, and isn't
         // kept under the missing file's stamp.)
         None if stamp.is_none() => (AccountRegistry::default(), true),
-        None => return AccountRegistry::default(),
+        None => {
+            note_read(&path, false);
+            return AccountRegistry::default();
+        }
     };
+    note_read(&path, true);
     if keep {
         *loaded = Some(Loaded {
             path,
@@ -193,6 +212,12 @@ pub fn registry_writes() -> u64 {
 }
 
 fn save_registry(app_root: &Path, registry: &AccountRegistry) -> std::io::Result<()> {
+    let path = registry_path(app_root);
+    if crate::locks::lock_or_recover(&UNREADABLE).contains(&path) {
+        return Err(std::io::Error::other(
+            "accounts.json could not be read; not overwriting it",
+        ));
+    }
     let written = write_json_atomic(&registry_path(app_root), registry);
     // After the write: a reader that saw the old count can only have read
     // the file before this write or after it, and the next one reads again.
@@ -403,6 +428,20 @@ mod tests {
             .map(|dirs| dirs.data_dir().to_path_buf());
         assert!(release.is_some());
         assert_ne!(real_app_root(), release);
+    }
+
+    /// An `accounts.json` that exists but cannot be read is never replaced
+    /// by the default registry on the next save.
+    #[test]
+    fn an_unreadable_registry_is_not_overwritten() {
+        let dir = std::env::temp_dir().join(format!("quill-unreadable-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        // A directory in the file's place: it exists and fs::read fails.
+        fs::create_dir_all(registry_path(&dir)).unwrap();
+        assert!(add_account(&dir, "Second").is_err());
+        assert!(set_notify_from_all(&dir, true).is_err());
+        assert!(registry_path(&dir).is_dir());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -965,6 +965,7 @@ mod attach_picker;
 mod bar_clicks;
 mod cancel_edit_confirm;
 mod command_menu;
+pub(super) use command_menu::CommandMenu;
 mod copy_inline_text;
 mod field_placeholder;
 mod send_bot_command;

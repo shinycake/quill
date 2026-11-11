@@ -235,6 +235,8 @@ pub struct GiftMarketState {
     pub active: Vec<AuctionState>,
     pub acquired: HashMap<i64, Vec<AcquiredGift>>,
     pub previews: HashMap<i64, UpgradePreview>,
+    /// Gifts whose preview request failed: not asked again from a render.
+    pub failed_previews: std::collections::BTreeSet<i64>,
     /// The auction `openGiftAuction` follows.
     pub follow: AuctionFollow,
     /// A `getGiftAuctionState` the UI waits for (a link or a tile) and

@@ -2,7 +2,47 @@
 //! Added to by features in this domain only; `Session::new` builds it
 //! with `new`.
 use crate::state::*;
-use crate::telegram::envelope::BankCardInfoData;
+use crate::telegram::envelope::{BankCardInfoData, OrderInfoData};
+
+/// The checkout's order info, from typed to validated. One value: Continue
+/// moves it to `Validating` (dropping the earlier order id and shipping
+/// choice), and only the answer to that same request promotes the snapshot
+/// that was sent to `Validated`, so Pay never uses an order id for fields
+/// other than the ones it was issued for. An error, a new form and a closed
+/// checkout all leave it `Unvalidated`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum OrderInfoStage {
+    #[default]
+    Unvalidated,
+    Validating {
+        request: RequestId,
+        order: OrderInfoData,
+    },
+    Validated {
+        order: OrderInfoData,
+        info: ValidatedOrderInfoData,
+    },
+}
+
+impl OrderInfoStage {
+    /// The validated answer, only while it answers `order`, the fields now
+    /// typed: an edit after Continue is validated again. Render and submit
+    /// both ask this.
+    pub fn validated_for(&self, order: &OrderInfoData) -> Option<&ValidatedOrderInfoData> {
+        match self {
+            Self::Validated { order: asked, info } if asked == order => Some(info),
+            _ => None,
+        }
+    }
+
+    /// The validated answer, once there is one for the current fields.
+    pub fn validated(&self) -> Option<&ValidatedOrderInfoData> {
+        match self {
+            Self::Validated { info, .. } => Some(info),
+            _ => None,
+        }
+    }
+}
 
 /// How a [`PaymentNotice`] reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +104,9 @@ pub struct PaymentVerification {
     /// The checkout on screen showed the paid invoice when the answer
     /// came: opening the page closes that checkout, and only that one.
     pub closes_checkout: bool,
+    /// The chat of the giveaway this payment buys, when it buys one: its
+    /// form closes with the checkout.
+    pub giveaway_chat_id: Option<i64>,
 }
 
 pub struct PaymentsState {
@@ -74,9 +117,8 @@ pub struct PaymentsState {
     pub form: Option<PaymentFormData>,
     /// Slice P1: `getPaymentForm` is in flight (dialog shows a spinner).
     pub form_loading: bool,
-    /// Slice P1: the validated order info + shipping options from
-    /// `validateOrderInfo`.
-    pub validated: Option<ValidatedOrderInfoData>,
+    /// Where the checkout's order info stands (`validateOrderInfo`).
+    pub order_info: OrderInfoStage,
     /// Slice P1: the chosen shipping option id (default: the first).
     pub shipping_id: Option<String>,
     /// The receipt dialog: closed, waiting for the `getPaymentReceipt` it
@@ -91,10 +133,6 @@ pub struct PaymentsState {
     /// to an earlier one (another invoice, opened before) is not this
     /// checkout's form.
     pub form_request: Option<RequestId>,
-    /// The `validateOrderInfo` the checkout waits for. An answer to one
-    /// sent from a checkout since closed (another invoice) is not this
-    /// checkout's shipping options or order id.
-    pub validate_request: Option<RequestId>,
     /// Slice P1: the `sendPaymentForm`s in flight, each with the invoice
     /// and form it pays (tdesktop keeps one checkout process per invoice).
     /// An answer goes to its own payment: the checkout on screen takes the
@@ -217,6 +255,14 @@ impl PaymentsState {
         self.paying.iter().any(|paying| &paying.invoice == invoice)
     }
 
+    /// A new giveaway for `chat_id` has a `sendPaymentForm` in flight, in
+    /// whichever checkout (or none) it was sent from.
+    pub fn giveaway_paying(&self, chat_id: i64) -> bool {
+        self.paying
+            .iter()
+            .any(|paying| paying.invoice.giveaway_chat_id() == Some(chat_id))
+    }
+
     /// The checkout on screen shows `invoice`.
     pub fn shows(&self, invoice: &crate::payment_invoice::InputInvoice) -> bool {
         self.request
@@ -257,12 +303,11 @@ impl PaymentsState {
             request: None,
             form: None,
             form_loading: false,
-            validated: None,
+            order_info: OrderInfoStage::Unvalidated,
             shipping_id: None,
             receipt: ReceiptStage::Closed,
             note: None,
             form_request: None,
-            validate_request: None,
             paying: Vec::new(),
             form_paid: false,
             unlocked_notice: None,
