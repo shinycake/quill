@@ -113,10 +113,12 @@ impl QuillApp {
         let max = session.payments.paid_messages.max();
         if let Some(live) = self.live.as_mut() {
             // A refusal of an earlier Save is not this box's.
-            let paid = &mut live.driver.session.payments.paid_messages;
-            if !paid.save.is_saving() {
-                paid.save = quill::paid_messages::PaidSave::Idle;
-            }
+            live.driver
+                .session
+                .payments
+                .paid_messages
+                .save
+                .forget_failure(quill::paid_messages::PaidTarget::Channel(chat_id.0));
             // The price of an enabled group may not have arrived yet.
             let _ = live.driver.fetch_direct_messages_price(chat_id);
         }
@@ -204,7 +206,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use quill::paid_messages::{PaidSave, PaidTarget};
+        use quill::paid_messages::{PaidTarget, TargetSave};
         let Some(boxed) = self
             .paid_messages
             .direct
@@ -214,18 +216,14 @@ impl QuillApp {
             return;
         };
         let target = PaidTarget::Channel(boxed.chat_id);
+        // Only this channel's own save counts: another target's (a Remove
+        // Fee) says nothing about this request.
         let save = self
             .session()
-            .map(|session| session.payments.paid_messages.save.clone())
-            .unwrap_or_default();
+            .and_then(|session| session.payments.paid_messages.save.of(target).cloned());
         match save {
-            // Another target's save (a Remove Fee) holds the slot: it says
-            // nothing about this channel's request, which is not known to
-            // have ended. The box stays as it is, and closable.
-            PaidSave::Saving { target: other, .. } | PaidSave::Failed { target: other, .. }
-                if other != target => {}
-            PaidSave::Saving { .. } => {}
-            PaidSave::Failed { .. } => {
+            Some(TargetSave::Saving(_)) => {}
+            Some(TargetSave::Failed(_)) => {
                 if let Some(boxed) = self.paid_messages.direct.as_mut() {
                     boxed.stage = DirectStage::Editing;
                 }
@@ -233,7 +231,7 @@ impl QuillApp {
             }
             // Idle: the change went through (or the answer was lost with
             // its account).
-            PaidSave::Idle => {
+            None => {
                 self.close_direct_messages(cx);
                 self.close_kit_dialog_if_done(DialogKind::DirectMessages, window, cx);
             }
@@ -266,7 +264,10 @@ impl QuillApp {
                 boxed.price.steps.last().copied().unwrap_or(0),
             );
             let price = boxed.price.price;
-            let saving = boxed.stage == DirectStage::Saving || paid.save.is_saving();
+            let saving = boxed.stage == DirectStage::Saving
+                || paid
+                    .save
+                    .is_saving_for(quill::paid_messages::PaidTarget::Channel(chat_id.0));
             let error = paid
                 .save
                 .error_for(quill::paid_messages::PaidTarget::Channel(chat_id.0))

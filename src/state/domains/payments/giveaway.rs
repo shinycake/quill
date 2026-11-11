@@ -1,5 +1,6 @@
 //! Giveaways: the "About this giveaway" lookup, the payment options for a
 //! new one and the progress of starting a prepaid one.
+use crate::state::fetch::Fetch;
 use crate::state::*;
 use crate::telegram::envelope::{
     GiveawayInfoData, GiveawaySummary, PremiumGiveawayOption, StarGiveawayOption,
@@ -38,17 +39,36 @@ impl GiveawayInfoLookup {
 /// What a new giveaway can be bought with.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GiveawayOptions {
-    pub premium: Vec<PremiumGiveawayOption>,
-    pub stars: Vec<StarGiveawayOption>,
-    pub premium_loading: bool,
-    pub stars_loading: bool,
-    pub premium_error: Option<String>,
-    pub stars_error: Option<String>,
+    /// The boosted chat the Premium prices were asked for: they depend on
+    /// it, so another chat's prices are never shown for this one.
+    pub for_chat: i64,
+    pub premium: Fetch<Vec<PremiumGiveawayOption>>,
+    pub stars: Fetch<Vec<StarGiveawayOption>>,
 }
 
 impl GiveawayOptions {
     pub fn loading(&self) -> bool {
-        self.premium_loading || self.stars_loading
+        self.premium.is_loading() || self.stars.is_loading()
+    }
+
+    /// The Premium prices held, none while another chat's are gone.
+    pub fn premium_options(&self) -> &[PremiumGiveawayOption] {
+        self.premium.data().map_or(&[], Vec::as_slice)
+    }
+
+    pub fn stars_options(&self) -> &[StarGiveawayOption] {
+        self.stars.data().map_or(&[], Vec::as_slice)
+    }
+
+    /// Both lists are asked for `boosted_chat_id`. The Premium prices of
+    /// another chat are dropped at once, not kept under the spinner.
+    pub fn begin(&mut self, boosted_chat_id: i64) {
+        if self.for_chat != boosted_chat_id {
+            self.for_chat = boosted_chat_id;
+            self.premium = Fetch::Idle;
+        }
+        self.premium.begin();
+        self.stars.begin();
     }
 }
 
@@ -169,11 +189,12 @@ impl Session {
         options: Vec<PremiumGiveawayOption>,
         pending: Option<&PendingRequest>,
     ) {
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPremiumGiveawayOptions) {
-            let state = &mut self.payments.giveaway.options;
-            state.premium_loading = false;
-            state.premium_error = None;
-            state.premium = options;
+        // Only the answer for the chat the form shows now.
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPremiumGiveawayOptions)
+            && pending.and_then(|p| p.chat_id).map(|c| c.0)
+                == Some(self.payments.giveaway.options.for_chat)
+        {
+            self.payments.giveaway.options.premium.succeed(options);
         }
     }
 
@@ -184,10 +205,7 @@ impl Session {
         pending: Option<&PendingRequest>,
     ) {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarGiveawayOptions) {
-            let state = &mut self.payments.giveaway.options;
-            state.stars_loading = false;
-            state.stars_error = None;
-            state.stars = options;
+            self.payments.giveaway.options.stars.succeed(options);
         }
     }
 
@@ -225,12 +243,12 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetPremiumGiveawayOptions) => {
-                state.options.premium_loading = false;
-                state.options.premium_error = Some(reason);
+                if pending.and_then(|p| p.chat_id).map(|c| c.0) == Some(state.options.for_chat) {
+                    state.options.premium.fail_dropping_data(reason);
+                }
             }
             Some(RequestPurpose::GetStarGiveawayOptions) => {
-                state.options.stars_loading = false;
-                state.options.stars_error = Some(reason);
+                state.options.stars.fail_dropping_data(reason);
             }
             Some(RequestPurpose::LaunchPrepaidGiveaway) => {
                 if let GiveawayLaunch::Launching { chat_id, request } = state.launch

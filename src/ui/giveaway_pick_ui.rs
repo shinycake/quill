@@ -51,7 +51,7 @@ impl QuillApp {
             .map(|c| c.title.clone())
             .unwrap_or_else(|| tr(keys::Q_MONEY_THIS_CHAT).into());
         let now = now_unix() as i32;
-        let boosts = draft.boost_count(&options.stars);
+        let boosts = draft.boost_count(options.stars_options());
 
         // Channels.
         body = body
@@ -269,7 +269,7 @@ impl QuillApp {
     ) -> Div {
         if draft.prepaid.is_some()
             || draft.kind != GiveawayKind::Premium
-            || options.premium.is_empty()
+            || options.premium_options().is_empty()
         {
             return body;
         }
@@ -324,8 +324,8 @@ impl QuillApp {
     ) -> Div {
         let users = draft.award_user_ids.len();
         let mut months = div().flex().flex_col().gap_1();
-        for month_count in gift_code_months(&options.premium) {
-            let price = gift_code_price(&options.premium, month_count, users)
+        for month_count in gift_code_months(options.premium_options()) {
+            let price = gift_code_price(options.premium_options(), month_count, users)
                 .map(|(currency, amount)| format_payment_price(&currency, amount))
                 .unwrap_or_default();
             months = months.child(
@@ -355,7 +355,8 @@ impl QuillApp {
         options: &GiveawayOptions,
     ) -> Option<String> {
         let users = draft.award_user_ids.len();
-        let (currency, amount) = gift_code_price(&options.premium, draft.premium_months, users)?;
+        let (currency, amount) =
+            gift_code_price(options.premium_options(), draft.premium_months, users)?;
         Some(format!(
             "{} for {users} Premium {}",
             format_payment_price(&currency, amount),

@@ -186,14 +186,15 @@ fn revoking_a_link_frees_the_limit() {
         .groups
         .group_type
         .revoke
-        .clone()
+        .revoking()
+        .cloned()
         .unwrap()
         .requests;
     for id in requests {
         rig.answer(id, "ok");
     }
     let state = &rig.driver.session.groups.group_type;
-    assert_eq!(state.revoke, None);
+    assert_eq!(state.revoke, crate::state::PublicLinkStage::Freed);
     assert_eq!(state.public_limit_reached, Some(false));
     assert_eq!(rig.driver.session.payments.hub.limit_box, None);
 }
@@ -271,7 +272,8 @@ fn a_failed_revoke_ends_so_the_box_can_revoke_again() {
         .groups
         .group_type
         .revoke
-        .clone()
+        .revoking()
+        .cloned()
         .unwrap()
         .requests;
     rig.answer(requests[0], "ok");
@@ -280,7 +282,11 @@ fn a_failed_revoke_ends_so_the_box_can_revoke_again() {
         requests[1].0
     ));
     let state = &rig.driver.session.groups.group_type;
-    assert_eq!(state.revoke, None, "the row stops spinning");
+    assert_eq!(
+        state.revoke,
+        crate::state::PublicLinkStage::Idle,
+        "the row stops spinning"
+    );
     assert_eq!(state.public_limit_reached, Some(true));
     assert!(
         !rig.driver.session.chats_state.chat_action_error.is_empty(),
@@ -301,13 +307,47 @@ fn a_half_sent_revoke_is_recorded_and_settles() {
     rig.recorder.refuse(Some("disableAllSupergroupUsernames"));
     assert!(rig.driver.revoke_public_link(ChatId(13)).is_err());
     rig.recorder.refuse(None);
-    let revoke = rig.driver.session.groups.group_type.revoke.clone().unwrap();
+    let revoke = rig
+        .driver
+        .session
+        .groups
+        .group_type
+        .revoke
+        .revoking()
+        .cloned()
+        .unwrap();
     assert_eq!(revoke.requests.len(), 1);
     rig.answer(revoke.requests[0], "ok");
     let state = &rig.driver.session.groups.group_type;
-    assert_eq!(state.revoke, None);
+    assert_eq!(state.revoke, crate::state::PublicLinkStage::Idle);
     assert!(!rig.driver.session.chats_state.chat_action_error.is_empty());
     assert_eq!(state.public_chats, crate::state::PublicChatsFetch::None);
+}
+
+/// Sweep s4-payments-2, 12-017: a revoke that settles, however late, leaves
+/// one "freed" signal for the Type box to check its link again; it is taken
+/// once.
+#[test]
+fn a_settled_revoke_signals_the_type_box_once() {
+    let mut rig = Rig::new();
+    rig.driver.session.groups.group_type.public_limit_reached = Some(true);
+    rig.driver.revoke_public_link(ChatId(13)).unwrap().unwrap();
+    assert!(!rig.driver.session.take_public_link_freed(), "still out");
+    let requests = rig
+        .driver
+        .session
+        .groups
+        .group_type
+        .revoke
+        .revoking()
+        .cloned()
+        .unwrap()
+        .requests;
+    for id in requests {
+        rig.answer(id, "ok");
+    }
+    assert!(rig.driver.session.take_public_link_freed());
+    assert!(!rig.driver.session.take_public_link_freed(), "taken once");
 }
 
 /// Round 2, 120: a check that could not be sent is not "Checking...".

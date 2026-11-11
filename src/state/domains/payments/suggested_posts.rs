@@ -72,7 +72,7 @@ impl Session {
             bar.send = BarSend::Idle;
         }
         if err.earn_hint == Some(crate::earn::EarnErrorHint::BalanceTooLow) {
-            posts.balance_low = Some(purpose);
+            posts.balance_low.push(purpose);
         } else {
             posts.notes.push(error_note(purpose, &error_reason(err)));
         }
@@ -122,9 +122,9 @@ impl Session {
         });
     }
 
-    /// Takes the request refused for a low balance, if any.
-    pub fn take_suggested_post_balance_low(&mut self) -> Option<SuggestedPostPurpose> {
-        self.payments.suggested_posts.balance_low.take()
+    /// Takes the requests refused for a low balance.
+    pub fn take_suggested_post_balance_low(&mut self) -> Vec<SuggestedPostPurpose> {
+        std::mem::take(&mut self.payments.suggested_posts.balance_low)
     }
 
     /// Takes the one-shot error notes for the UI's toasts.

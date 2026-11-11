@@ -260,17 +260,20 @@ fn direct_messages_group_is_clamped_to_the_server_limit() {
 /// A Direct Messages save that another save replaced: its `ok` or error
 /// leaves the newer save waiting; only the newer one's answer settles it.
 #[test]
-fn only_the_save_that_holds_the_slot_is_settled_by_its_answer() {
-    use crate::paid_messages::{PaidSave, PaidTarget};
+fn each_target_has_its_own_save_that_only_its_answer_settles() {
+    use crate::paid_messages::PaidTarget;
     for older_fails in [false, true] {
         let mut f = fixture();
         f.1.set_direct_messages_group(ChatId(-1001), true, 10)
             .unwrap();
-        // A Remove Fee for a user takes the slot while the channel's save
-        // is still out.
+        // A Remove Fee for a user goes out while the channel's save is
+        // still out: neither disables or settles the other.
         f.1.allow_unpaid_messages(700, false).unwrap();
         let older = requests(&f, "setChatDirectMessagesGroup").remove(0);
         let newer = requests(&f, "allowUnpaidMessagesFromUser").remove(0);
+        let save = &f.1.session.payments.paid_messages.save;
+        assert!(save.is_saving_for(PaidTarget::Channel(-1001)));
+        assert!(save.is_saving_for(PaidTarget::User(700)));
         let answer = if older_fails {
             r#"{"@type":"error","code":400,"message":"CHAT_ADMIN_REQUIRED","@extra":"EXTRA"}"#
         } else {
@@ -279,21 +282,19 @@ fn only_the_save_that_holds_the_slot_is_settled_by_its_answer() {
         ingest(&mut f, &answer.replace("EXTRA", &extra_of(&older)));
         let save = &f.1.session.payments.paid_messages.save;
         assert!(
-            matches!(
-                save,
-                PaidSave::Saving {
-                    target: PaidTarget::User(700),
-                    ..
-                }
-            ),
-            "the newer save still waits: {save:?}"
+            save.is_saving_for(PaidTarget::User(700)),
+            "the other save still waits: {save:?}"
         );
-        assert!(save.error_for(PaidTarget::Channel(-1001)).is_none());
+        assert_eq!(
+            save.error_for(PaidTarget::Channel(-1001)).is_some(),
+            older_fails
+        );
+        assert!(!save.is_saving_for(PaidTarget::Channel(-1001)));
         ingest(
             &mut f,
             &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra_of(&newer)),
         );
-        assert_eq!(f.1.session.payments.paid_messages.save, PaidSave::Idle);
+        assert!(!f.1.session.payments.paid_messages.save.is_saving());
         cleanup(f);
     }
 }

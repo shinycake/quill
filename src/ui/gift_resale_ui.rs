@@ -184,7 +184,9 @@ impl QuillApp {
             }
         };
         if started {
-            self.payments.gift_hide_name = false;
+            // The buy step starts with clean choices; the send box's
+            // message stays for Back.
+            self.reset_gift_choices(false);
             self.gift_market.push(MarketBox::Buy);
             self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         }

@@ -246,6 +246,20 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The revoke freed its link: check the typed link again, once. Called
+    /// from the poll drains when the reducer settles the revoke, however
+    /// slowly TDLib answered. True when it did something.
+    pub(in crate::ui) fn drain_public_link_freed(&mut self, cx: &mut Context<Self>) -> bool {
+        let freed = self
+            .live
+            .as_mut()
+            .is_some_and(|live| live.driver.session.take_public_link_freed());
+        if freed {
+            self.recheck_group_type_link(cx);
+        }
+        freed
+    }
+
     /// After a link was freed: check the typed link again.
     pub(in crate::ui) fn recheck_group_type_link(&mut self, cx: &mut Context<Self>) {
         let Some(facts) = self.group_type_facts() else {

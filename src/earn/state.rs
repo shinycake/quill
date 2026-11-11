@@ -432,6 +432,26 @@ impl JoinPage {
     }
 }
 
+/// A confirm box's request: none, or the one it waits for. An answer for
+/// another request (a closed box's, or an earlier box's) is not this box's.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BoxSend {
+    #[default]
+    Idle,
+    Sending(crate::ids::RequestId),
+}
+
+impl BoxSend {
+    pub fn is_sending(self) -> bool {
+        matches!(self, Self::Sending(_))
+    }
+
+    /// `request` is the one this box waits for.
+    pub fn waits_for(self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(self, Self::Sending(waiting) if Some(waiting) == request)
+    }
+}
+
 /// tdesktop `JoinStarRefBox`: join one bot's program.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JoinBox {
@@ -493,7 +513,7 @@ pub struct LinkBox {
 pub struct RevokeBox {
     pub program: ConnectedProgram,
     pub recipient: EarnPeer,
-    pub sending: bool,
+    pub send: BoxSend,
 }
 
 /// Who may receive commissions, as the two list requests settle it.

@@ -10,7 +10,6 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{ContextMenuExt, DropdownMenu, PopupMenuItem};
 use gpui_kit::component::spinner::Spinner;
 use quill::earn::*;
-use quill::ids::OfAccount;
 use quill::lang::{keys, tr, tr_with};
 
 /// How many screens ahead of the end the next page loads (tdesktop
@@ -220,7 +219,7 @@ impl QuillApp {
             earn.revoke = Some(RevokeBox {
                 program,
                 recipient,
-                sending: false,
+                send: BoxSend::Idle,
             });
         }
         cx.notify();
@@ -437,20 +436,13 @@ impl QuillApp {
             self.session().and_then(|s| s.users_state.open_info_panel),
             Some(InfoPanelTarget::Earn(EarnPanel::Join { .. }))
         );
-        let Some(account) = self.current_account() else {
-            return;
-        };
         let Some(live) = self.live.as_mut() else {
             return;
         };
+        // The file layer asks once per file and again only after a refused
+        // send or a finished attempt it allows to retry.
         for bot in bots {
-            if live.driver.session.user_photo_path(bot).is_none()
-                && self
-                    .screen
-                    .earn
-                    .photos_asked
-                    .insert(OfAccount::new(account.clone(), bot))
-            {
+            if live.driver.session.user_photo_path(bot).is_none() {
                 let _ = live.driver.download_user_photo(bot);
             }
         }

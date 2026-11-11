@@ -218,7 +218,11 @@ impl Session {
                 }
             }
             (EarnPayload::Connected(program), Some(EarnPurpose::Disconnect)) => {
-                let revoked = earn.revoke.take();
+                let ours = earn
+                    .revoke
+                    .as_ref()
+                    .is_some_and(|r| r.send.waits_for(pending.map(|p| p.id)));
+                let revoked = if ours { earn.revoke.take() } else { None };
                 if let Some(join) = earn.join.as_mut() {
                     join.mine
                         .programs
@@ -562,19 +566,20 @@ impl Session {
                 }
             }
             EarnPurpose::Connect { .. } => {
+                // A closed box's failure toasts over nothing.
                 if let Some(join) = earn.join_box.as_mut()
                     && join.stage.waits_for(request)
                 {
                     join.stage = JoinStage::Open;
+                    earn.note(format!("Failed: {reason}"));
                 }
-                earn.note(format!("Failed: {reason}"));
             }
             EarnPurpose::Disconnect => {
-                if let Some(revoke) = earn.revoke.as_mut() {
-                    revoke.sending = false;
+                if let Some(revoke) = earn.revoke.as_mut().filter(|r| r.send.waits_for(request)) {
+                    revoke.send = BoxSend::Idle;
+                    // tdesktop `Revoke`: "Failed: " and the error.
+                    earn.note(format!("Failed: {reason}"));
                 }
-                // tdesktop `Revoke`: "Failed: " and the error.
-                earn.note(format!("Failed: {reason}"));
             }
             EarnPurpose::RecipientChats | EarnPurpose::RecipientBots => {
                 // tdesktop treats a failed list as empty.

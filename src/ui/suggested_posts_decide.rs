@@ -9,6 +9,7 @@ use super::shell::{DialogKind, QuillShell};
 use super::suggested_posts_state::{AcceptBox, BalanceFor, DeclineBox, SuggestTarget, TimeTarget};
 use super::suggested_posts_ui::{channel_name, sender_short_name};
 use crate::ui::status_note::StatusNote;
+use gpui_base::Disableable;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -86,6 +87,11 @@ impl QuillApp {
         let Some(suggestion) = self.suggestion(chat_id, message_id) else {
             return;
         };
+        // A Publish of this post is still out: its answer settles it, and
+        // a second box would only wait on that answer.
+        if self.publish_busy(chat_id, message_id) {
+            return;
+        }
         let limits = self
             .session()
             .map(|session| session.payments.suggested_posts.limits)
@@ -115,21 +121,54 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The approve or decline of this post was sent and its answer has not
+    /// come.
+    fn publish_busy(&self, chat_id: ChatId, message_id: MessageId) -> bool {
+        self.session().is_some_and(|session| {
+            session
+                .payments
+                .suggested_posts
+                .busy
+                .contains(&(chat_id.0, message_id.0))
+        })
+    }
+
+    /// The Accept Terms box of a post that is no longer pending (decided
+    /// or expired, here or by the other side) closes with nothing sent.
+    pub(super) fn close_decided_accept(&mut self, cx: &mut Context<Self>) {
+        let Some(accept) = self.suggested_posts.accept.as_ref() else {
+            return;
+        };
+        let (chat_id, message_id) = (accept.chat_id, accept.message_id);
+        let decided = self
+            .suggestion(chat_id, message_id)
+            .is_some_and(|s| s.info.state != SuggestedPostState::Pending);
+        if decided {
+            self.close_suggest_accept(cx);
+        }
+    }
+
     /// "Publish": a member is checked against the balance first.
     pub(super) fn confirm_suggest_accept(&mut self, cx: &mut Context<Self>) {
         let Some(accept) = self.suggested_posts.accept.clone() else {
             return;
         };
-        // A second Publish while the first is on its way does nothing.
-        let busy = self.session().is_some_and(|session| {
-            session
-                .payments
-                .suggested_posts
-                .busy
-                .contains(&(accept.chat_id.0, accept.message_id.0))
-        });
-        if busy {
+        // A second Publish while the first is on its way does nothing and
+        // the box stays, its button waiting, until the answer settles it.
+        if self.publish_busy(accept.chat_id, accept.message_id) {
+            cx.notify();
+            return;
+        }
+        // The other side declined or the offer expired meanwhile: nothing
+        // is sent for a suggestion that is no longer pending.
+        let pending = self
+            .suggestion(accept.chat_id, accept.message_id)
+            .is_none_or(|s| s.info.state == SuggestedPostState::Pending);
+        if !pending {
             self.suggested_posts.accept = None;
+            self.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULDNT_PUBLISH_THE_POST,
+            )));
             cx.notify();
             return;
         }
@@ -199,8 +238,10 @@ impl QuillApp {
             window,
             |this, _, event: &InputEvent, window, cx| {
                 if matches!(event, InputEvent::PressEnter { .. }) {
-                    this.confirm_suggest_decline(cx);
-                    this.close_kit_dialog_if_done(DialogKind::SuggestDecline, window, cx);
+                    this.in_window_of(window, cx, |this, window, cx| {
+                        this.confirm_suggest_decline(cx);
+                        this.close_kit_dialog_if_done(DialogKind::SuggestDecline, window, cx);
+                    });
                 }
             },
         )
@@ -416,6 +457,7 @@ impl QuillApp {
             let Some(accept) = this.suggested_posts.accept.as_ref() else {
                 return dialog.on_close(on_close);
             };
+            let publishing = this.publish_busy(accept.chat_id, accept.message_id);
             let body = div()
                 .flex()
                 .flex_col()
@@ -448,6 +490,8 @@ impl QuillApp {
                             Button::new("suggest-accept-publish")
                                 .label(tr(keys::Q_MONEY_PUBLISH))
                                 .primary()
+                                .loading(publishing)
+                                .disabled(publishing)
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.confirm_suggest_accept(cx);
                                     this.close_kit_dialog_if_done(

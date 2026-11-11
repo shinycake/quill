@@ -99,6 +99,7 @@ fn hidden_last_seen_offers_to_show_yours(cx: &mut TestAppContext) {
         Some(ShowOrPremiumBox {
             kind: ShowOrPremium::LastSeen,
             user_id: COVER_HIDDEN,
+            stage: crate::ui::profile_cover::ShowStage::Choosing,
         })
     );
     assert_eq!(dialog(&shell, &mut vcx), Some(DialogKind::ShowOrPremium));

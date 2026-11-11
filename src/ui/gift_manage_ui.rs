@@ -190,7 +190,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let app = cx.entity().downgrade();
+        // The alert acts for the account and window it was opened in: after
+        // a switch, pressing Delete does nothing.
+        let app = self.scoped_app(cx);
         let id = id.to_string();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let (app, id) = (app.clone(), id.clone());
@@ -209,6 +211,14 @@ impl QuillApp {
     }
 
     pub(super) fn confirm_delete_gift(&mut self, id: &str, cx: &mut Context<Self>) {
+        // The list moved on (a refresh dropped the gift): there is nothing
+        // to delete, and a stale id is never sent.
+        let listed = self
+            .session()
+            .is_some_and(|s| s.payments.hub.gifts.iter().any(|g| g.id == id));
+        if !listed {
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
             if live.driver.delete_received_gift(id).is_err() {
                 self.note_gift_refused(tr(keys::Q_MONEY_DELETE_GIFT_NOT_SENT));

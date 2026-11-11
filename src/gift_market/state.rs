@@ -242,8 +242,8 @@ pub struct GiftMarketState {
     pub follow: AuctionFollow,
     /// The `getGiftAuctionState` the UI waits for (a link or a tile).
     pub auction: AuctionFetch,
-    /// A bid in flight, by gift id.
-    pub bidding: Option<i64>,
+    /// The bid in flight: its gift and the request that answers it.
+    pub bidding: Option<(i64, crate::ids::RequestId)>,
     pub craft: Option<CraftSession>,
     /// One-shot error toasts.
     pub notes: Vec<String>,

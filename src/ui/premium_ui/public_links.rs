@@ -6,11 +6,6 @@
 use super::*;
 use quill::ids::ChatId;
 use quill::state::PublicChatsFetch;
-use std::time::Duration;
-
-/// How often a revoke is checked for its answers, and for how long.
-const REVOKE_POLL: Duration = Duration::from_millis(200);
-const REVOKE_POLLS: u32 = 50;
 
 impl QuillApp {
     /// The list under the limit box's text; asks for it the first time.
@@ -80,7 +75,7 @@ impl QuillApp {
         };
         let revoking = self
             .session()
-            .and_then(|s| s.groups.group_type.revoke.as_ref())
+            .and_then(|s| s.groups.group_type.revoke.revoking())
             .map(|revoke| revoke.chat_id);
         for chat_id in chats {
             let Some(session) = self.session() else {
@@ -176,8 +171,8 @@ impl QuillApp {
         });
     }
 
-    /// Revoke, then, once both answers came, the Type box's link is
-    /// checked again (tdesktop goes back to Public and checks it).
+    /// Revoke; once both answers came, the Type box's link is checked
+    /// again (tdesktop goes back to Public and checks it).
     fn revoke_public_link(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         let Some(live) = self.live.as_mut() else {
             self.set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
@@ -191,22 +186,8 @@ impl QuillApp {
             cx.notify();
             return;
         }
+        // The Type box checks its link again when the revoke settles
+        // (`drain_public_link_freed`), not from a timer.
         cx.notify();
-        self.spawn_screen(cx, async move |this, cx| {
-            for _ in 0..REVOKE_POLLS {
-                cx.background_executor().timer(REVOKE_POLL).await;
-                let done = this
-                    .update(cx, |this, _| {
-                        this.session()
-                            .is_none_or(|s| s.groups.group_type.revoke.is_none())
-                    })
-                    .unwrap_or(true);
-                if done {
-                    let _ = this.update(cx, |this, cx| this.recheck_group_type_link(cx));
-                    return;
-                }
-            }
-        })
-        .detach();
     }
 }

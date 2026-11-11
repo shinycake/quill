@@ -852,7 +852,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             join.stage = JoinStage::Open;
         }
-        result.map(|_| ())
+        Ok(())
     }
 
     /// "Revoke Link" confirmed.
@@ -862,20 +862,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(revoke) = self.session.payments.earn.revoke.as_mut() else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if revoke.sending {
+        if revoke.send.is_sending() {
             return Ok(());
         }
-        revoke.sending = true;
         let affiliate = revoke.recipient.affiliate_json(me);
         let url = revoke.program.url.clone();
-        let result = self.send_earn(EarnPurpose::Disconnect, |extra| {
+        let request = self.send_earn(EarnPurpose::Disconnect, |extra| {
             disconnect_affiliate_program(extra, affiliate, &url)
-        });
-        if result.is_err()
-            && let Some(revoke) = self.session.payments.earn.revoke.as_mut()
-        {
-            revoke.sending = false;
+        })?;
+        if let Some(revoke) = self.session.payments.earn.revoke.as_mut() {
+            revoke.send = BoxSend::Sending(request);
         }
-        result.map(|_| ())
+        Ok(())
     }
 }
