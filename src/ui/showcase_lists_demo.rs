@@ -84,7 +84,7 @@ impl QuillApp {
                 session.apply(owned);
             }
         }
-        session.users_state.contacts = Some((101..=112).collect());
+        session.users_state.contacts = quill::state::fetch::Fetch::Ready((101..=112).collect());
         self.chat_list.tab = SidebarTab::Contacts;
     }
 }

@@ -370,7 +370,7 @@ impl QuillApp {
         self.group_call_needs_unlock(cx);
         self.group_call_boxes.invite_open = true;
         if let Some(live) = self.live.as_mut()
-            && live.driver.session.users_state.contacts.is_none()
+            && live.driver.session.users_state.contacts.data().is_none()
         {
             let _ = live.driver.fetch_contacts();
         }

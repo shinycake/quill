@@ -3,6 +3,7 @@
 
 use super::app::QuillApp;
 use super::signin_ui::PhoneStep;
+use crate::ui::connect_ui::ConnectStage;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
@@ -10,7 +11,6 @@ use quill::telegram::envelope::AuthorizationState;
 use smallvec::SmallVec;
 use std::sync::Arc;
 use zeroize::Zeroize;
-use crate::ui::connect_ui::ConnectStage;
 impl QuillApp {
     pub(super) fn cycle_auth(&mut self, cx: &mut Context<Self>) {
         if self.live.is_some() {

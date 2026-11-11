@@ -841,7 +841,7 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
     session.calls.privacy_p2p = Some(PrivacyWho::Everybody);
     session.settings.blocked_senders = Fetch::Ready(vec![63]);
     session.settings.blocked_total = 1;
-    session.users_state.contacts = Some(vec![61, 62, 63]);
+    session.users_state.contacts = quill::state::fetch::Fetch::Ready(vec![61, 62, 63]);
 }
 /// Slice S3: the Privacy-screen row value for one rule key: the base
 /// choice, with the always/never exception counts when non-zero (TGX

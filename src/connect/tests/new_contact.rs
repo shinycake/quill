@@ -167,8 +167,7 @@ fn a_closed_boxs_import_opens_nothing_and_the_next_box_sends() {
 #[test]
 fn an_invalidated_contact_list_is_fetched_again() {
     let mut f = fixture();
-    f.1.session.users_state.contacts = None;
-    f.1.session.users_state.contacts_error = false;
+    f.1.session.users_state.contacts = crate::state::fetch::Fetch::Idle;
     f.1.refetch_invalidated_contacts();
     assert_eq!(last_request(&f)["@type"], "getContacts");
     let sent = f.2.snapshot().len();
