@@ -151,7 +151,7 @@ impl QuillApp {
                     .screen_sharing_video_info
                     .as_ref()
                     .is_some_and(|info| info.is_paused)
-                    || (participant.is_current_user && call.screen.is_paused());
+                    || (participant.is_current_user && call.screen_share_paused);
                 if let Some((picture, overlay)) =
                     self.group_stream_tile(call, participant, true, &name, paused, contain, cx)
                 {
