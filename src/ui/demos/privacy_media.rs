@@ -114,7 +114,9 @@ impl QuillApp {
                 });
                 let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
                     self.demo_ui.sink.clone();
-                for json in &photos {
+                // And a service notice with a reaction under it.
+                let pinned = r#"{"@type":"updateNewMessage","message":{"id":851,"chat_id":11,"is_outgoing":false,"date":1790632560,"content":{"@type":"messagePinMessage","message_id":801}}}"#.to_string();
+                for json in photos.iter().chain([&pinned]) {
                     if let Some(owned) =
                         quill::telegram::client::copy_and_parse(json, &self.demo_ui.seq, &sink)
                     {
@@ -127,6 +129,7 @@ impl QuillApp {
                     (822, "😭", false),
                     (832, "👍", false),
                     (841, "🔥", false),
+                    (851, "🎉", false),
                 ] {
                     let json = format!(
                         r#"{{"@type":"updateMessageInteractionInfo","chat_id":11,"message_id":{message_id},"interaction_info":{{"@type":"messageInteractionInfo","view_count":0,"forward_count":0,"reactions":{{"@type":"messageReactions","reactions":[{{"@type":"messageReaction","type":{{"@type":"reactionTypeEmoji","emoji":"{emoji}"}},"total_count":1,"is_chosen":{chosen},"recent_sender_ids":[{{"@type":"messageSenderUser","user_id":11}}]}}],"are_tags":false,"can_get_added_reactions":true}}}}}}"#
