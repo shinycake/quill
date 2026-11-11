@@ -82,7 +82,7 @@ impl QuillApp {
             || !self
                 .payments
                 .grams_asked
-                .allow(grams.entries.len(), scrolled)
+                .allow(grams.rows.len(), scrolled)
         {
             return;
         }

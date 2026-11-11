@@ -25,7 +25,7 @@ use quill::lang::{keys, tr, tr_with};
 use quill::link_policy::{OpenDecision, open_decision};
 use quill::premium_hub::TxFilter;
 use quill::premium_hub::ton::{
-    GramsHub, TOPUP_URL, TonTx, TonTxKind, gram_amount_2dp, gram_balance, gram_balance_short,
+    GramsHub, PeerKey, TOPUP_URL, TonTx, TonTxKind, gram_amount_2dp, gram_balance, gram_balance_short,
     signed_gram_amount, usd_line,
 };
 use quill::state::Session;
@@ -67,15 +67,13 @@ fn peer_name(session: &Session, peer: MessageSender) -> Option<String> {
         MessageSender::User { user_id } => match session.user(user_id) {
             Some(user) => Some(user.display_name()),
             None => grams
-                .missing_users
-                .contains(&user_id)
+                .peer_missing(PeerKey::User(user_id))
                 .then(|| tr(keys::DELETED).to_string()),
         },
         MessageSender::Chat { chat_id } => match session.chats.get(&chat_id) {
             Some(chat) => Some(chat.title.clone()),
             None => grams
-                .missing_chats
-                .contains(&chat_id)
+                .peer_missing(PeerKey::Chat(chat_id))
                 .then(|| tr(keys::DELETED).to_string()),
         },
     }
@@ -365,7 +363,7 @@ fn history(
         col = col.child(div().text_sm().child(error.to_string()));
     }
     // tdesktop shows no history section until it has rows.
-    if grams.entries.is_empty() && !grams.shows_tabs() {
+    if grams.rows.is_empty() && !grams.shows_tabs() {
         if grams.load.is_loading() {
             col = col.child(
                 div()
@@ -406,7 +404,7 @@ fn history(
                 .child(tab_label(TxFilter::All)),
         );
     }
-    if grams.load.is_loading() && grams.entries.is_empty() {
+    if grams.load.is_loading() && grams.rows.is_empty() {
         col = col.child(
             div()
                 .text_sm()
@@ -414,7 +412,7 @@ fn history(
                 .child(tr(keys::Q_MONEY_LOADING_TRANSACTIONS)),
         );
     }
-    for tx in &grams.entries {
+    for tx in &grams.rows {
         col = col.child(tx_row(session, tx, roots, cx));
     }
     if grams.has_more() && grams.load.is_loading() {

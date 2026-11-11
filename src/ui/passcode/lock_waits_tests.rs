@@ -9,7 +9,7 @@ use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Focusable, TestAppContext, VisualTestContext, px, size};
 use quill::ids::ChatId;
 use quill::platform::{os_launch_attempts, os_opened_last};
-use quill::premium_hub::ton::WithdrawOutcome;
+use quill::premium_hub::ton::{GramWithdraw, WithdrawOutcome};
 
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
@@ -96,7 +96,7 @@ fn a_withdrawal_page_that_lands_under_the_lock_opens_after_the_unlock(cx: &mut T
     let url = "https://fragment.com/withdraw?token=2";
     app.update(vcx, |app, cx| {
         if let Some(grams) = app.demo_session.as_mut().map(|s| &mut s.payments.hub.grams) {
-            grams.withdraw_outcome = Some(WithdrawOutcome::Url(url.to_string()));
+            grams.withdraw = Some(GramWithdraw::Finished(WithdrawOutcome::Url(url.to_string())));
         }
         cx.notify();
     });
@@ -105,11 +105,11 @@ fn a_withdrawal_page_that_lands_under_the_lock_opens_after_the_unlock(cx: &mut T
     assert_ne!(os_opened_last().as_deref(), Some(url), "not under the lock");
     let kept = app.read_with(vcx, |app, _| {
         app.session()
-            .and_then(|s| s.payments.hub.grams.withdraw_outcome.clone())
+            .and_then(|s| s.payments.hub.grams.withdraw.clone())
     });
     assert_eq!(
         kept,
-        Some(WithdrawOutcome::Url(url.to_string())),
+        Some(GramWithdraw::Finished(WithdrawOutcome::Url(url.to_string()))),
         "the answer waits where it landed"
     );
     unlock(&app, vcx);

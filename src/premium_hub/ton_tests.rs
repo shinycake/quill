@@ -124,12 +124,13 @@ fn keys_stay_unique_when_ids_are_empty_or_repeat() {
         })),
         true,
     );
-    let keys: Vec<&str> = hub.entries.iter().map(|tx| tx.key.as_str()).collect();
+    let keys: Vec<&str> = hub.rows.iter().map(|tx| tx.key.as_str()).collect();
     assert_eq!(keys, ["0-10", "a", "2-12", "3-10"]);
     hub.selected = Some("2-12".into());
     assert_eq!(hub.selected_tx().map(|tx| tx.gram_nano), Some(3));
     assert_eq!(
-        hub.peers_checked, 0,
+        hub.rows.peers_checked(),
+        0,
         "the new rows still need their peers checked"
     );
 }
@@ -236,7 +237,7 @@ fn paging_appends_and_a_fresh_page_replaces() {
     assert!(!hub.shows_settings_row());
     hub.apply_page(page(), false);
     assert!(hub.shows_settings_row());
-    assert_eq!(hub.entries.len(), 11);
+    assert_eq!(hub.rows.len(), 11);
     assert!(hub.has_more());
     assert!(hub.has_in && hub.has_out && hub.shows_tabs());
     hub.apply_page(
@@ -248,12 +249,12 @@ fn paging_appends_and_a_fresh_page_replaces() {
         })),
         true,
     );
-    assert_eq!(hub.entries.len(), 12);
+    assert_eq!(hub.rows.len(), 12);
     assert!(!hub.has_more());
     assert_eq!(hub.balance_nano, Some(1));
     // A new tab starts over and keeps the tabs.
     hub.restart(TxFilter::Outgoing);
-    assert!(hub.entries.is_empty() && !hub.load.answered());
+    assert!(hub.rows.is_empty() && !hub.load.answered());
     assert!(hub.shows_tabs());
     // Only incoming rows: one "All Transactions" list, no tabs.
     let mut one_way = GramsHub::default();
@@ -348,10 +349,7 @@ fn collect_routes_on_the_password_state() {
     let mut idle = GramWithdraw::idle(None);
     idle.password_state_known(false);
     assert_eq!(idle, GramWithdraw::SecurityCheck { later: false });
-    let mut sending = GramWithdraw::Password {
-        request: Some(RequestId(9)),
-        error: None,
-    };
+    let mut sending = GramWithdraw::Sending(RequestId(9));
     sending.password_state_known(false);
     assert!(sending.sending() && !sending.can_submit());
     assert!(sending.waits_for(Some(RequestId(9))));
@@ -370,4 +368,36 @@ fn the_withdrawal_request_has_the_schema_shape() {
     assert_eq!(request.as_object().map(|o| o.len()), Some(3));
     let schema = include_str!("../../schema/td_api.tl");
     assert!(schema.contains("getGramWithdrawalUrl password:string = HttpUrl;"));
+}
+
+/// r2-17 (04-032): the finished outcome is one stage of the box: taken once,
+/// and a box that is still open is not touched by the take.
+#[test]
+fn a_finished_withdrawal_is_taken_once() {
+    use super::{GramWithdraw, WithdrawOutcome};
+    let mut hub = GramsHub::default();
+    hub.withdraw = Some(GramWithdraw::Sending(RequestId(3)));
+    assert_eq!(hub.take_withdraw_outcome(), None);
+    assert_eq!(hub.withdraw, Some(GramWithdraw::Sending(RequestId(3))));
+    hub.withdraw = Some(GramWithdraw::Finished(WithdrawOutcome::TooSmall));
+    assert!(!hub.withdraw.as_ref().is_some_and(GramWithdraw::shows_box));
+    assert_eq!(hub.take_withdraw_outcome(), Some(WithdrawOutcome::TooSmall));
+    assert_eq!(hub.withdraw, None);
+    assert_eq!(hub.take_withdraw_outcome(), None);
+}
+
+/// r2-17 (04-029, 04-030): a refusal marks only the peer its own request
+/// asked for; other requests' refusals change nothing.
+#[test]
+fn a_peer_refusal_matches_its_request() {
+    use super::{PeerAsk, PeerKey};
+    let mut hub = GramsHub::default();
+    hub.peers
+        .insert(PeerKey::User(1), PeerAsk::Asked(RequestId(10)));
+    hub.peers
+        .insert(PeerKey::Chat(1), PeerAsk::Asked(RequestId(11)));
+    hub.peer_refused(RequestId(99));
+    assert!(!hub.peer_missing(PeerKey::User(1)) && !hub.peer_missing(PeerKey::Chat(1)));
+    hub.peer_refused(RequestId(11));
+    assert!(hub.peer_missing(PeerKey::Chat(1)) && !hub.peer_missing(PeerKey::User(1)));
 }

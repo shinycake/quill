@@ -76,10 +76,7 @@ fn a_refused_withdrawal_shows_an_error_in_the_box() {
     assert!(driver.submit_gram_withdrawal("pw").is_err());
     assert!(matches!(
         driver.session.payments.hub.grams.withdraw,
-        Some(GramWithdraw::Password {
-            request: None,
-            error: Some(_)
-        })
+        Some(GramWithdraw::Password { error: Some(_) })
     ));
 }
 
