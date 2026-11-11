@@ -13,8 +13,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn badge_language(&self) -> String {
         let language = &self.session.settings.language;
         let info = language
-            .switching
-            .as_ref()
+            .switching()
             .map(|switch| &switch.info)
             .or(language.current.as_ref());
         match info {

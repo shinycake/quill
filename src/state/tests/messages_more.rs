@@ -62,7 +62,7 @@ fn forward_messages_result_upserts_dest_and_labels_origin() {
             .all(|c| c.supported())
     );
     let extra = session.request(RequestPurpose::ForwardMessages, Some(ChatId(12)));
-    session.messages.in_flight_forward = Some(ForwardFlight {
+    session.messages.forward_flights.push(ForwardFlight {
         extra,
         dest_chat_id: ChatId(12),
         from_chat_id: ChatId(11),

@@ -135,6 +135,14 @@ impl QuillApp {
         let Some(editor) = open.editor.as_mut() else {
             return;
         };
+        // Only the save this editor sent answers it.
+        if editor.save
+            != (StyleSave::Sent {
+                request: answer.request,
+            })
+        {
+            return;
+        }
         let toast = match answer.outcome {
             Ok(style) => {
                 let key = match editor.editing {

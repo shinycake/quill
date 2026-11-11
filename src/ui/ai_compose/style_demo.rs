@@ -13,7 +13,7 @@ use crate::ui::app::QuillApp;
 use gpui_kit::*;
 use quill::ai_compose::{StyleExample, StyleLimitNotice, TextCompositionStyle};
 use quill::ids::FileId;
-use quill::state::{StyleLookup, StyleNotice};
+use quill::state::{StyleLookup, StyleNotice, StyleReply};
 use quill::telegram::envelope::{StickerFormat, StickerItem, StickerSetInfo};
 use quill::text::{TextEntity, TextEntityKind};
 use std::sync::atomic::Ordering;
@@ -218,7 +218,7 @@ impl QuillApp {
             session.messages.ai_compose.style_lookup = Some(StyleLookup {
                 token,
                 name: style.name.clone(),
-                outcome: Some(Ok(style)),
+                outcome: StyleReply::Answered(Ok(style)),
             });
         }
         cx.notify();

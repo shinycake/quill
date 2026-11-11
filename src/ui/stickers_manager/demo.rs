@@ -74,11 +74,13 @@ impl QuillApp {
         };
         let stickers = &mut session.stickers;
         stickers.stickers.open = false;
-        stickers.masks.installed = stickers.stickers.sets.iter().take(3).cloned().collect();
-        stickers.masks.installed_loaded = true;
-        stickers.masks.archived = stickers.stickers.archived.iter().take(1).cloned().collect();
-        stickers.masks.archived_loaded = true;
-        stickers.masks.open = true;
+        stickers.masks.installed = quill::state::fetch::Fetch::Ready(
+            stickers.stickers.sets.iter().take(3).cloned().collect(),
+        );
+        stickers.masks.archived = quill::state::fetch::Fetch::Ready(
+            stickers.stickers.archived.iter().take(1).cloned().collect(),
+        );
+        stickers.masks.set_dialog_open(true);
         self.settings.sticker_settings_open = false;
     }
 

@@ -370,8 +370,8 @@ impl QuillApp {
         // --- Storage usage ---
         let stats = session
             .as_ref()
-            .and_then(|s| s.settings.storage_stats.clone());
-        let loading = session.is_some_and(|s| s.settings.storage_stats_loading);
+            .and_then(|s| s.settings.storage_stats.data().cloned());
+        let loading = session.is_some_and(|s| s.settings.storage_stats.is_loading());
         let mut usage = div().flex().flex_col().gap_2().px_3().py_2();
         let has_stats = stats.is_some();
         usage = match stats {

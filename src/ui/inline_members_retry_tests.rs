@@ -60,8 +60,10 @@ fn a_failed_page_is_asked_for_again_at_the_next_scroll(cx: &mut TestAppContext) 
         if let Some(session) = app.session_mut() {
             session
                 .groups
-                .member_more_failed
-                .insert((chat, MemberListFilter::Recent));
+                .member_asks
+                .entry((chat, MemberListFilter::Recent))
+                .or_default()
+                .more = quill::state::MoreMembers::Failed;
         }
         // A frame looks again: it does not ask a failing server in a loop.
         app.maybe_load_more_inline(false, cx);

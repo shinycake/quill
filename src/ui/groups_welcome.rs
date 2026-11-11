@@ -12,7 +12,8 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use quill::state::{Submit, SubmitView, WelcomeMessagesFetch};
+use quill::state::fetch::Fetch;
+use quill::state::{Submit, SubmitView};
 use quill::telegram::envelope::ParsedWelcomeMessage;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -263,16 +264,12 @@ impl QuillApp {
             let editing = dialog_state.editing;
             let requests = this.session().map(|session| &session.requests);
             let adding = dialog_state.add.is_sending(requests);
-            let fetch = this.session().and_then(|session| {
-                session
-                    .groups
-                    .welcome_message_fetches
-                    .get(&chat_id.0)
-                    .cloned()
-            });
-            let messages: Vec<ParsedWelcomeMessage> = this
+            let fetch = this
                 .session()
-                .and_then(|session| session.groups.welcome_messages.get(&chat_id.0).cloned())
+                .and_then(|session| session.groups.welcome_messages.get(&chat_id.0).cloned());
+            let messages: Vec<ParsedWelcomeMessage> = fetch
+                .as_ref()
+                .map(|pack| pack.items().to_vec())
                 .unwrap_or_default();
             let mut body = div().flex().flex_col().gap_2().child(
                 div()
@@ -308,7 +305,7 @@ impl QuillApp {
                 }
             }
             match fetch {
-                Some(WelcomeMessagesFetch::Failed(error)) => {
+                Some(Fetch::Failed { error, .. }) => {
                     body = body.child(
                         div()
                             .flex()
@@ -333,7 +330,7 @@ impl QuillApp {
                             ),
                     );
                 }
-                Some(WelcomeMessagesFetch::Loaded) | None => {
+                Some(Fetch::Ready(_) | Fetch::Idle) | None => {
                     if messages.is_empty() {
                         body = body.child(
                             div()
@@ -356,7 +353,7 @@ impl QuillApp {
                         body = body.child(list);
                     }
                 }
-                Some(WelcomeMessagesFetch::Loading) => {
+                Some(Fetch::Loading { .. }) => {
                     body = body.child(
                         div()
                             .text_sm()
@@ -459,7 +456,7 @@ impl QuillApp {
                                     .session()
                                     .and_then(|session| {
                                         session.groups.welcome_messages.get(&chat_id.0).and_then(
-                                            |messages| messages.iter().find(|m| m.id == welcome_id),
+                                            |pack| pack.items().iter().find(|m| m.id == welcome_id),
                                         )
                                     })
                                     .and_then(|message| {

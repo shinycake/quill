@@ -26,8 +26,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .iter()
             .chain(&stickers.stickers.trending)
             .chain(&stickers.stickers.archived)
-            .chain(&stickers.masks.installed)
-            .chain(&stickers.masks.archived)
+            .chain(stickers.masks.installed.items())
+            .chain(stickers.masks.archived.items())
         {
             if stickers.manager.covers_requested.contains(&set.id) || asked.contains(&set.id) {
                 continue;

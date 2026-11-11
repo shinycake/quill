@@ -63,13 +63,13 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Switch the interface to `info`: select it in TDLib, fetch its strings
     /// (and its base pack's), then keep it synchronized. The strings land
-    /// in `settings.language.outcome` for the UI to install. English (`en`
+    /// as a `LanguageEvent::Install` for the UI to install. English (`en`
     /// or an empty id) needs no strings: `ready` carries none.
     pub fn switch_language(&mut self, info: LanguagePackInfoData) -> Result<(), ConnectSendError> {
         let state = &mut self.session.settings.language;
         state.generation = state.generation.wrapping_add(1);
         let generation = state.generation;
-        state.outcome = crate::state::SwitchOutcome::None;
+        state.forget_failure();
         let builtin = info.id.is_empty() || info.id == "en";
         let id = if builtin {
             "en".to_string()
@@ -77,9 +77,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             info.id.clone()
         };
         if builtin {
-            state.switching = None;
+            state.stage = crate::state::LanguageStage::Idle;
             state.current = None;
-            state.outcome = crate::state::SwitchOutcome::Ready(crate::state::LanguageReady {
+            state.queue_install(crate::state::LanguageReady {
                 info,
                 pack: Vec::new(),
                 base: Vec::new(),
@@ -88,17 +88,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let base_id = info.base_language_pack_id.clone();
         let custom = !info.is_official && !info.is_installed;
-        state.switching = Some(LanguageSwitch {
+        state.stage = crate::state::LanguageStage::Fetching(Box::new(LanguageSwitch::new(
             info,
             generation,
-            pack: None,
-            base: base_id.is_empty().then(Vec::new),
-            late: Default::default(),
-        });
+            base_id.is_empty(),
+        )));
         let sent = self.send_language_switch(&id, &base_id, custom, generation);
         if sent.is_err() {
             // A send that never left must not leave the switch pending.
-            self.session.settings.language.switching = None;
+            self.session.settings.language.stage = crate::state::LanguageStage::Idle;
         }
         sent
     }
@@ -143,16 +141,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// saved now.
     pub fn adopt_saved_language(&mut self) -> Result<(), ConnectSendError> {
         let state = &mut self.session.settings.language;
-        state.outcome = crate::state::SwitchOutcome::None;
-        state.refresh = crate::state::LateChange::Nothing;
+        state.drop_all_but_failures();
         let root = crate::settings::app_root_of(&self.paths).map(std::path::Path::to_path_buf);
         let choice = root.as_deref().map(load_choice).unwrap_or_default();
         let wanted = (!choice.is_builtin()).then_some(choice.pack_id.as_str());
         let shown = state.current.as_ref().map(|info| info.id.as_str());
-        let switching = state
-            .switching
-            .as_ref()
-            .map(|switch| switch.info.id.as_str());
+        let switching = state.switching().map(|switch| switch.info.id.as_str());
         if switching.map_or(shown == wanted, |id| Some(id) == wanted) {
             return Ok(());
         }

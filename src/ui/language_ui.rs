@@ -18,7 +18,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::prefs::{self, LanguageChoice};
 use quill::lang::{keys, tr};
-use quill::state::LanguageReady;
+use quill::state::{LanguageEvent, LanguageReady};
 use quill::telegram::envelope::LanguagePackInfoData;
 
 /// One row of the box.
@@ -238,8 +238,7 @@ impl QuillApp {
                 .session
                 .settings
                 .language
-                .switching
-                .as_ref()
+                .switching()
                 .map(|switch| switch.info.id.clone())
         });
         let target = in_flight.unwrap_or_else(current_id);
@@ -273,48 +272,40 @@ impl QuillApp {
         else {
             return false;
         };
-        let (ready, error) = match std::mem::take(&mut state.outcome) {
-            quill::state::SwitchOutcome::None => (None, None),
-            quill::state::SwitchOutcome::Ready(ready) => (Some(ready), None),
-            quill::state::SwitchOutcome::Failed(error) => (None, Some(error)),
-        };
-        let refresh = std::mem::take(&mut state.refresh);
+        let events = std::mem::take(&mut state.events);
         let current = state.current.clone();
-        let progressed = ready.is_some()
-            || error.is_some()
-            || !matches!(refresh, quill::state::LateChange::Nothing);
-        if let Some(ready) = ready {
-            self.install_language(ready, cx);
-        }
-        let (patch, reload) = match refresh {
-            quill::state::LateChange::Nothing => (Vec::new(), false),
-            quill::state::LateChange::Patch(patch) => (patch, false),
-            quill::state::LateChange::Reload => (Vec::new(), true),
-        };
-        if !patch.is_empty()
-            && let Some(snapshot) = quill::lang::current()
-            && current
-                .as_ref()
-                .is_some_and(|info| info.id == snapshot.pack_id())
-        {
-            let next = snapshot.patched(patch.iter().map(|(k, v)| (k.as_str(), v)));
-            self.save_language_cache(&next, cx);
-            install_pack(Some(next));
-            cx.refresh_windows();
-        }
-        // A switch the person started wins over a reload of the old pack:
-        // its strings are newer anyway.
-        if reload
-            && let (Some(info), Some(live)) = (current, self.live.as_mut())
-            && live.driver.session.settings.language.switching.is_none()
-        {
-            let _ = live.driver.switch_language(info);
-        }
-        if let Some(error) = error {
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.restore_language_option();
+        let progressed = !events.is_empty();
+        for event in events {
+            match event {
+                LanguageEvent::Install(ready) => self.install_language(ready, cx),
+                LanguageEvent::Patch(patch) => {
+                    if let Some(snapshot) = quill::lang::current()
+                        && current
+                            .as_ref()
+                            .is_some_and(|info| info.id == snapshot.pack_id())
+                    {
+                        let next = snapshot.patched(patch.iter().map(|(k, v)| (k.as_str(), v)));
+                        self.save_language_cache(&next, cx);
+                        install_pack(Some(next));
+                        cx.refresh_windows();
+                    }
+                }
+                // A switch the person started wins over a reload of the old
+                // pack: its strings are newer anyway.
+                LanguageEvent::Reload => {
+                    if let (Some(info), Some(live)) = (current.clone(), self.live.as_mut())
+                        && live.driver.session.settings.language.switching().is_none()
+                    {
+                        let _ = live.driver.switch_language(info);
+                    }
+                }
+                LanguageEvent::SwitchFailed(error) => {
+                    if let Some(live) = self.live.as_mut() {
+                        let _ = live.driver.restore_language_option();
+                    }
+                    self.set_note(StatusNote::error(error));
+                }
             }
-            self.set_note(StatusNote::error(error));
         }
         progressed
     }

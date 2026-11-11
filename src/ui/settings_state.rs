@@ -96,7 +96,7 @@ impl super::on_screen::Farewell for SettingsUi {
         // the background with the account.
         let (masks, emoji, archive) = app.session().map_or((false, false, false), |session| {
             (
-                session.stickers.masks.open,
+                session.stickers.masks.dialog_open(),
                 session.stickers.emoji.open,
                 session.chat_list.archive_settings_open,
             )
