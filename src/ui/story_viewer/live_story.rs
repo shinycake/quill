@@ -431,6 +431,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_live_stars_box(&mut self, cx: &mut Context<Self>) {
+        // box-host: closing the flow opens nothing
         self.stories.live.stars = StarsFlow::Idle;
         cx.notify();
     }
@@ -452,6 +453,8 @@ impl QuillApp {
             // The top-up carries the waiting comment; a refused top-up (an
             // agent's input) leaves nothing waiting.
             if self.live_top_up(boxed.stars, cx) {
+                // box-host: the Stars box is closed; this only remembers
+                // what to reopen it on after the top-up
                 self.stories.live.stars = StarsFlow::TopUp {
                     mode: boxed.mode,
                     stars: boxed.stars,

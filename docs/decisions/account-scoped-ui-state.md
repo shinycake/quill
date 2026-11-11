@@ -4146,4 +4146,4 @@ and 10 are widget items another fixer owns).
 - **Not done as the register says.** 13-125 keeps the panels' data in their own
   fields (`cover`, `privacy_edit`, the close-friends stage, four flags) and
   closes the rest through one seam instead of storing a single `ViewerPanel`
-  value (about 150 readers); the seam is the only place that opens a panel.
+  value (about 150 readers); every open goes through that seam.
