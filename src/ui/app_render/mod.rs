@@ -335,13 +335,9 @@ impl Render for QuillApp {
             .children(self.disk_low_banner(cx))
             .children(self.live_share_strip(cx))
             .children(self.unconfirmed_login_banner(cx))
-            .when(
-                matches!(
-                    self.preferences.update_state,
-                    quill::updater::UpdateState::Installed(_)
-                ) && !self.preferences.update_banner_dismissed,
-                |this| this.child(self.update_banner(cx)),
-            )
+            .when(self.preferences.update_banner_shown(), |this| {
+                this.child(self.update_banner(cx))
+            })
             // Slice parity:platform-offline-indicator — slim connection
             // strip below the title bar. Offline gets the kit warning
             // banner with the "Waiting for network…" label; transitional

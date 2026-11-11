@@ -34,13 +34,14 @@ preferences.app_theme * | the app theme: custom themes, palettes, the theme edit
 preferences.system_accent | the OS accent color
 preferences.system_accent.Read.0 | the OS accent color once read
 preferences.send_to * | the Explorer "Send to" shortcut belongs to the machine: read once, written off the UI thread, whichever account is on screen
-preferences.system_accent_poll | the one task waiting for the OS accent read to land
+preferences.system_accent.Reading.color | the OS accent color known while its read is in flight
+preferences.system_accent.Reading._wait | the one task waiting for the OS accent read to land
 preferences.link_handler_watch | the one task waiting for the process-wide link handler read to land
 preferences.font_picker | the font family picker entity
 preferences.accent_picker | the accent color picker entity
 preferences.translate * | the translation preferences file
 preferences.update_state | the updater's state, for the install
-preferences.update_banner_dismissed | the update banner was dismissed, for the run
+preferences.update_banner_dismissed_for | the update banner was dismissed, for the run
 preferences.whats_new * | the What's New window and its release notes, for the install
 preferences.advanced * | Settings > Advanced: debug codes, test environment, disk-backed demo; values of the install
 preferences.emoji_style * | the emoji set and its download, an app-wide asset
@@ -178,8 +179,9 @@ group_call.live_pip * | the live picture-in-picture link; it carries its account
 screen_share.chooser * | the share chooser: its listing (tagged with the screen that asked: another screen's never blocks), its window (closed by the screen's goodbye, `CallScreen`), the windows and screens listed, the source picked, and the screen recording permission box; each names the call it shares into (one, or the video chat), and another call or none closes them
 screen_share.generation | which listing may land
 screen_share.backend | the capture backend
-screen_share.demo_active | the screenshot demos' shared source
-screen_share.demo_active_audio | the screenshot demos' shared sound
+screen_share.demo_active | the screenshot demos' running share
+screen_share.demo_active.source | the screenshot demos' shared source
+screen_share.demo_active.with_audio | the screenshot demos' shared sound
 screen_share.demo_system_audio | the screenshot demos' system sound
 main_window.handle | the main window's handle
 main_window.place * | the main window's place

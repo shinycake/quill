@@ -17,7 +17,7 @@ src/ui/selectable_text.rs OWNERS | keyed by text entity, which lives in one wind
 src/ui/image_budget.rs WHOLE | keyed by window scope (None: the main window)
 src/ui/image_budget.rs SLICES | keyed by slice entity, each with its own window
 src/ui/send_fly.rs CELLS | keyed by window scope and file
-src/ui/send_fly.rs FLY | the flight names its window; only that window draws it
+src/ui/send_fly.rs FLIGHT | the flight names its window; only that window draws it, and the account leaving or the lock ends it
 src/ui/send_fly.rs SOURCE,TARGET,ORIGIN | the one flight's ends, drawn only in its window
 src/ui/sticker_player/display.rs DISPLAYS | keyed by window scope
 src/ui/emoji_effect.rs ANCHORS,ACTIVE | keyed by chat and message; a chat shows in one window

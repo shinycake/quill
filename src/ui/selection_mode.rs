@@ -439,7 +439,7 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::SETTINGS_SAVE).into()),
         });
-        let task = self.spawn_screen(cx, async move |this, cx| {
+        let task = self.spawn_scoped(cx, async move |this, cx| {
             let picked = picker.await;
             // The picker is over, whatever it answered.
             let _ = this.update(cx, |this, _| {

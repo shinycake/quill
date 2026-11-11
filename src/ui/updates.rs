@@ -33,7 +33,6 @@ impl QuillApp {
             return;
         }
         self.preferences.update_state = UpdateState::Checking;
-        self.preferences.update_banner_dismissed = false;
         let check = cx
             .background_executor()
             .spawn(async move { check_latest_release() });
@@ -599,7 +598,13 @@ impl QuillApp {
                             .label(tr(keys::Q_OPS_DISMISS))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.preferences.update_banner_dismissed = true;
+                                this.preferences.update_banner_dismissed_for =
+                                    match &this.preferences.update_state {
+                                        UpdateState::Installed(release) => {
+                                            Some(release.version.clone())
+                                        }
+                                        _ => None,
+                                    };
                                 cx.notify();
                             })),
                     ),

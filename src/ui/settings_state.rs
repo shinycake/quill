@@ -54,22 +54,30 @@ pub(crate) struct SettingsUi {
 }
 
 /// What the operating system's accent color is known to be.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Default)]
 pub(crate) enum SystemAccent {
     /// Not read yet.
     #[default]
     Unread,
+    /// Linux reads it on a background thread: the color known so far, and
+    /// the task waiting for the read to land (dropping it ends the wait; a
+    /// second refresh while it runs does not start another).
+    Reading { color: Option<u32>, _wait: Task<()> },
     /// Read: the color (0xRRGGBB) when the system reports one.
     Read(Option<u32>),
 }
 
 impl SystemAccent {
     /// The color, when read and reported.
-    pub(super) fn color(self) -> Option<u32> {
+    pub(super) fn color(&self) -> Option<u32> {
         match self {
-            Self::Read(color) => color,
+            Self::Read(color) | Self::Reading { color, .. } => *color,
             Self::Unread => None,
         }
+    }
+
+    pub(super) fn is_unread(&self) -> bool {
+        matches!(self, Self::Unread)
     }
 }
 
@@ -189,9 +197,6 @@ pub(crate) struct PreferencesUi {
     /// The operating system's accent color, once read
     /// (`refresh_system_accent`).
     pub(super) system_accent: SystemAccent,
-    /// The one task waiting for a Linux accent read to land; a second
-    /// refresh while it runs does not start another.
-    pub(super) system_accent_poll: Option<Task<()>>,
     /// The wait for the link handler's background read to land; dropping
     /// it ends the wait.
     pub(super) link_handler_watch: Option<Task<()>>,
@@ -205,7 +210,9 @@ pub(crate) struct PreferencesUi {
     /// bar's toast are the screen's (`OnScreen::translate`).
     pub(super) translate: super::translate_ui::TranslateUi,
     pub(super) update_state: quill::updater::UpdateState,
-    pub(super) update_banner_dismissed: bool,
+    /// The release whose "Updated to Quill X" banner was dismissed: a
+    /// banner for another release shows again.
+    pub(super) update_banner_dismissed_for: Option<String>,
     /// The What's New window and the release notes it shows.
     pub(super) whats_new: super::whats_new::WhatsNewUi,
     /// Advanced and experimental settings, the secret codes, the test
@@ -218,6 +225,17 @@ pub(crate) struct PreferencesUi {
 }
 
 impl PreferencesUi {
+    /// The "Updated to Quill X" banner shows for an installed release the
+    /// user has not dismissed.
+    pub(super) fn update_banner_shown(&self) -> bool {
+        match &self.update_state {
+            quill::updater::UpdateState::Installed(release) => {
+                self.update_banner_dismissed_for.as_deref() != Some(release.version.as_str())
+            }
+            _ => false,
+        }
+    }
+
     pub(super) fn new(
         cx: &mut Context<QuillApp>,
         font_picker: super::appearance_power::FontPicker,
@@ -230,7 +248,6 @@ impl PreferencesUi {
             appearance_applied: None,
             app_theme: Default::default(),
             system_accent: SystemAccent::Unread,
-            system_accent_poll: None,
             link_handler_watch: None,
             font_picker,
             accent_picker,
@@ -240,7 +257,7 @@ impl PreferencesUi {
             } else {
                 quill::updater::UpdateState::Idle
             },
-            update_banner_dismissed: false,
+            update_banner_dismissed_for: None,
             whats_new: Default::default(),
             advanced: super::advanced_state::AdvancedUi::new(cx, demo.is_none()),
             emoji_style: Default::default(),

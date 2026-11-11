@@ -117,25 +117,34 @@ impl QuillApp {
             return;
         }
         quill::system_accent::refresh();
-        self.preferences.system_accent = SystemAccent::Read(quill::system_accent::read());
-        if quill::system_accent::pending() && self.preferences.system_accent_poll.is_none() {
-            // screen-scope: the system accent is an app-wide setting; it applies to whichever account is on screen.
-            let poll = cx.spawn(async move |this, cx| {
-                while quill::system_accent::pending() {
-                    cx.background_executor()
-                        .timer(std::time::Duration::from_millis(100))
-                        .await;
-                }
-                let _ = this.update(cx, |this, cx| {
-                    this.preferences.system_accent_poll = None;
-                    this.preferences.system_accent =
-                        SystemAccent::Read(quill::system_accent::read());
-                    this.apply_appearance(cx);
-                    cx.notify();
-                });
-            });
-            self.preferences.system_accent_poll = Some(poll);
+        let color = quill::system_accent::read();
+        if !quill::system_accent::pending() {
+            let waited = matches!(self.preferences.system_accent, SystemAccent::Reading { .. });
+            self.preferences.system_accent = SystemAccent::Read(color);
+            // The wait that was cancelled would have applied it.
+            if waited {
+                self.apply_appearance(cx);
+            }
+            return;
         }
+        if let SystemAccent::Reading { color: known, .. } = &mut self.preferences.system_accent {
+            *known = color;
+            return;
+        }
+        // screen-scope: the system accent is an app-wide setting; it applies to whichever account is on screen.
+        let wait = cx.spawn(async move |this, cx| {
+            while quill::system_accent::pending() {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(100))
+                    .await;
+            }
+            let _ = this.update(cx, |this, cx| {
+                this.preferences.system_accent = SystemAccent::Read(quill::system_accent::read());
+                this.apply_appearance(cx);
+                cx.notify();
+            });
+        });
+        self.preferences.system_accent = SystemAccent::Reading { color, _wait: wait };
     }
 
     /// The font family picker state: "Default" first, then the installed
