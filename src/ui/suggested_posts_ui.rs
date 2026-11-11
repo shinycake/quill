@@ -19,7 +19,7 @@ use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr};
 use quill::state::Session;
 use quill::suggested_posts::{
-    BAR_PRICED_TAIL, BAR_PROMPT, BarLine, DirectMessagesRole, SuggestBar, SuggestMode,
+    BAR_PRICED_TAIL, BAR_PROMPT, BarLine, BarSend, DirectMessagesRole, SuggestBar, SuggestMode,
     SuggestTerms, SuggestedPostPurpose, SuggestedPrice, bar_both_tail, bar_dated, time_value,
 };
 use quill::telegram::envelope::MessageSender;
@@ -311,6 +311,7 @@ impl QuillApp {
                 terms,
                 mode: SuggestMode::Change,
                 edit_of: Some(message_id),
+                send: BarSend::Idle,
             }),
             cx,
         );
@@ -327,9 +328,18 @@ impl QuillApp {
         let Some(chat_id) = self.open_chat_id() else {
             return false;
         };
+        // The edit's send is out: a second one waits for its answer.
+        if self
+            .session()
+            .and_then(|session| session.suggest_bar(chat_id))
+            .is_some_and(|bar| bar.edit_of.is_some() && bar.send.is_sending())
+        {
+            return true;
+        }
         let Some((message_id, terms, is_media)) = self.session().and_then(|session| {
             let bar = session.suggest_bar(chat_id)?;
             let message_id = bar.edit_of?;
+
             let is_media = session
                 .histories
                 .get(&chat_id.0)
@@ -355,7 +365,8 @@ impl QuillApp {
             None => true,
         };
         if sent {
-            self.clear_suggest_bar_after_send(chat_id);
+            // The bar stays up until the send answers; a refusal keeps the
+            // terms to send again.
             self.composer
                 .update(cx, |input, cx| input.set_value("", window, cx));
             self.set_note(StatusNote::silent(tr(keys::Q_MONEY_SENDING_2)));

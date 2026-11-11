@@ -149,7 +149,9 @@ pub(super) struct VideoEditorDialog {
     pub(super) timeline: Option<Timeline>,
     /// The still frame (turned and mirrored like the edit) at the cover:
     /// the picture when the video can't play here, and the cover bubble.
-    pub(super) preview: Option<PathBuf>,
+    /// With the time of the source it was cut at, so a cover moved since is
+    /// not taken for the chosen one.
+    pub(super) preview: Option<(i64, PathBuf)>,
     pub(super) still: Option<super::owned_image::OwnedImage>,
     /// The cover still's cutter, matched by its own token so an encode's
     /// serial bump does not orphan a cut.
@@ -418,7 +420,7 @@ impl QuillApp {
                 };
                 match result {
                     Ok((frame, still)) => {
-                        if let Some(old) = editor.preview.replace(frame) {
+                        if let Some((_, old)) = editor.preview.replace((at_ms, frame)) {
                             let _ = std::fs::remove_file(old);
                         }
                         if let Some(still) = still {
@@ -438,7 +440,7 @@ impl QuillApp {
 
     pub(super) fn close_video_editor(&mut self, cx: &mut Context<Self>) {
         if let Some(editor) = self.composer_ui.send_box.video_editor.take() {
-            if let Some(preview) = editor.preview {
+            if let Some((_, preview)) = editor.preview {
                 let _ = std::fs::remove_file(preview);
             }
             editor.motion.release_frames();

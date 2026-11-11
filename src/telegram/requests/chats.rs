@@ -1,4 +1,4 @@
-use super::{SendReply, send_reply_value};
+use super::{SendReply, send_reply_value, topic_id_json};
 use crate::composer::DraftTopic;
 use crate::ids::{ChatId, MessageId, RequestId, TopicId};
 use serde_json::{Value, json};
@@ -738,11 +738,23 @@ pub fn send_chat_action(extra: RequestId, chat_id: ChatId, typing: bool) -> Stri
 
 /// `sendChatAction` with an explicit `ChatAction` constructor (1.8.67).
 pub fn send_chat_action_kind(extra: RequestId, chat_id: ChatId, action: &str) -> String {
+    send_chat_action_in(extra, chat_id, TopicId::None, action)
+}
+
+/// [`send_chat_action_kind`] addressed to `topic` (a forum topic, a comment
+/// or reply thread, a direct messages conversation); [`TopicId::None`] is
+/// the chat itself.
+pub fn send_chat_action_in(
+    extra: RequestId,
+    chat_id: ChatId,
+    topic: TopicId,
+    action: &str,
+) -> String {
     json!({
         "@type": "sendChatAction",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
-        "topic_id": Value::Null,
+        "topic_id": topic_id_json(&topic),
         "business_connection_id": "",
         "action": { "@type": action }
     })

@@ -234,7 +234,7 @@ impl QuillApp {
         let write_access = apps.write_access.take();
         let custom_replies = std::mem::take(&mut apps.custom_replies);
         let attach_bot = apps.attachment_menu_bot.take();
-        let toggled = apps.attachment_menu_toggled.take();
+        let toggled = std::mem::take(&mut apps.attachment_menu_toggled);
         let found = apps.found.take();
         let data_sent = apps.data_sent.take();
 
@@ -308,9 +308,16 @@ impl QuillApp {
                 Err(message) => self.set_status_note(StatusNote::error(&message), cx),
             }
         }
-        if let Some(result) = toggled {
-            match result {
-                Ok((_, added)) => {
+        // Each answer is for its own bot: the flow waiting for another
+        // bot's toggle goes on waiting (its launch is not started by an
+        // answer that is not its own).
+        for toggle in toggled {
+            let waiting = self
+                .mini_apps
+                .awaiting_toggle
+                .take_if(|then| then.bot_id() == toggle.bot_user_id);
+            match toggle.result {
+                Ok(added) => {
                     self.set_status_note(
                         if added {
                             StatusNote::silent(tr(keys::BOT_ADD_TO_MENU_DONE))
@@ -319,14 +326,11 @@ impl QuillApp {
                         },
                         cx,
                     );
-                    if let Some(then) = self.mini_apps.awaiting_toggle.take() {
+                    if let Some(then) = waiting {
                         self.request_web_app(then, false, cx);
                     }
                 }
-                Err(message) => {
-                    self.mini_apps.awaiting_toggle = None;
-                    self.set_status_note(StatusNote::error(&message), cx);
-                }
+                Err(message) => self.set_status_note(StatusNote::error(&message), cx),
             }
         }
         if let Some((asked, result)) = found

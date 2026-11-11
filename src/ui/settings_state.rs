@@ -6,8 +6,6 @@
 use super::*;
 use gpui_kit::component::theme::ThemeMode;
 use gpui_kit::*;
-use quill::data_settings::AutoDownloadNetSettings;
-use quill::data_settings::NetworkKind;
 
 /// The settings window of the account on screen: its pages, search,
 /// scrolls and the boxes they open. A field of `OnScreen`.
@@ -41,7 +39,7 @@ pub(crate) struct SettingsUi {
     /// Slice S4: the Data & Storage per-network editor — the network
     /// being edited plus its draft settings (saved or discarded
     /// explicitly, never applied optimistically).
-    pub(super) data_storage_editor: Option<(NetworkKind, AutoDownloadNetSettings)>,
+    pub(super) data_storage_editor: super::dialogs::storage_editor::StorageEditor,
     /// Slice S4: the "Clear cache" button is awaiting its second,
     /// confirming tap.
     pub(super) storage_confirm: Option<StorageClear>,
@@ -72,7 +70,7 @@ impl SettingsUi {
             sticker_settings_open: false,
             sticker_manager: Default::default(),
             storage_scroll: super::dialogs::data_storage::StorageScroll::new(),
-            data_storage_editor: None,
+            data_storage_editor: Default::default(),
             storage_confirm: None,
             storage_selected: Default::default(),
             proxy: Default::default(),

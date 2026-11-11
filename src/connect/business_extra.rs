@@ -248,16 +248,27 @@ impl<S: JsonSender> ConnectDriver<S> {
             ..BotLookup::default()
         };
         let part = |part| SettingsPurpose::LookupBusinessBot { generation, part };
-        self.send_business_extra(part(BotLookupPart::Exact), |extra| {
-            bots::search_public_chat_request(extra, &query)
-        })?;
-        self.send_business_extra(part(BotLookupPart::Mine), |extra| {
-            bots::search_bots_on_server_request(extra, &query)
-        })?;
-        self.send_business_extra(part(BotLookupPart::Global), |extra| {
-            bots::search_public_bots_request(extra, &query)
-        })
-        .map(|_| ())
+        let sent = self
+            .send_business_extra(part(BotLookupPart::Exact), |extra| {
+                bots::search_public_chat_request(extra, &query)
+            })
+            .and_then(|_| {
+                self.send_business_extra(part(BotLookupPart::Mine), |extra| {
+                    bots::search_bots_on_server_request(extra, &query)
+                })
+            })
+            .and_then(|_| {
+                self.send_business_extra(part(BotLookupPart::Global), |extra| {
+                    bots::search_public_bots_request(extra, &query)
+                })
+            });
+        if sent.is_err() {
+            self.session.settings.business_extra.lookup = BotLookup {
+                generation: generation.wrapping_add(1),
+                ..BotLookup::default()
+            };
+        }
+        sent.map(|_| ())
     }
 
     /// `toggleHasSponsoredMessagesEnabled` ("Do Not Hide Ads").

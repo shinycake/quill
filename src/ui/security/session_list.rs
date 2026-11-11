@@ -222,7 +222,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn details_session(&self) -> Option<ParsedSession> {
+    pub(in crate::ui) fn details_session(&self) -> Option<ParsedSession> {
         let id = self.privacy.extra.session_details?;
         self.session()?
             .settings

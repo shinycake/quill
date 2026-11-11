@@ -275,10 +275,9 @@ impl QuillApp {
                     .public_unavailable
                     .contains(&facts.chat_id.0)
             });
+            // The blocked choice is not stored: the box keeps showing
+            // Private, and Public takes once the limit has cleared.
             if !unavailable {
-                if let Some(type_box) = self.group_type_box_mut() {
-                    type_box.draft.public = true;
-                }
                 self.show_premium_limit(PremiumLimitKind::PublicLinks, 0, cx);
             }
             return;
@@ -377,6 +376,9 @@ impl QuillApp {
         let text = trn(key, links).replace("**", "");
         let app = cx.entity().downgrade();
         let skip_app = app.clone();
+        // The answer belongs to the Type box that asked: of this chat, still
+        // open, and still choosing what was asked about.
+        let chat_id = facts.chat_id;
         window.open_alert_dialog(cx, move |alert, _, _| {
             let app = app.clone();
             let skip_app = skip_app.clone();
@@ -387,15 +389,32 @@ impl QuillApp {
                 .cancel_text(tr(keys::MANAGE_PEER_REQUEST_APPLY_SKIP))
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
-                    let _ = app.update(cx, |this, cx| this.finish_group_type_box(Some(true), cx));
+                    let _ = app.update(cx, |this, cx| {
+                        if this.type_box_still_asks(chat_id, enabled) {
+                            this.finish_group_type_box(Some(true), cx);
+                        }
+                    });
                     true
                 })
                 .on_cancel(move |_, _, cx| {
-                    let _ =
-                        skip_app.update(cx, |this, cx| this.finish_group_type_box(Some(false), cx));
+                    let _ = skip_app.update(cx, |this, cx| {
+                        if this.type_box_still_asks(chat_id, enabled) {
+                            this.finish_group_type_box(Some(false), cx);
+                        }
+                    });
                     true
                 })
         });
+    }
+
+    /// The Type box open now is the one of `chat_id` and still has
+    /// join approval at `enabled`: an alert's answer is for that box.
+    pub(super) fn type_box_still_asks(&self, chat_id: ChatId, enabled: bool) -> bool {
+        self.group_type_facts()
+            .is_some_and(|facts| facts.chat_id == chat_id)
+            && self
+                .group_type_box()
+                .is_some_and(|type_box| type_box.draft.request_to_join == enabled)
     }
 
     /// Hand the choice to the Edit box and close.

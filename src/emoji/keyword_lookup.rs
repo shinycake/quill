@@ -86,9 +86,19 @@ impl KeywordLookups {
     }
 
     /// Forget requests that will never answer (swept, or the account
-    /// went away), so they do not hold a flight slot.
+    /// went away), so they do not hold a flight slot. Each counts as a
+    /// failed attempt, so a query that is never answered is given up on
+    /// after [`ATTEMPTS`] instead of being asked after every sweep.
     pub fn retain_in_flight(&mut self, live: impl Fn(RequestId) -> bool) {
-        self.in_flight.retain(|id, _| live(*id));
+        let gone: Vec<RequestId> = self
+            .in_flight
+            .keys()
+            .copied()
+            .filter(|id| !live(*id))
+            .collect();
+        for id in gone {
+            self.failed(id);
+        }
     }
 }
 
@@ -252,6 +262,18 @@ mod tests {
         assert_eq!(lookups.generation, 1);
         lookups.sent(RequestId(2), "fire".into());
         lookups.failed(RequestId(2));
+        assert!(!lookups.wants("fire"));
+    }
+
+    #[test]
+    fn a_swept_request_counts_as_a_failed_attempt() {
+        let mut lookups = KeywordLookups::default();
+        lookups.sent(RequestId(1), "fire".into());
+        lookups.retain_in_flight(|_| false);
+        assert!(lookups.wants("fire"), "one attempt left");
+        lookups.sent(RequestId(2), "fire".into());
+        lookups.retain_in_flight(|_| false);
+        assert!(lookups.gave_up("fire"));
         assert!(!lookups.wants("fire"));
     }
 

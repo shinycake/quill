@@ -525,6 +525,12 @@ pub(super) fn mark_revealed(key: RevealKey) {
     });
 }
 
+/// A switch of account ends every fade: a key names a chat and message of
+/// the account on screen, and the same chat can be open in the next one.
+pub(super) fn forget_reveals() {
+    REVEALS.with(|reveals| reveals.borrow_mut().clear());
+}
+
 /// The cover's remaining opacity while `key` fades out after a reveal.
 pub(super) fn reveal_fade(key: RevealKey) -> Option<f32> {
     REVEALS.with(|reveals| {
@@ -585,6 +591,16 @@ mod tests {
     };
     use gpui_kit::{Bounds, Pixels, point, px, size};
     use std::collections::HashSet;
+
+    #[test]
+    fn a_switch_of_account_ends_the_reveal_fades() {
+        let key = (1, 2, 3, false);
+        super::mark_revealed(key);
+        assert!(super::reveal_fade(key).is_some());
+        super::forget_reveals();
+        assert_eq!(super::reveal_fade(key), None);
+        assert!(!super::revealing());
+    }
 
     #[test]
     fn specks_fade_in_and_out_over_their_life() {

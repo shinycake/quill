@@ -137,9 +137,16 @@ pub(crate) struct MainWindow {
     place: Option<WindowPlace>,
     /// New windows cascade from the main window; this counts them.
     cascade: u32,
-    /// An account switch closed every kit dialog in the main window: its
-    /// shell forgets the one it showed (`QuillShell::sync_kit_dialogs_in`).
-    pub(super) dialogs_closed: bool,
+    /// The windows whose kit dialog was closed from outside their shell
+    /// (an account switch closed every one in the main window; an action's
+    /// `close_kit_dialog_if_done`): the shell forgets the one it showed
+    /// (`QuillShell::sync_kit_dialogs_in`) and does not close again, which
+    /// would close an unrelated dialog now on top.
+    pub(super) dialogs_closed: std::cell::RefCell<std::collections::HashSet<WindowId>>,
+    /// The exit a Quit left waiting behind the "Stop and quit" alert. The
+    /// alert is the window's and the Quit is the app's, so an account
+    /// switch under the alert does not take the exit with it.
+    pub(super) export_stop: Option<super::export_quit::ExitAfterStop>,
     /// Keys go to the window that received them: the interceptor runs
     /// before any handler and puts that window's state in place.
     _key_scope: Subscription,
@@ -159,7 +166,8 @@ impl MainWindow {
             handle: None,
             place: None,
             cascade: 0,
-            dialogs_closed: false,
+            dialogs_closed: Default::default(),
+            export_stop: None,
             _key_scope: key_scope,
         }
     }
@@ -651,6 +659,7 @@ impl QuillApp {
         self.drop_play_intent_in_window(chat_id);
         self.stop_gif_of_window(chat_id);
         self.widgets_left_window(Some(chat_id));
+        super::send_fly::window_closed(chat_id);
         if self.windows.last_press == Some(chat_id) {
             self.windows.last_press = None;
         }
@@ -658,6 +667,11 @@ impl QuillApp {
         self.connection
             .toasts
             .window_closed(chat_id, std::time::Instant::now());
+        // Its toast's fade goes too: one entry per window ever shown would
+        // keep each last note's text for the rest of the run.
+        if let Ok(mut toasts) = self.frame.surfaces.toasts.try_borrow_mut() {
+            toasts.remove(&Some(chat_id.0));
+        }
         // Its boxes close with it, not move (`dialog_hosts`).
         self.windows.dialogs_window_closed(chat_id);
         self.set_window_chat_active(chat_id, false);

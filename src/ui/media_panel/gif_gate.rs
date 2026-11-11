@@ -18,7 +18,9 @@ impl QuillApp {
     /// when the first panel shows the tab and closes when the last one
     /// leaves it, so one window's close does not stop another's GIFs.
     pub(in crate::ui) fn sync_gif_downloads(&mut self) {
-        let wanted = self.pickers.media_panel.shows_gifs() || self.windows.slot_shows_gifs();
+        // Locked, no panel is drawn: the gate is shut, whatever tab it was on.
+        let wanted = !self.refused_while_locked()
+            && (self.pickers.media_panel.shows_gifs() || self.windows.slot_shows_gifs());
         let open = self
             .session()
             .is_some_and(|session| session.stickers.gifs.open);

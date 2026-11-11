@@ -103,13 +103,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(owner) = self.profile_owner(chat_id) else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if append {
-            if !self.session.media.shared_media.begin_profile_more(tab) {
+        let generation = if append {
+            let Some(generation) = self.session.media.shared_media.begin_profile_more(tab) else {
                 return Ok(());
-            }
+            };
+            generation
         } else {
-            self.session.media.shared_media.begin_profile_fetch(tab);
-        }
+            self.session.media.shared_media.begin_profile_fetch(tab)
+        };
         let next_offset = self
             .session
             .media
@@ -130,12 +131,17 @@ impl<S: JsonSender> ConnectDriver<S> {
                 } else {
                     0
                 };
-                self.get_chat_posted_to_chat_page_stories(chat_id, from, PROFILE_PAGE)
-                    .map(|_| ())
+                self.get_chat_posted_to_chat_page_stories(
+                    chat_id,
+                    from,
+                    PROFILE_PAGE,
+                    Some(generation),
+                )
+                .map(|_| ())
             }
             SharedMediaTab::Gifts => {
                 let extra = self.session.request(
-                    RequestPurpose::Media(MediaPurpose::GetProfileGifts { append }),
+                    RequestPurpose::Media(MediaPurpose::GetProfileGifts { append, generation }),
                     Some(chat_id),
                 );
                 let offset = if append { next_offset.as_str() } else { "" };
@@ -145,8 +151,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             _ => Err(ConnectSendError::InvalidRequest),
         };
         if result.is_err() {
-            self.session
-                .fail_profile_tab(chat_id, tab, "Could not send the request.".to_string());
+            self.session.fail_profile_tab(
+                chat_id,
+                tab,
+                Some(generation),
+                "Could not send the request.".to_string(),
+            );
         }
         result
     }
@@ -178,6 +188,40 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .fail_profile_audios(user_id, "Could not send the request.".to_string());
         }
         sent
+    }
+
+    /// The Playlist page opens: ask for the user's playlist. When nothing
+    /// can go out (offline, no user) the page shows a failure with Retry,
+    /// not Loading for good.
+    pub fn open_playlist(&mut self, user_id: i64) {
+        if self.fetch_playlist(user_id, false).is_err() {
+            let empty = self
+                .session
+                .media
+                .playlists
+                .get(&user_id)
+                .is_none_or(|playlist| playlist.error.is_none() && playlist.tracks.is_empty());
+            if empty {
+                self.session
+                    .fail_profile_audios(user_id, "Could not send the request.".to_string());
+            }
+        }
+    }
+
+    /// Retry after the first page failed: forget the failure and ask again.
+    /// When nothing goes out the failure and its Retry stay.
+    pub fn retry_playlist(&mut self, user_id: i64) {
+        let failed = match self.session.media.playlists.get(&user_id) {
+            Some(playlist) if playlist.error.is_some() && playlist.tracks.is_empty() => {
+                self.session.media.playlists.remove(&user_id)
+            }
+            _ => None,
+        };
+        if self.fetch_playlist(user_id, false).is_err()
+            && let Some(failed) = failed
+        {
+            self.session.media.playlists.insert(user_id, failed);
+        }
     }
 
     /// Ask whether a song is in the saved music (`isProfileAudio`), once, so
@@ -291,10 +335,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.settings.media_prefs.data_saver {
             return Ok(());
         }
+        // One refused download does not drop the rest of the queue.
+        let mut first_error = None;
         for file_id in due {
-            self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY)?;
+            if let Err(err) = self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY) {
+                first_error.get_or_insert(err);
+            }
         }
-        Ok(())
+        first_error.map_or(Ok(()), Err)
     }
 
     fn send_profile_request(

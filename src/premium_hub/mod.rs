@@ -91,7 +91,8 @@ impl StarAmount {
 
     /// `1,234` or `12.5`; fractional part only when there are nanostars.
     pub fn label(&self) -> String {
-        let whole = group_digits(self.stars.abs());
+        let grouped = group_digits(self.stars);
+        let whole = grouped.trim_start_matches('-');
         let sign = if self.is_negative() { "-" } else { "" };
         if self.nanos == 0 {
             return format!("{sign}{whole}");

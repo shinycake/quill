@@ -1,8 +1,8 @@
 //! Reducer for the gift market (`crate::gift_market`): resale pages and
 //! purchases, auction states and bids, crafting candidates and results.
 use crate::gift_market::{
-    AuctionFollow, CraftGift, CraftResult, GiftMarketPayload, GiftMarketPurpose, bid_done_toast,
-    error_note,
+    AuctionFetch, AuctionFollow, CraftGift, CraftResult, GiftMarketPayload, GiftMarketPurpose,
+    bid_done_toast, error_note,
 };
 use crate::marketplace::GiftPurchaseResult;
 use crate::state::fetch::Fetch;
@@ -55,9 +55,10 @@ impl Session {
             GiftMarketPayload::AuctionState(state) => {
                 self.remember_files(&state.gift.files);
                 let market = &mut self.payments.gift_market;
-                if request != 0 && market.auction_request == request {
-                    market.auction_loading = false;
-                    market.auction_ready = Some(state.gift_id());
+                if request != 0 && market.auction == (AuctionFetch::Loading { request }) {
+                    market.auction = AuctionFetch::Ready {
+                        gift_id: state.gift_id(),
+                    };
                 }
                 market.store_auction(*state);
             }
@@ -292,10 +293,10 @@ impl Session {
                 }
             }
             GiftMarketPurpose::AuctionState { .. } => {
-                if request == 0 || market.auction_request != request {
+                if request == 0 || market.auction != (AuctionFetch::Loading { request }) {
                     return;
                 }
-                market.auction_loading = false;
+                market.auction = AuctionFetch::Idle;
                 market.notes.push(note);
             }
             GiftMarketPurpose::PlaceBid { .. } | GiftMarketPurpose::IncreaseBid { .. } => {

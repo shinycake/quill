@@ -57,7 +57,18 @@ impl QuillApp {
         };
         // The frame stays as the box's still (closing the editor would
         // remove it).
-        let preview = editor.preview.take();
+        // Only a frame cut at the chosen cover goes to the box; a cut that
+        // has not landed yet leaves the box without a still, never an
+        // older frame.
+        let cover = editor.edits.cover_ms;
+        let preview = match editor.preview.take() {
+            Some((at, frame)) if at == cover => Some(frame),
+            Some((_, stale)) => {
+                let _ = std::fs::remove_file(stale);
+                None
+            }
+            None => None,
+        };
         let emoji = editor.set_emoji.clone();
         self.sticker_box.discard_create();
         self.sticker_box.create = Some(CreateSticker {

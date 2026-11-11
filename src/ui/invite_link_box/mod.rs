@@ -34,8 +34,9 @@ pub(crate) struct InviteLinkBox {
     pub(crate) stars_input: Entity<InputState>,
     /// A Custom box shown in place of this one.
     pub(crate) custom: Option<CustomBox>,
-    /// The Custom number field takes focus on its box's next frame.
-    pub(crate) focus_custom: bool,
+    /// The Custom number field takes focus when its content is first drawn
+    /// (shared with that content, which clears it).
+    pub(crate) focus_custom: std::rc::Rc<std::cell::Cell<bool>>,
     /// The last Save: the box closes on its answer, stays on its error.
     pub(crate) submit: Submit,
 }
@@ -138,7 +139,7 @@ impl QuillApp {
             name_input,
             stars_input,
             custom: None,
-            focus_custom: false,
+            focus_custom: std::rc::Rc::default(),
             submit: Submit::default(),
         });
         self.open_box(DialogKind::InviteLinkBox);

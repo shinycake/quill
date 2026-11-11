@@ -3,7 +3,7 @@
 //! group, offer state updates, the Grams balance and refused requests.
 use crate::state::*;
 use crate::suggested_posts::{
-    DirectMessagesRole, SuggestedPostPayload, SuggestedPostPurpose, error_note,
+    BarSend, DirectMessagesRole, SuggestedPostPayload, SuggestedPostPurpose, error_note,
 };
 
 fn suggested_purpose(pending: Option<&PendingRequest>) -> Option<SuggestedPostPurpose> {
@@ -24,10 +24,8 @@ impl Session {
                 self.edit_loaded_message(chat_id, message_id, |message| {
                     message.extras.suggested_post = info;
                 });
-                self.payments
-                    .suggested_posts
-                    .busy
-                    .remove(&(chat_id.0, message_id.0));
+                // `busy` is the approve or decline's own: only its answer
+                // (or error) clears it, not an offer update that lands first.
             }
             SuggestedPostPayload::GramBalance(nanos) => {
                 self.payments.suggested_posts.gram_balance = Some(nanos);
@@ -39,7 +37,23 @@ impl Session {
     /// buttons only stop waiting.
     pub(crate) fn apply_suggested_post_ok(&mut self, pending: Option<&PendingRequest>) {
         if let Some(purpose) = suggested_purpose(pending) {
-            self.payments.suggested_posts.busy.remove(&purpose.key());
+            self.payments.suggested_posts.settle_busy(purpose);
+        }
+    }
+
+    /// The `message` answer of an edit's send: the bar's terms rode it, so
+    /// the bar goes (when it is the bar that sent).
+    pub(crate) fn settle_suggested_send(&mut self, pending: Option<&PendingRequest>) {
+        let Some(SuggestedPostPurpose::SendChange { chat_id, .. }) = suggested_purpose(pending)
+        else {
+            return;
+        };
+        let bars = &mut self.payments.suggested_posts.bars;
+        if bars
+            .get(&chat_id)
+            .is_some_and(|bar| bar.send.waits_for(pending.map(|p| p.id)))
+        {
+            bars.remove(&chat_id);
         }
     }
 
@@ -47,9 +61,16 @@ impl Session {
         &mut self,
         err: &TdError,
         purpose: SuggestedPostPurpose,
+        request: Option<RequestId>,
     ) {
         let posts = &mut self.payments.suggested_posts;
-        posts.busy.remove(&purpose.key());
+        posts.settle_busy(purpose);
+        if let SuggestedPostPurpose::SendChange { chat_id, .. } = purpose
+            && let Some(bar) = posts.bars.get_mut(&chat_id)
+            && bar.send.waits_for(request)
+        {
+            bar.send = BarSend::Idle;
+        }
         if err.earn_hint == Some(crate::earn::EarnErrorHint::BalanceTooLow) {
             posts.balance_low = Some(purpose);
         } else {

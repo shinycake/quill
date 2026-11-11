@@ -83,10 +83,13 @@ impl QuillApp {
                 chat.my_member_status = Some(ChannelMemberStatus::Left);
             }
         }
-        session.chat_list.psa_labels.take_wanted("en", ["covid"]);
-        let (epoch, _) = session.chat_list.psa_labels.take_wanted("en", []);
-        session.chat_list.psa_labels.store(
-            epoch,
+        let labels = &mut session.chat_list.psa_labels;
+        let plan = labels.plan("en", ["covid"]);
+        let request = quill::ids::RequestId(1);
+        labels.begin(&plan, request);
+        labels.store(
+            plan.epoch,
+            Some(request),
             vec![(
                 "cloud_lng_badge_psa_covid".into(),
                 PackValue::Ordinary("COVID-19 Info".into()),

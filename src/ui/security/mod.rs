@@ -41,18 +41,10 @@ impl QuillApp {
             let state = session
                 .as_ref()
                 .and_then(|s| s.auth_state.password_state.clone());
-            let loading = session.is_some_and(|s| s.auth_state.password_state_loading);
+            let loading = session.is_some_and(|s| s.auth_state.password_state_loading());
             let error = session
                 .as_ref()
                 .and_then(|s| s.auth_state.password_op_error.clone());
-            // A finished recovery / reset / login-email step reports on the
-            // status screen.
-            if this.twofa_step_finished()
-                && matches!(this.twofa.view, TwofaView::Recover | TwofaView::LoginEmail)
-            {
-                this.twofa.view = TwofaView::Status;
-                this.twofa.confirm = None;
-            }
             let notice = this.twofa_notice_line();
             let mut body = div().flex().flex_col().gap_2();
             if let Some(line) = notice.filter(|_| this.twofa.view == TwofaView::Status) {
@@ -516,7 +508,7 @@ impl QuillApp {
         // cached state skips the fetch that would clear it. One still in
         // flight keeps its answer's line.
         if let Some(auth) = self.session_mut().map(|session| &mut session.auth_state)
-            && !auth.password_state_loading
+            && !auth.password_state_loading()
         {
             auth.password_op_error = None;
         }
@@ -595,8 +587,11 @@ impl QuillApp {
     }
 
     /// Something over the Devices list that Esc peels first.
+    /// The details box counts only while its session is in the list: one
+    /// terminated from another device closes the box, and Esc must not
+    /// spend itself on the invisible layer.
     pub(crate) fn sessions_layer_open(&self) -> bool {
-        self.privacy.sessions_confirm.is_some() || self.privacy.extra.session_details.is_some()
+        self.privacy.sessions_confirm.is_some() || self.details_session().is_some()
     }
 
     /// Esc on the Devices page: the confirmation first, then the details.

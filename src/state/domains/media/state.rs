@@ -25,8 +25,9 @@ pub struct MediaState {
     pub downloads: DownloadIntents,
     /// Automatic downloads of full media in the open chat (MED3), whose
     /// progress the history draws: their `updateFile`s redraw at once
-    /// (`redraw_need`). Pruned to the requested downloads on each pass.
-    pub open_chat_media_downloads: HashSet<i32>,
+    /// (`redraw_need`), by the chat whose window asked for them. Pruned to
+    /// the requested downloads on each pass.
+    pub open_chat_media_downloads: HashMap<i32, ChatId>,
     /// Avatar file id → number of chats showing it (chat-list photos),
     /// kept where those ids are set.
     pub(crate) avatar_file_refs: HashMap<i32, u32>,
@@ -40,8 +41,6 @@ pub struct MediaState {
     /// (`Session::user_photo_path`), downloaded at the next poll tick
     /// (`take_avatar_claims`): users are many and most are never shown.
     pub(crate) avatar_claims: std::cell::RefCell<BTreeSet<i32>>,
-    /// Downloads manager panel open (right side, next to the info panel).
-    pub downloads_panel_open: bool,
     /// `@extra` → `file.id` until the download unsticks (survives `file@extra` consuming pending).
     pub(crate) download_extras: DownloadExtras,
     /// Slice media-shared-gallery: per-chat shared-media gallery state
@@ -90,12 +89,11 @@ impl MediaState {
             disk_resume_due: Vec::new(),
             disk_paused_saved_changed: false,
             downloads: DownloadIntents::default(),
-            open_chat_media_downloads: HashSet::new(),
+            open_chat_media_downloads: HashMap::new(),
             avatar_file_refs: HashMap::new(),
             avatar_downloads_due: BTreeSet::new(),
             avatar_rescan: true,
             avatar_claims: Default::default(),
-            downloads_panel_open: false,
             download_extras: DownloadExtras::default(),
             shared_media: SharedMediaState::default(),
             map_thumbs: MapThumbs::default(),

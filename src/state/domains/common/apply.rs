@@ -277,7 +277,7 @@ impl Session {
                     == Some(RequestPurpose::Payments(PaymentsPurpose::GiftExportUrl))
                 {
                     // "Send via Blockchain": Fragment's export page.
-                    self.apply_gift_export_url(url);
+                    self.apply_gift_export_url(url, pending.map(|p| p.id));
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::Payments(PaymentsPurpose::Grams(
                         crate::premium_hub::ton::GramsPurpose::WithdrawalUrl,

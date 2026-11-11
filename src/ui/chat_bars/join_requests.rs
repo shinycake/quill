@@ -229,8 +229,13 @@ impl QuillApp {
 
     /// B8: next page of the join-request list.
     pub(super) fn load_more_join_requests(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.load_more_chat_join_requests(chat_id);
+        if let Some(live) = self.live.as_mut()
+            && live.driver.load_more_chat_join_requests(chat_id).is_err()
+        {
+            self.set_status_note(
+                StatusNote::error(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
+                cx,
+            );
         }
         cx.notify();
     }
@@ -278,6 +283,10 @@ impl QuillApp {
                 .session()
                 .and_then(|s| s.groups.join_requests.get(&chat_id.0))
                 .cloned();
+            // A page is on its way while the chat has a latest request id.
+            let loading_more = this
+                .session()
+                .is_some_and(|s| s.groups.join_request_latest.contains_key(&chat_id.0));
             let mut title = tr(keys::Q_CHAT_JOIN_REQUESTS_2).to_string();
             let mut body = div().flex().flex_col().gap_2();
             let searching = this
@@ -421,6 +430,7 @@ impl QuillApp {
                                 .label(tr(keys::Q_CHAT_SHOW_MORE))
                                 .ghost()
                                 .small()
+                                .disabled(loading_more)
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.load_more_join_requests(chat_id, cx);
                                 })),

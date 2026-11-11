@@ -447,6 +447,7 @@
 "qll_ops_could_not_decline_the_call" = "Couldn't decline the call";
 "qll_ops_could_not_delete_invite_link" = "Couldn't delete invite link";
 "qll_ops_could_not_load_invite_link_members" = "Couldn't load who joined with this link";
+"qll_ops_could_not_load_revoked_invite_links" = "Couldn't load the revoked links";
 "qll_ops_could_not_delete_revoked_links" = "Couldn't delete revoked links";
 "qll_ops_could_not_delete_the_link" = "Could not delete the link.";
 "qll_ops_could_not_delete_the_message" = "Could not delete the message.";
@@ -847,6 +848,7 @@
 "qll_ops_rescheduling" = "Rescheduling…";
 "qll_ops_reset" = "Reset";
 "qll_ops_reset_statistics" = "Reset statistics";
+"qll_ops_reset_statistics_failed" = "Couldn't reset the statistics.";
 "qll_ops_reset_the_statistics_the_counters" = "Reset the statistics? The counters start from zero.";
 "qll_ops_reset_to_default" = "Reset to Default";
 "qll_ops_restrict_user" = "Restrict user";

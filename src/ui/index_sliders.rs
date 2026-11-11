@@ -44,10 +44,25 @@ impl StepSlider {
     }
 }
 
+/// The two storage limit sliders between a drag step and the release that
+/// sends them: if the release never arrives (the pointer was lost), the
+/// page's leave sends what the sliders were left on.
+#[derive(Default)]
+pub(crate) enum StorageDrag {
+    #[default]
+    Settled,
+    Moved {
+        account: quill::ids::AccountKey,
+        size: Option<i64>,
+        keep: Option<i64>,
+    },
+}
+
 /// The live slider entities, by role.
 #[derive(Default)]
 pub(crate) struct IndexSliders {
     map: HashMap<StepSlider, Entity<SliderState>>,
+    pub(super) storage: StorageDrag,
 }
 
 impl IndexSliders {
@@ -106,15 +121,24 @@ impl QuillApp {
         let index = position(value.end(), key.steps());
         match key {
             StepSlider::DataCap(kind) => {
-                if let Some((_, draft)) = self.settings.data_storage_editor.as_mut() {
+                if let Some(draft) = self.settings.data_storage_editor.draft_mut() {
                     draft.set_cap(kind, cap_at(index));
                 }
             }
             StepSlider::StorageSize | StepSlider::StorageKeep => {
                 // tdesktop applies on every move; one `setOption` round per
-                // drag step would flood TDLib, so the release applies.
+                // drag step would flood TDLib, so the release applies, or
+                // the page's leave if no release came.
                 if matches!(event, SliderEvent::Release(_)) {
+                    self.preferences.index_sliders.storage = StorageDrag::Settled;
                     self.apply_storage_sliders(cx);
+                } else if let Some(account) = self.session().map(|s| s.account.clone()) {
+                    let (size, keep) = self.storage_slider_limits(cx);
+                    self.preferences.index_sliders.storage = StorageDrag::Moved {
+                        account,
+                        size,
+                        keep,
+                    };
                 }
             }
             StepSlider::AutoDelete => {}

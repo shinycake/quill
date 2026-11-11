@@ -5,6 +5,7 @@ use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::ChatId;
 use crate::platform::MemorySecretStore;
 use crate::state::SharedMediaTab;
+use crate::telegram::AuthorizationState;
 use crate::telegram::client::copy_and_parse;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -153,6 +154,37 @@ fn the_playlist_is_asked_for_once_per_user_and_pages_on_demand() {
     let sent = recorder.snapshot()[before..].to_vec();
     let request: serde_json::Value = serde_json::from_str(&sent[0]).unwrap();
     assert_eq!(request["offset"], 1);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Offline, opening the Playlist page shows a failure with Retry, and a
+/// Retry that cannot send keeps it (13-087).
+#[test]
+fn an_offline_playlist_page_fails_and_keeps_its_retry() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    driver.session.auth = AuthorizationState::WaitPhoneNumber;
+    driver.open_playlist(31);
+    let failed = |driver: &ConnectDriver<Arc<RecordingSender>>| {
+        driver
+            .session
+            .media
+            .playlists
+            .get(&31)
+            .is_some_and(|p| p.error.is_some() && !p.loading)
+    };
+    assert!(failed(&driver), "the page shows the failure, not Loading");
+    driver.retry_playlist(31);
+    assert!(failed(&driver), "Retry stays when nothing went out");
+    // Back online: Retry asks again.
+    driver.session.auth = AuthorizationState::Ready;
+    let before = recorder.snapshot().len();
+    driver.retry_playlist(31);
+    assert_eq!(recorder.snapshot().len(), before + 1);
+    assert!(driver.session.media.playlists[&31].loading);
     let _ = std::fs::remove_dir_all(dir);
 }
 

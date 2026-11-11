@@ -152,7 +152,8 @@ fn a_chat_windows_gift_box_goes_on_without_the_main_window(cx: &mut TestAppConte
             from_send_box: false,
         };
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.gift_market.auction_ready = Some(5);
+            session.payments.gift_market.auction =
+                quill::gift_market::AuctionFetch::Ready { gift_id: 5 };
         }
     });
     cx.update_window(chat_window, |_, window, cx| window.render_frame(cx))
@@ -163,11 +164,11 @@ fn a_chat_windows_gift_box_goes_on_without_the_main_window(cx: &mut TestAppConte
             app.gift_market.auction_open == crate::ui::gift_market_state::AuctionOpen::Idle,
             "the auction answer was taken"
         );
-        let ready = app
+        let auction = app
             .demo_session
             .as_ref()
-            .and_then(|s| s.payments.gift_market.auction_ready);
-        assert_eq!(ready, None);
+            .map(|s| s.payments.gift_market.auction);
+        assert_eq!(auction, Some(quill::gift_market::AuctionFetch::Idle));
     });
 }
 

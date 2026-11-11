@@ -26,32 +26,51 @@ impl Session {
     /// Phase 9.7: start tracking a story-page mutation (`Sending`) sent as
     /// `request`.
     pub fn begin_story_page_op(&mut self, label: impl Into<String>, request: RequestId) {
-        self.stories.page_op = Some(StoryPageOp {
-            label: label.into(),
-            state: StoryPageOpState::Sending,
-            request: Some(request),
-        });
+        self.track_story_page_op(label.into(), StoryPageOpState::Sending, request);
     }
 
     /// Phase 9.7: start tracking a story-page read (`Checking`) sent as
     /// `request`.
     pub fn begin_story_page_check(&mut self, label: impl Into<String>, request: RequestId) {
-        self.stories.page_op = Some(StoryPageOp {
-            label: label.into(),
-            state: StoryPageOpState::Checking,
-            request: Some(request),
+        self.track_story_page_op(label.into(), StoryPageOpState::Checking, request);
+    }
+
+    /// The chat page comes from the pending request the op tracks.
+    fn track_story_page_op(&mut self, label: String, state: StoryPageOpState, request: RequestId) {
+        let chat_id = self
+            .requests
+            .get(request)
+            .and_then(|pending| pending.chat_id)
+            .map(|chat| chat.0);
+        self.stories.page_ops.begin(StoryPageOp {
+            label,
+            state,
+            request,
+            chat_id,
         });
     }
 
-    /// The op tracking the call `pending` answers, if it is still the one
-    /// tracked: an answer to an earlier call of the same kind (another
-    /// story's Hide, say) never settles a later one.
+    /// The driver could not send `request`: its op fails with `reason`.
+    pub fn fail_story_page_send(
+        &mut self,
+        label: String,
+        request: RequestId,
+        chat_id: Option<ChatId>,
+        reason: String,
+    ) {
+        self.stories.page_ops.begin(StoryPageOp {
+            label,
+            state: StoryPageOpState::Failed(reason),
+            request,
+            chat_id: chat_id.map(|chat| chat.0),
+        });
+    }
+
+    /// The op tracking the call `pending` answers, if it is still tracked:
+    /// an answer settles the op of its own request only, whatever else the
+    /// page has in flight.
     fn story_page_op_for(&mut self, pending: Option<&PendingRequest>) -> Option<&mut StoryPageOp> {
-        let pending = pending?;
-        self.stories
-            .page_op
-            .as_mut()
-            .filter(|op| op.request == Some(pending.id))
+        self.stories.page_ops.get_mut(pending?.id)
     }
 
     /// Phase 9.7: mark the story-page op `Succeeded` when its answer lands.
@@ -73,21 +92,20 @@ impl Session {
     /// another chat's page. An op still in flight keeps its line until its
     /// answer.
     pub fn settle_story_page_op(&mut self) {
-        if self.stories.page_op.as_ref().is_some_and(|op| {
-            matches!(
-                op.state,
-                StoryPageOpState::Succeeded | StoryPageOpState::Failed(_)
-            )
-        }) {
-            self.stories.page_op = None;
-        }
+        self.stories.page_ops.settle_finished();
+    }
+
+    /// The story page of `chat_id` was closed: its calls are no longer
+    /// tracked, in flight or finished.
+    pub fn leave_story_page(&mut self, chat_id: i64) {
+        self.stories.page_ops.forget_chat(chat_id);
     }
 
     /// Phase 9.7: clear the story-page op once its load answer landed (the
     /// loaded list itself is the honest state — no status line needed).
     pub(crate) fn clear_story_page_op(&mut self, pending: Option<&PendingRequest>) {
-        if self.story_page_op_for(pending).is_some() {
-            self.stories.page_op = None;
+        if let Some(pending) = pending {
+            self.stories.page_ops.remove(pending.id);
         }
     }
 
@@ -144,6 +162,27 @@ impl Session {
         self.stories.viewers = None;
     }
 
+    /// The driver sent the viewers page `request` for the story's panel.
+    pub fn story_viewers_loading(&mut self, chat_id: i64, story_id: i32, request: RequestId) {
+        if let Some(state) = self.stories.viewers.as_mut()
+            && state.chat_id == chat_id
+            && state.story_id == story_id
+        {
+            state.page = ViewersPage::Loading { request };
+        }
+    }
+
+    /// The panel the answer to `pending` belongs to: the one that is still
+    /// loading exactly that request.
+    fn story_viewers_asking(&mut self, pending: &PendingRequest) -> Option<&mut StoryViewersState> {
+        self.stories.viewers.as_mut().filter(|state| {
+            state.page
+                == ViewersPage::Loading {
+                    request: pending.id,
+                }
+        })
+    }
+
     /// Phase 9.2+: store `getCustomEmojiStickers` answers for the story
     /// reaction picker — keyed by sticker id (= custom emoji id).
     pub fn accept_story_custom_emoji_stickers(&mut self, stickers: Vec<StickerItem>) {
@@ -163,24 +202,18 @@ impl Session {
     }
 
     /// Phase 9.5: accumulate one `storyInteractions` page into the
-    /// viewers panel. A page for a different story (stale response after
-    /// the viewer moved on) is dropped.
+    /// viewers panel. Only the panel that asked for this very request takes
+    /// it: a page for another story, or one asked by a panel since closed
+    /// and reopened, is dropped.
     pub fn accept_story_interactions(
         &mut self,
         pending: &PendingRequest,
         view: StoryInteractionsView,
     ) {
-        let (Some(chat_id), Some(story_id)) = (pending.chat_id, pending.story_id) else {
+        let Some(state) = self.story_viewers_asking(pending) else {
             return;
         };
-        let Some(state) = self.stories.viewers.as_mut() else {
-            return;
-        };
-        if state.chat_id != chat_id.0 || state.story_id != story_id {
-            return;
-        }
-        state.loading = false;
-        state.error = None;
+        state.page = ViewersPage::Idle;
         state.total_count = view.total_count;
         state.next_offset = view.next_offset;
         state.rows.extend(view.interactions);
@@ -189,25 +222,18 @@ impl Session {
     /// Phase 9.5: mark the viewers fetch as failed; the panel shows the
     /// error with a retry instead of spinning forever.
     pub fn fail_story_viewers(&mut self, pending: &PendingRequest, message: String) {
-        let (Some(chat_id), Some(story_id)) = (pending.chat_id, pending.story_id) else {
-            return;
-        };
-        if let Some(state) = self.stories.viewers.as_mut()
-            && state.chat_id == chat_id.0
-            && state.story_id == story_id
-        {
-            state.loading = false;
-            state.error = Some(message);
+        if let Some(state) = self.story_viewers_asking(pending) {
+            state.page = ViewersPage::Failed(message);
         }
     }
 
-    /// Phase 9.5: start the `reportStory` flow for a story — the UI
-    /// renders `Checking` until the first answer lands.
-    pub fn begin_story_report(&mut self, chat_id: i64, story_id: i32) {
+    /// Phase 9.5: the first `reportStory` of a story's flow went out as
+    /// `request` — the UI renders `Checking` until that answer lands.
+    pub fn begin_story_report(&mut self, chat_id: i64, story_id: i32, request: RequestId) {
         self.stories.report = Some(StoryReportFlow {
             chat_id,
             story_id,
-            stage: StoryReportStage::Checking,
+            stage: StoryReportStage::Checking { request },
         });
     }
 
@@ -215,20 +241,24 @@ impl Session {
         self.stories.report = None;
     }
 
-    /// Phase 9.5: apply a `ReportStoryResult` answer. A result for a
-    /// different story (stale response) is dropped. Mirrors TDLib's
+    /// The flow the answer to `pending` belongs to: the one that waits for
+    /// exactly that request. An answer to an earlier request of the same
+    /// story (the box was closed and reopened, the step was repeated) or to
+    /// a story left behind moves nothing.
+    fn story_report_asking(&mut self, pending: &PendingRequest) -> Option<&mut StoryReportFlow> {
+        self.stories
+            .report
+            .as_mut()
+            .filter(|flow| flow.stage.waiting_for() == Some(pending.id))
+    }
+
+    /// Phase 9.5: apply a `ReportStoryResult` answer. Mirrors TDLib's
     /// `ReportStoryQuery` mapping (`td/telegram/StoryManager.cpp:1406-1430`
     /// @d1085f9): an empty option list is a success, not a picker.
     pub fn accept_story_report(&mut self, pending: &PendingRequest, result: ReportStoryResult) {
-        let (Some(chat_id), Some(story_id)) = (pending.chat_id, pending.story_id) else {
+        let Some(flow) = self.story_report_asking(pending) else {
             return;
         };
-        let Some(flow) = self.stories.report.as_mut() else {
-            return;
-        };
-        if flow.chat_id != chat_id.0 || flow.story_id != story_id {
-            return;
-        }
         flow.stage = match result {
             ReportStoryResult::Ok => StoryReportStage::Reported,
             ReportStoryResult::OptionRequired { title: _, options } if options.is_empty() => {
@@ -248,13 +278,13 @@ impl Session {
     }
 
     /// Phase 9.5: the follow-up `reportStory` (reason picked / details
-    /// submitted) is in flight.
-    pub fn story_report_sending(&mut self, chat_id: i64, story_id: i32) {
+    /// submitted) went out as `request`.
+    pub fn story_report_sending(&mut self, chat_id: i64, story_id: i32, request: RequestId) {
         if let Some(flow) = self.stories.report.as_mut()
             && flow.chat_id == chat_id
             && flow.story_id == story_id
         {
-            flow.stage = StoryReportStage::Sending;
+            flow.stage = StoryReportStage::Sending { request };
         }
     }
 
@@ -262,28 +292,21 @@ impl Session {
     /// flow with the sanitized message (there is no `Failed` result
     /// variant — errors arrive as `error` answers).
     pub fn fail_story_report(&mut self, pending: &PendingRequest, message: String) {
-        let (Some(chat_id), Some(story_id)) = (pending.chat_id, pending.story_id) else {
-            return;
-        };
-        if let Some(flow) = self.stories.report.as_mut()
-            && flow.chat_id == chat_id.0
-            && flow.story_id == story_id
-        {
+        if let Some(flow) = self.story_report_asking(pending) {
             flow.stage = StoryReportStage::Failed(message);
         }
     }
 
     /// Phase 9.5: `reportStory` failed to send at all — the driver took
-    /// the pending request back, so no answer will ever arrive. End the
-    /// flow with the error instead of spinning on `Checking`/`Sending`
-    /// forever.
+    /// the pending request back, so no answer will ever arrive. The story's
+    /// flow ends with the error instead of spinning on `Checking`/`Sending`
+    /// forever (and is made when the first request never went out).
     pub fn fail_story_report_send(&mut self, chat_id: i64, story_id: i32, message: String) {
-        if let Some(flow) = self.stories.report.as_mut()
-            && flow.chat_id == chat_id
-            && flow.story_id == story_id
-        {
-            flow.stage = StoryReportStage::Failed(message);
-        }
+        self.stories.report = Some(StoryReportFlow {
+            chat_id,
+            story_id,
+            stage: StoryReportStage::Failed(message),
+        });
     }
 
     /// Phase 9.5: store the latest `updateStoryStealthMode` state.

@@ -5,7 +5,7 @@ use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
 use crate::ids::{AccountKey, ChatId, MessageId};
 use crate::platform::MemorySecretStore;
-use crate::state::{RequestPurpose, Session};
+use crate::state::Session;
 use crate::story_composer::StoryPrivacy;
 use crate::telegram::client::copy_and_parse;
 use serde_json::Value;
@@ -240,6 +240,7 @@ fn driver_get_story_interactions_gates_and_dedupes() {
         "storyContentPhoto",
         r#""can_get_interactions":true,"#,
     );
+    driver.session.begin_story_viewers(7, 6);
     let extra = driver
         .get_story_interactions(ChatId(7), 6, "")
         .unwrap()
@@ -257,6 +258,15 @@ fn driver_get_story_interactions_gates_and_dedupes() {
     assert_eq!(v["limit"], 50);
     // In-flight fetch dedupes to None (no second request).
     assert_eq!(driver.get_story_interactions(ChatId(7), 6, ""), Ok(None));
+    // The panel is closed and reopened while that request is still out: the
+    // new panel asks for its own first page instead of being held up by it.
+    driver.session.clear_story_viewers();
+    driver.session.begin_story_viewers(7, 6);
+    let fresh = driver
+        .get_story_interactions(ChatId(7), 6, "")
+        .unwrap()
+        .expect("the reopened panel sends");
+    assert_ne!(fresh, extra);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -317,7 +327,6 @@ fn driver_activate_story_stealth_mode_sends_and_dedupes() {
 
     let extra = driver
         .activate_story_stealth_mode()
-        .unwrap()
         .expect("activateStoryStealthMode sends");
     let json = recorder
         .snapshot()
@@ -327,8 +336,10 @@ fn driver_activate_story_stealth_mode_sends_and_dedupes() {
     let v: Value = serde_json::from_str(&json).unwrap();
     assert_eq!(v["@type"], "activateStoryStealthMode");
     assert_eq!(v["@extra"], extra.0.to_string());
-    // A second activation while the first is in flight is a no-op.
-    assert_eq!(driver.activate_story_stealth_mode(), Ok(None));
+    // The box asks once per press; a box opened after a closed one asks
+    // for its own answer, so a second call sends too.
+    let second = driver.activate_story_stealth_mode().expect("sends");
+    assert_ne!(second, extra);
     driver
         .ingest(
             copy_and_parse(
@@ -342,15 +353,19 @@ fn driver_activate_story_stealth_mode_sends_and_dedupes() {
             .unwrap(),
         )
         .unwrap();
-    assert!(
-        !driver
+    // The refusal is kept with the request it answers, for the box that
+    // asked.
+    assert_eq!(
+        driver
             .session
-            .requests
-            .has_purpose(RequestPurpose::ActivateStoryStealthMode)
+            .stories
+            .stealth_refusal
+            .as_ref()
+            .map(|(request, _)| *request),
+        Some(extra)
     );
     let again = driver
         .activate_story_stealth_mode()
-        .unwrap()
         .expect("sends again after the error");
     assert_ne!(again, extra);
     let _ = std::fs::remove_dir_all(&dir);
@@ -404,14 +419,14 @@ fn driver_manage_story_gated_on_cached_flags() {
     assert!(v["content"].is_null());
     assert!(v["areas"].is_null());
     assert_eq!(v["caption"]["text"], "new");
-    assert!(driver.session.stories.manage.pending);
+    assert!(driver.session.stories.manage.is_pending());
 
     let extra = driver.edit_story_cover(ChatId(7), 6, 2.5).unwrap();
     let v: Value = serde_json::from_str(recorder.snapshot().last().unwrap()).unwrap();
     assert_eq!(v["@type"], "editStoryCover");
     assert_eq!(v["@extra"], extra.0.to_string());
     assert_eq!(v["cover_frame_timestamp"], 2.5);
-    assert!(driver.session.stories.manage.pending);
+    assert!(driver.session.stories.manage.is_pending());
 
     let extra = driver
         .set_story_privacy_settings(ChatId(7), 6, StoryPrivacy::Contacts.settings_json(&[]))
@@ -423,7 +438,7 @@ fn driver_manage_story_gated_on_cached_flags() {
         v["privacy_settings"]["@type"],
         "storyPrivacySettingsContacts"
     );
-    assert!(driver.session.stories.manage.pending);
+    assert!(driver.session.stories.manage.is_pending());
 
     let _ = std::fs::remove_dir_all(&dir);
 }

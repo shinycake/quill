@@ -12,6 +12,7 @@
 
 use super::app::{ChatListFilter, PaneMode, QuillApp};
 use super::chat_row::ChatListItem;
+use super::chat_ui_state::A11yFocus;
 use super::history_a11y::A11yKey;
 use super::menu_states::ChatMenuState;
 use gpui_kit::component::*;
@@ -126,7 +127,9 @@ impl QuillApp {
         self.pane_mode() != PaneMode::Ready
             || self.account.passcode.is_locked()
             || self.viewer.state.is_open()
-            || self.stories.viewer.is_open()
+            // The story viewer is the main window's: a chat window's
+            // keys are its own.
+            || (self.windows.scope.is_none() && self.stories.viewer.is_open())
             || window.has_active_dialog(cx)
     }
 
@@ -359,14 +362,15 @@ impl QuillApp {
         let ids = self.loaded_selectable_ids(chat_id);
         let focus = self
             .chat_ui
-            .selection_focus
+            .focus
+            .row()
             .filter(|id| ids.contains(id))
             .or(ids.last().copied());
         let Some(focus) = focus else {
             return false;
         };
         self.chat_ui.selection_anchor = Some(focus);
-        self.chat_ui.selection_focus = Some(focus);
+        self.chat_ui.focus = A11yFocus::Row(focus);
         self.toggle_forward_select(chat_id, focus, false, cx);
         if self.selecting_in(chat_id) {
             // The keyboard stays on the rows: Space keeps toggling, Up and
@@ -478,7 +482,7 @@ impl QuillApp {
             return false;
         }
         let ids = self.loaded_selectable_ids(chat_id);
-        let old = self.chat_ui.selection_focus.filter(|id| ids.contains(id));
+        let old = self.chat_ui.focus.row().filter(|id| ids.contains(id));
         let Some(new) = quill::selection_pin::step_focus(&ids, old, older) else {
             return false;
         };
@@ -508,7 +512,7 @@ impl QuillApp {
         } else {
             self.chat_ui.selection_anchor = Some(new);
         }
-        self.chat_ui.selection_focus = Some(new);
+        self.chat_ui.focus = A11yFocus::Row(new);
         self.scroll_selection_focus_into_view(new, cx);
         cx.notify();
         true

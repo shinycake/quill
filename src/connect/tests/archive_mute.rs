@@ -137,3 +137,19 @@ fn a_failed_reload_stops_waiting_and_a_new_suggestion_reloads_again() {
     assert_eq!(requests(&f, "getArchiveChatListSettings").len(), 3);
     cleanup(f);
 }
+
+#[test]
+fn a_dismissal_that_cannot_be_sent_still_drops_the_suggestion() {
+    let mut f = fixture();
+    suggest(&mut f);
+    answer_settings(&mut f, false);
+    assert!(due(&f));
+    ingest(
+        &mut f,
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateClosing"}}"#,
+    );
+    assert!(f.1.hide_suggested_action(ACTION).is_err());
+    assert!(!due(&f), "the box does not come back");
+    assert!(requests(&f, "hideSuggestedAction").is_empty());
+    cleanup(f);
+}

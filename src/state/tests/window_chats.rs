@@ -231,6 +231,32 @@ fn an_answer_for_one_window_lands_there_while_another_window_is_in_place() {
 }
 
 #[test]
+fn an_answer_for_a_closed_window_does_not_land_in_a_new_window_of_the_same_chat() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, CHAT_JSON);
+    apply_json(&mut session, &seq, &sink, BOB_JSON);
+    session.open_chat(ChatId(8));
+    session.open_window_chat(ChatId(7));
+    let extra = session
+        .with_view(Some(ChatId(7)), |session| {
+            session.request(RequestPurpose::GetChatSponsoredMessages, Some(ChatId(7)))
+        })
+        .expect("chat 7 has a window");
+    assert!(session.close_window_chat(ChatId(7)));
+    session.open_window_chat(ChatId(7));
+    let json = format!(
+        r#"{{"@type":"sponsoredMessages","@extra":"{}","messages_between":3,"messages":[{{"@type":"sponsoredMessage","message_id":9001,"is_recommended":false,"can_be_reported":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"ad","entities":[]}}}},"sponsor":{{"@type":"advertisementSponsor","url":"https://example.com","info":"Ads"}},"title":"Sale","button_text":"Shop","accent_color_id":0,"background_custom_emoji_id":"0","additional_info":""}}]}}"#,
+        extra.0
+    );
+    apply_json(&mut session, &seq, &sink, &json);
+    assert!(
+        !session.messages.sponsored.contains_key(&7),
+        "the closed window's answer did not reach the new window"
+    );
+}
+
+#[test]
 fn sponsored_rows_asked_for_by_a_window_land_for_its_chat() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);

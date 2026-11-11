@@ -86,7 +86,13 @@ impl PhotoEditor {
         }
         self.keep_ratio = !self.keep_ratio;
         self.crop = if self.keep_ratio {
-            let (x, y, w, h) = keep_ratio_crop(self.original_ratio);
+            // The picture's ratio as it lies now: Rotate turned it.
+            let ratio = if self.orientation.is_sideways() {
+                1.0 / self.original_ratio
+            } else {
+                self.original_ratio
+            };
+            let (x, y, w, h) = keep_ratio_crop(ratio);
             CropRect { x, y, w, h }
         } else {
             CropRect::FULL
@@ -329,6 +335,18 @@ mod tests {
         let prepared = quill::sticker_image::prepared_sticker_image(&kept, 512, Corners::Large);
         assert_eq!(prepared.get_pixel(0, 0)[3], 0, "rounded corner");
         assert_eq!(prepared.get_pixel(256, 128)[3], 255);
+    }
+
+    #[test]
+    fn keep_ratio_after_rotate_follows_the_turned_picture() {
+        let mut wide = editor(400, 200, SetKind::Stickers);
+        wide.rotate();
+        wide.toggle_keep_ratio();
+        wide.toggle_keep_ratio();
+        wide.toggle_keep_ratio();
+        assert_eq!(wide.crop.w * 2.0, wide.crop.h, "tall after one turn");
+        wide.rotate();
+        assert_eq!(wide.crop.h * 2.0, wide.crop.w, "wide after two");
     }
 
     /// Done hands the canvas to the worker as it is: the turn waits for

@@ -179,6 +179,7 @@ impl QuillApp {
     pub(super) fn show_settings_sub(&mut self, sub: SubPage, cx: &mut Context<Self>) {
         self.settings.page = Some(sub.parent());
         self.settings.sub = Some(sub);
+        self.preferences.advanced.forget_import_offer();
         self.settings.sub_scroll.set_offset(point(px(0.), px(0.)));
         cx.notify();
     }

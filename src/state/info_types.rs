@@ -295,8 +295,17 @@ pub enum ChatStatisticsFetch {
     WaitingForInfo {
         is_dark: bool,
     },
-    Loading,
-    Loaded(std::sync::Arc<ChatStatistics>),
+    /// Asked for graphs in this theme.
+    Loading {
+        is_dark: bool,
+    },
+    /// The graphs' colors are the theme they were asked for
+    /// (`ConnectDriver::refresh_chat_statistics` asks again when the
+    /// theme changed).
+    Loaded {
+        stats: std::sync::Arc<ChatStatistics>,
+        is_dark: bool,
+    },
     Failed(String),
 }
 
@@ -731,4 +740,18 @@ pub enum DeepLinkState {
     Ui(crate::deep_link_types::DeepLinkUi),
     /// TDLib calls the link unknown: the UI asks `getDeepLinkInfo` for it.
     Unknown { link: String },
+}
+
+impl DeepLinkState {
+    /// The flow generation of a stage that belongs to one; answers of an
+    /// older flow are dropped by comparing it.
+    pub fn generation(&self) -> Option<u64> {
+        match self {
+            Self::InvitePreview { generation, .. }
+            | Self::ResolvingInfo { generation }
+            | Self::Info { generation, .. }
+            | Self::ResolvingChat { generation, .. } => Some(*generation),
+            Self::ChatReady { .. } | Self::ShowText(_) | Self::Ui(_) | Self::Unknown { .. } => None,
+        }
+    }
 }
