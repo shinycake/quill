@@ -33,7 +33,9 @@ pub enum AddressLine<'a> {
 struct Address {
     text: String,
     shown_once: bool,
-    hidden_while_moving: String,
+    /// The address that was shown, with the place it is for: restored
+    /// only when the pin comes back to that place.
+    hidden_while_moving: Option<(GeoPoint, String)>,
     resolving_for: Option<GeoPoint>,
     /// Resolve this once the pin rests (tdesktop `kResolveAddressDelay`).
     postponed: Option<GeoPoint>,
@@ -210,9 +212,13 @@ impl LocationPicker {
             return;
         }
         self.moving = true;
-        if !self.address.text.is_empty() {
-            self.address.hidden_while_moving = std::mem::take(&mut self.address.text);
+        if !self.address.text.is_empty()
+            && let Some(point) = self.address.resolving_for
+        {
+            self.address.hidden_while_moving =
+                Some((point, std::mem::take(&mut self.address.text)));
         }
+        self.address.text.clear();
         self.address.postponed = None;
         self.places_in_area = false;
     }
@@ -230,10 +236,12 @@ impl LocationPicker {
         }
         self.moving = false;
         let location = self.view.center();
-        if same_place(self.address.resolving_for, Some(location))
-            && !self.address.hidden_while_moving.is_empty()
-        {
-            self.address.text = std::mem::take(&mut self.address.hidden_while_moving);
+        let restored = match self.address.hidden_while_moving.take() {
+            Some((point, text)) if same_place(Some(point), Some(location)) => Some(text),
+            _ => None,
+        };
+        if let Some(text) = restored {
+            self.address.text = text;
             self.address.postponed = None;
         } else {
             self.address.postponed = Some(location);

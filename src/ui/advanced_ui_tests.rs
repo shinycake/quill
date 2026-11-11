@@ -10,7 +10,8 @@ use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
-    AppContext, Entity, Keystroke, Modifiers, TestAppContext, VisualTestContext, px, size,
+    AppContext, Entity, Focusable, Keystroke, Modifiers, TestAppContext, VisualTestContext, px,
+    size,
 };
 use quill::advanced::experimental::{self, Imported, Values};
 use quill::settings_catalog::Page;
@@ -258,14 +259,20 @@ fn the_hardware_video_switch_on_the_advanced_page_flips_the_setting(cx: &mut Tes
 /// A signed-out screen with no connection: the screenshot demo of the
 /// phone step.
 fn sign_in_screen(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+    sign_in_screen_on(cx, "wait-phone")
+}
+
+fn sign_in_screen_on(
+    cx: &mut TestAppContext,
+    demo: &'static str,
+) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
     let handle = cx.open_window(size(px(1100.), px(800.)), move |window, cx| {
-        let view = cx.new(|cx| {
-            QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named("wait-phone")))
-        });
+        let view = cx
+            .new(|cx| QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named(demo))));
         *slot_in.borrow_mut() = Some(view.clone());
         let shell = cx.new(|_| QuillShell::new(view));
         Root::new(shell, window, cx)
@@ -307,6 +314,28 @@ fn testmode_typed_on_the_sign_in_screen_shows_the_test_mode_label(cx: &mut TestA
     assert!(!test_mode_label_shown(vcx));
     app.read_with(vcx, |app, _| {
         assert_eq!(app.connection.status_note(), SWITCHED_TO_PRODUCTION);
+    });
+}
+
+/// A cloud password that holds a code word is typed into its field, not run.
+#[gpui_kit::test]
+fn a_password_holding_testmode_does_not_switch_environments(cx: &mut TestAppContext) {
+    let (app, mut vcx) = sign_in_screen_on(cx, "wait-password");
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        let focus = app.auth_ui.password_input.focus_handle(cx);
+        window.focus(&focus, cx);
+    });
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.simulate_keystrokes("t e s t");
+    assert!(
+        vcx.update(|window, _| window.focused_text_input()),
+        "the password field has the focus"
+    );
+    vcx.simulate_keystrokes("m o d e");
+    assert!(!test_mode_label_shown(vcx), "typing a password switched");
+    app.read_with(vcx, |app, _| {
+        assert!(!app.preferences.advanced.test_environment());
     });
 }
 
@@ -468,4 +497,26 @@ fn update_quill_in_the_title_bar_downloads_the_release(cx: &mut TestAppContext) 
     });
     assert!(shown(vcx, "title-bar-update"));
     quill::update_install::force_self_update_available(None);
+}
+
+/// Sweep 07-023: the page reads the clipboard once, not on every render,
+/// and again after the window is activated or Export wrote to it.
+#[gpui_kit::test]
+fn the_import_offer_reads_the_clipboard_once_until_it_may_have_changed(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let reads = std::cell::Cell::new(0);
+    app.read_with(vcx, |app, _| {
+        let advanced = &app.preferences.advanced;
+        let read = |offered: bool| {
+            reads.set(reads.get() + 1);
+            offered
+        };
+        assert!(advanced.import_offered(|| read(true)));
+        assert!(advanced.import_offered(|| read(false)), "kept, not read");
+        assert_eq!(reads.get(), 1);
+        advanced.forget_import_offer();
+        assert!(!advanced.import_offered(|| read(false)));
+        assert_eq!(reads.get(), 2);
+    });
 }

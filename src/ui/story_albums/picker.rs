@@ -4,7 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
-use crate::ui::scroll_load::scrolled_near_end;
+use crate::ui::scroll_load::{load_due, scrolled_near_end};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tooltip::Tooltip;
 use quill::local_path::sandboxed_display_path;
@@ -45,7 +45,7 @@ impl QuillApp {
             page.picker = Some(AlbumPicker::new(target, initial));
         }
         self.request_picker_thumbs(cx);
-        self.picker_load_near_end(cx);
+        self.picker_load_near_end(cx, false);
         cx.notify();
     }
 
@@ -143,14 +143,23 @@ impl QuillApp {
 
     /// Load the next page when the grid is scrolled near its end (or does
     /// not fill its box yet), as tdesktop's story grid does.
-    pub(super) fn picker_load_near_end(&mut self, cx: &mut Context<Self>) {
-        let Some(scroll) = self.stories.page.as_ref().map(|p| p.picker_scroll.clone()) else {
-            return;
-        };
-        if self.archived_loading() || !self.picker_has_more() {
+    /// The grid shows the archive, so it asks the way the archive section
+    /// does (`story_archive_more`): once per list length unless the reader
+    /// scrolled, and never in a demo session.
+    pub(super) fn picker_load_near_end(&mut self, cx: &mut Context<Self>, scrolled: bool) {
+        if self.live.is_none() {
             return;
         }
-        if !scrolled_near_end(&scroll) {
+        let loaded = self.archived_loaded();
+        let Some(page) = self.stories.page.as_ref() else {
+            return;
+        };
+        if !load_due(
+            scrolled_near_end(&page.picker_scroll),
+            self.picker_has_more(),
+            self.archived_loading(),
+        ) || !page.archive_asked.allow(loaded, scrolled)
+        {
             return;
         }
         self.load_more_archived_stories(cx);
@@ -275,7 +284,7 @@ impl QuillApp {
             .track_scroll(&scroll)
             .on_scroll(cx.listener(|this, _, _, cx| {
                 this.spawn_scoped(cx, async move |this, cx| {
-                    let _ = this.update(cx, |this, cx| this.picker_load_near_end(cx));
+                    let _ = this.update(cx, |this, cx| this.picker_load_near_end(cx, true));
                 })
                 .detach();
             }));

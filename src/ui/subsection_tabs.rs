@@ -135,8 +135,8 @@ impl QuillApp {
                 tab_count,
                 strip_width: f32::from(scroll.bounds().size.width) as i32,
             };
-            if needs_reveal(self.history.subsection_tabs.revealed.get(), key) {
-                self.history.subsection_tabs.revealed.set(Some(key));
+            if needs_reveal(self.chat_ui.tabs_revealed.get(), key) {
+                self.chat_ui.tabs_revealed.set(Some(key));
                 scroll.scroll_to_item(selected);
             }
         }

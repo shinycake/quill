@@ -9,7 +9,9 @@ use crate::calls::capture::{
     AudioFrame, CaptureError, CaptureEvent, FrameSink, MicCapture, MicControls, VideoFrame,
 };
 use crate::calls::engine::{CallEngine, CaptureTarget, ConnectParams, ExternalDevice, MockEngine};
+use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::state::{ActiveGroupCall, CallTransport};
+use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::parse_group_call_participant;
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -213,6 +215,34 @@ fn a_hidden_window_pauses_once_per_edge() {
     assert!(!driver.call_screen().paused());
     sink.push(frame(4));
     wait_for(|| engine.external_frames().len() == 1);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn a_refused_pause_edge_puts_the_tile_back_without_a_box_error() {
+    let (dir, mut driver, _engine, screens) = group_driver();
+    driver.session.calls.active_group_call = Some(sharing_group_call());
+    driver.choose_call_screen_source(SourceId("window:42".into()), false);
+    pump_until_screen_answers(&mut driver);
+    sink_of(&screens).push_event(CaptureEvent::Paused);
+    pump_until_screen_answers(&mut driver);
+    let toggles = sent_of(&driver, "toggleGroupCallScreenSharingIsPaused");
+    assert_eq!(toggles.len(), 1);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let json = serde_json::json!({
+        "@type": "error",
+        "@extra": toggles[0]["@extra"],
+        "code": 400,
+        "message": "GROUPCALL_INVALID",
+    })
+    .to_string();
+    let seq = std::sync::atomic::AtomicU64::new(5_000);
+    driver
+        .ingest(copy_and_parse(&json, &seq, &sink).unwrap())
+        .unwrap();
+    let call = driver.session.calls.active_group_call.as_ref().unwrap();
+    assert!(!call.screen_share_paused);
+    assert_eq!(driver.session.calls.group_call_error, None);
     std::fs::remove_dir_all(dir).ok();
 }
 

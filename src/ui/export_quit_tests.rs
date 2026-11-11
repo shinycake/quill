@@ -101,7 +101,7 @@ fn app_wide_actions(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
 }
 
 fn box_open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
-    app.read_with(vcx, |app, _| app.dialogs.export_stop.is_some())
+    app.read_with(vcx, |app, _| app.main_window.export_stop.is_some())
 }
 
 #[gpui_kit::test]
@@ -162,6 +162,45 @@ fn stop_ends_the_export_and_then_quits(cx: &mut TestAppContext) {
         let session = app.demo_session.as_mut().unwrap();
         session.settings.account_export.take().unwrap()
     });
+    wait_for_the_end(|| export.progress().is_settled());
+    drop(export);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Sweep 09-098: the Quit's exit belongs to the window's alert, not to the
+/// account on screen: a screen replaced under the open alert does not take
+/// the exit with it, so Stop still quits.
+#[gpui_kit::test]
+fn a_replaced_screen_leaves_the_quit_and_its_alert_in_step(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let dir = scratch("switch");
+    let export = running_account_export(&dir);
+    app.update(vcx, |app, _| {
+        app.demo_session.as_mut().unwrap().settings.account_export = Some(export);
+    });
+    let exited = ask(&app, vcx);
+    assert!(!exited.get());
+    app.update_in(vcx, |app, window, cx| app.replace_screen(window, cx));
+    settle(vcx);
+    assert!(
+        box_open(&app, vcx),
+        "the alert is the window's and stays up"
+    );
+    vcx.simulate_keystrokes("enter");
+    settle(vcx);
+    assert!(exited.get(), "Stop still quits");
+    assert!(!box_open(&app, vcx));
+    let export = app.update(vcx, |app, _| {
+        app.demo_session
+            .as_mut()
+            .unwrap()
+            .settings
+            .account_export
+            .take()
+            .unwrap()
+    });
+    export.cancel();
     wait_for_the_end(|| export.progress().is_settled());
     drop(export);
     let _ = std::fs::remove_dir_all(&dir);

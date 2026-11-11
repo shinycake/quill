@@ -221,6 +221,9 @@ impl QuillApp {
                 self.history.last_highlight = None;
                 self.history.scroll_date = Default::default();
                 self.history.scroll_top_probe.set(None);
+                // The painted row range is the old history's: the page
+                // keys, the chrome and a11y wait for the new first paint.
+                self.history.scroll_view_probe.set(None);
                 self.history.scroller.update(cx, |state, cx| {
                     state.reset(count, cx);
                 });

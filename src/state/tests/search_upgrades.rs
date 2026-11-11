@@ -212,7 +212,7 @@ fn a_refused_remove_surfaces_a_note() {
         session
             .chats_state
             .chat_action_error
-            .as_deref()
+            .last()
             .is_some_and(|note| note.contains("recent search"))
     );
 }

@@ -234,6 +234,34 @@ pub(super) struct WidgetEntry {
 }
 
 impl WidgetEntry {
+    /// A press or a hover that cannot end: the widget went off screen, or
+    /// its runtime stopped or restarted, so the release or the leave would
+    /// never reach it. A later move is a hover again, not a drag.
+    pub(super) fn release_pointer(&mut self) {
+        self.pressed = None;
+        self.hovered = false;
+        self.hold = false;
+    }
+
+    /// New content: the part bound to the old content goes whole (its last
+    /// frame, height, poll, the runtime and what it asked for), so a runtime
+    /// that fails shows the failure and not the old picture.
+    pub(super) fn replace_content(&mut self, identity: Identity, height: f32) {
+        self.lifecycle = Lifecycle::Idle;
+        self.crashes = 0;
+        self.polled = None;
+        self.frame = None;
+        self.height = height;
+        self.poll = Poll::Off;
+        self.wants_frames = false;
+        self.cursor.clear();
+        self.selection.clear();
+        self.queries.clear();
+        self.theme = None;
+        self.release_pointer();
+        self.identity = Some(identity);
+    }
+
     pub(super) fn new(stored: Stored, height: f32) -> Self {
         Self {
             lifecycle: Lifecycle::Idle,
@@ -330,8 +358,9 @@ pub(crate) struct WidgetsUi {
     pub(super) poll_timer: Option<(Instant, Task<()>)>,
     /// The next storage write's timer.
     pub(super) save_timer: Option<Task<()>>,
-    /// The scale of the window drawn last: widgets start at it (0 before a frame).
-    pub(super) scale: f32,
+    /// The device-pixel ratio each window drew its last frame at: a widget
+    /// starts at the scale of the window that shows it (none before a frame).
+    pub(super) scales: HashMap<Option<ChatId>, f32>,
     /// Whether this screen's account still has a widget folder.
     pub(super) storage: WidgetStorage,
 }

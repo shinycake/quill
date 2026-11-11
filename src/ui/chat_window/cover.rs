@@ -145,12 +145,14 @@ impl ChatWindows {
         chat_id: ChatId,
         active: bool,
         place: Option<WindowPlace>,
+        bounds: Bounds<Pixels>,
     ) -> bool {
         let Some(slot) = self.slot_for(chat_id) else {
             return false;
         };
         let mut slot = slot.borrow_mut();
         slot.place = place;
+        slot.bounds = Some(bounds);
         std::mem::replace(&mut slot.active, active) != active
     }
 }
@@ -202,9 +204,10 @@ impl QuillApp {
         chat_id: ChatId,
         active: bool,
         place: Option<WindowPlace>,
+        bounds: Bounds<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        self.windows.note_place(chat_id, active, place);
+        self.windows.note_place(chat_id, active, place, bounds);
         if !active {
             self.in_window_scope(Some(chat_id), cx, Self::cancel_viewer_boost);
         }

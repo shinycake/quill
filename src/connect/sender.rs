@@ -118,29 +118,28 @@ pub struct RetryStash {
 }
 
 impl RetryStash {
-    pub fn note(&self, request: &str) {
+    /// Keeps `request` when it is retryable; returns its `@extra` then.
+    pub fn note(&self, request: &str) -> Option<RequestId> {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(request) else {
-            return;
+            return None;
         };
         let retryable = value
             .get("@type")
             .and_then(serde_json::Value::as_str)
             .is_some_and(|kind| RETRYABLE_TYPES.contains(&kind));
-        let Some(extra) = value
+        let extra = value
             .get("@extra")
             .and_then(serde_json::Value::as_str)
-            .and_then(|extra| extra.parse::<u64>().ok())
-        else {
-            return;
-        };
+            .and_then(|extra| extra.parse::<u64>().ok())?;
         if !retryable {
-            return;
+            return None;
         }
         let mut map = self.map.lock_or_recover();
         if map.len() >= RETRY_STASH_LIMIT {
             map.clear();
         }
         map.insert(extra, request.to_string());
+        Some(RequestId(extra))
     }
 
     pub fn take(&self, extra: RequestId) -> Option<String> {
@@ -305,13 +304,18 @@ impl JsonSender for LiveSender {
             return Ok(());
         };
         let request = request.as_str();
-        self.api
-            .send(self.client_id, request)
-            .map_err(|e| match e {
+        // Stashed before it goes out: a rate-limit answer can reach the
+        // receive thread before `send` returns and must find its request.
+        let stashed = self.stash.note(request);
+        self.api.send(self.client_id, request).map_err(|e| {
+            if let Some(extra) = stashed {
+                self.stash.take(extra);
+            }
+            match e {
                 TdJsonError::InvalidRequest => ConnectSendError::InvalidRequest,
                 _ => ConnectSendError::Native,
-            })?;
-        self.stash.note(request);
+            }
+        })?;
         Ok(())
     }
 

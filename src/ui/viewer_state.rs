@@ -78,6 +78,8 @@ pub(crate) struct ViewerUi {
     pub(super) reorient_gen: u64,
     /// HDR rendition of the current picture file (macOS).
     pub(super) hdr: super::hdr_image::HdrViewer,
+    /// The header's album Pin or Unpin, kept while the history is unchanged.
+    pub(super) album_pin: quill::album_pin::AlbumPins,
     /// Counts viewer opens; keys the 200 ms fade-in so each open animates.
     pub(super) open_gen: u64,
     /// A media-timestamp link opened this message's video; the viewer
@@ -117,6 +119,7 @@ impl super::on_screen::Farewell for ViewerUi {
         app.close_video_pip(cx);
         app.viewer_leave_video_fullscreen();
         app.viewer_follow_window_fullscreen(window);
+        app.leave_viewer_edr(window);
         quill::media_session::clear();
     }
 }
@@ -160,6 +163,7 @@ impl ViewerUi {
             controls_gen: 0,
             over_controls: false,
             hide_timer: false,
+            album_pin: Default::default(),
             controls: Default::default(),
         }
     }

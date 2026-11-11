@@ -61,3 +61,34 @@ fn buy_by_name_from_send_gift_buys_for_its_recipient(cx: &mut TestAppContext) {
         })
         .unwrap();
 }
+
+/// Sweep 10-171: a purchase on its way stays the chat it started in; the
+/// box opened from another chat does not take it over.
+#[gpui_kit::test]
+fn a_purchase_on_its_way_is_not_taken_over_by_another_chats_box(cx: &mut TestAppContext) {
+    let window = demo(cx);
+    window
+        .update(cx, |app, window, cx| {
+            if let Some(session) = app.demo_session.as_mut() {
+                session.payments.marketplace_gift = Some(quill::marketplace::GiftPurchase {
+                    chat_id: ChatId(501),
+                    recipient: MessageSender::User { user_id: 501 },
+                    recipient_name: "Ada".into(),
+                    requested_name: "plush".into(),
+                    quote: None,
+                    price: None,
+                    loading: true,
+                    sending: false,
+                    completed: false,
+                    note: None,
+                });
+            }
+            app.payments.marketplace_chat = Some(ChatId(501));
+            app.open_marketplace_for(Some(ChatId(502)), window, cx);
+            assert!(!app.payments.marketplace_open, "B's box does not open");
+            assert_eq!(app.payments.marketplace_chat, Some(ChatId(501)));
+            app.open_marketplace_for(Some(ChatId(501)), window, cx);
+            assert!(app.payments.marketplace_open, "A's own box reopens");
+        })
+        .unwrap();
+}

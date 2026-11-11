@@ -561,6 +561,7 @@ fn refused_toggles_roll_back_and_report() {
         supergroup_id: sg,
         toggle: GroupToggle::HistoryVisible,
         previous,
+        shown: true,
     });
     apply_json(
         &mut session,
@@ -577,7 +578,7 @@ fn refused_toggles_roll_back_and_report() {
             .is_all_history_available
     );
     assert_eq!(
-        session.chats_state.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.last(),
         Some("could not change the group setting (error 400)")
     );
 
@@ -606,6 +607,7 @@ fn refused_protected_content_and_reactions_roll_back() {
         Some(RequestRollback::ProtectedContent {
             chat_id: 13,
             previous: false,
+            shown: true,
             previous_disabled_at: None,
         });
     apply_json(
@@ -634,6 +636,7 @@ fn refused_protected_content_and_reactions_roll_back() {
             previous: Some(ChatAvailableReactions::All {
                 max_reaction_count: 5,
             }),
+            shown: ChatAvailableReactions::none(),
         });
     session
         .chats_state

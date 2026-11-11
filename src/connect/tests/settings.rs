@@ -64,6 +64,146 @@ fn user_download_send_failure_marks_failed_download() {
 }
 
 #[test]
+fn a_sound_whose_download_cannot_be_sent_is_not_left_waiting() {
+    // 02-210: the pending marker is kept only while the download is out.
+    use crate::connect::SoundResolution;
+    use crate::notify::NotificationSoundKind;
+    use crate::telegram::envelope::{NotificationSound, ParsedFile};
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let sender = Arc::new(FailDownloadSender {
+        sent: Mutex::new(Vec::new()),
+    });
+    let mut driver = ConnectDriver::new(
+        Session::new(AccountKey::primary(), sink.clone()),
+        sender,
+        test_credentials(),
+        prepared,
+    );
+    let seq = AtomicU64::new(0);
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    driver.session.settings.saved_notification_sounds = vec![NotificationSound {
+        id: 7,
+        duration: 1,
+        date: 0,
+        title: "Chime".into(),
+        data: String::new(),
+        sound: ParsedFile {
+            id: FileId(31),
+            size: 10,
+            expected_size: 10,
+            uploading: false,
+            local: crate::telegram::envelope::LocalFileState {
+                path: String::new(),
+                can_be_downloaded: true,
+                is_downloading_active: false,
+                is_downloading_completed: false,
+                downloaded_size: 0,
+            },
+        },
+    }];
+    let resolved = driver.resolve_notification_sound(NotificationSoundKind::Custom(7));
+    assert!(matches!(resolved, SoundResolution::Pending));
+    assert!(driver.session.settings.pending_sound_downloads.is_empty());
+    assert!(driver.session.settings.sound_file_ids.is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Refuses the send that names one network; records the rest.
+struct RefuseNetworkSender {
+    refuse: &'static str,
+    sent: Mutex<Vec<String>>,
+}
+
+impl JsonSender for Arc<RefuseNetworkSender> {
+    fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
+        if request.contains(self.refuse) {
+            return Err(ConnectSendError::Native);
+        }
+        self.sent
+            .lock()
+            .expect("refuse network sender")
+            .push(request.to_string());
+        Ok(())
+    }
+}
+
+#[test]
+fn less_data_for_calls_reaches_every_network_when_one_send_fails() {
+    // 02-207: one refused send does not leave the later networks out.
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let sender = Arc::new(RefuseNetworkSender {
+        refuse: r#""@type":"networkTypeMobile""#,
+        sent: Mutex::new(Vec::new()),
+    });
+    let mut driver = ConnectDriver::new(
+        Session::new(AccountKey::primary(), sink.clone()),
+        sender.clone(),
+        test_credentials(),
+        prepared,
+    );
+    let seq = AtomicU64::new(0);
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    driver.session.settings.data_storage.seeded = true;
+    assert!(driver.set_less_data_for_calls(true).is_err());
+    let sent = sender.sent.lock().expect("sent").clone();
+    let sent_sets = sent
+        .iter()
+        .filter(|json| json.contains("setAutoDownloadSettings"))
+        .count();
+    assert_eq!(sent_sets, 2, "roaming and wifi still went out");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_badge_pref_that_cannot_be_saved_is_not_applied() {
+    // 11-p5-010: the session changes only once the file is written.
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let mut driver = ConnectDriver::new(
+        Session::new(AccountKey::primary(), sink),
+        recorder,
+        test_credentials(),
+        prepared,
+    );
+    let before = driver.session.settings.badge_prefs;
+    let mut next = before;
+    next.include_muted = !before.include_muted;
+    assert!(driver.set_badge_prefs(next).is_ok());
+    assert_eq!(driver.session.settings.badge_prefs, next);
+    // A directory where the file goes: the write fails.
+    let file = driver.paths.root.join("badge_prefs.json");
+    let _ = std::fs::remove_file(&file);
+    std::fs::create_dir_all(&file).unwrap();
+    assert!(driver.set_badge_prefs(before).is_err());
+    assert_eq!(driver.session.settings.badge_prefs, next);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn user_downloads_use_list_api_pause_and_cancel() {
     // Slice media-downloads-pause: user-initiated downloads go through
     // `addFileToDownloads` (not one-shot `downloadFile`); pause/resume

@@ -24,6 +24,7 @@ use quill::paid_messages::{
 };
 use quill::premium_hub::group_digits;
 use quill::privacy::{NewChatPrivacy, NewChatPrivacyState};
+use quill::state::PrivacyControl;
 use quill::telegram::requests_privacy::PrivacySettingKey;
 
 /// A slider over `steps` (see `price_steps`) that reports each pick to
@@ -93,7 +94,12 @@ impl QuillApp {
     pub(super) fn new_chat_editor(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
         let can_restrict = self.can_restrict_new_chats();
-        let error = session.and_then(|s| s.settings.privacy_data.error.clone());
+        let error = session.and_then(|s| {
+            s.settings
+                .privacy_data
+                .error(PrivacyControl::NewChat)
+                .map(str::to_string)
+        });
         let paid_error = session
             .and_then(|s| s.payments.paid_messages.save.user_error())
             .map(str::to_string);

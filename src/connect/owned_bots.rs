@@ -154,6 +154,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         create.generation = create.generation.wrapping_add(1);
         let generation = create.generation;
         create.creating = Some(generation);
+        create.starts = create.starts.wrapping_add(1);
         create.created = None;
         create.error = None;
         let extra = self.session.request(
@@ -176,9 +177,11 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Reset the create dialog's state.
     pub fn reset_create_bot(&mut self) {
-        let generation = self.session.bots.owned.create.generation;
+        let create = &self.session.bots.owned.create;
+        let (generation, starts) = (create.generation, create.starts);
         self.session.bots.owned.create = crate::state::CreateBotState {
             generation: generation.wrapping_add(1),
+            starts,
             ..Default::default()
         };
     }

@@ -169,7 +169,10 @@ fn a_follow_up_page_that_fails_ends_the_groups_in_common_list() {
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
     driver.session.users_state.profile_chat_lists.insert(
         (ProfileChatsKind::GroupsInCommon, 31),
-        ProfileChatsFetch::Loaded(vec![-5, -6]),
+        ProfileChatsFetch::Loaded {
+            ids: vec![-5, -6],
+            more: crate::state::MorePage::Idle,
+        },
     );
     let extra = driver
         .fetch_more_groups_in_common(31)
@@ -191,7 +194,7 @@ fn a_follow_up_page_that_fails_ends_the_groups_in_common_list() {
             .users_state
             .profile_chat_lists
             .get(&(ProfileChatsKind::GroupsInCommon, 31)),
-        Some(ProfileChatsFetch::Loaded(ids)) if ids.len() == 2
+        Some(ProfileChatsFetch::Loaded { ids, .. }) if ids.len() == 2
     ));
     assert!(driver.fetch_more_groups_in_common(31).unwrap().is_none());
     let _ = std::fs::remove_dir_all(dir);

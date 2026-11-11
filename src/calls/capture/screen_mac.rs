@@ -279,6 +279,13 @@ impl StreamShared {
         self.sink.push(frame);
     }
 
+    /// The source closed: `Ended`, once.
+    fn end(&self) {
+        if !self.stopped.swap(true, Ordering::AcqRel) {
+            self.sink.push_event(CaptureEvent::Ended);
+        }
+    }
+
     fn on_stopped(&self, error: &NSError) {
         if self.stopped.swap(true, Ordering::AcqRel) {
             return;
@@ -366,7 +373,7 @@ impl WindowMonitor {
                         sink.push_event(CaptureEvent::Paused);
                     }
                     WindowState::Gone => {
-                        sink.push_event(CaptureEvent::Ended);
+                        shared.end();
                         return;
                     }
                     WindowState::OnScreen | WindowState::OffScreen | WindowState::Unknown => {}

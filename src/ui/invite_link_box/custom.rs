@@ -87,7 +87,7 @@ impl QuillApp {
         )
         .detach();
         if let Some(link_box) = self.admin.invite_link_box.as_mut() {
-            link_box.focus_custom = true;
+            link_box.focus_custom.set(true);
         }
         self.set_invite_link_custom(Some(CustomBox::Limit(input)), cx);
     }
@@ -118,15 +118,15 @@ impl QuillApp {
         self.set_invite_link_custom(None, cx);
     }
 
-    /// The number field, once: the kit focuses a dialog as it opens, so
-    /// the field takes focus after the box's first frame.
-    fn take_invite_link_custom_focus(&mut self) -> Option<Entity<InputState>> {
-        let link_box = self.admin.invite_link_box.as_mut()?;
-        if !std::mem::take(&mut link_box.focus_custom) {
-            return None;
-        }
+    /// The number field and the flag that asks for its focus: the kit
+    /// focuses a dialog as it opens, so the field takes focus when the
+    /// content is first drawn, and the flag is cleared there, not at build.
+    fn invite_link_custom_focus(
+        &self,
+    ) -> Option<(Entity<InputState>, std::rc::Rc<std::cell::Cell<bool>>)> {
+        let link_box = self.admin.invite_link_box.as_ref()?;
         match &link_box.custom {
-            Some(CustomBox::Limit(input)) => Some(input.clone()),
+            Some(CustomBox::Limit(input)) => Some((input.clone(), link_box.focus_custom.clone())),
             _ => None,
         }
     }
@@ -164,7 +164,7 @@ impl QuillApp {
                 None => return dialog.on_close(on_close),
             };
             let valid = this.invite_link_custom_value(cx).is_some();
-            let focus = this.take_invite_link_custom_focus();
+            let focus = this.invite_link_custom_focus();
             let footer = div()
                 .flex()
                 .justify_end()
@@ -189,11 +189,14 @@ impl QuillApp {
                         })),
                 );
             let field = std::rc::Rc::new(std::cell::RefCell::new(Some(field)));
-            let focus = std::rc::Rc::new(std::cell::RefCell::new(focus));
+            let focus = std::rc::Rc::new(focus);
             dialog
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, window, cx| {
-                        if let Some(input) = focus.borrow_mut().take() {
+                        if let Some((input, wanted)) = focus.as_ref()
+                            && wanted.take()
+                        {
+                            let input = input.clone();
                             window.defer(cx, move |window, cx| {
                                 input.update(cx, |input, cx| input.focus(window, cx));
                             });

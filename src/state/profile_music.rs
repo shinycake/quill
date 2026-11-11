@@ -89,7 +89,10 @@ impl Session {
         if let Some(RequestPurpose::Media(MediaPurpose::IsProfileAudio { file_id })) =
             pending.map(|p| p.purpose)
         {
-            self.media.profile_audio_ids.insert(file_id, true);
+            // The check is only asked while the song is unknown, so a known
+            // value now came from a local save or remove made after the
+            // check went out, and it is newer than this answer.
+            self.media.profile_audio_ids.entry(file_id).or_insert(true);
         }
     }
 
@@ -104,7 +107,7 @@ impl Session {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::Media(MediaPurpose::IsProfileAudio { file_id })) => {
                 if err.code == 404 {
-                    self.media.profile_audio_ids.insert(file_id, false);
+                    self.media.profile_audio_ids.entry(file_id).or_insert(false);
                 }
             }
             Some(RequestPurpose::Media(MediaPurpose::AddProfileAudio { file_id })) => {
@@ -229,5 +232,27 @@ mod tests {
         assert_eq!(session.take_stale_playlists(), vec![7]);
         assert!(!session.media.playlists[&7].loaded);
         assert!(session.take_stale_playlists().is_empty());
+    }
+
+    #[test]
+    fn a_late_check_answer_does_not_undo_a_local_save_or_remove() {
+        let mut session = session_with(&[1]);
+        let check = |session: &mut Session, file_id: i32| {
+            let id = session.request(
+                RequestPurpose::Media(MediaPurpose::IsProfileAudio { file_id }),
+                None,
+            );
+            session.requests.take(id)
+        };
+        let saved = check(&mut session, 3);
+        session.local_save_profile_audio(track(3));
+        let not_found = TdError::from_code(404);
+        session.apply_profile_music_error(&not_found, saved.as_ref());
+        assert_eq!(session.profile_audio_known(FileId(3)), Some(true));
+
+        let removed = check(&mut session, 1);
+        session.local_remove_profile_audio(FileId(1));
+        session.apply_profile_music_ok(removed.as_ref());
+        assert_eq!(session.profile_audio_known(FileId(1)), Some(false));
     }
 }

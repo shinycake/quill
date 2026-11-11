@@ -114,21 +114,21 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     ComposerLink => DialogSpec::new(
         2940,
-        |app| app.composer_ui.link_dialog.is_some(),
+        |app| app.chat_ui.link_dialog.is_some(),
         QuillApp::build_composer_link_dialog,
     )
     .per_window()
     .close(|app, window, cx| app.close_composer_link_dialog(window, cx)),
     ComposerDate => DialogSpec::new(
         2941,
-        |app| app.composer_ui.date_dialog.is_some(),
+        |app| app.chat_ui.date_dialog.is_some(),
         QuillApp::build_composer_date_dialog,
     )
     .per_window()
     .close(|app, window, cx| app.close_composer_date_dialog(window, cx)),
     ComposerCodeLanguage => DialogSpec::new(
         2946,
-        |app| app.composer_ui.code_language.is_some(),
+        |app| app.chat_ui.code_language.is_some(),
         QuillApp::build_code_language_dialog,
     )
     .per_window()

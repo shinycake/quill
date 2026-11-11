@@ -150,8 +150,10 @@ impl QuillApp {
             },
             None => StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE)),
         };
+        // The member page is fetched again when the request answers
+        // (`member_list_stale`), not before the change applies.
         self.set_note(note);
-        self.refresh_member_dialog(cx);
+        cx.notify();
     }
 
     fn special_member_name(&self, user_id: i64) -> String {

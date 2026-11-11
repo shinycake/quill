@@ -307,7 +307,6 @@ pub(super) fn seed_ready_downloads_session(sink: Arc<MemorySink>) -> Session {
         .media
         .downloads
         .end_as(26, quill::state::DownloadOrigin::User);
-    session.media.downloads_panel_open = true;
     session
 }
 

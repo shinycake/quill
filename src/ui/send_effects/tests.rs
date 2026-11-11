@@ -421,3 +421,34 @@ fn the_cards_schedule_sends_with_the_effect_after_the_time_is_picked(cx: &mut Te
         assert!(app.composer_ui.send_menu.open.is_none());
     });
 }
+
+/// The menu was opened over one chat's composer: another chat showing
+/// closes it, so it does not come back when the first returns.
+#[gpui_kit::test]
+fn the_send_menu_closes_when_the_chat_changes(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    vcx.update(|window, cx| window.right_click("composer-send-wrap", cx));
+    frames(vcx);
+    assert!(menu_open(&app, vcx));
+    app.update(vcx, |app, cx| {
+        app.enter_chat_ui(quill::ids::ChatId(CHAT + 1), cx);
+    });
+    assert!(!menu_open(&app, vcx));
+}
+
+/// A chat's Send button starts settled: it does not fade from the glyph
+/// of the chat before.
+#[gpui_kit::test]
+fn a_new_chat_starts_with_a_settled_send_button(cx: &mut TestAppContext) {
+    use quill::send_button::{SendButtonKind, SendMorph};
+    let (app, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.chat_ui
+            .send_morph
+            .set(Some(SendMorph::new(SendButtonKind::Send)));
+        app.enter_chat_ui(quill::ids::ChatId(CHAT + 1), cx);
+        assert!(app.chat_ui.send_morph.get().is_none());
+    });
+}

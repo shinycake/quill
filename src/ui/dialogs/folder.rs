@@ -137,8 +137,9 @@ pub struct FolderShareDialog {
     pub(crate) op: LinkOp,
     /// The link whose delete is waiting for confirmation.
     pub(crate) confirm_delete: Option<String>,
-    /// The link last copied to the clipboard.
-    pub(crate) copied: Option<String>,
+    /// The link last copied to the clipboard, until the check mark times
+    /// out.
+    pub(crate) copied: CopyMark,
     pub(crate) error: Option<String>,
 }
 
@@ -157,9 +158,27 @@ impl FolderShareDialog {
             selected: HashSet::new(),
             op: LinkOp::Idle,
             confirm_delete: None,
-            copied: None,
+            copied: CopyMark::Idle,
             error: None,
         }
+    }
+}
+
+/// The copy button's check mark. A timer clears it by the time of its copy,
+/// so a second copy of the same link keeps its own full time.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum CopyMark {
+    #[default]
+    Idle,
+    Copied {
+        link: String,
+        at: std::time::Instant,
+    },
+}
+
+impl CopyMark {
+    pub(crate) fn is_copied(&self, url: &str) -> bool {
+        matches!(self, CopyMark::Copied { link, .. } if link == url)
     }
 }
 

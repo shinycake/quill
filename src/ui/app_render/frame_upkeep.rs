@@ -35,6 +35,8 @@ impl QuillApp {
         // account is ready (`chat_window::saved`).
         // main-only: it opens the chat windows themselves.
         self.restore_chat_windows(window, cx);
+        // main-only: Settings and its Privacy page are the main window's.
+        self.sync_check_password(window, cx);
         // Revenue and affiliate pages: the amount field, the setup
         // sliders, program photos and pages, profile balances.
         // main-only: they are pages of the session's info panel, which only

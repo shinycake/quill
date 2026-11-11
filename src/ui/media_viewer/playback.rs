@@ -294,10 +294,13 @@ impl QuillApp {
             self.players.audio.set_speed(next);
             restarted = was_playing;
         }
-        if let Some(player) = self.viewer.player.as_ref().filter(|_| !self.viewer_loops()) {
-            player.set_rate(next);
-            restarted = true;
-        }
+        // The speed is the app's: every window's viewer clip takes it.
+        self.in_every_window(cx, |app, _| {
+            if let Some(player) = app.viewer.player.as_ref().filter(|_| !app.viewer_loops()) {
+                player.set_rate(next);
+                restarted = true;
+            }
+        });
         if !restarted {
             // Nothing playing: the speed applies to the next play.
             self.set_note(StatusNote::silent(tr_with(
@@ -435,9 +438,12 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.set_stream_volume(self.players.volume);
         }
-        if let Some(player) = self.viewer.player.as_ref().filter(|_| !self.viewer_loops()) {
-            player.set_volume(self.players.volume);
-        }
+        let volume = self.players.volume;
+        self.in_every_window(cx, |app, _| {
+            if let Some(player) = app.viewer.player.as_ref().filter(|_| !app.viewer_loops()) {
+                player.set_volume(volume);
+            }
+        });
         cx.notify();
     }
 

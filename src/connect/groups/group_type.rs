@@ -4,7 +4,8 @@
 use super::*;
 use crate::group_type::GroupTypeEdit;
 use crate::state::{
-    EditAfterUpgrade, GroupTypePurpose, PublicChatsFetch, PublicLinkRevoke, UsernameCheck,
+    EditAfterUpgrade, GroupTypePurpose, PublicChatsFetch, PublicLinkRevoke, PublicLinkStage,
+    UsernameCheck,
 };
 use crate::telegram::requests::{
     check_chat_username, check_created_public_chats_limit, disable_all_supergroup_usernames,
@@ -103,7 +104,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.groups.group_type.revoke.is_some() {
+        if self.session.groups.group_type.revoke.is_revoking() {
             return Ok(None);
         }
         let Some(ChatKind::Supergroup { supergroup_id, .. }) = self
@@ -121,7 +122,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // The first request is out: record it before the second goes, so a
         // failed second send still ends in a settled revoke (the note and a
         // fresh list) instead of a link cleared with nothing to say so.
-        self.session.groups.group_type.revoke = Some(PublicLinkRevoke {
+        self.session.groups.group_type.revoke = PublicLinkStage::Revoking(PublicLinkRevoke {
             chat_id,
             requests: vec![clear],
             failed: false,
@@ -134,12 +135,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             disable,
             &disable_all_supergroup_usernames(disable, supergroup_id),
         ) {
-            if let Some(revoke) = self.session.groups.group_type.revoke.as_mut() {
+            if let Some(revoke) = self.session.groups.group_type.revoke.revoking_mut() {
                 revoke.failed = true;
             }
             return Err(err);
         }
-        if let Some(revoke) = self.session.groups.group_type.revoke.as_mut() {
+        if let Some(revoke) = self.session.groups.group_type.revoke.revoking_mut() {
             revoke.requests.push(disable);
         }
         Ok(Some(clear))
@@ -277,8 +278,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .upgraded_chat_for(edit.old)
             .is_some_and(|new| self.save_group_type(new, &edit.kind, &edit.info).is_ok());
         if !saved {
-            self.session.chats_state.chat_action_error =
-                Some("the group was upgraded, but its link could not be saved".to_string());
+            self.session
+                .chats_state
+                .chat_action_error
+                .push("the group was upgraded, but its link could not be saved".to_string());
         }
     }
 }

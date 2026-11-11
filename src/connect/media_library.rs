@@ -247,7 +247,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .default_reaction
                     .replace(choice.clone());
                 if let Some(pending) = self.session.requests.pending_mut(extra) {
-                    pending.rollback = Some(RequestRollback::DefaultReaction { previous });
+                    pending.rollback = Some(RequestRollback::DefaultReaction {
+                        previous,
+                        shown: choice.clone(),
+                    });
                 }
                 Ok(extra)
             }

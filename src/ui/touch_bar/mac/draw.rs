@@ -46,8 +46,9 @@ pub(super) fn symbol(name: &str, side: f64) -> Option<Retained<NSImage>> {
 }
 
 thread_local! {
-    /// Decoded pictures by file, so redraws don't read files again.
-    static FILES: RefCell<HashMap<PathBuf, Option<Retained<NSImage>>>> =
+    /// Decoded pictures by file, so redraws don't read files again. Only a
+    /// picture that decoded is kept: a file not readable yet is tried again.
+    static FILES: RefCell<HashMap<PathBuf, Retained<NSImage>>> =
         RefCell::new(HashMap::new());
 }
 
@@ -59,12 +60,13 @@ pub(super) fn file_image(path: &Path) -> Option<Retained<NSImage>> {
             .ok()
             .and_then(|files| files.get(path).cloned())
     }) {
-        return cached;
+        return Some(cached);
     }
     let image = NSImage::initWithContentsOfFile(
         NSImage::alloc(),
         &NSString::from_str(&path.to_string_lossy()),
     );
+    let image = image?;
     FILES.with(|files| {
         if let Ok(mut files) = files.try_borrow_mut() {
             // A long session sees many pictures; start over now and then.
@@ -74,7 +76,7 @@ pub(super) fn file_image(path: &Path) -> Option<Retained<NSImage>> {
             files.insert(path.to_path_buf(), image.clone());
         }
     });
-    image
+    Some(image)
 }
 
 /// An emoji drawn by the system's color emoji font (tdesktop

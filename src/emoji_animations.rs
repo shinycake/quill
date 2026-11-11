@@ -170,12 +170,21 @@ impl EmojiAnimations {
     }
 
     /// The request failed: try again after the refresh time, and drop the
-    /// messages that waited for it.
+    /// messages that waited for it (they are unwatched again).
     pub fn failed(&mut self) {
         if let Load::Loading { since_ms } = self.load {
             self.load = Load::Done { asked_ms: since_ms };
         }
-        self.waiting.clear();
+        self.forget_waiting();
+    }
+
+    /// Drop the waiting messages and let them count as unwatched again, so
+    /// a later read plays their effect once the pack has arrived.
+    fn forget_waiting(&mut self) {
+        for waiting in self.waiting.drain(..) {
+            self.watched
+                .remove(&(waiting.chat_id.0, waiting.message_id.0));
+        }
     }
 
     /// Whether the pack should be asked for at `now_ms`: never asked, or
@@ -244,8 +253,11 @@ impl EmojiAnimations {
 
     /// Keep a message read before the pack first arrived.
     pub fn wait(&mut self, waiting: Waiting) {
-        if self.waiting.len() >= MAX_WAITING {
-            self.waiting.pop_front();
+        if self.waiting.len() >= MAX_WAITING
+            && let Some(dropped) = self.waiting.pop_front()
+        {
+            self.watched
+                .remove(&(dropped.chat_id.0, dropped.message_id.0));
         }
         self.waiting.push_back(waiting);
     }

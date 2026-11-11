@@ -300,6 +300,7 @@ impl LiveStoryUi {
         self.flying.clear();
         self.last_comment = None;
         self.overlay = Default::default();
+        self.volume_pill.release();
         self.demo_clock = None;
     }
 

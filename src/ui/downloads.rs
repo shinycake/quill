@@ -176,7 +176,7 @@ impl QuillApp {
     /// open / reveal actions. Sits beside the conversation like the info
     /// panel; toggled from the sidebar "Downloads" entry.
     pub(super) fn downloads_panel_open(&self) -> bool {
-        self.session().is_some_and(|s| s.media.downloads_panel_open)
+        self.session().is_some() && self.chat_list.downloads_panel_open
     }
 
     pub(super) fn downloads_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -229,11 +229,7 @@ impl QuillApp {
                             .ghost()
                             .tooltip(tr(keys::Q_OPS_CLOSE_DOWNLOADS))
                             .on_click(cx.listener(|this, _, _, cx| {
-                                if let Some(live) = this.live.as_mut() {
-                                    live.driver.session.media.downloads_panel_open = false;
-                                } else if let Some(session) = this.demo_session.as_mut() {
-                                    session.media.downloads_panel_open = false;
-                                }
+                                this.chat_list.downloads_panel_open = false;
                                 cx.notify();
                             })),
                     ),

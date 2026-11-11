@@ -169,10 +169,11 @@ impl QuillApp {
     fn request_gifs(&mut self, wanted: GifWanted, cx: &mut Context<Self>) {
         self.pickers.gif_wanted = wanted.clone();
         self.pickers.gif_asked = GifAsked::For(wanted.clone());
+        let chat = self.viewed_chat();
         let sent = if let Some(live) = self.live.as_mut() {
             match &wanted {
                 GifWanted::Saved => live.driver.show_saved_gifs().is_ok(),
-                GifWanted::Search(query) => live.driver.search_gifs(query).is_ok(),
+                GifWanted::Search(query) => live.driver.search_gifs(query, chat).is_ok(),
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             match &wanted {

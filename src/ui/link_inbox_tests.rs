@@ -4,8 +4,8 @@
 //! has no `NSWindow` to hide, so whether a window is hidden comes in by
 //! hand here.
 use super::{
-    MainWindow, answer_wakes, main_window_on_activation, note_main_window, raise_main_window_if,
-    take_hide_after_full_screen,
+    MainWindow, MainWindowState, answer_wakes, main_window_on_activation, note_main_window,
+    raise_main_window_if, take_hide_after_full_screen,
 };
 use crate::ui::actions::QuitApp;
 use crate::ui::app::QuillApp;
@@ -55,7 +55,7 @@ fn a_dock_click_raises_a_hidden_main_window_and_leaves_one_that_shows(cx: &mut T
 fn close_main_window(vcx: &mut VisualTestContext) {
     vcx.update(|window, cx| note_main_window(window, cx));
     vcx.cx
-        .update(|cx| cx.global_mut::<MainWindow>().closed_by_user = true);
+        .update(|cx| cx.global_mut::<MainWindow>().state = MainWindowState::Closed);
     vcx.deactivate_window();
 }
 
@@ -65,6 +65,24 @@ fn come_forward(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     vcx.cx
         .update(|cx| main_window_on_activation(&view, |_| true, cx));
     vcx.run_until_parked();
+}
+
+/// Sweep 10-162: a window the user closed once and brought back is open
+/// again, so a later minimize is not taken for a close.
+#[gpui_kit::test]
+fn a_reopened_main_window_is_not_raised_after_a_plain_minimize(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-privacy");
+    let vcx = &mut vcx;
+    close_main_window(vcx);
+    vcx.update(super::raise_main_window);
+    vcx.run_until_parked();
+    assert_eq!(
+        vcx.cx.update(|cx| cx.global::<MainWindow>().state),
+        MainWindowState::Open
+    );
+    vcx.deactivate_window();
+    come_forward(&app, vcx);
+    assert!(!vcx.update(|window, _| window.is_window_active()));
 }
 
 #[gpui_kit::test]
@@ -79,7 +97,7 @@ fn quill_coming_forward_raises_the_closed_main_window(cx: &mut TestAppContext) {
 fn close_in_full_screen(vcx: &mut VisualTestContext) {
     close_main_window(vcx);
     vcx.cx
-        .update(|cx| cx.global_mut::<MainWindow>().hide_after_full_screen = true);
+        .update(|cx| cx.global_mut::<MainWindow>().state = MainWindowState::LeavingFullScreen);
 }
 
 #[gpui_kit::test]
@@ -210,7 +228,7 @@ fn quit_with_the_main_window_closed_asks_during_an_export(cx: &mut TestAppContex
     vcx.cx.update(|cx| cx.dispatch_action(&QuitApp));
     vcx.run_until_parked();
     assert!(!vcx.cx.windows().is_empty(), "still running");
-    assert!(app.read_with(vcx, |app, _| app.dialogs.export_stop.is_some()));
+    assert!(app.read_with(vcx, |app, _| app.main_window.export_stop.is_some()));
     assert!(
         vcx.update(|window, _| window.is_window_active()),
         "back with the prompt"

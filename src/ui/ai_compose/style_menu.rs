@@ -5,6 +5,7 @@
 //! binding.
 
 use super::pill_radius;
+use super::style_notices::text_toast;
 use crate::ui::actions::AiComposeApply;
 use crate::ui::ai_compose_state::{AiComposeView, PreviewStage};
 use crate::ui::app::QuillApp;
@@ -167,9 +168,9 @@ impl QuillApp {
             alert
                 .cancel_text(tr(keys::CANCEL))
                 .show_cancel(true)
-                .on_ok(move |_, _, cx| {
+                .on_ok(move |_, window, cx| {
                     let _ = app.update(cx, |this, cx| {
-                        this.remove_ai_style(&name, creator, from_preview, cx);
+                        this.remove_ai_style(&name, creator, from_preview, window, cx);
                     });
                     true
                 })
@@ -181,12 +182,28 @@ impl QuillApp {
         name: &str,
         creator: bool,
         from_preview: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if from_preview && let Some(preview) = self.ai_compose.preview.as_mut() {
+        let sent = self.live.as_mut().map(|live| {
+            if creator {
+                live.driver.delete_text_composition_style(name)
+            } else {
+                live.driver.remove_text_composition_style(name)
+            }
+        });
+        if matches!(sent, Some(Err(_))) {
+            // Nothing went out: the editor and the preview stay as they were.
+            self.push_ai_toast(text_toast(""), window, cx);
+            return;
+        }
+        if let Some(Ok(request)) = sent
+            && from_preview
+            && let Some(preview) = self.ai_compose.preview.as_mut()
+        {
             let stage = std::mem::replace(&mut preview.stage, PreviewStage::LookingUp { token: 0 });
             preview.stage = match stage {
-                PreviewStage::Shown(style) => PreviewStage::Removing(style),
+                PreviewStage::Shown(style) => PreviewStage::Removing { style, request },
                 other => other,
             };
         }
@@ -195,13 +212,6 @@ impl QuillApp {
         {
             open.editor = None;
             open.view = AiComposeView::Card;
-        }
-        if let Some(live) = self.live.as_mut() {
-            let _ = if creator {
-                live.driver.delete_text_composition_style(name)
-            } else {
-                live.driver.remove_text_composition_style(name)
-            };
         }
         cx.notify();
     }

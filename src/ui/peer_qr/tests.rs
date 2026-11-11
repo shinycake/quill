@@ -563,7 +563,7 @@ fn a_share_finishing_in_a_reopened_box_is_dropped(cx: &mut TestAppContext) {
     app.read_with(vcx, |app, _| {
         assert_eq!(app.share.link_text, None, "the new box shared nothing");
         let open = app.peer_qr.open.as_ref().expect("the new box");
-        assert_eq!(open.share_image, None);
+        assert_eq!(open.share.image(), None);
     });
 }
 
@@ -606,7 +606,7 @@ fn share_hides_the_box_under_the_chat_chooser_until_cancelled(cx: &mut TestAppCo
             .peer_qr
             .open
             .as_ref()
-            .and_then(|open| open.share_image.clone());
+            .and_then(|open| open.share.image().cloned());
         assert!(
             card.is_some_and(|path| path.exists()),
             "the card waits as a file"
@@ -624,8 +624,45 @@ fn share_hides_the_box_under_the_chat_chooser_until_cancelled(cx: &mut TestAppCo
     );
     app.read_with(vcx, |app, _| {
         let open = app.peer_qr.open.as_ref().expect("the box is back");
-        assert_eq!(open.share_image, None);
+        assert_eq!(open.share.image(), None);
     });
+}
+
+/// Another chooser's pick (a group link row's Share) does not close a box
+/// that opened no chooser of its own.
+#[gpui_kit::test]
+fn a_pick_in_another_share_chooser_leaves_the_box_open(cx: &mut TestAppContext) {
+    let (app, _, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    app.update(vcx, |app, cx| {
+        app.qr_share_chosen(quill::ids::ChatId(GROUP_CHAT), cx);
+        app.qr_share_cancelled(cx);
+    });
+    app.read_with(vcx, |app, _| {
+        assert!(app.peer_qr.open.is_some(), "the box stayed open");
+        assert_eq!(app.peer_qr.pending_attach, None);
+    });
+}
+
+/// The screen going away takes a shared card that no chat has taken yet.
+#[gpui_kit::test]
+fn leaving_the_screen_removes_a_waiting_share_card(cx: &mut TestAppContext) {
+    use crate::ui::on_screen::Farewell;
+    let (app, _, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    let card = std::env::temp_dir().join(format!("quill-qr-farewell-{}.png", std::process::id()));
+    std::fs::write(&card, b"card").expect("a card file");
+    close_box(&app, vcx);
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.peer_qr.pending_attach = Some((quill::ids::ChatId(424_242), card.clone()));
+            super::PeerQrUi::farewell(app, window, cx);
+        })
+    });
+    vcx.run_until_parked();
+    assert!(!card.exists(), "the card file is gone");
 }
 
 mod theme;

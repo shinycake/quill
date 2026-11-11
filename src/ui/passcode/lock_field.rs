@@ -54,7 +54,7 @@ impl LockField {
         cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| {
             this.in_window_of(window, cx, |this, window, cx| match event {
                 InputEvent::PressEnter { .. } => this.submit_unlock(window, cx),
-                InputEvent::Change if this.account.passcode.lock_error.take().is_some() => {
+                InputEvent::Change if this.account.passcode.lock_error.typed() => {
                     cx.notify();
                 }
                 _ => {}

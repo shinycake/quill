@@ -177,8 +177,11 @@ impl QuillApp {
         quill::settings::save_settings_search_recent(&QuillApp::appearance_paths(), &recent);
         self.settings.search.pending_clear = true;
         // A screen of the page may be covering the row.
+        // Leaving and arriving are one reset: the page's drafts go and its
+        // visit asks again, though the page itself does not change.
         if self.settings.page == Some(target.page()) {
             self.leave_settings_page(target.page());
+            self.arrive_settings_page(target.page());
         }
         self.show_settings_page(target.page(), cx);
         if let Target::Entry(entry) = target {

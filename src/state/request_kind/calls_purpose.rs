@@ -42,6 +42,7 @@ impl CallsPurpose {
             | Self::SendGroupCallMessage { .. }
             | Self::ToggleGroupCallAreMessagesAllowed { .. }
             | Self::ToggleGroupCallVideo { .. }
+            | Self::ToggleGroupCallScreenPaused { .. }
             | Self::ToggleGroupCallParticipantMute { .. }
             | Self::ToggleGroupCallParticipantHand { .. }
             | Self::ToggleVideoChatMuteNew { .. }

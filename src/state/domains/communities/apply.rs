@@ -94,7 +94,11 @@ impl Session {
         } else {
             fetch.take_data().unwrap_or_default()
         };
+        let handled = self.communities.handled_add_requests.get(&community_id);
         for request in page.requests {
+            if handled.is_some_and(|handled| handled.contains(&request.chat_id)) {
+                continue;
+            }
             if !list.requests.iter().any(|r| r.chat_id == request.chat_id) {
                 list.requests.push(request);
             }
@@ -175,6 +179,12 @@ impl Session {
     /// `ok` (`CommunityManager::on_change_community_dialogs`), so the new
     /// count has already come with `updateCommunityFullInfo`.
     fn drop_add_chat_request(&mut self, community_id: i64, chat_id: i64) {
+        // A page asked before this request was handled may still list it.
+        self.communities
+            .handled_add_requests
+            .entry(community_id)
+            .or_default()
+            .insert(chat_id);
         let Some(list) = self
             .communities
             .add_chat_requests
@@ -195,6 +205,7 @@ impl Session {
     /// dropped (its answer then has no pending request and is ignored) and
     /// the list is an answered empty one.
     fn reset_add_chat_requests(&mut self, community_id: i64) {
+        self.communities.handled_add_requests.remove(&community_id);
         for first_page in [true, false] {
             self.requests.take_purpose_for_community(
                 RequestPurpose::Communities(CommunitiesPurpose::GetAddChatRequests { first_page }),

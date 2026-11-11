@@ -140,24 +140,26 @@ fn an_old_bot_message_loaded_after_the_start_does_not_bring_the_user_back(cx: &m
     let (origin, bot_chat, bot_id) = app.read_with(&vcx, |app, _| {
         let session = app.session().expect("demo session");
         let origin = session.open_chat.expect("an open chat");
+        // The lowest id, so the pick does not depend on the map's order.
         let (chat, user) = session
             .chats
             .values()
-            .find_map(|chat| match &chat.kind {
+            .filter_map(|chat| match &chat.kind {
                 ChatKind::Private { user_id } if chat.id != origin => Some((chat.id.0, user_id.0)),
                 _ => None,
             })
+            .min()
             .expect("a private chat to stand for the bot");
         (origin, chat, user)
     });
+    // The start goes out as the bot's chat opens, so that chat is the open
+    // one by then (a frame in between would end the trip otherwise).
     app.update(&mut vcx, |app, cx| {
-        app.demo_session
-            .as_mut()
-            .expect("a demo session")
-            .histories
-            .remove(&bot_chat);
+        let session = app.demo_session.as_mut().expect("a demo session");
+        session.histories.remove(&bot_chat);
         app.begin_inline_return(bot_id, "somebot", "param");
-        // The user lands in the bot's chat, where the start goes out.
+        // The user lands in the bot's chat with the start: a frame between
+        // the steps must not find the trip outside the bot's chat.
         app.demo_session.as_mut().expect("a demo session").open_chat = Some(ChatId(bot_chat));
         assert!(
             app.take_inline_start(ChatId(bot_chat), cx),

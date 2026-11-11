@@ -348,7 +348,7 @@ fn load_topics_404_marks_the_list_complete() {
         ),
     );
     assert!(session.threads.saved.topics_exhausted);
-    assert!(session.chats_state.chat_action_error.is_none());
+    assert!(session.chats_state.chat_action_error.is_empty());
 }
 
 /// Round 7, 2d: a failed first page is not "sent" any more, so the pane

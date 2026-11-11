@@ -38,11 +38,11 @@ impl Session {
             }
             // The preview that asked reads its own answer, matched by the
             // request; the page-level line stays for the pages.
-            Some(
-                RequestPurpose::SetDefaultBackground
-                | RequestPurpose::SetDefaultBackgroundLocal
-                | RequestPurpose::GetBackgroundUrl,
-            ) => {
+            Some(RequestPurpose::Chats(
+                ChatsPurpose::SetDefaultBackground { .. }
+                | ChatsPurpose::SetDefaultBackgroundLocal { .. }
+                | ChatsPurpose::GetBackgroundUrl,
+            )) => {
                 let reason = error_reason(err);
                 if let Some(id) = pending.map(|p| p.id) {
                     self.chats_state
@@ -70,23 +70,27 @@ impl Session {
             // Slice CL3: refused report / block surfaces in the
             // status note — never shown as success.
             Some(RequestPurpose::ReportChat) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not report the chat (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not report the chat (error {})", err.code));
             }
             Some(RequestPurpose::RemoveChatActionBar) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not hide the bar (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not hide the bar (error {})", err.code));
             }
             Some(RequestPurpose::ToggleBusinessBotPaused) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not change the bot (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not change the bot (error {})", err.code));
             }
             Some(RequestPurpose::RemoveBusinessBotFromChat) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not remove the bot (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not remove the bot (error {})", err.code));
             }
             Some(RequestPurpose::CreatePrivateChat) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not open Saved Messages (error {})",
                     err.code
                 ));
@@ -102,18 +106,15 @@ impl Session {
                 | RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { generation })
                 | RequestPurpose::Chats(ChatsPurpose::DeepLinkCheckInvite { generation }),
             ) => {
-                let stale = !matches!(
-                    &self.chats_state.deep_link,
-                    Some(
-                        DeepLinkState::ResolvingInfo {
-                            generation: slot
-                        }
-                        | DeepLinkState::ResolvingChat {
-                            generation: slot,
-                            ..
-                        }
-                    ) if *slot == generation
-                );
+                // The flow this request belongs to is the one in whatever
+                // stage carries its generation (a preview or an info that
+                // the user already acted on is still that flow).
+                let stale = self
+                    .chats_state
+                    .deep_link
+                    .as_ref()
+                    .and_then(DeepLinkState::generation)
+                    != Some(generation);
                 // `joinChatByInviteLink` over the community limit opens the
                 // limit box (tdesktop `ChannelsLimitBox`) instead of a dialog.
                 // A stale answer (the flow ended, as an account switch

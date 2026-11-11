@@ -50,8 +50,6 @@ pub struct ChatsState {
     /// The account's default wallpaper per theme (`false` light, `true`
     /// dark), from `updateDefaultBackground` and `setDefaultBackground`.
     pub default_backgrounds: HashMap<bool, Background>,
-    /// Which theme the pending `setDefaultBackground` was for.
-    pub background_set_for_dark: bool,
     /// `chat.background` / `updateChatBackground`, by chat id.
     pub chat_backgrounds: HashMap<i64, ChatBackground>,
     /// `chat.theme` (emoji theme name) / `updateChatTheme`, by chat id.
@@ -70,11 +68,12 @@ pub struct ChatsState {
     pub background_error: Option<String>,
     /// `updateChatOnlineMemberCount`, keyed by chat id.
     pub chat_online_counts: HashMap<i64, i32>,
-    /// Slice CL1: one-shot error from a refused chat-list action
+    /// Slice CL1: the errors of refused chat-list actions, oldest first, so
+    /// two that fail before the UI drains them are both shown
     /// (`toggleChatIsPinned`, `toggleChatIsMarkedAsUnread`,
     /// `deleteChatHistory`). The UI drains it into the status note so a
     /// refused action never looks like it worked.
-    pub chat_action_error: Option<String>,
+    pub chat_action_error: crate::state::Notes,
     /// Answers of the Appearance box's requests (name, profile, status
     /// and emoji pack), under the request that asked.
     pub appearance_answers: Answers<()>,
@@ -143,7 +142,6 @@ impl ChatsState {
         Self {
             installed_backgrounds: crate::state::fetch::Fetch::Idle,
             default_backgrounds: HashMap::new(),
-            background_set_for_dark: false,
             chat_backgrounds: HashMap::new(),
             chat_theme_names: HashMap::new(),
             chat_gift_themes: HashMap::new(),
@@ -152,7 +150,7 @@ impl ChatsState {
             background_answers: Answers::default(),
             background_error: None,
             chat_online_counts: HashMap::new(),
-            chat_action_error: None,
+            chat_action_error: Default::default(),
             appearance_answers: Answers::default(),
             report_chat_outcome: None,
             chat_message_sender: HashMap::new(),

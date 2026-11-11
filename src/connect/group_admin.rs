@@ -79,6 +79,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 supergroup_id,
                 toggle,
                 previous,
+                shown: value,
             });
         }
         Ok(Some(extra))
@@ -252,6 +253,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             pending.rollback = Some(RequestRollback::ProtectedContent {
                 chat_id: chat_id.0,
                 previous,
+                shown: value,
                 previous_disabled_at,
             });
         }
@@ -284,11 +286,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .chats_state
             .chat_available_reactions
-            .insert(chat_id.0, setting);
+            .insert(chat_id.0, setting.clone());
         if let Some(pending) = self.session.requests.pending_mut(extra) {
             pending.rollback = Some(RequestRollback::AvailableReactions {
                 chat_id: chat_id.0,
                 previous,
+                shown: setting,
             });
         }
         Ok(Some(extra))
@@ -497,13 +500,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         };
         if !matches!(result, Ok(true)) {
-            self.session.chats_state.chat_action_error = Some(if linking {
-                "could not link the discussion group".to_string()
-            } else {
-                "the group was upgraded, but the setting could not be applied; \
-                 open the group settings to retry"
-                    .to_string()
-            });
+            self.session
+                .chats_state
+                .chat_action_error
+                .push(crate::state::admin_followup_failure_note(linking));
         }
     }
 }

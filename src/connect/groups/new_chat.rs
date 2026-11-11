@@ -158,8 +158,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .request(RequestPurpose::SetChatPhoto, Some(chat_id));
             let json = set_chat_photo(photo_request, chat_id, photo.to_json());
             if self.send_json_request(photo_request, &json).is_err() {
-                self.session.chats_state.chat_action_error =
-                    Some(crate::lang::tr(crate::lang::keys::Q_NEW_CHAT_PHOTO_FAILED).to_string());
+                self.session
+                    .chats_state
+                    .chat_action_error
+                    .push(crate::lang::tr(crate::lang::keys::Q_NEW_CHAT_PHOTO_FAILED).to_string());
             }
         }
         if make_invite_link && self.session.chat_primary_invite_link(chat_id).is_none() {

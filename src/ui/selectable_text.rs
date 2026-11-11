@@ -31,6 +31,9 @@ thread_local! {
         std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
+mod selection_start;
+pub(super) use selection_start::selected_occurrence;
+
 /// One window's selection, as its last paint saw it.
 #[derive(Default)]
 struct WindowSelected {
@@ -40,6 +43,8 @@ struct WindowSelected {
     /// offset): their fallback text replaces the placeholders in the
     /// copied string.
     emoji: std::collections::BTreeMap<(u64, usize), String>,
+    /// Where the selection starts (`selection_start`).
+    start: selection_start::SelectionStart,
 }
 
 /// Runs `f` on the selection record of `window`, dropping the records of
@@ -661,6 +666,13 @@ impl Element for SelectableRichText {
         {
             with_selected(window, cx, |selected| selected.message = Some(message));
         }
+        let order = self.document_order;
+        let before = (!foreign)
+            .then(|| {
+                selection_start::text_before(&self.text, self.source.as_ref(), projection.ranges())
+            })
+            .flatten();
+        with_selected(window, cx, |selected| selected.start.note(order, before));
         if let Some(map) = self.source.take() {
             let (text, ranges) = (self.text.clone(), projection.ranges().to_vec());
             handle.copy_with(
@@ -674,7 +686,6 @@ impl Element for SelectableRichText {
                 cx,
             );
         }
-        let order = self.document_order;
         let picked = selected_fallbacks(&self.emoji, projection.ranges());
         with_selected(window, cx, |selected| {
             if self.emoji.is_empty() && selected.emoji.is_empty() {

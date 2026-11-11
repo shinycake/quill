@@ -29,7 +29,11 @@ impl QuillApp {
             let asked = answer.clone();
             let ran = this.update_in(cx, move |this, window, cx| {
                 let job = std::mem::take(&mut this.account.passcode.job);
-                if let Some((out, done)) = asked.borrow_mut().take() {
+                let answered = asked.borrow_mut().take();
+                if job == PasscodeJob::Cancelled {
+                    // A log-out from the lock screen wiped what it checked.
+                    quill::passcode::global_unlock().clear();
+                } else if let Some((out, done)) = answered {
                     this.in_window_of(window, cx, |this, window, cx| done(this, out, window, cx));
                 }
                 this.lock_held_for_job(job, cx);
@@ -38,7 +42,12 @@ impl QuillApp {
             if ran.is_err() {
                 let _ = this.update(cx, |this, cx| {
                     let job = std::mem::take(&mut this.account.passcode.job);
-                    match answer.borrow_mut().take() {
+                    let answered = answer.borrow_mut().take();
+                    if job == PasscodeJob::Cancelled {
+                        quill::passcode::global_unlock().clear();
+                        return;
+                    }
+                    match answered {
                         Some((out, done)) => {
                             this.finish_passcode_job_in_main_window(out, done, job, cx)
                         }

@@ -463,9 +463,8 @@ impl OutputState {
         }
         if !self.watched {
             let watched = output.clone();
-            let spawned = std::thread::Builder::new()
-                .name("quill-audio-idle".into())
-                .spawn(move || watch(&watched));
+            let spawned =
+                quill::thread_guard::spawn_guarded("quill-audio-idle", move || watch(&watched));
             self.watched = spawned.is_ok();
         }
     }
@@ -584,11 +583,26 @@ impl Device {
 /// [`QUIET_FOR`], and moves the app mixer to the new default device when
 /// the stream ended while something plays. Ends with the device.
 fn watch(output: &Arc<Output>) {
+    let _ended = WatchEnded(output);
     let mut quiet = Quiet::default();
     loop {
         std::thread::sleep(LOOK_EVERY);
         if !look(output, &mut quiet, Instant::now()) {
             return;
+        }
+    }
+}
+
+/// A watch that panics in `look` leaves the flag that says one is running
+/// set, and no new watch would ever start; this clears it on the way out.
+/// A watch that ended by itself has already settled the flag (and may have
+/// started its successor), so it is left alone.
+struct WatchEnded<'a>(&'a Arc<Output>);
+
+impl Drop for WatchEnded<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            self.0.lock().watched = false;
         }
     }
 }
@@ -971,7 +985,7 @@ mod gate {
 
 #[cfg(test)]
 mod tests {
-    use super::{Feed, Heard, QUIET_FOR, Quiet, SharedOutput, look};
+    use super::{Feed, Heard, QUIET_FOR, Quiet, SharedOutput, WatchEnded, look};
     use rodio::buffer::SamplesBuffer;
     use rodio::mixer::mixer;
     use rodio::{ChannelCount, SampleRate, Source};
@@ -1227,6 +1241,24 @@ mod tests {
         output.settle_device();
         assert!(!player.lost());
         assert!(gate.pull(9600).iter().any(|s| *s > 0.4), "plays on");
+    }
+
+    #[test]
+    fn a_watch_that_panics_lets_a_new_one_start() {
+        let (output, _gate) = SharedOutput::gated();
+        output.0.lock().watched = true;
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ended = WatchEnded(&output.0);
+            std::panic::resume_unwind(Box::new("look panicked"));
+        }));
+        assert!(panicked.is_err());
+        assert!(!output.0.lock().watched);
+        output.0.lock().watched = true;
+        drop(WatchEnded(&output.0));
+        assert!(
+            output.0.lock().watched,
+            "a watch that ended alone settled it"
+        );
     }
 
     /// A playing player whose device failed to open says so, so its owner

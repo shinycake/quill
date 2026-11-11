@@ -55,8 +55,10 @@ impl MuteTimeInputs {
 }
 
 impl QuillApp {
-    /// Make the fields once a window can be reached. Openers of the Mute
-    /// panel have no window in hand, so this runs after the current update.
+    /// Put the fields on the default once a window can be reached. Every
+    /// opening of the Mute panel starts there, not at the last duration
+    /// typed. Openers have no window in hand, so this runs after the
+    /// current update.
     pub(in crate::ui) fn queue_mute_time_inputs(&mut self, cx: &mut Context<Self>) {
         // The window that asked for the box draws it, so the fields are
         // made with that window: the main window when none asked, or when
@@ -71,14 +73,6 @@ impl QuillApp {
         else {
             return;
         };
-        if self
-            .notify
-            .mute_time
-            .as_ref()
-            .is_some_and(|inputs| inputs.window == scope)
-        {
-            return;
-        }
         let app = cx.entity().downgrade();
         let screen = self.screen_epoch();
         cx.defer(move |cx| {

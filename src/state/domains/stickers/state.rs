@@ -16,9 +16,10 @@ pub struct StickersState {
     pub reaction_limits: crate::reaction_limit::ReactionLimits,
     /// The sticker set the message menu's "View Sticker Set" opened.
     pub sticker_set_view: Option<StickerSetView>,
-    /// A one-shot toast after editing an owned set ("Sticker added.",
-    /// the error), whether or not the set box is open.
-    pub creator_note: Option<String>,
+    /// The toasts after editing an owned set ("Sticker added.", the error),
+    /// oldest first, whether or not the set box is open: two edits answered
+    /// between polls both show.
+    pub creator_notes: std::collections::VecDeque<String>,
     /// An edit of an owned set changed a set's title, contents or
     /// existence: the driver fetches both installed lists again so menus
     /// and the panel show the server's sets.
@@ -56,7 +57,7 @@ impl StickersState {
             reaction_options_stale: false,
             reaction_limits: Default::default(),
             sticker_set_view: None,
-            creator_note: None,
+            creator_notes: Default::default(),
             creator_refetch_sets: false,
             custom_emoji_preview: None,
             emoji_pack_titles: HashMap::new(),

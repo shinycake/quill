@@ -215,8 +215,18 @@ impl QuillApp {
     /// paged out of the loaded history.
     fn pip_message_deleted(&self, link: &PipLink) -> bool {
         let (chat, message) = (link.item.chat_id, link.clip.message_id);
-        self.session()
-            .filter(|session| Some(&session.account) == link.account.as_ref())
+        let Some(account) = link.account.as_ref() else {
+            return false;
+        };
+        // The clip's own account: the one on screen or a background client.
+        let session = self
+            .session()
+            .filter(|session| &session.account == account)
+            .or_else(|| {
+                let live = self.background.client(account)?.live.as_ref()?;
+                Some(&live.driver.session)
+            });
+        session
             .and_then(|session| session.histories.get(&chat.0))
             .is_some_and(|history| history.is_tombstone(message))
     }

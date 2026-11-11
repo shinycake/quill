@@ -96,7 +96,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Add a text message; the shortcut `name` is created when new.
-    pub fn add_quick_reply_text(&mut self, name: &str, text: &str) -> Result<(), ConnectSendError> {
+    /// The request, or `None` when the same change is already on its way.
+    pub fn add_quick_reply_text(
+        &mut self,
+        name: &str,
+        text: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         let name = qr::validate_name(name).map_err(|_| ConnectSendError::InvalidRequest)?;
         if text.trim().is_empty() {
             return Err(ConnectSendError::InvalidRequest);
@@ -107,7 +112,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
             |extra| qr::add_message_request(extra, &name, text),
         )
-        .map(|_| ())
     }
 
     pub fn edit_quick_reply_text(
@@ -115,7 +119,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         shortcut_id: i32,
         message_id: i64,
         text: &str,
-    ) -> Result<(), ConnectSendError> {
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if text.trim().is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -125,7 +129,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
             |extra| qr::edit_message_request(extra, shortcut_id, message_id, text),
         )
-        .map(|_| ())
     }
 
     /// Delete a message; the list updates when TDLib reports it. Deleting a

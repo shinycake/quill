@@ -541,8 +541,9 @@ fn legend(
 
 mod cache {
     //! Parsed charts by JSON, so a panel redraw does not re-parse every
-    //! graph. Keyed by the JSON buffer's address and length, checked
-    //! against a sample of its bytes.
+    //! graph. Looked up by the JSON buffer's address and length, and used
+    //! only when the entry's own copy equals the text: a buffer freed and
+    //! reused at the same address with other values parses again.
     use quill::stat_chart::{StatChart, parse_chart};
     use std::cell::RefCell;
     use std::collections::HashMap;
@@ -551,7 +552,7 @@ mod cache {
     const LIMIT: usize = 64;
 
     struct Entry {
-        sample: u64,
+        json: String,
         chart: Option<Rc<StatChart>>,
     }
 
@@ -559,29 +560,13 @@ mod cache {
         static CHARTS: RefCell<HashMap<(usize, usize), Entry>> = RefCell::new(HashMap::new());
     }
 
-    fn sample(json: &str) -> u64 {
-        use std::hash::{Hash, Hasher};
-        let bytes = json.as_bytes();
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        let take = |from: usize| {
-            bytes
-                .get(from.min(bytes.len())..(from + 128).min(bytes.len()))
-                .unwrap_or_default()
-        };
-        take(0).hash(&mut hasher);
-        take(bytes.len() / 2).hash(&mut hasher);
-        take(bytes.len().saturating_sub(128)).hash(&mut hasher);
-        hasher.finish()
-    }
-
     /// The chart in `json`, or `None` when it does not parse.
     pub(in crate::ui) fn parsed_chart(json: &str) -> Option<Rc<StatChart>> {
         let key = (json.as_ptr() as usize, json.len());
-        let sample = sample(json);
         CHARTS.with(|charts| {
             let mut charts = charts.borrow_mut();
             if let Some(entry) = charts.get(&key)
-                && entry.sample == sample
+                && entry.json == json
             {
                 return entry.chart.clone();
             }
@@ -592,11 +577,36 @@ mod cache {
             charts.insert(
                 key,
                 Entry {
-                    sample,
+                    json: json.to_string(),
                     chart: chart.clone(),
                 },
             );
             chart
         })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::parsed_chart;
+
+        /// A buffer rewritten in place keeps its address and length: the
+        /// chart is parsed again, not served from the old text.
+        #[test]
+        fn a_buffer_rewritten_in_place_is_parsed_again() {
+            let text = r#"{"columns":[["x",1727740800000,1727827200000],["y0",11,22]],"types":{"y0":"line","x":"x"},"names":{"y0":"A"},"colors":{"y0":"BLUE#3497ED"}}"#;
+            let mut buffer = text.as_bytes().to_vec();
+            let parse = |buffer: &[u8]| {
+                let json = std::str::from_utf8(buffer).unwrap_or_default();
+                parsed_chart(json).map(|chart| chart.lines.clone())
+            };
+            let first = parse(&buffer);
+            let at = text.find("22]").unwrap_or(0);
+            if let Some(byte) = buffer.get_mut(at + 1) {
+                *byte = b'3';
+            }
+            let second = parse(&buffer);
+            assert!(first.is_some() && second.is_some(), "both parse");
+            assert_ne!(first, second);
+        }
     }
 }

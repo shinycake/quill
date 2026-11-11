@@ -360,6 +360,16 @@ impl QuillApp {
             chat_id.0,
             self.session().is_some_and(|s| s.chat_am_creator(chat_id)),
         );
+        if let Some(live) = self.live.as_ref()
+            && live
+                .driver
+                .check_create_video_chat(chat_id.0, String::new(), 0)
+                .is_err()
+        {
+            self.group_call_boxes.rtmp_start = RtmpStartUi::default();
+            self.created_video_chat(chat_id, None, true, join_as, window, cx);
+            return;
+        }
         self.end_current_call_for_create(cx);
         self.group_call_boxes.rtmp_start = RtmpStartUi::default();
         let sent = match self.live.as_mut() {

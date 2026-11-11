@@ -107,7 +107,13 @@ impl QuillApp {
                 this.close_rating_box(cx)
             });
         let target = app.read(cx).rating_box_target();
-        app.update(cx, |_, cx| {
+        app.update(cx, |this, cx| {
+            // The person's rating is gone (the info was dropped or has no
+            // rating): the box has nothing to say, so it ends here instead
+            // of standing open and empty.
+            if target.is_none() {
+                this.close_rating_box(cx);
+            }
             let body = target
                 .map(|view| rating_body(&view, cx))
                 .unwrap_or_else(|| div().into_any_element());

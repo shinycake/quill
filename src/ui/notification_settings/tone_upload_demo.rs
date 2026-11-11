@@ -46,6 +46,7 @@ impl QuillApp {
             }
             session.settings.tone_upload = ToneUpload::Uploading {
                 name: "Glass Chime".into(),
+                target: SoundPickerTarget::Chat(chat_id),
             };
         }
         self.open_mute_menu(cx);

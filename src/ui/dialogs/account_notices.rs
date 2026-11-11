@@ -5,6 +5,7 @@
 //! (`updateServiceNotification`) and the terms of service prompt
 //! (`updateTermsOfService`, tdesktop `TermsBox`).
 
+use super::super::account_state::OpenNotice;
 use super::super::app::QuillApp;
 use super::super::shell::{DialogKind, QuillShell};
 use super::super::*;
@@ -99,9 +100,11 @@ impl QuillApp {
             Some(AccountNotice::Service)
         } else if self.auth_ui.login_prevented.is_some() {
             Some(AccountNotice::LoginPrevented)
-        } else if self.account_boxes.freeze_info_open && session.sync.freeze.is_some() {
+        } else if self.account_boxes.notice == OpenNotice::Frozen && session.sync.freeze.is_some() {
             Some(AccountNotice::Frozen)
-        } else if self.account_boxes.age_verify_open && session.sync.age_verification.is_some() {
+        } else if self.account_boxes.notice == OpenNotice::AgeVerify
+            && session.sync.age_verification.is_some()
+        {
             Some(AccountNotice::AgeVerify)
         } else {
             None
@@ -111,6 +114,21 @@ impl QuillApp {
     /// Take the finished new-login review out of the reducer: "Yes" is a
     /// toast, "No" a box (tdesktop `ShowAuthToast`).
     pub(crate) fn drain_account_notices(&mut self) {
+        // A notice whose condition cleared (the freeze lifted, the age check
+        // done) is closed for good: it must not open again unasked when the
+        // condition comes back.
+        let condition = self.session().map(|session| {
+            (
+                session.sync.freeze.is_some(),
+                session.sync.age_verification.is_some(),
+            )
+        });
+        let (frozen, age_asked) = condition.unwrap_or_default();
+        match self.account_boxes.notice {
+            OpenNotice::Frozen if !frozen => self.account_boxes.notice.close(),
+            OpenNotice::AgeVerify if !age_asked => self.account_boxes.notice.close(),
+            _ => {}
+        }
         // Terms accepted (here or on another device): the prompt is over.
         if self.auth_ui.terms_prompt.is_some()
             && self
@@ -252,8 +270,9 @@ impl QuillApp {
                 }
             }
             Some(AccountNotice::LoginPrevented) => self.auth_ui.login_prevented = None,
-            Some(AccountNotice::Frozen) => self.account_boxes.freeze_info_open = false,
-            Some(AccountNotice::AgeVerify) => self.account_boxes.age_verify_open = false,
+            Some(AccountNotice::Frozen | AccountNotice::AgeVerify) => {
+                self.account_boxes.notice.close();
+            }
             _ => {}
         }
         cx.notify();

@@ -935,6 +935,7 @@ pub(in crate::ui) fn session_history_row(
             message.id,
             rich,
             revealed,
+            session.is_some_and(|s| s.full_rich_loading(message.chat_id, message.id)),
             // Settings → Appearance: message font size.
             look.font,
             cx,

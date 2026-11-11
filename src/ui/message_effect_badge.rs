@@ -118,6 +118,23 @@ thread_local! {
     static APP: RefCell<Option<WeakEntity<QuillApp>>> = const { RefCell::new(None) };
 }
 
+/// What these registries know is one account's screen's: the badges as
+/// painted, the clicked ones and the effects waiting to play carry bare
+/// chat and message ids, which another account reuses. `OnScreen` holds
+/// this guard, so replacing the screen (an account switch) empties them.
+#[derive(Default)]
+pub(super) struct EffectNotes;
+
+impl super::on_screen::Farewell for EffectNotes {}
+
+impl Drop for EffectNotes {
+    fn drop(&mut self) {
+        let _ = BADGES.try_with(|badges| badges.borrow_mut().clear());
+        let _ = REPLAYS.try_with(|replays| replays.borrow_mut().clear());
+        super::message_effect_play::forget_waiting();
+    }
+}
+
 /// Remember the app, so a click on a badge can wake it.
 pub(super) fn set_app(app: WeakEntity<QuillApp>) {
     APP.with(|slot| *slot.borrow_mut() = Some(app));

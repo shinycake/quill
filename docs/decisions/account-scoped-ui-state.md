@@ -5465,6 +5465,469 @@ land and the typed form was gone.
   filter wherever `picked` changes, with a test
   (`picking_another_account_resets_the_activity_filter`).
 
+### Sweep fixes (s4-platform-2)
+
+- **Agent driver.** A send the composer hands over is stamped with the
+  screen epoch and only the command on that screen takes it; a command
+  starts by clearing a send an earlier command's deferred half left
+  (07-026). The history and the composer carry the open chat's `chat=<id>`
+  tag, so redaction follows the chat the frame drew, not the open chat of
+  the moment the agent reads (07-027). The takeover pill records the window
+  that painted it; another window's pointer is never "on the pill" (07-034).
+- **Chat windows.** Activating a window whose state is in place focuses the
+  app's compose field, not the slot's copy (08-111). A chat window that
+  fails to open gives the chat back to the main window that left it
+  (08-110). "Reopen closed window" pops its entry only once the window
+  opens; an entry whose chat is gone is dropped (08-109). An open that
+  cannot reach its window posts a note instead of vanishing with its
+  carry (08-145; the carried forward draft is not restored, tdesktop has no
+  equivalent). Places are saved from the geometry each slot recorded, so a
+  window the switch runs inside is saved too, and the OS window is removed
+  in a deferred step (08-146). `save_pending` is `SaveTimer`, whose `Due`
+  holds the timer task and its screen epoch; a timer of an older epoch no
+  longer counts (08-142). A lost "Restore chat windows?" box is asked again
+  while the stage is still `Offered` (08-144).
+- **Demo.** Every `apply_demo_*` numbers its envelope through
+  `apply_demo_json`, which catches the counter up to `session.last_seq`
+  (09-021).
+- **Notification windows.** `Shown` has one `Stage` (`Live`, `Replying`,
+  `Unlinked`): an unlinked window is not replying (11-p6-008). A
+  notification whose window cannot open goes back to the head of the queue
+  and waits for the next change (11-p6-007).
+- **Touch Bar (macOS; not built on the Linux runner, reviewed by reading).**
+  Only decoded pictures are cached (13-159). A hidden window skips the sync
+  and an unchanged bar is not applied again; Quill cannot ask AppKit
+  whether the Mac has a Touch Bar, so the model is still built on those
+  Macs (13-160). The bar is bound per main window (`Binding`), including
+  the window the GPU-loss recovery opens (13-153). A dropped pinned order
+  stays on screen as `Order::Reordering` until the model echoes it, the pins
+  change, or the request is refused (13-156). Touches carry the screen epoch
+  of the bar they came from and are dropped when stale (13-158).
+- **Platform.** The timer's update check leaves "Updated to Quill X" alone
+  (14-007). A download the disk held restarts at once when the disk is
+  healthy by then (14-008). `AccountBoxes::notice` is one `OpenNotice`
+  (`None`, `Frozen`, `AgeVerify`), closed when its condition goes away; the
+  age check is `AgeCheck` (14-010). A failed request on the cached X11
+  connection drops it (14-060). `window_frame`'s applied map loses an entry
+  with its window (14-059). The update helper waits on the launch's lock on
+  the claim, with no deadline while it is held, and falls back on the pid
+  only where the file system has no locks (14-068).
+- **Review fixes (Touch Bar).** The bar's screen stamp (`BAR_SCREEN`) is
+  set on every sync that reaches the host, not only when the model changed,
+  so a screen change onto an identical bar keeps its touches. A pinned
+  reorder dropped as stale (screen epoch moved, lock engaged) or taken by
+  nobody ends `Order::Reordering` through `reorder_refused`.
+  `forget_connection` uses `try_borrow_mut`.
+
+### Sweep fixes (s4-platform-1)
+
+S4 entries, each proved against the code before it was fixed.
+
+- **Agent link (01-008).** The MCP bridge's pending requests and its end are
+  one `Waiting::{Open(map), Dead}` under one lock, so a request filed after
+  the reader drained is answered at once instead of hanging (the old
+  `alive` flag and the map were two things kept in step). A failed write
+  ends the link and answers everything still waiting.
+- **Agent TDLib calls (01-015).** `PENDING` is keyed by client; the hub's
+  `Routes::unregister` (and a dead reader) calls `td::client_closed`, which
+  wakes that client's waiters as `TdError::Send` ("could not pass the
+  request") instead of at their 30 s or 300 s timeout. A call whose route is
+  already closed fails at once.
+- **Agent name (01-020).** `CallScope::drop` clears the thread's agent name.
+- **download_file copy (01-016).** The copy goes to a sibling temp file and
+  is renamed over the file `create_new` reserved; any error removes both.
+- **wait_for_message (01-017).** `target::remember_grant` caches only an
+  answer, in `wait_for_message` and in `granted_message_arrived`; a failed
+  lookup is asked again for the next message.
+- **td_call sends (01-018).** `grants.writable` runs before the user is
+  asked, so an Allow is never clicked for a send that is refused anyway.
+- **Offset tokens (01-022).** A token is bound to the account, agent and
+  method that got it (`td_offset::binding`) and refused for another.
+- **UI send (01-032, 01-033).** The composer clear after an agent send is
+  never turned away by a full bridge queue (it is the one command exempt
+  from `MAX_WAITING`), and a failed post is said in the tool's answer.
+  `UiSend` and `ComposerSent` carry the account the window showed;
+  `finish_ui_send` refuses when the active account changed, and the window
+  clears only the same account's chat.
+- **Screenshot slot (01-034, 01-058).** `shot::reserve` returns a `Slot`;
+  `Asked::give_back` and `take_screenshot` release it when the command is
+  busy, times out, is refused, or comes back without a picture.
+- **getMessage errors (01-038).** Only TDLib's "message not found" is "there
+  is no message"; other errors keep their own text, and a failed re-read after
+  a successful edit still says the edit went through.
+- **mute_chat (01-036).** The notification settings are read at the write's
+  queue turn (`change_built`) and only `mute_for` changes.
+- **Folders (01-037).** Membership is read from the lists (`Membership::
+  {Pinned, Included, Excluded, None}`): remove takes a listed chat off the
+  lists and excludes only a chat that is in by the folder's rules (as
+  Telegram Desktop does); add leaves a pinned or included chat alone.
+  `CHATLIST_INCLUDE_INVALID` is no longer reported as "folder is full".
+- **Secret codes (01-026).** On the sign-in screen a focused text field
+  (2FA password, email, name) is not fed to the code buffer and clears it.
+  The phone step still feeds it: its field takes digits only. tdesktop reads
+  the codes on the settings page of the sign-in screen, not in its fields.
+- **Launcher badge (03-069).** Linux: `Launcher::{Idle, Pending, Delivered,
+  Failed}`; the dedupe records a count only after the worker emitted it, and
+  a failed emit is asked again on the next tick. `invalidate_icon_badge`
+  (dock restart, account switch) also resets `Delivered` to `Idle`
+  (`Launcher::invalidate`), so the same count is handed over again. A failed
+  emit is still asked again every tick, not backed off: the ask is a slot
+  write and the worker's connect is the only cost.
+- **Launch lines (03-081).** macOS: the process-wide once-cells are one
+  `Slot::{Empty, Open, Forgotten}`; each account's open replaces the file to
+  write, and a log-out forgets only the account whose file is open. The
+  macOS-only code could not be built in the Linux session; the slot logic is
+  platform-neutral and tested.
+- **Tray under the lock (03-090, 07-013).** `TrayToggles::{Hidden, Shown}` is
+  the menu's toggles: left out of the SNI menu while locked, disabled in the
+  macOS/Windows menu (an item cannot be hidden there). The two tray actions
+  go through `toggle_notifications_from_tray` / `toggle_sounds_from_tray`,
+  which test `refused_while_locked`. (`main.rs` calls them; hotspot change.)
+- **Key store (04-026).** A failed `FileSecretStore::put` removes the temp
+  key file.
+- **Open-link child (04-027).** `answer_on_exit` keeps the child in a slot a
+  failed thread start can take back and hand to `wait_in_background`. When
+  that cannot start a thread either, the child is parked (`PARKED`) and
+  polled again by the next such call, not dropped as a zombie.
+- **Screen reader (04-035).** The Linux watcher is restarted by `running()`
+  after `RETRY_AFTER` once it ended (`Watch::{Idle, Watching, Ended}`; the
+  pause doubles with each watch in a row that never reached the bus, up to
+  64 times `RETRY_AFTER`, and a read resets it) and
+  clears its value when it ends.
+- **Tray registration (07-014).** The registration worker shuts a handle
+  down itself when nobody waits for it (the tray was turned off while it
+  registered); a registration lands showing what it was created with.
+- **UI driver input (07-025).** `Driver::{Idle, Running{id, waiting}}` on the
+  app: input commands run one at a time, the next starts when the running
+  one answers (every switch checked afresh).
+- **Skipped.** 04-009: a second process on the same logs folder cannot pass
+  the single-instance check (`begin_app_run` runs after it, and says so);
+  the only way past is an I/O error from the check, where TDLib's database
+  lock stops a second client as well.
+
+### Sweep fixes (s4-payments-2)
+
+- **Earn boxes.** A join or revoke box waits on a `BoxSend` (`Idle` or
+  `Sending(RequestId)`), set when the send succeeded, and only the answer
+  or error of that request closes the box, opens the link box or toasts;
+  the lists still learn a joined or left program (09-X034, replaces
+  `JoinBox::joining` and `RevokeBox::sending`). A program click carries the
+  list it came from (`ProgramSurface`), and its answer opens a box only
+  while that programs box or that peer's join page is open (09-X035). The
+  bot photos of a program list are asked every upkeep and the file layer
+  dedups, so a refused send is tried again (09-X042, 09-067; no
+  `photos_asked` set). The setup sliders are one `SetupSliders` keyed by bot
+  and the program the page opened with, rebuilt when either differs
+  (09-X036). A reopened Stars Balance page refills the amount (09-068).
+  Every earn note toasts (09-069).
+- **Gift market.** The bid in flight is `(gift_id, RequestId)` and only its
+  answer clears it (09-X067; `bid_gift_auction` already refused a second
+  bid, so this guards a late or foreign answer). Stack changes go through
+  `GiftMarketUi::pop/clear/close_where`, which drop the slider, custom field
+  and Hide My Name when the last box owning them leaves, however it left
+  (10-006). A sticker file counts as requested only when its send went out
+  (10-012; the auction follow was already `AuctionFollow::Failed`). Every
+  market note toasts (10-013). The send-gift choices are one
+  `SendGiftInputs` replaced whole by `reset_gift_inputs` when a send or buy
+  step begins, so the message, Hide My Name, upgrade and pay-with-Stars
+  choices of one recipient or listing never reach another (10-007, 10-008).
+  Delete Gift acts for the account and window that asked and only for a gift
+  still in the list (10-015).
+- **Giveaway form.** `GiveawayOptions` holds `Fetch` lists and the chat the
+  Premium prices were asked for; asking for another chat drops the old
+  prices at once and the earlier chat's late answer is ignored (10-010).
+- **Paid messages.** `PaidSave` is one entry per target, so a Remove Fee
+  never disables a channel's Save, and an answer settles only its own
+  target (11-p6-006).
+- **Premium and groups.** The preview clip slot is `ClipSlot` (`Idle`,
+  `Playing`, `Failed(file_id)`), so a clip that cannot be opened is tried
+  once per preview (12-018). Closing the Stars box folds "Buy more Stars"
+  (12-019). A revoke from the limit box ends as `PublicLinkStage::Freed`;
+  the poll drain takes it once and the Type box checks its link again, so
+  the 10 s timer is gone and a slow TDLib no longer leaves "link taken"
+  (12-017).
+- **Suggested posts.** Publish on a busy suggestion keeps its box open with
+  the button waiting, and a suggestion that is no longer pending sends
+  nothing (13-112). The decline reason's Enter runs in the window of the
+  field (13-111). Every failure toasts and every refused payment asks for
+  its top-up (13-108).
+- **Smaller.** The Fragment line of the collectible box is found in the
+  translated sentence and dropped when absent, and its prefix is a lang
+  key (08-119). Show My Last Seen / Read Time keeps its box in a `Saving`
+  stage and toasts on the answer, or the refusal (12-048; tdesktop's
+  source was not reachable, this is the smallest safe choice). A refused
+  quit request clears the noted quit, so a lost main window is reopened
+  (13-040).
+- **Guard.** `scripts/check-drained-notes.py` fails on
+  `notes.into_iter().last()` in `src/ui`.
+- **Review fixes.** A Publish in flight (the `busy` entry of the post)
+  refuses a second Accept Terms box, and the suggested-posts drain closes
+  the open box once its post is no longer Pending, so the answer of the
+  first Publish cannot leave a live Publish button that then toasts
+  "Couldn't publish the post" for a published post. The resale and craft
+  Buy steps reset only the gift choices (`reset_gift_choices`), so the
+  typed send-gift message survives Back. The Show Last Seen / Read Time
+  box waits while any save of its key is out instead of reporting "shown"
+  for an unrelated one. The join box's `BoxSend` gave way to the
+  integration branch's `JoinStage`/`Resolve` (same fix); `BoxSend` stays
+  for the revoke box.
+- **Skipped.** 10-011: both openers already call
+  `open_box(DialogKind::SendGift)`. 13-037: handled; files handed to
+  Quill wait in the app's own `start_files`, and the test
+  `files_waiting_for_a_chat_survive_a_switch` pins it.
+
+### Sweep fixes (s4-settings)
+
+- **Wallpapers.** A default-wallpaper request carries the theme it was sent for
+  (`SetDefaultBackground { for_dark_theme }`, the Local one too) and its answer
+  files under that theme, so two sets in flight cannot swap themes; the
+  session field `background_set_for_dark` is gone (02-086). An installed
+  wallpaper whose pattern file cannot be read is not remembered as unreadable;
+  the fill-only picture is cached until a retry time, not under the final key
+  for good (`Rendered::complete`, `Entry::retry_at`). A photo or pattern mask
+  that gave nothing at all has the same retry time (`retry_time` takes the
+  wallpaper: a file-backed one is tried again, colours alone are not), so a
+  photo TDLib was rewriting does not leave the chat bare (14-026). The preview
+  slot is hashed with its window id like the history's, so two preview areas
+  of different windows stop replacing each other's render job (14-024). A
+  gradient bubble uses the history area only when its own window reported it
+  (08-014).
+- **Settings state.** A saved-sound list answer older than the stale mark is
+  dropped with the request (`mark_saved_sounds_stale` takes the one in flight)
+  (02-209). A custom sound whose download cannot be sent leaves no pending
+  marker (02-210). Turning on "Use less data for calls" and saving the storage
+  limits send every network and option even if one send fails, and report the
+  first error (02-207). Privacy-data errors are one line per control
+  (`PrivacyControl`), shown where that control is; network usage is a
+  `Fetch<NetworkUsage>` (05-254). Updates to the language pack being switched
+  to wait on the switch (`LateChange`: a patch, or a reload when a string was
+  deleted or the base pack changed) and apply when it is ready (05-139). The
+  phone prompt's "No" lives with the suggestion (`PhonePrompt`) and starts at
+  the question whenever TDLib adds or removes the action (12-107). The phone
+  pickers' empty state is Loading, Couldn't load with Retry, or No more
+  contacts (12-020).
+- **Notifications.** Forum bursts coalesce per chat and topic (04-011). The
+  badge pref is saved before the session takes it (`set_badge_prefs`)
+  (11-p5-010). The story sound picker is a `MuteSection`, so the Mute panel
+  reopens collapsed (11-p5-012); a preset closes the box only when the change
+  went out (11-p5-013); the custom fields reset on every opening
+  (11-p5-014); the sound pickers close only when the change went out
+  (11-p5-017). A sound picked after the lock waits for the unlock
+  (11-p5-018). The upload's picker target is part of `ToneUpload` in the
+  session, so an account switch cannot part them (`ToneTarget`, shared with
+  the UI's `SoundPickerTarget`) (11-p5-019). A failed delete of a saved sound
+  says so, at send time and when TDLib refuses it (the error arm adds the
+  note and marks the saved sounds stale so the list is read again)
+  (11-p5-020).
+- **Appearance and spelling.** A refused delete leaves the custom theme
+  applied (07-040); a renamed one repoints both slots (07-041). One task waits
+  for the Linux accent read (07-049). A zoom change inside the resize callback
+  runs it again (`Refire`) (10-141). The dictionary list is read from disk
+  when it opens and after a download or removal (13-062); a second download
+  says to wait (13-061); a user cancel is `DownloadError::Cancelled` (05-005);
+  a refused remove leaves the language chosen (05-006). A dictionary that
+  failed to load is tried again after 30 s, and the checker does not remember
+  the word it could not judge (05-013); a word of a script no dictionary
+  covers is still taken as correct. The resize callback's run ends (back to
+  idle, callback restored) even if it panics (10-141). A replaced engine's warm-up thread
+  stops (05-014). A verdict asked for before a cache clear is not stored after
+  it (05-008). Check spelling on checks every window's draft (13-058).
+- **Settings window.** The activity page size lives in `AgentPageUi`, starts
+  over with the filter, the account and each visit (13-070). The Add-a-chat
+  picker is keyed by a fingerprint of the chats it lists (13-076). Leaving a
+  page drops its search arrival, and a search result for the page already
+  shown runs leave then arrive (13-078, 13-077).
+- **Skipped.** 02-203: the refusal already restores the confirmed rule and the
+  call mirror (2ca5a183). 02-206, 02-211: a request that is never answered
+  settles through `settle_lost_request` (account loss, failed flood re-send),
+  whose error arms end the stages; TDLib itself does not drop requests (test
+  `an_unanswered_device_login_and_tone_upload_settle_with_their_account`).
+  03-080: a deleted string already asks for a reload of both packs.
+  05-004: cancel drops the app task, so the completion arm that enables the
+  language never runs (29f24e11).
+
+### Sweep fixes (s4-media-2)
+
+- **Viewer.** A Shared Media viewer merges older pages and asks for more only
+  while the session's shared-media panel is for the chat of the viewer's
+  current item (11-p1-008). A Picture-in-Picture clip's deletion is looked up
+  in the clip's own account, the one on screen or a background client
+  (11-p2-005). Speed and volume reach every window's viewer player through
+  `in_every_window` (11-p2-006). "Share at" keeps its position only when the
+  forward picker is open over that very message (11-p2-004). The edit-video
+  frame strip is matched by its own cancel token, so an encode's serial bump
+  (and a failed encode) no longer orphans a strip still being cut (14-003).
+  The set video editor keeps the cut time with its cover still and hands the
+  box none rather than an older frame (14-004).
+- **Transcribe** shares the request in flight for the message
+  (`recognize_speech` returns `Ok(None)`), so a second press sends nothing
+  (11-p3-005).
+- **Sticker editor.** "Keep original aspect ratio" uses the ratio of the
+  picture as it lies after Rotate (12-003).
+- **Profile.** A failed profile chat list keeps its Failed entry and Retry
+  when nothing went out (12-039). The personal-photo picker names no box host
+  until it is answered, and applies the answer only over the same dialog stage
+  it started from (12-038, 12-053 for the camera: the answer also names the
+  photo target it was asked for). Take photo stops the stream when pressed, so
+  the frozen preview is the frame saved; a failed save clears `busy` and
+  offers Retake (12-054). The rating box ends at build when the person's
+  rating is gone (12-035).
+- **Gallery.** A story tile whose story is not loaded asks for it through the
+  story opener (its note says when it could not load) (13-086). The Playlist
+  page closes back to the gallery under it, Esc included (13-085); its rows
+  count as playing only for the chat the track plays for (13-088); it asks for
+  its playlist as it opens and a failed first page draws Retry (13-087); offline
+  (nothing can go out) `open_playlist` marks the playlist failed, and
+  `retry_playlist` puts the removed Failed entry back, so Retry stays.
+- **Keys.** The sender status head is keyed by `ChatMessage` (13-016). A
+  switch of account ends the spoiler reveal fades, which last 200 ms (13-042).
+- **Players.** A speed drag cut off by the clip ending is cleared with the
+  clip (14-018). A player still opening asks for per-vsync frames for 10 s,
+  not for ever (14-028).
+- **Skipped.** 11-p1-009: the menu actions are already a map keyed by
+  (chat, message) in `messages.menu_actions`. 12-044: tdesktop counts the box
+  as shown when it opens (`kDisableSharingBoxMaxShowsCount`); not changed.
+  12-056: `SliderState::set_value` emits no event, so syncing the controls
+  cannot feed back. 14-061: a failed clip is `Failed` for good by design
+  (`transport.rs`, "Failed stays failed"), so the decode error left after a
+  seek is never read. 14-004's stale-cover drop has no cheap test: it needs a
+  decoded video in the editor.
+
+### Sweep fixes (s4-messages-1)
+
+- **Lists and covers.** `EmojiPanel::failed` is gone: `EmojiPanel::lists` holds
+  one `Fetch<()>` per tab (installed, trending, search), begun when the request
+  goes out, ended by its answer or error whichever tab is shown, so a failure
+  stays on its tab and an unrelated request no longer clears it (02-053,
+  05-136). The group sticker box reads the installed list's error the same way.
+  Covers of emoji sets and of the sticker manager count as asked only once
+  their download went out, and the trending sets lose their unread dots only
+  once `viewTrendingStickerSets` was sent (02-054, 02-222). Suggestions that
+  wait for the installed sets stop waiting when that request fails (02-224).
+  A mask list asked before a change is dropped by the change, so it neither
+  lands as the new list nor blocks the refetch (05-138).
+- **Requests that never left, and answers.** `closeChat` of the main window and
+  of a chat window goes through `send_json_request`, which takes the request
+  back when the send is refused (02-025). A swept `searchEmojis` counts as a
+  failed attempt (03-034). Callback-button answers are a queue
+  (`BotsState::callback_answers`), so two answers between polls both show;
+  `attachment_menu_toggled` is a list whose entries name their bot, and the
+  flow waiting takes only its own (05-047, 06-007). Sticker set edits are
+  tracked by request id and their toasts are queued (05-135). `getGiftAuctionState`
+  is one `AuctionFetch` (`Idle`, `Loading { request }`, `Ready { gift_id }`);
+  the error already applied only to its request (07-004). A bot Stop is a
+  `BotStopStage` (`Running`, `Failed`, `Stopped`); sending Stop again leaves
+  `Failed` (08-018).
+- **Typing and windows.** `OutgoingTyping` holds the topic the action went to;
+  `sendChatAction` is built with it (`send_chat_action_in`), a change of topic
+  inside the chat cancels the old one and the cancel goes to the old topic
+  (07-003). Turning spell check on re-checks every window's composer
+  (07-042). The effect badge lookup covers every shown chat (05-134). A
+  macOS text replacement applies only while the composer that asked is the one
+  shown (06-049, macOS only: not built on Linux).
+- **Selections and quotes.** Delete for everyone in a selection needs every
+  message to be yours and still open to it (`allows_revoke`), in the offer and
+  in the request (02-148). The quote of a selection points at the occurrence
+  selected, not the first (`quote_for_nth`; 04-076). Two quotes on adjacent
+  lines are one quote in the document (02-098). A poll not sent yet keeps its
+  options as choices (04-029). The effect watch drops its oldest key, not
+  everything, at the cap (03-095). The reply bar's fetched copies are kept in
+  fetch order and show an edit (05-055). Chat-row animations are kept in
+  `ChatListUi` (replaced with the account). A row that no list build drew
+  between two sightings snaps when it returns; this is counted in builds
+  (`RowFxMap::begin_pass`), not seconds, so an idle list still animates a
+  change that arrives later (04-030). The quote occurrence counts
+  non-overlapping copies of the trimmed selection, as `quote_for_nth` walks
+  them.
+- **Bot boxes.** The create watcher ends when a later create starts
+  (`CreateBotState::starts`; 08-022). The edit box keeps trying to fill when no
+  window could take the texts (08-024). Its Save rejection stands only while
+  the fields hold the texts it was found for, and "Saved" only while they hold
+  what the server has (`SaveCheck`; 08-025).
+- **Skipped.** 02-005: already fixed by f86e9e7c (the deferred caption goes when
+  its message leaves the history). 02-028: a window's events run with that
+  window's view in place, and the menu is drawn only for the shown chat.
+  02-228: the Attached Stickers action takes over the one set box by design,
+  and every exit of it is wired. 05-046: one inline query per (chat, bot) is in
+  flight and the slot records its query. 05-217: already fixed by e38b4dae
+  (a `Fetch` per chat). 05-267: already fixed by f86e9e7c (`StickerLists`).
+  05-270: `search_gifs` and `show_saved_gifs` drop every in-flight page before
+  the query changes. 08-028: tdesktop closes its verify box at once and reports
+  the result as a toast, as Quill does.
+
+### Sweep fixes (s4-accounts-1)
+
+- **Answers matched to their request.** `PendingRequest` carries
+  `subject_id` (the terms `acceptTermsOfService` accepts, the gift `sellGift`
+  sells) and `user_ids` (what `setCloseFriends` saved), so an id-less `ok`
+  settles that subject only: newer terms pushed while accepting stay
+  (05-022), selecting another gift while one sells keeps its panel and
+  convert box (05-223), and the close friends list takes the ids of the
+  save that was acknowledged (05-221; s4-stories made the same fix for
+  03-010, and the merge keeps its one `user_ids` field and
+  `request_for_user_ids`). A
+  failure of older terms' accept does not fail the current box. Profile chat
+  lists are `ProfileChatsFetch::{Loading(RequestId), Loaded { ids, more },
+  Failed}` with `MorePage::{Idle, Loading(RequestId), Exhausted}` inside the
+  loaded list (05-264, 05-265): an old page-2 answer or an old failure after
+  the list was asked for again changes nothing; `CommonGroupsPaging` is
+  gone. In the merge with s4-links-tdlib-2 this design replaces its
+  `CommonGroupsPaging::next_page: PhotoPage` (05-185): the follow-up page
+  lives inside the loaded list, so a new first page drops it whole and its
+  late answer lands nowhere. The proxy list waits for one `getProxies` as `ProxyFetch::
+  Loading(RequestId)` (04-069): an explicit refresh does not send a second
+  fetch, a mutation's success drops the awaited id so an answer sent before
+  the change cannot clear `stale`, and `ProxyState::loading` left the
+  baseline.
+- **Dropped answers settle.** An envelope ignored as out of order takes its
+  pending request and settles it as lost, so a download is no longer counted
+  as running and a mutation's spinner clears (05-199).
+- **Guards before the send.** The 2FA sign-in requests (password, recovery
+  request, recovery code) go through `login_request`, one per purpose
+  (02-081). `request_twofa_recovery_code` and `set_login_email` clear their
+  "code sent to" step only after the request was accepted (02-080). The
+  sign-in recovery request keeps s4-accounts-2's `PasswordRecovery` stage:
+  it is sent through `login_request` and becomes `Requested(id)` after the
+  send, so the code step still waits for its answer.
+- **Writers.** `update_registry` is the one way to change `accounts.json`
+  and holds a lock across load and save (04-083). The deferred settings
+  writer starts its thread under the queue lock (04-092) and a
+  `WriterExit` drop guard resets `writer_running`, marks the cut-short write
+  failed and wakes `flush` when a sink panics (04-091). A failed
+  `window_state.json` write puts the state back and raises the status note
+  (04-094). A stray `recent_hashtags.json` is kept when its owner folder
+  cannot be created (04-084). The web view delete that waits for a helper
+  checks the salt it read when the account left, so the next sign-in's
+  folder is not wiped (01-006). A failed first-run write is logged (04-096).
+- **Smaller seams.** A call created while another took the slot is
+  discarded (`created_call_discards`, no "declined" banner; 05-225).
+  Switching chats releases the left chat's open topic (05-243). `Initial`
+  is not offline, like the connection strip (05-246). A deleted direct
+  messages conversation forgets its count and revenue (05-248). A draft save
+  that failed and was left behind clears the slot's unsaved mark
+  (05-244). The peer-QR theme save answer applies only for the save in
+  flight (04-014). Leaving, being removed from, or deleting a channel drops
+  its joined notice and strip (05-276).
+- **Skipped.** 05-019: already fixed by f51f1abc (`ReviewStage`; a failed
+  send settles the unsent ids). 05-275: both paths that call
+  `set_supergroup_member_counts` insert the full-info entry first (tested by
+  `connect::tests::permissions_box`). 05-257: `send_proxy_mutation` refuses
+  a second mutation while one is out (`a_mutation_refetches_the_authoritative_list`
+  asserts it), so the first answer cannot free a second. 04-093: retrying
+  on a timer needs a waiting writer thread; every later submit and the quit
+  flush already retry, the failure is shown once, and tdesktop does not
+  retry either. 04-096: when the "started" write fails nothing durable can
+  tell an install from an upgrade; only the log line was added.
+- **Review fixes.** The settings writer's exit guard acts only when the
+  thread unwinds: a clean exit already cleared `writer_running` under the
+  lock, and clearing it again after another thread spawned a new writer
+  allowed two writers at once (a stale batch landing after a newer one, an
+  early `flush`). A created call discarded because the slot was taken is
+  recorded in `busy_declined_calls` through the same
+  `remember_busy_declined` as `queue_busy_decline`, so its end shows no
+  "Missed call" and a late `Pending` cannot take the call window. The
+  out-of-order answer and the writer-stopped texts go through lang keys.
+
 ### Sweep fixes (s3-stories)
 
 - **One story-page op per request.** `StoriesState::page_ops` (`StoryPageOps`)
@@ -5557,3 +6020,767 @@ land and the typed form was gone.
   fields (`cover`, `privacy_edit`, the close-friends stage, four flags) and
   closes the rest through one seam instead of storing a single `ViewerPanel`
   value (about 150 readers); every open goes through that seam.
+
+### Sweep fixes (s4-links-tdlib-1)
+
+Minor entries, each proved against the code first.
+
+- **Sent before recorded, recorded before sent.** A group bot's `getUser` that
+  could not be sent leaves `asked_bot_users` (02-084). A mask set's request
+  that could not be sent leaves `set_requested` (02-139). `setTdlibParameters`
+  that could not be sent takes its `SetParameters` entry back (02-039).
+  `request_close` puts back the logOut request `begin_close` cleared when its
+  send fails (02-038). Edit and Remove of a proxy drop its ping result only
+  once the change was accepted (02-189). The retry stash is written before
+  `td_send` and the entry taken back when the send fails, so a fast 429 finds
+  its request (02-231).
+- **Answers matched to what asked.** A superseded username check's failure
+  sets no profile error: only the check that is still current does (05-156).
+  A failed `getChatMessageCount` drops the chat's entry, so the next open asks
+  for all of them again (02-030). A lost export request (flood-retry re-send
+  failed, TTL sweep) frees the export's link, so the worker is not left
+  waiting out its timeout (03-046). Composer link previews never evict an
+  entry that is still `Asked` (05-056). The sharing request is answered from
+  `loaded_message`, so a request shown in a topic or other view works
+  (02-196). The Translate card made with a style the server removed is asked
+  again without it, like the Style tab (01-055).
+- **Failures drawn.** A message statistics send that fails is `Failed`, which
+  has Retry, not `Loading` (02-217). The Collect password box shows an error
+  when its request could not be sent (04-043). A refused zoom is not recorded
+  (02-219; `zoomed` stays keyed by the graph token, which TDLib makes unique
+  per graph).
+- **Window and account scope.** The GIF search asks with the chat of the
+  window that searched (`GifPanel::search_chat`), not the main window's open
+  chat (02-061). A log-out sweeps only the on-screen account's media scratch
+  (`sweep_account_media_cache`), and `ensure_private_dir` makes a directory
+  again when the OS removed it (03-071, 03-072).
+- **Links and the picker.** A ninth queued external link is `Full`, not
+  silently dropped: the poll turn says "Too many links opened at once" once
+  (03-019; tdesktop opens each at once and has no queue, so this is the
+  smallest safe message). Venue icons that failed or never answered are asked
+  again when a picker opens (03-075). The address hidden while the pin moves
+  is kept with its place and restored only there (03-086). A launch whose
+  sender thread cannot be spawned reports `NotSent` and Quill starts
+  unchecked, not "not responding" (05-012; not tested: a thread-spawn failure
+  cannot be forced). Profile accent colour is refused while the own user is
+  unknown instead of sending emoji id 0 (02-171). A failing call-audio send is
+  no longer a change to redraw for (02-056).
+- **Skipped.** 02-043: `resume_disk_paused_found` already puts unsent ids back
+  and always saves. 02-071 and 02-178: the asked set and the request box are
+  already written after the send (tests `a_grams_peer_request_that_never_left_…`
+  and the private-sharing tests). 03-005: the wallet's explorer, rates and
+  state are already `Fetch`-like stages with `cancel`/`fail`. 05-177: the add
+  contact box reads its own answer (`ContactSave::Failed`, test
+  `the_add_contact_box_closes_on_the_answer_and_shows_a_refusal`); the contacts
+  notice belongs to the settings list.
+
+### Sweep fixes (s4-misc-1)
+
+- **Lost answers settle.** `canTransferOwnership`, the later-page and
+  tab searches (`SearchMessagesMore`, `SearchPublicPosts`,
+  `SearchPublicPostsMore`, `SearchPublicMessagesByTag`) and the recommended
+  channels are sweepable lookups. A lost answer settles through the error
+  arm each already had, so the transfer box and the search tabs end in an
+  error with their retry instead of a state nothing ends (05-193, 05-202).
+- **Answers matched to what asked.** A late `isProfileAudio` answer
+  never overwrites a value a local save or remove already set: the check is
+  asked only for an unknown song, so a known value is newer (05-194). A page
+  of a post's public forwards lands only in the list that asked for it:
+  `PublicForwardsList::asking` holds the request, `loading` is derived, and
+  reopening a post whose older page is still out asks again (06-008). A
+  late relay Ack from the document before a reload is ignored by sequence
+  (`Relay::stale_through`) instead of ending the carrier (01-003). An
+  import-contacts read and the file picker's answer carry tokens counted
+  process-wide, so a closed box's read cannot land in the next box
+  (09-001). Selection check fades are keyed by chat and message (11-p4-014).
+  A purchase on its way in the marketplace box is not taken over by another
+  chat's box (10-171).
+- **Every window.** Auto-download progress of a chat a chat window draws is
+  live there (`open_chat_media_downloads` records the chat that asked,
+  05-195). Fast buttons mode rebuilds the rows of every window, from the
+  Experimental page and the bot's own switch (07-024). The device-link
+  answer is dropped with the link flow (`clear_device_qr`), so no stale
+  "Device linked" shows on the next visit (09-X015, 09-028).
+- **Owner and exits.** The Downloads panel's open flag is `ChatListUi`'s,
+  so it starts closed when an account comes back (09-053). The folder zip is
+  an `ArchiveJob` of the composer (`Idle` or `Building(slot)`), one at a
+  time; an answer for another chat is dropped and its "Preparing" note goes
+  (03-050, 09-055). The Quit's pending exit is `MainWindow::export_stop`,
+  beside the window-level alert (09-098). The window-place save timer is a
+  `StateSaveTimer` that holds its task and is `Idle` again whether or not
+  the window was still there (09-117). The experimental page reads the
+  clipboard when it opens and when the window is activated, not on every
+  render (07-023). Autoscroll's loop is a `Task` inside `Active` (08-038).
+  A refused fact check keeps its box and text (09-102). A replayed intro
+  clip ends when the app locks (09-X051). A storage slider drag whose
+  release never came is applied when the page is left (10-133).
+- **Skipped.** 05-045: the conference's `invite_results` is already cleared
+  by leaving or ending the call, by the call's own update and by logout.
+  10-165: the tick runs from each window's `per_window_upkeep`, is scoped to
+  that window, and `frame.window_active` counts chat windows.
+
+### Sweep fixes (s4-groups)
+
+- **Requests that never answer.** A swept or logout-settled request takes its
+  waiting group-admin follow-ups with it and says so (02-074). A refused part
+  of the business bot lookup clears the recorded query and drops late answers,
+  so the same text asks again (02-032). A refused poll-votes request is a
+  `Failed` chart with Retry, not an empty slot the next render asks for
+  again (13-030).
+- **Answers matched to what asked.** The join-request list keeps its newest
+  request id after it answers, so an older page that lands later is dropped;
+  "load more" asks the registry, not that map, whether a page is out; a stale
+  load-more error says nothing (05-078, 05-084). A membership update forgets
+  an administrator list asked before it, so its answer cannot put the old
+  administrators back (05-079). A list error does not fail a list that
+  already holds an answer (05-085). A hidden join request does not bump a
+  searched total (05-080). Statistics carry the theme their request asked
+  for in `Loading`/`Loaded`, and a poll drain asks again when the theme
+  changed (13-032).
+- **Saves in parts.** A permissions Save whose later part is refused returns
+  `PermissionsSent::Partial { sent, refused }`; the box stays, names the part
+  and a second Save sends only what still differs (02-168, 10-065). The
+  upgrade-to-supergroup confirm is a `Submit` page: it closes on the answer
+  or the upgrade event and shows TDLib's reason otherwise (10-043).
+- **New group dialog.** A made plain group takes its dialog (and its creation
+  row) away from a poll drain, like a community's chat (02-150, 05-087,
+  11-p5-001). Editing the link no longer forgets a type save still out
+  (11-p5-005). The subscribers step finishes only when the add went out; tdesktop
+  closes at the send, so the answer is not waited for (11-p5-004).
+- **Stage owners.** Add Members keeps the picked contacts when the add did
+  not go out (09-051). Unban, kick and remove no longer refetch the page
+  before the change applies: the request's `ok` marks the member list stale
+  (10-061). A saved Edit box is dropped, not hidden (10-055). The Custom
+  limit field clears its focus request when its content is drawn
+  (`Rc<Cell<bool>>` shared with the content closure) (10-150). Welcome
+  Retry only re-asks the load, so typed text stays (10-076). A blocked
+  Public choice is not stored in the draft (10-083); the apply-to-links and
+  username alerts name the box that asked (10-084, 10-086). The Share of a
+  group link names the asking window (10-095). A chat window of an upgraded
+  group is replaced from whichever window is live (10-044). A failed topic
+  select forgets no scroll position (10-073). The revoked-links list opens
+  only once its request is out (10-143); Requests on a link says when the
+  driver refused (10-147).
+- **Smaller.** One welcome message per chat in flight, not per account
+  (02-132); revoked links wait for the viewer's id (02-151); one failed
+  profile thumbnail download keeps the rest of the queue (02-186); a saved
+  business time zone stays when TDLib's list lacks it (08-007); typing on
+  past a debounced bot lookup reads as Loading (08-006); a Created
+  community closes the identity box too (08-124); the monoforum ban item says
+  Checking until the member status is known (09-063); a filter naming only
+  gone administrators opens as all (03-047); the boost count buttons wait
+  for the save in flight (02-124).
+- **Skipped.** 09-052: the New community box is a `Submit`; a refused
+  `createCommunity` lands in `Failed` with the reason and the box stays
+  (`settle_create_community_dialog`). 10-094: the info panel target is a
+  selection that draws from cached data; a failed fetch shows the error note
+  and reopening asks again, so no stage can stick.
+
+### Sweep fixes (s4-chat-list)
+
+Twenty-four S4 entries. Each was read end to end against the integration
+branch first; eighteen were real and fixed, five were already fixed by the S3
+chat-list sweep, and 09-X059 duplicates 09-101.
+
+- **A swipe runs what the panel showed.** `SwipeMachine<K, A>` carries the
+  action the row offered at its latest event; the release stores it and `poll`
+  returns `(key, action)`, so a chat that was muted meanwhile does not flip
+  Mute into Unmute (02-007). `poll_swipe` runs nothing while locked and
+  `close_for_lock` drops the gesture and every spring-back (08-113).
+  tdesktop resolves the label per paint and per perform; the lock gate is
+  Quill's own rule (`lock-is-a-render-state.md`).
+- **Search.** A filter change bumps the generation and clears the results
+  (`SearchState::restart_for_filters`), so the Recent answer of the old tab no
+  longer lands under Channels (05-203). Picking a chat or a hit closes search
+  through `ConnectDriver::close_search`, which clears the typing debounce
+  (02-214). `getPublicPostSearchLimits` carries the search generation, is
+  applied only for the open one, and the quota of the previous query is
+  dropped when a new public-posts query starts (05-128).
+- **Shared-media calendar.** `jump_shared_media_to_day` returns
+  `SharedMediaJump::{Jumped, NoMedia, Stale}` and takes the calendar only after
+  its checks: a day with nothing near it keeps the box open with a note; a
+  calendar of another chat is dropped (02-232).
+- **Notes are a queue.** `chat_action_error` is `Notes` (the queue the message
+  notes already use): two refusals before the drain are both shown, oldest
+  first (05-063). The logout settle keeps it with the other queues.
+- **Suggestion box.** `hide_suggested_action` removes the action locally before
+  it tries to send, so a dismissal that cannot go out does not reopen the box
+  and add a toast per close (07-045).
+- **Chat list drags.** A forward drag entering the list drops the file drag's
+  probe, hover and one-second timer, and `choose_row_by_drag` refuses while a
+  forward drag is seen (08-064). The freeze timer, which every drag update
+  re-arms, ends the drag state too when no drag is active any more, and
+  `drag_left` clears even when nothing was hovered, so the next drag of the
+  same paths is probed again (08-065).
+- **Rows not on screen.** The Contacts and Calls panes and search results clear
+  `chat_list.items`, so key stepping and file drags never read a list that is
+  not drawn (08-075).
+- **Row animation per account.** `RowFxMap` moved from `FrameUi` into
+  `ChatListUi`, so a switch starts it empty and a row snaps on first sight
+  (08-098). It is bounded by one account's chats.
+- **Contacts.** A failed send in `fetch_contacts` sets `contacts_error`, so
+  Retry ends in the error line (09-002; `set_contact_sync`'s refetch uses the
+  same path). The Sync switch is saved first and put back when the save fails
+  (`ConnectDriver::set_contact_sync`, 09-X003).
+- **Folders.** The copy button's check mark is a `CopyMark` enum cleared by a
+  `spawn_screen` timer matched to its own copy (09-035). The join box for new
+  chats sends and counts `selected` intersected with the current offer
+  (09-101, 09-X059). The delete box asks `getChatFolderChatsToLeave` through
+  `folder_chats_to_leave: HashMap<i32, Fetch<Vec<i64>>>`: Loading disables the
+  confirm and says so, a failure draws the error with a Retry, and Delete stays
+  possible (09-X058). A failed delete no longer moves the tab to All; the poll
+  does it when `updateChatFolders` drops the folder (09-113).
+- **Already fixed** by the S3 chat-list sweep (e38b4dae, 6b7156e4): 05-060 and
+  09-X017 (the share box takes only the answer of its `LinkOp::Saving(request)`;
+  `folder_share_error` is gone), 09-036 (`InviteStage::Checking(request)`), 09-X055
+  (`InviteStage::Adding` is left by the matching answer, error or lost-request
+  settle), 09-X056 (`folder_limit_hit` carries the asking request).
+- **Not verified on screen.** The headless demo has no live driver, so the
+  delete-box Loading text and the Retry row were checked by tests only.
+
+### Sweep fixes (s4-accounts-2)
+
+Twenty-six S4 entries; the code was read first and each is fixed, a
+duplicate, or skipped with its reason.
+
+- **Window answers.** `WindowViews` numbers every opening of a chat window
+  (`opening_of`, never reused); a request carries the opening of the window
+  whose view was in place (`PendingRequest::window_opening`), and
+  `apply_payload_in_asking_view` applies it to a view only while that
+  opening is the window's. A window closed and opened again for the same chat
+  takes none of the old window's answers (06-006).
+- **Forum topics.** The order of a new topic and of a topic that moves to the
+  top is a saturating add (05-285; the `getForumTopic` refetch the entry asks
+  for already runs from `possible_topic_refresh`). `replace_forum_topic`
+  checks that the list is loaded before it merges drafts (05-286).
+- **2FA password recovery.** `AuthState::password_recovery` is one enum
+  (`Idle`, `Requested(RequestId)`, `CodeSent`) moved by the answer to the
+  request that asked: the code step draws only after `ok`, a refused request
+  goes back to `Idle` with the auth error on the password step, and auth
+  leaving the password step resets it. `AuthUi::recovery_mode` is gone
+  (08-043).
+- **Already fixed.** 08-045 and 09-X014: the terms prompt is
+  `Option<TermsPrompt { terms_id, stage }>`, replaced whole for another
+  version and dropped when the terms go (f51f1abc, with a test).
+- **Account box.** Log out from it goes through `close_account_lifecycle`,
+  so the typed password and reason are emptied (07-018).
+- **Data and Storage.** The per-network editor is one `StorageEditor`
+  (`Closed`, `Open`, `Saving { request }`): Save keeps the draft until the
+  session's `AutoDownloadAnswer` for that request id says `Saved` (closes) or
+  `Refused` (reopens with the draft); the answer is drained by the poll
+  (09-042). "Reset statistics" is `NetworkReset { Idle, Confirming }`, dropped
+  by `leave_data_storage` (09-040), and kept with a page error when the send
+  failed (09-041). "Clear selected" forgets the ticks only when the clear went
+  out (09-044).
+- **Video chats.** The Schedule box keeps the refused time with its message
+  and draws it only while that time is the picked one (09-X026). Before
+  leaving the call you are in, `check_create_video_chat` runs every refusal
+  `createVideoChat` has except the call itself, so a request the driver would
+  refuse (a start time too close, a closed connection) no longer ends the
+  original call; the same for "Stream with..." (09-045).
+- **Lock screen.** `LockNotice { None, Wrong, Flood { until } }` replaces
+  `lock_error` plus `flood_until`: typing clears a wrong-passcode line, never
+  the flood wait that disables Unlock (11-p7-006). The GIF gate is shut while
+  locked and `set_locked` re-syncs it both ways (11-p1-003). Log out from the
+  lock screen sets `PasscodeJob::Cancelled`; the passcode check and the system
+  unlock drop their late answer and clear the master key (11-p7-008). The
+  auto-lock time and system unlock change the screen only after the write
+  succeeded, and say why otherwise (11-p7-009).
+- **QR box.** A failed code draws nothing instead of the previous link's
+  (11-p8-011). Copy or Share finishing in a box whose code or colors changed
+  says so (`QrToast::Changed`, a new string) instead of doing nothing
+  (11-p8-013). The share chooser is remembered as `QrShare::Chooser { window }`;
+  another window's pick or cancel leaves the box alone (11-p8-010). The
+  screen's `Farewell` removes a card file still waiting for its chat
+  (11-p8-009).
+- **Security.** The two-step dialog falls back to its status screen from the
+  poll's drain (`drain_twofa_step`), not while it draws (13-171). The
+  sessions layer is open only while `details_session()` resolves (12-097).
+- **Security keys.** A login round gives the PIN only to the key that asked for
+  it (14-080). On Linux a key that exists but cannot be opened ends the
+  ceremony at once with `AccessDenied` and its own message (14-079;
+  `hid::Found`).
+- **Skipped.** 09-X025: the Waiting step has nothing to show; its answer is
+  applied by the window that hosts the box, and a minimized window draws
+  nothing either way. The answer's two effects (the box, an error toast) need
+  that window, and it recovers when the window comes back, as the Asker seam
+  intends.
+
+### Sweep fixes (s4-media-1)
+
+- **Emoji effects.** A lone emoji read while the effects pack loads is
+  marked watched when it waits, so a failed pack load (or the queue pushing
+  it out) puts it back as unwatched and a later read plays it (03-035). A
+  tap that arrived more than the start wait before a window took it is
+  dropped: `EmojiInteractions` stamps each effect with its arrival and
+  `take_fresh` hands over the recent ones, so taps made while the app was
+  locked do not play at the unlock (09-X038). The "watching" action carries
+  the effect that started, not the first effect of its chat (09-084). The
+  anchors, badges and effects noted by bare chat id go with the account on
+  screen (`MessageUi`'s `Farewell`, 09-085).
+- **Emoji sets.** Each unpack of a pack has its own temp and move-aside
+  folders and swaps under one lock, so two installs of one set do not wipe
+  each other (03-044). The installed set list for the `:` suggestions is
+  asked from `EmojiSets::installed` (`Fetch<()>`): from idle or after a
+  failure, and set to loading only when the request went out. The UI flag
+  `EmojiBarUi::sets_asked` is gone (09-080, 09-X037).
+- **Gallery profile tabs.** Stories and Gifts requests carry the tab's stamp
+  (`begin_profile_fetch` restamps, `begin_profile_more` keeps it); an answer
+  for another stamp, from before the gallery was closed and reopened, is
+  dropped whole, and a request is only "already in flight" for its own stamp
+  (06-004).
+- **Reactions.** A refused reaction puts the old chips back only while the
+  message still shows what the request made; with another change on top it
+  takes back just its own reaction (05-191).
+- **Media playback.** The shuffle's played list drops tracks that left the
+  playlist (04-022). A swipe steps from the same armed value the arrow shows
+  (03-097). A seek slider event is applied only for the slider of the active
+  track (08-041). A frame ThorVG cannot draw fails its clip, so views rest
+  and the frame is not asked again every tick (06-012). The idle watch
+  thread starts through `spawn_guarded` and clears its flag when it panics
+  (07-048).
+- **Panels and windows.** The reaction and status selectors enter their mode
+  through one function that also puts the panel on the emoji tab and syncs
+  the GIF gate (11-p1-002). Closing a word's bar (typing on, blocking, the
+  setting) resets the `EmojiBarUi` it shares with the suggestions, like the
+  other ways of closing (09-081). Tapping a custom emoji again restarts its
+  card timer (each tap has a count the timer compares, 09-019). The album
+  pin label is kept per history revision instead of cloning the history on
+  every chrome redraw (11-p1-007). The viewer's farewell switches the
+  window's extended range off (10-099). A failed image decode is tried again
+  after 30 s (10-112). A sweep that met a window mid-draw wakes itself once
+  more (10-113). The demos report a failed check instead of panicking
+  (09-029); a test no longer sleeps (07-050).
+- **Skipped.** 02-141: the scan runs once per user click, not per frame, and
+  an index would be state kept in step with every edit and delete. 03-039:
+  the switch is already one `SetStage::Switching`; a replaced switch's task
+  is dropped, so its continuation (which saves) never runs, and the load it
+  ran is a read. 05-095: a cancel with no request of ours is only sent for
+  a transfer the file map shows active, and TDLib's idle update for that
+  transfer is the one that settles it (a paused one is not cancelled this
+  way).
+
+### Sweep fixes (s4-messages-2)
+
+Minor entries of the messages area, proved one by one.
+
+- **Sends and the composer.** The reader's saved scroll and the recent
+  hashtags are noted by `note_message_leaving`, called where a send has
+  passed every refusal (slow mode, rights, size, the paid box) and goes out,
+  not when Send is pressed (08-137). Delete confirm dissolves the message
+  only when the delete went out (08-138). A bot's Restart after Unblock
+  sends `/start` only when the unblock request went out (08-010). The
+  attach picker's answer waits for the unlock instead of filling the tray
+  while locked (08-141).
+- **Composer boxes are the chat's.** The link, date and Code Language boxes
+  are fields of `ChatUi`, so a chat or topic change replaces them and Save
+  cannot apply a range to another chat's draft (08-140, 08-154). "Send as a
+  document" for an edit's replacement file is a field of the edit
+  (`EditMode::replace_as_file`), so it ends with the edit and another edit
+  starts without it (02-092).
+- **ChatUi of a closed chat.** `sync_chat_ui` replaces the value when the
+  reducer closed the chat (removed, left), so reopening it brings no old
+  bars (08-106).
+- **Menus and keys.** `open_submenu` reads the chat list's and the
+  community's menus only in the main window, so an arrow key in a chat
+  window's message menu does not close the main window's submenu
+  (09-X004). The reactor tab a chip's menu asked for is dropped when the
+  next menu opens, so it cannot outlive its menu (11-p3-010). Copy Option
+  Link and Delete Item say when the request could not be sent (11-p3-012).
+  Save to Saved Messages tells a connected account whose id or draft is
+  missing from the demo (11-p3-009). A failed reactor tab or viewer list is
+  drawn with a Retry row (11-p3-011; `menu_audience_page.rs` is split out).
+- **Boxes and links.** The wallpaper file picker's answer applies only to
+  the chat look box that asked (`LookTarget`, 08-097). An Add-bot or
+  Share-game link does not replace an open profile box (Edit Contact,
+  Birthday ...) and says to close it first (08-013).
+- **Join requests.** "Show more" is disabled while a page is on its way
+  and a send that cannot go out is a status note (08-060).
+- **History.** `scroll_view_probe` resets with `scroll_top_probe` when the
+  history key changes (09-005).
+- **Emoji.** Closing the emoji packs box bumps the search keystroke, so a
+  search waiting on its pause does not go out (09-078, 09-X039; the field is
+  already cleared on open). Download progress notifies only while the
+  Choose emoji set box is open (09-X044). Saves of the chosen set run in a
+  chain, in the order the switches were applied (09-088).
+- **Inline mode.** A failed first page is asked again by the next composer
+  event instead of counting as fresh (10-117); closing the results panel
+  bumps the query token (10-118). A sleeping inline player whose file no
+  longer opens becomes `Rest::Stuck` and keeps its still, so no sweep opens
+  it again (10-128).
+- **Message effects.** The badge, replay and waiting registries are emptied
+  when `OnScreen` is replaced (`EffectNotes` guard), so an account switch
+  leaves no entry that could match another account's message (11-p2-016,
+  03-096).
+- **Skipped.** 08-136: a rich send's flag is dropped on its refusal
+  (`apply_sent_text_answer`) and a voice or round video's is set only after
+  the send went out; what is left is a later async send failure, which
+  cannot be tied to the flag without a request-to-message map, and dropping
+  it by slot would resurrect the drafts of later sends. 09-X011: tdesktop's
+  `HistoryWidget::newItemAdded` scrolls to the end for any new outgoing item
+  of the open history, not only for the view that sent it. 09-X007: the
+  dismissed set would need a home every window's view reads; online,
+  `deleteChatReplyMarkup` reaches every window's session through TDLib.
+  10-131: the mark at the attempt is what stops a file outside the sandbox
+  from being tried (and noted) every frame; a download wait plays through
+  the intent. 10-129: `forget` already drops `on_demand` with the players;
+  the other window's scale only sizes the decode. 10-120: the Started stage
+  ends when the user leaves the bot's chat, and the scan is over the loaded
+  messages only. 11-p2-011: already fixed by f86e9e7c (`MenuActions` keyed
+  by chat and message). 11-p2-010: the reaction options and the paid offer
+  are keyed by chat and message, and each menu opens by asking its own, so
+  a stale value never applies to another message. 11-p3-003: already
+  `EffectLookup` with `forget_dropped` (a lost answer is asked again).
+- **Test repaired.** `an_old_bot_message_loaded_after_the_start_does_not_bring_the_user_back`
+  (already failing on the integration branch) opened the bot's chat only after
+  the start went, so a frame in between saw the user outside it and ended the
+  trip; the chat is opened before the start, as in the app.
+
+### Sweep fixes (s4-payments-1)
+
+Minor entries (S4). Each was read end to end first; the ones that were
+already fixed or cannot happen are listed at the end with the reason.
+
+- **Earn / affiliate.** `JoinBox::joining` is `JoinStage` (`Open` or
+  `Joining(RequestId)`): only the answer or error of that request acts on the
+  box, and a late Connect ok fills "My Programs" but closes or covers no
+  box opened since (03-027, 05-124). A click on a program is `Resolve`
+  (`Idle` or `Asking(RequestId)`); only its answer opens a box, and leaving
+  the page (`set_open_info_panel`, the programs box closing) returns it to
+  `Idle` (03-027, 05-124). TON and Stars history pages apply and fail only
+  for the request the list waits for, like the program lists (05-123; 02-048
+  was already fixed the same way). "End program" closes its confirmation
+  only when the send went out (02-051). Earn toasts, the Fragment URL and the
+  setup page's "go back" of an account in the background are forgotten when
+  it comes back on screen, with the other drained outcomes (03-028).
+- **Suggested posts.** `SuggestBar::send` (`BarSend`) keeps the edit's bar up
+  until its send answers: the `message` answer takes it down, an error returns
+  it to `Idle`, and a second send waits (03-012). `busy` is cleared only by the
+  approve or decline's own ok or error, not by an offer update or another
+  request on the same post (06-041).
+- **Limits, labels, files.** `getPremiumLimit` asks are kept as
+  `LimitAsk::{Asked(request), Refused}`: a lost or transiently failed ask is
+  asked again, only the server's refusal stays (04-049). `PsaLabels` keeps a
+  `PsaAsk` per type; nothing is marked asked before its request exists, a
+  failed send or error returns the type to asking (three tries per pack)
+  (04-071). Files handed to Quill past the queue's size are counted and a
+  toast says how many were not added (05-033). The Remove Fee box keeps an
+  earlier save's slot (04-054). `StarAmount::label` no longer overflows on
+  `i64::MIN` (04-051).
+- **Sign-in and security.** The 2FA round trip is `PasswordFlight`
+  (`Idle` or `InFlight(RequestId)`): an older request's late answer or error
+  neither frees the newer one nor writes its error line (05-039).
+- **Chats and links.** `setDefaultBackground` carries `for_dark_theme` in its
+  purpose and files under it (05-067). A deep-link failure is stale only when
+  no stage carries its generation (05-066). A handled community add-chat
+  request is remembered until the next page is asked, so a page in flight does
+  not bring it back (05-073).
+- **Gifts.** An ok closes the flow it belongs to (`GiftFlow::answers`), not
+  whichever flow is open; a transfer's ok closes the picker that sent it
+  (05-118). The export password box is `ExportSend::{Idle, Out(RequestId)}`,
+  and the temporary password, the URL and the error act only for the request
+  it holds (05-119).
+- **Names.** The name-color palette is kept per account and the renderer
+  reads the account on screen (`set_active_account` in `put_on_screen`), so a
+  background account's `updateAccentColors` paints nothing (06-064).
+- **Skipped.** 04-054 (the slot was already matched by request, with a test;
+  only the reset on open was changed), 05-069 (`take_chat_upgrades` drains the
+  pairs every poll), 05-070 (`refuse_login_url_overlap` allows one login-url
+  request at a time and a swept request has no pending to answer), 05-071
+  (`background_answers` is keyed by request), 05-072 (a first page is not asked
+  while a page is in flight), 05-075 (outcomes of a left screen are forgotten
+  on return by design, like the other drained outcomes), 05-113 and 05-127
+  (answers already matched by request).
+
+### Sweep fixes (s4-misc-2)
+
+- **Owner resets.** The side column's slide (`PanelReveal`) is replaced in
+  `replace_screen`, so it never slides out an old account's panel (11-p7-007).
+  The business-hours row's view is `BusinessHoursUi { view: Option<(user,
+  HoursView)> }`: another profile starts folded in the viewer's zone
+  (12-036). The send button's morph, the topic strip's reveal key and the
+  self-destruct tick task are `ChatUi` fields, replaced with the chat: a new
+  chat's Send button starts settled, its strip is scrolled to its selected
+  tab, and a return to a chat holds one tick task, not two (04-088, 13-101,
+  12-079). The send menu (and its card) closes in `replace_chat_ui`
+  (12-104). Closing a chat window drops its flying sticker (`send_fly::
+  window_closed`) and its toast entry (12-106, 13-117). The effect strip
+  rests only while a card is shown, not after it was hidden (12-105). The Privacy page's
+  password-check field is emptied by a derived upkeep step whenever Settings
+  is not on the Privacy page (13-170).
+- **Colors box.** Color-request failures have their own
+  `UsersState::peer_color_error`; `PeerColorDialog::stage` is `ApplyStage`
+  (`Editing`, `Sent`, `Failed(text)`) and replaces `sent`. Editing leaves
+  `Sent` and `Failed`; with the box closed the failure is a note (11-p8-002).
+- **Answers and effects only when they happened.** The reaction fly-up
+  starts only when the request went out (12-063). A failed source listing
+  forgets the call like an empty list (12-069). Report and Save as HTML end
+  a selection with `end_selection`, which says nothing; only
+  `clear_forward` says "Forward cancelled" (12-087). The dissolve starts
+  only after `delete_selected` / `delete_confirmed` were sent (12-089), a
+  waiting dissolve asks for no frames, and an emptied chat keeps its rows
+  while the last message crumbles (14-012). Dust starts only from a row
+  painted in its window's latest frame (14-013).
+- **Dialogs and shortcuts.** `MainWindow::dialogs_closed` is a set of
+  windows whose kit dialog an action already closed
+  (`close_kit_dialog_if_done`); the shell then forgets it instead of closing
+  the dialog now on top (13-053, hotspot: shell.rs). The story viewer blocks
+  shortcuts of the main window only (13-055). The statistics chart cache
+  compares the whole text, so a buffer reused at the same address parses again
+  (13-024).
+- **Skipped.** 11-p5-007: `close_add_contact_dialog` calls
+  `forget_new_contact` (test `a_closed_boxs_import_opens_nothing_and_the_next_box_sends`).
+  12-091: the first mouse move without the button ends the drag
+  (`selection_drag_lost`), a window that lost focus ends it in the poll, and
+  GPUI has no read of held buttons for the poll. 13-074: `ForwardStage` is
+  one enum (round 18). 13-033: a pick removes the picker's flight in
+  `begin_sponsored_report`, so a second click finds no picker (test
+  `a_picked_report_option_closes_the_picker_until_the_answer`).
+
+### Sweep fixes (s4-stories)
+
+Twenty-two S4 entries; each was proved against the code first.
+
+- **Answers matched to their request.** `setCloseFriends` carries its list
+  on the request (`PendingRequest::user_ids`), so the `ok` of the first of two
+  quick saves applies its own list and a failure of one never clears the other's
+  (03-010; the `close_friends_pending` field is gone). The viewers panel and
+  the public story search keep their page in one `PageFetch` (`Idle`,
+  `Loading(request)`, `Failed(text)`); the story forwards list keeps it in
+  `ForwardsPage` (`NotAsked`, `Loading { request, offset }`, `Ready`,
+  `Failed`), which also knows whether the first page was ever asked and makes
+  a first page replace the rows (03-007). Either way an answer or an error
+  lands only when it is the request the page waits for, so a stale one from
+  an earlier visit to the same story fills or fails nothing (05-279, 06-009),
+  and a page whose request the registry no longer holds does not hold the
+  next one back. `StoryViewersState`, `StoryInsightsState` and
+  `StorySearchState` drop their `loading`/`error` pairs (baseline lines
+  removed). A reopened insights panel that replaced another story's starts
+  at `NotAsked` and asks its first forwards page again. A search page the
+  sender refuses leaves the pages already found and a retryable error
+  instead of clearing the panel (03-008).
+- **Viewers panel (13-145).** The spinner shows only for `Loading`; a failed
+  page shows its error with Retry (also for a failed first page), and a send the
+  sender refuses is a `Failed` page, so scrolling does not re-ask every frame.
+- **Post-as list (05-162).** `StoriesState::post_as` is its own
+  `Fetch<Vec<i64>>`: its failure no longer lands in the eligibility check's
+  answers (which made the composer stop waiting for the real `canPostStory`
+  answer), and it replaces the `StoryPostState::post_as_error` field the s3
+  round added for the same bug. The picker draws the error (the composer's
+  status line no longer repeats it); reopening the composer asks again.
+- **Live Stars (05-168, 03-079).** `LiveStoryState::committed` is one batch per
+  commit request instead of a number. A failed add takes exactly its Stars from
+  the batch that holds them (request ids only grow, so the add belongs to the
+  batch whose commit followed it, or to the pending one); a failed commit drops
+  only its own batch; the answer to a `getLiveStoryTopDonors` asked before a
+  commit leaves that batch in the total. A pushed `updateLiveStoryTopDonors`
+  still counts every batch: it carries no request id to compare, and TDLib sends
+  it because of the commit (a snapshot older than the commit that arrives as an
+  update is not told apart; it was the same before).
+- **Comments toggle (03-078).** `show_from_pinned` opens the list the way the
+  toggle does (marks the comments read), so the dot cannot come back for ones
+  already seen.
+- **Live call (13-100).** `Session::live_call()` is the story stream only when
+  it is the watched story's call; the composer, the send price, the admin check,
+  the sender and the Ban User check read it. The delete box bans only after the
+  delete went out (`delete_live_story_comment_then_ban`), and says when the
+  delete itself could not be sent (13-093).
+- **Calendar (05-158).** `HistoryCalendar::paging` is `Idle`, `Loading`,
+  `Failed` or `Exhausted`; a failed page stays retryable (moving to another
+  month asks again) and only an empty page ends the paging. The baseline line is
+  removed.
+- **Mention search (05-240).** A failed `searchChatMembers` drops its own search
+  (an older query's error is ignored), so the same query is asked again.
+- **Custom emoji cache (05-283).** The cap clears the cache once, before the
+  batch goes in, not in the middle of it.
+- **Story page (06-037, 13-136, 13-143).** "Page loading" is read from the
+  open page's chat's own ops (`StoryPageOps::loading`, one op per request
+  since the s3 round), not from the label of a single status op that a
+  mutation or another chat's page replaces.
+  The album picker's grid asks like the archive section (`load_due`, the shared
+  `archive_asked` guard, never in a demo session). The statistics and search
+  lists reset their `Asked` guard and scroll handle when the story or search
+  changes.
+- **Per viewer / per chat (13-127, 10-104, 13-099).** The stealth toast lives in
+  `StoryViewerUi`, so closing the viewer drops it. The fact-check expansion lives
+  in `ChatUi` (per view, collapsed again on a chat change, as tdesktop's
+  per-element `Factcheck::expanded`). A voice/video/sticker/GIF reply that
+  finishes after the viewer moved on ends the reply row only when it is still
+  the row for that story (`reply_row_ends`).
+- **Skipped.** 10-102: `sharing_request_answering` already reads the in-flight
+  `AnswerSharingRequest` request, so a second click (Accept then Reject) sends
+  nothing; the test `accepting_a_request_names_it_once_and_a_refusal_frees_the_buttons`
+  asserts it, and the error frees the buttons. 13-122: the passcode lock calls
+  `release_story_viewer`, which drops the cover picker, and the strip loop checks
+  the picker's serial after every frame, so the cutting stops within one frame.
+  Minimising or pausing is not a lock; nothing private is on screen, so the cuts
+  are left to finish.
+
+### Sweep fixes (s4-calls)
+
+S4 entries, each proven against the code first.
+
+- **Calls engine and capture.** A late empty stream list no longer revives a
+  `Failed` or `Ended` feeder (01-083). The macOS window monitor ends through
+  `StreamShared::end()`, which swaps `stopped` once, as the Windows one does
+  (01-065). A reaper thread that never started runs a hand-off on a thread of
+  its own, never on the caller (01-079). The Windows hook thread of a start
+  that timed out no longer installs its context over a newer hook (01-088).
+- **Invite links.** `VideoChatShareLinks` holds one `ShareLink`
+  (`Idle`/`Fetching`/`Got`) per link; "generating" is derived, so a failed
+  listener request no longer re-sends a speaker request still in flight, and
+  a listener send that fails frees the speaker request it never sent
+  (01-093).
+- **Call end card.** The diagnostics and call-log uploads are one
+  `CallUpload` each (`Idle`/`Sending(request)`/`Sent`/`Failed`) in place of
+  two bools and two errors: a second press while one is out is refused, and
+  an answer or error applies only to the summary whose request it is
+  (02-016, 05-027). A call that ends untracked no longer replaces another
+  call's open rating card (05-226). Submitting a rating puts the draft back
+  when the send is refused (08-083). The window that pressed Call is
+  forgotten when its card is dismissed and when a call comes in (08-077).
+- **Group call requests.** The screen-share pause toggle has its own purpose;
+  a refusal puts your tile back to what the server has and raises no box
+  error (02-014). An unwanted rejoin or screen offer is undone, so neither
+  waits on a request that is gone (02-105, 02-106). A failed `addPending`
+  after its commit takes the Stars off the committed total (02-116). Calls
+  waiting for their chat are a list (02-112). The "join as" request is
+  marked asked only once it was sent (05-031). `failed_creates` keeps the
+  latest eight (05-053). The own-mute guard keys the in-flight toggle by
+  participant (05-227).
+- **Call UI.** A mute or connect cue over a ringing loop leaves the loop set
+  and the ring resumes after it (08-086). Calls history keeps its loaded
+  rows when a later page fails, with Retry for that page (08-079). The live
+  PiP: a failed open restores the stream window and ignores a link that was
+  replaced; the source check compares the link's account (08-090, 08-088,
+  08-089). The story volume pill is released with its slider and with the
+  viewer (08-057). The stream key reveal is part of the Settings overlay
+  (`StreamOverlay::Settings { key_shown }`), so every way out hides it
+  (10-029). Share Invite Link refuses under the lock before asking (10-037);
+  Share to leaves a waiting deep-link open alone (10-039). The in-call chat
+  and member levels reset with the call (10-040) and so does the composer
+  text (10-052). A stream wish ends when the call fetch fails (10-050,
+  10-033). A failed rename keeps its box (10-051).
+- **Skipped.** 01-072 (PipeWire takes the fd even when the connect fails; a
+  second close would hit an unrelated fd), 01-087 (a layout switch changes
+  the XKB group, not the keycodes; only a remap does), 01-096 (the map is
+  reset per call, bounded by its participants), 02-102 (a failing engine
+  call is retried by design and its error is written once), 02-110 and
+  02-117 (tdesktop closes the box and removes the comments at once, with no
+  rollback), 02-115 (same: Undo is local), 08-056 (no dialing ticket is left;
+  `PermissionAsk` owns the wait), 10-035 (the no-photo branch already drops
+  the cached blur and its task).
+
+### Sweep fixes (s4-links-tdlib-2)
+
+Minor links, mini app, location and TDLib entries; each was proved first.
+
+- **Answers matched to what asked.** The groups-in-common list is
+  `ProfileChatsFetch::Loading(RequestId)` and its follow-up page is
+  `CommonGroupsPaging::next_page: PhotoPage::Asking(request)`: a late page
+  of a fetch that was dropped lands in neither (05-185). A story album
+  answer merges into a list that was fetched, never starts one (05-198).
+  A mini app's attachment-menu toggle goes on to its launch only for its
+  own bot, and the three waiting launches carry the window that asked
+  (`Awaited`, 14-042, 14-043). The latest launch asked is the current one
+  (`mark_web_app_pending` drops older ones, whose answers are closed,
+  14-041). Mini app render actions are a queue (14-040).
+- **Rollbacks.** Every optimistic rollback that has a shown value restores
+  only while the value still equals it (`restore_optimistic`), as the topic
+  mute already did (05-201).
+- **Stages with an exit.** The AI style preview has `Adding` and `Removing`
+  carrying the request: the button waits, the answer or an error (or a send
+  failure) leaves the stage, and `Added`/`Removed`/`Deleted` name the
+  request so another preview's answer closes nothing (07-030, 07-031).
+  The proxy editor is `ProxySave::Saving(request)` and closes on the
+  answer through the `SaveWatch` (12-057). The mini app emoji-status grant
+  is `Granting(request)` and ends when its request leaves flight (14-035).
+  The main window's close is `MainWindowState`, and a raise makes it
+  `Open` (10-162).
+- **Asked once, but freed on failure.** A video userpic's full-info ask is
+  released when the send fails (05-157; an error answer keeps it, since the
+  ask comes from drawing). The AI compose emoji lookups use the session's
+  own per-id stage (`custom_lookups.attempted`), so a failed lookup is
+  asked again up to `MAX_FAILURES` (07-032); `emoji_asked` is gone.
+- **Parsing.** `updateChatReplyMarkup` reads only the id and the markup of
+  its message (06-047); `updateChatLastMessage` says `Unreadable` instead of
+  clearing the preview (06-048); an unreadable `messageEffect` fails its
+  request (06-051). The first frame's launch wait belongs to the client that
+  asked for the page (06-063).
+- **Small UI.** The link tooltip is in `ChatUi` with a stage that owns its
+  timer (09-X046, 09-090); a right-click link note is dropped when its event
+  ends (09-092); the map drag ends at the next move without the button
+  (10-168); a map tile cache past its cap forgets one place per new one
+  (05-188); an invite Join names its window before sending (09-X010).
+  The IP-exposure warning is acknowledged per account (documented, 12-058).
+- **Skipped.** 05-186: `refresh_chat_statistics` keeps the `Loading`
+  entry while a request is out (`send_chat_statistics`), so no stale answer
+  can land. 09-014: a lookup that cannot be sent already becomes
+  `ShowText("Couldn't reach Telegram.")`; the remaining `InvalidRequest`
+  returns are a shutting-down session and a share draft. 10-167: already
+  fixed by 5ddbff65 (`Locating::drop` stops the manager). 09-X010's second
+  half (drawing the invite box from `ChatsState::deep_link`) is left: the
+  copy is only read by the box and cleared with the flow.
+
+### Sweep fixes (s4-messages-3)
+
+Thirty-four minor entries; each was proved against the integration branch first.
+
+- **Stages with an answer.** The Replies "Block" box stays as `Submitting`
+  (`RepliesBlockStage`, carrying the request id) until the answer: ok closes
+  it and queues the "blocked" note, an error gives the choices back
+  (11-p4-011). "Load full message" is one `Fetch<()>` per `ChatMessage` in
+  the session: loading from the send, removed by the answer, `Failed` by the
+  error, and the button waits while it loads (11-p4-012). A quick reply's
+  text is held as `TextSave::Sending` with its request; an answered refusal
+  puts the text and its edit back in the field (12-061). `mask_set_change_pending`
+  is keyed by set, so one Add disables its own row only (13-013).
+- **Answers matched to what asked.** A poll vote carries the option id and
+  the driver looks the index up at send time (11-p4-010). A file picked for a
+  poll option finds its slot by `OptionAttach::id`, not by row index (12-004).
+  A sticker-set editor and a selection translation say goodbye through
+  `Farewell`, so the encode stops and the job leaves the old session
+  (13-008, 13-164). The report's details field is emptied where the flow
+  ends, `close_message_report` (11-p3-008).
+- **One place for a close.** Every message-menu close goes through
+  `close_message_menu` (it also resets the reaction strip's request; the
+  reaction selector alone keeps it, as it shows those options);
+  `scripts/single_writers.py` rejects a bare `message_ui.menu = None`
+  (11-p4-006).
+- **Lost answers.** A translation job whose request is gone fails, so it no
+  longer holds one of the 20 places (13-167); a widget public-data poll is
+  swept like the other lookups and answers "poll again" (14-057); a retry of
+  a failed thread open keeps the failed pane when it cannot be sent, and says
+  so (13-107). Mini-app requests the bridge refuses (popup, custom method,
+  clipboard read) get their failure reply with the id that asked; a request
+  id over 64 characters is refused, not cut (14-077, 14-078).
+- **Widgets.** A press or hover is released when the widget goes off screen,
+  stops, fails or restarts; new content replaces the entry's content-bound
+  part whole (`replace_content`); a widget starts at the scale of the window
+  that shows it (`WidgetsUi::scales`); canvas reads and puts check their size
+  (14-046, 14-051, 14-058, 14-056, 14-047).
+- **Notifications.** A preview that has to download plays only while a sound
+  picker is open: `pending_sound_downloads` is a set the UI empties
+  (`forget_sound_previews`) on any poll that finds no picker open, with no
+  clock in the reducer (11-p5-023). A sound finishing in a background
+  account is not played. "Mark as read"
+  waits, queued, while locked (11-p5-025). A toast replaced in the call slot
+  is dismissed first (11-p5-022, partly). A Linux toast withdrawn while its
+  `Notify` is on the bus is closed when its id lands (`Sending`), and the
+  D-Bus connection is made again after the listener ends (11-p5-026,
+  11-p5-027).
+- **Smaller.** Element ids built from message ids use wrapping arithmetic
+  (11-p4-016); the sticker creator's refusals are toasts, not silent notes
+  (13-009); Reply in Another Chat keeps the reply when an agent may not open
+  the chat (12-073); leaving or changing a thread closes its info card
+  (13-106); the manager box puts the composer panel's tab back on close
+  (13-012, the shared open flag stays; the tab goes back only if the box
+  was open); a closed chat window drops its widget scale; a reaction picked
+  from the menu strip is toggled before the menu closes, so a locked emoji
+  still finds its Premium options; a demo session clears the translation
+  of a chat whose bar is gone (13-166).
+- **Skipped.** 12-098: the background poll already drains
+  `take_finished_rich_html_exports` per account. 14-054: query tokens are
+  process-wide (`next_query_token`). 13-165: tdesktop toasts the hide at
+  once (the bar is optimistic here too, with `RequestRollback`), and the
+  local hidden flag is already keyed by account.

@@ -266,8 +266,6 @@ const WATCH_INTERVAL: Duration = Duration::from_millis(100);
 /// While opening, the backend is polled this often (AVPlayer reports
 /// `readyToPlay` asynchronously; no KVO).
 const OPEN_POLL: Duration = Duration::from_millis(50);
-/// A paused seek or step waits this long for its picture at most.
-const AWAIT_PICTURE: Duration = Duration::from_secs(2);
 
 impl VideoPlayer {
     /// Open a local file; playback starts paused (call [`Self::play`]).
@@ -790,8 +788,9 @@ impl VideoPlayer {
         self.read_inner(|inner| {
             let transport = inner.machine.snapshot(now);
             let awaiting = inner.awaiting.is_some_and(|since| {
-                transport.state == PlayState::Opening
-                    || now.saturating_duration_since(since) < AWAIT_PICTURE
+                transport
+                    .state
+                    .awaits_picture(now.saturating_duration_since(since))
             });
             // A surface the renderer hasn't drawn yet, or refused: another
             // frame settles it (drawn, or replaced by an image), even while

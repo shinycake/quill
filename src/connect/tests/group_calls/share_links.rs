@@ -84,10 +84,7 @@ fn admin_gets_speaker_and_listener_links() {
         .unwrap()
         .share_links;
     assert!(links.ready(), "{links:?}");
-    assert_eq!(
-        links.listener.as_deref(),
-        Some("https://t.me/quill?videochat")
-    );
+    assert_eq!(links.listener_link(), Some("https://t.me/quill?videochat"));
     assert_eq!(
         links.speaker_link(),
         Some("https://t.me/quill?videochat=speak")
@@ -175,8 +172,8 @@ fn share_links_need_a_video_chat() {
 fn revoking_drops_both_cached_links() {
     let (_dir, recorder, mut driver, _seq) = group_call_test_driver();
     let mut call = video_chat(true, false);
-    call.share_links.listener = Some("L".into());
-    call.share_links.speaker = Some("S".into());
+    call.share_links.listener = crate::calls::share_links::ShareLink::Got("L".into());
+    call.share_links.speaker = crate::calls::share_links::ShareLink::Got("S".into());
     driver.session.calls.active_group_call = Some(call);
     driver.revoke_video_chat_invite_link().unwrap();
     let request: Value = sent(&recorder).pop().unwrap();

@@ -20,7 +20,7 @@ impl QuillApp {
         list_id: &str,
     ) -> Vec<AnyElement> {
         let uploading = match self.session().map(|s| &s.settings.tone_upload) {
-            Some(ToneUpload::Uploading { name }) => Some(name.clone()),
+            Some(ToneUpload::Uploading { name, .. }) => Some(name.clone()),
             _ => None,
         };
         let mut footer = Vec::new();
@@ -115,21 +115,29 @@ impl QuillApp {
         path: &std::path::Path,
         cx: &mut Context<Self>,
     ) {
+        // A file chosen while the app was locked starts after the unlock.
+        if self.refused_while_locked() {
+            let path = path.to_path_buf();
+            self.wait_for_unlock(move |this, cx| this.begin_tone_upload(target, &path, cx));
+            return;
+        }
         let started = if let Some(live) = self.live.as_mut() {
-            live.driver.upload_notification_tone(path).map(|_| ())
+            live.driver
+                .upload_notification_tone(path, target)
+                .map(|_| ())
         } else if let Some(session) = self.demo_session.as_mut() {
             let size = std::fs::metadata(path).map_or(0, |meta| meta.len());
             check_file(path, size, session.messages.tone_limits).map(|()| {
                 session.settings.tone_upload = ToneUpload::Uploading {
                     name: display_name(path),
+                    target,
                 };
             })
         } else {
             Err(ToneProblem::Unreadable)
         };
-        match started {
-            Ok(()) => self.notify.tone_upload_target = Some(target),
-            Err(problem) => self.tell_tone_problem(problem),
+        if let Err(problem) = started {
+            self.tell_tone_problem(problem);
         }
         cx.notify();
     }
@@ -148,17 +156,21 @@ impl QuillApp {
         let Some(outcome) = outcome else {
             return;
         };
-        let target = self.notify.tone_upload_target.take();
-        match (outcome, target) {
-            (ToneUpload::Added { sound_id }, Some(target)) => {
+        // The target came back with the outcome, from the account that
+        // uploaded: another account's switch cannot lose it.
+        match outcome {
+            ToneUpload::Added {
+                sound_id,
+                target: Some(target),
+            } => {
                 self.apply_sound_choice(target, SoundChoice::Custom(sound_id), cx);
                 self.set_note(StatusNote::info(tr(keys::RINGTONES_TOAST_ADDED)));
             }
-            (ToneUpload::Added { .. }, None) => {
+            ToneUpload::Added { target: None, .. } => {
                 self.set_note(StatusNote::info(tr(keys::RINGTONES_TOAST_ADDED)));
             }
-            (ToneUpload::Failed(problem), _) => self.tell_tone_problem(problem),
-            (ToneUpload::Idle | ToneUpload::Uploading { .. }, _) => {}
+            ToneUpload::Failed(problem) => self.tell_tone_problem(problem),
+            ToneUpload::Idle | ToneUpload::Uploading { .. } => {}
         }
         cx.notify();
     }
@@ -184,8 +196,11 @@ impl QuillApp {
             menu.item(
                 PopupMenuItem::new(tr(keys::BOX_DELETE)).on_click(move |_, _, cx| {
                     let _ = owner.update(cx, |this, cx| {
-                        if let Some(live) = this.live.as_mut() {
-                            let _ = live.driver.remove_notification_tone(sound_id);
+                        // tdesktop deletes from this menu without a box.
+                        if let Some(live) = this.live.as_mut()
+                            && live.driver.remove_notification_tone(sound_id).is_err()
+                        {
+                            this.set_note(StatusNote::error(tr(keys::Q_TONE_DELETE_FAILED)));
                         }
                         cx.notify();
                     });

@@ -440,12 +440,16 @@ impl QuillShell {
         if host.is_none() {
             Self::close_left_dialogs(&app, window, cx);
         }
-        // An account switch already closed the kit dialog this shell showed.
-        if host.is_none()
-            && app.update(cx, |app, _| {
-                std::mem::take(&mut app.main_window.dialogs_closed)
-            })
-        {
+        // The kit dialog this shell showed was already closed (an account
+        // switch, or the action that finished it): closing again would
+        // take whichever dialog is on top now.
+        let window_id = window.window_handle().window_id();
+        if app.update(cx, |app, _| {
+            app.main_window
+                .dialogs_closed
+                .borrow_mut()
+                .remove(&window_id)
+        }) {
             self.open_dialog = None;
         }
         // A session-wide box this window showed whose flag is clear (its own
@@ -610,6 +614,10 @@ impl QuillApp {
         }
         if !QuillShell::dialog_is_open(self, kind) {
             window.close_dialog(cx);
+            self.main_window
+                .dialogs_closed
+                .borrow_mut()
+                .insert(window.window_handle().window_id());
         }
     }
 

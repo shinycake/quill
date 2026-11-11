@@ -367,6 +367,19 @@ pub enum PermissionsSent {
     Refused,
     /// These requests (or the upgrade that carries them) are out.
     Sent(Vec<RequestId>),
+    /// Some requests are out, but a later part could not be sent: the
+    /// box stays, and a second Save sends only what still differs.
+    Partial {
+        sent: Vec<RequestId>,
+        refused: PermissionsPart,
+    },
+}
+
+/// A part of one permissions Save that goes out as its own request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PermissionsPart {
+    SlowMode,
+    Boosts,
 }
 
 #[cfg(test)]

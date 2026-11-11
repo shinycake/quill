@@ -25,7 +25,7 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::gift_manage::{
-    ExportError, ProbeOutcome, TransferPicker, TransferStage, fragment_gift_url,
+    ExportError, ExportSend, ProbeOutcome, TransferPicker, TransferStage, fragment_gift_url,
 };
 use quill::lang::{keys, tr, tr_with};
 use quill::local_time::now_unix;
@@ -195,7 +195,7 @@ impl QuillApp {
             // seen (a note would sit behind the picker).
             Some(Err(_)) => self.edit_transfer(cx, |picker| {
                 if let TransferStage::Password {
-                    sending: false,
+                    send: ExportSend::Idle,
                     error,
                 } = &mut picker.stage
                 {
@@ -253,7 +253,13 @@ impl QuillApp {
             Some(manage) => {
                 let stage = manage.transfer().map(|p| &p.stage);
                 let in_password = matches!(stage, Some(TransferStage::Password { .. }));
-                let idle = matches!(stage, Some(TransferStage::Password { sending: false, .. }));
+                let idle = matches!(
+                    stage,
+                    Some(TransferStage::Password {
+                        send: ExportSend::Idle,
+                        ..
+                    })
+                );
                 (
                     manage.export_url.take(),
                     manage.transferred.take(),

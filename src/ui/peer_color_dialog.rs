@@ -26,12 +26,20 @@ use quill::state::RequestPurpose;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+/// What the box says about its last Apply. Editing a swatch leaves
+/// `Sent` and `Failed`; the answer's error lands in `Failed`.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum ApplyStage {
+    Editing,
+    Sent,
+    Failed(String),
+}
+
 /// The open box: the tab and the draft the swatches edit.
 pub(crate) struct PeerColorDialog {
     pub(super) tab: PeerColorTab,
     pub(super) draft: PeerColorDraft,
-    /// Apply sent at least one request; the box then reports the result.
-    pub(super) sent: bool,
+    pub(super) stage: ApplyStage,
 }
 
 impl QuillApp {
@@ -74,17 +82,35 @@ impl QuillApp {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.users_state.profile_edit_error = None;
+            live.driver.session.users_state.peer_color_error = None;
             let _ = live.driver.load_background_emoji_icons();
             let _ = live.driver.load_wearable_gifts();
         }
         self.dialogs.peer_color_dialog = Some(PeerColorDialog {
             tab,
             draft,
-            sent: false,
+            stage: ApplyStage::Editing,
         });
         self.open_box(DialogKind::PeerColor);
         cx.notify();
+    }
+
+    /// Move a color request's failure into the box that asked; with the
+    /// box closed it is a note, so the user does not believe the colors
+    /// changed.
+    pub(in crate::ui) fn take_peer_color_error(&mut self) -> bool {
+        let Some(err) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.users_state.peer_color_error.take())
+        else {
+            return false;
+        };
+        match self.dialogs.peer_color_dialog.as_mut() {
+            Some(dialog) => dialog.stage = ApplyStage::Failed(err),
+            None => self.set_note(StatusNote::error(err)),
+        }
+        true
     }
 
     pub(super) fn close_peer_color_dialog(&mut self, cx: &mut Context<Self>) {
@@ -100,7 +126,7 @@ impl QuillApp {
         if let Some(dialog) = self.dialogs.peer_color_dialog.as_mut() {
             let tab = dialog.tab;
             edit(&mut dialog.draft, tab);
-            dialog.sent = false;
+            dialog.stage = ApplyStage::Editing;
         }
         cx.notify();
     }
@@ -126,7 +152,7 @@ impl QuillApp {
                     cx.notify();
                     return;
                 };
-                live.driver.session.users_state.profile_edit_error = None;
+                live.driver.session.users_state.peer_color_error = None;
                 let mut failed = false;
                 if name {
                     failed |= if draft.gift_colors_id != 0 {
@@ -149,7 +175,11 @@ impl QuillApp {
                     StatusNote::silent(tr(keys::Q_MISC_STYLE_UPDATE_REQUESTED))
                 });
                 if let Some(dialog) = self.dialogs.peer_color_dialog.as_mut() {
-                    dialog.sent = !failed;
+                    dialog.stage = if failed {
+                        ApplyStage::Editing
+                    } else {
+                        ApplyStage::Sent
+                    };
                 }
                 cx.notify();
             }
@@ -167,6 +197,7 @@ impl QuillApp {
                 this.close_peer_color_dialog(cx);
             });
         app.update(cx, |this, cx| {
+            this.take_peer_color_error();
             let dialog = dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(
@@ -334,7 +365,7 @@ impl QuillApp {
         let dialog = self.dialogs.peer_color_dialog.as_ref()?;
         let tab = dialog.tab;
         let draft = dialog.draft;
-        let sent = dialog.sent;
+        let stage = dialog.stage.clone();
         let session = self.session();
         let my_name = session
             .and_then(|s| s.my_user_id.and_then(|id| s.user(id)))
@@ -346,7 +377,6 @@ impl QuillApp {
                 || s.requests
                     .has_purpose(RequestPurpose::SetProfileAccentColor)
         });
-        let error = session.and_then(|s| s.users_state.profile_edit_error.clone());
         let icons_failed = session.is_some_and(|s| s.users_state.background_emoji_icons_failed);
         let icons_empty = session.is_some_and(|s| s.users_state.background_emoji_icons.is_empty());
         let dark = super::chat_theme::is_dark_palette();
@@ -569,12 +599,12 @@ impl QuillApp {
 
         let status = if busy {
             Some((tr(keys::Q_MISC_APPLYING_STYLE).to_string(), false))
-        } else if let Some(error) = error {
-            Some((error, true))
-        } else if sent {
-            Some((tr(keys::Q_MISC_STYLE_UPDATED).to_string(), false))
         } else {
-            None
+            match stage {
+                ApplyStage::Failed(error) => Some((error, true)),
+                ApplyStage::Sent => Some((tr(keys::Q_MISC_STYLE_UPDATED).to_string(), false)),
+                ApplyStage::Editing => None,
+            }
         };
 
         let mut panel = div()

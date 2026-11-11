@@ -147,7 +147,7 @@ fn cl2_set_pinned_chat_order_sends_full_list_and_rolls_back() {
     assert_eq!(driver.session.chats.get(&7).expect("chat").order, 300);
     assert_eq!(driver.session.chats.get(&9).expect("chat").order, 200);
     assert_eq!(
-        driver.session.chats_state.chat_action_error.as_deref(),
+        driver.session.chats_state.chat_action_error.last(),
         Some("could not reorder pinned chats (error 400)")
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -293,7 +293,7 @@ fn cl2_clear_recently_found_chats_optimistic_clear() {
         )
         .unwrap();
     assert_eq!(
-        driver.session.chats_state.chat_action_error.as_deref(),
+        driver.session.chats_state.chat_action_error.last(),
         Some("could not clear recent searches (error 500)")
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -392,7 +392,7 @@ fn cl2_archive_chat_list_settings_fetch_and_set() {
         "refusal restored the old settings"
     );
     assert_eq!(
-        driver.session.chats_state.chat_action_error.as_deref(),
+        driver.session.chats_state.chat_action_error.last(),
         Some("could not save archive settings (error 400)")
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -497,7 +497,7 @@ fn cl2_create_private_chat_refusal_opens_nothing() {
             .unwrap();
     assert_eq!(driver.session.open_chat, None, "nothing opened on refusal");
     assert_eq!(
-        driver.session.chats_state.chat_action_error.as_deref(),
+        driver.session.chats_state.chat_action_error.last(),
         Some("could not open Saved Messages (error 400)")
     );
     assert!(

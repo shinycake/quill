@@ -37,13 +37,47 @@ pub enum Suggestion {
     UpgradePremium,
 }
 
+/// Where the "Is +X still your number?" prompt stands. It belongs to the
+/// suggestion: when TDLib adds or removes the action, it asks again.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PhonePrompt {
+    #[default]
+    Asking,
+    /// "No" was answered: the note about changing the number shows.
+    NotMine,
+}
+
 /// What the account knows right now.
 #[derive(Debug, Clone, Default)]
 pub struct SuggestionFacts {
     pub actions: BTreeSet<String>,
+    pub phone_prompt: PhonePrompt,
     pub close_birthdays: Vec<CloseBirthday>,
     /// The user dismissed the birthday suggestion (`hideContactCloseBirthdays`).
     pub birthdays_hidden: bool,
+}
+
+impl SuggestionFacts {
+    /// TDLib offers `name`. A phone suggestion that comes back starts at
+    /// the question, not at an old answer.
+    pub fn add_action(&mut self, name: &str) {
+        if self.actions.insert(name.to_string()) {
+            self.reset_phone_prompt(name);
+        }
+    }
+
+    /// `name` is gone (answered, hidden, or removed by TDLib).
+    pub fn remove_action(&mut self, name: &str) {
+        if self.actions.remove(name) {
+            self.reset_phone_prompt(name);
+        }
+    }
+
+    fn reset_phone_prompt(&mut self, name: &str) {
+        if name == ACTION_PHONE {
+            self.phone_prompt = PhonePrompt::Asking;
+        }
+    }
 }
 
 /// Contacts whose birthday falls on `month`/`day`.
@@ -213,7 +247,28 @@ mod tests {
                 })
                 .collect(),
             birthdays_hidden: hidden,
+            ..Default::default()
         }
+    }
+
+    #[test]
+    fn the_phone_prompt_asks_again_when_its_suggestion_comes_back() {
+        let mut f = SuggestionFacts::default();
+        f.add_action(ACTION_PHONE);
+        f.phone_prompt = PhonePrompt::NotMine;
+        f.remove_action(ACTION_PHONE);
+        assert_eq!(f.phone_prompt, PhonePrompt::Asking);
+        f.add_action(ACTION_PHONE);
+        assert_eq!(f.phone_prompt, PhonePrompt::Asking);
+        f.phone_prompt = PhonePrompt::NotMine;
+        f.add_action(ACTION_PHONE);
+        assert_eq!(f.phone_prompt, PhonePrompt::NotMine, "already offered");
+        f.add_action(ACTION_PASSWORD);
+        assert_eq!(
+            f.phone_prompt,
+            PhonePrompt::NotMine,
+            "other actions leave it"
+        );
     }
 
     #[test]

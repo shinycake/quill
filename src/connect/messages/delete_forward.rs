@@ -76,7 +76,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .get(&chat_id.0)
             .is_some_and(|chat| chat.supported());
         let history = self.session.histories.get(&chat_id.0);
-        let mut all_outgoing = true;
+        let mut all_revocable = true;
         for id in message_ids {
             let Some(message) = history.and_then(|history| history.messages.get(&id.0)) else {
                 return Err(ConnectSendError::InvalidRequest);
@@ -91,7 +91,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             {
                 return Err(ConnectSendError::InvalidRequest);
             }
-            all_outgoing &= message.is_outgoing;
+            // TDLib refuses the whole batch when one message is past its
+            // window, so for everyone only when every one allows it.
+            all_revocable &= message.is_outgoing
+                && self
+                    .session
+                    .messages
+                    .menu_actions
+                    .allows_revoke(chat_id, *id, true);
         }
         if !supported {
             return Err(ConnectSendError::InvalidRequest);
@@ -99,7 +106,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::DeleteMessages, Some(chat_id));
-        let json = delete_messages(extra, chat_id, message_ids, revoke && all_outgoing);
+        let json = delete_messages(extra, chat_id, message_ids, revoke && all_revocable);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),
             Err(err) => {

@@ -157,7 +157,7 @@ impl QuillApp {
     pub(super) fn understood_auction(&mut self, gift_id: i64, cx: &mut Context<Self>) {
         set_auction_about_shown(true);
         let below = self.gift_market.stack.len() > 1;
-        self.gift_market.stack.pop();
+        self.gift_market.pop();
         if !below {
             self.show_auction_box(gift_id, cx);
         }

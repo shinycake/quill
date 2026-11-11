@@ -418,3 +418,24 @@ fn update_chat_reply_markup_parses_the_message_and_null() {
         other => panic!("{other:?}"),
     }
 }
+
+/// Sweep 06-047: a keyboard message whose other fields do not parse still
+/// carries its markup; the update is not dropped.
+#[test]
+fn update_chat_reply_markup_survives_an_unparsable_message_body() {
+    let env = parse_envelope(
+        r#"{"@type":"updateChatReplyMarkup","chat_id":21,"reply_markup_message":{"id":12,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupRemoveKeyboard","is_personal":false}}}"#,
+    )
+    .unwrap();
+    match env.payload {
+        EnvelopePayload::Bots(BotsPayload::UpdateChatReplyMarkup {
+            message_id,
+            reply_markup,
+            ..
+        }) => {
+            assert_eq!(message_id.map(|m| m.0), Some(12));
+            assert!(matches!(reply_markup, Some(ReplyMarkup::RemoveKeyboard)));
+        }
+        other => panic!("{other:?}"),
+    }
+}

@@ -36,6 +36,71 @@ pub enum ComposerReplyFetch {
     },
 }
 
+/// The fetched reply-bar targets, oldest first, so the room a new fetch
+/// needs is made by dropping the oldest settled one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReplyFetches(Vec<((i64, i64), ComposerReplyFetch)>);
+
+impl ReplyFetches {
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn get(&self, key: &(i64, i64)) -> Option<&ComposerReplyFetch> {
+        self.0.iter().find(|(held, _)| held == key).map(|(_, v)| v)
+    }
+
+    pub fn get_mut(&mut self, key: &(i64, i64)) -> Option<&mut ComposerReplyFetch> {
+        self.0
+            .iter_mut()
+            .find(|(held, _)| held == key)
+            .map(|(_, v)| v)
+    }
+
+    pub fn contains_key(&self, key: &(i64, i64)) -> bool {
+        self.get(key).is_some()
+    }
+
+    /// Replace the entry in place (it keeps its age), or add a new, youngest
+    /// one.
+    pub fn insert(&mut self, key: (i64, i64), value: ComposerReplyFetch) {
+        match self.get_mut(&key) {
+            Some(slot) => *slot = value,
+            None => self.0.push((key, value)),
+        }
+    }
+
+    /// Start `key` over as the youngest entry.
+    fn renew(&mut self, key: (i64, i64), value: ComposerReplyFetch) {
+        self.0.retain(|(held, _)| *held != key);
+        self.0.push((key, value));
+    }
+
+    /// Make room for one more: the oldest entries that are not in flight go.
+    fn make_room(&mut self, kept: usize) {
+        let mut excess = (self.0.len() + 1).saturating_sub(kept);
+        self.0.retain(|(_, state)| {
+            if excess > 0 && !matches!(state, ComposerReplyFetch::Loading { .. }) {
+                excess -= 1;
+                return false;
+            }
+            true
+        });
+    }
+
+    /// The fetched copies of one message, to show an edit of it.
+    pub(crate) fn loaded_mut(&mut self, key: (i64, i64)) -> Option<&mut HistoryMessage> {
+        match self.get_mut(&key) {
+            Some(ComposerReplyFetch::Loaded(message)) => Some(message.as_mut()),
+            _ => None,
+        }
+    }
+}
+
 impl Session {
     /// Whether a waiting force reply can arm now: its chat is shown by a
     /// window and its message is loaded. Only then does a render have
@@ -117,18 +182,9 @@ impl Session {
             _ => 0,
         };
         if fetch.len() >= COMPOSER_REPLY_FETCH_MAX && !fetch.contains_key(&key) {
-            let mut settled: Vec<(i64, i64)> = fetch
-                .iter()
-                .filter(|(_, state)| !matches!(state, ComposerReplyFetch::Loading { .. }))
-                .map(|(key, _)| *key)
-                .collect();
-            settled.sort_unstable();
-            let excess = (fetch.len() + 1).saturating_sub(COMPOSER_REPLY_FETCH_MAX);
-            for doomed in settled.into_iter().take(excess) {
-                fetch.remove(&doomed);
-            }
+            fetch.make_room(COMPOSER_REPLY_FETCH_MAX);
         }
-        fetch.insert(key, ComposerReplyFetch::Loading { attempts });
+        fetch.renew(key, ComposerReplyFetch::Loading { attempts });
     }
 
     /// The request never left (the sender is closed): counts as a failed

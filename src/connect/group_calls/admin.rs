@@ -99,7 +99,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 if let Some(call) = self.session.calls.active_group_call.as_mut() {
                     call.share_links.failed(can_self_unmute);
-                    call.share_links.generating = false;
+                    // The request after this one is never sent.
+                    if !can_self_unmute {
+                        call.share_links.unsent(true);
+                    }
                 }
                 return Err(err);
             }

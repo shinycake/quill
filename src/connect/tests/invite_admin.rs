@@ -38,6 +38,7 @@ impl Rig {
             sink,
             _dir: dir,
         };
+        rig.driver.session.my_user_id = Some(777);
         rig.ingest(&format!(
             r#"{{"@type":"updateNewChat","chat":{{"id":13,"title":"C","type":{{"@type":"chatTypeSupergroup","supergroup_id":113,"is_channel":{is_channel}}},"unread_count":0}}}}"#
         ));
@@ -129,6 +130,14 @@ fn join_request_search_drops_stale_replies_and_pages_with_offset() {
         panic!("loaded");
     };
     assert_eq!(list.requests.len(), 2);
+    assert_eq!(list.total_count, 3);
+    // The older search answering after the newer one landed is still
+    // stale (05-078).
+    rig.ingest(&requests_json(first, 9, &[1, 2, 3, 4]));
+    let Some(JoinRequestFetch::Loaded(list)) = rig.driver.session.groups.join_requests.get(&13)
+    else {
+        panic!("loaded");
+    };
     assert_eq!(list.total_count, 3);
 
     // The next page continues after the last row and appends.
@@ -726,4 +735,32 @@ fn a_join_request_ask_without_the_right_to_invite_fails_and_a_sent_one_loads() {
         admin.driver.session.groups.join_requests.get(&13),
         Some(JoinRequestFetch::Loading)
     ));
+}
+
+/// The revoked-links list is asked for the viewer's own links, so it waits
+/// until the viewer's id is known (02-151).
+#[test]
+fn revoked_links_wait_for_the_viewers_id() {
+    let mut rig = Rig::new(false, ADMIN);
+    rig.driver.session.my_user_id = None;
+    assert!(
+        rig.driver
+            .fetch_revoked_chat_invite_links(ChatId(13))
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        rig.driver
+            .delete_all_revoked_chat_invite_links(ChatId(13))
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(rig.sent_count("getChatInviteLinks"), 0);
+    assert!(rig.driver.session.groups.revoked_invite_links.is_empty());
+    rig.driver.session.my_user_id = Some(777);
+    rig.driver
+        .fetch_revoked_chat_invite_links(ChatId(13))
+        .unwrap()
+        .expect("sent once the id is known");
+    assert_eq!(rig.last_sent("getChatInviteLinks")["creator_user_id"], 777);
 }

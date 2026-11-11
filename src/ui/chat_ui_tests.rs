@@ -205,6 +205,26 @@ fn leaving_the_chat_drops_its_state(cx: &mut TestAppContext) {
     assert_eq!(made_for, None);
 }
 
+/// The reducer closes a chat (removed, left) with no goodbye from the view:
+/// the next frame still drops what was open, so reopening starts clean.
+#[gpui_kit::test]
+fn a_chat_the_reducer_closed_does_not_keep_its_bars(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    open(&app, &mut vcx, CHAT);
+    open_chat_surfaces(&app, &mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.open_chat = None;
+        }
+        cx.notify();
+    });
+    frames(&mut vcx);
+    assert_eq!(app.read_with(&vcx, |app, _| app.chat_ui.chat()), None);
+    open(&app, &mut vcx, CHAT);
+    let after = shown(&app, &mut vcx);
+    assert!(!after.rich_editor && !after.send_as && !after.link_popup && !after.reply);
+}
+
 /// A forum's topics share the chat id: an edit opened in one topic does
 /// not stay in the next topic's composer, and the value is made for the
 /// topic shown.

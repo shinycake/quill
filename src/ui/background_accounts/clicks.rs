@@ -38,9 +38,9 @@ impl QuillApp {
             }
             self.show_background_notification(account, queued, cx);
         }
-        for path in drain.sound_plays {
-            self.play_sound_file(path);
-        }
+        // A sound preview belongs to the picker of the account on screen;
+        // one that finishes in a background account is not played.
+        drop(drain.sound_plays);
     }
 
     /// The account on screen, or the one about to be (no session yet).
@@ -94,6 +94,8 @@ impl QuillApp {
         let active = self.current_account();
         let known = self.background.keys();
         let mut switches = Vec::new();
+        // Read receipts wait for the unlock, queued.
+        let mut held = Vec::new();
         for click in clicks {
             match plan_account_click(&click.account, click.action, active.as_ref(), &known) {
                 // Shown for the account on screen, or switched to it since.
@@ -101,6 +103,9 @@ impl QuillApp {
                     if let Ok(mut guard) = self.delivery.notify_clicks.lock() {
                         guard.push(click);
                     }
+                }
+                ClickPlan::MarkReadInBackground(_) if self.refused_while_locked() => {
+                    held.push(click);
                 }
                 ClickPlan::MarkReadInBackground(account) => {
                     if let Some(live) = self
@@ -118,6 +123,9 @@ impl QuillApp {
             }
         }
         self.drain_background_clicks(cx);
+        if !held.is_empty() {
+            self.background.clicks.lock_or_recover().extend(held);
+        }
         if switches.is_empty() {
             return;
         }

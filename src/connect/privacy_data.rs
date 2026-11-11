@@ -142,7 +142,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         self.session.settings.privacy_data.inactive_session_ttl_days = Some(days);
-        self.session.settings.privacy_data.error = None;
+        self.session
+            .settings
+            .privacy_data
+            .clear_error(crate::state::PrivacyControl::SessionTtl);
         Ok(extra)
     }
 
@@ -167,7 +170,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.settings.privacy_data.error = None;
+        self.session
+            .settings
+            .privacy_data
+            .clear_error(crate::state::PrivacyControl::Sensitive);
         Ok(extra)
     }
 
@@ -192,7 +198,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.settings.privacy_data.error = None;
+        self.session
+            .settings
+            .privacy_data
+            .clear_error(crate::state::PrivacyControl::ContactJoined);
         Ok(extra)
     }
 
@@ -201,13 +210,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.privacy_data.network_loading = true;
+        self.session.settings.privacy_data.network.begin();
         let extra = self
             .session
             .request(RequestPurpose::GetNetworkStatistics, None);
         if let Err(err) = self.sender.send_json(&get_network_statistics(extra)) {
             self.session.requests.take(extra);
-            self.session.settings.privacy_data.network_loading = false;
+            self.session.settings.privacy_data.network.cancel();
             return Err(err);
         }
         Ok(())
@@ -225,7 +234,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.settings.privacy_data.network_usage = None;
+        self.session.settings.privacy_data.network = Default::default();
         let _ = self.fetch_network_statistics();
         Ok(extra)
     }
@@ -283,6 +292,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         action: &'static str,
     ) -> Result<RequestId, ConnectSendError> {
+        // The user said no: the suggestion is gone here whether or not the
+        // server can be told (a closing connection), so a box that offers it
+        // does not open again and again.
+        self.session.chat_list.suggestions.remove_action(action);
+        if action == crate::chatlist_suggestions::ACTION_PASSWORD {
+            self.session.settings.privacy_data.check_password_suggested = false;
+        }
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -293,10 +309,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Err(err) = self.sender.send_json(&hide_suggested_action(extra, action)) {
             self.session.requests.take(extra);
             return Err(err);
-        }
-        self.session.chat_list.suggestions.actions.remove(action);
-        if action == crate::chatlist_suggestions::ACTION_PASSWORD {
-            self.session.settings.privacy_data.check_password_suggested = false;
         }
         Ok(extra)
     }

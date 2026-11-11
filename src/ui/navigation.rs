@@ -196,12 +196,7 @@ impl QuillApp {
                 });
             }
             NavigationAction::Downloads => {
-                if let Some(live) = self.live.as_mut() {
-                    let open = &mut live.driver.session.media.downloads_panel_open;
-                    *open = !*open;
-                } else if let Some(session) = self.demo_session.as_mut() {
-                    session.media.downloads_panel_open = !session.media.downloads_panel_open;
-                }
+                self.chat_list.downloads_panel_open = !self.chat_list.downloads_panel_open;
                 cx.notify();
             }
             NavigationAction::Group => {
@@ -368,21 +363,28 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.stage_window_state(window);
-        if self.frame.window_state_save_pending {
+        if matches!(
+            self.frame.window_state_save,
+            super::frame_state::StateSaveTimer::Scheduled { .. }
+        ) {
             return;
         }
-        self.frame.window_state_save_pending = true;
-        cx.spawn_in(window, async move |this, cx| {
+        let timer = cx.spawn_in(window, async move |this, cx| {
             cx.background_executor()
                 .timer(std::time::Duration::from_millis(600))
                 .await;
             let _ = this.update_in(cx, |this, window, _| {
-                this.frame.window_state_save_pending = false;
                 this.stage_window_state(window);
                 quill::settings::save_staged_window_state();
             });
-        })
-        .detach();
+            // Idle whether or not the window was still there, so the next
+            // move can schedule again.
+            let _ = this.update(cx, |this, _| {
+                this.frame.window_state_save = super::frame_state::StateSaveTimer::Idle;
+            });
+        });
+        self.frame.window_state_save =
+            super::frame_state::StateSaveTimer::Scheduled { _timer: timer };
     }
 
     fn stage_window_state(&self, window: &Window) {

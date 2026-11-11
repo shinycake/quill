@@ -50,7 +50,6 @@ impl Session {
             return false;
         }
         self.window_chats
-            .views
             .insert(chat_id, SessionView::of_chat(chat_id));
         self.prepare_history_view(chat_id);
         self.prepare_history_window(chat_id);
@@ -66,7 +65,7 @@ impl Session {
         self.messages
             .instant_view_fallbacks
             .retain(|fallback| fallback.window != Some(chat_id));
-        let was_window = self.window_chats.views.remove(&chat_id).is_some();
+        let was_window = self.window_chats.remove(&chat_id);
         if was_window {
             self.release_chat_history(chat_id);
         }
@@ -91,10 +90,12 @@ impl Session {
         if let Some(current) = self.requests.window.take() {
             self.swap_stored_view(current);
         }
+        self.requests.window_opening = 0;
         match target {
             Some(chat_id) if self.window_chats.contains(&chat_id) => {
                 self.swap_stored_view(chat_id);
                 self.requests.window = Some(chat_id);
+                self.requests.window_opening = self.window_chats.opening_of(chat_id);
                 true
             }
             Some(chat_id) => {
@@ -150,7 +151,9 @@ impl Session {
             return self.apply_payload(payload, pending, extra, seq);
         };
         let outer = self.view_in_place();
-        if asked_in.is_none_or(|chat_id| self.window_chats.contains(&chat_id)) {
+        let asked_opening = pending.map_or(0, |pending| pending.window_opening);
+        // The same chat in a new window is not the window that asked.
+        if asked_in.is_none_or(|chat_id| self.window_chats.opening_of(chat_id) == asked_opening) {
             self.enter_view(asked_in);
             self.apply_payload(payload, pending, extra, seq);
         } else {
@@ -158,8 +161,10 @@ impl Session {
             let mut detached = SessionView::default();
             self.swap_view(&mut detached);
             self.requests.window = asked_in;
+            self.requests.window_opening = asked_opening;
             self.apply_payload(payload, pending, extra, seq);
             self.requests.window = None;
+            self.requests.window_opening = 0;
             self.swap_view(&mut detached);
         }
         self.enter_view(outer);
@@ -234,9 +239,30 @@ fn lands_in_view(purpose: RequestPurpose) -> bool {
 #[derive(Debug, Default)]
 pub struct WindowViews {
     views: BTreeMap<ChatId, SessionView>,
+    /// Which opening each window is (never 0, never repeated): requests
+    /// carry it, so a window closed and opened again for the same chat
+    /// does not take the old window's answers.
+    openings: BTreeMap<ChatId, u64>,
+    opened: u64,
 }
 
 impl WindowViews {
+    fn insert(&mut self, chat_id: ChatId, view: SessionView) {
+        self.opened = self.opened.saturating_add(1);
+        self.openings.insert(chat_id, self.opened);
+        self.views.insert(chat_id, view);
+    }
+
+    fn remove(&mut self, chat_id: &ChatId) -> bool {
+        self.openings.remove(chat_id);
+        self.views.remove(chat_id).is_some()
+    }
+
+    /// Which opening `chat_id`'s window is; 0 for no window.
+    pub(crate) fn opening_of(&self, chat_id: ChatId) -> u64 {
+        self.openings.get(&chat_id).copied().unwrap_or(0)
+    }
+
     /// Whether `chat_id` is shown in a window of its own.
     pub fn contains(&self, chat_id: &ChatId) -> bool {
         self.views.contains_key(chat_id)

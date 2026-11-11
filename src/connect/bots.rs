@@ -115,6 +115,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .is_err()
             {
                 self.session.requests.take(extra);
+                self.session.bots.asked_bot_users.remove(&user_id);
                 continue;
             }
             sent = true;
@@ -770,6 +771,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             self.session.requests.take(extra);
             return Err(err);
+        }
+        // Stopping again: the last refusal no longer stands.
+        if let Some(draft) = self
+            .session
+            .messages
+            .pending_bot_messages
+            .get_mut(&(chat_id.0, topic_id))
+            .filter(|draft| draft.stop == crate::state::BotStopStage::Failed)
+        {
+            draft.stop = crate::state::BotStopStage::Running;
         }
         Ok(Some(extra))
     }

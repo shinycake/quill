@@ -272,7 +272,11 @@ impl QuillApp {
             |u| u.display_name(),
         );
         if let Some(session) = self.paid_session_mut() {
-            session.payments.paid_messages.save = quill::paid_messages::PaidSave::Idle;
+            session
+                .payments
+                .paid_messages
+                .save
+                .forget_failure(quill::paid_messages::PaidTarget::User(user_id));
         }
         self.paid_messages.remove_fee = Some(RemoveFeeBox {
             user_id,
@@ -315,7 +319,10 @@ impl QuillApp {
                 )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.payments.paid_messages.save = quill::paid_messages::PaidSave::Idle;
+            demo.payments
+                .paid_messages
+                .save
+                .clear(quill::paid_messages::PaidTarget::User(boxed.user_id));
             demo.finish_unpaid_exception(boxed.user_id);
         }
         cx.notify();

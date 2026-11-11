@@ -95,12 +95,12 @@ impl QuillApp {
 
         let now = now_ms();
         let mut morph = self
-            .composer_ui
+            .chat_ui
             .send_morph
             .get()
             .unwrap_or(SendMorph::new(kind));
         morph.set(kind, now);
-        self.composer_ui.send_morph.set(Some(morph));
+        self.chat_ui.send_morph.set(Some(morph));
         let progress = morph.progress(now);
         let animating = morph.is_animating(now);
         if animating {

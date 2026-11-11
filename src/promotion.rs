@@ -10,7 +10,7 @@ use crate::lang::{PackValue, keys, tr};
 use crate::state::{ChatSummary, Session};
 use crate::telegram::envelope::{ChannelMemberStatus, ChatKind};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Prefix of the server-provided label of an announcement type.
 pub const PSA_LABEL_PREFIX: &str = "cloud_lng_badge_psa_";
@@ -109,8 +109,38 @@ pub struct RowBadge {
     pub preview: Option<String>,
 }
 
+/// How many times one type's text is asked for in one pack. A request
+/// that failed while connected may be asked again; past this the generic
+/// text stays until the language changes.
+const PSA_ASK_ATTEMPTS: u8 = 3;
+
+/// Where one announcement type's text stands in the current pack.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PsaAsk {
+    /// Out under `request`; its answer settles it, its error or a send
+    /// that did not leave returns it to asking again (while `attempts`
+    /// last).
+    Asking {
+        request: crate::ids::RequestId,
+        attempts: u8,
+    },
+    /// Answered (the server may have no text for the type).
+    Ready,
+    /// The last ask failed after `attempts` tries.
+    Failed { attempts: u8 },
+}
+
+/// What one pump asks for: the language-pack keys of the types still
+/// wanted, tagged with the pack's epoch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PsaPlan {
+    pub epoch: u32,
+    pub keys: Vec<String>,
+    kinds: Vec<String>,
+}
+
 /// The server's badge text per announcement type for one language pack,
-/// and which types were already asked for in it.
+/// and where asking for each type stands.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PsaLabels {
     pack: String,
@@ -119,7 +149,7 @@ pub struct PsaLabels {
     cloud: HashMap<String, String>,
     /// The server's "about" text per type.
     about: HashMap<String, String>,
-    requested: HashSet<String>,
+    asks: HashMap<String, PsaAsk>,
 }
 
 impl PsaLabels {
@@ -140,36 +170,94 @@ impl PsaLabels {
         }
     }
 
-    /// The language-pack keys still to fetch for `kinds` in `pack`, with
-    /// the epoch to tag the request with. A new pack forgets what the old
-    /// one gave; each type is asked for once per pack.
-    pub fn take_wanted<'a>(
-        &mut self,
-        pack: &str,
-        kinds: impl IntoIterator<Item = &'a str>,
-    ) -> (u32, Vec<String>) {
+    /// The language-pack keys still to fetch for `kinds` in `pack`. A new
+    /// pack forgets what the old one gave. Nothing is marked asked here:
+    /// [`Self::begin`] does that once the request exists.
+    pub fn plan<'a>(&mut self, pack: &str, kinds: impl IntoIterator<Item = &'a str>) -> PsaPlan {
         if self.pack != pack {
             self.pack = pack.to_string();
             self.epoch = self.epoch.wrapping_add(1);
             self.cloud.clear();
             self.about.clear();
-            self.requested.clear();
+            self.asks.clear();
         }
-        let mut wanted = Vec::new();
+        let mut wanted: Vec<String> = Vec::new();
         for kind in kinds {
-            if self.requested.insert(kind.to_string()) {
-                wanted.push(format!("{PSA_LABEL_PREFIX}{kind}"));
-                wanted.push(format!("{PSA_ABOUT_PREFIX}{kind}"));
+            let open = match self.asks.get(kind) {
+                None => true,
+                Some(PsaAsk::Failed { attempts }) => *attempts < PSA_ASK_ATTEMPTS,
+                Some(PsaAsk::Asking { .. } | PsaAsk::Ready) => false,
+            };
+            if open && !wanted.iter().any(|k| k == kind) {
+                wanted.push(kind.to_string());
             }
         }
-        (self.epoch, wanted)
+        let keys = wanted
+            .iter()
+            .flat_map(|kind| {
+                [
+                    format!("{PSA_LABEL_PREFIX}{kind}"),
+                    format!("{PSA_ABOUT_PREFIX}{kind}"),
+                ]
+            })
+            .collect();
+        PsaPlan {
+            epoch: self.epoch,
+            keys,
+            kinds: wanted,
+        }
     }
 
-    /// Keep the labels a `languagePackStrings` answer carries, if it is for
-    /// the pack asked about last.
-    pub fn store(&mut self, epoch: u32, strings: Vec<(String, PackValue)>) {
+    /// The plan's request exists: its types wait for its answer.
+    pub fn begin(&mut self, plan: &PsaPlan, request: crate::ids::RequestId) {
+        if plan.epoch != self.epoch {
+            return;
+        }
+        for kind in &plan.kinds {
+            let tries = match self.asks.get(kind) {
+                Some(PsaAsk::Failed { attempts }) => *attempts,
+                _ => 0,
+            };
+            self.asks.insert(
+                kind.clone(),
+                PsaAsk::Asking {
+                    request,
+                    attempts: tries.saturating_add(1),
+                },
+            );
+        }
+    }
+
+    /// `request` failed (its error answer, or its send): the types that
+    /// waited for it are failed, to be asked again while attempts last.
+    pub fn fail_request(&mut self, request: crate::ids::RequestId) {
+        for ask in self.asks.values_mut() {
+            if let PsaAsk::Asking {
+                request: waiting,
+                attempts,
+            } = *ask
+                && waiting == request
+            {
+                *ask = PsaAsk::Failed { attempts };
+            }
+        }
+    }
+
+    /// Keep the labels a `languagePackStrings` answer of `request` carries,
+    /// if it is for the pack asked about last.
+    pub fn store(
+        &mut self,
+        epoch: u32,
+        request: Option<crate::ids::RequestId>,
+        strings: Vec<(String, PackValue)>,
+    ) {
         if epoch != self.epoch {
             return;
+        }
+        for ask in self.asks.values_mut() {
+            if matches!(*ask, PsaAsk::Asking { request: waiting, .. } if Some(waiting) == request) {
+                *ask = PsaAsk::Ready;
+            }
         }
         for (key, value) in strings {
             let PackValue::Ordinary(text) = value else {
@@ -206,6 +294,18 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// A pump that asked: the plan and its request (ids count up).
+    fn ask<'a>(
+        labels: &mut PsaLabels,
+        pack: &str,
+        kinds: impl IntoIterator<Item = &'a str>,
+    ) -> (u32, crate::ids::RequestId, Vec<String>) {
+        let plan = labels.plan(pack, kinds);
+        let id = crate::ids::RequestId(labels.asks.len() as u64 + u64::from(plan.epoch) * 100);
+        labels.begin(&plan, id);
+        (plan.epoch, id, plan.keys)
+    }
+
     fn psa(kind: &str, text: &str) -> Promotion {
         Promotion::Psa {
             kind: kind.into(),
@@ -240,9 +340,10 @@ mod tests {
         let covid = psa("covid", "");
         assert_eq!(labels.row(&covid).label, "PSA");
         assert_eq!(labels.row(&Promotion::MtprotoProxy).label, "Proxy sponsor");
-        let (epoch, _) = labels.take_wanted("en", ["covid"]);
+        let (epoch, id, _) = ask(&mut labels, "en", ["covid"]);
         labels.store(
             epoch,
+            Some(id),
             vec![
                 (
                     "cloud_lng_badge_psa_covid".into(),
@@ -264,7 +365,7 @@ mod tests {
     #[test]
     fn each_type_is_asked_for_once_per_pack() {
         let mut labels = PsaLabels::default();
-        let (_, keys) = labels.take_wanted("en", ["covid", "covid", "war"]);
+        let (_, _, keys) = ask(&mut labels, "en", ["covid", "covid", "war"]);
         assert_eq!(
             keys,
             vec![
@@ -274,8 +375,8 @@ mod tests {
                 "cloud_lng_about_psa_war"
             ]
         );
-        assert!(labels.take_wanted("en", ["covid", "war"]).1.is_empty());
-        let (_, keys) = labels.take_wanted("ru", ["covid"]);
+        assert!(labels.plan("en", ["covid", "war"]).keys.is_empty());
+        let (_, _, keys) = ask(&mut labels, "ru", ["covid"]);
         assert_eq!(
             keys,
             vec!["cloud_lng_badge_psa_covid", "cloud_lng_about_psa_covid"]
@@ -291,9 +392,10 @@ mod tests {
         assert_eq!(labels.about(&Promotion::MtprotoProxy), proxy);
         assert_eq!(labels.about(&psa("", "text")), proxy, "no type");
         assert_eq!(labels.about(&covid), default, "unknown to the server");
-        let (epoch, _) = labels.take_wanted("en", ["covid", "empty"]);
+        let (epoch, id, _) = ask(&mut labels, "en", ["covid", "empty"]);
         labels.store(
             epoch,
+            Some(id),
             vec![
                 (
                     "cloud_lng_about_psa_covid".into(),
@@ -308,7 +410,7 @@ mod tests {
         assert_eq!(labels.about(&covid), "Stay **safe**");
         assert_eq!(labels.about(&psa("empty", "")), default, "empty falls back");
         assert_eq!(labels.about(&psa("other", "")), default);
-        labels.take_wanted("ru", ["covid"]);
+        labels.plan("ru", ["covid"]);
         assert_eq!(labels.about(&covid), default, "a new pack forgets it");
     }
 
@@ -381,21 +483,49 @@ mod tests {
     fn a_new_pack_drops_the_old_text_and_late_answers() {
         let mut labels = PsaLabels::default();
         let covid = psa("covid", "");
-        let (old, _) = labels.take_wanted("en", ["covid"]);
+        let (old, old_id, _) = ask(&mut labels, "en", ["covid"]);
         let answer = || {
             vec![(
                 "cloud_lng_badge_psa_covid".to_string(),
                 PackValue::Ordinary("COVID-19 Info".into()),
             )]
         };
-        labels.store(old, answer());
+        labels.store(old, Some(old_id), answer());
         assert_eq!(labels.row(&covid).label, "COVID-19 Info");
-        let (new, _) = labels.take_wanted("ru", ["covid"]);
+        let (new, new_id, _) = ask(&mut labels, "ru", ["covid"]);
         assert_eq!(labels.row(&covid).label, "PSA");
         // The English answer arrives late: ignored.
-        labels.store(old, answer());
+        labels.store(old, Some(old_id), answer());
         assert_eq!(labels.row(&covid).label, "PSA");
-        labels.store(new, answer());
+        labels.store(new, Some(new_id), answer());
         assert_eq!(labels.row(&covid).label, "COVID-19 Info");
+    }
+
+    /// 04-071: a request that failed (or never left) is asked again, a
+    /// few times; the answer settles it for good.
+    #[test]
+    fn a_failed_ask_is_asked_again_a_few_times() {
+        use crate::ids::RequestId;
+        let mut labels = PsaLabels::default();
+        for attempt in 1..=PSA_ASK_ATTEMPTS {
+            let plan = labels.plan("en", ["covid"]);
+            assert_eq!(plan.keys.len(), 2, "attempt {attempt}");
+            let id = RequestId(u64::from(attempt));
+            labels.begin(&plan, id);
+            // Out and unanswered: nothing asks beside it.
+            assert!(labels.plan("en", ["covid"]).keys.is_empty());
+            // Another request's error leaves it waiting.
+            labels.fail_request(RequestId(99));
+            assert!(labels.plan("en", ["covid"]).keys.is_empty());
+            labels.fail_request(id);
+        }
+        assert!(labels.plan("en", ["covid"]).keys.is_empty(), "gave up");
+        // A new pack starts over, and an answer settles the type.
+        let plan = labels.plan("ru", ["covid"]);
+        assert_eq!(plan.keys.len(), 2);
+        labels.begin(&plan, RequestId(50));
+        labels.store(plan.epoch, Some(RequestId(50)), Vec::new());
+        assert!(labels.plan("ru", ["covid"]).keys.is_empty());
+        assert_eq!(labels.row(&psa("covid", "")).label, "PSA");
     }
 }

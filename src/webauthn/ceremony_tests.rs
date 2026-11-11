@@ -313,3 +313,33 @@ fn a_system_ceremony_reports_its_result() {
     ceremony.cancel();
     assert!(ceremony.poll().is_empty());
 }
+
+#[test]
+fn a_pin_goes_only_to_the_key_that_asked_for_it() {
+    assert_eq!(pin_for(Some(1), 1, Some("1234")), Some("1234"));
+    assert_eq!(pin_for(Some(1), 0, Some("1234")), None);
+    assert_eq!(pin_for(None, 0, Some("1234")), None);
+    assert_eq!(pin_for(Some(1), 1, None), None);
+}
+
+/// A key Quill may not open (Linux without the udev rule).
+struct DeniedKeys;
+
+impl DeviceSource for DeniedKeys {
+    fn open_all(&mut self) -> Vec<Box<dyn HidDevice>> {
+        Vec::new()
+    }
+
+    fn find(&mut self) -> crate::webauthn::ctap2::hid::Found {
+        crate::webauthn::ctap2::hid::Found::Denied("/dev/hidraw3".into())
+    }
+}
+
+#[test]
+fn a_key_that_may_not_be_opened_ends_the_ceremony_at_once() {
+    let mut ceremony = Ceremony::register(options(60_000), Box::new(DeniedKeys));
+    assert_eq!(
+        next(&mut ceremony),
+        CeremonyEvent::Failed(CeremonyError::AccessDenied)
+    );
+}

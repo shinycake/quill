@@ -18,8 +18,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Download the first sticker of every listed set, once each.
     fn ensure_manager_covers(&mut self) -> Result<(), ConnectSendError> {
         let stickers = &self.session.stickers;
-        let mut asked = Vec::new();
-        let mut files = Vec::new();
+        let mut asked: Vec<i64> = Vec::new();
+        let mut wanted: Vec<(i64, Vec<crate::ids::FileId>)> = Vec::new();
         for set in stickers
             .stickers
             .sets
@@ -33,14 +33,24 @@ impl<S: JsonSender> ConnectDriver<S> {
                 continue;
             }
             asked.push(set.id);
-            files.extend(
-                set.covers
-                    .iter()
-                    .filter_map(|cover| cover.display_file_id()),
-            );
+            let files = set
+                .covers
+                .iter()
+                .filter_map(|cover| cover.display_file_id())
+                .collect();
+            wanted.push((set.id, files));
         }
-        self.session.stickers.manager.covers_requested.extend(asked);
-        self.ensure_media_files(&files)
+        // A set counts as asked once its downloads went out; a refused send
+        // is tried again after the next answer.
+        for (set_id, files) in wanted {
+            self.ensure_media_files(&files)?;
+            self.session
+                .stickers
+                .manager
+                .covers_requested
+                .insert(set_id);
+        }
+        Ok(())
     }
 
     /// The trending sets on screen were seen: tell TDLib, and drop their
@@ -51,19 +61,25 @@ impl<S: JsonSender> ConnectDriver<S> {
             .stickers
             .stickers
             .trending
-            .iter_mut()
+            .iter()
             .filter(|set| !set.is_viewed)
-            .map(|set| {
-                set.is_viewed = true;
-                set.id
-            })
+            .map(|set| set.id)
             .collect();
         if ids.is_empty() {
             return Ok(None);
         }
-        self.sticker_request(RequestPurpose::ViewTrendingStickerSets, |id| {
+        let sent = self.sticker_request(RequestPurpose::ViewTrendingStickerSets, |id| {
             crate::telegram::requests::view_trending_sticker_sets(id, &ids)
-        })
+        })?;
+        // The dots go once TDLib has been told; a refused send keeps them.
+        if sent.is_some() {
+            for set in &mut self.session.stickers.stickers.trending {
+                if ids.contains(&set.id) {
+                    set.is_viewed = true;
+                }
+            }
+        }
+        Ok(sent)
     }
 
     /// Queue what a closed box changed: the sets to remove and the order of

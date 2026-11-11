@@ -116,7 +116,12 @@ fn preview_answers_are_taken_by_the_request_that_asked() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let first = session.request(RequestPurpose::GetBackgroundUrl, None);
-    let second = session.request(RequestPurpose::SetDefaultBackground, None);
+    let second = session.request(
+        RequestPurpose::Chats(ChatsPurpose::SetDefaultBackground {
+            for_dark_theme: false,
+        }),
+        None,
+    );
     apply_json(
         &mut session,
         &seq,
@@ -138,7 +143,12 @@ fn preview_answers_are_taken_by_the_request_that_asked() {
         session.chats_state.background_answers.is_empty(),
         "an answer nobody waits for is dropped"
     );
-    let third = session.request(RequestPurpose::SetDefaultBackground, None);
+    let third = session.request(
+        RequestPurpose::Chats(ChatsPurpose::SetDefaultBackground {
+            for_dark_theme: false,
+        }),
+        None,
+    );
     answer(&mut session, &seq, &sink, third, false);
     assert!(matches!(
         session

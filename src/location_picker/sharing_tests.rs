@@ -198,3 +198,47 @@ fn a_new_picker_asks_again_after_a_lost_or_missing_bot_lookup() {
         );
     }
 }
+
+/// Sweep 03-075: a venue icon that failed, or whose answer never came, is
+/// asked again by the next picker.
+#[test]
+fn a_new_picker_asks_again_for_icons_that_failed_or_never_answered() {
+    let mut sharing = LocationSharing::default();
+    sharing.set_venue_bot_username("foursquare".into());
+    sharing.open(ChatId(3), None);
+    sharing.geolocated(GeoOutcome::Found(point(10., 20.)));
+    let _ = sharing.next_requests();
+    sharing.venue_bot_resolved(Some(99));
+    let generation = sharing
+        .next_requests()
+        .into_iter()
+        .find_map(|request| match request {
+            PickerRequest::Venues { generation, .. } => Some(generation),
+            _ => None,
+        })
+        .expect("venue query");
+    sharing.venues_answered(generation, vec![cafe()]);
+    let icons = sharing.next_requests();
+    sharing.request_sent(&icons[0], 41);
+    sharing.request_unsent(&icons[0]);
+    assert!(sharing.next_requests().is_empty(), "failed stays failed");
+
+    sharing.open(ChatId(3), None);
+    sharing.geolocated(GeoOutcome::Found(point(10., 20.)));
+    let generation = sharing
+        .next_requests()
+        .into_iter()
+        .find_map(|request| match request {
+            PickerRequest::Venues { generation, .. } => Some(generation),
+            _ => None,
+        })
+        .expect("venue query again");
+    sharing.venues_answered(generation, vec![cafe()]);
+    assert!(
+        sharing
+            .next_requests()
+            .iter()
+            .any(|request| matches!(request, PickerRequest::VenueIcon { .. })),
+        "the icon is asked again"
+    );
+}

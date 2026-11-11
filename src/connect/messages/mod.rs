@@ -4,7 +4,7 @@ use crate::composer::{
     AttachmentKind, ComposerEdit, ComposerEditKind, ComposerScheduling, ComposerSnapshot,
     DeleteConfirm, EditMediaKind, ForwardDraft, LinkPreviewChoice, SendOptions,
 };
-use crate::ids::{ChatId, MessageId, RequestId};
+use crate::ids::{ChatId, ChatMessage, MessageId, RequestId};
 use crate::rich::RichBlock;
 use crate::state::MessagesPurpose;
 use crate::state::{ForwardFlight, RequestPurpose, WindowEdge};

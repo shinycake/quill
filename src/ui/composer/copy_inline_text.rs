@@ -56,7 +56,7 @@ impl QuillApp {
         path: &std::path::Path,
         cx: &mut Context<Self>,
     ) {
-        let as_file = self.composer_ui.edit_replace_as_file;
+        let as_file = self.chat_ui.edit_replace_as_file();
         let Some(edit) = self.screen.chat_ui.pending_edit_mut() else {
             return;
         };
@@ -138,7 +138,7 @@ impl QuillApp {
             Ok(probe) => replacement.probe = quill::composer::ReplacementProbe::Ready(probe),
             Err(reason) => {
                 edit.media_edit.replacement = None;
-                self.composer_ui.edit_replace_as_file = false;
+                self.chat_ui.set_edit_replace_as_file(false);
                 self.set_note(StatusNote::error(reason));
             }
         }
@@ -150,14 +150,15 @@ impl QuillApp {
         if let Some(edit) = self.chat_ui.pending_edit_mut() {
             edit.media_edit.replacement = None;
         }
-        self.composer_ui.edit_replace_as_file = false;
+        self.chat_ui.set_edit_replace_as_file(false);
         self.set_note(StatusNote::silent(tr(keys::Q_CHAT_REPLACEMENT_CLEARED)));
         cx.notify();
     }
 
     /// B5: tdesktop's "Send as a document" checkbox on the replacement.
     pub(in crate::ui) fn toggle_edit_replace_as_file(&mut self, cx: &mut Context<Self>) {
-        self.composer_ui.edit_replace_as_file = !self.composer_ui.edit_replace_as_file;
+        let next = !self.chat_ui.edit_replace_as_file();
+        self.chat_ui.set_edit_replace_as_file(next);
         let path = self
             .chat_ui
             .pending_edit()
@@ -251,7 +252,6 @@ impl QuillApp {
             );
             return;
         }
-        self.composer_ui.edit_replace_as_file = false;
         // Switching from one edit to another: the first edit's text is not the
         // draft, so put the real draft and reply back before they are stashed.
         if self.chat_ui.is_editing() {
@@ -455,14 +455,19 @@ impl QuillApp {
         let Some(confirm) = self.chat_ui.pending_delete.take() else {
             return;
         };
-        self.begin_vanish(confirm.chat_id, &[confirm.message_id]);
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.delete_confirmed(&confirm);
+            // The message dissolves only once the delete went out: a refused
+            // send leaves it on screen.
+            if result.is_ok() {
+                self.begin_vanish(confirm.chat_id, &[confirm.message_id]);
+            }
             self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_DELETING)),
                 Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_DELETE_MESSAGE)),
             });
         } else if self.demo_session.is_some() {
+            self.begin_vanish(confirm.chat_id, &[confirm.message_id]);
             self.apply_demo_delete(confirm.chat_id, confirm.message_id);
             self.set_note(StatusNote::silent(tr(
                 keys::Q_CHAT_DEMO_DELETE_APPLIED_LOCALLY_NO,

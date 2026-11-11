@@ -210,3 +210,23 @@ fn emoji_picked_in_the_panel_go_to_the_option_field_with_a_token(cx: &mut TestAp
         assert_eq!(draft.options[0], "");
     });
 }
+
+#[gpui_kit::test]
+fn a_slot_is_found_by_its_id_after_an_earlier_row_is_removed(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.open_poll_dialog(window, cx);
+        app.add_poll_option_row(window, cx);
+        app.add_poll_option_row(window, cx);
+        let asked = app.chat_ui.poll_dialog.as_ref().unwrap().attach[2].id;
+        assert_eq!(app.target_of_attach(asked), Some(AttachTarget::Row(2)));
+        app.remove_poll_option_row(0, cx);
+        assert_eq!(
+            app.target_of_attach(asked),
+            Some(AttachTarget::Row(1)),
+            "the file lands on the row that asked, not on whatever is at its old index"
+        );
+        app.remove_poll_option_row(1, cx);
+        assert_eq!(app.target_of_attach(asked), None, "its row is gone");
+    });
+}

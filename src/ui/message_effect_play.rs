@@ -45,6 +45,11 @@ thread_local! {
     static WAITING: RefCell<Vec<Waiting>> = const { RefCell::new(Vec::new()) };
 }
 
+/// The screen was replaced: nothing waits for the old account's effects.
+pub(super) fn forget_waiting() {
+    let _ = WAITING.try_with(|waiting| waiting.borrow_mut().clear());
+}
+
 /// The sticker the overlay plays for `effect`.
 fn effect_sticker(animation: EffectAnimation) -> StickerItem {
     StickerItem {

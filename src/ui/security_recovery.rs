@@ -247,7 +247,7 @@ impl QuillApp {
             .and_then(|s| s.auth_state.twofa_flow.recovery_code_sent_to.clone());
         let loading = session
             .as_ref()
-            .is_some_and(|s| s.auth_state.password_state_loading);
+            .is_some_and(|s| s.auth_state.password_state_loading());
         let Some(state) = state else {
             return body.child(muted_line(cx, tr(keys::Q_PREFS_LOADING)));
         };
@@ -552,7 +552,7 @@ impl QuillApp {
             .and_then(|s| s.auth_state.twofa_flow.login_email_code_sent_to.clone());
         let loading = session
             .as_ref()
-            .is_some_and(|s| s.auth_state.password_state_loading);
+            .is_some_and(|s| s.auth_state.password_state_loading());
         let body = if let Some(pattern) = code_sent_to {
             body.child(heading(tr(keys::SETTINGS_CLOUD_LOGIN_EMAIL_CODE_TITLE)))
                 .child(div().text_sm().child(tr_with(
@@ -659,10 +659,19 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Whether the two-step dialog should fall back to the status
-    /// screen: a finished step reports there.
-    pub(super) fn twofa_step_finished(&self) -> bool {
-        self.session()
-            .is_some_and(|s| s.auth_state.twofa_flow.notice.is_some())
+    /// A recovery / reset / login-email step that finished reports on the
+    /// status screen. Run where the answer is drained, never while the
+    /// dialog draws. Returns whether the view moved.
+    pub(super) fn drain_twofa_step(&mut self) -> bool {
+        let finished = self
+            .session()
+            .is_some_and(|s| s.auth_state.twofa_flow.notice.is_some());
+        if !finished || !matches!(self.twofa.view, TwofaView::Recover | TwofaView::LoginEmail) {
+            return false;
+        }
+        self.twofa.view = TwofaView::Status;
+        self.twofa.confirm = None;
+        self.twofa.notice = None;
+        true
     }
 }

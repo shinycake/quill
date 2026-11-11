@@ -98,6 +98,21 @@ impl Session {
         })
     }
 
+    /// A request that changes this mask set is in flight: its own
+    /// `changeStickerSet`, or a reorder (which moves every row).
+    pub fn mask_set_change_pending(&self, set_id: i64) -> bool {
+        self.requests.pending.values().any(|pending| {
+            matches!(
+                pending.purpose,
+                RequestPurpose::Stickers(StickersPurpose::ChangeMaskSet { set_id: id, .. })
+                    if id == set_id
+            ) || matches!(
+                pending.purpose,
+                RequestPurpose::Stickers(StickersPurpose::ReorderInstalledMaskSets)
+            )
+        })
+    }
+
     /// A mask change (`changeStickerSet` or reorder) succeeded: drop both
     /// lists so the dialog refetches what TDLib now holds.
     pub(crate) fn finish_mask_mutation(&mut self, purpose: Option<RequestPurpose>) {
@@ -108,6 +123,16 @@ impl Session {
                     | RequestPurpose::Stickers(StickersPurpose::ReorderInstalledMaskSets)
             )
         ) {
+            // A list asked before the change answers with what the change
+            // replaced: dropped, so it neither lands as the new list nor
+            // keeps the refetch from going out.
+            for purpose in [
+                StickersPurpose::GetInstalledMaskSets,
+                StickersPurpose::GetArchivedMaskSets { first_page: true },
+                StickersPurpose::GetArchivedMaskSets { first_page: false },
+            ] {
+                while self.requests.take_purpose(purpose.into()).is_some() {}
+            }
             let masks = &mut self.stickers.masks;
             masks.installed_loaded = false;
             masks.archived_loaded = false;

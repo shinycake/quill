@@ -67,7 +67,7 @@ impl QuillApp {
             return;
         }
         if !quill::file_prefs::current().ask_download_path {
-            self.clear_forward(window, cx);
+            self.end_selection(window, cx);
             let base = quill::media_viewer::downloads_dir();
             self.start_rich_html(chat_id, message_id, base, cx);
             return;
@@ -91,7 +91,7 @@ impl QuillApp {
                             // The pick was for this message; the selection
                             // may be another by now, which stays.
                             if this.selection_html_target(chat_id) == Some(message_id) {
-                                this.clear_forward(window, cx);
+                                this.end_selection(window, cx);
                             }
                             this.start_rich_html(chat_id, message_id, Some(base), cx);
                         }

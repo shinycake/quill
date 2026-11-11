@@ -196,9 +196,9 @@ impl QuillApp {
                         day_label: row_day_label,
                         unread_divider: row_unread_divider,
                         fact_check_expanded: self
-                            .message_ui
+                            .chat_ui
                             .fact_check_expanded
-                            .contains(&(message.chat_id.0, message.id.0)),
+                            .contains(&message.id.0),
                         is_secret: build.is_secret,
                         vanishing: self.vanish_progress(message.chat_id, message.id).is_some(),
                         message,

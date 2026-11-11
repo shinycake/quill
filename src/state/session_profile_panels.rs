@@ -106,63 +106,79 @@ impl Session {
         Some((kind, id))
     }
 
-    /// A `chats` answer to one of our profile list fetches.
+    /// A `chats` answer to one of our profile list fetches: the first page
+    /// when the list waits for this request (or holds nothing), a follow-up
+    /// page when the list asked for exactly this one. Any other answer
+    /// belongs to a fetch that was replaced and is dropped.
     pub(crate) fn apply_profile_chats(&mut self, chat_ids: &[ChatId], pending: &PendingRequest) {
         let Some(key) = Self::profile_chats_key(pending) else {
             return;
         };
         let mut ids: Vec<i64> = chat_ids.iter().map(|id| id.0).collect();
-        if key.0 == ProfileChatsKind::GroupsInCommon {
-            let paging = self
-                .users_state
-                .common_groups_paging
-                .entry(key.1)
-                .or_default();
-            paging.exhausted = ids.len() < GROUPS_IN_COMMON_PAGE;
-            // A follow-up page extends the list; the first page replaces it.
-            if std::mem::take(&mut paging.loading_more)
-                && let Some(ProfileChatsFetch::Loaded(shown)) =
-                    self.users_state.profile_chat_lists.get(&key)
-            {
+        let paged = key.0 == ProfileChatsKind::GroupsInCommon;
+        let more = if !paged || ids.len() < GROUPS_IN_COMMON_PAGE {
+            MorePage::Exhausted
+        } else {
+            MorePage::Idle
+        };
+        let lists = &mut self.users_state.profile_chat_lists;
+        match lists.get(&key) {
+            None => {}
+            Some(ProfileChatsFetch::Loading(waiting)) if *waiting == pending.id => {}
+            Some(ProfileChatsFetch::Loaded {
+                ids: shown,
+                more: MorePage::Loading(waiting),
+            }) if *waiting == pending.id => {
                 let mut all = shown.clone();
                 ids.retain(|id| !all.contains(id));
                 all.extend(ids);
                 ids = all;
             }
+            Some(_) => return,
         }
-        self.users_state
-            .profile_chat_lists
-            .insert(key, ProfileChatsFetch::Loaded(ids));
+        lists.insert(key, ProfileChatsFetch::Loaded { ids, more });
     }
 
     /// Whether more groups in common can be asked for, and whether that
     /// page is on its way.
-    pub fn common_groups_paging(&self, user_id: i64) -> CommonGroupsPaging {
-        self.users_state
-            .common_groups_paging
-            .get(&user_id)
-            .copied()
-            .unwrap_or_default()
+    pub fn common_groups_more(&self, user_id: i64) -> MorePage {
+        match self
+            .users_state
+            .profile_chat_lists
+            .get(&(ProfileChatsKind::GroupsInCommon, user_id))
+        {
+            Some(ProfileChatsFetch::Loaded { more, .. }) => *more,
+            _ => MorePage::Idle,
+        }
     }
 
     /// A refused list or gallery fetch: keep the reason so the panel can
     /// show a Retry row instead of spinning forever.
     pub(crate) fn fail_profile_fetch(&mut self, pending: &PendingRequest, reason: String) {
         if let Some(key) = Self::profile_chats_key(pending) {
-            // A failed follow-up page keeps the groups already listed and
-            // ends the list: tdesktop's `loadMoreRows` has no failure
-            // handler, so its request id stays set and it never asks
-            // again. (TDLib's "Wrong offset_chat_id" would only repeat.)
-            if key.0 == ProfileChatsKind::GroupsInCommon
-                && let Some(paging) = self.users_state.common_groups_paging.get_mut(&key.1)
-                && std::mem::take(&mut paging.loading_more)
-            {
-                paging.exhausted = true;
-                return;
+            // Only the fetch the list waits for fails it. A failed
+            // follow-up page keeps the groups already listed and ends the
+            // list: tdesktop's `loadMoreRows` has no failure handler, so
+            // its request id stays set and it never asks again. (TDLib's
+            // "Wrong offset_chat_id" would only repeat.)
+            match self.users_state.profile_chat_lists.get_mut(&key) {
+                None => {
+                    self.users_state
+                        .profile_chat_lists
+                        .insert(key, ProfileChatsFetch::Failed(reason));
+                }
+                Some(ProfileChatsFetch::Loading(waiting)) if *waiting == pending.id => {
+                    self.users_state
+                        .profile_chat_lists
+                        .insert(key, ProfileChatsFetch::Failed(reason));
+                }
+                Some(ProfileChatsFetch::Loaded { more, .. })
+                    if *more == MorePage::Loading(pending.id) =>
+                {
+                    *more = MorePage::Exhausted;
+                }
+                _ => {}
             }
-            self.users_state
-                .profile_chat_lists
-                .insert(key, ProfileChatsFetch::Failed(reason));
         } else if pending.purpose == RequestPurpose::GetUserProfilePhotos
             && let Some(user_id) = pending.user_id
         {
@@ -250,7 +266,7 @@ impl Session {
     /// The chat ids of a loaded profile list; empty while loading.
     pub fn profile_chat_list(&self, kind: ProfileChatsKind, id: i64) -> &[i64] {
         match self.users_state.profile_chat_lists.get(&(kind, id)) {
-            Some(ProfileChatsFetch::Loaded(ids)) => ids,
+            Some(ProfileChatsFetch::Loaded { ids, .. }) => ids,
             _ => &[],
         }
     }

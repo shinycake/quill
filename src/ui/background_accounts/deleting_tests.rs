@@ -451,7 +451,10 @@ fn a_lock_screen_log_out_that_cannot_start_the_wipe_stays_locked(cx: &mut TestAp
         assert!(passcode.is_locked(), "no passcode was typed");
         assert!(passcode.enabled, "the passcode is still set");
         assert!(!passcode.logout_confirm);
-        assert!(passcode.lock_error.is_some(), "the lock screen says why");
+        assert!(
+            passcode.lock_error.text().is_some(),
+            "the lock screen says why"
+        );
         assert!(!app.background.wiping, "nothing started");
     });
     assert!(config.exists(), "the passcode stays on disk");

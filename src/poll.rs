@@ -122,7 +122,14 @@ pub enum PollRow {
 pub fn poll_shows_results(poll: &Poll) -> bool {
     !poll_results_hidden(poll)
         && (poll.is_closed
-            || poll.vote_restriction_reason.is_some()
+            || poll.vote_restriction_reason.as_ref().is_some_and(|reason| {
+                // A poll not sent yet has no votes to show: its options
+                // stay choices.
+                !matches!(
+                    reason,
+                    PollVoteRestrictionReason::YetUnsent | PollVoteRestrictionReason::Scheduled
+                )
+            })
             || !poll.chosen_indexes().is_empty())
 }
 
@@ -605,6 +612,18 @@ mod tests {
         let mut restricted = regular_poll(&[], false, true, false);
         restricted.vote_restriction_reason = Some(PollVoteRestrictionReason::Other);
         assert_eq!(mark(&restricted, 0), Some(PollMark::None));
+    }
+
+    #[test]
+    fn an_unsent_or_scheduled_poll_keeps_its_options_as_choices() {
+        for reason in [
+            PollVoteRestrictionReason::YetUnsent,
+            PollVoteRestrictionReason::Scheduled,
+        ] {
+            let mut poll = regular_poll(&[], false, true, false);
+            poll.vote_restriction_reason = Some(reason);
+            assert_eq!(row(&poll, 0), PollRow::Choice { selected: false });
+        }
     }
 
     #[test]

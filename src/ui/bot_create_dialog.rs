@@ -277,6 +277,7 @@ impl QuillApp {
             return;
         }
         dialog.submitted = true;
+        let starts = live.driver.session.bots.owned.create.starts;
         // Watched until TDLib answers or the box closes: a cap would leave
         // Create off with nothing in flight, and drop a late success. Not
         // tied to the window it was pressed in: when that window closes the
@@ -287,7 +288,7 @@ impl QuillApp {
                     .timer(Duration::from_millis(150))
                     .await;
                 let Ok(done) = this.update(cx, |this, cx| {
-                    this.poll_bot_create(&name, &full, manager_id, share, cx)
+                    this.poll_bot_create(&name, &full, manager_id, share, starts, cx)
                 }) else {
                     break;
                 };
@@ -308,11 +309,18 @@ impl QuillApp {
         full: &str,
         manager_id: i64,
         share: Option<ManagedBotShare>,
+        starts: u64,
         cx: &mut Context<Self>,
     ) -> bool {
         let Some(create) = self.session().map(|s| s.bots.owned.create.clone()) else {
             return true;
         };
+        // A later create started (the box was closed and reopened, and
+        // Create pressed again): its own watcher reports its answer, with
+        // its own name and username.
+        if create.starts != starts {
+            return true;
+        }
         if let Some(new_bot_id) = create.created {
             let manager = self
                 .session()

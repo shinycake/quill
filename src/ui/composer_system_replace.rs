@@ -27,9 +27,10 @@ impl QuillApp {
         if !range.is_empty() || self.composer_caret_in_code(range.start, cx) {
             return;
         }
-        let Some(check) = check_for(prev, text, range.start) else {
+        let Some(mut check) = check_for(prev, text, range.start) else {
             return;
         };
+        check.owner = self.system_replace_owner();
         self.spawn_scoped_in(window, cx, async move |this, cx| {
             let asked = check.text.clone();
             let found = cx
@@ -56,6 +57,13 @@ impl QuillApp {
     ) {
     }
 
+    /// The chat and topic the composer in place belongs to.
+    #[cfg(target_os = "macos")]
+    fn system_replace_owner(&self) -> Option<(i64, Option<i32>)> {
+        let session = self.session()?;
+        session.open_chat.map(|chat| (chat.0, session.open_topic))
+    }
+
     /// Swap the shortcut for its phrase, keeping the caret where the user
     /// left it (tdesktop `commitInstantReplacement`).
     #[cfg(target_os = "macos")]
@@ -66,7 +74,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.chat_prefs.system_text_replace {
+        // The answer is for the composer that asked: a chat switched to
+        // meanwhile may start with the same text.
+        if !self.chat_prefs.system_text_replace || check.owner != self.system_replace_owner() {
             return;
         }
         let text = self.composer.read(cx).value().to_string();

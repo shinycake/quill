@@ -19,14 +19,29 @@ use quill::wallpaper_raster::vertical_color_at;
 use std::cell::Cell;
 
 thread_local! {
-    /// The message area of the history being painted (the wallpaper
-    /// layer reports it before the rows paint).
-    static HISTORY_AREA: Cell<Option<Bounds<Pixels>>> = const { Cell::new(None) };
+    /// The message area of the history being painted and the window it is
+    /// in (the wallpaper layer reports it before the rows paint). Windows
+    /// paint one after another, so a bubble only trusts an area its own
+    /// window reported.
+    static HISTORY_AREA: Cell<Option<(WindowId, Bounds<Pixels>)>> = const { Cell::new(None) };
 }
 
 /// Record the message area for this frame's bubbles.
-pub(super) fn note_history_area(bounds: Bounds<Pixels>) {
-    HISTORY_AREA.with(|area| area.set(Some(bounds)));
+pub(super) fn note_history_area(bounds: Bounds<Pixels>, window: &Window) {
+    let id = window.window_handle().window_id();
+    HISTORY_AREA.with(|area| area.set(Some((id, bounds))));
+}
+
+/// The message area `window`'s history reported, if it did.
+fn history_area_of(window: &Window) -> Option<Bounds<Pixels>> {
+    area_for(
+        HISTORY_AREA.with(Cell::get),
+        window.window_handle().window_id(),
+    )
+}
+
+fn area_for(noted: Option<(WindowId, Bounds<Pixels>)>, window: WindowId) -> Option<Bounds<Pixels>> {
+    noted.and_then(|(owner, bounds)| (owner == window).then_some(bounds))
 }
 
 /// Fill of outgoing bubbles from a chat theme.
@@ -130,7 +145,7 @@ pub(crate) fn gradient_layer(fill: OutgoingFill, joined_above: bool) -> Option<A
         canvas(
             |_, _, _| {},
             move |bounds, _, window, cx| {
-                let area = HISTORY_AREA.with(Cell::get).unwrap_or(bounds);
+                let area = history_area_of(window).unwrap_or(bounds);
                 let (top, bottom) = slice_of(area, bounds.top(), bounds.bottom());
                 let big = cx.theme().radius_2xl();
                 let small = px(5.);
@@ -163,8 +178,8 @@ pub(crate) fn gradient_layer(fill: OutgoingFill, joined_above: bool) -> Option<A
 
 #[cfg(test)]
 mod tests {
-    use super::{OutgoingFill, slice_of};
-    use gpui_kit::{Bounds, point, px, size};
+    use super::{OutgoingFill, area_for, slice_of};
+    use gpui_kit::{Bounds, WindowId, point, px, size};
     use quill::telegram::envelope::{BackgroundFill, ThemeSettings};
 
     fn settings(fill: Option<BackgroundFill>, accent: Option<u32>) -> ThemeSettings {
@@ -209,6 +224,16 @@ mod tests {
             OutgoingFill::from_theme(&settings(None, None), false).solid(),
             0x112233
         );
+    }
+
+    #[test]
+    fn a_bubble_ignores_the_area_another_window_reported() {
+        let area = Bounds::new(point(px(0.), px(100.)), size(px(300.), px(400.)));
+        let main = WindowId::from(1_u64);
+        let chat = WindowId::from(2_u64);
+        assert_eq!(area_for(Some((main, area)), main), Some(area));
+        assert_eq!(area_for(Some((main, area)), chat), None);
+        assert_eq!(area_for(None, main), None);
     }
 
     #[test]

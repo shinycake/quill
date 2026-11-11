@@ -76,6 +76,12 @@ impl VolumePill {
     fn drag(&mut self, dragging: bool) {
         self.dragging = dragging;
     }
+
+    /// The slider or the viewer it belonged to is gone: no leave, release
+    /// or blur will come for what was held.
+    pub(crate) fn release(&mut self) {
+        *self = Self::default();
+    }
 }
 
 /// Up and Down while a live story plays through Quill: its volume, 5 %
@@ -133,6 +139,9 @@ impl QuillApp {
     ) -> Option<Entity<SliderState>> {
         if !self.stream_volume_shown(call_id) {
             *self.volume_slot(host) = None;
+            if host == VolumeHost::LiveStory {
+                self.stories.live.volume_pill.release();
+            }
             return None;
         }
         let percent = self.stream_volume_percent();
@@ -242,6 +251,17 @@ mod tests {
         assert!(pill.open(now + Duration::from_millis(199)));
         pill.hover(VolumePart::Toggle, true, now + Duration::from_millis(100));
         assert!(pill.open(now + LEAVE_PILL), "coming back keeps it");
+    }
+
+    #[test]
+    fn a_released_pill_forgets_what_it_held() {
+        let now = Instant::now();
+        let mut pill = VolumePill::default();
+        pill.hover(VolumePart::Pill, true, now);
+        pill.drag(true);
+        pill.focus(true);
+        pill.release();
+        assert!(!pill.open(now));
     }
 
     #[test]

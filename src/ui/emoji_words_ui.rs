@@ -85,12 +85,18 @@ impl EmojiWordsUi {
         self.strip_bounds.clone()
     }
 
-    /// Close the word's bar.
-    pub(super) fn unhover(&mut self) {
+    /// Close the word's bar. The bar's grid and scroll are the composer's
+    /// one `EmojiBarUi`, shared with the `:` suggestions: closing the word
+    /// bar puts it back to a closed strip unless the suggestions are using
+    /// it, so the next word's bar does not open expanded and scrolled.
+    pub(super) fn unhover(&mut self, suggest: &mut super::composer_suggest::SuggestUi) {
         self.hovered = None;
         self.pinned = false;
         self.strip_bounds.set(None);
         self.pending = None;
+        if suggest.active.is_none() {
+            suggest.bar.reset();
+        }
     }
 }
 
@@ -236,7 +242,7 @@ impl QuillApp {
                 !highlights.contains(hovered)
             }
         }) {
-            ui.unhover();
+            ui.unhover(&mut self.screen.composer_ui.suggest);
         }
         if matches!(&ui.asked, AskedWord::Waiting { range, word }
             if text.get(range.clone()).map(str::to_lowercase).as_deref() != Some(word.as_str()))
@@ -338,8 +344,8 @@ impl QuillApp {
             let items = self.word_strip_items(&h);
             (h, items)
         });
-        let ui = &mut self.composer_ui.emoji_words;
-        ui.unhover();
+        let ui = &mut self.screen.composer_ui.emoji_words;
+        ui.unhover(&mut self.screen.composer_ui.suggest);
         ui.hovered = bar.filter(|(_, items)| !items.is_empty());
         cx.notify();
     }
@@ -384,11 +390,11 @@ impl QuillApp {
     /// Esc while a word's strip is open: close it and stop highlighting
     /// that word. True when consumed.
     pub(super) fn dismiss_emoji_word(&mut self, cx: &mut Context<Self>) -> bool {
-        let ui = &mut self.composer_ui.emoji_words;
+        let ui = &mut self.screen.composer_ui.emoji_words;
         let Some((h, _)) = ui.hovered.take() else {
             return false;
         };
-        ui.unhover();
+        ui.unhover(&mut self.screen.composer_ui.suggest);
         ui.ignored.insert(h.normalized);
         ui.basis = Basis::default();
         self.sync_emoji_words(cx);
@@ -406,7 +412,10 @@ impl QuillApp {
         let Some((h, items)) = self.composer_ui.emoji_words.hovered.take() else {
             return;
         };
-        self.composer_ui.emoji_words.unhover();
+        self.screen
+            .composer_ui
+            .emoji_words
+            .unhover(&mut self.screen.composer_ui.suggest);
         self.composer_ui.suggest.bar.reset();
         let Some(item) = items.get(index) else {
             return;

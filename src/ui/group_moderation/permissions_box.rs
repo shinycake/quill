@@ -28,8 +28,8 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::permissions_box::{
-    BOOSTS_STOPS, MEDIA, Permission, PermissionsSave, PermissionsSent, SLOW_MODE_STOPS,
-    bottom_rows, has_send_restrictions, initial, lock, media_on, set_media,
+    BOOSTS_STOPS, MEDIA, Permission, PermissionsPart, PermissionsSave, PermissionsSent,
+    SLOW_MODE_STOPS, bottom_rows, has_send_restrictions, initial, lock, media_on, set_media,
     suggests_broadcast_group, toggle,
 };
 use quill::state::{Submit, SubmitView};
@@ -125,6 +125,19 @@ impl QuillApp {
                 Ok(PermissionsSent::Sent(ids)) => {
                     if let Some(dialog) = self.admin.permissions_dialog.as_mut() {
                         dialog.submit = Submit::sent(ids);
+                    }
+                }
+                // Part of the Save is out and a later part was refused: the
+                // box stays and says which part, and its Save sends only
+                // what still differs.
+                Ok(PermissionsSent::Partial { refused, .. }) => {
+                    let part = tr(match refused {
+                        PermissionsPart::SlowMode => keys::Q_PEOPLE_PERMISSIONS_PART_SLOW_MODE,
+                        PermissionsPart::Boosts => keys::Q_PEOPLE_PERMISSIONS_PART_BOOSTS,
+                    });
+                    let reason = tr_with(keys::Q_PEOPLE_PERMISSIONS_PARTIAL, &[("part", part)]);
+                    if let Some(dialog) = self.admin.permissions_dialog.as_mut() {
+                        dialog.submit = Submit::Failed(reason);
                     }
                 }
                 // Nothing differs: nothing to save, the box just closes.

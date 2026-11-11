@@ -1,8 +1,8 @@
 //! The transfer picker's core: the unlock countdown against tdesktop's
 //! formula, the stages and the people it lists.
 use crate::gift_manage::{
-    ExportState, ProbeOutcome, TransferPicker, TransferStage, UnlockIn, fragment_gift_url,
-    transfer_candidates, unlock_hours,
+    ExportSend, ExportState, ProbeOutcome, TransferPicker, TransferStage, UnlockIn,
+    fragment_gift_url, transfer_candidates, unlock_hours,
 };
 use crate::premium_hub::parse_received_gift;
 use serde_json::{Value, json};
@@ -120,7 +120,7 @@ fn the_picker_walks_its_stages() {
     assert_eq!(
         picker.stage,
         TransferStage::Password {
-            sending: false,
+            send: ExportSend::Idle,
             error: None
         }
     );
@@ -130,13 +130,13 @@ fn the_picker_walks_its_stages() {
     assert_eq!(
         picker.stage,
         TransferStage::Password {
-            sending: false,
+            send: ExportSend::Idle,
             error: None
         }
     );
     // While the request is out nothing goes back.
     picker.stage = TransferStage::Password {
-        sending: true,
+        send: ExportSend::Out(crate::ids::RequestId(1)),
         error: None,
     };
     assert!(picker.exporting());
@@ -175,7 +175,7 @@ fn the_probe_routes_like_pre_password_error_box() {
         picker.stage
     };
     let password = TransferStage::Password {
-        sending: false,
+        send: ExportSend::Idle,
         error: None,
     };
     assert_eq!(
@@ -202,7 +202,7 @@ fn the_probe_routes_like_pre_password_error_box() {
     assert_eq!(picker.stage, TransferStage::SecurityCheck { later: false });
     // Never while the password is being sent.
     picker.stage = TransferStage::Password {
-        sending: true,
+        send: ExportSend::Out(crate::ids::RequestId(1)),
         error: None,
     };
     picker.password_state_known(false);

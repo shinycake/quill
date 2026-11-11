@@ -262,11 +262,16 @@ fn auction_link_follow_and_bids() {
     let mut f = Fixture::new();
     f.driver.fetch_gift_auction("pepe").unwrap();
     assert_eq!(f.last("getGiftAuctionState")["auction_id"], "pepe");
-    assert!(f.driver.session.payments.gift_market.auction_loading);
+    assert!(matches!(
+        f.driver.session.payments.gift_market.auction,
+        crate::gift_market::AuctionFetch::Loading { .. }
+    ));
     f.answer("getGiftAuctionState", auction_state(Value::Null));
     let market = &f.driver.session.payments.gift_market;
-    assert_eq!(market.auction_ready, Some(800));
-    assert!(!market.auction_loading);
+    assert_eq!(
+        market.auction,
+        crate::gift_market::AuctionFetch::Ready { gift_id: 800 }
+    );
     f.driver.follow_gift_auction(Some(800)).unwrap();
     assert_eq!(f.last("openGiftAuction")["gift_id"], "800");
     // Below the minimum bid nothing is sent.
@@ -313,7 +318,21 @@ fn auction_link_follow_and_bids() {
             )
             .is_err()
     );
+    // The bid in flight is the request that answers it (09-X067).
+    let asked = f.last("placeGiftAuctionBid")["@extra"]
+        .as_str()
+        .and_then(|extra| extra.parse::<u64>().ok());
+    assert_eq!(
+        f.driver
+            .session
+            .payments
+            .gift_market
+            .bidding
+            .map(|(gift, request)| (gift, Some(request.0))),
+        Some((800, asked))
+    );
     f.answer("placeGiftAuctionBid", json!({"@type": "ok"}));
+    assert!(f.driver.session.payments.gift_market.bidding.is_none());
     assert_eq!(
         f.driver.session.take_gift_market_toasts()[0].0,
         "Your bid has been placed"

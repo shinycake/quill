@@ -396,6 +396,42 @@ fn update_chat_member_invalidates_admin_list_and_own_rights() {
     assert!(chat.can_manage_admins());
 }
 
+/// An administrator list asked before a membership change must not put
+/// the old administrators back when it answers (05-079).
+#[test]
+fn an_admin_list_asked_before_a_membership_change_is_dropped() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.my_user_id = Some(777);
+    let mut channel = placeholder_chat(ChatId(13));
+    channel.kind = ChatKind::Supergroup {
+        supergroup_id: 13,
+        is_channel: true,
+    };
+    session.chats.insert(13, channel);
+    let asked = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
+    session
+        .groups
+        .admin_lists
+        .insert(13, AdminListFetch::Loading);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatMember","chat_id":13,"actor_user_id":777,"date":1,"invite_link":null,"via_join_request":false,"via_chat_folder_invite_link":false,"old_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":888},"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":true}},"new_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":888},"status":{"@type":"chatMemberStatusMember","member_until_date":0}}}"#,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"chatAdministrators","@extra":"{}","administrators":[{{"@type":"chatAdministrator","user_id":888,"custom_title":"","is_owner":false,"can_be_edited":true}}]}}"#,
+            asked.0
+        ),
+    );
+    assert!(!session.groups.admin_lists.contains_key(&13));
+}
+
 #[test]
 fn get_admin_rights_response_caches_rights() {
     // Phase D3b: `getChatMember` tagged `GetAdminRights` stores the
@@ -746,6 +782,8 @@ fn g2_sign_toggle_error_rolls_back() {
         supergroup_id: 25,
         previous_sign: Some(false),
         previous_show: Some(false),
+        shown_sign: true,
+        shown_show: true,
     });
     session.groups.supergroup_sign_messages.insert(25, true);
     session
@@ -792,6 +830,7 @@ fn g2_anti_spam_toggle_error_rolls_back() {
         .rollback = Some(RequestRollback::AntiSpam {
         supergroup_id: 25,
         previous: Some(false),
+        shown: true,
     });
     session.groups.supergroup_anti_spam_enabled.insert(25, true);
     apply_json(
@@ -1045,4 +1084,37 @@ fn a_refusal_the_edit_box_has_no_field_for_still_fails_its_save() {
     assert!(session.requests.failure(link).is_some());
     let error = session.groups.info_edit_errors.get(&13).expect("an error");
     assert_eq!(error.field, GroupInfoField::Username);
+}
+
+#[test]
+fn a_refused_toggle_keeps_a_value_an_update_changed_meanwhile() {
+    // Sweep 05-201: the rollback restores only while the flags still show
+    // what the request showed; a newer update is the truth.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request(
+        RequestPurpose::ToggleSupergroupAggressiveAntiSpam,
+        Some(ChatId(13)),
+    );
+    session
+        .requests
+        .pending_mut(extra)
+        .expect("pending")
+        .rollback = Some(RequestRollback::AntiSpam {
+        supergroup_id: 25,
+        previous: Some(false),
+        shown: true,
+    });
+    // Another admin's change arrived: the flag is no longer what we showed.
+    session.groups.supergroup_anti_spam_enabled.remove(&25);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_ADMIN_REQUIRED"}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(session.groups.supergroup_anti_spam_enabled.get(&25), None);
 }

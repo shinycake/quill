@@ -520,6 +520,30 @@ fn a_failed_save_is_sent_again_only_after_another_pick() {
 }
 
 #[test]
+fn a_late_answer_of_an_older_save_does_not_free_a_failed_pick() {
+    let mut qr = own_box();
+    qr.apply(QrAction::Served(ThemeChoice::default()), env(true));
+    let first = ticket_of(&pick_and_close(&mut qr, SwatchKey::Backdrop(3)));
+    let second = ticket_of(&pick_and_close(&mut qr, SwatchKey::Backdrop(4)));
+    assert_ne!(first.serial, second.serial);
+    qr.apply(
+        QrAction::SaveAnswer {
+            ticket: second,
+            result: Err("Too many attempts.".into()),
+        },
+        env(true),
+    );
+    qr.apply(
+        QrAction::SaveAnswer {
+            ticket: first,
+            result: Ok(backdrop_pick(3)),
+        },
+        env(true),
+    );
+    assert!(saves(&pick_and_close(&mut qr, SwatchKey::Backdrop(4))).is_empty());
+}
+
+#[test]
 fn the_default_is_not_saved_while_the_saved_theme_is_unknown() {
     let mut qr = own_box();
     qr.apply(QrAction::OpenPanel(QrPanel::Colors), env(true));

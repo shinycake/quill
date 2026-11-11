@@ -139,6 +139,7 @@ impl Session {
         let Some(chat) = self.supergroup_chat_mut(supergroup_id) else {
             return;
         };
+        let chat_id = chat.id;
         match chat.my_member_status {
             None => {
                 chat.set_member_status(status, None);
@@ -153,6 +154,7 @@ impl Session {
             }
             _ => {}
         }
+        self.drop_similar_strip_if_not_member(chat_id);
     }
 
     /// `getChatMember(me)` failed (TDLib answers "Member not found" for a
@@ -198,6 +200,7 @@ impl Session {
                 member.admin_rights.map(|r| r.can_send_welcome_messages),
             );
         }
+        self.drop_similar_strip_if_not_member(chat_id);
     }
 
     /// Phase B1: record a secret chat (`updateSecretChat` or a

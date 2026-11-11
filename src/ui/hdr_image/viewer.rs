@@ -289,6 +289,18 @@ impl QuillApp {
         .detach();
     }
 
+    /// The account on screen leaves: its viewer (and the record of the
+    /// window's extended-range mode with it) goes, so the mode is switched
+    /// off here, or the next screen's `want = false` would equal the new
+    /// record and leave the layer in extended range.
+    pub(crate) fn leave_viewer_edr(&mut self, window: &Window) {
+        let hdr = &mut self.viewer.hdr;
+        if hdr.edr_on {
+            super::set_window_edr(window, false);
+            hdr.edr_on = false;
+        }
+    }
+
     /// Called every render: the window is in extended-range mode exactly
     /// while the viewer shows an HDR frame upright (a rotated or flipped
     /// picture draws the SDR image).

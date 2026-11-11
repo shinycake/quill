@@ -8,7 +8,6 @@
 //! per-chat flag there) and lets its history page and its rows report as
 //! viewed while the main window shows something else.
 use super::*;
-use crate::composer::DraftSaveClock;
 use crate::ids::{ChatId, RequestId};
 use crate::state::{RequestPurpose, ViewJump};
 use crate::telegram::requests::close_chat;
@@ -110,7 +109,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::CloseChat, Some(chat_id));
-        self.sender.send_json(&close_chat(extra, chat_id))?;
+        self.send_json_request(extra, &close_chat(extra, chat_id))?;
         Ok(())
     }
 
@@ -131,8 +130,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // cleared it.
         let typing = self.cancel_outgoing_typing();
         let closed = self.close_open_chat();
-        self.draft_clock = DraftSaveClock::idle();
-        self.pending_draft = None;
+        self.cancel_pending_draft();
         self.session.leave_open_chat();
         typing?;
         closed?;

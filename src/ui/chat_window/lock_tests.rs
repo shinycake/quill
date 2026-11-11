@@ -164,7 +164,7 @@ fn a_wrong_passcode_empties_the_field_it_was_typed_in(cx: &mut TestAppContext) {
     assert_eq!(typed(&app, None, cx), "99", "the main window's text stays");
     app.read_with(cx, |app, _| {
         assert!(!app.account.passcode.job.is_running());
-        assert!(app.account.passcode.lock_error.is_some());
+        assert!(app.account.passcode.lock_error.text().is_some());
     });
 }
 

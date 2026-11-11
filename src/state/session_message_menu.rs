@@ -94,6 +94,10 @@ impl<T> Audience<T> {
     pub fn is_loading(&self) -> bool {
         matches!(self, Self::Loading)
     }
+
+    pub fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed)
+    }
 }
 
 /// Who viewed / listened / reacted to one message, for the menu row and

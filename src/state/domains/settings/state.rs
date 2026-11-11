@@ -28,7 +28,17 @@ impl ReadDateStage {
     }
 }
 
+/// How the last `setAutoDownloadSettings` ended, by the request that asked:
+/// the editor that sent it closes on `Saved` and reopens on `Refused`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoDownloadAnswer {
+    Saved(RequestId),
+    Refused(RequestId),
+}
+
 pub struct SettingsState {
+    /// See [`AutoDownloadAnswer`].
+    pub auto_download_answer: Option<AutoDownloadAnswer>,
     /// Mirror of `settings::Preferences::notify_view` (tdesktop "Name" /
     /// "Text"), loaded from `prefs.json` at connect time.
     pub notify_view: crate::notify::NotifyView,
@@ -187,9 +197,11 @@ pub struct SettingsState {
     /// Parity slice: downloaded-file id → notification sound id, for files
     /// fetched as notification sounds.
     pub sound_file_ids: HashMap<i32, i64>,
-    /// Parity slice: sound ids with playback requested whose file is not
+    /// Parity slice: sound ids with a preview requested whose file is not
     /// local yet. When the file completes, its path lands in
-    /// `pending_sound_plays`.
+    /// `pending_sound_plays`. The set belongs to the open sound picker: the
+    /// UI calls `forget_sound_previews` once no picker is open, so a
+    /// completion nobody waits for plays nothing.
     pub pending_sound_downloads: HashSet<i64>,
     /// Parity slice: local sound-file paths the UI should play, drained by
     /// `flush_notifications`. The reducer never spawns processes.
@@ -308,6 +320,29 @@ impl SettingsState {
             .chain(self.rich_html_exports.iter().map(|export| &export.link))
     }
 
+    /// An export's request that will never be answered: its worker waits on
+    /// the link for this answer, so the link is told the send failed.
+    pub(crate) fn fail_lost_export(&mut self, purpose: RequestPurpose, id: RequestId) {
+        match purpose {
+            RequestPurpose::ExportAccount => {
+                if let Some(export) = self.account_export.as_mut() {
+                    export.link.fail_send(id);
+                }
+            }
+            RequestPurpose::ExportChat => {
+                if let Some(export) = self.chat_export.as_mut() {
+                    export.link.fail_send(id);
+                }
+            }
+            RequestPurpose::ExportRichHtml => {
+                for export in &mut self.rich_html_exports {
+                    export.link.fail_send(id);
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             quick_replies: QuickRepliesState::default(),
@@ -340,6 +375,7 @@ impl SettingsState {
             data_storage: DataStoragePrefs::default(),
             data_storage_dirty: false,
             auto_download_presets_loading: false,
+            auto_download_answer: None,
             data_storage_error: None,
             storage_freed: None,
             storage_clearing: false,
@@ -395,4 +431,19 @@ fn dedup_ids(mut list: Vec<i64>, more: Vec<i64>) -> Vec<i64> {
         }
     }
     list
+}
+
+impl SettingsState {
+    /// A preview download finished: whether a picker still waits for it.
+    /// Either way the request is over.
+    pub fn take_sound_preview(&mut self, sound_id: i64) -> bool {
+        self.pending_sound_downloads.remove(&sound_id)
+    }
+
+    /// No sound picker is open: previews asked for, and any not played yet,
+    /// are no longer wanted.
+    pub fn forget_sound_previews(&mut self) {
+        self.pending_sound_downloads.clear();
+        self.pending_sound_plays.clear();
+    }
 }

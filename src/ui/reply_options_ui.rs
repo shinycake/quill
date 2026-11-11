@@ -199,6 +199,12 @@ impl QuillApp {
             cx.notify();
             return;
         }
+        // An agent driving the window opens granted chats only
+        // (`select_chat_request` refuses the rest): the reply stays here.
+        if !self.agent_may_open(dest) {
+            cx.notify();
+            return;
+        }
         self.share.forward.close_reply_chooser();
         self.share
             .search_input

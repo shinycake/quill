@@ -89,9 +89,7 @@ impl QuillApp {
             }
             experimental::FAST_BUTTONS_ID => {
                 experimental::set_fast_buttons_mode(on);
-                // Rows are cached per message revision; the digits appear
-                // or go on the next history refresh.
-                self.history.rows_key = None;
+                self.rebuild_rows_in_every_window(cx);
             }
             // The Touch Bar follows on its next sync (`touch_bar`), so no
             // restart is needed.
@@ -99,6 +97,16 @@ impl QuillApp {
             _ => {}
         }
         cx.notify();
+    }
+
+    /// Rows are cached per message revision, in each window's history:
+    /// the bot buttons' digits appear or go when every window builds its
+    /// rows again.
+    pub(super) fn rebuild_rows_in_every_window(&mut self, cx: &mut Context<Self>) {
+        self.in_every_window(cx, |this, cx| {
+            this.history.rows_key = None;
+            cx.notify();
+        });
     }
 
     fn apply_experimental_values(&mut self, values: Values, cx: &mut Context<Self>) {
@@ -189,10 +197,6 @@ impl QuillApp {
     /// Import (tdesktop puts those two in the page's top bar menu).
     pub(super) fn experimental_settings_page(&self, cx: &mut Context<Self>) -> AnyElement {
         let values = self.experimental_values();
-        let clipboard = cx
-            .read_from_clipboard()
-            .and_then(|item| item.text())
-            .unwrap_or_default();
         let about = div()
             .id("experimental-about")
             .text_sm()
@@ -243,6 +247,7 @@ impl QuillApp {
                         .on_click(cx.listener(|this, _, _, cx| {
                             let code = experimental::encode_export(this.experimental_values());
                             cx.write_to_clipboard(ClipboardItem::new_string(code));
+                            this.preferences.advanced.forget_import_offer();
                             this.set_note(StatusNote::info(experimental::EXPORTED_TOAST));
                             cx.notify();
                         }))
@@ -251,7 +256,13 @@ impl QuillApp {
                 ),
             ),
         );
-        let importable = experimental::is_importable(&clipboard);
+        let importable = self.preferences.advanced.import_offered(|| {
+            let clipboard = cx
+                .read_from_clipboard()
+                .and_then(|item| item.text())
+                .unwrap_or_default();
+            experimental::is_importable(&clipboard)
+        });
         if importable {
             actions = actions.child(
                 div().flex_none().child(

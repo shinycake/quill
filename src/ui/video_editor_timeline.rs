@@ -199,10 +199,10 @@ impl QuillApp {
         }
         motion.release_frames();
         let cancel = Arc::new(AtomicBool::new(false));
+        let mine = cancel.clone();
         motion.frames_cancel = Some(cancel.clone());
         motion.frames_width = strip;
         motion.frames = times.iter().map(|_| None).collect();
-        let serial = editor.serial;
         let source = editor.source.clone();
         // Twice the strip's height, for HiDPI screens.
         let height = (STRIP_HEIGHT * 2.0) as u32;
@@ -223,12 +223,20 @@ impl QuillApp {
                     })
                     .await;
                 let alive = this.update(cx, |this, cx| {
-                    let Some(editor) = this
-                        .composer_ui
-                        .send_box
-                        .video_editor
-                        .as_mut()
-                        .filter(|editor| editor.serial == serial)
+                    let Some(editor) =
+                        this.composer_ui
+                            .send_box
+                            .video_editor
+                            .as_mut()
+                            .filter(|editor| {
+                                // This load's own token: an encode's serial bump
+                                // must not orphan the frames still being cut.
+                                editor
+                                    .motion
+                                    .frames_cancel
+                                    .as_ref()
+                                    .is_some_and(|current| Arc::ptr_eq(current, &mine))
+                            })
                     else {
                         return false;
                     };

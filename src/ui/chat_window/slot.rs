@@ -94,6 +94,9 @@ super::super::on_screen::on_screen_fields! {
     pub(super) active: bool,
     /// Where the window stood then (`cover`).
     pub(super) place: Option<super::cover::WindowPlace>,
+    /// The window's geometry at its last render or move, so the places
+    /// can be saved while the window itself is leased (`saved`).
+    pub(super) bounds: Option<Bounds<Pixels>>,
     ;
     history: HistoryUi,
     composer: Entity<TextareaState>,
@@ -259,6 +262,7 @@ impl WindowSlot {
             frame_started: Cell::new(0),
             active: false,
             place: None,
+            bounds: None,
         }
     }
 }
@@ -440,6 +444,9 @@ impl QuillApp {
         let display = window.display(cx).map(|display| u64::from(display.id()));
         sticker_player::note_display(Some(chat), display, window, cx);
         self.sticker_frame_starts(cx);
+        self.widgets
+            .scales
+            .insert(Some(chat), window.scale_factor());
         self.widgets_frame_start(Some(chat), cx);
         images.update(cx, |images, cx| {
             images.begin_window_frame(draw, window, cx);

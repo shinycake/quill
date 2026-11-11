@@ -26,6 +26,13 @@ impl QuillApp {
     ) {
         self.admin.welcome_dialog = Some(WelcomeDialog::new(window, cx, chat_id));
         self.open_box(DialogKind::Welcome);
+        self.load_welcome_messages(chat_id);
+        cx.notify();
+    }
+
+    /// Ask for the open dialog's pack again (its Retry): only the request,
+    /// so what was typed stays.
+    pub(super) fn load_welcome_messages(&mut self, chat_id: ChatId) {
         if let Some(live) = self.live.as_mut()
             && live.driver.load_chat_welcome_messages(chat_id).is_err()
         {
@@ -33,7 +40,6 @@ impl QuillApp {
                 keys::Q_PEOPLE_COULD_NOT_LOAD_WELCOME_MESSAGES,
             )));
         }
-        cx.notify();
     }
 
     pub(super) fn close_welcome_dialog(&mut self, cx: &mut Context<Self>) {
@@ -303,13 +309,9 @@ impl QuillApp {
                                 Button::new("g2-welcome-retry")
                                     .label(tr(keys::Q_PEOPLE_RETRY))
                                     .ghost()
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.open_welcome_dialog(chat_id, window, cx);
-                                        this.close_kit_dialog_if_done(
-                                            DialogKind::Welcome,
-                                            window,
-                                            cx,
-                                        );
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.load_welcome_messages(chat_id);
+                                        cx.notify();
                                     })),
                             ),
                     );

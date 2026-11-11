@@ -236,6 +236,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             },
         )?;
         if sent.is_some() {
+            // No page is in flight here, so what was handled so far is
+            // behind this page's answer.
+            self.session
+                .communities
+                .handled_add_requests
+                .remove(&community_id);
             let fetch = self
                 .session
                 .communities

@@ -65,6 +65,18 @@ pub(super) fn with_options(mut schema: Value) -> Value {
 pub(super) struct Asked {
     pub options: Option<ShotOptions>,
     pub skipped: Option<String>,
+    /// The rate-limit slot reserved for the picture, until it is taken or
+    /// given back.
+    slot: Option<shot::Slot>,
+}
+
+impl Asked {
+    /// No picture was taken: the slot goes back to the limiter.
+    pub fn give_back(&mut self) {
+        if let Some(slot) = self.slot.take() {
+            shot::release(slot);
+        }
+    }
 }
 
 /// The screenshot options in `args`, counted against the limits. Over the
@@ -78,16 +90,19 @@ pub(super) fn asked(args: &Value) -> Asked {
         return Asked {
             options: None,
             skipped: None,
+            slot: None,
         };
     }
     match shot::reserve() {
-        Ok(()) => Asked {
+        Ok(slot) => Asked {
             options: Some(options(args)),
             skipped: None,
+            slot: Some(slot),
         },
         Err(note) => Asked {
             options: None,
             skipped: Some(note),
+            slot: None,
         },
     }
 }
@@ -182,21 +197,29 @@ pub fn take_screenshot(args: &Value) -> Result<ToolOutput, ToolError> {
     if let Some(refusal) = policy::switch_refusal() {
         return Err(ToolError::new(refusal));
     }
-    shot::reserve().map_err(ToolError::new)?;
+    let slot = shot::reserve().map_err(ToolError::new)?;
     let reply = bridge::send_with_shot(
         &current_agent(),
         UiCommand::ReadTree,
         Some(options(args)),
         COMMAND_WAIT,
     )
-    .map_err(super::ui::bridge_error)?;
+    .map_err(super::ui::bridge_error);
     let (tree, shot) = match reply {
-        UiReply::Shot { tree, shot } => (tree, shot),
-        UiReply::Refused(reason) => return Err(ToolError::new(reason)),
-        _ => {
+        Ok(UiReply::Shot { tree, shot }) => (tree, shot),
+        Ok(UiReply::Refused(reason)) => {
+            shot::release(slot);
+            return Err(ToolError::new(reason));
+        }
+        Ok(_) => {
+            shot::release(slot);
             return Err(ToolError::new(
                 "Quill's window gave an unexpected answer. Retry.",
             ));
+        }
+        Err(error) => {
+            shot::release(slot);
+            return Err(error);
         }
     };
     attach(&shot);

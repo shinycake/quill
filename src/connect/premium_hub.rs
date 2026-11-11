@@ -252,7 +252,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self.session.request(RequestPurpose::SellGift, None);
+        let extra = self
+            .session
+            .request_for_subject(RequestPurpose::SellGift, received_gift_id);
         self.session.payments.hub.gift_mutating = true;
         self.session.payments.hub.gifts_error = None;
         let json = sell_gift(extra, received_gift_id);
@@ -307,7 +309,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let extra = self.session.request(RequestPurpose::GetPremiumLimit, None);
-        self.session.payments.hub.limits.note_asked(kind);
+        self.session.payments.hub.limits.note_asked(kind, extra);
         if let Err(err) = self.send_json_request(extra, &get_premium_limit(extra, type_name)) {
             self.session.payments.hub.limits.forget_asked(kind);
             return Err(err);

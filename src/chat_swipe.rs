@@ -259,8 +259,10 @@ impl Anim {
 }
 
 #[derive(Debug)]
-struct Gesture<K> {
+struct Gesture<K, A> {
     key: Option<K>,
+    /// What the panel behind the row offered at the latest event.
+    action: Option<A>,
     /// The first nonzero horizontal delta fixed the direction.
     direction_set: bool,
     /// +1 when fingers moved left (the only direction that swipes a row).
@@ -275,8 +277,10 @@ struct Gesture<K> {
 }
 
 #[derive(Debug)]
-struct Release<K> {
+struct Release<K, A> {
     key: K,
+    /// The action the panel showed when the finger lifted: the one run.
+    action: A,
     ratio: Anim,
     /// Reach value frozen at release (`reachRatio` stays until cleared).
     reach: f32,
@@ -296,12 +300,12 @@ pub struct Feed {
 
 /// One swipe gesture at a time plus rows still springing back.
 #[derive(Debug)]
-pub struct SwipeMachine<K> {
-    gesture: Option<Gesture<K>>,
-    releases: Vec<Release<K>>,
+pub struct SwipeMachine<K, A = ()> {
+    gesture: Option<Gesture<K, A>>,
+    releases: Vec<Release<K, A>>,
 }
 
-impl<K> Default for SwipeMachine<K> {
+impl<K, A> Default for SwipeMachine<K, A> {
     fn default() -> Self {
         Self {
             gesture: None,
@@ -310,7 +314,7 @@ impl<K> Default for SwipeMachine<K> {
     }
 }
 
-impl<K: Copy + PartialEq> SwipeMachine<K> {
+impl<K: Copy + PartialEq, A: Copy> SwipeMachine<K, A> {
     pub fn new() -> Self {
         Self::default()
     }
@@ -319,7 +323,7 @@ impl<K: Copy + PartialEq> SwipeMachine<K> {
     /// that can run the action, or `None` when there is none (no row,
     /// action disabled for it): such a gesture is locked out like a
     /// vertical one. `dx`/`dy` are the raw scroll deltas in px.
-    pub fn feed(&mut self, phase: Phase, dx: f32, dy: f32, key: Option<K>, now: u64) -> Feed {
+    pub fn feed(&mut self, phase: Phase, dx: f32, dy: f32, key: Option<(K, A)>, now: u64) -> Feed {
         match phase {
             Phase::Ended => {
                 let redraw = self.end(now, true);
@@ -340,6 +344,7 @@ impl<K: Copy + PartialEq> SwipeMachine<K> {
                 self.end(now, true);
                 self.gesture = Some(Gesture {
                     key: None,
+                    action: None,
                     direction_set: false,
                     direction: 1.0,
                     orientation: Orientation::Undecided,
@@ -367,7 +372,7 @@ impl<K: Copy + PartialEq> SwipeMachine<K> {
         }
     }
 
-    fn update(&mut self, dx: f32, dy: f32, key: Option<K>, now: u64, first: bool) -> Feed {
+    fn update(&mut self, dx: f32, dy: f32, key: Option<(K, A)>, now: u64, first: bool) -> Feed {
         let Some(g) = self.gesture.as_mut() else {
             return Feed::default();
         };
@@ -380,7 +385,8 @@ impl<K: Copy + PartialEq> SwipeMachine<K> {
             if args.0 != 0.0 {
                 g.direction_set = true;
                 g.direction = if args.0 < 0.0 { -1.0 } else { 1.0 };
-                g.key = key;
+                g.key = key.map(|(k, _)| k);
+                g.action = key.map(|(_, a)| a);
                 // Wrong direction (swiping right) or no row action:
                 // leave the event to the list.
                 if g.key.is_none() || g.direction < 0.0 {
@@ -388,6 +394,11 @@ impl<K: Copy + PartialEq> SwipeMachine<K> {
                 }
             }
             return Feed::default();
+        }
+        if let (Some(k), Some((now_key, action))) = (g.key, key)
+            && k == now_key
+        {
+            g.action = Some(action);
         }
         match g.orientation {
             Orientation::Vertical => Feed::default(),
@@ -441,7 +452,7 @@ impl<K: Copy + PartialEq> SwipeMachine<K> {
         if g.orientation != Orientation::Horizontal {
             return false;
         }
-        let Some(key) = g.key else {
+        let (Some(key), Some(action)) = (g.key, g.action) else {
             return false;
         };
         let raw = (g.delta.0 * g.direction / THRESHOLD).max(0.0);
@@ -449,6 +460,7 @@ impl<K: Copy + PartialEq> SwipeMachine<K> {
         let reach = g.reach.value(now);
         self.releases.push(Release {
             key,
+            action,
             ratio: Anim {
                 from: ratio,
                 to: 0.0,
@@ -463,7 +475,7 @@ impl<K: Copy + PartialEq> SwipeMachine<K> {
 
     /// Abandon a gesture that went quiet without an end event, and drop
     /// finished springs. Returns the key whose action is due, if any.
-    pub fn poll(&mut self, now: u64) -> Option<K> {
+    pub fn poll(&mut self, now: u64) -> Option<(K, A)> {
         if self
             .gesture
             .as_ref()
@@ -477,7 +489,7 @@ impl<K: Copy + PartialEq> SwipeMachine<K> {
                 return true;
             }
             if r.fire && due.is_none() {
-                due = Some(r.key);
+                due = Some((r.key, r.action));
             }
             false
         });
@@ -541,13 +553,13 @@ mod tests {
     /// Raw scroll px that move the ratio by one threshold.
     const FULL: f32 = THRESHOLD / WHEEL_SLOW;
 
-    fn start(m: &mut SwipeMachine<u32>, key: Option<u32>) {
+    fn start(m: &mut SwipeMachine<u32, ()>, key: Option<u32>) {
         // Mac sends a MayBegin/Began event with no travel first.
-        m.feed(Phase::Started, 0.0, 0.0, key, 0);
+        m.feed(Phase::Started, 0.0, 0.0, key.map(|k| (k, ())), 0);
         // Fingers moving left: negative scroll x. The first nonzero x
         // fixes the direction (its delta is dropped); then the
         // orientation is decided.
-        m.feed(Phase::Moved, -1.0, 0.0, key, 8);
+        m.feed(Phase::Moved, -1.0, 0.0, key.map(|k| (k, ())), 8);
     }
 
     #[test]
@@ -555,9 +567,9 @@ mod tests {
         let mut m = SwipeMachine::new();
         start(&mut m, Some(7));
         // Orientation decided on this event; ratio starts at the next.
-        let f = m.feed(Phase::Moved, -20.0, 1.0, Some(7), 16);
+        let f = m.feed(Phase::Moved, -20.0, 1.0, Some((7, ())), 16);
         assert!(!f.consumed);
-        let f = m.feed(Phase::Moved, -FULL * 0.5, 0.0, Some(7), 24);
+        let f = m.feed(Phase::Moved, -FULL * 0.5, 0.0, Some((7, ())), 24);
         assert!(f.consumed && f.redraw);
         let row = m.row(7, 24).unwrap();
         // Slowed accumulation: 20 + FULL/2 raw px.
@@ -573,24 +585,24 @@ mod tests {
         start(&mut m, Some(1));
         // Vertical dominates: locked out for the rest of the gesture,
         // even if the finger later drifts sideways.
-        let f = m.feed(Phase::Moved, -2.0, 60.0, Some(1), 16);
+        let f = m.feed(Phase::Moved, -2.0, 60.0, Some((1, ())), 16);
         assert!(!f.consumed);
         for t in 1..20 {
-            let f = m.feed(Phase::Moved, -100.0, 0.0, Some(1), 16 + t * 8);
+            let f = m.feed(Phase::Moved, -100.0, 0.0, Some((1, ())), 16 + t * 8);
             assert!(!f.consumed, "locked vertical gesture stayed vertical");
         }
         assert!(m.row(1, 200).is_none());
         assert!(!m.swiping());
-        m.feed(Phase::Ended, 0.0, 0.0, Some(1), 300);
+        m.feed(Phase::Ended, 0.0, 0.0, Some((1, ())), 300);
         assert!(!m.animating(300));
     }
 
     #[test]
     fn rightward_swipe_and_missing_row_are_locked_out() {
         let mut m = SwipeMachine::new();
-        m.feed(Phase::Started, 0.0, 0.0, Some(1), 0);
-        m.feed(Phase::Moved, 5.0, 0.0, Some(1), 8);
-        let f = m.feed(Phase::Moved, 400.0, 0.0, Some(1), 16);
+        m.feed(Phase::Started, 0.0, 0.0, Some((1, ())), 0);
+        m.feed(Phase::Moved, 5.0, 0.0, Some((1, ())), 8);
+        let f = m.feed(Phase::Moved, 400.0, 0.0, Some((1, ())), 16);
         assert!(!f.consumed);
         assert!(m.row(1, 16).is_none());
 
@@ -602,13 +614,13 @@ mod tests {
 
     #[test]
     fn momentum_without_a_start_is_ignored() {
-        let mut m: SwipeMachine<u32> = SwipeMachine::new();
-        let f = m.feed(Phase::Moved, -500.0, 0.0, Some(1), 0);
+        let mut m: SwipeMachine<u32, ()> = SwipeMachine::new();
+        let f = m.feed(Phase::Moved, -500.0, 0.0, Some((1, ())), 0);
         assert_eq!(f, Default::default());
         assert!(m.row(1, 0).is_none());
         // Non-phased platforms only ever send Moved: nothing happens.
         for t in 0..10 {
-            m.feed(Phase::Moved, -500.0, 0.0, Some(1), t);
+            m.feed(Phase::Moved, -500.0, 0.0, Some((1, ())), t);
         }
         assert!(!m.swiping() && !m.animating(10));
     }
@@ -617,11 +629,11 @@ mod tests {
     fn release_below_threshold_springs_back_without_firing() {
         let mut m = SwipeMachine::new();
         start(&mut m, Some(3));
-        m.feed(Phase::Moved, -10.0, 0.0, Some(3), 16);
-        m.feed(Phase::Moved, -FULL * 0.6, 0.0, Some(3), 24);
+        m.feed(Phase::Moved, -10.0, 0.0, Some((3, ())), 16);
+        m.feed(Phase::Moved, -FULL * 0.6, 0.0, Some((3, ())), 24);
         let held = m.row(3, 24).unwrap().ratio;
         assert!(held > 0.5 && held < 1.0);
-        m.feed(Phase::Ended, 0.0, 0.0, Some(3), 30);
+        m.feed(Phase::Ended, 0.0, 0.0, Some((3, ())), 30);
         assert!(m.animating(30));
         // Duration is ratio * 150 ms, linear back to 0.
         let half = 30 + (held * SLIDE_MS as f32 / 2.0) as u64;
@@ -633,20 +645,32 @@ mod tests {
     }
 
     #[test]
+    fn a_released_swipe_fires_the_action_the_panel_showed() {
+        let mut m: SwipeMachine<u32, &str> = SwipeMachine::new();
+        m.feed(Phase::Started, 0.0, 0.0, Some((5, "Mute")), 0);
+        m.feed(Phase::Moved, -10.0, 0.0, Some((5, "Mute")), 8);
+        m.feed(Phase::Moved, -FULL * 1.1, 0.0, Some((5, "Mute")), 24);
+        m.feed(Phase::Ended, 0.0, 0.0, Some((5, "Mute")), 400);
+        // Whatever the chat became meanwhile, the due action is the one
+        // captured at the last event before the release.
+        assert_eq!(m.poll(400 + SLIDE_MS), Some((5, "Mute")));
+    }
+
+    #[test]
     fn release_past_threshold_fires_after_the_slide_duration() {
         let mut m = SwipeMachine::new();
         start(&mut m, Some(9));
-        m.feed(Phase::Moved, -10.0, 0.0, Some(9), 16);
-        m.feed(Phase::Moved, -FULL * 1.1, 0.0, Some(9), 24);
+        m.feed(Phase::Moved, -10.0, 0.0, Some((9, ())), 16);
+        m.feed(Phase::Moved, -FULL * 1.1, 0.0, Some((9, ())), 24);
         // Reached: the bounce animation runs.
         let reach_mid = m.row(9, 24 + SLIDE_MS / 2).unwrap().reach;
         assert!((reach_mid - 0.5).abs() < 0.05);
         assert!((m.row(9, 24 + SLIDE_MS).unwrap().reach - 1.0).abs() < 1e-4);
-        m.feed(Phase::Ended, 0.0, 0.0, Some(9), 400);
+        m.feed(Phase::Ended, 0.0, 0.0, Some((9, ())), 400);
         // Full-duration spring (ratio >= 1) and the action is due at its
         // end, exactly once.
         assert_eq!(m.poll(400 + SLIDE_MS - 1), None);
-        assert_eq!(m.poll(400 + SLIDE_MS), Some(9));
+        assert_eq!(m.poll(400 + SLIDE_MS), Some((9, ())));
         assert_eq!(m.poll(400 + SLIDE_MS + 1), None);
     }
 
@@ -654,12 +678,12 @@ mod tests {
     fn dragging_back_below_the_reach_mark_rearms_and_cancels_the_fire() {
         let mut m = SwipeMachine::new();
         start(&mut m, Some(2));
-        m.feed(Phase::Moved, -10.0, 0.0, Some(2), 16);
-        m.feed(Phase::Moved, -FULL * 1.2, 0.0, Some(2), 24);
-        m.feed(Phase::Moved, FULL * 0.9, 0.0, Some(2), 300);
+        m.feed(Phase::Moved, -10.0, 0.0, Some((2, ())), 16);
+        m.feed(Phase::Moved, -FULL * 1.2, 0.0, Some((2, ())), 24);
+        m.feed(Phase::Moved, FULL * 0.9, 0.0, Some((2, ())), 300);
         let row = m.row(2, 300).unwrap();
         assert!(row.ratio < 0.95);
-        m.feed(Phase::Ended, 0.0, 0.0, Some(2), 320);
+        m.feed(Phase::Ended, 0.0, 0.0, Some((2, ())), 320);
         assert_eq!(m.poll(320 + SLIDE_MS), None, "ended below the threshold");
     }
 
@@ -667,9 +691,9 @@ mod tests {
     fn cancelled_gesture_never_fires() {
         let mut m = SwipeMachine::new();
         start(&mut m, Some(4));
-        m.feed(Phase::Moved, -10.0, 0.0, Some(4), 16);
-        m.feed(Phase::Moved, -FULL * 1.4, 0.0, Some(4), 24);
-        m.feed(Phase::Cancelled, 0.0, 0.0, Some(4), 40);
+        m.feed(Phase::Moved, -10.0, 0.0, Some((4, ())), 16);
+        m.feed(Phase::Moved, -FULL * 1.4, 0.0, Some((4, ())), 24);
+        m.feed(Phase::Cancelled, 0.0, 0.0, Some((4, ())), 40);
         assert_eq!(m.poll(40 + SLIDE_MS), None);
         assert!(!m.animating(40 + SLIDE_MS));
     }
@@ -678,9 +702,9 @@ mod tests {
     fn ratio_caps_at_max_on_release() {
         let mut m = SwipeMachine::new();
         start(&mut m, Some(5));
-        m.feed(Phase::Moved, -10.0, 0.0, Some(5), 16);
-        m.feed(Phase::Moved, -FULL * 10.0, 0.0, Some(5), 24);
-        m.feed(Phase::Ended, 0.0, 0.0, Some(5), 30);
+        m.feed(Phase::Moved, -10.0, 0.0, Some((5, ())), 16);
+        m.feed(Phase::Moved, -FULL * 10.0, 0.0, Some((5, ())), 24);
+        m.feed(Phase::Ended, 0.0, 0.0, Some((5, ())), 30);
         let start_ratio = m.row(5, 30).unwrap().ratio;
         assert!((start_ratio - MAX_RATIO).abs() < 1e-4);
     }
@@ -689,8 +713,8 @@ mod tests {
     fn stale_gesture_is_abandoned() {
         let mut m = SwipeMachine::new();
         start(&mut m, Some(6));
-        m.feed(Phase::Moved, -10.0, 0.0, Some(6), 16);
-        m.feed(Phase::Moved, -FULL * 1.3, 0.0, Some(6), 24);
+        m.feed(Phase::Moved, -10.0, 0.0, Some((6, ())), 16);
+        m.feed(Phase::Moved, -FULL * 1.3, 0.0, Some((6, ())), 24);
         assert_eq!(m.poll(24 + STALE_GESTURE_MS), None);
         assert!(m.swiping());
         m.poll(24 + STALE_GESTURE_MS + 1);
@@ -703,13 +727,13 @@ mod tests {
     fn started_resets_a_lost_end() {
         let mut m = SwipeMachine::new();
         start(&mut m, Some(1));
-        m.feed(Phase::Moved, -10.0, 0.0, Some(1), 16);
-        m.feed(Phase::Moved, -FULL * 1.3, 0.0, Some(1), 24);
+        m.feed(Phase::Moved, -10.0, 0.0, Some((1, ())), 16);
+        m.feed(Phase::Moved, -FULL * 1.3, 0.0, Some((1, ())), 24);
         // No Ended; a new scroll starts on another row.
-        m.feed(Phase::Started, 0.0, 0.0, Some(2), 100);
+        m.feed(Phase::Started, 0.0, 0.0, Some((2, ())), 100);
         // The old row springs back and still counts as released past the
         // threshold, so its action runs once.
-        assert_eq!(m.poll(100 + SLIDE_MS), Some(1));
+        assert_eq!(m.poll(100 + SLIDE_MS), Some((1, ())));
     }
 
     #[test]

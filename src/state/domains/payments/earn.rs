@@ -38,7 +38,10 @@ impl Session {
                 append,
             }) => {
                 self.payments.earn.star_balances.insert(peer, page.balance);
-                if let Some(open) = self.earn_page_mut(peer) {
+                let id = pending.map(|p| p.id);
+                if let Some(open) = self.earn_page_mut(peer)
+                    && open.history_mut(filter).load.waits_for(id)
+                {
                     open.history_mut(filter).apply(page, append);
                 }
             }
@@ -93,7 +96,9 @@ impl Session {
                 EarnPayload::TonTransactions(page_data),
                 Some(EarnPurpose::TonTransactions { peer, append }),
             ) => {
-                if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
+                if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer)
+                    && page.ton_history.load.waits_for(pending.map(|p| p.id))
+                {
                     let history = &mut page.ton_history;
                     if !append {
                         history.rows.clear();
@@ -171,6 +176,12 @@ impl Session {
                     choose_recipient,
                 }),
             ) => {
+                // Only the click being resolved opens a box: the answer of
+                // a program the user left (or tapped past) opens nothing.
+                if !earn.resolve.waits_for(pending.map(|p| p.id)) {
+                    return;
+                }
+                earn.resolve = Resolve::Idle;
                 // tdesktop `ListController::open`: a live link opens the
                 // link box, anything else the join box.
                 if program.bot_user_id == bot_user_id
@@ -184,9 +195,16 @@ impl Session {
                 }
             }
             (EarnPayload::Connected(program), Some(EarnPurpose::Connect { recipient })) => {
-                // Joined: the link box replaces the join box and the
-                // program moves to "My Programs" when it was for this page.
-                earn.join_box = None;
+                // Joined: the link box replaces the join box that asked and
+                // the program moves to "My Programs" when it was for this
+                // page. A box the user opened since is left as it is.
+                let asked = earn
+                    .join_box
+                    .as_ref()
+                    .is_some_and(|b| b.stage.waits_for(pending.map(|p| p.id)));
+                if asked {
+                    earn.join_box = None;
+                }
                 if let Some(join) = earn.join.as_mut().filter(|j| j.peer == recipient) {
                     join.found
                         .programs
@@ -195,10 +213,16 @@ impl Session {
                         join.mine.programs.insert(0, program.clone());
                     }
                 }
-                earn.link_box = Some(LinkBox { program, recipient });
+                if asked || earn.join_box.is_none() {
+                    earn.link_box = Some(LinkBox { program, recipient });
+                }
             }
             (EarnPayload::Connected(program), Some(EarnPurpose::Disconnect)) => {
-                let revoked = earn.revoke.take();
+                let ours = earn
+                    .revoke
+                    .as_ref()
+                    .is_some_and(|r| r.send.waits_for(pending.map(|p| p.id)));
+                let revoked = if ours { earn.revoke.take() } else { None };
                 if let Some(join) = earn.join.as_mut() {
                     join.mine
                         .programs
@@ -260,7 +284,7 @@ impl Session {
             info,
             recipient,
             choose_recipient,
-            joining: false,
+            stage: JoinStage::Open,
         };
         if choose_recipient && earn.recipients.is_loading() {
             earn.pending_join = Some(join);
@@ -487,12 +511,12 @@ impl Session {
             }
             EarnPurpose::TonTransactions { peer, .. } => {
                 if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
-                    page.ton_history.load.fail();
+                    page.ton_history.load.fail_request(request);
                 }
             }
             EarnPurpose::StarTransactions { peer, filter, .. } => {
                 if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
-                    page.history_mut(filter).load.fail();
+                    page.history_mut(filter).load.fail_request(request);
                 }
             }
             // Settled either way, so the gates do not ask again each frame.
@@ -536,20 +560,26 @@ impl Session {
                 choose_recipient,
             } => {
                 // tdesktop `Resolve` treats a failure as "not joined".
-                self.open_join_box_after_resolve(bot_user_id, recipient, choose_recipient);
+                if earn.resolve.waits_for(request) {
+                    earn.resolve = Resolve::Idle;
+                    self.open_join_box_after_resolve(bot_user_id, recipient, choose_recipient);
+                }
             }
             EarnPurpose::Connect { .. } => {
-                if let Some(join) = earn.join_box.as_mut() {
-                    join.joining = false;
+                // A closed box's failure toasts over nothing.
+                if let Some(join) = earn.join_box.as_mut()
+                    && join.stage.waits_for(request)
+                {
+                    join.stage = JoinStage::Open;
+                    earn.note(format!("Failed: {reason}"));
                 }
-                earn.note(format!("Failed: {reason}"));
             }
             EarnPurpose::Disconnect => {
-                if let Some(revoke) = earn.revoke.as_mut() {
-                    revoke.sending = false;
+                if let Some(revoke) = earn.revoke.as_mut().filter(|r| r.send.waits_for(request)) {
+                    revoke.send = BoxSend::Idle;
+                    // tdesktop `Revoke`: "Failed: " and the error.
+                    earn.note(format!("Failed: {reason}"));
                 }
-                // tdesktop `Revoke`: "Failed: " and the error.
-                earn.note(format!("Failed: {reason}"));
             }
             EarnPurpose::RecipientChats | EarnPurpose::RecipientBots => {
                 // tdesktop treats a failed list as empty.

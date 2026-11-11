@@ -144,14 +144,18 @@ impl FilterDraft {
                 }
             }
         }
-        let admins = if stored_admins.is_empty() {
+        let kept: Vec<i64> = all_admins
+            .iter()
+            .copied()
+            .filter(|id| stored_admins.contains(id))
+            .collect();
+        // Stored administrators that left the list cannot be ticked, so a
+        // filter naming only them opens as all administrators, not as an
+        // empty list that cannot be saved.
+        let admins = if kept.is_empty() {
             all_admins.to_vec()
         } else {
-            all_admins
-                .iter()
-                .copied()
-                .filter(|id| stored_admins.contains(id))
-                .collect()
+            kept
         };
         Self {
             ticked,
@@ -299,5 +303,14 @@ mod tests {
         assert!(!draft.can_save());
         draft.set_all_admins(true, &ADMINS);
         assert!(draft.choice(&ADMINS).admins.is_empty());
+    }
+
+    #[test]
+    fn a_filter_naming_only_gone_administrators_opens_as_all() {
+        let draft = FilterDraft::open(None, &[9], &ADMINS, false);
+        assert!(draft.all_admins(&ADMINS));
+        assert!(draft.can_save());
+        let kept = FilterDraft::open(None, &[2, 9], &ADMINS, false);
+        assert!(kept.admin(2) && !kept.admin(1));
     }
 }

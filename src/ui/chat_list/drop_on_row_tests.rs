@@ -367,3 +367,24 @@ fn the_list_keeps_its_order_while_a_drag_hovers_it(cx: &mut TestAppContext) {
     wait(vcx, 2100);
     assert_ne!(row_top(vcx, 12), lit_row_top);
 }
+
+#[gpui_kit::test]
+fn rows_of_a_pane_that_is_not_drawn_are_not_kept(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    let vcx = &mut vcx;
+    assert!(app.update(vcx, |app, _| !app.chat_list.items.is_empty()));
+    // Contacts takes the column: stepping and file drags must not read the
+    // rows the chats render left behind.
+    app.update(vcx, |app, cx| {
+        app.chat_list.tab = crate::ui::chat_list_state::SidebarTab::Contacts;
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(app.update(vcx, |app, _| app.chat_list.items.is_empty()));
+    app.update(vcx, |app, cx| {
+        app.chat_list.tab = crate::ui::chat_list_state::SidebarTab::Chats;
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(app.update(vcx, |app, _| !app.chat_list.items.is_empty()));
+}

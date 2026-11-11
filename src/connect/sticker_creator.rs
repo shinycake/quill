@@ -35,7 +35,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.begin_sticker_set_edit(purpose.set_id());
+        self.session.begin_sticker_set_edit(purpose.set_id(), extra);
         Ok(extra)
     }
 

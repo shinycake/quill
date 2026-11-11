@@ -216,8 +216,10 @@ impl QuillApp {
             },
             None => StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE)),
         };
+        // The member page is fetched again when the request answers
+        // (`member_list_stale`), not before the change applies.
         self.set_note(note);
-        self.refresh_member_dialog(cx);
+        cx.notify();
     }
 
     /// "Delete" for a removed user (tdesktop `removeKicked`).
@@ -229,8 +231,10 @@ impl QuillApp {
             },
             None => StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE)),
         };
+        // The member page is fetched again when the request answers
+        // (`member_list_stale`), not before the change applies.
         self.set_note(note);
-        self.refresh_member_dialog(cx);
+        cx.notify();
     }
 
     /// "Mention": `@username` (or a text mention) goes into the composer.

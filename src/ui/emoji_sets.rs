@@ -57,6 +57,8 @@ impl QuillApp {
         cx.notify();
     }
     pub(super) fn close_emoji_sets(&mut self, cx: &mut Context<Self>) {
+        // A search still waiting on its pause is for a box that is gone.
+        self.pickers.emoji_set_keystroke = self.pickers.emoji_set_keystroke.wrapping_add(1);
         if let Some(live) = self.live.as_mut() {
             live.driver.session.stickers.emoji.open = false;
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -352,7 +354,7 @@ impl QuillApp {
         });
         let status = if loading && sets.is_empty() {
             Some(tr(keys::Q_MEDIA_LOADING_EMOJI_PACKS))
-        } else if panel.failed || panel.mutation_failed {
+        } else if panel.lists.of(panel.tab).error().is_some() || panel.mutation_failed {
             Some(tr(keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS))
         } else if sets.is_empty() && !loading {
             Some(tr(keys::Q_MEDIA_NO_EMOJI_PACKS_FOUND))

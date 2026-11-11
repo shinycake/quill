@@ -391,10 +391,9 @@ impl QuillApp {
                 })
             }
             ComposerStage::Posted => Some(tr(keys::Q_MEDIA_POSTED_IT_WILL_APPEAR_IN).into()),
-            ComposerStage::Editing => self
-                .session()
-                .and_then(|s| s.stories.post.post_as_error.as_ref())
-                .map(|error| format!("✗ {error}")),
+            // A "Post as" list that failed to load says so under the
+            // picker (`post_as`), not here.
+            ComposerStage::Editing => None,
         }
     }
 
@@ -638,13 +637,18 @@ impl QuillApp {
         // while a check/post is in flight so the eligibility answer
         // always matches the target chat.
         let post_as: Option<AnyElement> = (!is_edit).then(|| {
+            let post_as_error: Option<String> = self
+                .session()
+                .and_then(|session| session.stories.post_as.error().map(str::to_owned));
             let as_chats: Vec<(i64, String)> = self
                 .session()
                 .map(|session| {
                     session
                         .stories
-                        .post_as_chats
-                        .iter()
+                        .post_as
+                        .data()
+                        .into_iter()
+                        .flatten()
                         .map(|id| {
                             let title = session
                                 .chats
@@ -704,6 +708,9 @@ impl QuillApp {
                         .child(tr(keys::Q_MEDIA_POST_AS)),
                 )
                 .child(picker)
+                .children(
+                    post_as_error.map(|error| div().text_xs().text_color(danger()).child(error)),
+                )
                 .into_any_element()
         });
 

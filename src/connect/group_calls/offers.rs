@@ -80,6 +80,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.offer_wanted(key, extra, &send) {
             self.session.requests.take(extra);
             self.discard_offered_instance(key);
+            // A rejoin attempt and a screen share started by this offer are
+            // put back, or they would wait on a request that is gone. A
+            // conference offer is unwanted because the pending conference
+            // is another request's, which must stay.
+            if matches!(send, OfferSend::Rejoin { .. } | OfferSend::Screen) {
+                self.undo_offer(key.id(), extra, &send);
+            }
             return;
         }
         match offer.payload {

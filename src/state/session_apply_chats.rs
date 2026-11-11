@@ -626,11 +626,14 @@ impl Session {
             )
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
-            let albums = self.stories.albums.entry(chat_id.0).or_default();
-            if let Some(existing) = albums.iter_mut().find(|a| a.id == album.id) {
-                *existing = album.clone();
-            } else {
-                albums.push(album.clone());
+            // Merge into a list that was fetched: a list started here from
+            // one album would read as the chat's whole list.
+            if let Some(albums) = self.stories.albums.get_mut(&chat_id.0) {
+                if let Some(existing) = albums.iter_mut().find(|a| a.id == album.id) {
+                    *existing = album.clone();
+                } else {
+                    albums.push(album.clone());
+                }
             }
             if !matches!(purpose, RequestPurpose::SetStoryAlbumName) {
                 self.stories.album_stories.remove(&(chat_id.0, album.id));
@@ -658,7 +661,9 @@ impl Session {
         {
             self.chat_list
                 .folder_chats_to_leave
-                .insert(folder_id, chat_ids.iter().map(|id| id.0).collect());
+                .entry(folder_id)
+                .or_default()
+                .succeed(chat_ids.iter().map(|id| id.0).collect());
         }
         // `getChatFolderNewChats` answer: the "N new chats" bar.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatFolderNewChats)
@@ -698,8 +703,9 @@ impl Session {
         // composer's "post as" picker options. Runs before the
         // search branch below consumes `chat_ids`.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatsToPostStories) {
-            self.stories.post_as_chats = chat_ids.iter().map(|id| id.0).collect();
-            self.stories.post.post_as_error = None;
+            self.stories
+                .post_as
+                .succeed(chat_ids.iter().map(|id| id.0).collect());
         }
         // Parity slice: `getChatNotificationSettingsExceptions`
         // answer — the scope is correlated via `pending.scope`

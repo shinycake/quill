@@ -444,7 +444,7 @@ fn a_failed_game_button_press_is_noted() {
         Some(ChatId(31)),
     );
     rig.error(request, 502);
-    let answer = rig.driver.session.bots.last_callback_answer.as_ref();
+    let answer = rig.driver.session.bots.callback_answers.back();
     assert_eq!(
         answer.map(|a| a.answer.text.as_str()),
         Some("bot did not answer")

@@ -87,7 +87,14 @@ impl Session {
             return;
         }
         if call.state.is_terminal() {
-            self.calls.summary = Some(CallSummary::from_terminal(call, 0, false));
+            // Another call's card still waiting for its rating stays: a
+            // call that ended untracked (a missed one) does not replace it.
+            let holds_rating = self.calls.summary.as_ref().is_some_and(|summary| {
+                summary.call_id != call.id && summary.need_rating && summary.rating.is_open()
+            });
+            if !holds_rating {
+                self.calls.summary = Some(CallSummary::from_terminal(call, 0, false));
+            }
             return;
         }
         if self.decline_call_while_invite_rings(call) {
@@ -108,17 +115,26 @@ impl Session {
     /// Queue an incoming call for the driver to decline as busy, and
     /// remember it so its later updates are dropped (`accept_call_update`).
     pub(crate) fn queue_busy_decline(&mut self, call: &ParsedCall) {
-        const BUSY_DECLINED_CALLS_MAX: usize = 16;
         if self.calls.busy_declined_calls.contains(&call.id) {
             return;
         }
         self.calls
             .busy_decline_queue
             .push((call.id, call.user_id, call.is_video));
+        self.remember_busy_declined(call.id);
+    }
+
+    /// Mark a call id as no one's, so its updates (and a missed-call
+    /// summary for its end) never reach the call window.
+    pub(crate) fn remember_busy_declined(&mut self, id: i32) {
+        const BUSY_DECLINED_CALLS_MAX: usize = 16;
+        if self.calls.busy_declined_calls.contains(&id) {
+            return;
+        }
         if self.calls.busy_declined_calls.len() >= BUSY_DECLINED_CALLS_MAX {
             self.calls.busy_declined_calls.pop_front();
         }
-        self.calls.busy_declined_calls.push_back(call.id);
+        self.calls.busy_declined_calls.push_back(id);
     }
 
     /// Phase C2b: `updateNewCallSignalingData`. The driver also feeds these
@@ -326,8 +342,13 @@ impl Session {
         // disagrees is older than the change (a stale speaking or volume
         // update) and must not undo it, or the microphone would reopen for
         // a round trip. Once the request completed the next update settles.
+        // Only a toggle of this participant counts: muting someone else
+        // says nothing about your own row.
         let toggle_in_flight = self.requests.has_purpose(RequestPurpose::Calls(
-            CallsPurpose::ToggleGroupCallParticipantMute { group_call_id },
+            CallsPurpose::ToggleGroupCallParticipantMute {
+                group_call_id,
+                participant: participant.participant_id,
+            },
         ));
         let Some(tracked) = self.calls.group_call_mut(group_call_id) else {
             return;

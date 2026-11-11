@@ -493,7 +493,8 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Phase 9.5: fetch the next viewers page (`next_offset` non-empty).
+    /// Phase 9.5: fetch the next viewers page, or ask for the first one
+    /// again when it failed (`next_offset` empty).
     pub(super) fn load_more_story_viewers(&mut self, cx: &mut Context<Self>) {
         let Some(item) = self.stories.viewer.current().cloned() else {
             return;
@@ -503,9 +504,6 @@ impl QuillApp {
             .and_then(|session| session.stories.viewers.as_ref())
             .map(|state| state.next_offset.clone())
             .unwrap_or_default();
-        if offset.is_empty() {
-            return;
-        }
         self.fetch_story_viewers(&item, &offset, cx);
     }
 

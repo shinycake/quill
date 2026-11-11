@@ -72,7 +72,7 @@ impl Render for QuillApp {
         self.sync_window_title(window);
         self.sync_proxy_list_box();
         self.sync_premium_preview_files();
-        super::window_frame::sync(window, self.appearance.native_window_frame);
+        super::window_frame::sync(window, cx, self.appearance.native_window_frame);
         // Rows the history list painted last frame are what the user saw.
         self.passcode_frame(window, cx);
         self.report_visible_history(
@@ -89,7 +89,7 @@ impl Render for QuillApp {
         }
         let history_drawn = self.slices.window.history_drawn();
         self.players.inline_videos.set_scale(window.scale_factor());
-        self.widgets.scale = window.scale_factor();
+        self.widgets.scales.insert(None, window.scale_factor());
         self.widgets_frame_start(None, cx);
         // Picture-in-Picture outlives neither its message, the account
         // nor an unlocked app.

@@ -7,9 +7,9 @@ use crate::ui::user_error::user_error_for;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
-    /// Slice parity:chatlist-badge-settings: update one badge-counter
-    /// pref in the session and persist it to the account dir (via
-    /// `ConnectDriver::save_badge_prefs`).
+    /// Slice parity:chatlist-badge-settings: persist one badge-counter
+    /// pref to the account dir and, once saved, apply it to the session
+    /// (via `ConnectDriver::set_badge_prefs`).
     pub(in crate::ui) fn set_badge_pref(
         &mut self,
         update: impl FnOnce(&mut BadgePrefs),
@@ -21,9 +21,10 @@ impl QuillApp {
             .unwrap_or_default();
         update(&mut prefs);
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.settings.badge_prefs = prefs;
-            if let Err(err) = live.driver.save_badge_prefs() {
-                self.set_note(StatusNote::silent(tr_with(
+            // Applied once saved: a failed save leaves the switch where it
+            // was and says so.
+            if let Err(err) = live.driver.set_badge_prefs(prefs) {
+                self.set_note(StatusNote::error(tr_with(
                     keys::Q_PREFS_COULDN_T_SAVE_BADGE_SETTINGS,
                     &[("err", &err.to_string())],
                 )));
@@ -237,6 +238,12 @@ impl QuillApp {
         let on = self
             .session()
             .is_none_or(|s| !s.settings.disable_contact_registered_notifications);
+        let error = self.session().and_then(|s| {
+            s.settings
+                .privacy_data
+                .error(quill::state::PrivacyControl::ContactJoined)
+                .map(str::to_string)
+        });
         div()
             .id("events-section")
             .flex()
@@ -278,6 +285,9 @@ impl QuillApp {
                     cx,
                 ),
             )
+            .when_some(error, |this, line| {
+                this.child(div().text_xs().text_color(cx.theme().danger).child(line))
+            })
             .into_any_element()
     }
 

@@ -21,7 +21,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::collectible_info::{
     CollectibleKind, CollectibleLookup, copy_label, crypto_text, fiat_text, format_entity,
-    info_prefix, title_parts,
+    info_prefix, title_parts, word_range,
 };
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
@@ -189,9 +189,13 @@ impl QuillApp {
                 font_weight: Some(FontWeight::BOLD),
                 ..Default::default()
             };
-            let fragment_range = prefix.len()
-                ..prefix.len() + tr(keys::INFO_MOBILE_CONTEXT_MENU_FRAGMENT_ABOUT_LINK).len();
-            let sentence = StyledText::new(sentence).with_highlights(vec![(fragment_range, bold)]);
+            let highlights = word_range(
+                &sentence,
+                tr(keys::INFO_MOBILE_CONTEXT_MENU_FRAGMENT_ABOUT_LINK),
+            )
+            .map(|range| vec![(range, bold)])
+            .unwrap_or_default();
+            let sentence = StyledText::new(sentence).with_highlights(highlights);
             let price_color = cx.theme().foreground;
             let mut price = div().flex().items_center().justify_center().gap_1();
             if info.crypto_currency == "TON" {

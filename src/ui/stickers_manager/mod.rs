@@ -166,6 +166,10 @@ impl QuillApp {
     pub(super) fn open_archived_stickers(&mut self, cx: &mut Context<Self>) {
         self.settings.sticker_settings_open = true;
         self.open_box(DialogKind::ArchivedStickers);
+        self.settings.sticker_manager.composer_tab = self
+            .session()
+            .map(|s| s.stickers.stickers.tab)
+            .unwrap_or_default();
         self.settings.sticker_manager.stickers.clear();
         self.settings
             .sticker_manager
@@ -196,12 +200,19 @@ impl QuillApp {
 
     /// Close the box and send what it changed (tdesktop `saveChanges`).
     pub(super) fn close_stickers_manager(&mut self, cx: &mut Context<Self>) {
-        self.settings.sticker_settings_open = false;
+        let was_open = std::mem::replace(&mut self.settings.sticker_settings_open, false);
         self.finish_manager(Kind::Stickers);
         if let Some(live) = self.live.as_mut() {
             live.driver.close_sticker_panel();
         } else if let Some(session) = self.demo_session.as_mut() {
             session.stickers.stickers.close();
+        }
+        // Only a box that was open has a tab of the composer's to give back.
+        if was_open {
+            let composer_tab = self.settings.sticker_manager.composer_tab;
+            if let Some(session) = self.session_mut() {
+                session.stickers.stickers.tab = composer_tab;
+            }
         }
         cx.notify();
     }

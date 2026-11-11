@@ -339,9 +339,18 @@ fn flooded_request_is_exempt_from_the_sweep_while_it_waits() {
 #[test]
 fn only_idempotent_reads_are_retained_for_retry() {
     let stash = RetryStash::default();
-    stash.note(r#"{"@type":"getChatHistory","@extra":"3","chat_id":7}"#);
-    stash.note(r#"{"@type":"sendMessage","@extra":"4","chat_id":7}"#);
-    stash.note(r#"{"@type":"checkAuthenticationPassword","@extra":"5","password":"x"}"#);
+    // The live sender stashes before `td_send` and takes the entry back by
+    // the id `note` returns when the send fails (sweep 02-231).
+    let noted = stash.note(r#"{"@type":"getChatHistory","@extra":"3","chat_id":7}"#);
+    assert_eq!(noted, Some(RequestId(3)));
+    assert_eq!(
+        stash.note(r#"{"@type":"sendMessage","@extra":"4","chat_id":7}"#),
+        None
+    );
+    assert_eq!(
+        stash.note(r#"{"@type":"checkAuthenticationPassword","@extra":"5","password":"x"}"#),
+        None
+    );
     assert_eq!(stash.len(), 1);
     assert!(stash.take(RequestId(4)).is_none());
     assert!(stash.take(RequestId(3)).is_some());

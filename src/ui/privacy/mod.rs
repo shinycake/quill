@@ -485,13 +485,7 @@ impl QuillApp {
                 .child(tr(keys::Q_PREFS_CHOOSE_A_CONTACT_TO_BLOCK)),
         );
         if rows.is_empty() {
-            body = body.child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .px_2()
-                    .child(tr(keys::Q_PREFS_NO_MORE_CONTACTS)),
-            );
+            body = body.child(self.empty_contact_picker_note(cx));
         }
         for row in rows {
             let user_id = row.user_id;

@@ -205,6 +205,25 @@ fn empty_preview_falls_back_to_generic_body() {
 }
 
 #[test]
+fn bursts_in_two_forum_topics_stay_two_entries() {
+    let in_topic = |topic: Option<i32>, id: i64| OsNotification {
+        chat_id: ChatId(7),
+        message_id: Some(MessageId(id)),
+        topic_id: topic,
+        title: "Forum".into(),
+        body: format!("m{id}"),
+    };
+    let mut queue = Vec::new();
+    coalesce_notification(&mut queue, in_topic(Some(1), 10));
+    coalesce_notification(&mut queue, in_topic(Some(2), 20));
+    coalesce_notification(&mut queue, in_topic(Some(1), 11));
+    assert_eq!(queue.len(), 2);
+    assert_eq!(queue[0].count, 2);
+    assert_eq!(queue[0].message_id, Some(MessageId(11)));
+    assert_eq!(queue[1].message_id, Some(MessageId(20)));
+}
+
+#[test]
 fn locked_notifications_reveal_no_sender_or_text() {
     let mut queue = Vec::new();
     coalesce_notification(
@@ -212,6 +231,7 @@ fn locked_notifications_reveal_no_sender_or_text() {
         OsNotification {
             chat_id: ChatId(7),
             message_id: None,
+            topic_id: None,
             title: "Ada".into(),
             body: "my secret".into(),
         },
@@ -224,6 +244,7 @@ fn locked_notifications_reveal_no_sender_or_text() {
         OsNotification {
             chat_id: ChatId(7),
             message_id: None,
+            topic_id: None,
             title: "Ada".into(),
             body: "more".into(),
         },
@@ -237,6 +258,7 @@ fn coalesce_bursts_into_summary() {
     let first = OsNotification {
         chat_id: ChatId(7),
         message_id: None,
+        topic_id: None,
         title: "Ada".into(),
         body: "one".into(),
     };
@@ -246,6 +268,7 @@ fn coalesce_bursts_into_summary() {
         OsNotification {
             chat_id: ChatId(7),
             message_id: None,
+            topic_id: None,
             title: "Ada".into(),
             body: "two".into(),
         },
@@ -255,6 +278,7 @@ fn coalesce_bursts_into_summary() {
         OsNotification {
             chat_id: ChatId(8),
             message_id: None,
+            topic_id: None,
             title: "Noor".into(),
             body: "hi".into(),
         },
@@ -272,6 +296,7 @@ fn linux_command_shape() {
     let notification = OsNotification {
         chat_id: ChatId(7),
         message_id: None,
+        topic_id: None,
         title: "Ada".into(),
         body: "hello".into(),
     };
@@ -318,6 +343,7 @@ fn native_backend_spawns_no_command() {
     let notification = OsNotification {
         chat_id: ChatId(7),
         message_id: None,
+        topic_id: None,
         title: "Ada".into(),
         body: "hello".into(),
     };
@@ -333,6 +359,7 @@ fn linux_command_passes_the_avatar_icon_before_the_separator() {
     let notification = OsNotification {
         chat_id: ChatId(7),
         message_id: None,
+        topic_id: None,
         title: "Ann".to_string(),
         body: "hi".to_string(),
     };
@@ -460,6 +487,7 @@ fn locked_apps_offer_no_buttons() {
     let chat = OsNotification {
         chat_id: ChatId(7),
         message_id: None,
+        topic_id: None,
         title: "Ada".into(),
         body: "hello".into(),
     };
@@ -750,6 +778,7 @@ fn a_burst_keeps_its_first_photo() {
     let notification = |body: &str| OsNotification {
         chat_id: ChatId(7),
         message_id: None,
+        topic_id: None,
         title: "Ada".into(),
         body: body.into(),
     };
@@ -765,6 +794,7 @@ fn a_zalgo_name_and_tags_are_not_drawn_in_a_notification() {
     let shown = OsNotification {
         chat_id: ChatId(7),
         message_id: None,
+        topic_id: None,
         title: format!("Ada{}", "\u{0301}".repeat(40)),
         body: "hi \u{1F4DA}\u{E0069}\u{E007F} there".into(),
     }

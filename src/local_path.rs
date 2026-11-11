@@ -145,7 +145,12 @@ static ENSURED_DIRS: LazyLock<Mutex<HashSet<PathBuf>>> =
 /// the frame-cache roots every frame.
 pub fn ensure_private_dir(path: &Path) {
     if ENSURED_DIRS.lock_or_recover().contains(path) {
-        return;
+        // The OS temp cleaner may have removed it since: one `lstat`, and
+        // the directory is made again.
+        if std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir()) {
+            return;
+        }
+        ENSURED_DIRS.lock_or_recover().remove(path);
     }
     if secure_create_dir(path).is_ok() {
         ENSURED_DIRS.lock_or_recover().insert(path.to_path_buf());
@@ -269,6 +274,31 @@ pub fn sweep_media_caches() {
     let _ = spawned;
 }
 
+/// Remove only the on-screen account's media scratch
+/// (`{temp}/quill-media-cache/{account}`), as a log-out does: another
+/// signed-in account's frames and recordings stay where they are. The
+/// memos about paths under it are forgotten; the others keep theirs.
+pub fn sweep_account_media_cache() {
+    let base = media_cache_base();
+    ENSURED_DIRS
+        .lock_or_recover()
+        .retain(|path| !path.starts_with(&base));
+    CANONICAL_ROOTS
+        .lock_or_recover()
+        .retain(|root, _| !root.starts_with(&base));
+    VERDICTS
+        .lock_or_recover()
+        .retain(|path, _| !Path::new(path).starts_with(&base));
+    let temp = cache_temp_dir();
+    let Some(tomb) = tombstone_dir(&temp, &base, "quill-account-cache") else {
+        return;
+    };
+    let spawned = crate::thread_guard::spawn_guarded("quill-cache-sweep", move || {
+        let _ = std::fs::remove_dir_all(tomb);
+    });
+    let _ = spawned;
+}
+
 const TOMB_MARK: &str = ".tomb-";
 
 /// Move `{temp}/{name}` out of the way with one rename so it is gone from
@@ -276,8 +306,14 @@ const TOMB_MARK: &str = ".tomb-";
 /// rename fails the directory is removed in place instead (still gone on
 /// return); `None` when there was nothing to remove.
 fn tombstone(temp: &Path, name: &str) -> Option<PathBuf> {
+    tombstone_dir(temp, &temp.join(name), name)
+}
+
+/// [`tombstone`] for any `dir`; the tombstone sits in `temp` named after
+/// `name`, where a later run finds it if this one is killed.
+fn tombstone_dir(temp: &Path, dir: &Path, name: &str) -> Option<PathBuf> {
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let dir = temp.join(name);
+    let dir = dir.to_path_buf();
     if std::fs::symlink_metadata(&dir).is_err() {
         return None;
     }
@@ -393,6 +429,41 @@ mod tests {
         set_media_cache_scope(&b);
         assert!(media_cache_base().ends_with("quill-media-cache/scope-b"));
         set_media_cache_scope(&crate::ids::AccountKey::primary());
+    }
+
+    /// Sweep 03-071: a log-out clears its own account's scratch only.
+    #[test]
+    fn an_account_sweep_leaves_the_other_accounts_scratch() {
+        let _guard = lock_shared_media_cache();
+        let (a, b) = (
+            crate::ids::AccountKey("sweep-a".into()),
+            crate::ids::AccountKey("sweep-b".into()),
+        );
+        set_media_cache_scope(&b);
+        let kept = media_cache_base().join("gif-frames");
+        fs::create_dir_all(&kept).unwrap();
+        set_media_cache_scope(&a);
+        let gone = media_cache_base().join("gif-frames");
+        fs::create_dir_all(&gone).unwrap();
+        sweep_account_media_cache();
+        assert!(!gone.exists(), "the logged-out account's scratch is gone");
+        assert!(kept.exists(), "the other account's scratch stays");
+        set_media_cache_scope(&b);
+        sweep_account_media_cache();
+        set_media_cache_scope(&crate::ids::AccountKey::primary());
+    }
+
+    /// Sweep 03-072: a directory the OS removed is made again.
+    #[test]
+    fn a_remembered_dir_that_was_removed_is_created_again() {
+        let _guard = lock_shared_media_cache();
+        let dir = media_cache_base().join("ensure-again");
+        ensure_private_dir(&dir);
+        assert!(dir.is_dir());
+        fs::remove_dir_all(&dir).unwrap();
+        ensure_private_dir(&dir);
+        assert!(dir.is_dir(), "not 'done' for good");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

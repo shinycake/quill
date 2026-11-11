@@ -24,6 +24,7 @@ impl QuillApp {
             let editing = editor.id;
             let kind = editor.kind;
             let error = editor.error.clone();
+            let saving = editor.save != super::ProxySave::Editing;
             let (server, web_host, port, username, password, secret) = (
                 editor.server.clone(),
                 editor.web_host.clone(),
@@ -157,6 +158,7 @@ impl QuillApp {
                     Button::new("proxy-edit-save")
                         .label(tr(keys::SETTINGS_SAVE))
                         .primary()
+                        .disabled(saving)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.save_proxy_editor(cx);
                             this.close_kit_dialog_if_done(DialogKind::ProxyEdit, window, cx);

@@ -14,6 +14,35 @@ pub enum StoryStatsFetch {
     Failed(String),
 }
 
+/// One page request of a paged list: idle, waiting for its own answer
+/// (`None` between starting the list and sending the request), or failed
+/// with the text the panel draws.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum PageFetch {
+    #[default]
+    Idle,
+    Loading(Option<RequestId>),
+    Failed(String),
+}
+
+impl PageFetch {
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading(_))
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            Self::Failed(message) => Some(message),
+            _ => None,
+        }
+    }
+
+    /// Whether `id` is the request this page waits for.
+    pub(crate) fn waits_for(&self, id: RequestId) -> bool {
+        matches!(self, Self::Loading(Some(waiting)) if *waiting == id)
+    }
+}
+
 /// Statistics plus the public forwards list of one story.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StoryInsightsState {
@@ -91,12 +120,10 @@ pub struct StorySearchState {
     pub stories: Vec<(i64, i32)>,
     pub total_count: i32,
     pub next_offset: String,
-    pub loading: bool,
-    pub error: Option<String>,
     /// The page request this search waits for. Only its answer or error
     /// fills the search: an earlier search's request still in flight
     /// answers into nothing.
-    pub request: Option<RequestId>,
+    pub page: PageFetch,
 }
 
 /// The hashtag or cashtag a chat-search box holds, when the whole text is
@@ -226,16 +253,14 @@ impl Session {
             stories: Vec::new(),
             total_count: 0,
             next_offset: String::new(),
-            loading: true,
-            error: None,
-            request: None,
+            page: PageFetch::Loading(None),
         });
     }
 
     /// The open search sent `request` for its next page.
     pub fn story_search_sent(&mut self, request: RequestId) {
         if let Some(search) = self.stories.search.as_mut() {
-            search.request = Some(request);
+            search.page = PageFetch::Loading(Some(request));
         }
     }
 
@@ -244,14 +269,21 @@ impl Session {
         self.stories
             .search
             .as_mut()
-            .filter(|search| search.request == Some(pending.id))
+            .filter(|search| search.page.waits_for(pending.id))
     }
 
     /// Mark the next page of the open search as requested.
     pub fn story_search_page_requested(&mut self) {
         if let Some(search) = self.stories.search.as_mut() {
-            search.loading = true;
-            search.error = None;
+            search.page = PageFetch::Loading(None);
+        }
+    }
+
+    /// The open search could not send its page: the pages stay and the
+    /// panel offers the retry.
+    pub fn story_search_send_failed(&mut self, message: String) {
+        if let Some(search) = self.stories.search.as_mut() {
+            search.page = PageFetch::Failed(message);
         }
     }
 
@@ -278,9 +310,7 @@ impl Session {
         let Some(search) = self.search_waiting_for(pending) else {
             return;
         };
-        search.request = None;
-        search.loading = false;
-        search.error = None;
+        search.page = PageFetch::Idle;
         search.total_count = found.total_count;
         search.next_offset = found.next_offset;
         for key in keys {
@@ -292,9 +322,7 @@ impl Session {
 
     pub(crate) fn fail_story_search(&mut self, pending: &PendingRequest, message: String) {
         if let Some(search) = self.search_waiting_for(pending) {
-            search.request = None;
-            search.loading = false;
-            search.error = Some(message);
+            search.page = PageFetch::Failed(message);
         }
     }
 }

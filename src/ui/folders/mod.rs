@@ -122,13 +122,28 @@ impl QuillApp {
             };
             let muted = cx.theme().muted_foreground;
             let folder_id = confirm.folder_id;
-            let suggested: Vec<i64> = if confirm.shared {
+            // A shared folder's list of chats to leave is asked when the box
+            // opens: until it answers the box says so and cannot confirm,
+            // and a failed ask ends in a line with a Retry.
+            let to_leave = if confirm.shared {
                 this.session()
-                    .and_then(|s| s.chat_list.folder_chats_to_leave.get(&folder_id).cloned())
-                    .unwrap_or_default()
+                    .and_then(|s| s.chat_list.folder_chats_to_leave.get(&folder_id))
+                    .cloned()
             } else {
-                Vec::new()
+                None
             };
+            let waiting = confirm.shared
+                && to_leave
+                    .as_ref()
+                    .is_none_or(|f| f.is_loading() || f.is_idle());
+            let leave_error = to_leave
+                .as_ref()
+                .and_then(|f| f.error())
+                .map(str::to_string);
+            let suggested: Vec<i64> = to_leave
+                .as_ref()
+                .and_then(|f| f.data().cloned())
+                .unwrap_or_default();
             let leaving = suggested
                 .iter()
                 .filter(|id| !confirm.keep.contains(id))
@@ -218,6 +233,40 @@ impl QuillApp {
                         .child(tr(keys::FILTERS_BY_LINK_ABOUT_QUIT)),
                 );
             }
+            if waiting {
+                body = body.child(
+                    div()
+                        .id("folder-delete-chats-loading")
+                        .text_xs()
+                        .text_color(muted)
+                        .child(tr(keys::Q_CHATLIST_LOADING_FOLDER_CHATS_TO_LEAVE)),
+                );
+            }
+            if let Some(error) = leave_error {
+                body = body.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            div()
+                                .id("folder-delete-chats-error")
+                                .text_xs()
+                                .text_color(danger_dark())
+                                .child(error),
+                        )
+                        .child(
+                            div().flex().child(
+                                Button::new("folder-delete-chats-retry")
+                                    .label(tr(keys::Q_MONEY_RETRY))
+                                    .small()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.retry_folder_chats_to_leave(folder_id, cx);
+                                    })),
+                            ),
+                        ),
+                );
+            }
             let body = body.into_any_element();
             // tdesktop: "Remove Folder and Keep Chats" until a chat is ticked.
             let confirm_label = if !suggested.is_empty() {
@@ -248,6 +297,7 @@ impl QuillApp {
                     Button::new("folder-delete-confirm")
                         .label(confirm_label)
                         .danger()
+                        .disabled(waiting)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.confirm_folder_delete(cx);
                             this.close_kit_dialog_if_done(DialogKind::FolderDelete, window, cx);

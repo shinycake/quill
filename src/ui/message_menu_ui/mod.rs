@@ -363,7 +363,7 @@ impl QuillApp {
                             }
                         }
                     }
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 },
             ));
@@ -634,7 +634,7 @@ crate::ui::shell::register_dialogs! {
         QuillApp::build_message_report_dialog,
     )
     .per_window()
-    .close(|app, _, cx| app.close_message_report(cx)),
+    .close(|app, window, cx| app.close_message_report(window, cx)),
 }
 
 mod delete_member_reaction;
@@ -643,6 +643,7 @@ pub(in crate::ui) mod item_rows;
 #[cfg(feature = "demo-capture")]
 mod media_order_tests;
 mod menu_add_to_set_rows;
+mod menu_audience_page;
 mod menu_save_to_rows;
 pub(in crate::ui) mod origin_rows;
 mod read_date_row;

@@ -351,11 +351,18 @@ impl QuillApp {
             return false;
         };
         let Some(model) = self.translate_bar_model(chat_id) else {
-            if let Some(live) = self.live.as_mut() {
-                live.driver.session.set_chat_translated_to(chat_id, None);
+            // Not offered any more: the chat is shown in the original (the
+            // demo session too, or this reports a change on every tick).
+            match (self.live.as_mut(), self.demo_session.as_mut()) {
+                (Some(live), _) => live.driver.session.set_chat_translated_to(chat_id, None),
+                (None, Some(demo)) => demo.set_chat_translated_to(chat_id, None),
+                (None, None) => return false,
             }
             return true;
         };
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.fail_orphaned_translations();
+        }
         let followed = current != model.to;
         if followed && let Some(live) = self.live.as_mut() {
             live.driver

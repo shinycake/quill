@@ -64,7 +64,12 @@ impl QuillApp {
             return false;
         }
         raise_main_window(window, cx);
-        if self.dialogs.export_stop.replace(Box::new(exit)).is_some() {
+        if self
+            .main_window
+            .export_stop
+            .replace(Box::new(exit))
+            .is_some()
+        {
             return true;
         }
         window.set_shutdown_block_reason(Some(tr(keys::EXPORT_PROGRESS_TITLE)));
@@ -80,7 +85,7 @@ impl QuillApp {
                 .on_ok(move |_, window, cx| {
                     let exit = stop.update(cx, |this, _| {
                         this.stop_exports();
-                        this.dialogs.export_stop.take()
+                        this.main_window.export_stop.take()
                     });
                     if let Ok(Some(exit)) = exit {
                         exit(window, cx);
@@ -89,7 +94,7 @@ impl QuillApp {
                 })
                 .on_close(move |_, window, cx| {
                     window.set_shutdown_block_reason(None);
-                    let _ = closed.update(cx, |this, _| this.dialogs.export_stop = None);
+                    let _ = closed.update(cx, |this, _| this.main_window.export_stop = None);
                 })
         });
         true

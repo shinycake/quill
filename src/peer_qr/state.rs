@@ -122,6 +122,8 @@ pub enum QrToast {
         free_code: bool,
     },
     Unavailable,
+    /// The code or its colors changed while a Copy or Share picture was made.
+    Changed,
     /// The server's reason a request failed.
     Failed(String),
     /// The card image is on the clipboard.
@@ -391,9 +393,14 @@ impl PeerQrBox {
             .take_if(|(serial, _)| *serial == ticket.serial)
             .map(|(_, choice)| choice);
         match result {
+            // An answer for a save that is no longer the one out says nothing
+            // about the newer pick; the saved theme reaches `served` from the
+            // session (`QrServedThemeValue`).
             Ok(saved) => {
-                self.served = Some(saved);
-                self.failed = None;
+                if sent.is_some() {
+                    self.served = Some(saved);
+                    self.failed = None;
+                }
                 Vec::new()
             }
             Err(reason) => {

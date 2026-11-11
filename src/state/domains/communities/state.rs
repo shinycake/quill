@@ -108,6 +108,10 @@ pub struct CommunitiesState {
     pub new_community_photo: Option<(RequestId, String)>,
     /// `getCommunityAddChatRequests`, by community id.
     pub add_chat_requests: HashMap<i64, Fetch<AddChatRequestList>>,
+    /// Add-chat requests approved or declined, by community, since the last
+    /// first page was asked: a page that was in flight meanwhile may still
+    /// list them, and must not bring them back.
+    pub handled_add_requests: HashMap<i64, HashSet<i64>>,
     /// `getCommunityMemberChats`, by community and member.
     pub member_chats: HashMap<(i64, CommunityMember), Fetch<CommunityMemberChats>>,
     /// The settings each in-flight `setCommunityNotificationSettings`
@@ -137,6 +141,7 @@ impl CommunitiesState {
             owned_bots: Fetch::Idle,
             new_community_photo: None,
             add_chat_requests: HashMap::new(),
+            handled_add_requests: HashMap::new(),
             member_chats: HashMap::new(),
             notification_sends: HashMap::new(),
             outcomes: VecDeque::new(),

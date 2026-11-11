@@ -112,6 +112,8 @@ impl VideoControlsState {
         self.seek_preview = None;
         self.volume = None;
         self.volume_dragging = false;
+        // A speed drag cut off by the clip's end never gets its Release.
+        self.speed_preview = None;
         self.hover = None;
         self.boost_timer = None;
         self.waiting = WaitingGate::default();

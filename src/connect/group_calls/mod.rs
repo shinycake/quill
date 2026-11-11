@@ -38,6 +38,7 @@ pub(crate) mod levels;
 mod link;
 pub(crate) mod live_feeds;
 mod live_story;
+pub use live_story::LiveDeleteFailed;
 mod live_story_extras;
 pub(crate) mod muted_hint;
 mod rtmp_start;

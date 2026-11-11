@@ -58,15 +58,16 @@ impl Session {
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
             let tab = match purpose {
-                RequestPurpose::Media(MediaPurpose::GetProfileGifts { .. }) => {
-                    Some(SharedMediaTab::Gifts)
+                RequestPurpose::Media(MediaPurpose::GetProfileGifts { generation, .. }) => {
+                    Some((SharedMediaTab::Gifts, generation))
                 }
                 _ => None,
             };
-            if let Some(tab) = tab {
+            if let Some((tab, generation)) = tab {
                 self.fail_profile_tab(
                     chat_id,
                     tab,
+                    Some(generation),
                     call_request_error_line(err, "Could not load this tab"),
                 );
             }

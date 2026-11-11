@@ -5,7 +5,10 @@ use quill::ids::ChatId;
 pub(crate) enum GroupSettingsView {
     Reactions,
     Discussion,
-    ConfirmUpgrade,
+    /// "Upgrade to supergroup?": Editing until Upgrade, Sending while
+    /// the request is out, Failed with TDLib's reason; it closes on the
+    /// answer or on the chat's `pump_chat_upgrades` event.
+    ConfirmUpgrade(quill::state::Submit),
     ConfirmUnlink,
     Boosts,
     InviteLinks,
@@ -59,5 +62,4 @@ pub(crate) enum GroupSettingsAction {
     PaidReaction(bool),
     LinkGroup(ChatId),
     Unlink,
-    Upgrade,
 }

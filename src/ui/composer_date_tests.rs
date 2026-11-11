@@ -65,11 +65,11 @@ fn the_date_box_turns_the_selection_into_a_date(cx: &mut TestAppContext) {
     #[cfg(not(target_os = "macos"))]
     vcx.simulate_keystrokes("ctrl-shift-d");
     frames(vcx);
-    app.update(vcx, |app, _| assert!(app.composer_ui.date_dialog.is_some()));
+    app.update(vcx, |app, _| assert!(app.chat_ui.date_dialog.is_some()));
     assert!(vcx.update(|window, _| window.try_find("composer-date-dialog").is_some()));
 
     app.update_in(vcx, |app, window, cx| {
-        let dialog = app.composer_ui.date_dialog.as_ref().expect("box");
+        let dialog = app.chat_ui.date_dialog.as_ref().expect("box");
         let value = picker_value(TIME, cx).expect("value");
         dialog
             .picker
@@ -79,7 +79,7 @@ fn the_date_box_turns_the_selection_into_a_date(cx: &mut TestAppContext) {
     vcx.update(|window, cx| window.click("composer-date-save", cx));
     frames(vcx);
     app.update(vcx, |app, cx| {
-        assert!(app.composer_ui.date_dialog.is_none());
+        assert!(app.chat_ui.date_dialog.is_none());
         assert_eq!(
             app.composer_markup(cx),
             format!("hello from [composer](tg://time?unix={TIME})")
@@ -99,13 +99,13 @@ fn the_date_box_turns_the_selection_into_a_date(cx: &mut TestAppContext) {
             Some(TIME)
         );
         app.open_composer_date_dialog(window, cx);
-        let dialog = app.composer_ui.date_dialog.as_ref().expect("box");
+        let dialog = app.chat_ui.date_dialog.as_ref().expect("box");
         assert_eq!(
             crate::ui::scheduled::picked_unix(&dialog.picker, 0, cx),
             Some(TIME)
         );
         app.close_composer_date_dialog(window, cx);
-        assert!(app.composer_ui.date_dialog.is_none());
+        assert!(app.chat_ui.date_dialog.is_none());
     });
 }
 
@@ -118,5 +118,38 @@ fn a_control_character_is_typed_over_the_selection(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, window, cx| {
         app.insert_composer_control_char('\u{200f}', window, cx);
         assert_eq!(app.composer.read(cx).value(), "hello \u{200f} composer");
+    });
+}
+
+/// The box holds a range of one chat's draft: another chat in the view
+/// replaces it, so Save cannot date the other chat's text.
+#[gpui_kit::test]
+fn the_date_box_goes_with_its_chat(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    select(&app, vcx, "composer");
+    #[cfg(target_os = "macos")]
+    vcx.simulate_keystrokes("cmd-shift-d");
+    #[cfg(not(target_os = "macos"))]
+    vcx.simulate_keystrokes("ctrl-shift-d");
+    frames(vcx);
+    app.update(vcx, |app, _| assert!(app.chat_ui.date_dialog.is_some()));
+
+    let other = app.read_with(vcx, |app, _| {
+        let session = app.session().expect("a demo session");
+        session
+            .chats
+            .keys()
+            .copied()
+            .find(|id| Some(quill::ids::ChatId(*id)) != session.open_chat)
+            .map(quill::ids::ChatId)
+            .expect("a second chat")
+    });
+    app.update_in(vcx, |app, window, cx| {
+        app.select_listed_chat(other, window, cx)
+    });
+    frames(vcx);
+    app.update(vcx, |app, _| {
+        assert!(app.chat_ui.date_dialog.is_none(), "the box is chat A's");
     });
 }

@@ -157,3 +157,41 @@ fn cancel_closes_the_box_while_the_create_request_is_out(cx: &mut TestAppContext
     assert_eq!(step(&app, vcx), None);
     assert!(shell.read_with(vcx, |s, _| s.open_dialog != Some(DialogKind::CreateChat)));
 }
+
+/// A plain group whose create was answered ends its dialog (and with it
+/// the creation row), instead of leaving a hidden dialog behind.
+#[gpui_kit::test]
+fn a_made_group_takes_its_dialog_away(cx: &mut TestAppContext) {
+    use quill::new_chat::{CreationOutcome, NewChatBack, NewChatStage};
+    use quill::state::{NewChatCreation, RequestPurpose};
+    let (app, shell, mut vcx) = open_demo(cx, "ready-new-group");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| {
+        let Some(session) = app.demo_session.as_mut() else {
+            return;
+        };
+        let request = session.request(RequestPurpose::SetChatTitle, None);
+        session.groups.new_chats.creations.insert(
+            request,
+            NewChatCreation {
+                outcome: Some(CreationOutcome::Created(ChatId(77))),
+                ..NewChatCreation::default()
+            },
+        );
+        if let Some(dialog) = app.admin.create_chat_dialog.as_mut() {
+            dialog.stage = NewChatStage::Creating {
+                request,
+                back: NewChatBack::Info,
+            };
+        }
+    });
+    assert_eq!(step(&app, vcx), Some(NewChatStep::Done(ChatId(77))));
+    assert!(app.read_with(vcx, |app, _| app.admin.create_chat_dialog.is_some()));
+    app.update(vcx, |app, cx| {
+        assert!(app.drain_new_chat_done(cx));
+        assert!(!app.drain_new_chat_done(cx));
+    });
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.admin.create_chat_dialog.is_none()));
+    assert!(shell.read_with(vcx, |s, _| s.open_dialog != Some(DialogKind::CreateChat)));
+}

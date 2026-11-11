@@ -7,7 +7,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
-use quill::state::BotsPurpose;
+use quill::state::{BotStopStage, BotsPurpose};
 use quill::state::{RequestPurpose, unix_ms_now};
 
 impl QuillApp {
@@ -30,8 +30,8 @@ impl QuillApp {
         }
         let draft_id = draft.draft_id;
         let can_stop = draft.can_stop;
-        let failed = draft.stop_failed;
-        let stopped = draft.stopped;
+        let failed = draft.stop == BotStopStage::Failed;
+        let stopped = draft.stop == BotStopStage::Stopped;
         let stopping = session.requests.has_purpose_for_chat(
             RequestPurpose::Bots(BotsPurpose::StopPendingMessage { topic_id, draft_id }),
             chat_id,

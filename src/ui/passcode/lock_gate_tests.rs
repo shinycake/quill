@@ -59,6 +59,31 @@ fn lock(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
 }
 
 #[gpui_kit::test]
+fn the_tray_toggles_change_nothing_while_locked(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_chat(cx);
+    let both = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            (
+                app.desktop_notifications_enabled(),
+                app.notification_sounds_enabled(),
+            )
+        })
+    };
+    let (notifications, sounds) = both(&app, &mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        app.toggle_notifications_from_tray(cx);
+        app.toggle_sounds_from_tray(cx);
+    });
+    assert_eq!(both(&app, &mut vcx), (!notifications, !sounds), "unlocked");
+    lock(&app, &mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        app.toggle_notifications_from_tray(cx);
+        app.toggle_sounds_from_tray(cx);
+    });
+    assert_eq!(both(&app, &mut vcx), (!notifications, !sounds), "locked");
+}
+
+#[gpui_kit::test]
 fn locking_stops_a_voice_recording_without_sending_it(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_chat(cx);
     app.update(&mut vcx, |app, cx| {
@@ -116,6 +141,35 @@ fn a_link_resolved_while_locked_opens_after_the_unlock(cx: &mut TestAppContext) 
         assert!(
             app.links.pending_deep_link_open.is_none(),
             "the link ran after the unlock"
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn a_mark_as_read_click_waits_for_the_unlock(cx: &mut TestAppContext) {
+    use quill::notify::NotificationAction;
+    use quill::notify_accounts::ChatClick;
+    let (app, mut vcx) = open_chat(cx);
+    let click = |app: &QuillApp| ChatClick {
+        account: app.session().expect("session").account.clone(),
+        chat_id: OTHER,
+        action: NotificationAction::MarkRead,
+    };
+    lock(&app, &mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        let click = click(app);
+        app.delivery.notify_clicks.lock().unwrap().push(click);
+        app.drain_background_clicks(cx);
+        assert_eq!(
+            app.delivery.notify_clicks.lock().unwrap().len(),
+            1,
+            "no read receipt under the lock; the click stays queued"
+        );
+        app.set_locked(false, cx);
+        app.drain_background_clicks(cx);
+        assert!(
+            app.delivery.notify_clicks.lock().unwrap().is_empty(),
+            "unlocked, it runs"
         );
     });
 }

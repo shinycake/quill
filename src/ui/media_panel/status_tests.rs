@@ -127,6 +127,39 @@ fn the_reaction_selector_replaces_the_status_selector(cx: &mut TestAppContext) {
     });
 }
 
+/// 11-p1-002: a selector opened over the GIFs tab leaves that tab, so the
+/// session's GIF gate closes and GIFs stop downloading.
+#[gpui_kit::test]
+fn a_selector_over_the_gifs_tab_closes_the_gif_gate(cx: &mut TestAppContext) {
+    use crate::ui::media_panel::PanelTab;
+    let (app, mut vcx) = new_app(cx, true);
+    let vcx = &mut vcx;
+    let gate = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.session().is_some_and(|s| s.stickers.gifs.open)
+        })
+    };
+    app.update(vcx, |app, cx| app.open_media_panel(PanelTab::Gifs, cx));
+    assert!(gate(&app, vcx), "the GIFs tab opens the gate");
+    app.update_in(vcx, |app, window, cx| {
+        app.open_reaction_selector(
+            quill::ids::ChatId(11),
+            quill::ids::MessageId(1),
+            point(px(10.), px(10.)),
+            window,
+            cx,
+        );
+    });
+    assert!(
+        !gate(&app, vcx),
+        "the reaction selector is on the emoji tab"
+    );
+    app.update(vcx, |app, cx| app.open_media_panel(PanelTab::Gifs, cx));
+    assert!(gate(&app, vcx));
+    open_selector(&app, vcx);
+    assert!(!gate(&app, vcx), "so is the status selector");
+}
+
 #[gpui_kit::test]
 fn the_menu_entry_opens_the_selector_with_the_remove_cell_first(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, true);

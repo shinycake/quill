@@ -37,8 +37,16 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.preview_custom_emoji(emoji_id, set_id);
         }
-        self.message_ui.custom_emoji_tapped = Some(emoji_id);
+        self.note_custom_emoji_tap(emoji_id);
         cx.notify();
+    }
+
+    /// The emoji was tapped (again): its card is for this tap, and its
+    /// timer starts from it.
+    pub(super) fn note_custom_emoji_tap(&mut self, emoji_id: i64) {
+        self.message_ui.custom_emoji_tapped = Some(emoji_id);
+        self.message_ui.custom_emoji_tap_count =
+            self.message_ui.custom_emoji_tap_count.wrapping_add(1);
     }
 
     fn clear_custom_emoji_preview(&mut self, cx: &mut Context<Self>) {
@@ -74,9 +82,15 @@ impl QuillApp {
     #[inline(never)]
     fn custom_emoji_card_body(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let preview: CustomEmojiPreview = self.session()?.stickers.custom_emoji_preview.clone()?;
-        if self.message_ui.custom_emoji_card_seen.as_ref() != Some(&preview) {
-            self.message_ui.custom_emoji_card_seen = Some(preview.clone());
-            let shown = preview.clone();
+        let tap = self.message_ui.custom_emoji_tap_count;
+        if self
+            .message_ui
+            .custom_emoji_card_seen
+            .as_ref()
+            .is_none_or(|(seen, seen_tap)| *seen != preview || *seen_tap != tap)
+        {
+            let shown = (preview.clone(), tap);
+            self.message_ui.custom_emoji_card_seen = Some(shown.clone());
             self.spawn_scoped(cx, async move |this, cx| {
                 cx.background_executor().timer(CARD_LIFETIME).await;
                 let _ = this.update(cx, |this, cx| {

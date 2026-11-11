@@ -156,10 +156,6 @@ pub(crate) struct HistoryUi {
     /// Where the dissolves read the time: the wall clock in the app, a
     /// clock that only moves when told to in tests.
     pub(super) vanish_clock: std::cell::Cell<super::vanish::VanishClock>,
-    /// Phase B3: the open chat whose self-destruct countdown badges are
-    /// ticking (`Some` exactly while the 1s tick task runs). Mirrors
-    /// `slow_mode_tick_chat`.
-    pub(super) self_destruct_tick_chat: Option<ChatId>,
     /// The open chat whose live-location countdowns are being refreshed
     /// (`Some` exactly while that task runs; see `live_location_tick`).
     pub(super) live_location_tick_chat: Option<ChatId>,
@@ -191,8 +187,6 @@ pub(super) struct SubsectionTabsScroll {
     pub(super) strip: gpui_kit::ScrollHandle,
     /// The Left layout's column.
     pub(super) column: gpui_kit::ScrollHandle,
-    /// What the selected tab was last scrolled into view for.
-    pub(super) revealed: std::cell::Cell<Option<super::folder_tabs_fit::RevealKey>>,
 }
 
 /// The open chat is left as any leave: the draft is saved through the old
@@ -269,7 +263,6 @@ impl HistoryUi {
             vanish_now: Default::default(),
             vanish_conflicts: Default::default(),
             vanish_clock: Default::default(),
-            self_destruct_tick_chat: None,
             live_location_tick_chat: None,
             chat_layout: Default::default(),
             width: Default::default(),

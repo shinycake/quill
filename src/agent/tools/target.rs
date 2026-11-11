@@ -264,6 +264,25 @@ fn by_title(ctx: &Ctx, title: &str, me: i64, reach: Reach) -> Result<i64, ToolEr
 
 /// The scope, title and class of chat `chat_id`, or `None` when it is not
 /// granted (or unknown).
+/// Whether `chat_id` is granted, remembering only an answer: a failed lookup
+/// (a timeout) says nothing about the chat, so the next message asks again.
+pub(crate) fn remember_grant(
+    known: &mut HashMap<i64, bool>,
+    chat_id: i64,
+    ask: impl FnOnce() -> Result<bool, ToolError>,
+) -> bool {
+    if let Some(allowed) = known.get(&chat_id) {
+        return *allowed;
+    }
+    match ask() {
+        Ok(allowed) => {
+            known.insert(chat_id, allowed);
+            allowed
+        }
+        Err(_) => false,
+    }
+}
+
 pub(crate) fn granted(ctx: &Ctx, chat_id: i64, me: i64) -> Result<Option<Target>, ToolError> {
     let Ok(chat) = ctx.call(json!({"@type": "getChat", "chat_id": chat_id})) else {
         return Ok(None);
@@ -376,7 +395,21 @@ pub(crate) fn chat_schema() -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::username_of;
+    use super::{ToolError, remember_grant, username_of};
+    use std::collections::HashMap;
+
+    #[test]
+    fn a_failed_grant_lookup_is_asked_again_not_remembered() {
+        let mut known = HashMap::new();
+        assert!(!remember_grant(&mut known, 5, || Err(ToolError::new(
+            "timed out"
+        ))));
+        assert!(known.is_empty());
+        assert!(remember_grant(&mut known, 5, || Ok(true)));
+        assert!(remember_grant(&mut known, 5, || Err(ToolError::new(
+            "not asked"
+        ))));
+    }
 
     #[test]
     fn usernames_come_from_handles_and_links() {

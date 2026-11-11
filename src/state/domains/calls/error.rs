@@ -88,10 +88,15 @@ impl Session {
                 }
             }
             Some(RequestPurpose::SendCallDebugInformation) => {
-                if let Some(summary) = self.calls.summary.as_mut() {
-                    summary.debug_information_sent = false;
-                    summary.debug_information_error =
-                        Some(call_request_error_line(err, "Could not upload diagnostics"));
+                if let Some(summary) = self.calls.summary.as_mut()
+                    && extra.is_some_and(|extra| {
+                        summary.debug_information == CallUpload::Sending(extra)
+                    })
+                {
+                    summary.debug_information = CallUpload::Failed(call_request_error_line(
+                        err,
+                        "Could not upload diagnostics",
+                    ));
                 }
             }
             // Phase C2i: call history / privacy / log failures
@@ -104,8 +109,9 @@ impl Session {
             }
             Some(RequestPurpose::DeleteAllCallMessages) => {
                 self.calls.recent_calls_clearing = false;
-                self.chats_state.chat_action_error =
-                    Some(crate::chatlist_calls::clear_failed(err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(crate::chatlist_calls::clear_failed(err.code));
             }
             Some(RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules { setting })) => {
                 if let Some(pending) = pending {
@@ -128,9 +134,10 @@ impl Session {
                 }
             }
             Some(RequestPurpose::SendCallLog) => {
-                if let Some(summary) = self.calls.summary.as_mut() {
-                    summary.log_sent = false;
-                    summary.log_error = Some(call_request_error_line(
+                if let Some(summary) = self.calls.summary.as_mut()
+                    && extra.is_some_and(|extra| summary.log == CallUpload::Sending(extra))
+                {
+                    summary.log = CallUpload::Failed(call_request_error_line(
                         err,
                         "Could not upload the call log",
                     ));
@@ -146,6 +153,11 @@ impl Session {
             Some(RequestPurpose::Calls(CallsPurpose::CreateVideoChat { .. })) => {
                 if let Some(extra) = extra {
                     self.calls.failed_creates.push(extra);
+                    // Nobody drains this for an account off screen: keep the
+                    // latest few (the box that asked is on screen, so asks
+                    // for one of the last few).
+                    let extra_old = self.calls.failed_creates.len().saturating_sub(8);
+                    self.calls.failed_creates.drain(..extra_old);
                 }
             }
             Some(RequestPurpose::Calls(CallsPurpose::CreateVideoChatJoinAs { .. })) => {
@@ -240,6 +252,20 @@ impl Session {
                     err,
                     "Could not stop screen sharing",
                 ));
+            }
+            // The server never got the pause edge: your own tile shows what
+            // it still has, and the next edge sends again. No box error: the
+            // share itself works.
+            Some(RequestPurpose::Calls(CallsPurpose::ToggleGroupCallScreenPaused {
+                group_call_id,
+                paused,
+            })) => {
+                if let Some(tracked) = self.calls.active_group_call.as_mut()
+                    && tracked.id == group_call_id
+                    && tracked.screen_share_paused == paused
+                {
+                    tracked.screen_share_paused = !paused;
+                }
             }
             Some(
                 RequestPurpose::Calls(CallsPurpose::LeaveGroupCall { .. })

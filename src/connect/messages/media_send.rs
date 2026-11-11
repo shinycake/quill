@@ -359,7 +359,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
-    ) -> Result<RequestId, ConnectSendError> {
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -374,12 +374,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         if message.pending() || message.id.0 <= 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::RecognizeSpeech, Some(chat_id));
+        // A second press before TDLib answers shares the request in flight.
+        if self.session.requests.has_purpose_for_message(
+            RequestPurpose::RecognizeSpeech,
+            chat_id,
+            message_id,
+        ) {
+            return Ok(None);
+        }
+        let extra =
+            self.session
+                .request_for_message(RequestPurpose::RecognizeSpeech, chat_id, message_id);
         let json = recognize_speech(extra, chat_id, message_id);
         match self.sender.send_json(&json) {
-            Ok(()) => Ok(extra),
+            Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)

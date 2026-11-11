@@ -198,10 +198,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // tdesktop `cloudPassword().reload()`, then the state it has.
         let auth = &self.session.auth_state;
-        let has_password = (!auth.password_state_loading)
+        let has_password = (!auth.password_state_loading())
             .then(|| auth.password_state.as_ref().map(|s| s.has_password))
             .flatten();
-        if !auth.password_state_loading {
+        if !auth.password_state_loading() {
             let _ = self.refresh_password_state();
         }
         self.session.payments.hub.grams.withdraw = Some(GramWithdraw::open(has_password));
@@ -231,9 +231,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         });
         // Only this request's answer counts: a late answer to an earlier
         // try that was cancelled is dropped.
-        self.session.payments.hub.grams.withdraw = Some(GramWithdraw::Password {
-            request: sent.as_ref().ok().copied(),
-            error: None,
+        self.session.payments.hub.grams.withdraw = Some(match &sent {
+            Ok(request) => GramWithdraw::Password {
+                request: Some(*request),
+                error: None,
+            },
+            // Nothing went out: the box says so and Submit can try again.
+            Err(_) => {
+                GramWithdraw::idle(Some(crate::gift_manage::ExportError::Other(String::new())))
+            }
         });
         sent
     }

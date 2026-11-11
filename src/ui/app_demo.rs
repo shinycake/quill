@@ -103,7 +103,7 @@ impl QuillApp {
             // `setup_app_menus` at startup).
             menu_bar: AppMenuBar::new(cx),
             first_run: super::first_run_ui::initial_first_run(demo.is_some(), &credentials, cx),
-            frame: super::frame_state::FrameUi::new(cx),
+            frame: Box::new(super::frame_state::FrameUi::new(cx)),
             group_call: super::group_call_state::GroupCallUi::new(),
             screen_share: Default::default(),
             composer_sends: Default::default(),
@@ -113,7 +113,7 @@ impl QuillApp {
             credentials,
             start_files: super::start_files_state::StartFilesUi::new(window, cx),
             update_pill: Default::default(),
-            agent_bridge: super::agent_state::AgentBridge::new(window, cx),
+            agent_bridge: Box::new(super::agent_state::AgentBridge::new(window, cx)),
             takeover: super::agent_takeover_state::TakeoverUi::new(window, cx),
             focus_sidebar: cx.focus_handle(),
             connect: super::connection_state::ConnectGeneration::new(),
@@ -263,6 +263,7 @@ impl QuillApp {
             }
             // The gate counts the chat windows too: one may be in front.
             this.frame.main_active.set(active);
+            this.preferences.advanced.forget_import_offer();
             this.follow_windows(cx);
             super::glyph_sweep::window_activation(window.window_handle().window_id(), active);
             this.viewer_window_activation(window, cx);

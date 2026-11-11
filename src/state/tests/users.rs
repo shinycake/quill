@@ -384,7 +384,11 @@ fn failed_color_requests_surface_the_error_and_icons_flag() {
             extra.0
         ),
     );
-    assert!(session.users_state.profile_edit_error.is_some());
+    assert!(session.users_state.peer_color_error.is_some());
+    assert!(
+        session.users_state.profile_edit_error.is_none(),
+        "a color failure is not a profile-edit failure"
+    );
 
     let extra = session.request(RequestPurpose::GetBackgroundEmojiIcons, None);
     apply_json(

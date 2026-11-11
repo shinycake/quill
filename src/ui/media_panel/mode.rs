@@ -81,6 +81,19 @@ impl MediaPanel {
 }
 
 impl QuillApp {
+    /// Open a selector (reactions, statuses): its mode, on the emoji tab,
+    /// from the first section. The GIF gate follows the tab, so a panel
+    /// that was on the GIFs tab stops downloading them.
+    pub(in crate::ui) fn enter_selector_mode(&mut self, mode: PanelMode) {
+        self.set_media_panel_mode(mode);
+        let panel = &mut self.pickers.media_panel;
+        panel.key = None;
+        panel.active_section = 0;
+        panel.category = None;
+        panel.tab = PanelTab::Emoji;
+        self.sync_gif_downloads();
+    }
+
     /// The one writer of the panel's mode. Leaving a selector drops the
     /// rows it listed; leaving the status selector also stops resolving
     /// its choices.

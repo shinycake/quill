@@ -156,8 +156,8 @@ impl QuillApp {
         if items.is_empty() {
             self.set_note(StatusNote::info(tr(keys::Q_CHAT_EMOJI_WORD_NONE)));
         } else {
-            let ui = &mut self.composer_ui.emoji_words;
-            ui.unhover();
+            let ui = &mut self.screen.composer_ui.emoji_words;
+            ui.unhover(&mut self.screen.composer_ui.suggest);
             ui.hovered = Some((word, items));
             ui.pinned = true;
         }
@@ -170,13 +170,13 @@ impl QuillApp {
         if !self.chat_prefs.emoji_word_blocklist.contains(&word) {
             self.set_chat_prefs(cx, |c| c.emoji_word_blocklist.push(word));
         }
-        let ui = &mut self.composer_ui.emoji_words;
+        let ui = &mut self.screen.composer_ui.emoji_words;
         if ui
             .hovered
             .as_ref()
             .is_some_and(|(h, _)| h.normalized == action.word)
         {
-            ui.unhover();
+            ui.unhover(&mut self.screen.composer_ui.suggest);
         }
         self.sync_emoji_words(cx);
         cx.notify();
@@ -192,7 +192,10 @@ impl QuillApp {
     /// After the highlights were turned off from the menu (the tests call
     /// it straight, so the shared test prefs file keeps them on).
     pub(super) fn emoji_words_turned_off(&mut self, cx: &mut Context<Self>) {
-        self.composer_ui.emoji_words.unhover();
+        self.screen
+            .composer_ui
+            .emoji_words
+            .unhover(&mut self.screen.composer_ui.suggest);
         self.sync_emoji_words(cx);
         self.set_note(StatusNote::info(tr(keys::Q_CHAT_EMOJI_WORDS_OFF_NOTE)));
         cx.notify();

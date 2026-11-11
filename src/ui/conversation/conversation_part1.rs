@@ -466,8 +466,9 @@ impl QuillApp {
             session.and_then(|s| s.chats.get(&id.0).and_then(|c| c.kind.gate_reason()))
         });
         let main_history = open.and_then(|id| session.and_then(|s| s.histories.get(&id.0)));
-        let main_empty = main_history.is_none_or(|h| h.messages.is_empty())
-            || open.is_some_and(|id| session.is_some_and(|s| s.history_loading(id)));
+        let main_empty = (main_history.is_none_or(|h| h.messages.is_empty())
+            || open.is_some_and(|id| session.is_some_and(|s| s.history_loading(id))))
+            && !open.is_some_and(|id| self.vanishing_in_emptied(id));
         // kit Phase 3: owned — `history_message_list` takes `&mut self`,
         // so the chat summary can't borrow the session here.
         let chat: Option<ChatSummary> =

@@ -191,6 +191,19 @@ impl Session {
             }
             Some(RequestPurpose::GetChatPostedToChatPageStories) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    // A page the gallery asked for before it was closed and
+                    // reopened is dropped whole, so it neither shows alone
+                    // nor lands ahead of the new first page.
+                    let generation = pending.and_then(|p| p.search_generation);
+                    if !self.media.shared_media.accepts_profile(
+                        chat_id,
+                        SharedMediaTab::Stories,
+                        generation,
+                    ) && generation.is_some()
+                    {
+                        self.clear_story_page_op(pending);
+                        return;
+                    }
                     let entry = self.stories.chat_page_stories.entry(chat_id.0).or_default();
                     // Phase 9.7: preserve server order (newest
                     // first) across pages — append new ids, dedupe.
@@ -206,7 +219,7 @@ impl Session {
                     self.clear_story_page_op(pending);
                     // The shared-media gallery's Stories tab lists the same
                     // chat-page stories.
-                    self.apply_profile_stories(chat_id, total_count);
+                    self.apply_profile_stories(chat_id, generation, total_count);
                 }
             }
             _ => {}
@@ -562,8 +575,7 @@ impl Session {
         {
             if pending.keep_on_stop {
                 pending.can_stop = false;
-                pending.stopped = true;
-                pending.stop_failed = false;
+                pending.stop = BotStopStage::Stopped;
             } else {
                 self.messages.pending_bot_messages.remove(&key);
             }

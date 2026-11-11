@@ -309,19 +309,18 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Not `close_message_menu`: the selector shows this message's
+        // reaction options, which that would drop.
         self.message_ui.menu = None;
         self.pickers.reaction_search_input.update(cx, |input, cx| {
             input.set_value("", window, cx);
             input.focus(window, cx);
         });
-        self.set_media_panel_mode(PanelMode::Reaction(ReactionTarget {
+        self.enter_selector_mode(PanelMode::Reaction(ReactionTarget {
             chat_id,
             message_id,
             position,
         }));
-        self.pickers.media_panel.key = None;
-        self.pickers.media_panel.active_section = 0;
-        self.pickers.media_panel.tab = PanelTab::Emoji;
         if let Some(live) = self.live.as_mut() {
             // Loads the installed custom emoji packs.
             let _ = live.driver.open_media_panel();

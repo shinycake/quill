@@ -197,19 +197,25 @@ impl AiComposeBox {
     /// The style list changed (tdesktop `refreshTones`): a picked style the
     /// server no longer lists is dropped, and the Style tab asks again.
     pub fn refresh_styles(&mut self, styles: &StyleList) -> Option<AiSend> {
-        if let StyleChoice::Style(name) = &self.translate_style
-            && styles.find(name).is_none()
-        {
+        // A card made with a style that is gone is replaced by one made
+        // without it (only the shown tab's can be on screen).
+        let translate_gone = matches!(&self.translate_style, StyleChoice::Style(name)
+            if styles.find(name).is_none());
+        if translate_gone {
             self.translate_style = StyleChoice::None;
         }
-        let StyleChoice::Style(name) = &self.style else {
-            return None;
-        };
-        if styles.find(name).is_some() {
-            return None;
+        let style_gone = matches!(&self.style, StyleChoice::Style(name)
+            if styles.find(name).is_none());
+        if style_gone {
+            self.style = StyleChoice::None;
         }
-        self.style = StyleChoice::None;
-        self.request_in(AiComposeMode::Style)
+        if translate_gone && let Some(send) = self.request_in(AiComposeMode::Translate) {
+            return Some(send);
+        }
+        if style_gone {
+            return self.request_in(AiComposeMode::Style);
+        }
+        None
     }
 
     pub fn toggle_original_expanded(&mut self) {

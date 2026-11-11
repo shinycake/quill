@@ -482,8 +482,20 @@ pub fn saved_list_full(saved_count: usize, limit: i64) -> bool {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LimitStore {
     answered: Vec<(PremiumLimitKind, LimitPair)>,
-    asked: Vec<PremiumLimitKind>,
+    asked: Vec<(PremiumLimitKind, LimitAsk)>,
     options: Vec<(PremiumLimitKind, i64)>,
+}
+
+/// Where a `getPremiumLimit` for one kind stands once it left.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LimitAsk {
+    /// Out under this request; its answer fills the pair, its transient
+    /// error (a lost request, a flood wait, a server fault) forgets the ask
+    /// so the next box asks again.
+    Asked(crate::ids::RequestId),
+    /// The server refused (an account that cannot buy Premium): not asked
+    /// again this session.
+    Refused,
 }
 
 impl LimitStore {
@@ -493,6 +505,7 @@ impl LimitStore {
             return;
         };
         self.answered.retain(|(k, _)| *k != kind);
+        self.asked.retain(|(k, _)| *k != kind);
         self.answered.push((
             kind,
             LimitPair {
@@ -515,18 +528,32 @@ impl LimitStore {
     pub fn should_ask(&self, kind: PremiumLimitKind) -> bool {
         kind.td_limit_type().is_some()
             && self.answered(kind).is_none()
-            && !self.asked.contains(&kind)
+            && !self.asked.iter().any(|(k, _)| *k == kind)
     }
 
-    pub fn note_asked(&mut self, kind: PremiumLimitKind) {
-        if !self.asked.contains(&kind) {
-            self.asked.push(kind);
-        }
+    /// `kind` left under `request`.
+    pub fn note_asked(&mut self, kind: PremiumLimitKind, request: crate::ids::RequestId) {
+        self.asked.retain(|(k, _)| *k != kind);
+        self.asked.push((kind, LimitAsk::Asked(request)));
     }
 
     /// A send failed: `kind` may be asked again.
     pub fn forget_asked(&mut self, kind: PremiumLimitKind) {
-        self.asked.retain(|k| *k != kind);
+        self.asked.retain(|(k, _)| *k != kind);
+    }
+
+    /// The error of `request`: a definite refusal is kept, anything else
+    /// returns the kind to unasked.
+    pub fn fail_ask(&mut self, request: crate::ids::RequestId, refused: bool) {
+        for (_, ask) in &mut self.asked {
+            if *ask == LimitAsk::Asked(request) && refused {
+                *ask = LimitAsk::Refused;
+            }
+        }
+        if !refused {
+            self.asked
+                .retain(|(_, ask)| *ask != LimitAsk::Asked(request));
+        }
     }
 
     /// An integer `updateOption`; only the options of
@@ -775,12 +802,31 @@ mod tests {
         );
     }
 
+    /// 04-049: a lost or transiently failed ask is asked again; only the
+    /// server's refusal is kept.
+    #[test]
+    fn a_failed_ask_is_asked_again_unless_the_server_refused() {
+        use crate::ids::RequestId;
+        let mut store = LimitStore::default();
+        store.note_asked(Kind::SavedPins, RequestId(1));
+        store.fail_ask(RequestId(2), false);
+        assert!(
+            !store.should_ask(Kind::SavedPins),
+            "another request's error"
+        );
+        store.fail_ask(RequestId(1), false);
+        assert!(store.should_ask(Kind::SavedPins), "lost or transient");
+        store.note_asked(Kind::SavedPins, RequestId(3));
+        store.fail_ask(RequestId(3), true);
+        assert!(!store.should_ask(Kind::SavedPins), "refused stays refused");
+    }
+
     #[test]
     fn the_store_folds_answers_options_and_asks_once() {
         let mut store = LimitStore::default();
         assert!(store.should_ask(Kind::SavedPins));
         assert!(!store.should_ask(Kind::FileSize));
-        store.note_asked(Kind::SavedPins);
+        store.note_asked(Kind::SavedPins, crate::ids::RequestId(1));
         assert!(!store.should_ask(Kind::SavedPins));
         store.forget_asked(Kind::SavedPins);
         assert!(store.should_ask(Kind::SavedPins));

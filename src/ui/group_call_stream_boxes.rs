@@ -39,7 +39,11 @@ use quill::lang::{keys, tr, tr_with};
 /// The box over the stream window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StreamOverlay {
-    Settings,
+    /// `key_shown`: the Stream Key was revealed after its warning. It
+    /// lives in the box, so every way out of the box hides it again.
+    Settings {
+        key_shown: bool,
+    },
     /// The Speakers list (`ChoosePlaybackDeviceBox`).
     Speakers,
     /// Leave or end; `end` starts with "End live stream" ticked.
@@ -70,9 +74,8 @@ impl QuillApp {
     }
 
     pub(super) fn close_stream_overlay(&mut self, cx: &mut Context<Self>) {
-        self.group_call.stream.overlay = None;
         // The key shows again only after the warning.
-        self.group_call.stream.key_shown = false;
+        self.group_call.stream.overlay = None;
         cx.notify();
     }
 
@@ -91,7 +94,7 @@ impl QuillApp {
                 .size(px(44.))
                 .tooltip(tr(keys::GROUP_CALL_SETTINGS))
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.open_stream_overlay(StreamOverlay::Settings, cx)
+                    this.open_stream_overlay(StreamOverlay::Settings { key_shown: false }, cx)
                 }))
                 .into_any_element();
         }
@@ -125,7 +128,7 @@ impl QuillApp {
                     |this, _, cx| this.toggle_group_call_recording(cx),
                 ))
                 .item(item(tr(keys::GROUP_CALL_SETTINGS), |this, _, cx| {
-                    this.open_stream_overlay(StreamOverlay::Settings, cx)
+                    this.open_stream_overlay(StreamOverlay::Settings { key_shown: false }, cx)
                 }))
                 .item(item(tr(keys::GROUP_CALL_END_CHANNEL), |this, _, cx| {
                     this.open_stream_overlay(StreamOverlay::Leave { end: true }, cx)
@@ -161,7 +164,7 @@ impl QuillApp {
     ) -> Option<AnyElement> {
         let overlay = self.group_call.stream.overlay?;
         let content = match overlay {
-            StreamOverlay::Settings => self.stream_settings_box(facts, cx),
+            StreamOverlay::Settings { key_shown } => self.stream_settings_box(facts, key_shown, cx),
             StreamOverlay::Speakers => self.stream_speakers_box(cx),
             StreamOverlay::Leave { end } => self.stream_leave_box(facts, end, cx),
             StreamOverlay::RevokeKey => confirm_box(
@@ -171,7 +174,7 @@ impl QuillApp {
                 cx,
                 |this, cx| {
                     this.replace_video_chat_rtmp_url(cx);
-                    this.open_stream_overlay(StreamOverlay::Settings, cx);
+                    this.open_stream_overlay(StreamOverlay::Settings { key_shown: false }, cx);
                 },
             ),
             StreamOverlay::KeyWarning => confirm_box(
@@ -180,8 +183,7 @@ impl QuillApp {
                 true,
                 cx,
                 |this, cx| {
-                    this.group_call.stream.key_shown = true;
-                    this.open_stream_overlay(StreamOverlay::Settings, cx);
+                    this.open_stream_overlay(StreamOverlay::Settings { key_shown: true }, cx);
                 },
             ),
         };
@@ -217,7 +219,12 @@ impl QuillApp {
         )
     }
 
-    fn stream_settings_box(&mut self, facts: &StreamFacts, cx: &mut Context<Self>) -> AnyElement {
+    fn stream_settings_box(
+        &mut self,
+        facts: &StreamFacts,
+        key_shown: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let speaker = self
             .call_device_sections(DeviceMenuTarget::Audio)
             .into_iter()
@@ -241,7 +248,9 @@ impl QuillApp {
                 .hover(|style| style.bg(hsla(0., 0., 0.5, 0.12)))
                 .child(div().child(label))
         };
-        let rtmp = (facts.manager).then(|| self.stream_rtmp_rows(cx)).flatten();
+        let rtmp = (facts.manager)
+            .then(|| self.stream_rtmp_rows(key_shown, cx))
+            .flatten();
         div()
             .flex()
             .flex_col()
@@ -322,17 +331,16 @@ impl QuillApp {
     }
 
     /// Server URL and Stream Key for managers, once the URL is known.
-    fn stream_rtmp_rows(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn stream_rtmp_rows(&self, key_shown: bool, cx: &mut Context<Self>) -> Option<AnyElement> {
         let call = self.session()?.calls.active_group_call.as_ref()?;
         let url = call.rtmp_url.clone().filter(|url| !url.is_empty())?;
         let key = call.rtmp_stream_key.clone().unwrap_or_default();
-        let shown = self.group_call.stream.key_shown;
         Some(rtmp_info_rows(
             RtmpRows {
                 prefix: "group-call-stream",
                 url,
                 key,
-                key_shown: shown,
+                key_shown,
                 revoke_label: tr(keys::GROUP_CALL_RTMP_REVOKE),
             },
             cx,
@@ -400,7 +408,10 @@ impl QuillApp {
                         .label(tr(keys::BOX_DONE))
                         .primary()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.open_stream_overlay(StreamOverlay::Settings, cx)
+                            this.open_stream_overlay(
+                                StreamOverlay::Settings { key_shown: false },
+                                cx,
+                            )
                         })),
                 ),
             )
@@ -551,7 +562,10 @@ fn confirm_box(
                         .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.open_stream_overlay(StreamOverlay::Settings, cx)
+                            this.open_stream_overlay(
+                                StreamOverlay::Settings { key_shown: false },
+                                cx,
+                            )
                         })),
                 )
                 .child(

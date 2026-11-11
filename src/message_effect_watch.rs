@@ -12,13 +12,14 @@
 //! not the effect then plays (power saving can skip it).
 #![deny(clippy::indexing_slicing)]
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 /// A message: chat id and message id.
 pub type MessageKey = (i64, i64);
 
-/// Messages remembered in each set, at most. Past it the set starts over;
-/// a forgotten message at worst plays or skips its effect once more.
+/// Messages remembered in each set, at most. Past it the oldest is
+/// forgotten; a forgotten message at worst plays or skips its effect once
+/// more.
 const MAX_KEYS: usize = 16_384;
 
 /// How a message with an effect reached the session.
@@ -43,15 +44,42 @@ impl EffectArrival {
     }
 }
 
+/// A set that forgets its oldest key when it is full, so a busy session
+/// never replays an effect it forgot or loses one that has not played.
 #[derive(Debug, Default)]
-struct BoundedKeys(HashSet<MessageKey>);
+struct BoundedKeys {
+    keys: HashSet<MessageKey>,
+    /// Insertion order. It may hold keys that were removed since; those
+    /// are skipped when the oldest is dropped.
+    order: VecDeque<MessageKey>,
+}
 
 impl BoundedKeys {
     fn insert(&mut self, key: MessageKey) {
-        if self.0.len() >= MAX_KEYS {
-            self.0.clear();
+        if !self.keys.insert(key) {
+            return;
         }
-        self.0.insert(key);
+        self.order.push_back(key);
+        while self.keys.len() > MAX_KEYS {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            self.keys.remove(&oldest);
+        }
+        // Removed keys leave their place in `order`: shed them when they
+        // outnumber the live ones.
+        if self.order.len() > MAX_KEYS * 2 {
+            let keys = &self.keys;
+            self.order.retain(|key| keys.contains(key));
+        }
+    }
+
+    fn contains(&self, key: &MessageKey) -> bool {
+        self.keys.contains(key)
+    }
+
+    fn remove(&mut self, key: &MessageKey) -> bool {
+        self.keys.remove(key)
     }
 }
 
@@ -66,7 +94,7 @@ pub struct EffectWatch {
 impl EffectWatch {
     /// A message sent with an effect was stored (again).
     pub fn note(&mut self, key: MessageKey, arrival: EffectArrival) {
-        if arrival.starts_unwatched() && !self.watched.0.contains(&key) {
+        if arrival.starts_unwatched() && !self.watched.contains(&key) {
             self.unwatched.insert(key);
         }
     }
@@ -74,20 +102,20 @@ impl EffectWatch {
     /// A message sent from here got its final id (or failed under a new
     /// one): the effect it has not played moves with it.
     pub fn renamed(&mut self, old: MessageKey, new: MessageKey) {
-        if self.unwatched.0.remove(&old) {
+        if self.unwatched.remove(&old) {
             self.unwatched.insert(new);
         }
     }
 
     pub fn is_unwatched(&self, key: MessageKey) -> bool {
-        self.unwatched.0.contains(&key)
+        self.unwatched.contains(&key)
     }
 
     /// tdesktop `markEffectWatched`: the message was shown. Returns
     /// whether its effect had not played, so this is its one automatic
     /// play.
     pub fn mark_watched(&mut self, key: MessageKey) -> bool {
-        let was = self.unwatched.0.remove(&key);
+        let was = self.unwatched.remove(&key);
         self.watched.insert(key);
         was
     }
@@ -162,7 +190,26 @@ mod tests {
             watch.note((2, id), EffectArrival::SentHere);
             watch.mark_watched((3, id));
         }
-        assert!(watch.unwatched.0.len() <= MAX_KEYS);
-        assert!(watch.watched.0.len() <= MAX_KEYS);
+        assert!(watch.unwatched.keys.len() <= MAX_KEYS);
+        assert!(watch.watched.keys.len() <= MAX_KEYS);
+    }
+
+    #[test]
+    fn a_full_set_forgets_the_oldest_message_only() {
+        let mut watch = EffectWatch::default();
+        for id in 0..MAX_KEYS as i64 {
+            watch.note((2, id), EffectArrival::SentHere);
+            watch.mark_watched((3, id));
+        }
+        // One more message: only the oldest goes.
+        watch.note((2, -1), EffectArrival::SentHere);
+        assert!(watch.is_unwatched((2, -1)));
+        assert!(!watch.is_unwatched((2, 0)));
+        assert!(watch.is_unwatched((2, 1)));
+        // A message that played long ago but not the oldest stays watched
+        // when a history page brings it back.
+        watch.mark_watched((3, -1));
+        watch.note((3, 5), EffectArrival::Incoming { unread: true });
+        assert!(!watch.is_unwatched((3, 5)));
     }
 }

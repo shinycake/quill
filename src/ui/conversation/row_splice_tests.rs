@@ -221,6 +221,53 @@ fn text_message(id: i64, sender: Option<i64>, date: i64, extra: &str) -> String 
     )
 }
 
+fn row_expanded(app: &QuillApp, n: i64) -> Option<bool> {
+    app.history.rows.iter().find_map(|row| match row {
+        HistoryRow::Single(row) if row.message.id == MessageId(id(n)) => {
+            Some(row.fact_check_expanded)
+        }
+        _ => None,
+    })
+}
+
+/// A fact check is expanded in the chat it belongs to, in this view only:
+/// a toggle for another chat changes nothing, and a chat change starts
+/// every one collapsed.
+#[gpui_kit::test]
+fn a_fact_check_expands_per_chat_view(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    mixed_group(&app, vcx);
+    let toggle = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, chat: i64| {
+        app.update(vcx, |app, cx| {
+            app.toggle_fact_check(ChatId(chat), MessageId(id(100)), cx)
+        });
+        frames(vcx);
+    };
+    assert_eq!(
+        app.read_with(vcx, |app, _| row_expanded(app, 100)),
+        Some(false)
+    );
+    toggle(&app, vcx, 99);
+    assert_eq!(
+        app.read_with(vcx, |app, _| row_expanded(app, 100)),
+        Some(false)
+    );
+    toggle(&app, vcx, 31);
+    assert_eq!(
+        app.read_with(vcx, |app, _| row_expanded(app, 100)),
+        Some(true)
+    );
+    toggle(&app, vcx, 31);
+    assert_eq!(
+        app.read_with(vcx, |app, _| row_expanded(app, 100)),
+        Some(false)
+    );
+    toggle(&app, vcx, 31);
+    app.update(vcx, |app, cx| app.enter_chat_ui(ChatId(99), cx));
+    assert!(app.read_with(vcx, |app, _| app.chat_ui.fact_check_expanded.is_empty()));
+}
+
 #[gpui_kit::test]
 fn patched_and_spliced_rows_equal_a_full_build(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");

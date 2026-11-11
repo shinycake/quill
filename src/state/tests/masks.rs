@@ -147,6 +147,30 @@ fn a_confirmed_change_drops_both_lists_and_an_error_marks_failure() {
 }
 
 #[test]
+fn a_pending_change_is_pending_for_its_own_set_only() {
+    let (mut session, _sink) = session();
+    session.request(
+        StickersPurpose::ChangeMaskSet {
+            set_id: 11,
+            installed: true,
+            archived: false,
+        }
+        .into(),
+        None,
+    );
+    assert!(session.mask_set_change_pending(11));
+    assert!(
+        !session.mask_set_change_pending(12),
+        "another row stays live"
+    );
+    session.request(StickersPurpose::ReorderInstalledMaskSets.into(), None);
+    assert!(
+        session.mask_set_change_pending(12),
+        "a reorder moves every row"
+    );
+}
+
+#[test]
 fn installed_order_updates_route_by_sticker_type() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);

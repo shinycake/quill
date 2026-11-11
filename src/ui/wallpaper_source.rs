@@ -19,6 +19,9 @@ pub(super) struct Rendered {
     pub raster: Raster,
     pub x: i32,
     pub y: i32,
+    /// `false` for the fill shown alone because the pattern file could not
+    /// be read: good enough to paint, but the cache asks again later.
+    pub complete: bool,
 }
 
 /// A decoded pattern file.
@@ -82,16 +85,18 @@ impl Pattern {
 /// decoding again. Two of each: the chat on screen and the one before.
 #[derive(Default)]
 pub(super) struct Sources {
-    photos: Vec<((PathBuf, bool), Option<Arc<Raster>>)>,
-    patterns: Vec<(PathBuf, Option<Arc<Pattern>>)>,
-    masks: Vec<((PathBuf, u32, u32), Option<Arc<Mask>>)>,
+    photos: Vec<((PathBuf, bool), Arc<Raster>)>,
+    patterns: Vec<(PathBuf, Arc<Pattern>)>,
+    masks: Vec<((PathBuf, u32, u32), Arc<Mask>)>,
 }
 
 const KEEP: usize = 2;
 
-/// The value for `key`, made once and kept among the last [`KEEP`].
+/// The value for `key`, made once and kept among the last [`KEEP`]. A
+/// failure is not kept: a file that could not be read a moment ago (it was
+/// being rewritten) is read again by the next render.
 fn remember<K: PartialEq, V: Clone>(
-    list: &mut Vec<(K, Option<V>)>,
+    list: &mut Vec<(K, V)>,
     key: K,
     make: impl FnOnce() -> Option<V>,
 ) -> Option<V> {
@@ -99,14 +104,14 @@ fn remember<K: PartialEq, V: Clone>(
         let entry = list.remove(at);
         let value = entry.1.clone();
         list.push(entry);
-        return value;
+        return Some(value);
     }
-    let value = make();
+    let value = make()?;
     if list.len() >= KEEP {
         list.remove(0);
     }
     list.push((key, value.clone()));
-    value
+    Some(value)
 }
 
 /// A photo as tdesktop prepares it: long images trimmed to 40:1, at most
@@ -184,7 +189,12 @@ impl Sources {
         if width == 0 || height == 0 {
             return None;
         }
-        let whole = |raster| Rendered { raster, x: 0, y: 0 };
+        let whole = |raster| Rendered {
+            raster,
+            x: 0,
+            y: 0,
+            complete: true,
+        };
         match wallpaper {
             Wallpaper::Solid(color) => Some(whole(compose_fill(
                 &FillSampler::new(&quill::telegram::envelope::BackgroundFill::Solid(*color)),
@@ -210,7 +220,10 @@ impl Sources {
                 // Until the pattern reads, the fill shows alone (tdesktop
                 // paints the gradient while the pattern loads).
                 let Some(pattern) = pattern else {
-                    return Some(whole(compose_fill(&sampler, width, height)));
+                    return Some(Rendered {
+                        complete: false,
+                        ..whole(compose_fill(&sampler, width, height))
+                    });
                 };
                 let (pw, ph) = pattern.size();
                 let (tw, th) = pattern_tile_size(pw, ph, height);
@@ -240,6 +253,7 @@ impl Sources {
                     raster,
                     x: to.x,
                     y: to.y,
+                    complete: true,
                 })
             }
         }
@@ -357,7 +371,7 @@ mod tests {
 
     #[test]
     fn sources_keep_only_the_last_two() {
-        let mut list: Vec<(u8, Option<u8>)> = Vec::new();
+        let mut list: Vec<(u8, u8)> = Vec::new();
         let mut made = 0;
         for key in [1, 2, 1, 3, 1] {
             remember(&mut list, key, || {
@@ -367,5 +381,36 @@ mod tests {
         }
         assert_eq!(made, 3, "1 and 2 made, 1 reused, 3 made, 1 kept");
         assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn a_failed_read_is_made_again_not_remembered() {
+        let mut list: Vec<(u8, u8)> = Vec::new();
+        let mut tries = 0;
+        for _ in 0..2 {
+            let got = remember(&mut list, 1, || {
+                tries += 1;
+                (tries > 1).then_some(9)
+            });
+            assert_eq!(got.is_some(), tries > 1);
+        }
+        assert_eq!(tries, 2);
+        assert_eq!(list, vec![(1, 9)]);
+    }
+
+    #[test]
+    fn an_unreadable_pattern_paints_the_fill_but_is_not_complete() {
+        let mut sources = Sources::default();
+        let pattern = Wallpaper::Pattern {
+            fill: BackgroundFill::Solid(0x336699),
+            path: "/nonexistent/quill-pattern.svg".into(),
+            intensity: 50,
+            inverted: false,
+            rotation: 0,
+        };
+        let out = sources.render(&pattern, 8, 8).unwrap();
+        assert!(!out.complete);
+        let solid = sources.render(&Wallpaper::Solid(0x336699), 8, 8).unwrap();
+        assert!(solid.complete);
     }
 }

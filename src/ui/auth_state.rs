@@ -27,10 +27,6 @@ pub(crate) struct AuthUi {
     /// is never stored beyond the input widget — it is zeroized after
     /// submit (the A2 rule).
     pub(super) recovery_code_input: Entity<TextareaState>,
-    /// Slice A10: the password screen is showing recovery-code entry
-    /// instead of password entry. Pure UI state, reset when auth leaves
-    /// WaitPassword.
-    pub(super) recovery_mode: bool,
     /// Batch 4: the attempts the user just terminated from the new-login
     /// alert ("New Login Prevented" box), until acknowledged.
     pub(super) login_prevented: Option<Vec<String>>,
@@ -135,7 +131,6 @@ impl AuthUi {
             code_input,
             password_input,
             recovery_code_input,
-            recovery_mode: false,
             login_prevented: None,
             terms_prompt: None,
             qr_login_cache: None,

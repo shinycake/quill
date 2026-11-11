@@ -148,6 +148,36 @@ impl Session {
         self.finish_translation(job, Translation::Failed("send".into()));
     }
 
+    /// "Load full message" of this message is out.
+    pub fn full_rich_loading(&self, chat_id: ChatId, message_id: MessageId) -> bool {
+        self.messages
+            .full_rich_loads
+            .get(&crate::ids::ChatMessage::new(chat_id, message_id))
+            .is_some_and(|load| load.is_loading())
+    }
+
+    /// Jobs whose request is gone without an answer (a dropped
+    /// continuation, a restarted client) fail, so they stop holding a place
+    /// in the pump's in-flight cap and their messages are not "pending"
+    /// for good.
+    pub fn fail_orphaned_translations(&mut self) {
+        let orphans: Vec<u64> = self
+            .messages
+            .translate
+            .jobs
+            .keys()
+            .copied()
+            .filter(|job| {
+                !self.requests.has_purpose(RequestPurpose::Messages(
+                    MessagesPurpose::TranslateJob { job: *job },
+                ))
+            })
+            .collect();
+        for job in orphans {
+            self.finish_translation(job, Translation::Failed("lost".into()));
+        }
+    }
+
     /// Record the answer (or failure) of a job.
     pub(crate) fn finish_translation(&mut self, job: u64, result: Translation) {
         let Some(finished) = self.messages.translate.jobs.remove(&job) else {

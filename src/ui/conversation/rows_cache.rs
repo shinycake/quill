@@ -295,12 +295,7 @@ impl QuillApp {
             .map(|draft| (draft.from_chat_id.0, draft.message_ids))
             .hash(&mut hasher);
         self.stream_rows_hash().hash(&mut hasher);
-        let mut fact_checks: Vec<(i64, i64)> = self
-            .message_ui
-            .fact_check_expanded
-            .iter()
-            .copied()
-            .collect();
+        let mut fact_checks: Vec<i64> = self.chat_ui.fact_check_expanded.iter().copied().collect();
         fact_checks.sort_unstable();
         fact_checks.hash(&mut hasher);
         self.vanish_rows_hash().hash(&mut hasher);

@@ -98,7 +98,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || set_id <= 0 || installed && archived {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.mask_change_pending() {
+        if self.session.mask_set_change_pending(set_id) {
             return Ok(None);
         }
         self.mask_request(
@@ -213,9 +213,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             .collect();
         for set_id in wanted {
             self.session.stickers.masks.set_requested.insert(set_id);
-            self.mask_request(StickersPurpose::GetMaskSet { set_id }.into(), |id| {
-                get_sticker_set(id, set_id)
-            })?;
+            if let Err(err) = self
+                .mask_request(StickersPurpose::GetMaskSet { set_id }.into(), |id| {
+                    get_sticker_set(id, set_id)
+                })
+            {
+                // Never left: asked again on the next strip refresh.
+                self.session.stickers.masks.set_requested.remove(&set_id);
+                return Err(err);
+            }
         }
         let files: Vec<_> = self
             .session

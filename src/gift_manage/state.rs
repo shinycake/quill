@@ -25,6 +25,25 @@ pub enum GiftFlow {
     DeleteCollection(i32),
 }
 
+impl GiftFlow {
+    /// Whether the answer of `purpose` belongs to this flow: only the box
+    /// that asked closes on it, not whichever one is open when it lands.
+    pub fn answers(&self, purpose: crate::state::PaymentsPurpose) -> bool {
+        use crate::state::PaymentsPurpose as P;
+        matches!(
+            (self, purpose),
+            (Self::Upgrade { .. }, P::UpgradeGift)
+                | (Self::Resale { .. }, P::SetGiftResalePrice)
+                | (
+                    Self::NewCollection | Self::RenameCollection(_),
+                    P::ChangeGiftCollection
+                )
+                | (Self::DeleteCollection(_), P::DeleteGiftCollection)
+                | (Self::DeleteCollection(_), P::ChangeGiftCollection)
+        )
+    }
+}
+
 /// One list the send-gift dialog asks for when it opens. The dialog is
 /// rebuilt for each recipient, so only the answer (or failure) of the
 /// request named here lands; an earlier box's is dropped.
@@ -151,6 +170,13 @@ impl GiftManageState {
         match &mut self.flow {
             Some(GiftFlow::Transfer(picker)) => Some(picker),
             _ => None,
+        }
+    }
+
+    /// The flow that sent `purpose` is done; any other open flow stays.
+    pub fn close_flow_answered_by(&mut self, purpose: crate::state::PaymentsPurpose) {
+        if self.flow.as_ref().is_some_and(|flow| flow.answers(purpose)) {
+            self.flow = None;
         }
     }
 

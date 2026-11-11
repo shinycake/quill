@@ -432,6 +432,26 @@ impl JoinPage {
     }
 }
 
+/// A confirm box's request: none, or the one it waits for. An answer for
+/// another request (a closed box's, or an earlier box's) is not this box's.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BoxSend {
+    #[default]
+    Idle,
+    Sending(crate::ids::RequestId),
+}
+
+impl BoxSend {
+    pub fn is_sending(self) -> bool {
+        matches!(self, Self::Sending(_))
+    }
+
+    /// `request` is the one this box waits for.
+    pub fn waits_for(self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(self, Self::Sending(waiting) if Some(waiting) == request)
+    }
+}
+
 /// tdesktop `JoinStarRefBox`: join one bot's program.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JoinBox {
@@ -442,7 +462,43 @@ pub struct JoinBox {
     /// The user picks the recipient among their own peers (tdesktop
     /// `requireOthers`: the user's own page or "View existing programs").
     pub choose_recipient: bool,
-    pub joining: bool,
+    pub stage: JoinStage,
+}
+
+/// Where the join box stands: only the answer of `Joining`'s own request
+/// closes it (the error returns it to `Open`), so a late answer of a box
+/// the user left acts on nothing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum JoinStage {
+    #[default]
+    Open,
+    Joining(crate::ids::RequestId),
+}
+
+impl JoinStage {
+    pub fn is_joining(self) -> bool {
+        matches!(self, Self::Joining(_))
+    }
+
+    pub fn waits_for(self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(self, Self::Joining(waiting) if Some(waiting) == request)
+    }
+}
+
+/// A click on a program asks whether it is joined
+/// (`getConnectedAffiliateProgram`). Only that request's answer opens a
+/// box; leaving the page or a newer click returns it to `Idle`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Resolve {
+    #[default]
+    Idle,
+    Asking(crate::ids::RequestId),
+}
+
+impl Resolve {
+    pub fn waits_for(self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(self, Self::Asking(waiting) if Some(waiting) == request)
+    }
 }
 
 /// tdesktop `StarRefLinkBox`: a joined program's link.
@@ -457,7 +513,7 @@ pub struct LinkBox {
 pub struct RevokeBox {
     pub program: ConnectedProgram,
     pub recipient: EarnPeer,
-    pub sending: bool,
+    pub send: BoxSend,
 }
 
 /// Who may receive commissions, as the two list requests settle it.
@@ -508,6 +564,8 @@ pub struct EarnState {
     pub join: Option<JoinPage>,
     pub join_box: Option<JoinBox>,
     pub link_box: Option<LinkBox>,
+    /// The click on a program that is being resolved.
+    pub resolve: Resolve,
     pub revoke: Option<RevokeBox>,
     /// "View existing programs" of the setup page (tdesktop
     /// `ProgramsListBox`).

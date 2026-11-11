@@ -6,20 +6,35 @@ use super::super::target::{Target, chat_schema, require};
 use super::super::{Ctx, ToolError, ToolOutput, int_arg};
 use super::common::{self, TEXT_LIMIT, change, confirm, formatted, message_ids, required_text};
 use crate::agent::grants::Scope;
+use crate::agent::td::{self, TdError};
 use serde_json::{Value, json};
 
 fn message_id_schema(what: &str) -> Value {
     json!({"type": "integer", "description": what})
 }
 
+/// TDLib's answer for a message that does not exist, as against a network
+/// or flood error that says nothing about it.
+fn is_missing(error: &TdError) -> bool {
+    matches!(error, TdError::Td { code: 400 | 404, message }
+        if message.to_ascii_lowercase().contains("not found"))
+}
+
 fn get_message(ctx: &Ctx, target: &Target, id: i64) -> Result<Value, ToolError> {
-    ctx.call(json!({"@type": "getMessage", "chat_id": target.chat_id, "message_id": id}))
-        .map_err(|_| {
+    td::call(
+        &ctx.client,
+        json!({"@type": "getMessage", "chat_id": target.chat_id, "message_id": id}),
+    )
+    .map_err(|error| {
+        if is_missing(&error) {
             ToolError::new(format!(
                 "There is no message {id} in \"{}\". Message ids come from list_messages or read_history.",
                 target.title
             ))
-        })
+        } else {
+            ToolError::from(error)
+        }
+    })
 }
 
 fn properties(ctx: &Ctx, target: &Target, id: i64) -> Value {
@@ -104,7 +119,16 @@ pub fn edit_message(args: &Value) -> Result<ToolOutput, ToolError> {
         request,
         vec![id],
     )?;
-    let edited = get_message(&ctx, &target, id)?;
+    // The edit went through; a failed re-read must not report it as failed.
+    let Ok(edited) = get_message(&ctx, &target, id) else {
+        return Ok(done(
+            format!(
+                "Edited message {id} in \"{}\". Quill could not read it back; call get_message to see it.",
+                target.title
+            ),
+            json!({"chat": target.summary(), "message_id": id, "edited": true}),
+        ));
+    };
     let shaped = messages::shape(&edited, target.me, Detail::Full, &mut Names::new(&ctx));
     Ok(done(
         format!(
@@ -274,4 +298,22 @@ pub fn pin_message(args: &Value) -> Result<ToolOutput, ToolError> {
         format!("{verb} message {id} in \"{}\".", target.title),
         json!({"chat": target.summary(), "message_id": id, "pinned": !unpin}),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TdError, is_missing};
+
+    #[test]
+    fn only_a_not_found_answer_means_no_such_message() {
+        let td = |code, message: &str| TdError::Td {
+            code,
+            message: message.into(),
+        };
+        assert!(is_missing(&td(400, "Message not found")));
+        assert!(!is_missing(&td(429, "Too Many Requests: retry after 5")));
+        assert!(!is_missing(&td(400, "Chat is not accessible")));
+        assert!(!is_missing(&TdError::Timeout));
+        assert!(!is_missing(&TdError::Send));
+    }
 }

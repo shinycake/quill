@@ -441,3 +441,35 @@ fn suggest_emoji_says_so_when_the_lookup_fails(cx: &mut TestAppContext) {
         );
     });
 }
+
+/// 09-081: the word bar and the `:` suggestions share one `EmojiBarUi`.
+/// A word bar closed by typing on (the word no longer lit) or by the
+/// setting leaves it a closed strip, so the next word's bar does not open
+/// already expanded.
+#[gpui_kit::test]
+fn a_word_bar_closed_by_the_composer_does_not_leave_the_grid_open(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.simulate_input("we got pizza and cake for the party later tonight with friends ");
+    frame(vcx);
+    app.update(vcx, |app, _| {
+        app.hover_highlight(0);
+        app.composer_ui.suggest.bar.expanded = true;
+    });
+    app.update(vcx, |app, _| app.chat_prefs.highlight_emoji_words = false);
+    frame(vcx);
+    app.read_with(vcx, |app, _| {
+        assert!(app.composer_ui.emoji_words.hovered.is_none());
+        assert!(!app.composer_ui.suggest.bar.expanded, "closed with its bar");
+    });
+    app.update(vcx, |app, _| app.chat_prefs.highlight_emoji_words = true);
+    frame(vcx);
+    app.update(vcx, |app, _| {
+        app.hover_highlight(1);
+        app.composer_ui.suggest.bar.expanded = true;
+    });
+    app.update(vcx, |app, cx| app.emoji_words_turned_off(cx));
+    app.read_with(vcx, |app, _| {
+        assert!(!app.composer_ui.suggest.bar.expanded, "turned off");
+    });
+}

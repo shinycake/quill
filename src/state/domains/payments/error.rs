@@ -232,7 +232,7 @@ impl Session {
             // UI drains `chat_action_error`); the optimistic state was
             // never changed, so nothing to roll back.
             Some(RequestPurpose::DeleteSavedOrderInfo | RequestPurpose::DeleteSavedCredentials) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not clear saved payment info (error {})",
                     err.code
                 ));
@@ -254,7 +254,7 @@ impl Session {
                 self.apply_earn_error(err, purpose, pending.map(|p| p.id))
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::SuggestedPost(purpose))) => {
-                self.apply_suggested_post_error(err, purpose)
+                self.apply_suggested_post_error(err, purpose, pending.map(|p| p.id))
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GiftMarket(purpose))) => {
                 self.apply_gift_market_error(err, purpose, pending.map_or(0, |p| p.id.0))

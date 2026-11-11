@@ -84,7 +84,7 @@ fn driver_new_chats_folder_read_and_premium_limit() {
         .ingest(copy_and_parse(&refused, &seq, &dyn_sink).unwrap())
         .unwrap();
     assert!(driver.session.chat_list.folder_new_chats.contains_key(&5));
-    assert!(driver.session.chats_state.chat_action_error.is_some());
+    assert!(!driver.session.chats_state.chat_action_error.is_empty());
     let process = driver
         .process_folder_new_chats(5, &[41])
         .expect("process again")

@@ -565,5 +565,5 @@ fn a_refused_username_change_reports_an_error() {
         r#"{{"@type":"error","@extra":"{}","code":400,"message":"USERNAMES_ACTIVE_TOO_MUCH"}}"#,
         extra.0
     ));
-    assert!(rig.driver.session.chats_state.chat_action_error.is_some());
+    assert!(!rig.driver.session.chats_state.chat_action_error.is_empty());
 }

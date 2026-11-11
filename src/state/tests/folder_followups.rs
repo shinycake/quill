@@ -224,11 +224,11 @@ fn a_refused_folder_reorder_or_tags_switch_says_why() {
         RequestPurpose::ReorderChatFolders,
         RequestPurpose::ToggleChatFolderTags,
     ] {
-        assert!(session.chats_state.chat_action_error.is_none());
+        assert!(session.chats_state.chat_action_error.is_empty());
         let extra = session.request(purpose, None);
         refuse(&mut session, &seq, &sink, extra, "PREMIUM_ACCOUNT_REQUIRED");
         assert!(
-            session.chats_state.chat_action_error.take().is_some(),
+            !session.chats_state.chat_action_error.take_all().is_empty(),
             "{purpose:?}: the toast is not silent"
         );
     }

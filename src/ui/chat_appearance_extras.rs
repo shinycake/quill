@@ -150,7 +150,10 @@ impl QuillApp {
                     .iter()
                     .map(|set| (set.id, set.title.clone()))
                     .collect();
-                (sets, emoji.installed_loaded)
+                (
+                    sets,
+                    matches!(emoji.installed, quill::state::fetch::Fetch::Ready(())),
+                )
             })
             .unwrap_or_default();
         let empty = sets.is_empty();

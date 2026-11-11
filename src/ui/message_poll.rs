@@ -360,7 +360,10 @@ pub(super) fn poll_option_row(
             .child(super::message_text::rich_text_line(
                 &option.text,
                 &option.entities,
-                (chat_id.0, key.0 as u64 * 64 + key.1),
+                (
+                    chat_id.0,
+                    (key.0 as u64).wrapping_mul(64).wrapping_add(key.1),
+                ),
                 false,
                 &Default::default(),
                 px(14.),
@@ -409,7 +412,12 @@ pub(super) fn poll_option_row(
             |this, (fill, mark)| this.child(result_bar(fill, ink.mark(mark), rtl)),
         );
     let mut row = div()
-        .id(("poll-option", message_id.0 as u64 * 64 + index as u64))
+        .id((
+            "poll-option",
+            (message_id.0 as u64)
+                .wrapping_mul(64)
+                .wrapping_add(index as u64),
+        ))
         .flex()
         .when(rtl, |this| this.flex_row_reverse())
         .gap(LEAD_GAP)
@@ -438,6 +446,7 @@ pub(super) fn poll_option_row(
         }),
     );
     if poll.can_vote() {
+        let vote_option_id = option.id.clone();
         row = row
             .role(gpui_kit::Role::Button)
             .aria_label(tr_with(
@@ -448,7 +457,7 @@ pub(super) fn poll_option_row(
             .cursor_pointer()
             .pressable(cx.theme())
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.vote_on_poll(chat_id, message_id, index, cx);
+                this.vote_on_poll(chat_id, message_id, &vote_option_id, cx);
             }));
     }
     row.test_support().into_any_element()

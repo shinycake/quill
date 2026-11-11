@@ -343,7 +343,13 @@ impl QuillApp {
             .session()
             .and_then(|s| s.bots.inline_query.as_ref())
             .is_some_and(|slot| {
-                slot.chat_id == chat_id && slot.bot_user_id == user_id && slot.query == query
+                // A failed first page is asked again by the next composer
+                // event (the user retyping the query); only the events of
+                // the composer ask, never a frame or a poll.
+                slot.chat_id == chat_id
+                    && slot.bot_user_id == user_id
+                    && slot.query == query
+                    && !matches!(slot.fetch, quill::state::InlineQueryFetch::Failed(_))
             });
         if fresh {
             return;
@@ -424,6 +430,8 @@ impl QuillApp {
         self.chat_ui.inline_results_open = false;
         self.chat_ui.inline_results_selected = 0;
         self.chat_ui.inline_query_armed = None;
+        // A query waiting out its pause is for a panel that is gone.
+        self.composer_ui.inline_query_token = self.composer_ui.inline_query_token.wrapping_add(1);
         cx.notify();
         true
     }

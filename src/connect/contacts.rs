@@ -30,6 +30,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.session.request(RequestPurpose::GetContacts, None);
         if let Err(err) = self.sender.send_json(&get_contacts(extra)) {
             self.session.requests.take(extra);
+            // Nothing is in flight: the tab shows the error and its Retry,
+            // not "Loading contacts...".
+            self.session.users_state.contacts_error = true;
             return Err(err);
         }
         Ok(Some(extra))
@@ -146,6 +149,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request_for_user(RequestPurpose::GetUserFullInfo, user_id);
         if let Err(err) = self.sender.send_json(&get_user_full_info(extra, user_id)) {
             self.session.requests.take(extra);
+            self.session.release_userpic_full_info_ask(user_id);
             return Err(err);
         }
         Ok(Some(extra))
@@ -434,6 +438,18 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// files).
     pub fn save_contact_prefs(&mut self) -> std::io::Result<()> {
         save_contact_prefs(&self.paths, &self.session.settings.contact_prefs)
+    }
+
+    /// Switch "Sync contacts" and save it. A save that fails leaves the
+    /// switch where it was, so what shows and what a restart reads agree.
+    pub fn set_contact_sync(&mut self, on: bool) -> std::io::Result<()> {
+        let was = self.session.settings.contact_prefs.sync_enabled;
+        self.session.settings.contact_prefs.sync_enabled = on;
+        let saved = self.save_contact_prefs();
+        if saved.is_err() {
+            self.session.settings.contact_prefs.sync_enabled = was;
+        }
+        saved
     }
 
     /// Phase 6: download the small profile photo for the user info panel

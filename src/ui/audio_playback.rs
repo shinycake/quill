@@ -203,8 +203,12 @@ impl QuillApp {
                 .step(0.1)
                 .default_value(offset_secs.clamp(0.0, duration_secs.max(0.0)) as f32)
         });
-        cx.subscribe(&slider, |this, _entity, event: &SliderEvent, cx| {
-            this.on_seek_event(event, cx);
+        cx.subscribe(&slider, |this, entity, event: &SliderEvent, cx| {
+            // A slider the element still holds from before the track
+            // changed (a drag in progress) is not this track's.
+            if this.playback.seek_slider.as_ref() == Some(&entity) {
+                this.on_seek_event(event, cx);
+            }
         })
         .detach();
         self.playback.seek_slider = Some(slider);

@@ -51,18 +51,10 @@ pub(super) use mute_time::MuteTimeInputs;
 /// --wait` blocks until dismissal). Excess bursts are dropped, not stacked.
 pub(super) const MAX_OS_NOTIFICATION_THREADS: usize = 8;
 
-/// Parity slice: cap for concurrent `quill-sound` player threads.
 /// Parity slice: which settings object a sound-picker choice applies to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum SoundPickerTarget {
-    Chat(ChatId),
-    /// Parity slice (`parity:stories-notify-settings`): per-chat story
-    /// sound (`story_sound_id`), separate from the message sound.
-    ChatStory(ChatId),
-    Scope(NotificationSettingsScope),
-    /// Parity slice: `reactionNotificationSettings` (TDLib 1.8.67, line 3396).
-    Reaction,
-}
+/// It is also where an "Upload Sound" selects the new sound, so it is
+/// defined with the upload (`quill::tone_upload::ToneTarget`).
+pub(super) use quill::tone_upload::ToneTarget as SoundPickerTarget;
 
 /// Parity slice: a sound choice in the picker UI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

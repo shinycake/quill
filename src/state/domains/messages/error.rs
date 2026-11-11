@@ -35,6 +35,22 @@ impl Session {
         ) {
             self.note_premium_limit(err, pending);
         }
+        if let Some(RequestPurpose::Messages(MessagesPurpose::GetFullRichMessage {
+            chat_id,
+            message_id,
+        })) = pending.map(|p| p.purpose)
+        {
+            self.messages.full_rich_loads.insert(
+                crate::ids::ChatMessage::new(chat_id, message_id),
+                crate::state::fetch::Fetch::Failed {
+                    error: format!("could not load the full message (error {})", err.code),
+                    stale: None,
+                },
+            );
+            self.chats_state.chat_action_error.push(
+                crate::lang::tr(crate::lang::keys::Q_MISC_COULD_NOT_LOAD_FULL_MESSAGE).to_string(),
+            );
+        }
         if let Some(RequestPurpose::Messages(MessagesPurpose::GetMessageAvailableReactions {
             message_id,
         })) = pending.map(|p| p.purpose)
@@ -104,6 +120,14 @@ impl Session {
                     "could not delete the reaction: {}",
                     error_reason(err)
                 ));
+            }
+            // A failed `searchChatMembers` for the `@` menu drops its search
+            // (only the one waiting for that request), so the same query is
+            // asked again on the next keystroke instead of never.
+            Some(RequestPurpose::SearchMentionMembers) => {
+                if let Some(id) = pending.map(|p| p.id) {
+                    self.fail_mention_search(id);
+                }
             }
             // kit Phase 9: a failed first `getChatHistory` must not
             // leave the message list without a history entry — the

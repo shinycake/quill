@@ -234,6 +234,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request_for_folder(RequestPurpose::GetChatFolderChatsToLeave, folder_id);
+        self.session
+            .chat_list
+            .folder_chats_to_leave
+            .entry(folder_id)
+            .or_default()
+            .begin();
         if let Err(err) = self.sender.send_json(&{
             serde_json::json!({
                 "@type": "getChatFolderChatsToLeave",
@@ -243,6 +249,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             .to_string()
         }) {
             self.session.requests.take(extra);
+            // The box ends in the error with a Retry, not in "Loading".
+            self.session
+                .chat_list
+                .folder_chats_to_leave
+                .entry(folder_id)
+                .or_default()
+                .fail(err.stage_line());
             return Err(err);
         }
         Ok(Some(extra))

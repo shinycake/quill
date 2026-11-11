@@ -16,8 +16,7 @@ pub struct PendingBotMessage {
     pub keep_on_stop: bool,
     pub content: MessageContent,
     pub expires_at_ms: u64,
-    pub stop_failed: bool,
-    pub stopped: bool,
+    pub stop: BotStopStage,
 }
 
 pub struct Session {

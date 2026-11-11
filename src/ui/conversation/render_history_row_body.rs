@@ -45,7 +45,11 @@ impl QuillApp {
                 }
                 let refs: Vec<&HistoryMessage> = messages.iter().collect();
                 let sender_status = refs.first().and_then(|first| {
-                    self.sender_status_element(chrome.sender.as_ref(), first.id.0, cx)
+                    self.sender_status_element(
+                        chrome.sender.as_ref(),
+                        quill::ids::ChatMessage::new(first.chat_id, first.id),
+                        cx,
+                    )
                 });
                 let avatar = self.history_sender_avatar(
                     chrome,
@@ -115,8 +119,11 @@ impl QuillApp {
                     self.request_animation_tick(gif.fps(), cx);
                 }
                 self.tick_media_spoiler(message, cx);
-                let sender_status =
-                    self.sender_status_element(chrome.sender.as_ref(), message.id.0, cx);
+                let sender_status = self.sender_status_element(
+                    chrome.sender.as_ref(),
+                    quill::ids::ChatMessage::new(message.chat_id, message.id),
+                    cx,
+                );
                 let avatar = self.history_sender_avatar(chrome, message.sender, cx);
                 // A widget fills its bubble edge to edge, inside the
                 // border, as wide as the bubble gets (Telegram Desktop

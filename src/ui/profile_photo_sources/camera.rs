@@ -50,13 +50,17 @@ impl QuillApp {
         sources.note = None;
         sources.serial += 1;
         let serial = sources.serial;
+        let target = self.photo_target();
         let log = work_dir().join("camera.log");
         let choice = self.capture_choice();
         let worker = cx.background_spawn(async move { CameraStream::start(&log, &choice) });
         self.spawn_screen_in(window, cx, async move |this, cx| {
             let result = worker.await;
             let _ = this.update(cx, |this, cx| {
-                if this.sources().map(|s| s.serial) != Some(serial) {
+                // The serial counts per `PhotoSources`: the answer is for
+                // the sources of the box that asked.
+                if this.photo_target() != target || this.sources().map(|s| s.serial) != Some(serial)
+                {
                     return;
                 }
                 match result {
@@ -129,6 +133,10 @@ impl QuillApp {
         sources.serial += 1;
         let serial = sources.serial;
         let rgb = camera.rgb.clone();
+        // The frame kept is the one on screen: the stream stops now, so no
+        // newer frame replaces the picture the JPEG is saved from.
+        camera.stream = None;
+        let owner = self.photo_target();
         // Removed unless the shot is taken (`camera.shot`), also when the
         // screen is gone before the save answers.
         let output =
@@ -144,7 +152,8 @@ impl QuillApp {
         self.spawn_screen(cx, async move |this, cx| {
             let result = worker.await;
             let _ = this.update(cx, |this, cx| {
-                if this.sources().map(|s| s.serial) != Some(serial) {
+                if this.photo_target() != owner || this.sources().map(|s| s.serial) != Some(serial)
+                {
                     return;
                 }
                 match result {
@@ -154,12 +163,16 @@ impl QuillApp {
                             if let Some(frozen) = camera.live.take() {
                                 camera.shot = Some((output.keep(), frozen));
                             }
-                            camera.stream = None;
                             sources.busy = false;
                         }
                         cx.notify();
                     }
-                    Err(message) => this.photo_source_note(message, cx),
+                    Err(message) => {
+                        if let Some(sources) = this.sources_mut() {
+                            sources.busy = false;
+                        }
+                        this.photo_source_note(message, cx);
+                    }
                 }
             });
         })
@@ -190,6 +203,13 @@ impl QuillApp {
         let theme = cx.theme();
         let camera = &sources.camera;
         let taken = camera.shot.is_some();
+        // A frame frozen by a Take photo whose save failed: only a new
+        // camera run can take another.
+        let stopped = camera.live.is_some()
+            && camera.stream.is_none()
+            && !camera.starting
+            && !sources.busy
+            && !taken;
         let picture = camera
             .shot
             .as_ref()
@@ -221,7 +241,7 @@ impl QuillApp {
             .gap_3()
             .child(div().font_semibold().child(tr(keys::Q_PEOPLE_TAKE_A_PHOTO)))
             .child(div().flex().justify_center().child(circle))
-            .child(div().flex().justify_center().child(if taken {
+            .child(div().flex().justify_center().child(if taken || stopped {
                 Button::new("profile-photo-retake")
                     .label(tr(keys::Q_PEOPLE_RETAKE))
                     .ghost()

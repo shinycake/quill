@@ -56,8 +56,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return Ok(None);
         };
-        self.session.threads.thread = None;
-        self.open_thread(chat_id, message_id)
+        // The failed pane stays if the request cannot go out.
+        let failed = self.session.threads.thread.take();
+        let sent = self.open_thread(chat_id, message_id);
+        if sent.is_err() {
+            self.session.threads.thread = failed;
+        }
+        sent
     }
 
     /// The "Couldn't load older messages · Retry" strip of a thread that

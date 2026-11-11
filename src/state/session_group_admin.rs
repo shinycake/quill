@@ -344,6 +344,30 @@ impl Session {
         }
     }
 
+    /// What `set_group_toggle` would return now: the toggle's current value.
+    pub(crate) fn group_toggle_value(
+        &self,
+        supergroup_id: i64,
+        toggle: GroupToggle,
+    ) -> Option<bool> {
+        let admin = || {
+            self.groups
+                .supergroup_full_infos
+                .get(&supergroup_id)
+                .map(|info| &info.admin)
+        };
+        match toggle {
+            GroupToggle::JoinToSend => self
+                .groups
+                .supergroup_join_to_send
+                .get(&supergroup_id)
+                .copied(),
+            GroupToggle::HistoryVisible => admin().map(|a| a.is_all_history_available),
+            GroupToggle::HiddenMembers => admin().map(|a| a.has_hidden_members),
+            GroupToggle::SponsoredMessages => admin().map(|a| a.can_have_sponsored_messages),
+        }
+    }
+
     /// Undo `set_group_toggle` after the server refused the change.
     pub(crate) fn restore_group_toggle(
         &mut self,
@@ -408,6 +432,22 @@ impl Session {
         Some(self.groups.admin_followups.remove(index).1)
     }
 
+    /// A request that will never be answered (swept after its TTL, or
+    /// settled with its account) takes its waiting steps with it and tells
+    /// the person, as a refused request does.
+    pub fn drop_admin_followups_of_lost(&mut self, request: RequestId) {
+        let mut linking = None;
+        while let Some(followup) = self.take_admin_followup(request) {
+            let is_link = matches!(followup, AdminFollowup::LinkAfterHistory { .. });
+            linking = Some(linking.unwrap_or(false) || is_link);
+        }
+        if let Some(linking) = linking {
+            self.chats_state
+                .chat_action_error
+                .push(admin_followup_failure_note(linking));
+        }
+    }
+
     /// The supergroup chat a basic group became (recorded when
     /// `upgradeBasicGroupChatToSupergroupChat` answers).
     pub fn upgraded_chat_for(&self, old: ChatId) -> Option<ChatId> {
@@ -464,5 +504,16 @@ impl Session {
             reactions,
             max_reaction_count: max,
         }
+    }
+}
+
+/// The note shown when a waiting group-admin step could not run.
+pub(crate) fn admin_followup_failure_note(linking: bool) -> String {
+    if linking {
+        "could not link the discussion group".to_string()
+    } else {
+        "the group was upgraded, but the setting could not be applied; \
+         open the group settings to retry"
+            .to_string()
     }
 }

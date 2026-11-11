@@ -16,7 +16,6 @@ impl QuillApp {
         sound_id: i64,
         cx: &mut Context<Self>,
     ) {
-        self.notify.defaults_sound_picker = None;
         if let Some(live) = self.live.as_mut() {
             // Guard: never send schema-defaults as current state — if the
             // scope's settings haven't arrived yet, wait for the fetch
@@ -37,6 +36,11 @@ impl QuillApp {
             let result = live
                 .driver
                 .send_scope_notification_settings(scope, &settings);
+            // The picker closes once the change went out; "still loading"
+            // and a refusal leave it open.
+            if result.is_ok() {
+                self.notify.defaults_sound_picker = None;
+            }
             self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_PREFS_DEFAULT_SOUND_UPDATED)),
                 Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_CHANGE_DEFAULT_SOUND)),
@@ -54,6 +58,7 @@ impl QuillApp {
                 .settings
                 .scope_notification_settings
                 .insert(scope, settings);
+            self.notify.defaults_sound_picker = None;
             self.set_note(StatusNote::silent(tr(
                 keys::Q_PREFS_DEFAULT_SOUND_UPDATED_2,
             )));

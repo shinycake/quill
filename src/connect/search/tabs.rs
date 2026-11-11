@@ -194,17 +194,18 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// `getPublicPostSearchLimits`: the free searches left, without
-    /// spending one.
+    /// spending one. The answer is for the search generation that asked.
     pub fn fetch_public_post_limits(
         &mut self,
         query: &str,
+        search_gen: u64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
-            .request(RequestPurpose::GetPublicPostSearchLimits, None);
+            .request_search(RequestPurpose::GetPublicPostSearchLimits, search_gen);
         if let Err(err) = self
             .sender
             .send_json(&get_public_post_search_limits(extra, query))

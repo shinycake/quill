@@ -200,7 +200,7 @@ fn seed_communities_session(sink: Arc<MemorySink>) -> Session {
     );
     session.users_state.profile_chat_lists.insert(
         (ProfileChatsKind::SuitableCommunityChats, 0),
-        ProfileChatsFetch::Loaded(vec![OWN_CHANNEL]),
+        ProfileChatsFetch::complete(vec![OWN_CHANNEL]),
     );
     session.open_chat(ChatId(11));
     session

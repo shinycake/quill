@@ -4,6 +4,19 @@
 use crate::composer::{DraftKey, DraftTopic};
 use crate::state::*;
 
+/// One optimistic reaction change, kept until TDLib answers its request.
+/// A refusal puts `before` back only while the chips still show `after`;
+/// once another change landed on top, it takes back just this one.
+#[derive(Debug, Clone)]
+pub struct ReactionUndo {
+    pub chat_id: ChatId,
+    pub message_id: MessageId,
+    pub before: Option<crate::telegram::envelope::MessageInteractionInfo>,
+    pub after: Option<crate::telegram::envelope::MessageInteractionInfo>,
+    pub reaction: crate::telegram::envelope::ReactionType,
+    pub add: bool,
+}
+
 pub struct MessagesState {
     /// The composer's `@` suggestions for the open chat.
     pub mention_search: Option<MentionSearch>,
@@ -12,14 +25,7 @@ pub struct MessagesState {
     pub menu_actions: MenuActions,
     /// The chips under a message before a reaction request changed them,
     /// put back if TDLib refuses it.
-    pub reaction_undo: std::collections::HashMap<
-        RequestId,
-        (
-            ChatId,
-            MessageId,
-            Option<crate::telegram::envelope::MessageInteractionInfo>,
-        ),
-    >,
+    pub reaction_undo: std::collections::HashMap<RequestId, ReactionUndo>,
     /// What the open poll-option menu may offer (`pollOptionProperties`).
     pub poll_option_menu: Option<PollOptionMenu>,
     /// The message menu's Report flow (`reportChat` with message ids).
@@ -99,6 +105,10 @@ pub struct MessagesState {
     /// error fell into the `_ => {}` swallower and the user saw
     /// "transcription requested" followed by silence.
     pub recognize_speech_error: Notes,
+    /// "Load full message" of a partial rich message, per message: loading
+    /// from the send until the answer (which removes the entry, the message
+    /// is full now) or the error (`Failed`, tap again to retry).
+    pub full_rich_loads: HashMap<crate::ids::ChatMessage, crate::state::fetch::Fetch<()>>,
     /// M1 fix-up: one-shot; set when a `resendMessages` request errors.
     /// The UI drains it into the status note — previously the error fell
     /// into the `_ => {}` swallower and the user saw "retrying send…"
@@ -118,7 +128,7 @@ pub struct MessagesState {
     pub reply_targets: HashMap<(i64, i64), ReplyTarget>,
     /// Messages the composer's reply bar points at that were not in memory,
     /// fetched with `getMessage`, keyed by `(chat_id, message_id)`.
-    pub composer_reply_fetch: HashMap<(i64, i64), ComposerReplyFetch>,
+    pub composer_reply_fetch: ReplyFetches,
     pub pending_bot_messages: HashMap<(i64, i32), PendingBotMessage>,
     pub pending_bot_period_secs: u64,
     /// `poll.id` → `(chat_id, message_id)` of rows loaded with that poll,
@@ -211,12 +221,13 @@ impl MessagesState {
             composer_previews: Default::default(),
             composer_preview_urls: HashMap::new(),
             recognize_speech_error: Notes::default(),
+            full_rich_loads: HashMap::new(),
             resend_error: Notes::default(),
             send_permission_error: Notes::default(),
             flood_notice: Notes::default(),
             scheduled_messages: Vec::new(),
             reply_targets: HashMap::new(),
-            composer_reply_fetch: HashMap::new(),
+            composer_reply_fetch: Default::default(),
             pending_bot_messages: HashMap::new(),
             pending_bot_period_secs: 30,
             poll_messages: HashMap::new(),

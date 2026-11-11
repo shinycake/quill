@@ -670,10 +670,17 @@ impl Load {
     }
 }
 
+/// A picture that failed to decode is tried once more after this long
+/// (a file that was still being written, or rewritten in place), not on
+/// every draw.
+const RETRY_FAILED_AFTER: Duration = Duration::from_secs(30);
+
 struct Entry {
     load: Load,
     /// Decoded size once loaded (0 for failures).
     bytes: Option<usize>,
+    /// When the decode was seen to fail, on the executor clock.
+    failed_at: Option<Instant>,
     /// The last frame each scope (slice, or `None` for the app) used it.
     uses: SmallVec<[(Option<EntityId>, u64); 2]>,
 }
@@ -835,9 +842,19 @@ impl BoundedImageCache {
         cx: &mut App,
     ) -> Option<LoadResult> {
         let (scope, now) = (self.scope.get(), frame());
+        let clock = cx.background_executor().now();
+        if self.entries.get(&key).is_some_and(|entry| {
+            entry
+                .failed_at
+                .is_some_and(|at| clock.saturating_duration_since(at) >= RETRY_FAILED_AFTER)
+        }) && let Some(failed) = self.entries.remove(&key)
+        {
+            self.bytes -= failed.bytes.unwrap_or(0);
+        }
         let entry = self.entries.entry(key).or_insert_with(|| Entry {
             load: start(cx),
             bytes: None,
+            failed_at: None,
             uses: SmallVec::new(),
         });
         let previous = match entry.uses.iter_mut().find(|(s, _)| *s == scope) {
@@ -861,7 +878,10 @@ impl BoundedImageCache {
                         atlas_cost(size.width.0.max(0) as u32, size.height.0.max(0) as u32)
                     })
                     .sum(),
-                Err(_) => 0,
+                Err(_) => {
+                    entry.failed_at = Some(clock);
+                    0
+                }
             };
             entry.bytes = Some(bytes);
             self.bytes += bytes;
@@ -1475,6 +1495,7 @@ mod tests {
                 let entry = Entry {
                     load: Load::Sized(SizedLoad::new(sized, cx)),
                     bytes: Some(10),
+                    failed_at: None,
                     uses: SmallVec::new(),
                 };
                 cache.entries.insert(key, entry);
@@ -1617,5 +1638,69 @@ mod tests {
         assert_eq!(atlas_cost(92, 92), small_texture / (5 * 5));
         assert!((36 * 36 * 4..36 * 36 * 4 * 11 / 10).contains(&atlas_cost(36, 36)));
         assert_eq!(atlas_cost(0, 5), 0);
+    }
+
+    /// 10-112: a picture that failed to decode is asked for again once the
+    /// retry delay has passed, not on every draw and not never.
+    #[cfg(feature = "demo-capture")]
+    #[gpui_kit::test]
+    fn a_failed_decode_is_tried_again_after_a_while(cx: &mut gpui_kit::TestAppContext) {
+        use super::{BoundedImageCache, CacheScope, RETRY_FAILED_AFTER};
+        use gpui_kit::test::TestWindowExt;
+        use gpui_kit::{
+            AppContext, Context, Entity, IntoElement, Render, Styled, VisualTestContext, Window,
+            img, px, size,
+        };
+
+        struct Broken {
+            cache: Entity<BoundedImageCache>,
+        }
+        impl Render for Broken {
+            fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                self.cache.update(cx, |cache, cx| {
+                    cache.begin_window_frame(super::WindowDraw::Whole, window, cx)
+                });
+                CacheScope::new(
+                    self.cache.clone(),
+                    img(std::path::PathBuf::from("quill-no-such-picture.png")).size(px(40.)),
+                )
+            }
+        }
+
+        cx.update(gpui_kit::init);
+        let handle = cx.open_window(size(px(200.), px(200.)), |_, cx| Broken {
+            cache: cx
+                .new(|_| BoundedImageCache::for_window(quill::ids::ChatId(1), Default::default())),
+        });
+        let view = handle.root(cx).expect("the view");
+        let cache = view.read_with(cx, |view, _| view.cache.clone());
+        let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+        let frames = |vcx: &mut VisualTestContext| {
+            for _ in 0..3 {
+                vcx.run_until_parked();
+                vcx.update(|window, cx| window.render_frame(cx));
+            }
+            vcx.run_until_parked();
+        };
+        let failed_at = |vcx: &VisualTestContext| {
+            cache.read_with(vcx, |cache, _| {
+                cache
+                    .entries
+                    .values()
+                    .map(|entry| entry.failed_at)
+                    .collect::<Vec<_>>()
+            })
+        };
+        frames(&mut vcx);
+        let first = failed_at(&vcx);
+        assert!(matches!(first.as_slice(), [Some(_)]), "{first:?}");
+        vcx.executor().advance_clock(RETRY_FAILED_AFTER / 2);
+        frames(&mut vcx);
+        assert_eq!(failed_at(&vcx), first, "not tried again yet");
+        vcx.executor().advance_clock(RETRY_FAILED_AFTER);
+        frames(&mut vcx);
+        let again = failed_at(&vcx);
+        assert!(matches!(again.as_slice(), [Some(_)]), "{again:?}");
+        assert_ne!(again, first, "decoded again, and failed again");
     }
 }

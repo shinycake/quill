@@ -26,7 +26,12 @@ pub fn first_run_pending(app_root: &Path) -> bool {
             false
         }
         None => {
-            let _ = save(app_root, false);
+            // Without this file the next start cannot tell a new install from
+            // one that predates the onboarding; nothing else is durable, so
+            // the failure is at least logged.
+            if let Err(err) = save(app_root, false) {
+                log::warn!("first run: could not record the started onboarding: {err}");
+            }
             true
         }
     }

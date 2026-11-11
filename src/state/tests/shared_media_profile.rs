@@ -23,6 +23,82 @@ fn tab(session: &Session, tab: SharedMediaTab) -> &SharedMediaTabState {
     &session.media.shared_media.tabs[tab.index()]
 }
 
+fn gifts_stamp(session: &Session) -> u64 {
+    tab(session, SharedMediaTab::Gifts).generation
+}
+
+#[test]
+fn a_gifts_page_asked_before_the_gallery_reopened_is_dropped() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    open_user_gallery(&mut session, &seq, &sink);
+    let first = session
+        .media
+        .shared_media
+        .begin_profile_fetch(SharedMediaTab::Gifts);
+    let late = session.request(
+        RequestPurpose::Media(MediaPurpose::GetProfileGifts {
+            append: true,
+            generation: first,
+        }),
+        Some(ChatId(6)),
+    );
+    session.media.shared_media.close();
+    session.media.shared_media.open_for(ChatId(6));
+    session
+        .media
+        .shared_media
+        .begin_profile_fetch(SharedMediaTab::Gifts);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"receivedGifts","@extra":"{}","total_count":9,"next_offset":"stale","gifts":[{{"received_gift_id":"g9","date":1,"gift":{{"@type":"sentGiftUpgraded","gift":{{"@type":"upgradedGift","title":"Old","number":1}}}}}}]}}"#,
+            late.0
+        ),
+    );
+    let gifts = tab(&session, SharedMediaTab::Gifts);
+    assert!(gifts.items.is_empty());
+    assert_eq!(gifts.status, SharedMediaTabStatus::Loading);
+    assert_eq!(gifts.next_offset, "");
+}
+
+#[test]
+fn a_stories_page_asked_before_the_gallery_reopened_is_dropped() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    open_user_gallery(&mut session, &seq, &sink);
+    let first = session
+        .media
+        .shared_media
+        .begin_profile_fetch(SharedMediaTab::Stories);
+    let late = session.request_chat_search(
+        RequestPurpose::GetChatPostedToChatPageStories,
+        ChatId(6),
+        first,
+    );
+    session.media.shared_media.close();
+    session.media.shared_media.open_for(ChatId(6));
+    session
+        .media
+        .shared_media
+        .begin_profile_fetch(SharedMediaTab::Stories);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"stories","@extra":"{}","total_count":3,"stories":[{{"@type":"story","id":4,"poster_chat_id":6,"date":1690000000,"content":{{"@type":"storyContentUnsupported"}}}}]}}"#,
+            late.0
+        ),
+    );
+    let stories = tab(&session, SharedMediaTab::Stories);
+    assert!(stories.items.is_empty());
+    assert_eq!(stories.status, SharedMediaTabStatus::Loading);
+    assert!(!session.stories.chat_page_stories.contains_key(&6));
+}
+
 #[test]
 fn saved_tracks_fill_the_users_playlist_and_page() {
     let (mut session, sink) = session();
@@ -106,7 +182,10 @@ fn received_gifts_fill_the_gifts_tab_without_touching_the_gifts_dialog() {
         .shared_media
         .begin_profile_fetch(SharedMediaTab::Gifts);
     let extra = session.request(
-        RequestPurpose::Media(MediaPurpose::GetProfileGifts { append: false }),
+        RequestPurpose::Media(MediaPurpose::GetProfileGifts {
+            append: false,
+            generation: gifts_stamp(&session),
+        }),
         Some(ChatId(6)),
     );
     apply_json(
@@ -141,7 +220,10 @@ fn a_late_gifts_page_for_another_chat_leaves_the_open_gallerys_offset() {
         .shared_media
         .begin_profile_fetch(SharedMediaTab::Gifts);
     let extra = session.request(
-        RequestPurpose::Media(MediaPurpose::GetProfileGifts { append: false }),
+        RequestPurpose::Media(MediaPurpose::GetProfileGifts {
+            append: false,
+            generation: gifts_stamp(&session),
+        }),
         Some(ChatId(6)),
     );
     apply_json(
@@ -155,7 +237,10 @@ fn a_late_gifts_page_for_another_chat_leaves_the_open_gallerys_offset() {
     );
     assert_eq!(tab(&session, SharedMediaTab::Gifts).next_offset, "mine");
     let other = session.request(
-        RequestPurpose::Media(MediaPurpose::GetProfileGifts { append: true }),
+        RequestPurpose::Media(MediaPurpose::GetProfileGifts {
+            append: true,
+            generation: gifts_stamp(&session),
+        }),
         Some(ChatId(7)),
     );
     apply_json(
@@ -212,7 +297,10 @@ fn chat_page_stories_fill_the_stories_tab_and_failures_hide_it() {
         .shared_media
         .begin_profile_fetch(SharedMediaTab::Gifts);
     let extra = session.request(
-        RequestPurpose::Media(MediaPurpose::GetProfileGifts { append: false }),
+        RequestPurpose::Media(MediaPurpose::GetProfileGifts {
+            append: false,
+            generation: gifts_stamp(&session),
+        }),
         Some(ChatId(6)),
     );
     apply_json(

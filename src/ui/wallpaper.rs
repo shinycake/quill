@@ -259,11 +259,14 @@ pub(super) fn paint_wallpaper<T: Styled + ParentElement>(
     // The history reports its area every frame: gradient bubbles take
     // their colors from where they sit in it.
     let area_probe = || {
-        canvas(|bounds, _, _| note_history_area(bounds), |_, _, _, _| {})
-            .absolute()
-            .top_0()
-            .left_0()
-            .size_full()
+        canvas(
+            |bounds, window, _| note_history_area(bounds, window),
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
     };
     let Some(wallpaper) = wallpaper else {
         return if history {
@@ -279,7 +282,7 @@ pub(super) fn paint_wallpaper<T: Styled + ParentElement>(
         _ => this.child(wallpaper_layer(
             wallpaper.clone(),
             slot,
-            history.then_some(note_history_area as fn(Bounds<Pixels>)),
+            history.then_some(note_history_area as fn(Bounds<Pixels>, &Window)),
         )),
     };
     if dimming > 0 && matches!(wallpaper, Wallpaper::Image { .. }) {

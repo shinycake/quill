@@ -43,6 +43,9 @@ thread_local! {
     static FRAME_DONE: Cell<Option<(u64, usize)>> = const { Cell::new(None) };
     /// Wakes the sweeper task.
     static WAKE: RefCell<Option<oneshot::Sender<()>>> = const { RefCell::new(None) };
+    /// The one wake still to come for a sweep that found a window mid-draw
+    /// (`retry_later`); it ends when it fires.
+    static RETRY: RefCell<Option<Task<()>>> = const { RefCell::new(None) };
 }
 
 struct Retired {
@@ -231,6 +234,22 @@ pub(in crate::ui) fn start_sweeper(cx: &mut App) {
     .detach();
 }
 
+/// How long a sweep that met a window mid-draw waits before trying again.
+const RETRY_AFTER: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// Wake the sweeper once more shortly, unless that is already planned.
+fn retry_later(cx: &mut App) {
+    if RETRY.with(|retry| retry.borrow().is_some()) {
+        return;
+    }
+    let task = cx.spawn(async move |cx| {
+        cx.background_executor().timer(RETRY_AFTER).await;
+        drop(RETRY.with(|retry| retry.borrow_mut().take()));
+        wake();
+    });
+    RETRY.with(|retry| *retry.borrow_mut() = Some(task));
+}
+
 /// A fresh wake for the sweeper task. A wake while it sweeps is not
 /// needed: that sweep comes after it.
 fn arm() -> oneshot::Receiver<()> {
@@ -252,8 +271,10 @@ fn sweep(current: Option<&mut Window>, cx: &mut App) {
             main_open = true;
             continue;
         }
-        // A window being drawn: not between frames, no sweep.
+        // A window being drawn: not between frames, no sweep. Nothing else
+        // may draw to wake it again, so it is tried again shortly.
         let Ok(frame) = handle.update(cx, |_, window, _| window.frame_number()) else {
+            retry_later(cx);
             return;
         };
         windows.push((id, frame));

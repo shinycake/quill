@@ -65,8 +65,9 @@ pub(crate) enum CreateStep {
 
 pub(crate) struct ScheduleStep {
     pub(crate) picker: TimePicker,
-    /// The picked time is outside the allowed range.
-    pub(crate) error: Option<&'static str>,
+    /// The time Schedule refused, with why (outside the allowed range).
+    /// Shown while that time is the picked one: another pick clears it.
+    pub(crate) error: Option<(Option<i64>, &'static str)>,
     /// Re-renders the countdown every ten seconds while the box shows.
     _refresh: Task<()>,
 }
@@ -231,7 +232,8 @@ impl QuillApp {
         let clock = WallClock::of(cx);
         let now = clock.now();
         let max = schedule_max(now, &|unix| clock.offset_at(unix));
-        let picked = picked_unix(&step.picker, SCHEDULE_MIN_AHEAD_SECS, cx)
+        let raw = picked_unix(&step.picker, SCHEDULE_MIN_AHEAD_SECS, cx);
+        let picked = raw
             .ok_or(quill::schedule::ScheduleError::Invalid)
             .and_then(|date| check_schedule(date, now, max));
         match picked {
@@ -242,7 +244,7 @@ impl QuillApp {
                     ..
                 }) = self.group_call_boxes.start_dialog.as_mut()
                 {
-                    step.error = Some(err.message());
+                    step.error = Some((raw, err.message()));
                 }
                 cx.notify();
             }
@@ -381,6 +383,16 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.group_call_boxes.start_dialog = None;
+        // The call you are in ends only for a request the driver will take.
+        if let Some(live) = self.live.as_ref()
+            && live
+                .driver
+                .check_create_video_chat(chat_id.0, String::new(), start_date)
+                .is_err()
+        {
+            self.created_video_chat(chat_id, None, start_date == 0, join_as, window, cx);
+            return;
+        }
         self.end_current_call_for_create(cx);
         let sent = match self.live.as_mut() {
             Some(live) => live
@@ -744,6 +756,11 @@ fn notified_line(step: &ScheduleStep, channel: bool, cx: &App) -> Option<String>
 /// The date and time picker and the live "will start in …" line.
 fn schedule_body(step: &ScheduleStep, channel: bool, cx: &mut Context<QuillApp>) -> AnyElement {
     let notified = notified_line(step, channel, cx);
+    let picked = picked_unix(&step.picker, SCHEDULE_MIN_AHEAD_SECS, cx);
+    let shown_error = step
+        .error
+        .filter(|(refused, _)| *refused == picked)
+        .map(|(_, error)| error);
     div()
         .flex()
         .flex_col()
@@ -753,7 +770,7 @@ fn schedule_body(step: &ScheduleStep, channel: bool, cx: &mut Context<QuillApp>)
                 .debug_selector(|| "group-call-schedule-picker".into())
                 .child(DatePicker::new(&step.picker.state).small()),
         )
-        .when_some(step.error, |this, error| {
+        .when_some(shown_error, |this, error| {
             this.child(
                 div()
                     .id("group-call-schedule-error")

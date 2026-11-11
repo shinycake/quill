@@ -87,6 +87,30 @@ fn the_account_dialog_does_not_reopen_over_the_next_account(cx: &mut TestAppCont
     });
 }
 
+/// Log out from the Account box empties the typed password and reason.
+#[gpui_kit::test]
+fn logging_out_from_the_account_box_empties_its_inputs(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    frames(&mut vcx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.open_account_lifecycle(cx);
+        app.account_boxes.lifecycle.confirm_logout = true;
+        for input in [
+            &app.account_boxes.lifecycle.password,
+            &app.account_boxes.lifecycle.reason,
+        ] {
+            input.update(cx, |input, cx| input.set_value("typed", window, cx));
+        }
+        app.confirm_logout_in_account_box(window, cx);
+    });
+    app.read_with(&vcx, |app, cx| {
+        let lifecycle = &app.account_boxes.lifecycle;
+        assert!(!lifecycle.open && !lifecycle.confirm_logout);
+        assert_eq!(lifecycle.password.read(cx).value().to_string(), "");
+        assert_eq!(lifecycle.reason.read(cx).value().to_string(), "");
+    });
+}
+
 /// Call ids repeat across clients: the call whose window was closed, the
 /// end time and the sound marks of one account do not hold the next
 /// account's call of the same id; neither do the video chat's boxes, its

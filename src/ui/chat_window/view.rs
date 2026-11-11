@@ -81,8 +81,9 @@ impl ChatWindowView {
     fn placed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (chat_id, active) = (self.chat_id, window.is_window_active());
         let place = WindowPlace::of(window, window.display(cx).map(|display| display.id()));
+        let bounds = window.bounds();
         let _ = self.owner.update(cx, |app, cx| {
-            app.chat_window_placed(chat_id, active, place, cx);
+            app.chat_window_placed(chat_id, active, place, bounds, cx);
         });
     }
 
@@ -187,7 +188,7 @@ impl Render for ChatWindowView {
         // A window may draw in the middle of another window's input: the
         // scope in place then is restored afterwards.
         let (outer, outer_tick) = app.update(cx, |app, cx| {
-            if app.windows.note_place(chat_id, active, place) {
+            if app.windows.note_place(chat_id, active, place, bounds) {
                 // The gate follows it now, not at the main window's next
                 // render, which a minimized main window never draws.
                 app.follow_windows(cx);
@@ -246,7 +247,7 @@ impl Render for ChatWindowView {
             app.disk_low_banner(cx)
         });
         let view = cx.weak_entity();
-        super::super::window_frame::sync(window, app.read(cx).appearance.native_window_frame);
+        super::super::window_frame::sync(window, cx, app.read(cx).appearance.native_window_frame);
         let title_bar = super::super::window_frame::FrameTitleBar::new()
             .on_close_window({
                 let view = view.clone();

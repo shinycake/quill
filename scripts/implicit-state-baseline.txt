@@ -1,5 +1,4 @@
 # Implicit-state debt (scripts/check-implicit-state.py). Only remove lines.
-AccountBoxes::age_verify_started
 ActiveGroupCall::join_as_requested
 ActiveGroupCall::loaded_all_participants
 ActiveGroupCall::loaded_all_participants+transport_error
@@ -11,7 +10,6 @@ AudioEngine::start_failed
 AudioEngine::start_failed+error
 AuthState::change_number_loading
 AuthState::change_number_loading+last_auth_error
-AuthState::password_state_loading
 AwardMembers::done
 AwardMembers::loading
 AwardMembers::loading+error
@@ -25,9 +23,6 @@ BusinessSettingsState::time_zones_requested
 BusinessSettingsState::time_zones_requested+error
 CallSnap::connecting
 CallSummary::busy
-CallSummary::busy+debug_information_error
-CallSummary::debug_information_sent
-CallSummary::log_sent
 CallUi::window_opening
 CameraDraft::starting
 Ceremony::finished
@@ -35,7 +30,6 @@ ChatListState::archive_settings_loading
 ChatSummary::my_rights_fetched
 ChatSwipeFacts::is_saved
 ChatUi::inline_query_waiting
-ChatWindows::save_pending
 ChatWindowsState::asked
 ChatbotDraft::loaded
 Checklist::others_can_mark_tasks_as_done
@@ -45,7 +39,6 @@ ChecklistDraft::others_can_mark_tasks_as_done
 ChecklistSend::others_can_mark_tasks_as_done
 CheckoutView::sending
 Clip::busy
-CommonGroupsPaging::loading_more
 ComposerUi::draft_restore_pending
 ConnectDriver::parameters_sent
 CraftSession::candidates_loaded
@@ -55,9 +48,6 @@ DragSelect::pending
 Drawn::leaving
 DropTopic::load_failed
 EarnLimits::app_config_loaded
-EmojiBarUi::sets_asked
-EmojiPanel::failed
-EmojiPanel::installed_loaded
 EmojiPanel::mutation_failed
 EmojiStyleUi::started
 EmojiStyleUi::started+file_error
@@ -65,7 +55,6 @@ FastShareFacts::sent
 FieldResult::finished
 FirstRunPrefs::completed
 FooterMeta::pending
-FrameUi::window_state_save_pending
 GifPanel::failed
 GifPanel::loaded
 GifPanel::loading
@@ -74,7 +63,6 @@ GifPanel::search_loading
 GiftCodeLookup::loading
 GiftCodeLookup::loading+error
 GiftManageState::collections_loading
-GiftMarketState::auction_loading
 GiftPurchase::completed
 GiftPurchase::loading
 GiftPurchase::sending
@@ -82,9 +70,6 @@ GiftValueLookup::loading
 GiftValueLookup::loading+error
 GiveawayInfoLookup::loading
 GiveawayInfoLookup::loading+error
-GiveawayOptions::premium_loading
-GiveawayOptions::premium_loading+premium_error
-GiveawayOptions::stars_loading
 GiveawaySummary::finished
 GramsHub::loaded
 GramsHub::loaded+error
@@ -92,7 +77,6 @@ GramsHub::loading
 GroupCallUi::window_opening
 HdrViewer::in_flight
 HeaderFacts::is_saved_messages
-HistoryCalendar::loading
 HistoryState::load_failed
 HistoryState::loaded_complete
 HistoryState::newer_failed
@@ -104,7 +88,6 @@ InviteLinkMembersState::loading+error
 InvoiceWatch::failed
 InvoiceWatch::pending
 InvoiceWatch::sending
-JoinBox::joining
 JoinedLines::started
 LanguageLinkLookup::loading
 LanguageLinkLookup::loading+error
@@ -150,8 +133,6 @@ PasswordBox::sending+error
 PaymentsState::form_loading
 PaymentsState::form_loading+receipt_error
 PaymentsState::verification_started
-PeerColorDialog::sent
-PendingBotMessage::stop_failed
 PhotoSources::busy
 PlayHead::started
 PlaybackHealth::output_failed
@@ -167,13 +148,7 @@ PremiumHub::premium_stickers_loading
 PremiumHub::tx_loaded
 PremiumHub::tx_loaded+tx_error
 PremiumHub::tx_loading
-PrivacyData::network_loading
-PrivacyData::network_loading+error
 ProfileModal::closing
-ProxyState::loading
-ProxyState::loading+error
-PublicForwardsList::loading
-PublicForwardsList::loading+error
 PublicLinkRevoke::failed
 PullMachine::expand_pending
 Queued::failed
@@ -185,7 +160,6 @@ ResaleBuy::sending
 ResaleSearch::loaded
 ResaleSearch::loading
 ResaleSearch::loading+error
-RevokeBox::sending
 RowForum::loaded
 RowMenuFacts::is_saved_messages
 RowState::pending
@@ -224,8 +198,6 @@ StickerPanel::installed_loaded
 StickerPanel::suggest_waiting_for_sets
 StickerSetView::files_requested
 StorageScroll::pending
-StorySearchState::loading
-StorySearchState::loading+error
 StreamFacts::transport_failed
 StyleExamples::loading
 Tempo::done

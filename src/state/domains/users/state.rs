@@ -12,7 +12,6 @@ pub struct UsersState {
     /// `updateNewChat` before the `chats` answer.
     pub profile_chat_lists: HashMap<(ProfileChatsKind, i64), ProfileChatsFetch>,
     /// Paging of the groups in common list, by user id.
-    pub common_groups_paging: HashMap<i64, CommonGroupsPaging>,
     /// `chats.total_count` of a `getChatSimilarChats` answer, by channel
     /// chat id: more similar channels exist than the list shows (the
     /// non-Premium list is capped), which the strip's "More Channels" tile
@@ -39,6 +38,9 @@ pub struct UsersState {
     pub contacts_notice: Option<String>,
     /// The open "Block {name}" box for a reply in the Replies chat.
     pub replies_block: Option<crate::message_menu_origin::RepliesBlock>,
+    /// Short names of senders the server blocked from the Replies chat,
+    /// waiting for the screen's "blocked" note (drained once).
+    pub replies_blocked: Vec<String>,
     /// The option `replies_bot_chat_id`: the Replies chat (it differs on
     /// the test environment).
     pub replies_bot_chat_id: Option<i64>,
@@ -68,6 +70,10 @@ pub struct UsersState {
     /// `setProfilePhoto`/`deleteProfilePhoto`), shown in the
     /// edit-profile dialog. Cleared when the dialog opens.
     pub profile_edit_error: Option<String>,
+    /// The last "Your color" request that failed (`setAccentColor`,
+    /// `setProfileAccentColor`, `setUpgradedGiftColors`). Only the color
+    /// box reads it, so a username or photo failure never shows there.
+    pub peer_color_error: Option<String>,
     /// `getDefaultBackgroundCustomEmojiStickers` answer: the custom emoji
     /// the color editor offers as reply and profile icons.
     pub background_emoji_icons: Vec<StickerItem>,
@@ -155,7 +161,6 @@ impl UsersState {
         Self {
             saves: SaveWatch::default(),
             profile_chat_lists: HashMap::new(),
-            common_groups_paging: HashMap::new(),
             similar_chat_totals: HashMap::new(),
             user_profile_photos: HashMap::new(),
             chat_current_photos: HashMap::new(),
@@ -164,6 +169,7 @@ impl UsersState {
             contacts_error: false,
             contacts_notice: None,
             replies_block: None,
+            replies_blocked: Vec::new(),
             replies_bot_chat_id: None,
             user_full_infos: UserFullInfos::default(),
             userpic_full_info_asked: Default::default(),
@@ -171,6 +177,7 @@ impl UsersState {
             username_check_pending: None,
             bio_length_max: 70,
             profile_edit_error: None,
+            peer_color_error: None,
             background_emoji_icons: Vec::new(),
             background_emoji_icons_failed: false,
             profile_photo_emoji_icons: Vec::new(),

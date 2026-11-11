@@ -27,11 +27,21 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        let busy = self
+        let running = self
             .session()
             .and_then(|s| s.payments.marketplace_gift.as_ref())
-            .is_some_and(|g| g.loading || g.sending);
-        if !busy {
+            .filter(|g| g.loading || g.sending)
+            .map(|g| g.chat_id);
+        // A purchase on its way is for the chat it started in: another
+        // chat's box waits for it instead of taking it over.
+        if running.is_some_and(|started_in| started_in != chat) {
+            self.set_note(StatusNote::silent(tr(
+                keys::Q_PEOPLE_REQUEST_ALREADY_IN_FLIGHT,
+            )));
+            cx.notify();
+            return;
+        }
+        if running.is_none() {
             self.payments
                 .marketplace_name_input
                 .update(cx, |input, cx| input.set_value("", window, cx));

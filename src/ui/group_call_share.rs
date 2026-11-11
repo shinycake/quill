@@ -114,13 +114,17 @@ impl QuillApp {
     /// "Share Invite Link": ask for the links; the box shows once both
     /// are in (tdesktop `ShareInviteLinkAction`).
     pub(super) fn open_group_call_share_links(&mut self, cx: &mut Context<Self>) {
+        // Locked: nothing is asked and no box opens behind the lock; the
+        // main window asks for the passcode.
+        if self.group_call_needs_unlock(cx) {
+            return;
+        }
         let asked = match self.live.as_mut() {
             Some(live) => live.driver.request_video_chat_share_links().is_ok(),
             // Screenshot demos and tests carry their links in the session.
             None => self.demo_session.is_some(),
         };
         if asked {
-            self.group_call_needs_unlock(cx);
             self.group_call_boxes.share_open = true;
             self.group_call_boxes.share_speaker = true;
             self.group_call_boxes.share_copied = false;
@@ -159,6 +163,11 @@ impl QuillApp {
         let Some(text) = self.group_call_share_link() else {
             return;
         };
+        // An open already waiting for its chat is not replaced: the box
+        // stays, and the pick works once that open has gone through.
+        if self.links.pending_deep_link_open.is_some() {
+            return;
+        }
         self.links.pending_deep_link_open = Some(super::links_state::PendingOpen::user(
             chat_id,
             DeepLinkAction::ShareDraft { text },

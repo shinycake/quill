@@ -142,9 +142,13 @@ impl QuillApp {
         restart: bool,
         cx: &mut Context<Self>,
     ) {
+        let mut restart_now = false;
         if let Some(live) = self.live.as_mut() {
             let note = match live.driver.set_chat_user_blocked(chat_id, false) {
-                Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_UNBLOCKING_USER)),
+                Ok(Some(_)) => {
+                    restart_now = restart;
+                    StatusNote::silent(tr(keys::Q_MEDIA_UNBLOCKING_USER))
+                }
                 Ok(None) => StatusNote::silent(tr(keys::Q_MEDIA_REQUEST_ALREADY_IN_FLIGHT)),
                 Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
             };
@@ -154,8 +158,11 @@ impl QuillApp {
                 chat.blocked = false;
             }
             self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_UNBLOCKED_DEMO)));
+            restart_now = restart;
         }
-        if restart {
+        // A refused or deduped unblock leaves the bot blocked: /start would
+        // go nowhere and bury the error note.
+        if restart_now {
             self.start_bot_from_bar(chat_id, cx);
         }
     }

@@ -293,6 +293,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         save_badge_prefs(&self.paths, &self.session.settings.badge_prefs)
     }
 
+    /// Save `prefs` and, once they are on disk, apply them to the session:
+    /// a failed save leaves the value the switch shows as it was.
+    pub fn set_badge_prefs(&mut self, prefs: crate::settings::BadgePrefs) -> std::io::Result<()> {
+        save_badge_prefs(&self.paths, &prefs)?;
+        self.session.settings.badge_prefs = prefs;
+        Ok(())
+    }
+
     /// Parity slice: persist the in-app notification sounds toggle
     /// (`prefs.json`). Loads the existing prefs first so the other
     /// fields survive the write.

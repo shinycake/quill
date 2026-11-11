@@ -127,7 +127,9 @@ impl QuillApp {
         self.pane_mode() != PaneMode::Ready
             || self.account.passcode.is_locked()
             || self.viewer.state.is_open()
-            || self.stories.viewer.is_open()
+            // The story viewer is the main window's: a chat window's
+            // keys are its own.
+            || (self.windows.scope.is_none() && self.stories.viewer.is_open())
             || window.has_active_dialog(cx)
     }
 

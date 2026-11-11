@@ -62,6 +62,9 @@ struct Active {
     pressed_at: Option<Instant>,
     last_tick: Instant,
     pull: Pull,
+    /// The loop that scrolls: it ends with the mode, so a quick new press
+    /// never runs beside the old loop.
+    _scroller: Task<()>,
 }
 
 impl QuillApp {
@@ -80,15 +83,8 @@ impl QuillApp {
             return;
         };
         let now = Instant::now();
-        self.history.autoscroll.active = Some(Active {
-            anchor: position,
-            chat: chat.0,
-            pressed_at: Some(now),
-            last_tick: now,
-            pull: Pull::Neutral,
-        });
         let handle = window.window_handle();
-        self.spawn_scoped_in(window, cx, async move |this, cx| {
+        let scroller = self.spawn_scoped_in(window, cx, async move |this, cx| {
             loop {
                 cx.background_executor().timer(TICK).await;
                 let Ok((pointer, window_active)) =
@@ -111,8 +107,15 @@ impl QuillApp {
                     });
                 }
             }
-        })
-        .detach();
+        });
+        self.history.autoscroll.active = Some(Active {
+            anchor: position,
+            chat: chat.0,
+            pressed_at: Some(now),
+            last_tick: now,
+            pull: Pull::Neutral,
+            _scroller: scroller,
+        });
         cx.notify();
     }
 

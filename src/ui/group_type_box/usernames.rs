@@ -193,6 +193,14 @@ impl QuillApp {
         show: bool,
         cx: &mut Context<Self>,
     ) {
+        // The alert's answer is for the Edit box that asked: it closed (or
+        // moved to another chat) while the alert was open, so nothing goes.
+        if self
+            .group_edit_box()
+            .is_none_or(|edit| edit.chat_id != chat_id)
+        {
+            return;
+        }
         let Some(live) = self.live.as_mut() else {
             self.set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
             cx.notify();

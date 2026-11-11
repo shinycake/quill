@@ -11,6 +11,10 @@ fn chat_statistics_fetch_flow_loads_and_caches() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatStatistics, Some(ChatId(13)));
+    session
+        .groups
+        .chat_statistics
+        .insert(13, ChatStatisticsFetch::Loading { is_dark: true });
     let graph = r#"{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""}"#;
     let value = r#"{"@type":"statisticalValue","value":1.0,"previous_value":1.0,"growth_rate_percentage":0.0}"#;
     apply_json(
@@ -24,7 +28,10 @@ fn chat_statistics_fetch_flow_loads_and_caches() {
             v = value,
         ),
     );
-    let ChatStatisticsFetch::Loaded(boxed) = session
+    let ChatStatisticsFetch::Loaded {
+        stats: boxed,
+        is_dark,
+    } = session
         .groups
         .chat_statistics
         .get(&13)
@@ -32,6 +39,8 @@ fn chat_statistics_fetch_flow_loads_and_caches() {
     else {
         panic!("expected loaded channel statistics");
     };
+    // The theme the answered request asked for (13-032).
+    assert!(*is_dark);
     let ChatStatistics::Channel(stats) = boxed.as_ref() else {
         panic!("expected channel statistics");
     };
@@ -120,6 +129,7 @@ fn optimistic_mutations_roll_back_on_error() {
         pending.rollback = Some(RequestRollback::JoinByRequest {
             supergroup_id: 21,
             previous: Some(true),
+            shown: false,
         });
     }
     session.groups.supergroup_join_by_request.insert(21, false);
@@ -147,6 +157,7 @@ fn optimistic_mutations_roll_back_on_error() {
         pending.rollback = Some(RequestRollback::SupergroupUsername {
             supergroup_id: 22,
             previous: Some("oldname".into()),
+            shown: "newname".into(),
         });
     }
     session
@@ -325,6 +336,28 @@ fn take_purpose_drops_only_matching_request() {
             .has_purpose(RequestPurpose::GetSavedNotificationSounds)
     );
     assert!(session.requests.take(sounds_id).is_some());
+}
+
+/// A request that is never answered (the account closes, or the flood
+/// re-send fails) settles through the error path, which ends the stages
+/// that waited on it: nothing blocks until restart (02-206, 02-211).
+#[test]
+fn an_unanswered_device_login_and_tone_upload_settle_with_their_account() {
+    use crate::tone_upload::{ToneTarget, ToneUpload};
+    let (mut session, _) = session();
+    session.request(RequestPurpose::ConfirmDeviceLogin, None);
+    session.request(RequestPurpose::UploadSavedNotificationSound, None);
+    session.settings.sessions_mutating = true;
+    session.settings.tone_upload = ToneUpload::Uploading {
+        name: "Chime".into(),
+        target: ToneTarget::Reaction,
+    };
+    session.settle_account_requests();
+    assert!(!session.settings.sessions_mutating);
+    assert!(matches!(
+        session.settings.tone_upload,
+        ToneUpload::Failed(_)
+    ));
 }
 
 #[test]

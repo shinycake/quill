@@ -170,7 +170,6 @@ impl QuillApp {
                                 .map(|c| c.id);
                             app.group_call_screen.stream_join = None;
                             app.group_call.stream.overlay = None;
-                            app.group_call.stream.key_shown = false;
                             app.sync_group_call_large_tile();
                             cx.notify();
                         });
@@ -379,6 +378,7 @@ impl QuillApp {
         // The boxes drawn here are this call's (a hidden main window runs
         // no frame upkeep).
         self.sync_group_call_boxes();
+        self.sync_group_call_composer(window, cx);
         if let Some(facts) = self.group_call_stream_facts() {
             let body = self.group_call_stream_body(&facts, stream_full, window, cx);
             let title = facts.chat.map(|(_, name)| name).unwrap_or_default();

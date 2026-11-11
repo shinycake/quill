@@ -113,3 +113,37 @@ fn the_terms_prompt_starts_over_for_another_version(cx: &mut TestAppContext) {
         assert_eq!(app.auth_ui.terms_prompt, None::<TermsPrompt>);
     });
 }
+
+/// The frozen-account box the user opened ends with the freeze: when the
+/// account is frozen again later, nothing opens by itself.
+#[gpui_kit::test]
+fn a_freeze_notice_closed_by_the_lifted_freeze_does_not_reopen(cx: &mut TestAppContext) {
+    use crate::ui::account_state::OpenNotice;
+    use quill::telegram::envelope::FreezeStateUpdate;
+    let (app, mut vcx) = open(cx);
+    let freeze = |frozen: bool| FreezeStateUpdate {
+        is_frozen: frozen,
+        freezing_date: 1,
+        deletion_date: 2,
+        appeal_link: String::new(),
+    };
+    app.update(&mut vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.sync.set_freeze(freeze(true));
+        }
+        app.account_boxes.notice = OpenNotice::Frozen;
+        assert_eq!(app.account_notice(), Some(super::AccountNotice::Frozen));
+        // The server lifts the freeze while the box is open.
+        if let Some(session) = app.demo_session.as_mut() {
+            session.sync.set_freeze(freeze(false));
+        }
+        assert_eq!(app.account_notice(), None);
+        app.drain_account_notices();
+        // Frozen again, later: the user has not asked for the box.
+        if let Some(session) = app.demo_session.as_mut() {
+            session.sync.set_freeze(freeze(true));
+        }
+        assert_eq!(app.account_boxes.notice, OpenNotice::None);
+        assert_eq!(app.account_notice(), None);
+    });
+}

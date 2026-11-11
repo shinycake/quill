@@ -72,10 +72,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.chats_state.background_set_for_dark = for_dark_theme;
-        let extra = self
-            .session
-            .request(RequestPurpose::SetDefaultBackground, None);
+        let extra = self.session.request(
+            RequestPurpose::Chats(ChatsPurpose::SetDefaultBackground { for_dark_theme }),
+            None,
+        );
         if let Err(err) = self.sender.send_json(&set_default_background(
             extra,
             background_id,
@@ -144,10 +144,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || path.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.chats_state.background_set_for_dark = for_dark_theme;
-        let extra = self
-            .session
-            .request(RequestPurpose::SetDefaultBackgroundLocal, None);
+        let extra = self.session.request(
+            RequestPurpose::Chats(ChatsPurpose::SetDefaultBackgroundLocal { for_dark_theme }),
+            None,
+        );
         if let Err(err) = self.sender.send_json(&set_default_background_local(
             extra,
             path,

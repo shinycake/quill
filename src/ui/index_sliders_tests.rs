@@ -76,7 +76,7 @@ fn draft_cap(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, kind: CapKind)
     app.read_with(vcx, |app, _| {
         app.settings
             .data_storage_editor
-            .as_ref()
+            .shown()
             .map(|(_, draft)| draft.cap(kind))
     })
 }
@@ -92,7 +92,7 @@ fn network_editor_size_caps_follow_their_sliders(cx: &mut TestAppContext) {
     vcx.update(|window, cx| window.click("data-storage-net-Wi-Fi", cx));
     frames(vcx);
     let wifi = app.read_with(vcx, |app, _| {
-        app.settings.data_storage_editor.as_ref().map(|(n, _)| *n)
+        app.settings.data_storage_editor.shown().map(|(n, _)| n)
     });
     assert_eq!(wifi, Some(NetworkKind::WiFi), "the row opens the editor");
     for id in [
@@ -211,4 +211,26 @@ fn storage_limit_sliders_restart_from_the_account_shown(cx: &mut TestAppContext)
         Some(quill::limit_steps::SIZE_STEPS - 1),
         "the slider reads the account shown: no limit"
     );
+}
+
+/// Sweep 10-133: a drag whose release never came (the pointer was lost) is
+/// sent when the page is left, and a released one is not sent twice.
+#[gpui_kit::test]
+fn a_storage_drag_without_a_release_applies_when_the_page_is_left(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.demo_ready_storage_usage(window, cx)
+    });
+    frames(vcx);
+    let size_limit = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.session()
+                .and_then(|session| session.settings.storage_limits.size_limit())
+        })
+    };
+    move_slider(&app, vcx, StepSlider::StorageSize, 9, false);
+    assert_eq!(size_limit(&app, vcx), None, "no release yet");
+    app.update(vcx, |app, _| app.leave_data_storage());
+    assert_eq!(size_limit(&app, vcx), Some(2 * GIB), "the leave applied it");
 }

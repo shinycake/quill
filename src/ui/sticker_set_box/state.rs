@@ -221,8 +221,18 @@ impl StickerSetBoxUi {
     }
 }
 
-/// Nothing to say: its state is the account's only app-side.
-impl crate::ui::on_screen::Farewell for StickerSetBoxUi {}
+/// An encode that runs stops, and the editor's files go: the account on
+/// screen is replaced whole, and nothing else would cancel the job or
+/// remove them.
+impl crate::ui::on_screen::Farewell for StickerSetBoxUi {
+    fn farewell(
+        app: &mut crate::ui::app::QuillApp,
+        _: &mut gpui_kit::Window,
+        _: &mut gpui_kit::Context<crate::ui::app::QuillApp>,
+    ) {
+        app.sticker_box.reset();
+    }
+}
 
 #[cfg(test)]
 mod encoding_tests {

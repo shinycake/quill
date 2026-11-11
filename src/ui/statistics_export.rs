@@ -71,7 +71,7 @@ fn page_sheets(
     unsettled: &Cell<bool>,
 ) -> Option<(Vec<Sheet>, String)> {
     let chat_stats = match session.groups.chat_statistics.get(&chat_id) {
-        Some(ChatStatisticsFetch::Loaded(stats)) => Some(stats.as_ref()),
+        Some(ChatStatisticsFetch::Loaded { stats, .. }) => Some(stats.as_ref()),
         _ => None,
     };
     match session.groups.stats.page(chat_id) {

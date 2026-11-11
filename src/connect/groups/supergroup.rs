@@ -69,6 +69,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 supergroup_id,
                 previous_sign,
                 previous_show,
+                shown_sign: sign_messages,
+                shown_show: sign_messages && show_message_sender,
             });
         }
         Ok(Some(extra))
@@ -131,6 +133,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             pending.rollback = Some(RequestRollback::AntiSpam {
                 supergroup_id,
                 previous,
+                shown: enabled,
             });
         }
         Ok(Some(extra))

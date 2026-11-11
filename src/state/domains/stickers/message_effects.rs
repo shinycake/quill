@@ -51,15 +51,14 @@ impl Session {
             .note((message.chat_id.0, message.id.0), arrival);
     }
 
-    /// The effect ids on the open chat's messages that were never looked
-    /// up (the badge needs each one's icon).
+    /// The effect ids on the messages of every chat a window shows (the
+    /// main window's and the chat windows') that were never looked up (the
+    /// badge needs each one's icon).
     pub fn message_effect_ids_in_view(&self) -> Vec<i64> {
-        let Some(history) = self.open_chat.and_then(|chat| self.histories.get(&chat.0)) else {
-            return Vec::new();
-        };
-        history
-            .messages
-            .values()
+        self.chats_shown()
+            .into_iter()
+            .filter_map(|chat| self.histories.get(&chat.0))
+            .flat_map(|history| history.messages.values())
             .map(|message| message.extras.effect_id)
             .filter(|id| *id != 0)
             .collect()

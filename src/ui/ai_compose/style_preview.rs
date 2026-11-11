@@ -79,6 +79,42 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Add Style: sent once, the button waits for that request's answer.
+    fn add_ai_style_from_preview(
+        &mut self,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .ai_compose
+            .preview
+            .as_ref()
+            .is_none_or(AiStylePreview::adding)
+        {
+            return;
+        }
+        let sent = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.add_text_composition_style(name));
+        match sent {
+            Some(Ok(request)) => {
+                if let Some(preview) = self.ai_compose.preview.as_mut() {
+                    let stage =
+                        std::mem::replace(&mut preview.stage, PreviewStage::LookingUp { token: 0 });
+                    preview.stage = match stage {
+                        PreviewStage::Shown(style) => PreviewStage::Adding { style, request },
+                        other => other,
+                    };
+                }
+            }
+            Some(Err(_)) => self.push_ai_toast(text_toast(""), window, cx),
+            None => {}
+        }
+        cx.notify();
+    }
+
     pub(super) fn ai_style_preview_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.ai_style_lookup_upkeep(window, cx);
         self.ai_style_example_upkeep(window, cx);
@@ -496,6 +532,11 @@ impl QuillApp {
         else {
             return div().into_any_element();
         };
+        let adding = self
+            .ai_compose
+            .preview
+            .as_ref()
+            .is_some_and(AiStylePreview::adding);
         let installed = self
             .session()
             .and_then(|s| s.messages.ai_compose.styles.find(&style.name))
@@ -519,11 +560,9 @@ impl QuillApp {
             None => Button::new("ai-style-preview-add")
                 .primary()
                 .label(tr(keys::AI_COMPOSE_TONE_PREVIEW_ADD))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if let Some(live) = this.live.as_mut() {
-                        let _ = live.driver.add_text_composition_style(&name);
-                    }
-                    cx.notify();
+                .disabled(adding)
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.add_ai_style_from_preview(&name, window, cx);
                 })),
         };
         div()

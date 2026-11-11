@@ -321,32 +321,55 @@ impl Session {
         reaction: &ReactionType,
         add: bool,
     ) {
-        if let Some(message) = self
+        let before = self
             .histories
             .get(&chat_id.0)
             .and_then(|history| history.messages.get(&message_id.0))
-        {
-            let before = message.interaction_info.clone();
-            self.messages
-                .reaction_undo
-                .insert(extra, (chat_id, message_id, before));
-        }
+            .map(|message| message.interaction_info.clone());
         self.set_own_reaction(chat_id, message_id, reaction, add);
+        if let Some(before) = before {
+            let after = self
+                .histories
+                .get(&chat_id.0)
+                .and_then(|history| history.messages.get(&message_id.0))
+                .and_then(|message| message.interaction_info.clone());
+            self.messages.reaction_undo.insert(
+                extra,
+                ReactionUndo {
+                    chat_id,
+                    message_id,
+                    before,
+                    after,
+                    reaction: reaction.clone(),
+                    add,
+                },
+            );
+        }
     }
 
     /// TDLib answered a reaction request: on a refusal the bubble goes back
-    /// to what it showed.
+    /// to what it showed, or, when a later reaction change sits on top of
+    /// this one, only this change is taken back.
     pub(crate) fn settle_own_reaction(&mut self, extra: Option<RequestId>, refused: bool) {
-        let Some((chat_id, message_id, before)) =
-            extra.and_then(|extra| self.messages.reaction_undo.remove(&extra))
-        else {
+        let Some(undo) = extra.and_then(|extra| self.messages.reaction_undo.remove(&extra)) else {
             return;
         };
-        if refused {
-            self.edit_loaded_message(chat_id, message_id, |message| {
-                message.interaction_info = before.clone();
-            });
+        if !refused {
+            return;
         }
+        let limit = self.reaction_limit();
+        self.edit_loaded_message(undo.chat_id, undo.message_id, |message| {
+            message.interaction_info = if message.interaction_info == undo.after {
+                undo.before.clone()
+            } else {
+                Some(crate::reaction_limit::with_own_reaction(
+                    message.interaction_info.as_ref(),
+                    &undo.reaction,
+                    !undo.add,
+                    limit,
+                ))
+            };
+        });
     }
 
     /// The Premium feature to show instead of reacting with `choice`, or

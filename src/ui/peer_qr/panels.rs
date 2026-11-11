@@ -74,6 +74,7 @@ pub(super) fn toast_text(toast: &QrToast) -> String {
         QrToast::Expiring { free_code: true } => tr(keys::NO_PAID_TOKEN_TOAST_EXPIRING).into(),
         QrToast::Expiring { free_code: false } => tr(keys::PEER_QR_LINK_EXPIRING).into(),
         QrToast::Unavailable => tr(keys::PEER_QR_LINK_UNAVAILABLE).into(),
+        QrToast::Changed => tr(keys::Q_QR_BOX_CHANGED_TRY_AGAIN).into(),
         QrToast::Failed(reason) => reason.clone(),
         QrToast::Copied => tr(keys::GROUP_INVITE_QR_COPIED).into(),
         QrToast::LinkCopied => tr(keys::USERNAME_COPIED).into(),

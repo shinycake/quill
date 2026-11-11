@@ -54,6 +54,9 @@ impl QuillApp {
     /// held for the unlock are taken again.
     pub(in crate::ui) fn set_locked(&mut self, locked: bool, cx: &mut Context<Self>) {
         self.account.passcode.set_lock_flag(locked);
+        // The GIF gate follows what is drawn: shut under the lock, open
+        // again for a panel left on its GIFs tab.
+        self.sync_gif_downloads();
         quill::wake::PASSCODE.poke();
         quill::wake::CHROME.poke();
         if !locked {
@@ -114,6 +117,8 @@ impl QuillApp {
     /// Close or stop what the lock screen does not cover or must not keep
     /// running. Every surface the lock reaches is called from here.
     pub(super) fn close_for_lock(&mut self, cx: &mut Context<Self>) {
+        // A swipe the finger left or released does not run behind the lock.
+        self.chat_list.swipe.drop_gestures();
         // The microphone or camera stops, and nothing is sent: a round
         // video reaching its time limit would go out by itself.
         if self.recording_busy() {
@@ -153,6 +158,12 @@ impl QuillApp {
         // in `switchToPip`); this runs with the main window minimized or
         // hidden too. A chat window's viewer keeps its own link.
         self.close_every_video_pip(cx);
+        // A replayed intro clip is drawn only by the unlocked window: its
+        // curtain, volume fade and pause stop running under the lock, so
+        // the clip would play its sound on behind it. It ends here.
+        if self.first_run.intro_player().is_some() || self.first_run.awaits_intro() {
+            self.first_run.finish();
+        }
         // The device-linking scanner is a helper window with the camera on.
         self.clear_device_qr();
         // A passkey ceremony box closes and its key is told to stop; its

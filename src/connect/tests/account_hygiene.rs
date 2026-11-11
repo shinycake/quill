@@ -281,6 +281,36 @@ fn terms_of_service_accept_round_trip() {
 }
 
 #[test]
+fn accepting_old_terms_does_not_clear_newer_terms() {
+    let mut f = fixture();
+    let terms = |id: &str| {
+        format!(
+            r#"{{"@type":"updateTermsOfService","terms_of_service_id":"{id}","terms_of_service":{{"@type":"termsOfService","text":{{"@type":"formattedText","text":"Be nice.","entities":[]}},"min_user_age":0,"show_popup":true}}}}"#
+        )
+    };
+    ingest(&mut f.1, &f.4, &f.3, &terms("tos-1"));
+    f.1.accept_terms().unwrap();
+    let extra = last_request(&f.2)["@extra"].as_str().unwrap().to_string();
+    ingest(&mut f.1, &f.4, &f.3, &terms("tos-2"));
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
+        &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
+    );
+    assert_eq!(
+        f.1.session
+            .settings
+            .notices
+            .terms
+            .as_ref()
+            .map(|t| t.id.as_str()),
+        Some("tos-2")
+    );
+    cleanup(f);
+}
+
+#[test]
 fn terms_accept_failure_keeps_the_prompt_with_an_error() {
     let mut f = fixture();
     ingest(
@@ -510,7 +540,7 @@ fn forgot_password_requests_a_code_then_recovers_with_a_new_password() {
             .as_deref(),
         Some("i***@example.com")
     );
-    assert!(!f.1.session.auth_state.password_state_loading);
+    assert!(!f.1.session.auth_state.password_state_loading());
 
     assert_invalid(f.1.recover_twofa_password("", "new", "hint"));
     f.1.recover_twofa_password("654321", "newpw", "new hint")
@@ -537,6 +567,28 @@ fn forgot_password_requests_a_code_then_recovers_with_a_new_password() {
     assert_eq!(
         f.1.session.auth_state.twofa_flow.notice,
         Some(TwofaNotice::PasswordRecovered)
+    );
+    cleanup(f);
+}
+
+#[test]
+fn a_refused_request_keeps_the_code_sent_to_step() {
+    let mut f = fixture();
+    seed_password_state(&mut f, PASSWORD_STATE_ON);
+    f.1.session.auth_state.twofa_flow.recovery_code_sent_to = Some("i***@example.com".into());
+    f.1.session.auth_state.twofa_flow.login_email_code_sent_to = Some("m***@example.com".into());
+    // Another 2FA request is out: both starters are refused.
+    f.1.refresh_password_state().unwrap();
+    assert_invalid(f.1.request_twofa_recovery_code());
+    assert_invalid(f.1.set_login_email("me@example.com"));
+    let flow = &f.1.session.auth_state.twofa_flow;
+    assert_eq!(
+        flow.recovery_code_sent_to.as_deref(),
+        Some("i***@example.com")
+    );
+    assert_eq!(
+        flow.login_email_code_sent_to.as_deref(),
+        Some("m***@example.com")
     );
     cleanup(f);
 }

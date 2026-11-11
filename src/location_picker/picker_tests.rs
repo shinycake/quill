@@ -98,6 +98,34 @@ fn moving_hides_the_address_and_returning_restores_it() {
     assert!(!picker.places_in_area_shown());
 }
 
+/// Sweep 03-086: an address kept for place A is not shown for place B when
+/// the pin is moved again before B's address arrives.
+#[test]
+fn a_hidden_address_is_not_restored_for_another_place() {
+    let mut picker = fresh();
+    let a = point(48.85, 2.35);
+    picker.geolocated(GeoOutcome::Found(a), true);
+    let _ = picker.take_address_job();
+    picker.address_resolved(a, Some("A street".into()));
+    let start = picker.view();
+    // Drag to B and rest: B's lookup starts.
+    let b_view = start.panned(400., 0.);
+    picker.moved_to(b_view);
+    picker.move_ended();
+    picker.resolve_postponed();
+    let b = picker.take_address_job().expect("B is looked up");
+    // Drag slightly again before it answers and release at B.
+    picker.moved_to(b_view);
+    picker.move_ended();
+    assert_ne!(
+        picker.address_line(),
+        AddressLine::Text("A street"),
+        "not A's address under B"
+    );
+    picker.address_resolved(b, Some("B street".into()));
+    assert_eq!(picker.address_line(), AddressLine::Text("B street"));
+}
+
 #[test]
 fn settling_elsewhere_offers_places_and_postpones_the_address() {
     let mut picker = fresh();

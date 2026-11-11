@@ -122,6 +122,33 @@ fn a_mutation_refetches_the_authoritative_list() {
 }
 
 #[test]
+fn a_list_fetch_that_predates_a_change_does_not_clear_the_stale_mark() {
+    let mut rig = Rig::new();
+    rig.load_list(&[(1, true), (2, false)]);
+    let old = rig.driver.fetch_proxies().unwrap();
+    assert_eq!(
+        rig.driver.fetch_proxies().unwrap(),
+        old,
+        "the fetch out is waited for, not repeated"
+    );
+    assert_eq!(rig.count("getProxies"), 2);
+    rig.driver.enable_proxy(2).unwrap();
+    rig.answer("enableProxy", json!({"@type": "ok"}));
+    assert_eq!(rig.count("getProxies"), 3, "the change asks again");
+    // The answer sent before the change lands late: it is not the list.
+    let mut stale = proxies_json(&[(1, true), (2, false)]);
+    stale["@extra"] = json!(old.0.to_string());
+    rig.feed(stale);
+    let proxy = &rig.driver.session.settings.proxy;
+    assert!(proxy.stale, "still waiting for the fetch after the change");
+    assert!(proxy.fetch.loading());
+    rig.answer("getProxies", proxies_json(&[(1, false), (2, true)]));
+    let proxy = &rig.driver.session.settings.proxy;
+    assert!(!proxy.stale && !proxy.fetch.loading());
+    assert_eq!(proxy.enabled().map(|p| p.id), Some(2));
+}
+
+#[test]
 fn ok_acks_refetch_and_errors_surface_without_touching_the_list() {
     let mut rig = Rig::new();
     rig.load_list(&[(1, true), (2, false)]);
@@ -614,4 +641,21 @@ fn a_ping_sent_before_an_edit_does_not_land_on_the_edited_entry() {
     rig.driver.edit_proxy(1, &draft, false, "").unwrap();
     rig.feed(json!({"@type": "seconds", "seconds": 0.05, "@extra": before.0.to_string()}));
     assert_eq!(rig.driver.session.settings.proxy.pings.get(&1), None);
+}
+
+/// Sweep 02-189: Edit or Remove refused while another change is out keeps
+/// the proxy's ping result.
+#[test]
+fn a_refused_remove_keeps_the_ping_result() {
+    let mut rig = Rig::new();
+    rig.load_list(&[(1, false), (2, false)]);
+    rig.driver.ping_listed_proxy(1).unwrap();
+    rig.answer("pingProxy", json!({"@type": "seconds", "seconds": 0.0423}));
+    rig.driver.disable_proxy().unwrap();
+    assert!(rig.driver.session.settings.proxy.mutating);
+    assert!(rig.driver.remove_proxy(1).is_err());
+    assert_eq!(
+        rig.driver.session.settings.proxy.pings.get(&1),
+        Some(&PingStatus::Available(42))
+    );
 }

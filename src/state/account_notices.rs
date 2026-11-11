@@ -305,9 +305,10 @@ impl Session {
     }
 
     /// A `PasswordStateOp` answered `ok`.
-    pub(crate) fn apply_password_op_ok(&mut self, op: PasswordOp) {
-        self.auth_state.password_state_loading = false;
-        self.auth_state.password_op_error = None;
+    pub(crate) fn apply_password_op_ok(&mut self, op: PasswordOp, request: Option<RequestId>) {
+        if self.auth_state.settle_password_op(request) {
+            self.auth_state.password_op_error = None;
+        }
         match op {
             PasswordOp::CancelPasswordReset => {
                 self.auth_state.twofa_flow.notice = Some(TwofaNotice::ResetCancelled);

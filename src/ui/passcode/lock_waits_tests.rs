@@ -227,7 +227,8 @@ fn the_lock_closes_the_call_windows_boxes_and_refuses_new_ones(cx: &mut TestAppC
     let vcx = &mut vcx;
     app.update_in(vcx, |app, window, cx| {
         app.call_boxes.add_people = Some(crate::ui::call_add_people::AddPeopleBox::new(1));
-        app.group_call.stream.key_shown = true;
+        app.group_call.stream.overlay =
+            Some(crate::ui::group_call_stream_boxes::StreamOverlay::Settings { key_shown: true });
         app.group_call_screen.settings_open = true;
         app.group_call_screen.title_dialog = Some(
             crate::ui::dialogs::group_call::GroupCallTitleDialog::new(window, cx, "x"),
@@ -236,7 +237,10 @@ fn the_lock_closes_the_call_windows_boxes_and_refuses_new_ones(cx: &mut TestAppC
     lock(&app, vcx);
     app.update_in(vcx, |app, window, cx| {
         assert!(app.call_boxes.add_people.is_none(), "Add People goes");
-        assert!(!app.group_call.stream.key_shown, "the stream key hides");
+        assert!(
+            app.group_call.stream.overlay.is_none(),
+            "the stream key hides"
+        );
         assert!(!app.group_call_screen.settings_open);
         assert!(app.group_call_screen.title_dialog.is_none());
         app.open_group_call_settings(cx);

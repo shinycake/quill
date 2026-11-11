@@ -230,6 +230,55 @@ fn stopping_a_share_during_the_wait_sends_neither_start_nor_end() {
 }
 
 #[test]
+fn an_unwanted_rejoin_offer_is_not_left_in_flight() {
+    let (dir, mut driver, recorder, handle, _sink, _seq) = ready_group_call_driver();
+    driver
+        .session
+        .calls
+        .active_group_call
+        .as_mut()
+        .expect("tracked call")
+        .rejoin = crate::state::GroupCallRejoin::Wanted { attempts: 0 };
+    handle.hold_group_offers();
+    driver.rejoin_group_call(true).expect("rejoin starts");
+    assert!(matches!(
+        tracked(&driver).rejoin,
+        crate::state::GroupCallRejoin::InFlight { .. }
+    ));
+    driver.session.calls.left_group_call = Some(555);
+    land(&mut driver, &handle);
+    assert_eq!(sent_count(&recorder, "joinVideoChat"), 0);
+    assert_eq!(
+        tracked(&driver).rejoin,
+        crate::state::GroupCallRejoin::Wanted { attempts: 0 }
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_unwanted_share_offer_clears_the_pending_share() {
+    let (dir, mut driver, recorder, handle, _sink, _seq) = ready_group_call_driver();
+    sharable(&handle, &mut driver);
+    handle.hold_group_offers();
+    driver
+        .toggle_group_call_screen_share()
+        .expect("start sharing");
+    assert!(tracked(&driver).screen_share_pending);
+    // The call stopped being joined while the payload was made.
+    driver
+        .session
+        .calls
+        .active_group_call
+        .as_mut()
+        .expect("tracked call")
+        .is_joined = false;
+    land(&mut driver, &handle);
+    assert_eq!(sent_count(&recorder, "startGroupCallScreenSharing"), 0);
+    assert!(!tracked(&driver).screen_share_pending);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn a_failed_share_payload_clears_the_pending_share() {
     let (dir, mut driver, recorder, handle, _sink, _seq) = ready_group_call_driver();
     sharable(&handle, &mut driver);

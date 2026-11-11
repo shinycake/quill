@@ -19,7 +19,7 @@ impl Session {
             self.finish_pending_bot_stop(chat_id, topic_id, draft_id);
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::RemoveSavedNotificationSound) {
-            self.settings.saved_sounds_stale = true;
+            self.mark_saved_sounds_stale();
         }
         self.apply_profile_music_ok(pending);
         self.apply_proxy_ok(pending);
@@ -222,6 +222,7 @@ impl Session {
             self.settings.data_storage.seeded = true;
             self.settings.data_storage_error = None;
             self.settings.data_storage_dirty = true;
+            self.settings.auto_download_answer = extra.map(AutoDownloadAnswer::Saved);
         }
         // Batch 4: a `confirmSession` / `terminateSession` for the
         // new-login alert succeeded.
@@ -237,15 +238,20 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::AcceptTermsOfService)
         ) {
-            self.settings.notices.terms = None;
-            self.settings.notices.terms_accept = crate::state::fetch::Fetch::Idle;
+            // Only the terms that were accepted: newer ones pushed while
+            // the request was out stay for the user to answer.
+            let accepted = pending.and_then(|p| p.subject_id.as_deref());
+            if self.settings.notices.terms.as_ref().map(|t| t.id.as_str()) == accepted {
+                self.settings.notices.terms = None;
+                self.settings.notices.terms_accept = crate::state::fetch::Fetch::Idle;
+            }
         }
         // Batch 6: a 2FA step answered `ok` (cancel reset, login email
         // code check).
         if let Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp { op })) =
             pending.map(|p| p.purpose)
         {
-            self.apply_password_op_ok(op);
+            self.apply_password_op_ok(op, pending.map(|p| p.id));
         }
         // Batch 6: a storage limit option was accepted; TDLib echoes the
         // value as `updateOption`.
@@ -293,8 +299,13 @@ impl Session {
             Some(RequestPurpose::SellGift) => {
                 self.payments.hub.gift_mutating = false;
                 self.payments.hub.gifts_error = None;
-                self.payments.hub.gift_convert_confirm = None;
-                self.payments.hub.gift_selected = None;
+                // The panel and the box close only when they are still the
+                // sold gift's: the user may have opened another meanwhile.
+                let sold = pending.and_then(|p| p.subject_id.as_deref());
+                if self.payments.hub.gift_selected.as_deref() == sold {
+                    self.payments.hub.gift_convert_confirm = None;
+                    self.payments.hub.gift_selected = None;
+                }
                 self.payments.hub.gifts_stale = true;
                 self.payments.hub.tx_loaded = false;
             }
@@ -503,10 +514,10 @@ impl Session {
                 }
                 self.succeed_story_page_op(pending);
             }
-            // B14: `setCloseFriends` confirmed — the staged ids are the
+            // B14: `setCloseFriends` confirmed — the ids it carried are the
             // new list.
             Some(RequestPurpose::SetCloseFriends) => {
-                if let Some(ids) = self.stories.close_friends_pending.take() {
+                if let Some(ids) = pending.and_then(|p| p.user_ids.clone()) {
                     self.stories.close_friends = CloseFriendsList::Ready(ids);
                 }
                 self.succeed_story_page_op(pending);
@@ -524,11 +535,19 @@ impl Session {
         }
         // Phase C2i: `sendCallLog` confirmed — the log upload for
         // the ended call succeeded.
-        if let Some(RequestPurpose::SendCallLog) = pending.map(|p| p.purpose)
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::SendCallLog
             && let Some(summary) = self.calls.summary.as_mut()
+            && summary.log == CallUpload::Sending(pending.id)
         {
-            summary.log_sent = true;
-            summary.log_error = None;
+            summary.log = CallUpload::Sent;
+        }
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::SendCallDebugInformation
+            && let Some(summary) = self.calls.summary.as_mut()
+            && summary.debug_information == CallUpload::Sending(pending.id)
+        {
+            summary.debug_information = CallUpload::Sent;
         }
         // `sendCallRating` confirmed: the card says thanks.
         if let Some(RequestPurpose::SendCallRating) = pending.map(|p| p.purpose)
@@ -661,6 +680,7 @@ impl Session {
             // Optimistic: `updateChatMember` confirms. TDLib errors
             // keep the old status (Error arm below does not touch it).
             chat.set_member_status(ChannelMemberStatus::Left, None);
+            self.drop_similar_strip_if_not_member(chat_id);
             self.release_chat_history(chat_id);
         }
         // Slice G1: `deleteChat` confirmed — drop the chat locally.
@@ -671,6 +691,7 @@ impl Session {
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
             self.chats.remove(&chat_id.0);
+            self.groups.similar_strips.remove(&chat_id.0);
             self.forget_chat_history(chat_id);
             self.groups
                 .supergroup_members
@@ -810,6 +831,18 @@ impl Session {
                     user.is_contact = false;
                 }
             }
+            Some(RequestPurpose::BlockSenderFromReplies) => {
+                use crate::message_menu_origin::RepliesBlockStage::Submitting;
+                let asked = pending.map(|p| p.id);
+                let box_is_for_it = self
+                    .users_state
+                    .replies_block
+                    .as_ref()
+                    .is_some_and(|b| Some(b.stage) == asked.map(Submitting));
+                if box_is_for_it && let Some(block) = self.users_state.replies_block.take() {
+                    self.users_state.replies_blocked.push(block.name);
+                }
+            }
             Some(RequestPurpose::ImportContacts) => {
                 self.users_state.contacts = None;
                 self.users_state.contacts_error = false;
@@ -840,6 +873,14 @@ impl Session {
         }
         if pending.is_some_and(|p| is_auth_submit(p.purpose)) {
             self.auth_state.last_auth_error = None;
+        }
+        if pending
+            .is_some_and(|p| p.purpose == RequestPurpose::RequestAuthenticationPasswordRecovery)
+            && extra.is_some_and(|extra| {
+                self.auth_state.password_recovery == PasswordRecovery::Requested(extra)
+            })
+        {
+            self.auth_state.password_recovery = PasswordRecovery::CodeSent;
         }
     }
 }

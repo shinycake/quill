@@ -125,3 +125,12 @@ fn unrestrict_setting_is_for_supergroup_rights_only() {
     supergroup(&mut member, &seq, &sink, false, MEMBER);
     assert!(!member.chat_can_edit_unrestrict_boosts(ChatId(13)));
 }
+
+#[test]
+fn a_boost_count_save_in_flight_is_reported_until_it_answers() {
+    let (mut session, _sink) = super::common::session();
+    assert!(!session.unrestrict_boost_saving(ChatId(13)));
+    session.groups.unrestrict_boost_pending.insert(13, 4);
+    assert!(session.unrestrict_boost_saving(ChatId(13)));
+    assert!(!session.unrestrict_boost_saving(ChatId(14)));
+}

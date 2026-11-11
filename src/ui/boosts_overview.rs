@@ -148,9 +148,11 @@ impl QuillApp {
         }
         if session.chat_can_edit_unrestrict_boosts(chat_id) {
             let current = session.chat_unrestrict_boost_count(chat_id);
+            let saving = session.unrestrict_boost_saving(chat_id);
             let mut choices = div().flex().flex_wrap().items_center().gap_1().child({
                 let b = Button::new("unrestrict-off")
                     .label(tr(keys::Q_MONEY_OFF))
+                    .disabled(saving)
                     .small();
                 let b = if current != 0 { b.ghost() } else { b };
                 b.on_click(cx.listener(move |this, _, _, cx| {
@@ -161,6 +163,7 @@ impl QuillApp {
                 choices = choices.child({
                     let b = Button::new(("unrestrict-count", value as u64))
                         .label(value.to_string())
+                        .disabled(saving)
                         .small();
                     let b = if current != value { b.ghost() } else { b };
                     b.on_click(cx.listener(move |this, _, _, cx| {

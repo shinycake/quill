@@ -231,6 +231,11 @@ impl<K: PartialEq, T> NotifyQueue<K, T> {
         self.items.push_back((key, item));
     }
 
+    /// Put an entry back at the head, where it waits for its turn again.
+    pub fn push_front(&mut self, key: K, item: T) {
+        self.items.push_front((key, item));
+    }
+
     pub fn len(&self) -> usize {
         self.items.len()
     }

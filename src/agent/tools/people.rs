@@ -1,7 +1,7 @@
 //! `list_contacts`, `download_file` and `wait_for_message`.
 
 use super::messages::{self, Detail, Names, user_name};
-use super::target::{chat_schema, granted, my_user_id, require};
+use super::target::{chat_schema, granted, my_user_id, remember_grant, require};
 use super::{Ctx, ToolError, ToolOutput, int_arg};
 use crate::agent::grants::{self, Scope};
 use serde_json::{Value, json};
@@ -134,16 +134,45 @@ fn copy_new(from: &Path, to: &Path, name: &str) -> std::io::Result<PathBuf> {
             .create_new(true)
             .open(&dest)
         {
-            Ok(mut out) => {
-                let mut input = std::fs::File::open(from)?;
-                std::io::copy(&mut input, &mut out)?;
-                return Ok(dest);
+            Ok(reserved) => {
+                drop(reserved);
+                return match fill_reserved(from, &dest) {
+                    Ok(()) => Ok(dest),
+                    Err(err) => {
+                        let _ = std::fs::remove_file(&dest);
+                        Err(err)
+                    }
+                };
             }
             Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => last_error = err,
             Err(err) => return Err(err),
         }
     }
     Err(last_error)
+}
+
+/// Copy `from` into a sibling temp file and rename it over `dest`, the empty
+/// file this call just created, so `dest` is never left cut short. The temp
+/// file is removed on any error.
+fn fill_reserved(from: &Path, dest: &Path) -> std::io::Result<()> {
+    let mut part = dest.as_os_str().to_os_string();
+    part.push(".quill-part");
+    let part = PathBuf::from(part);
+    let copied = std::fs::File::open(from)
+        .and_then(|mut input| {
+            let mut out = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&part)?;
+            std::io::copy(&mut input, &mut out)?;
+            out.sync_all()
+        })
+        .and_then(|()| std::fs::rename(&part, dest));
+    if copied.is_err() {
+        let _ = std::fs::remove_file(&part);
+    }
+    copied
 }
 
 pub fn download_file(args: &Value) -> Result<ToolOutput, ToolError> {
@@ -257,9 +286,9 @@ pub fn wait_for_message(args: &Value) -> Result<ToolOutput, ToolError> {
             if let Some(only) = &only {
                 return new.chat_id == only.chat_id;
             }
-            *checked
-                .entry(new.chat_id)
-                .or_insert_with(|| granted(&ctx, new.chat_id, me).ok().flatten().is_some())
+            remember_grant(&mut checked, new.chat_id, || {
+                granted(&ctx, new.chat_id, me).map(|found| found.is_some())
+            })
         },
     );
     if arrived.is_empty() {
@@ -317,6 +346,19 @@ mod tests {
         assert_eq!(first, Some(dir.join("a.txt")));
         assert_eq!(second, Some(dir.join("a (2).txt")));
         assert!(copy_new(&dir.join("src"), &dir.join("a.txt"), "x").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_copy_leaves_nothing_behind() {
+        let dir = std::env::temp_dir().join(format!("quill-agent-failcopy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(std::fs::create_dir_all(&dir).is_ok());
+        assert!(copy_new(&dir.join("evicted"), &dir, "a.txt").is_err());
+        let left: Vec<_> = std::fs::read_dir(&dir)
+            .map(|entries| entries.flatten().map(|e| e.file_name()).collect())
+            .unwrap_or_default();
+        assert!(left.is_empty(), "left {left:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -15,6 +15,7 @@ use crate::ids::{ChatId, MessageId, RequestId};
 use crate::telegram::envelope::StickerItem;
 use serde_json::{Value, json};
 use std::collections::{HashMap, VecDeque};
+use std::time::{Duration, Instant};
 
 /// tdesktop `kAccumulateSeenRequests`: one "watching" action per emoji and
 /// chat in this many milliseconds.
@@ -66,10 +67,11 @@ pub struct EmojiEffect {
     pub incoming: bool,
 }
 
-/// Effects the session received and the window has not started yet.
+/// Effects the session received and the window has not started yet, each
+/// with the time it arrived.
 #[derive(Debug, Default)]
 pub struct EmojiInteractions {
-    pending: VecDeque<EmojiEffect>,
+    pending: VecDeque<(Instant, EmojiEffect)>,
     /// When "watching" was last sent for an emoji in a chat.
     seen_sent: Vec<(ChatId, String, u64)>,
     /// Messages sent from here that got their final id: the key their
@@ -80,18 +82,34 @@ pub struct EmojiInteractions {
 
 impl EmojiInteractions {
     pub fn push(&mut self, effect: EmojiEffect) {
+        self.push_at(effect, Instant::now());
+    }
+
+    /// [`Self::push`] for an effect that arrived at `at`.
+    pub fn push_at(&mut self, effect: EmojiEffect, at: Instant) {
         if effect.sticker.file_id.0 == 0 {
             return;
         }
         if self.pending.len() >= MAX_PENDING {
             self.pending.pop_front();
         }
-        self.pending.push_back(effect);
+        self.pending.push_back((at, effect));
     }
 
     /// Hand the waiting effects to the window.
     pub fn take_pending(&mut self) -> Vec<EmojiEffect> {
-        self.pending.drain(..).collect()
+        self.pending.drain(..).map(|(_, effect)| effect).collect()
+    }
+
+    /// Hand the waiting effects to the window, dropping those that arrived
+    /// more than `max_age` before `now`: taps that came while no window
+    /// drew them (a locked app) are long past (tdesktop `kMaxDelay`).
+    pub fn take_fresh(&mut self, now: Instant, max_age: Duration) -> Vec<EmojiEffect> {
+        self.pending
+            .drain(..)
+            .filter(|(at, _)| now.saturating_duration_since(*at) <= max_age)
+            .map(|(_, effect)| effect)
+            .collect()
     }
 
     /// A message sent from here got its final id (or failed under a new
@@ -157,6 +175,19 @@ mod tests {
             },
             incoming,
         }
+    }
+
+    #[test]
+    fn a_tap_that_arrived_long_before_the_window_took_it_is_dropped() {
+        let start = Instant::now();
+        let ms = Duration::from_millis;
+        let mut interactions = EmojiInteractions::default();
+        interactions.push_at(effect(1, true), start);
+        interactions.push_at(effect(2, true), start + ms(4000));
+        let taken = interactions.take_fresh(start + ms(4500), ms(2000));
+        let files: Vec<i32> = taken.iter().map(|e| e.sticker.file_id.0).collect();
+        assert_eq!(files, [2]);
+        assert!(interactions.take_pending().is_empty());
     }
 
     #[test]

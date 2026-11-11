@@ -498,7 +498,11 @@ fn folder_chats_to_leave_cached_per_folder() {
     );
     apply_json(&mut session, &seq, &sink, &json);
     assert_eq!(
-        session.chat_list.folder_chats_to_leave.get(&3),
+        session
+            .chat_list
+            .folder_chats_to_leave
+            .get(&3)
+            .and_then(|f| f.data()),
         Some(&vec![5, 6])
     );
     // Same payload shape, different purpose: cache untouched.
@@ -526,7 +530,9 @@ fn cl1_pin_error_rolls_back_and_surfaces() {
         .pending_mut(extra)
         .expect("pending")
         .rollback = Some(RequestRollback::ChatPin {
+        chat_id: 11,
         previous: false,
+        shown: true,
         archived: false,
     });
     session.chats.get_mut(&11).expect("chat").is_pinned = true;
@@ -541,7 +547,7 @@ fn cl1_pin_error_rolls_back_and_surfaces() {
     );
     assert!(!session.chats.get(&11).expect("chat").is_pinned);
     // A pin limit opens the Premium limit box instead of an error line.
-    assert_eq!(session.chats_state.chat_action_error, None);
+    assert!(session.chats_state.chat_action_error.is_empty());
     assert_eq!(
         session.payments.hub.limit_box,
         Some((crate::premium_limits::PremiumLimitKind::Pins, 0))
@@ -567,7 +573,11 @@ fn cl1_marked_as_unread_update_and_rollback() {
         .requests
         .pending_mut(extra)
         .expect("pending")
-        .rollback = Some(RequestRollback::ChatMarkedAsUnread { previous: true });
+        .rollback = Some(RequestRollback::ChatMarkedAsUnread {
+        chat_id: 12,
+        previous: true,
+        shown: false,
+    });
     session
         .chats
         .get_mut(&12)
@@ -584,7 +594,7 @@ fn cl1_marked_as_unread_update_and_rollback() {
     );
     assert!(session.chats.get(&12).expect("chat").is_marked_as_unread);
     assert_eq!(
-        session.chats_state.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.last(),
         Some("could not change read state (error 400)")
     );
 }
@@ -621,7 +631,7 @@ fn cl1_clear_history_error_surfaces() {
         ),
     );
     assert_eq!(
-        session.chats_state.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.last(),
         Some("could not clear history (error 400)")
     );
 }

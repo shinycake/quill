@@ -10,7 +10,7 @@ use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
-use quill::state::{ActiveCall, CallRating, CallSummary};
+use quill::state::{ActiveCall, CallRating, CallSummary, CallUpload};
 use quill::telegram::envelope::CallState;
 impl QuillApp {
     /// Phase C1: call overlay — incoming / outgoing / active / ended
@@ -619,7 +619,7 @@ impl QuillApp {
                     tr(keys::Q_OPS_NO_AUDIO_WAS_CARRIED)
                 }),
         );
-        if summary.need_debug_information && !summary.debug_information_sent {
+        if summary.need_debug_information && summary.debug_information.can_send() {
             card = card.child(
                 Button::new("call-upload-diagnostics")
                     .label(tr(keys::Q_OPS_UPLOAD_DIAGNOSTICS))
@@ -628,7 +628,7 @@ impl QuillApp {
                     })),
             );
         }
-        if summary.debug_information_sent {
+        if summary.debug_information == CallUpload::Sent {
             card = card.child(
                 div()
                     .text_xs()
@@ -636,15 +636,15 @@ impl QuillApp {
                     .child(tr(keys::Q_OPS_DIAGNOSTICS_SENT)),
             );
         }
-        if let Some(error) = &summary.debug_information_error {
+        if let Some(error) = summary.debug_information.error() {
             card = card.child(
                 div()
                     .text_xs()
                     .text_color(danger_soft())
-                    .child(error.clone()),
+                    .child(error.to_string()),
             );
         }
-        if summary.need_log && !summary.log_sent {
+        if summary.need_log && summary.log.can_send() {
             card = card.child(
                 Button::new("call-upload-log")
                     .label(tr(keys::Q_OPS_UPLOAD_CALL_LOG))
@@ -653,7 +653,7 @@ impl QuillApp {
                     })),
             );
         }
-        if summary.log_sent {
+        if summary.log == CallUpload::Sent {
             card = card.child(
                 div()
                     .text_xs()
@@ -661,12 +661,12 @@ impl QuillApp {
                     .child(tr(keys::Q_OPS_CALL_LOG_SENT)),
             );
         }
-        if let Some(error) = &summary.log_error {
+        if let Some(error) = summary.log.error() {
             card = card.child(
                 div()
                     .text_xs()
                     .text_color(danger_soft())
-                    .child(error.clone()),
+                    .child(error.to_string()),
             );
         }
         if summary.need_rating && summary.rating.is_open() {

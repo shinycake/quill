@@ -323,15 +323,20 @@ impl QuillApp {
     }
 
     /// The code for `link` in `ink`, or the one it replaces while the new
-    /// one is made.
+    /// one is made. A code that failed draws nothing: the old one is
+    /// another link's, and Copy and Share carry the new link.
     pub(super) fn qr_code_image(&self, link: &str, ink: Rgb) -> Option<Arc<RenderImage>> {
         let codes = &self.peer_qr.art.codes;
-        codes
-            .iter()
-            .find(|(k, _)| k.0 == link && k.1 == ink)
-            .and_then(|(_, slot)| slot.ready())
-            .or_else(|| codes.iter().rev().find_map(|(_, slot)| slot.ready()))
-            .map(|(image, _)| image)
+        let wanted = codes.iter().find(|(k, _)| k.0 == link && k.1 == ink);
+        match wanted.map(|(_, slot)| slot) {
+            Some(Slot::Ready { image, .. }) => Some(image.clone()),
+            Some(Slot::Failed) => None,
+            Some(Slot::Loading) | None => codes
+                .iter()
+                .rev()
+                .find_map(|(_, slot)| slot.ready())
+                .map(|(image, _)| image),
+        }
     }
 
     /// The picture of `emoji` in the pattern: the emoji set's sprite, or

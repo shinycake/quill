@@ -27,6 +27,8 @@ use quill::state::PhotoOwner;
 use quill::story_ring::UNREAD_WIDTH;
 use quill::story_viewer::StoryOpenScope;
 use quill::telegram::envelope::ParsedUser;
+#[cfg(test)]
+pub(in crate::ui) use show_or_premium_box::ShowStage;
 pub(in crate::ui) use show_or_premium_box::{ShowOrPremium, ShowOrPremiumBox};
 
 /// The open cover boxes (a `QuillApp` field).

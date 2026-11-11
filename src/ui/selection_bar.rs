@@ -162,7 +162,7 @@ fn selection_cancel_button(cx: &mut Context<QuillApp>) -> AnyElement {
         .label(tr(keys::CANCEL))
         .ghost()
         .on_click(cx.listener(|this, _, window, cx| {
-            this.clear_forward(window, cx);
+            this.end_selection(window, cx);
         }))
         .into_any_element()
 }

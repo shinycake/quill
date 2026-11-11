@@ -60,11 +60,12 @@ pub struct BotsState {
     /// `(chat_id, message_id)`. Present = panel open; `None` = request in
     /// flight (the panel shows a loading row); `Some` = loaded rows.
     pub game_scores: HashMap<(i64, i64), Option<Vec<GameHighScore>>>,
-    /// Last `callbackQueryAnswer` to an inline keyboard callback-button press
-    /// (Phase 3.2), with the chat of the press. The UI takes it on the next
-    /// poll and shows the answer in the status line (URL answers open in the
-    /// OS browser).
-    pub last_callback_answer: Option<CallbackAnswer>,
+    /// The `callbackQueryAnswer`s of inline keyboard callback-button
+    /// presses (Phase 3.2), oldest first, each with the chat of its press.
+    /// The UI takes them on the next poll and shows each answer in the
+    /// status line (URL answers open in the OS browser); two answers that
+    /// land between polls both show.
+    pub callback_answers: std::collections::VecDeque<CallbackAnswer>,
     /// Inline button presses and the requests they sent
     /// (`Session::callback_button_waiting`).
     pub callback_presses: Vec<CallbackPress>,
@@ -120,7 +121,7 @@ impl BotsState {
             asked_bot_users: HashSet::new(),
             similar_bots: HashMap::new(),
             game_scores: HashMap::new(),
-            last_callback_answer: None,
+            callback_answers: Default::default(),
             callback_presses: Vec::new(),
             web_apps: WebApps::default(),
             last_login_url_info: None,

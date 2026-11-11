@@ -22,6 +22,16 @@ use quill::folder_archive::{ARCHIVE_SIZE_LIMIT, ArchiveError, build_archive};
 use quill::lang::{keys, tr, trn};
 use std::path::PathBuf;
 
+/// The folder zip behind "Send as archive": at most one per composer, for
+/// the chat it was dropped in. It ends with the answer (landed or dropped)
+/// or with the screen, whose task and composer go together.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) enum ArchiveJob {
+    #[default]
+    Idle,
+    Building(SendSlot),
+}
+
 impl QuillApp {
     /// Whether the open chat takes dropped files into its composer.
     pub(super) fn file_drop_enabled(&self) -> bool {
@@ -150,6 +160,11 @@ impl QuillApp {
                 let Some(slot) = self.send_slot() else {
                     return;
                 };
+                // One zip at a time; its note is still showing.
+                if self.composer_ui.archive != ArchiveJob::Idle {
+                    return;
+                }
+                self.composer_ui.archive = ArchiveJob::Building(slot.clone());
                 self.set_note(StatusNote::silent(tr(keys::Q_MISC_PREPARING_THE_ARCHIVE)));
                 cx.notify();
                 let dir = quill::local_path::media_cache_base().join("archives");
@@ -175,13 +190,19 @@ impl QuillApp {
         built: Result<quill::scratch::OwnedFile, ArchiveError>,
         cx: &mut Context<Self>,
     ) {
+        self.composer_ui.archive = ArchiveJob::Idle;
+        // The person moved on to another chat (or account) while it was
+        // zipped: the result is dropped (an archive removes itself), and
+        // so is the note that said it was being prepared.
+        if self.send_slot().as_ref() != Some(&slot) {
+            if self.connection.note().text() == tr(keys::Q_MISC_PREPARING_THE_ARCHIVE) {
+                self.set_note(StatusNote::default());
+            }
+            cx.notify();
+            return;
+        }
         match built {
             Ok(archive) => {
-                // The person moved on to another chat (or account) while
-                // it was zipped: dropping it removes it.
-                if self.send_slot().as_ref() != Some(&slot) {
-                    return;
-                }
                 let path = archive.path().to_path_buf();
                 let Some(appended) = self.update_pending_attachments(|tray| {
                     ComposerAttachment::append_planned(tray, &[(path, AttachmentKind::Document)])
@@ -255,3 +276,8 @@ impl QuillApp {
             .into_any_element()
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "drop_zones_tests.rs"]
+mod tests;

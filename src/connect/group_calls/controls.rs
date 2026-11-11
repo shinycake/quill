@@ -261,7 +261,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             MessageSender::Chat { chat_id } => MessageSenderRef::Chat(chat_id),
         };
         let extra = self.session.request(
-            RequestPurpose::Calls(CallsPurpose::ToggleGroupCallParticipantMute { group_call_id }),
+            RequestPurpose::Calls(CallsPurpose::ToggleGroupCallParticipantMute {
+                group_call_id,
+                participant: participant_id,
+            }),
             None,
         );
         if let Err(err) = self
