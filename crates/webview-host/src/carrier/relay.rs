@@ -66,37 +66,61 @@ pub(super) fn page_message(body: &str, token: &str) -> Option<PageMessage> {
     })
 }
 
+fn in_flight_is(flight: &Option<InFlight>, sequence: u64) -> bool {
+    flight
+        .as_ref()
+        .is_some_and(|flight| flight.sequence == sequence)
+}
+
 struct InFlight {
     sequence: u64,
     sent: Instant,
     data: String,
 }
 
+/// How far the current document has got. It only moves forward, and a
+/// reload replaces the whole value (`Relay::load_started`), so nothing of
+/// the old document's bridge or page survives into the next.
+enum Page {
+    /// Nothing the carrier trusts yet.
+    Silent,
+    /// The bridge said hello; the page's own script has not done anything.
+    BridgeUp,
+    /// The page's own script posted but has not set `onmessage`.
+    Talking,
+    /// `onmessage` is a function: deliveries may go, one in flight at a time.
+    Listening { in_flight: Option<InFlight> },
+}
+
+impl Page {
+    /// The page's own script did something in this document; before that
+    /// the bridge's own hello says nothing about the page.
+    fn started(&self) -> bool {
+        matches!(self, Self::Talking | Self::Listening { .. })
+    }
+}
+
+/// The document being loaded, with the clocks that judge it.
+struct Document {
+    /// When it started loading.
+    started: Instant,
+    /// When it finished loading, if it did.
+    finished: Option<Instant>,
+    page: Page,
+}
+
 pub(super) struct Relay {
     pending: VecDeque<String>,
     pending_bytes: usize,
-    in_flight: Option<InFlight>,
+    document: Document,
     sequence: u64,
     /// Deliveries numbered up to here went to an earlier document; their
     /// late acknowledgements are ignored.
     stale_through: u64,
-    /// When the current document started loading.
-    load_started: Instant,
-    /// When it finished loading, if it did.
-    load_finished: Option<Instant>,
-    /// The bridge said hello in this document.
-    bridge_seen: bool,
-    /// The page's `onmessage` is a function: deliveries may go.
-    receiving: bool,
-    /// The page's own script did something in this document (set
-    /// `onmessage` or posted); before that the bridge's own hello says
-    /// nothing about the page.
-    started: bool,
     /// The page posted at least once, in any document (it gets
     /// `{"t":"close"}` at the end).
     pub(super) posted: bool,
     last_heard: Instant,
-    pub(super) closing_at: Option<Instant>,
 }
 
 impl Relay {
@@ -104,17 +128,15 @@ impl Relay {
         Self {
             pending: VecDeque::new(),
             pending_bytes: 0,
-            in_flight: None,
+            document: Document {
+                started: now,
+                finished: None,
+                page: Page::Silent,
+            },
             sequence: 0,
             stale_through: 0,
-            load_started: now,
-            load_finished: None,
-            bridge_seen: false,
-            receiving: false,
-            started: false,
             posted: false,
             last_heard: now,
-            closing_at: None,
         }
     }
 
@@ -122,43 +144,58 @@ impl Relay {
     /// bridge is new, and a delivery the old one never acknowledged goes
     /// again first.
     pub(super) fn load_started(&mut self, now: Instant) {
-        self.load_started = now;
-        self.load_finished = None;
-        self.bridge_seen = false;
-        self.receiving = false;
-        self.started = false;
+        let old = std::mem::replace(
+            &mut self.document,
+            Document {
+                started: now,
+                finished: None,
+                page: Page::Silent,
+            },
+        );
         self.stale_through = self.sequence;
-        if let Some(lost) = self.in_flight.take() {
+        if let Page::Listening {
+            in_flight: Some(lost),
+        } = old.page
+        {
             self.pending_bytes = self.pending_bytes.saturating_add(lost.data.len());
             self.pending.push_front(lost.data);
         }
     }
 
     pub(super) fn load_finished(&mut self, now: Instant) {
-        self.load_finished = Some(now);
+        self.document.finished = Some(now);
     }
 
     /// Whether the page's own script has started.
     pub(super) fn started(&self) -> bool {
-        self.started
+        self.document.page.started()
     }
 
     /// Note a bridge message. `Err` when it breaks the relay.
     pub(super) fn heard(&mut self, message: &PageMessage, now: Instant) -> Result<(), ()> {
         self.last_heard = now;
         match message {
-            PageMessage::Hello => self.bridge_seen = true,
-            PageMessage::Receiving => {
-                self.receiving = true;
-                self.started = true;
+            PageMessage::Hello => {
+                if matches!(self.document.page, Page::Silent) {
+                    self.document.page = Page::BridgeUp;
+                }
             }
-            PageMessage::Ack(sequence) => match &self.in_flight {
-                Some(flight) if flight.sequence == *sequence => self.in_flight = None,
+            PageMessage::Receiving => {
+                if !matches!(self.document.page, Page::Listening { .. }) {
+                    self.document.page = Page::Listening { in_flight: None };
+                }
+            }
+            PageMessage::Ack(sequence) => match &mut self.document.page {
+                Page::Listening { in_flight } if in_flight_is(in_flight, *sequence) => {
+                    *in_flight = None;
+                }
                 _ if *sequence <= self.stale_through => {}
                 _ => return Err(()),
             },
             PageMessage::Binary(_) | PageMessage::Text(_) => {
-                self.started = true;
+                if matches!(self.document.page, Page::Silent | Page::BridgeUp) {
+                    self.document.page = Page::Talking;
+                }
                 self.posted = true;
             }
             PageMessage::LeftScope | PageMessage::Failed | PageMessage::Invalid => return Err(()),
@@ -169,7 +206,7 @@ impl Relay {
     /// Queue a delivery; `false` when the page is too far behind.
     pub(super) fn queue(&mut self, data: String) -> bool {
         let bytes = self.pending_bytes.saturating_add(data.len());
-        let items = self.pending.len() + usize::from(self.in_flight.is_some());
+        let items = self.pending.len() + usize::from(self.in_flight().is_some());
         if items >= MAX_PENDING_ITEMS || bytes > base64_len(MAX_PENDING_BYTES) {
             return false;
         }
@@ -181,13 +218,16 @@ impl Relay {
     /// The next delivery to hand the page: none while one is in flight or
     /// before the page can take it.
     pub(super) fn next(&mut self, now: Instant) -> Option<(u64, String)> {
-        if self.in_flight.is_some() || !self.bridge_seen || !self.receiving {
+        let Page::Listening { in_flight } = &mut self.document.page else {
+            return None;
+        };
+        if in_flight.is_some() {
             return None;
         }
         let data = self.pending.pop_front()?;
         self.pending_bytes = self.pending_bytes.saturating_sub(data.len());
         self.sequence = self.sequence.saturating_add(1);
-        self.in_flight = Some(InFlight {
+        *in_flight = Some(InFlight {
             sequence: self.sequence,
             sent: now,
             data: data.clone(),
@@ -195,17 +235,25 @@ impl Relay {
         Some((self.sequence, data))
     }
 
+    fn in_flight(&self) -> Option<&InFlight> {
+        match &self.document.page {
+            Page::Listening { in_flight } => in_flight.as_ref(),
+            _ => None,
+        }
+    }
+
     /// Why the carrier failed by `now`, if it did.
     pub(super) fn failure(&self, now: Instant) -> Option<CarrierFailure> {
-        if !self.started {
+        if !self.document.page.started() {
             let load_failed = |message: &str| CarrierFailure::LoadFailed {
                 message: message.into(),
             };
-            if now.saturating_duration_since(self.load_started) > LOAD_TIMEOUT {
+            if now.saturating_duration_since(self.document.started) > LOAD_TIMEOUT {
                 return Some(load_failed("the relay page did not load"));
             }
             if self
-                .load_finished
+                .document
+                .finished
                 .is_some_and(|at| now.saturating_duration_since(at) > START_TIMEOUT)
             {
                 return Some(load_failed("the relay page did not start"));
@@ -214,8 +262,7 @@ impl Relay {
         }
         let silent = now.saturating_duration_since(self.last_heard) > PAGE_SILENCE;
         let stuck = self
-            .in_flight
-            .as_ref()
+            .in_flight()
             .is_some_and(|flight| now.saturating_duration_since(flight.sent) > WRITE_TIMEOUT);
         (silent || stuck).then_some(CarrierFailure::Terminated)
     }
@@ -324,6 +371,19 @@ mod tests {
         relay.heard(&PageMessage::Ack(1), now).unwrap();
         assert!(relay.heard(&PageMessage::Ack(3), now).is_err());
         relay.heard(&PageMessage::Ack(2), now).unwrap();
+    }
+
+    #[test]
+    fn a_probe_answer_does_not_undo_a_listening_page() {
+        let now = Instant::now();
+        let mut relay = ready(now);
+        relay.heard(&PageMessage::Hello, now).unwrap();
+        assert!(relay.started());
+        assert!(relay.queue("AAAA".into()));
+        assert_eq!(relay.next(now), Some((1, "AAAA".into())));
+        relay.load_started(now);
+        assert!(!relay.started(), "a reload starts the document over");
+        assert_eq!(relay.next(now), None);
     }
 
     #[test]

@@ -43,6 +43,7 @@ pub mod mcp;
 pub mod pacing;
 pub mod prompts;
 pub mod server;
+mod subscription;
 pub mod summary;
 pub mod td;
 pub mod tools;

@@ -180,14 +180,26 @@ pub struct NetworkState {
     pub available: bool,
 }
 
+/// Where one IP version's gateway stands in having its link-layer address
+/// resolved. It leaves `Asking` when the route no longer carries the old
+/// address over (the system resolved it, or the gateway changed).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Neighbour {
+    /// Nothing is awaited.
+    Unasked,
+    /// This gateway was asked for; not asked again until it changes.
+    Asking(IpAddr),
+}
+
 #[derive(Debug)]
 struct Tracker {
     route: Route,
     epoch: u64,
-    /// The gateways [`Self::gateways_to_resolve`] last named, so each is asked once
-    /// until it resolves: a router that never answers would otherwise turn
-    /// every failed lookup's event into another lookup.
-    resolving: [Option<IpAddr>; 2],
+    /// Per IP version (v4, v6): the gateway [`Self::gateways_to_resolve`]
+    /// last named, so each is asked once until it resolves: a router that
+    /// never answers would otherwise turn every failed lookup's event into
+    /// another lookup.
+    neighbours: [Neighbour; 2],
     /// When a read last looked at the routing table because the route read
     /// offline.
     looked_at: Option<Instant>,
@@ -203,7 +215,7 @@ impl Tracker {
         Self {
             route,
             epoch: 0,
-            resolving: [None; 2],
+            neighbours: [Neighbour::Unasked; 2],
             looked_at: None,
         }
     }
@@ -217,10 +229,11 @@ impl Tracker {
         ];
         let fresh = carried
             .iter()
-            .zip(self.resolving)
-            .filter_map(|(now, asked)| now.filter(|gateway| asked != Some(*gateway)))
+            .zip(self.neighbours)
+            .filter_map(|(now, asked)| now.filter(|gateway| asked != Neighbour::Asking(*gateway)))
             .collect();
-        self.resolving = carried;
+        self.neighbours =
+            carried.map(|gateway| gateway.map_or(Neighbour::Unasked, Neighbour::Asking));
         fresh
     }
 
@@ -306,8 +319,8 @@ fn is_gateway(ip: IpAddr) -> bool {
 #[cfg(target_os = "macos")]
 fn still_resolving(gateway: IpAddr) -> bool {
     lock_or_recover(tracker())
-        .resolving
-        .contains(&Some(gateway))
+        .neighbours
+        .contains(&Neighbour::Asking(gateway))
 }
 
 fn network_changed() {

@@ -76,6 +76,7 @@ pub fn list_contacts(args: &Value) -> Result<ToolOutput, ToolError> {
     Ok(ToolOutput {
         text,
         data: json!({"contacts": contacts}),
+        images: Vec::new(),
     })
 }
 
@@ -246,6 +247,7 @@ pub fn download_file(args: &Value) -> Result<ToolOutput, ToolError> {
     Ok(ToolOutput {
         text: format!("Saved {name} at {}", path.display()),
         data: json!({"path": path.to_string_lossy(), "name": name, "size": file.get("size")}),
+        images: Vec::new(),
     })
 }
 
@@ -295,6 +297,7 @@ pub fn wait_for_message(args: &Value) -> Result<ToolOutput, ToolError> {
         return Ok(ToolOutput {
             text: format!("No new message in {timeout} seconds. Call again to keep waiting."),
             data: json!({"messages": []}),
+            images: Vec::new(),
         });
     }
     let mut names = Names::new(&ctx);
@@ -314,6 +317,7 @@ pub fn wait_for_message(args: &Value) -> Result<ToolOutput, ToolError> {
     Ok(ToolOutput {
         text,
         data: json!({"messages": shaped}),
+        images: Vec::new(),
     })
 }
 
