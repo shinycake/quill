@@ -143,27 +143,28 @@ fn cl2_archive_settings_fetch_stores_and_set_rolls_back() {
         ),
     );
     assert_eq!(
-        session.chat_list.archive_settings.data().copied(),
+        session.chat_list.archive_chat_list_settings(),
         Some(ArchiveChatListSettings {
             archive_and_mute_new_chats_from_unknown_users: true,
             keep_unmuted_chats_archived: false,
             keep_chats_from_folders_archived: true,
         })
     );
-    assert!(!session.chat_list.archive_settings.is_loading());
+    assert!(!session.chat_list.archive_settings_loading());
 
-    let old = session.chat_list.archive_settings.data().copied();
+    let old = session.chat_list.archive_chat_list_settings();
     let extra = session.request(RequestPurpose::SetArchiveChatListSettings, None);
     session
         .requests
         .pending_mut(extra)
         .expect("pending")
         .rollback = Some(RequestRollback::ArchiveChatListSettings { previous: old });
-    session.chat_list.archive_settings =
-        crate::state::fetch::Fetch::Ready(ArchiveChatListSettings {
+    session
+        .chat_list
+        .edit_archive_settings(Some(ArchiveChatListSettings {
             keep_unmuted_chats_archived: true,
             ..old.unwrap_or_default()
-        });
+        }));
     apply_json(
         &mut session,
         &seq,
@@ -173,7 +174,7 @@ fn cl2_archive_settings_fetch_stores_and_set_rolls_back() {
             extra.0
         ),
     );
-    assert_eq!(session.chat_list.archive_settings.data().copied(), old);
+    assert_eq!(session.chat_list.archive_chat_list_settings(), old);
     assert_eq!(
         session.chats_state.chat_action_error.last(),
         Some("could not save archive settings (error 400)")
@@ -459,7 +460,7 @@ fn folder_invite_links_list_create_edit_and_errors() {
         ),
     );
     assert_eq!(
-        session.chat_list.folder_limit_hit.take(),
+        session.chat_list.take_folder_limit_hit(),
         Some((
             crate::folder_limits::FolderLimitKind::InviteLinks,
             Some(extra)

@@ -40,10 +40,9 @@ use crate::telegram::envelope::{
     PaymentFormData, PaymentReceiptData, Poll, ReactionNotificationSettings, RecommendedChatFolder,
     ReplyKeyboard, ReplyMarkup, ReportChatOutcome, ReportOption, ReportSponsoredResult,
     ReportStoryResult, RichMessageContent, ScopeNotificationSettings, SecretChatState,
-    SponsoredMessage, StarSubscriptionsData, StickerItem, StickerSetInfo, StorageStats,
-    StoryAvailableReactionView, StoryInteractionView, StoryInteractionsView, StoryListView,
-    TdError, UsernameCheckResult, ValidatedOrderInfoData, effective_content,
-    reply_markup_demands_reply,
+    SponsoredMessage, StickerItem, StickerSetInfo, StorageStats, StoryAvailableReactionView,
+    StoryInteractionView, StoryInteractionsView, StoryListView, TdError, UsernameCheckResult,
+    ValidatedOrderInfoData, effective_content, reply_markup_demands_reply,
 };
 use crate::telegram::envelope::{AvailableMessageSender, CallState, ReadyParams};
 use crate::telegram::envelope_story::ParsedStoryAlbum;

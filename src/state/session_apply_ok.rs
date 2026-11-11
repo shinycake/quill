@@ -59,10 +59,8 @@ impl Session {
             Some(RequestPurpose::DeleteAllCallMessages) => {
                 self.calls.recent_calls.clear();
                 self.calls.recent_calls_offset.clear();
-                self.calls.recent_calls_error = false;
-                self.calls.recent_calls_clearing = false;
                 // A page in flight still lists the calls just deleted.
-                self.calls.recent_calls_request = None;
+                self.calls.recent_calls_stage = RecentCalls::Idle;
             }
             Some(RequestPurpose::DeleteChatMessagesBySender) => {
                 self.messages
@@ -283,9 +281,7 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::EditStarSubscription | RequestPurpose::ReuseStarSubscription)
         ) {
-            self.payments.star_subscriptions_stale = true;
-            self.payments.star_subscriptions_mutating = false;
-            self.payments.star_subscriptions_error = None;
+            self.payments.star_subscriptions.edit_done();
         }
         // `toggleGiftIsSaved` / `sellGift` succeeded: refetch the list from
         // the server (the connect driver does it on the same ingest) and,
@@ -584,8 +580,8 @@ impl Session {
         // A short OK is not exhaustion; 404 is. A page that went through
         // ends the wait after an earlier failure.
         match pending.map(|p| p.purpose) {
-            Some(RequestPurpose::LoadChats) => self.chat_list.chats_retry = None,
-            Some(RequestPurpose::LoadArchiveChats) => self.chat_list.archive_retry = None,
+            Some(RequestPurpose::LoadChats) => self.chat_list.main_paging.page_ok(),
+            Some(RequestPurpose::LoadArchiveChats) => self.chat_list.archive_paging.page_ok(),
             _ => {}
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::DeleteChatFolder)
@@ -730,6 +726,7 @@ impl Session {
                         std::mem::replace(&mut state.stage, PageStage::Ready)
                     {
                         self.requests.take(page);
+                        state.stage = PageStage::Ready;
                     }
                     state.requests.clear();
                     state.total_count = 0;

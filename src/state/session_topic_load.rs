@@ -28,7 +28,7 @@ impl Session {
             None => true,
             Some(history) => {
                 history.messages.is_empty()
-                    && !history.loaded_complete
+                    && !history.loaded_complete()
                     && self.topic_page_in_flight(chat_id, forum_topic_id, WindowEnd::Oldest)
             }
         }
@@ -43,7 +43,7 @@ impl Session {
             .topic_histories
             .get_mut(&(chat_id.0, forum_topic_id))
         {
-            history.older = OlderEnd::Open;
+            history.reopen_older();
         }
     }
 }

@@ -191,10 +191,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session
-                    .messages
-                    .forward_flights
-                    .retain(|f| f.extra != extra);
+                self.session.messages.take_forward_flight(extra);
                 Err(err)
             }
         }

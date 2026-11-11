@@ -130,7 +130,7 @@ fn comments_thread_open_load_send_and_close() {
     {
         let thread = driver.session.threads.thread.as_ref().unwrap();
         assert_eq!(thread.status, ThreadStatus::Ready);
-        assert!(thread.history.loaded_complete, "the root ends the thread");
+        assert!(thread.history.loaded_complete(), "the root ends the thread");
         let ids: Vec<i64> = thread.ordered().iter().map(|m| m.id.0).collect();
         assert_eq!(ids, vec![501, 502, 503, 504]);
     }
@@ -282,7 +282,7 @@ fn group_reply_thread_pages_older_and_fails_with_retry() {
             .as_ref()
             .unwrap()
             .history
-            .loaded_complete
+            .loaded_complete()
     );
     let older = driver.fetch_thread_history().unwrap().expect("older page");
     let history = requests_of(&recorder, "getMessageThreadHistory");
@@ -303,7 +303,7 @@ fn group_reply_thread_pages_older_and_fails_with_retry() {
             .as_ref()
             .unwrap()
             .history
-            .loaded_complete
+            .loaded_complete()
     );
     // Closing in the same chat needs no chat switch.
     assert_eq!(driver.close_thread(), None);
@@ -506,7 +506,7 @@ fn unread_thread_opens_at_the_read_position_and_jumps_to_the_latest_replies() {
             .as_ref()
             .unwrap()
             .history
-            .has_newer
+            .has_newer()
     );
     assert!(!driver.thread_needs_reload());
 
@@ -536,7 +536,7 @@ fn unread_thread_opens_at_the_read_position_and_jumps_to_the_latest_replies() {
     {
         let thread = driver.session.threads.thread.as_ref().unwrap();
         assert_eq!(thread.unread_anchor, None);
-        assert!(!thread.history.has_newer);
+        assert!(!thread.history.has_newer());
         assert_eq!(thread.history.window_epoch, 1);
     }
     ingest(
@@ -574,7 +574,7 @@ fn unread_thread_opens_at_the_read_position_and_jumps_to_the_latest_replies() {
         let thread = driver.session.threads.thread.as_ref().unwrap();
         let ids: Vec<i64> = thread.ordered().iter().map(|m| m.id.0).collect();
         assert_eq!(ids, vec![47, 48, 49]);
-        assert!(!thread.history.has_newer);
+        assert!(!thread.history.has_newer());
         assert_eq!(thread.history.next_from_message_id, MessageId(47));
     }
     // With the newest replies shown, the button only scrolls.

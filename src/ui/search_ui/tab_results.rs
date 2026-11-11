@@ -50,12 +50,14 @@ impl QuillApp {
         let tabs = &session.search.search.tabs;
         let recommended: Vec<(ChatId, String, String)> = tabs
             .recommended
-            .iter()
+            .data()
+            .into_iter()
+            .flatten()
             .filter(|id| !joined.iter().any(|chat| chat.id == **id))
             .filter_map(|id| session.chats.get(&id.0))
             .map(|chat| (chat.id, chat.title.clone(), chat.sidebar_preview()))
             .collect();
-        let loading = tabs.recommended_loading;
+        let loading = tabs.recommended.is_loading();
         let muted = cx.theme().muted_foreground;
         let section = |id: &'static str,
                        prefix: &'static str,

@@ -107,7 +107,7 @@ fn a_search_answer_lands_in_the_window_that_asked() {
     assert_eq!(session.view_in_place(), None);
     apply_json(&mut session, &seq, &sink, &found_json(extra));
     assert!(
-        !session.search.chat_search.open,
+        !session.search.chat_search.is_open(),
         "the main window's search stayed shut"
     );
     assert!(session.search.chat_search.hits.is_empty());

@@ -310,7 +310,7 @@ fn clear_call_history_empties_the_list_only_on_ok() {
         .expect("deleteAllCallMessages sent");
     assert!(request.contains("\"revoke\":true"));
     assert_eq!(driver.session.calls.recent_calls.len(), 1, "kept until ok");
-    assert!(driver.session.calls.recent_calls_clearing);
+    assert!(driver.session.calls.recent_calls_clearing());
     assert!(
         driver.clear_call_history(true).expect("again").is_none(),
         "one clear in flight at a time"
@@ -324,7 +324,7 @@ fn clear_call_history_empties_the_list_only_on_ok() {
         ),
     );
     assert_eq!(driver.session.calls.recent_calls.len(), 1);
-    assert!(!driver.session.calls.recent_calls_clearing);
+    assert!(!driver.session.calls.recent_calls_clearing());
     assert_eq!(
         driver.session.chats_state.chat_action_error.last(),
         Some("could not clear the call history (error 500)")
@@ -336,7 +336,7 @@ fn clear_call_history_empties_the_list_only_on_ok() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, sent.0),
     );
     assert!(driver.session.calls.recent_calls.is_empty());
-    assert!(!driver.session.calls.recent_calls_clearing);
+    assert!(!driver.session.calls.recent_calls_clearing());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

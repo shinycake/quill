@@ -1,4 +1,5 @@
 # Implicit-state debt (scripts/check-implicit-state.py). Only remove lines.
+ActiveGroupCall::loaded_all_participants
 AppearancePrefs::ignore_battery_saving
 Assembly::started
 AudioEngine::failed
@@ -12,8 +13,7 @@ AwardMembers::loading+error
 Backdrops::loading
 BackendStatus::failed
 BarFacts::bot_start_pending
-BusinessSettingsState::time_zones_requested
-BusinessSettingsState::time_zones_requested+error
+
 CallSnap::connecting
 CallSummary::busy
 CallUi::window_opening
@@ -33,8 +33,6 @@ CheckoutView::sending
 Clip::busy
 ComposerUi::draft_restore_pending
 ConnectDriver::parameters_sent
-CraftSession::candidates_loaded
-CraftSession::candidates_loading
 DestRow::saved
 DragSelect::pending
 Drawn::leaving
@@ -58,9 +56,6 @@ GiftValueLookup::loading+error
 GiveawayInfoLookup::loading
 GiveawayInfoLookup::loading+error
 GiveawaySummary::finished
-GramsHub::loaded
-GramsHub::loaded+error
-GramsHub::loading
 GroupCallUi::window_opening
 HdrViewer::in_flight
 HeaderFacts::is_saved_messages
@@ -70,9 +65,7 @@ HistoryState::newer_failed
 HistoryUi::anchor_pending
 InlineMembersUi::admins_asked
 InstallResult::failed
-InvoiceWatch::failed
-InvoiceWatch::pending
-InvoiceWatch::sending
+
 JoinedLines::started
 Latest::wake_pending
 LayerFade::closing
@@ -107,9 +100,6 @@ ParsedGroupCall::loaded_all_participants
 ParsedSession::is_password_pending
 PasswordBox::sending
 PasswordBox::sending+error
-PaymentsState::form_loading
-PaymentsState::form_loading+receipt_error
-PaymentsState::verification_started
 PhotoSources::busy
 PlayHead::started
 PlaybackHealth::output_failed
@@ -126,16 +116,10 @@ PremiumHub::tx_loaded
 PremiumHub::tx_loaded+tx_error
 PremiumHub::tx_loading
 ProfileModal::closing
-PublicLinkRevoke::failed
 PullMachine::expand_pending
 Queued::failed
-QuickRepliesState::shortcuts_requested
-QuickRepliesState::shortcuts_requested+error
 ReceivedGift::is_saved
-ResaleBuy::sending
-ResaleSearch::loaded
-ResaleSearch::loading
-ResaleSearch::loading+error
+
 RowForum::loaded
 RowMenuFacts::is_saved_messages
 RowState::pending
@@ -143,8 +127,6 @@ RtmpStart::failed
 SavedMessagesState::tags_loaded
 SavedMessagesState::topics_requested
 SavedTagSearch::loaded
-SearchTabsState::recommended_loaded
-SearchTabsState::recommended_loading
 SettingsSearch::pending_clear
 SettingsState::account_ttl_loading
 SettingsState::auto_download_presets_loading
@@ -174,10 +156,7 @@ StreamFacts::transport_failed
 Tempo::done
 Tempo::inner_done
 ThreadView::reading_started
-ThreadWindow::loaded_complete
 TopPerson::saved_messages
-TopicHistory::loaded_complete
-TopicHistory::newer_failed
 TransportMachine::loop_sent
 UiClip::failed
 UpdatePill::downloading

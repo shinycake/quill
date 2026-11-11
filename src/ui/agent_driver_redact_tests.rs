@@ -78,8 +78,7 @@ fn show_search_tab(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, tab: Sea
         } else {
             "demo".to_string()
         };
-        search.open = true;
-        search.recents = false;
+        search.surface = quill::state::SearchSurface::Query;
         search.filters = tab.apply(GlobalSearchFilters::default());
         search.messages = vec![hit(12, 1, "top secret post"), hit(11, 2, "granted hit")];
         search.public_limits_exceeded = true;

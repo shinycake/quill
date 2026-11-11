@@ -35,7 +35,7 @@ fn replay_global_search_happy_empty_and_error() {
         session.search.search.status(),
         quill::state::SearchStatus::Ready
     );
-    assert!(session.search.search.recents);
+    assert!(session.search.search.is_recents());
     assert_eq!(session.search.search.chat_ids[0].0, 7);
 
     let search_gen = session.search.search.begin_query("hello");

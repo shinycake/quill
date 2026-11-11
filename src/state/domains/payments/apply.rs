@@ -35,12 +35,9 @@ impl Session {
                 // answer to an earlier checkout's fetch is not this one's.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPaymentForm)
                     && extra.is_some()
-                    && self.payments.form_request == extra
+                    && self.payments.checkout.waits_for(extra)
                 {
-                    self.payments.form_request = None;
-                    self.payments.form = Some(form);
-                    self.payments.form_loading = false;
-                    self.payments.form_paid = false;
+                    self.payments.checkout = CheckoutForm::Ready(form);
                     self.payments.order_info = OrderInfoStage::Unvalidated;
                     self.payments.shipping_id = None;
                     self.payments.note = None;
@@ -75,7 +72,7 @@ impl Session {
                 {
                     let shown = self.payments.shows(&paid.invoice);
                     if shown {
-                        self.payments.verification_started = false;
+                        self.payments.checkout.end_verification();
                     }
                     if result.success {
                         self.note_paid_media_unlocked(&paid);
@@ -90,7 +87,7 @@ impl Session {
                             );
                         }
                         if shown {
-                            self.payments.form_paid = true;
+                            self.payments.checkout.mark_paid();
                             self.payments.note = Some(format!(
                                 "✅ {}",
                                 crate::lang::tr(crate::lang::keys::Q_MONEY_PAYMENT_SUCCESS_NOTE)
@@ -112,7 +109,7 @@ impl Session {
                             giveaway_chat_id: paid.invoice.giveaway_chat_id(),
                         });
                         if shown {
-                            self.payments.verification_started = true;
+                            self.payments.checkout.mark_verifying();
                         }
                     } else if shown {
                         self.payments.note = Some(
@@ -169,22 +166,12 @@ impl Session {
                     && let RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions {
                         append,
                     }) = p.purpose
-                    && self.payments.star_subscriptions_request == Some(p.id)
                 {
-                    self.payments.star_subscriptions_request = None;
-                    self.payments.star_subscriptions_error = None;
-                    // Only a first page answers a refetch.
-                    if !append {
-                        self.payments.star_subscriptions_stale = false;
-                    }
-                    self.payments.star_subscriptions_offset = subs.next_offset.clone();
-                    if append && let Some(existing) = self.payments.star_subscriptions.as_mut() {
-                        existing.star_amount = subs.star_amount;
-                        existing.required_star_count = subs.required_star_count;
-                        existing.subscriptions.extend(subs.subscriptions);
-                    } else {
-                        self.payments.star_subscriptions = Some(subs);
-                    }
+                    // Only the page in flight lands (older ones are
+                    // dropped); only a first page answers a refetch.
+                    self.payments
+                        .star_subscriptions
+                        .page_answered(p.id, append, subs);
                 }
             }
             PaymentsPayload::StarTransactions(page) if self.is_earn_request(pending) => {
@@ -285,7 +272,7 @@ impl Session {
             PaymentsPayload::GiftMarket(payload) => self.apply_gift_market(payload, pending),
             PaymentsPayload::UpdateOwnedStarCount(amount) => {
                 // The subscriptions list carries its own copy of the balance.
-                if let Some(subs) = self.payments.star_subscriptions.as_mut() {
+                if let Some(subs) = self.payments.star_subscriptions.data_mut() {
                     subs.star_amount = amount.stars;
                 }
                 self.payments.hub.balance = Some(amount);

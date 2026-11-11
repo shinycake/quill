@@ -6,7 +6,7 @@ mod purpose;
 mod second_call;
 mod state;
 
-pub use hang_up::HangUp;
+pub use hang_up::{CallProgress, HangUp};
 pub use purpose::*;
 pub use second_call::SecondCall;
 

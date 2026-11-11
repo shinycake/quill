@@ -6876,3 +6876,55 @@ allow list with a reason.
 | 02-165, 05-049, 08-020 | `BotText`, `BotSave` per field; `BotUsernameCheck` and `CreateStage` (the submission rides in the stage). The 150 ms poll task is gone: `drain_bot_create` runs from the existing poll drains. |
 | 02-163, 04-055 | `TrustFile` (`NotLoaded`, `Clean`, `Dirty`, `SaveFailed`); a failed write is shown. |
 | 02-161, 05-015, 12-026 | `StarPacksState::options` is a `Fetch<Vec<StarPack>>`; `open` stays a view flag. |
+
+### Sweep fixes (is-09)
+
+Forty-one implicit-state entries. Each thing that moves through stages is now
+one enum (or `Fetch<T>`) whose variants carry the data, with a way out of
+every stage. Fields that were gone before the sweep reached them are listed
+as "already fixed".
+
+| Id | Result |
+| --- | --- |
+| 05-048 | `game_scores` holds a `Fetch<Vec<GameHighScore>>` per open panel; a refused request removes the panel. |
+| 05-052 | `ActiveGroupCall::screen_share` is the `GroupScreenShare` from is-04 (the answer lives in the stage that waits for it), next to `GroupTransport`. is-09's own `ScreenShare` enum, `join_payload`, `transport_ready` and `transport_error` were dropped in the merge. |
+| 05-050 | `CallsState::progress` is `CallProgress { Idle, Answered, HangingUp(HangUp) }`; a failed hang-up goes back to what it replaced (`HangUpFrom`). |
+| 05-051 | `recent_calls_stage` is `RecentCalls { Idle, Loading(request), Failed, Clearing }`. A reopen during "Clear all" waits for the answer. Privacy was already one `PrivacyAsk` per rule. |
+| 05-059 | `folder_limit_hits` is a queue (two hits between polls both show). `folder_link_saved` and `folder_share_error` were already gone (`DialogAnswers`). |
+| 05-058 | Already fixed: the add-folder dialog is `InviteStage` plus `DialogAnswers`. |
+| 05-064 | `main_paging` and `archive_paging` are `ListPaging { More, Retrying, Exhausted }`. |
+| 05-057 | `archive_settings` is a `Fetch`; "loading only when no copy is held" is `begin` on an empty fetch. The box-open flag stays (a box, not a stage). |
+| 05-068 | Already gone: `chat_look_oks` is not in the tree. |
+| 05-065 | `ChatsState::deep_link` is `Option<DeepLinkFlow { stage, from_agent }>`; the lookup's link text is inside `ResolvingInfo { original }`. The UI passes the origin to `continue_deep_link`. |
+| 05-074 | Skipped: `notification_sends` and `new_community_photo` are keyed by the request that asked and removed on ok, error, lost request and failed send; `outcomes` is a queue the UI drains. |
+| 05-081, 05-094 | The pending boost and its slots live in the boost box phase (`BoostWork::Slots`, `SlotsReady`, from is-01). is-09's `groups.boost_chain` was dropped in the merge. |
+| 05-076 | Already fixed: `BoostsListState::stage`. It is now the shared `PageStage`. |
+| 05-077, 10-144 | Invite-link members and join requests use `PageStage { Loading(request), Ready, Failed }`. |
+| 05-090 | `PublicLinkStage::RevokingFailed` replaces the `failed` bool. |
+| 05-089 | Already fixed: `UsernameCheck` is an enum; `check_generation` is a counter. |
+| 05-093 | `member_asks` (`MemberAsk { first, query, more: MoreMembers }`, from is-04) replaces the queries, next-page bases and failed marks; a new first page resets the next page. is-09's `MemberPaging` was dropped in the merge. |
+| 05-098 | Skipped: the stop stage is `BotStopStage`; `can_stop` is TDLib's capability flag. |
+| 05-101 | `message_link` is one `MessageLinkAnswer { link, is_public }`. |
+| 05-102 | `instant_view_requests` is one table of `InstantViewAsk { url, from_agent }` by request. |
+| 05-099 | `forward_flights` is one list; `last_forward` is the outcome the UI takes. |
+| 05-100 | `sponsored_report` is `SponsoredReportFlow { Idle, Asking, Picking, Done }`. |
+| 05-121 | `PageLoad` for resale and craft candidate pages; `CraftRun { Idle, Crafting, Done }`; `BuyPhase` for the purchase. The auction was already `AuctionFetch`. |
+| 05-125 | `GramsHub::load` is a `PageLoad`. |
+| 05-111 | `checkout` is `CheckoutForm { Closed, Loading, Ready, Verifying, Paid }`. The order info was already an enum. |
+| 05-112 | `star_subscriptions` is `StarSubscriptionsList { data, load, edit }`; an edit landing while a page is out makes that page's answer stale. |
+| 05-149 | `recommended` is a `Fetch`. |
+| 05-148, 05-232 | `date_jump` is `DateJumpAnswer { Idle, Resolved, NotFound }` (jump and note). The pending jump stays on the per-window view. |
+| 05-159, 10-153 | Already fixed: `HistoryCalendar` pages with `CalendarPaging`. |
+| 05-208 | `SearchState::surface` is `SearchSurface { Closed, Recents, Query }`. |
+| 05-206, 05-230 | The in-chat search is open exactly when its status is not `Closed` (`is_open`); the page and jump stages were already enums. |
+| 05-207, 06-031, 09-X022 | `TopicHistory::older` gains `Complete` and `newer` is `NewerEnd { AtLatest, More, Failed }`; `ThreadsState::topic_load_failed` was already gone. |
+| 05-145 | `time_zones` is a `Fetch`; the Business extra state was already `Fetch`. |
+| 05-146 | Quick reply messages are a `Fetch` per shortcut; `shortcuts_load` is a `Fetch<()>`. A failed load waits for the dialog to open again. |
+
+- **Also converted** (baseline fields in the files touched): `ResaleBuy`,
+  `InvoiceWatch`, `ThreadWindow`.
+- **Behaviour changes with a reason.** A page answer for an older query is
+  dropped by the `MemberAsk` of its list. A failed first page of a gift
+  list, Grams or the star subscriptions is `Failed` and is not asked again by
+  render. `fetch_call_history` refuses while "Clear all" is out.
+- **Baseline.** 221 lines at the start; 162 after merging with is-01 and is-04.

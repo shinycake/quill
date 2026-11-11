@@ -585,11 +585,11 @@ impl QuillApp {
     /// ends its wait; no other box is touched.
     pub(super) fn drain_folder_limit(&mut self, cx: &mut Context<Self>) -> bool {
         let hit = match self.live.as_mut() {
-            Some(live) => live.driver.session.chat_list.folder_limit_hit.take(),
+            Some(live) => live.driver.session.chat_list.take_folder_limit_hit(),
             None => self
                 .demo_session
                 .as_mut()
-                .and_then(|s| s.chat_list.folder_limit_hit.take()),
+                .and_then(|s| s.chat_list.take_folder_limit_hit()),
         };
         let Some((kind, request)) = hit else {
             return false;

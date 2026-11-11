@@ -373,7 +373,10 @@ fn hanging_up(session: &mut Session, call_id: i32) -> RequestId {
     let request = session.request(RequestPurpose::DiscardCall, None);
     let call = session.calls.active_call.as_mut().expect("active call");
     let resume = std::mem::replace(&mut call.state, CallState::HangingUp);
-    session.calls.hang_up = Some(crate::state::HangUp::new(request, call_id, resume));
+    session
+        .calls
+        .progress
+        .hang_up_sent(crate::state::HangUp::new(request, call_id, resume));
     request
 }
 
@@ -403,7 +406,7 @@ fn non_terminal_update_keeps_a_hang_up_in_flight() {
     // The hang-up fails: the call is back in the phase it moved to.
     apply_json(&mut session, &seq, &sink, &error_json(request));
     assert_eq!(state(&session), Some(CallState::ExchangingKeys));
-    assert!(session.calls.hang_up.is_none());
+    assert!(session.calls.progress.hang_up().is_none());
     assert!(session.calls.error.is_some());
 }
 
@@ -439,11 +442,11 @@ fn other_discard_errors_leave_the_hang_up_alone() {
     apply_json(&mut session, &seq, &sink, &error_json(other));
     let call = session.calls.active_call.as_ref().expect("active call");
     assert_eq!(call.state, CallState::HangingUp);
-    assert!(session.calls.hang_up.is_some());
+    assert!(session.calls.progress.hang_up().is_some());
     // TDLib's own hanging-up update is kept as the phase to go back to.
     apply_json(&mut session, &seq, &sink, &hanging_up_update_json(77, 41));
     assert_eq!(
-        session.calls.hang_up.as_ref().map(|h| h.resume.clone()),
+        session.calls.progress.hang_up().map(|h| h.resume.clone()),
         Some(CallState::HangingUp)
     );
 }

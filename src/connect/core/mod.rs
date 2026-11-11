@@ -77,7 +77,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let story_page_ok = answered
             .filter(|_| ok)
             .and_then(crate::state::story_list_of);
-        let main_was_exhausted = self.session.chat_list.chats_exhausted;
+        let main_was_exhausted = self.session.chat_list.main_paging.is_exhausted();
         let had_topic_icons = !self.session.threads.forum_topic_icons.is_empty();
         // Parity slice: a folder `loadChats` page completing with ok pages
         // on (until a 404 marks the folder exhausted in the reducer).
@@ -553,8 +553,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // M1: stash the `getMessageLink` answer for the UI clipboard drain.
         if let Some((link, is_public)) = message_link_answer {
-            self.session.messages.message_link_result = Some(link);
-            self.session.messages.message_link_public = is_public;
+            self.session.messages.message_link =
+                Some(crate::state::MessageLinkAnswer { link, is_public });
         }
         // Slice msg-richtext-ai-tools: stash AI answers for the composer
         // drain. A late answer for a chat the user has since left is
@@ -726,7 +726,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if became_ready || load_chats_ok {
             self.maybe_load_main_chats()?;
         }
-        let main_ended = !main_was_exhausted && self.session.chat_list.chats_exhausted;
+        let main_ended = !main_was_exhausted && self.session.chat_list.main_paging.is_exhausted();
         if load_archive_ok || load_chats_failed || main_ended {
             self.maybe_load_archive_chats()?;
         }
@@ -795,7 +795,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Corner "@" / heart buttons and jump to date: run in the window
         // that asked, for its chat. A failed jump (closed chat) drops it.
         let unread = self.session.messages.unread_jump.take();
-        for jump in [unread, self.session.search.date_jump.take()]
+        for jump in [unread, self.session.search.take_date_jump()]
             .into_iter()
             .flatten()
         {

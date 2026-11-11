@@ -161,7 +161,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .threads
             .topic_histories
             .get(&key)
-            .is_some_and(|h| h.loaded_complete)
+            .is_some_and(|h| h.loaded_complete())
         {
             return Ok(None);
         }

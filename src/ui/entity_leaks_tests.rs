@@ -162,7 +162,7 @@ impl Harness {
             let others = [
                 ("media-panel", app.pickers.media_panel.is_open()),
                 ("send-menu", app.composer_ui.send_menu.open.is_some()),
-                ("search", search.is_some_and(|s| s.search.open)),
+                ("search", search.is_some_and(|s| s.search.is_open())),
                 (
                     "date-jump",
                     search.is_some_and(|s| s.history_calendar.is_some()),

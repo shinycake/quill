@@ -812,8 +812,11 @@ pub enum DeepLinkState {
         is_channel: bool,
         generation: u64,
     },
-    /// `getDeepLinkInfo` in flight; `generation` drops stale answers.
-    ResolvingInfo { generation: u64 },
+    /// `getDeepLinkInfo` / `getInternalLinkType` in flight; `generation`
+    /// drops stale answers. `original` is the link text a
+    /// `getInternalLinkType` lookup resolves (the proxy hand-off and the
+    /// web fallback need it back); empty for a `getDeepLinkInfo` lookup.
+    ResolvingInfo { generation: u64, original: String },
     /// `deepLinkInfo` answer parsed. The UI consumes this once: with an
     /// action it fires the follow-up request, otherwise (or when
     /// `need_update`) it shows `text` in a dialog.
@@ -843,13 +846,24 @@ pub enum DeepLinkState {
     Unknown { link: String },
 }
 
+/// The deep-link flow in progress: its stage and who started it, one value
+/// (set when the flow starts, kept while it continues, gone with it).
+/// `from_agent`: the flow was started by a step the agent UI driver
+/// injected; the UI re-checks what an agent's flow opens
+/// (`guard::with_injecting`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeepLinkFlow {
+    pub stage: DeepLinkState,
+    pub from_agent: bool,
+}
+
 impl DeepLinkState {
     /// The flow generation of a stage that belongs to one; answers of an
     /// older flow are dropped by comparing it.
     pub fn generation(&self) -> Option<u64> {
         match self {
             Self::InvitePreview { generation, .. }
-            | Self::ResolvingInfo { generation }
+            | Self::ResolvingInfo { generation, .. }
             | Self::Info { generation, .. }
             | Self::ResolvingChat { generation, .. } => Some(*generation),
             Self::ChatReady { .. } | Self::ShowText(_) | Self::Ui(_) | Self::Unknown { .. } => None,

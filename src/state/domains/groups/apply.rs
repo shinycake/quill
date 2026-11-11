@@ -943,10 +943,10 @@ impl Session {
                     && let Some(DeepLinkState::ResolvingChat {
                         action,
                         generation: slot,
-                    }) = self.chats_state.deep_link.clone()
+                    }) = self.chats_state.deep_link_stage().cloned()
                     && slot == generation
                 {
-                    self.chats_state.deep_link = Some(match result {
+                    self.chats_state.enter_deep_link_stage(match result {
                         ChatJoinResult::Success { chat_id } => {
                             DeepLinkState::ChatReady { chat_id, action }
                         }
@@ -979,17 +979,18 @@ impl Session {
                     && let Some(DeepLinkState::ResolvingChat {
                         action: DeepLinkAction::JoinInvite { hash },
                         generation: slot,
-                    }) = self.chats_state.deep_link.clone()
+                    }) = self.chats_state.deep_link_stage().cloned()
                     && slot == generation
                 {
-                    self.chats_state.deep_link = Some(DeepLinkState::InvitePreview {
-                        hash,
-                        title,
-                        member_count,
-                        creates_join_request,
-                        is_channel,
-                        generation,
-                    });
+                    self.chats_state
+                        .enter_deep_link_stage(DeepLinkState::InvitePreview {
+                            hash,
+                            title,
+                            member_count,
+                            creates_join_request,
+                            is_channel,
+                            generation,
+                        });
                 }
             }
         }

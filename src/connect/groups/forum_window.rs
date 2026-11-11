@@ -18,7 +18,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .threads
             .topic_histories
             .get(&(chat_id.0, topic))
-            .filter(|history| history.has_newer && !history.newer_failed)
+            .filter(|history| history.has_newer() && !history.newer_failed())
             .and_then(|history| history.newest_loaded_id())
         else {
             return Ok(None);
@@ -65,7 +65,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .threads
             .topic_histories
             .get(&(chat_id.0, topic))
-            .is_some_and(|history| history.has_newer);
+            .is_some_and(|history| history.has_newer());
         if !short || !self.session.reset_topic_window(chat_id, topic) {
             return Ok(None);
         }

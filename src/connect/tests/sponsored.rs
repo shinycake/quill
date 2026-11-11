@@ -116,7 +116,7 @@ fn sponsored_fetch_view_once_and_click() {
             .map(|request| request.feature),
         Some(crate::premium_hub::PremiumFeature::DisabledAds.into())
     );
-    assert!(driver.session.messages.last_sponsored_report.is_none());
+    assert!(driver.session.messages.sponsored_report.outcome().is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -162,7 +162,7 @@ fn a_cancelled_report_ignores_its_late_answer() {
         .ingest(copy_and_parse(&answer, &seq, &sink).unwrap())
         .unwrap();
     assert!(
-        driver.session.messages.sponsored_report.is_none(),
+        driver.session.messages.sponsored_report.flight().is_none(),
         "the picker stays closed"
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -209,13 +209,13 @@ fn a_picked_report_option_closes_the_picker_until_the_answer() {
     driver
         .ingest(copy_and_parse(&answer, &seq, &sink).unwrap())
         .unwrap();
-    assert!(driver.session.messages.sponsored_report.is_some());
+    assert!(driver.session.messages.sponsored_report.flight().is_some());
     driver
         .report_sponsored_message(chat, 9001, "c3BhbQ==")
         .unwrap()
         .expect("the pick is sent");
     assert!(
-        driver.session.messages.sponsored_report.is_none(),
+        driver.session.messages.sponsored_report.flight().is_none(),
         "the picker is gone while the pick is out"
     );
     let _ = std::fs::remove_dir_all(&dir);

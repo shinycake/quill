@@ -133,13 +133,14 @@ fn pay_for_then(
             message_id: MessageId(402),
         },
     });
-    session.payments.form = Some(crate::telegram::envelope::PaymentFormData {
-        id: 1,
-        form_type: crate::telegram::envelope::PaymentFormTypeData::Stars { star_count },
-        seller_bot_user_id: 0,
-        product_title: String::new(),
-        product_description: String::new(),
-    });
+    session.payments.checkout =
+        crate::state::CheckoutForm::Ready(crate::telegram::envelope::PaymentFormData {
+            id: 1,
+            form_type: crate::telegram::envelope::PaymentFormTypeData::Stars { star_count },
+            seller_bot_user_id: 0,
+            product_title: String::new(),
+            product_description: String::new(),
+        });
     let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(21)));
     session.payment_sent(extra);
     meanwhile(session);
@@ -213,22 +214,28 @@ fn a_checkout_opened_meanwhile_does_not_take_the_payment_answer() {
             session.payments.request = Some(PaymentRequest {
                 invoice: crate::payment_invoice::InputInvoice::Name("other".into()),
             });
-            session.payments.form = Some(crate::telegram::envelope::PaymentFormData {
-                id: 2,
-                form_type: crate::telegram::envelope::PaymentFormTypeData::Stars { star_count: 99 },
-                seller_bot_user_id: 0,
-                product_title: String::new(),
-                product_description: String::new(),
-            });
+            session.payments.checkout =
+                crate::state::CheckoutForm::Ready(crate::telegram::envelope::PaymentFormData {
+                    id: 2,
+                    form_type: crate::telegram::envelope::PaymentFormTypeData::Stars {
+                        star_count: 99,
+                    },
+                    seller_bot_user_id: 0,
+                    product_title: String::new(),
+                    product_description: String::new(),
+                });
             assert!(
                 !session.payments.checkout_sending(),
                 "not this checkout's payment"
             );
         },
     );
-    assert!(!session.payments.form_paid, "the new checkout is not paid");
+    assert!(
+        !session.payments.checkout.is_paid(),
+        "the new checkout is not paid"
+    );
     assert!(session.payments.note.is_none(), "and shows no outcome");
-    assert_eq!(session.payments.form.as_ref().map(|f| f.id), Some(2));
+    assert_eq!(session.payments.checkout.form().map(|f| f.id), Some(2));
     let note = session.payments.unlocked_notice.take().expect("a note");
     assert!(note.contains("25 Stars"), "the paid message's note: {note}");
 }
@@ -240,20 +247,22 @@ fn an_earlier_checkouts_form_answer_is_dropped() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(session.last_seq);
     let first = session.request(RequestPurpose::GetPaymentForm, None);
-    session.payments.form_request = Some(first);
+    session.payments.checkout = crate::state::CheckoutForm::Loading { request: first };
     let second = session.request(RequestPurpose::GetPaymentForm, None);
-    session.payments.form_request = Some(second);
-    session.payments.form_loading = true;
+    session.payments.checkout = crate::state::CheckoutForm::Loading { request: second };
     let form = |extra: u64, id: i64| {
         format!(
             r#"{{"@type":"paymentForm","@extra":"{extra}","id":{id},"type":{{"@type":"paymentFormTypeStars","star_count":5}},"seller_bot_user_id":5,"product_info":{{"@type":"productInfo","title":"x","description":{{"@type":"formattedText","text":"","entities":[]}},"photo":null}}}}"#
         )
     };
     apply_json(&mut session, &seq, &sink, &form(first.0, 1));
-    assert!(session.payments.form.is_none());
-    assert!(session.payments.form_loading, "still waiting for its own");
+    assert!(session.payments.checkout.form().is_none());
+    assert!(
+        session.payments.checkout.is_loading(),
+        "still waiting for its own"
+    );
     apply_json(&mut session, &seq, &sink, &form(second.0, 2));
-    assert_eq!(session.payments.form.as_ref().map(|f| f.id), Some(2));
+    assert_eq!(session.payments.checkout.form().map(|f| f.id), Some(2));
 }
 
 #[test]
