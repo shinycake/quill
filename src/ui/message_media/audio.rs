@@ -364,9 +364,7 @@ pub(in crate::ui) fn voice_note_row(
 }
 
 pub(in crate::ui) fn audio_row(
-    chat_id: ChatId,
-    message_id: MessageId,
-    outgoing: bool,
+    message: &quill::state::HistoryMessage,
     audio: &quill::telegram::envelope::AudioContent,
     files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
@@ -376,6 +374,7 @@ pub(in crate::ui) fn audio_row(
     room: crate::ui::history::bubble_width::BubbleRoom,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
+    let (chat_id, message_id, outgoing) = (message.chat_id, message.id, message.is_outgoing);
     let file_id = audio.file_id;
     let downloading_now = file_is_downloading(file_id, files, downloading);
     let audio_duration = f64::from(audio.duration);
