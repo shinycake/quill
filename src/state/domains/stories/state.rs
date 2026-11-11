@@ -1,6 +1,7 @@
 //! Stories, the story tray, albums, archive, posting, viewers and close friends: the `stories` domain's share of `Session`.
 //! Added to by features in this domain only; `Session::new` builds it
 //! with `new`.
+use crate::state::fetch::Fetch;
 use crate::state::*;
 use crate::story_page::StoryPageOps;
 use std::time::{Duration, Instant};
@@ -154,8 +155,10 @@ pub struct StoriesState {
     pub stealth_periods: crate::story_stealth::StealthPeriods,
     /// Phase 9.5: chat ids from the last `getChatsToPostStories` answer —
     /// the composer's "post as" picker (channels/supergroups where the
-    /// user has the `can_post_stories` admin right).
-    pub post_as_chats: Vec<i64>,
+    /// user has the `can_post_stories` admin right) — and why it failed.
+    /// Its own value: the composer's eligibility check
+    /// (`StoryPostState::check`) is another question.
+    pub post_as: Fetch<Vec<i64>>,
     /// Phase 9.5: posted-story management round-trip state (edit /
     /// cover / privacy) rendered as one status line.
     pub manage: StoryManageState,
@@ -182,8 +185,6 @@ pub struct StoriesState {
     /// B14: the close-friends list (`getCloseFriends` / `setCloseFriends`);
     /// `None` until loaded.
     pub close_friends: CloseFriendsList,
-    /// B14: ids sent by an in-flight `setCloseFriends`, applied on `ok`.
-    pub close_friends_pending: Option<Vec<i64>>,
     /// Paging of the main story list.
     pub main_paging: ActiveStoriesPaging,
     /// Paging of the hidden story list.
@@ -235,7 +236,7 @@ impl StoriesState {
             stealth: StoryStealthMode::default(),
             stealth_refusal: None,
             stealth_periods: Default::default(),
-            post_as_chats: Vec::new(),
+            post_as: Fetch::Idle,
             manage: StoryManageState::default(),
             albums: HashMap::new(),
             album_stories: HashMap::new(),
@@ -243,7 +244,6 @@ impl StoriesState {
             archived_stories: HashMap::new(),
             page_ops: StoryPageOps::default(),
             close_friends: CloseFriendsList::NotLoaded,
-            close_friends_pending: None,
             main_paging: ActiveStoriesPaging::default(),
             hidden_paging: ActiveStoriesPaging::default(),
             custom_emoji_retry: None,

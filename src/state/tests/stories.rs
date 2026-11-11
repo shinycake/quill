@@ -648,15 +648,15 @@ fn story_viewers_accumulate_pages_and_drop_stale() {
         )
     };
     let extra1 = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 5);
-    session.story_viewers_loading(11, 5, extra1);
+    session.story_viewers_sent(11, 5, extra1);
     apply_json(&mut session, &seq, &sink, &page(extra1.0, "1"));
     let state = session.stories.viewers.as_ref().unwrap();
     assert_eq!(state.rows.len(), 1);
     assert_eq!(state.next_offset, "1");
-    assert!(!state.is_loading());
+    assert!(!state.page.is_loading());
     // Second page appends.
     let extra2 = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 5);
-    session.story_viewers_loading(11, 5, extra2);
+    session.story_viewers_sent(11, 5, extra2);
     apply_json(&mut session, &seq, &sink, &page(extra2.0, ""));
     assert_eq!(session.stories.viewers.as_ref().unwrap().rows.len(), 2);
     assert!(
@@ -671,12 +671,12 @@ fn story_viewers_accumulate_pages_and_drop_stale() {
     // Stale page for another story is dropped.
     session.begin_story_viewers(11, 6);
     let extra3 = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 5);
-    session.story_viewers_loading(11, 5, extra3);
+    session.story_viewers_sent(11, 5, extra3);
     apply_json(&mut session, &seq, &sink, &page(extra3.0, "9"));
     assert!(session.stories.viewers.as_ref().unwrap().rows.is_empty());
     // Error lands on the current panel.
     let extra4 = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 6);
-    session.story_viewers_loading(11, 6, extra4);
+    session.story_viewers_sent(11, 6, extra4);
     apply_json(
         &mut session,
         &seq,
@@ -687,10 +687,56 @@ fn story_viewers_accumulate_pages_and_drop_stale() {
         ),
     );
     let state = session.stories.viewers.as_ref().unwrap();
-    assert!(!state.is_loading());
+    assert!(!state.page.is_loading());
     // The server message is classified by `error_reason` (native
     // text is never surfaced); the panel shows the failure.
-    assert!(state.error().unwrap().starts_with("Could not load viewers"));
+    assert!(
+        state
+            .page
+            .error()
+            .unwrap()
+            .starts_with("Could not load viewers")
+    );
+}
+
+/// A lost or failed request of an earlier visit to the same story's
+/// panel does not fail (or fill) the page the reopened panel waits for.
+#[test]
+fn a_stale_viewers_answer_leaves_the_reopened_panels_page_alone() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.begin_story_viewers(11, 5);
+    let old = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 5);
+    session.story_viewers_sent(11, 5, old);
+    // Closed and reopened: a fresh state asks again.
+    session.clear_story_viewers();
+    session.begin_story_viewers(11, 5);
+    let fresh = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 5);
+    session.story_viewers_sent(11, 5, fresh);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"Timeout"}}"#,
+            old.0
+        ),
+    );
+    let state = session.stories.viewers.as_ref().unwrap();
+    assert!(state.page.is_loading(), "still waiting for its own page");
+    assert!(state.page.error().is_none());
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"Timeout"}}"#,
+            fresh.0
+        ),
+    );
+    let state = session.stories.viewers.as_ref().unwrap();
+    assert!(state.page.error().is_some());
+    assert!(!state.wants_next_page(), "a failed page waits for Retry");
 }
 
 #[test]
@@ -705,7 +751,7 @@ fn story_viewers_reopen_resets_rows() {
     // Open the panel: begin + first page.
     session.begin_story_viewers(11, 5);
     let extra1 = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 5);
-    session.story_viewers_loading(11, 5, extra1);
+    session.story_viewers_sent(11, 5, extra1);
     apply_json(&mut session, &seq, &sink, &page(extra1.0));
     assert_eq!(session.stories.viewers.as_ref().unwrap().rows.len(), 1);
     // `begin_story_viewers` alone keeps the same story's rows —
@@ -716,7 +762,7 @@ fn story_viewers_reopen_resets_rows() {
     session.clear_story_viewers();
     session.begin_story_viewers(11, 5);
     let extra2 = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 5);
-    session.story_viewers_loading(11, 5, extra2);
+    session.story_viewers_sent(11, 5, extra2);
     apply_json(&mut session, &seq, &sink, &page(extra2.0));
     assert_eq!(session.stories.viewers.as_ref().unwrap().rows.len(), 1);
 }
@@ -737,11 +783,11 @@ fn a_viewers_page_of_a_closed_panel_is_dropped() {
     // reopened: a fresh state asks for page 1.
     session.begin_story_viewers(11, 5);
     let old = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 5);
-    session.story_viewers_loading(11, 5, old);
+    session.story_viewers_sent(11, 5, old);
     session.clear_story_viewers();
     session.begin_story_viewers(11, 5);
     let fresh = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 5);
-    session.story_viewers_loading(11, 5, fresh);
+    session.story_viewers_sent(11, 5, fresh);
     // The old page answers first: dropped, the panel is still loading.
     apply_json(&mut session, &seq, &sink, &page(old.0, "far"));
     let state = session.stories.viewers.as_ref().unwrap();

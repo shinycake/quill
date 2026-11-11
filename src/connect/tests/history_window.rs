@@ -341,6 +341,38 @@ fn mention_search_targets_group_members_and_drops_stale_answers() {
 }
 
 #[test]
+fn a_failed_mention_search_is_asked_again_for_the_same_query() {
+    let mut h = Harness::with_unread_chat();
+    h.ingest(r#"{"@type":"updateNewChat","chat":{"id":-100,"title":"Group","type":{"@type":"chatTypeBasicGroup","basic_group_id":100},"unread_count":0}}"#);
+    h.ingest(r#"{"@type":"updateChatPosition","chat_id":-100,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"8","is_pinned":false}}"#);
+    h.driver.select_chat(ChatId(-100)).unwrap();
+    let asked = |h: &Harness| {
+        h.recorder
+            .snapshot()
+            .iter()
+            .filter(|j| j.contains("\"@type\":\"searchChatMembers\""))
+            .count()
+    };
+    h.driver.search_mentions(Some("ab")).unwrap();
+    let first = h
+        .driver
+        .session
+        .messages
+        .mention_search
+        .as_ref()
+        .and_then(|s| s.request)
+        .unwrap();
+    h.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":429,"message":"Too Many Requests: retry after 1"}}"#,
+        first.0
+    ));
+    assert!(h.driver.session.messages.mention_search.is_none());
+    let before = asked(&h);
+    h.driver.search_mentions(Some("ab")).unwrap();
+    assert_eq!(asked(&h), before + 1);
+}
+
+#[test]
 fn chat_peer_online_follows_the_private_user_status() {
     fn h_chat(h: &Harness) -> crate::state::ChatSummary {
         h.driver.session.chats.get(&7).unwrap().clone()

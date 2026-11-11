@@ -27,6 +27,14 @@ pub(in crate::ui) fn reply_target(
     if reply_open { current } else { None }
 }
 
+/// Whether a finished reply to `replied` ends the reply row now open on
+/// `open`: only when the row is still on that story. A reply finishing
+/// off-thread after the viewer stepped to another story leaves that
+/// story's row (and recording) alone.
+pub(in crate::ui) fn reply_row_ends(open: Option<(ChatId, i32)>, replied: (ChatId, i32)) -> bool {
+    open == Some(replied)
+}
+
 /// Whether a media pick belongs to the story reply instead of the open chat.
 pub(in crate::ui) fn picks_go_to_story(reply_open: bool, panel_for_story: bool) -> bool {
     reply_open && panel_for_story
@@ -256,7 +264,7 @@ impl QuillApp {
                 )
                 .is_ok()
         });
-        self.finish_story_reply_media(sent, "sticker", cx);
+        self.finish_story_reply_media(sent, "sticker", (chat_id, story_id), cx);
         true
     }
 
@@ -299,7 +307,7 @@ impl QuillApp {
                 )
                 .is_ok()
         });
-        self.finish_story_reply_media(sent, "GIF", cx);
+        self.finish_story_reply_media(sent, "GIF", (chat_id, story_id), cx);
         true
     }
 
@@ -373,14 +381,22 @@ impl QuillApp {
 
     /// Report a media send and close the row after a successful one. `sent`
     /// is `None` outside a live session (the demo).
-    fn finish_story_reply_media(&mut self, sent: Option<bool>, what: &str, cx: &mut Context<Self>) {
+    fn finish_story_reply_media(
+        &mut self,
+        sent: Option<bool>,
+        what: &str,
+        replied: (ChatId, i32),
+        cx: &mut Context<Self>,
+    ) {
         match sent {
             Some(true) => {
                 self.set_note(StatusNote::silent(tr_with(
                     keys::Q_MEDIA_STORY_REPLY_SENT_2,
                     &[("what", what)],
                 )));
-                self.end_story_reply(cx);
+                if reply_row_ends(self.story_reply_target(), replied) {
+                    self.end_story_reply(cx);
+                }
             }
             Some(false) => {
                 self.set_note(StatusNote::error(tr_with(
@@ -468,7 +484,12 @@ impl QuillApp {
                         return;
                     }
                 };
-                this.finish_story_reply_media(sent, tr(keys::Q_MEDIA_VIDEO_MESSAGE), cx);
+                this.finish_story_reply_media(
+                    sent,
+                    tr(keys::Q_MEDIA_VIDEO_MESSAGE),
+                    (chat_id, story_id),
+                    cx,
+                );
             });
             if updated.is_err() {
                 let _ = this
@@ -531,7 +552,12 @@ impl QuillApp {
                 if sent != Some(true) {
                     let _ = std::fs::remove_file(&draft.path);
                 }
-                this.finish_story_reply_media(sent, tr(keys::Q_MEDIA_VOICE_MESSAGE), cx);
+                this.finish_story_reply_media(
+                    sent,
+                    tr(keys::Q_MEDIA_VOICE_MESSAGE),
+                    (chat_id, story_id),
+                    cx,
+                );
             });
             if updated.is_err() {
                 let _ = this
@@ -546,8 +572,21 @@ impl QuillApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{picks_go_to_story, reply_target};
+    use super::{picks_go_to_story, reply_row_ends, reply_target};
     use quill::ids::ChatId;
+
+    #[test]
+    fn a_finished_reply_ends_only_the_row_it_came_from() {
+        let a = (ChatId(7), 5);
+        let b = (ChatId(7), 6);
+        assert!(reply_row_ends(Some(a), a));
+        assert!(!reply_row_ends(Some(b), a), "another story's row stays");
+        assert!(
+            !reply_row_ends(Some((ChatId(8), 5)), a),
+            "so does another chat's"
+        );
+        assert!(!reply_row_ends(None, a));
+    }
 
     #[test]
     fn reply_target_needs_the_row_open() {

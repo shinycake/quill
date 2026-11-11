@@ -286,7 +286,7 @@ fn calendar_highlights_media_days_and_jumps_to_their_first_message() {
     ));
     let cal = fx.driver.session.search.history_calendar.as_ref().unwrap();
     assert_eq!(cal.days.len(), 2);
-    assert!(!cal.loading);
+    assert!(!cal.is_loading());
     let picked = crate::search_filters::local_day_number(1_789_000_000);
 
     // Paging back for an older month continues from the oldest message.
@@ -316,8 +316,37 @@ fn unfiltered_calendar_sends_no_calendar_request() {
             .history_calendar
             .as_ref()
             .unwrap()
-            .exhausted
+            .paging
+            == crate::state::CalendarPaging::Exhausted
     );
+}
+
+#[test]
+fn a_failed_calendar_page_is_asked_again_on_the_next_month() {
+    let mut fx = Fixture::new();
+    assert!(fx.driver.open_chat_search().unwrap());
+    fx.driver
+        .set_chat_search_media(SearchMediaKind::Media)
+        .unwrap();
+    fx.driver.open_history_calendar().unwrap();
+    let first = fx.last_request("getChatMessageCalendar");
+    fx.feed(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":429,"message":"Too Many Requests: retry after 3"}}"#,
+        extra_of(&first)
+    ));
+    let calendar = || {
+        fx.driver
+            .session
+            .search
+            .history_calendar
+            .as_ref()
+            .map(|c| c.paging)
+    };
+    assert_eq!(calendar(), Some(crate::state::CalendarPaging::Failed));
+    let asked = fx.count("getChatMessageCalendar");
+    let older = crate::search_filters::YearMonth::of(1_700_000_000);
+    fx.driver.show_calendar_month(older).unwrap();
+    assert_eq!(fx.count("getChatMessageCalendar"), asked + 1);
 }
 
 #[test]

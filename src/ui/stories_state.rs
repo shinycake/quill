@@ -60,6 +60,9 @@ pub(crate) struct StoryViewerUi {
     /// The ⋯ menu is open: the story holds still under it, and its entries
     /// act on the story it was opened for (`MenuAct` carries it).
     pub(super) menu_open: bool,
+    /// The "Stealth mode on" toast over this viewer until its deadline;
+    /// it goes with the viewer (`release_story_viewer`).
+    pub(super) stealth_toast: Option<super::story_stealth_ui::ShownStealthToast>,
 }
 
 /// One story's file being copied to Downloads on a background thread
@@ -169,7 +172,6 @@ pub(crate) struct StoryUi {
     pub(super) more_search: Entity<TextareaState>,
     pub(super) stealth_box: Option<super::story_stealth_ui::StealthBox>,
     pub(super) stealth_tick: Option<Task<()>>,
-    pub(super) stealth_toast: Option<super::story_stealth_ui::ShownStealthToast>,
     /// What the viewer has open over its story; `Some` only while the
     /// viewer is open (`viewer_ui_mut`), dropped by every close
     /// (`release_story_viewer`).
@@ -325,7 +327,6 @@ impl StoryUi {
             more_search: story_more_search,
             stealth_box: None,
             stealth_tick: None,
-            stealth_toast: None,
             viewer: StoryViewer::closed(),
             playback: StoryPlayback::default(),
             tick_active: false,

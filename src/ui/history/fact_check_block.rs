@@ -173,9 +173,13 @@ impl QuillApp {
         message_id: MessageId,
         cx: &mut Context<Self>,
     ) {
-        let key = (chat_id.0, message_id.0);
-        if !self.message_ui.fact_check_expanded.remove(&key) {
-            self.message_ui.fact_check_expanded.insert(key);
+        // The chat's own value: a click on a row of another chat's stale
+        // frame changes nothing.
+        if self.chat_ui.made_for() != Some(chat_id) {
+            return;
+        }
+        if !self.chat_ui.fact_check_expanded.remove(&message_id.0) {
+            self.chat_ui.fact_check_expanded.insert(message_id.0);
         }
         cx.notify();
     }

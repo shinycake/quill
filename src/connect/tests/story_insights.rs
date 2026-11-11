@@ -127,6 +127,36 @@ fn public_story_search_pages_by_next_offset() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// The sender refusing the next page keeps the pages already found and
+/// leaves an error the panel draws, which a later load more retries.
+#[test]
+fn a_refused_story_search_page_keeps_the_results() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+    let extra = driver
+        .search_public_stories(StorySearchQuery::Tag("#sunset".into()))
+        .unwrap()
+        .expect("sends");
+    driver
+        .ingest(copy_and_parse(&found_stories(extra, 21, "p2"), &seq, &dyn_sink).unwrap())
+        .unwrap();
+    recorder.refuse_sends(true);
+    assert!(driver.load_more_found_stories().is_err());
+    let search = driver.session.stories.search.as_ref().expect("kept");
+    assert_eq!(search.stories, vec![(21, 1)]);
+    assert!(search.page.error().is_some());
+    recorder.refuse_sends(false);
+    assert!(driver.load_more_found_stories().unwrap().is_some());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 fn found_stories(extra: crate::ids::RequestId, poster: i64, next: &str) -> String {
     format!(
         r#"{{"@type":"foundStories","@extra":"{}","total_count":1,"next_offset":"{next}","stories":[{{"@type":"story","id":1,"poster_chat_id":{poster},"date":1,"content":{{"@type":"storyContentUnsupported"}}}}]}}"#,
@@ -165,7 +195,7 @@ fn a_new_story_search_replaces_one_in_flight() {
     let search = driver.session.stories.search.as_ref().expect("the search");
     assert!(search.stories.is_empty(), "the old answer is not listed");
     assert!(search.next_offset.is_empty());
-    assert!(search.loading, "still waiting for its own page");
+    assert!(search.page.is_loading(), "still waiting for its own page");
 
     driver
         .ingest(copy_and_parse(&found_stories(dogs, 31, "dogs-2"), &seq, &dyn_sink).unwrap())
@@ -193,13 +223,13 @@ fn a_new_story_search_replaces_one_in_flight() {
         .ingest(copy_and_parse(&error(birds), &seq, &dyn_sink).unwrap())
         .unwrap();
     let search = driver.session.stories.search.as_ref().expect("the search");
-    assert!(search.error.is_none());
-    assert!(search.loading);
+    assert!(search.page.error().is_none());
+    assert!(search.page.is_loading());
     driver
         .ingest(copy_and_parse(&error(fish), &seq, &dyn_sink).unwrap())
         .unwrap();
     let search = driver.session.stories.search.as_ref().expect("the search");
-    assert!(search.error.is_some());
+    assert!(search.page.error().is_some());
     let _ = std::fs::remove_dir_all(dir);
 }
 

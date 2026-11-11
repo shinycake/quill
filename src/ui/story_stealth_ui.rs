@@ -124,8 +124,8 @@ impl QuillApp {
     }
 
     fn show_stealth_toast(&mut self, toast: StealthToast, cx: &mut Context<Self>) {
-        if self.stories.viewer.is_open() {
-            self.stories.stealth_toast = Some(ShownStealthToast {
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.stealth_toast = Some(ShownStealthToast {
                 toast,
                 until: Instant::now() + TOAST_DURATION,
             });
@@ -251,6 +251,7 @@ impl QuillApp {
     pub(in crate::ui) fn story_stealth_toast(&self) -> Option<AnyElement> {
         let shown = self
             .stories
+            .viewer_ui()
             .stealth_toast
             .as_ref()
             .filter(|shown| shown.until > Instant::now())?;

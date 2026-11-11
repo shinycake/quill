@@ -190,11 +190,9 @@ fn demo_viewers(loading: bool) -> quill::state::StoryViewersState {
         ],
         next_offset: "more".to_string(),
         page: if loading {
-            quill::state::ViewersPage::Loading {
-                request: quill::ids::RequestId(0),
-            }
+            quill::state::PageFetch::Loading(None)
         } else {
-            quill::state::ViewersPage::Idle
+            quill::state::PageFetch::Idle
         },
     }
 }

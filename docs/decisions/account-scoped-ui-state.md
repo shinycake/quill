@@ -6182,3 +6182,82 @@ already fixed or cannot happen are listed at the end with the reason.
   one enum (round 18). 13-033: a pick removes the picker's flight in
   `begin_sponsored_report`, so a second click finds no picker (test
   `a_picked_report_option_closes_the_picker_until_the_answer`).
+
+### Sweep fixes (s4-stories)
+
+Twenty-two S4 entries; each was proved against the code first.
+
+- **Answers matched to their request.** `setCloseFriends` carries its list
+  on the request (`PendingRequest::user_ids`), so the `ok` of the first of two
+  quick saves applies its own list and a failure of one never clears the other's
+  (03-010; the `close_friends_pending` field is gone). The viewers panel and
+  the public story search keep their page in one `PageFetch` (`Idle`,
+  `Loading(request)`, `Failed(text)`); the story forwards list keeps it in
+  `ForwardsPage` (`NotAsked`, `Loading { request, offset }`, `Ready`,
+  `Failed`), which also knows whether the first page was ever asked and makes
+  a first page replace the rows (03-007). Either way an answer or an error
+  lands only when it is the request the page waits for, so a stale one from
+  an earlier visit to the same story fills or fails nothing (05-279, 06-009),
+  and a page whose request the registry no longer holds does not hold the
+  next one back. `StoryViewersState`, `StoryInsightsState` and
+  `StorySearchState` drop their `loading`/`error` pairs (baseline lines
+  removed). A reopened insights panel that replaced another story's starts
+  at `NotAsked` and asks its first forwards page again. A search page the
+  sender refuses leaves the pages already found and a retryable error
+  instead of clearing the panel (03-008).
+- **Viewers panel (13-145).** The spinner shows only for `Loading`; a failed
+  page shows its error with Retry (also for a failed first page), and a send the
+  sender refuses is a `Failed` page, so scrolling does not re-ask every frame.
+- **Post-as list (05-162).** `StoriesState::post_as` is its own
+  `Fetch<Vec<i64>>`: its failure no longer lands in the eligibility check's
+  answers (which made the composer stop waiting for the real `canPostStory`
+  answer), and it replaces the `StoryPostState::post_as_error` field the s3
+  round added for the same bug. The picker draws the error (the composer's
+  status line no longer repeats it); reopening the composer asks again.
+- **Live Stars (05-168, 03-079).** `LiveStoryState::committed` is one batch per
+  commit request instead of a number. A failed add takes exactly its Stars from
+  the batch that holds them (request ids only grow, so the add belongs to the
+  batch whose commit followed it, or to the pending one); a failed commit drops
+  only its own batch; the answer to a `getLiveStoryTopDonors` asked before a
+  commit leaves that batch in the total. A pushed `updateLiveStoryTopDonors`
+  still counts every batch: it carries no request id to compare, and TDLib sends
+  it because of the commit (a snapshot older than the commit that arrives as an
+  update is not told apart; it was the same before).
+- **Comments toggle (03-078).** `show_from_pinned` opens the list the way the
+  toggle does (marks the comments read), so the dot cannot come back for ones
+  already seen.
+- **Live call (13-100).** `Session::live_call()` is the story stream only when
+  it is the watched story's call; the composer, the send price, the admin check,
+  the sender and the Ban User check read it. The delete box bans only after the
+  delete went out (`delete_live_story_comment_then_ban`), and says when the
+  delete itself could not be sent (13-093).
+- **Calendar (05-158).** `HistoryCalendar::paging` is `Idle`, `Loading`,
+  `Failed` or `Exhausted`; a failed page stays retryable (moving to another
+  month asks again) and only an empty page ends the paging. The baseline line is
+  removed.
+- **Mention search (05-240).** A failed `searchChatMembers` drops its own search
+  (an older query's error is ignored), so the same query is asked again.
+- **Custom emoji cache (05-283).** The cap clears the cache once, before the
+  batch goes in, not in the middle of it.
+- **Story page (06-037, 13-136, 13-143).** "Page loading" is read from the
+  open page's chat's own ops (`StoryPageOps::loading`, one op per request
+  since the s3 round), not from the label of a single status op that a
+  mutation or another chat's page replaces.
+  The album picker's grid asks like the archive section (`load_due`, the shared
+  `archive_asked` guard, never in a demo session). The statistics and search
+  lists reset their `Asked` guard and scroll handle when the story or search
+  changes.
+- **Per viewer / per chat (13-127, 10-104, 13-099).** The stealth toast lives in
+  `StoryViewerUi`, so closing the viewer drops it. The fact-check expansion lives
+  in `ChatUi` (per view, collapsed again on a chat change, as tdesktop's
+  per-element `Factcheck::expanded`). A voice/video/sticker/GIF reply that
+  finishes after the viewer moved on ends the reply row only when it is still
+  the row for that story (`reply_row_ends`).
+- **Skipped.** 10-102: `sharing_request_answering` already reads the in-flight
+  `AnswerSharingRequest` request, so a second click (Accept then Reject) sends
+  nothing; the test `accepting_a_request_names_it_once_and_a_refusal_frees_the_buttons`
+  asserts it, and the error frees the buttons. 13-122: the passcode lock calls
+  `release_story_viewer`, which drops the cover picker, and the strip loop checks
+  the picker's serial after every frame, so the cutting stops within one frame.
+  Minimising or pausing is not a lock; nothing private is on screen, so the cuts
+  are left to finish.

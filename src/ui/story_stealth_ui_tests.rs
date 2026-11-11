@@ -84,7 +84,7 @@ fn box_open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
 
 fn toast(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<(Option<String>, String)> {
     app.read_with(vcx, |app, _| {
-        app.stories.stealth_toast.as_ref().map(|shown| {
+        app.stories.viewer_ui().stealth_toast.as_ref().map(|shown| {
             (
                 shown.toast.title.map(str::to_string),
                 shown.toast.text.clone(),
@@ -228,6 +228,22 @@ fn while_stealth_is_on_an_entry_point_only_toasts(cx: &mut TestAppContext) {
     assert_eq!(dialog(&shell, vcx), None);
     let (title, _) = toast(&app, vcx).expect("the already-on toast");
     assert_eq!(title.as_deref(), Some("You are in Stealth Mode"));
+}
+
+#[gpui_kit::test]
+fn the_toast_goes_with_the_viewer_it_was_shown_over(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let on = StoryStealthMode {
+        active_until_date: now() + 125,
+        cooldown_until_date: now() + 3600,
+    };
+    seed(&app, vcx, true, on);
+    open_box(&app, vcx, None);
+    assert!(toast(&app, vcx).is_some(), "shown over the open viewer");
+    app.update(vcx, |app, cx| app.close_story_viewer(cx));
+    frames(vcx);
+    assert!(toast(&app, vcx).is_none(), "closing the viewer drops it");
 }
 
 #[gpui_kit::test]

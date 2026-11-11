@@ -105,6 +105,14 @@ impl Session {
                     error_reason(err)
                 ));
             }
+            // A failed `searchChatMembers` for the `@` menu drops its search
+            // (only the one waiting for that request), so the same query is
+            // asked again on the next keystroke instead of never.
+            Some(RequestPurpose::SearchMentionMembers) => {
+                if let Some(id) = pending.map(|p| p.id) {
+                    self.fail_mention_search(id);
+                }
+            }
             // kit Phase 9: a failed first `getChatHistory` must not
             // leave the message list without a history entry — the
             // skeleton shimmer would run forever. Create the entry

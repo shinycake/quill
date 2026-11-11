@@ -162,39 +162,46 @@ impl Session {
         self.stories.viewers = None;
     }
 
-    /// The driver sent the viewers page `request` for the story's panel.
-    pub fn story_viewers_loading(&mut self, chat_id: i64, story_id: i32, request: RequestId) {
+    /// The viewers panel of this story sent `request` for a page.
+    pub fn story_viewers_sent(&mut self, chat_id: i64, story_id: i32, request: RequestId) {
         if let Some(state) = self.stories.viewers.as_mut()
             && state.chat_id == chat_id
             && state.story_id == story_id
         {
-            state.page = ViewersPage::Loading { request };
+            state.page = PageFetch::Loading(Some(request));
         }
     }
 
     /// The panel the answer to `pending` belongs to: the one that is still
     /// loading exactly that request.
     fn story_viewers_asking(&mut self, pending: &PendingRequest) -> Option<&mut StoryViewersState> {
-        self.stories.viewers.as_mut().filter(|state| {
-            state.page
-                == ViewersPage::Loading {
-                    request: pending.id,
-                }
-        })
+        self.stories
+            .viewers
+            .as_mut()
+            .filter(|state| state.page.waits_for(pending.id))
     }
 
     /// Phase 9.2+: store `getCustomEmojiStickers` answers for the story
     /// reaction picker — keyed by sticker id (= custom emoji id).
     pub fn accept_story_custom_emoji_stickers(&mut self, stickers: Vec<StickerItem>) {
         self.stories.custom_emoji_retry = None;
+        // Bounded: when this answer would pass the cap, the cache restarts
+        // empty before any of it goes in (never in the middle of the
+        // batch); the story viewer refetches the ids it still shows.
+        let fresh = stickers
+            .iter()
+            .filter(|s| !self.stories.custom_emoji_stickers.contains_key(&s.id))
+            .count();
+        if self
+            .stories
+            .custom_emoji_stickers
+            .len()
+            .saturating_add(fresh)
+            > STORY_CUSTOM_EMOJI_CAP
+        {
+            self.stories.custom_emoji_stickers.clear();
+        }
         for sticker in stickers {
-            // Bounded: past the cap the cache restarts empty; the story
-            // viewer refetches the ids it still shows.
-            if self.stories.custom_emoji_stickers.len() >= STORY_CUSTOM_EMOJI_CAP
-                && !self.stories.custom_emoji_stickers.contains_key(&sticker.id)
-            {
-                self.stories.custom_emoji_stickers.clear();
-            }
             self.stories
                 .custom_emoji_stickers
                 .insert(sticker.id, sticker);
@@ -213,7 +220,7 @@ impl Session {
         let Some(state) = self.story_viewers_asking(pending) else {
             return;
         };
-        state.page = ViewersPage::Idle;
+        state.page = PageFetch::Idle;
         state.total_count = view.total_count;
         state.next_offset = view.next_offset;
         state.rows.extend(view.interactions);
@@ -223,7 +230,18 @@ impl Session {
     /// error with a retry instead of spinning forever.
     pub fn fail_story_viewers(&mut self, pending: &PendingRequest, message: String) {
         if let Some(state) = self.story_viewers_asking(pending) {
-            state.page = ViewersPage::Failed(message);
+            state.page = PageFetch::Failed(message);
+        }
+    }
+
+    /// The page request of this story's viewers panel could not be sent:
+    /// the panel offers the retry.
+    pub fn story_viewers_send_failed(&mut self, chat_id: i64, story_id: i32, message: String) {
+        if let Some(state) = self.stories.viewers.as_mut()
+            && state.chat_id == chat_id
+            && state.story_id == story_id
+        {
+            state.page = PageFetch::Failed(message);
         }
     }
 

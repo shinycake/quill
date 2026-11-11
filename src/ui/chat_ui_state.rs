@@ -146,6 +146,10 @@ pub(crate) struct ChatUi {
     pub(super) rich_editor_open: bool,
     /// The composer's "send as" identity list is open.
     pub(super) send_as_open: bool,
+    /// Messages of this chat whose fact-check block is expanded (tdesktop
+    /// `Factcheck::expanded`, held by the view's own message element): each
+    /// window has its own, and a chat change starts them collapsed.
+    pub(super) fact_check_expanded: std::collections::HashSet<i64>,
     /// The copy menu of a phone number, card number or date.
     pub(super) link_popup: Option<super::entity_links::LinkPopup>,
     /// The bot command list above the composer: closed, opened by a typed

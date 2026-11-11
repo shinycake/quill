@@ -76,6 +76,19 @@ impl Session {
             .collect();
     }
 
+    /// The `searchChatMembers` `request` failed: its search ends, so the
+    /// same query is asked again. An older query's error changes nothing.
+    pub(crate) fn fail_mention_search(&mut self, request: RequestId) {
+        if self
+            .messages
+            .mention_search
+            .as_ref()
+            .is_some_and(|s| s.request == Some(request))
+        {
+            self.messages.mention_search = None;
+        }
+    }
+
     /// The chat's first history page failed or timed out and the window is
     /// still empty: the UI offers "Couldn't load messages · Retry".
     pub fn history_load_failed(&self, chat_id: ChatId) -> bool {

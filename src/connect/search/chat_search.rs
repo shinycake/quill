@@ -429,7 +429,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(chat_id),
         );
         if let Some(calendar) = self.session.search.history_calendar.as_mut() {
-            calendar.loading = true;
+            calendar.begin_page();
         }
         match self.sender.send_json(&get_chat_message_calendar(
             extra,

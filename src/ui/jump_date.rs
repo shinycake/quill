@@ -227,7 +227,7 @@ impl QuillApp {
             grid = grid.child(row);
         }
 
-        let hint = if calendar.loading {
+        let hint = if calendar.is_loading() {
             tr(keys::Q_MISC_LOADING_DAYS).to_string()
         } else if calendar.media == SearchMediaKind::All {
             tr(keys::Q_MISC_PICK_A_DAY_TO_SEE).to_string()
