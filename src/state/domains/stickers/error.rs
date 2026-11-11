@@ -158,7 +158,7 @@ impl Session {
                 match self.stickers.stickers.lists.for_purpose(pending.purpose) {
                     Some(list) => list.fail(line),
                     None if self.stickers.manager.note_commit_failure(pending.id) => {}
-                    None => self.stickers.creator_note = Some(line),
+                    None => self.stickers.creator_notes.push_back(line),
                 }
             }
         }

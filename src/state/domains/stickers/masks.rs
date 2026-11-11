@@ -108,6 +108,16 @@ impl Session {
                     | RequestPurpose::Stickers(StickersPurpose::ReorderInstalledMaskSets)
             )
         ) {
+            // A list asked before the change answers with what the change
+            // replaced: dropped, so it neither lands as the new list nor
+            // keeps the refetch from going out.
+            for purpose in [
+                StickersPurpose::GetInstalledMaskSets,
+                StickersPurpose::GetArchivedMaskSets { first_page: true },
+                StickersPurpose::GetArchivedMaskSets { first_page: false },
+            ] {
+                while self.requests.take_purpose(purpose.into()).is_some() {}
+            }
             let masks = &mut self.stickers.masks;
             masks.installed_loaded = false;
             masks.archived_loaded = false;

@@ -93,10 +93,7 @@ impl ReplyFetches {
     }
 
     /// The fetched copies of one message, to show an edit of it.
-    pub(crate) fn loaded_mut(
-        &mut self,
-        key: (i64, i64),
-    ) -> Option<&mut HistoryMessage> {
+    pub(crate) fn loaded_mut(&mut self, key: (i64, i64)) -> Option<&mut HistoryMessage> {
         match self.get_mut(&key) {
             Some(ComposerReplyFetch::Loaded(message)) => Some(message.as_mut()),
             _ => None,

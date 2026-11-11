@@ -44,7 +44,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         // is tried again after the next answer.
         for (set_id, files) in wanted {
             self.ensure_media_files(&files)?;
-            self.session.stickers.manager.covers_requested.insert(set_id);
+            self.session
+                .stickers
+                .manager
+                .covers_requested
+                .insert(set_id);
         }
         Ok(())
     }

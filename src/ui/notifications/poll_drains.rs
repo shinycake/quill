@@ -236,11 +236,12 @@ impl QuillApp {
             }
         }
         // Phase 3.2: bot answers to inline keyboard callback presses.
-        if let Some(quill::state::CallbackAnswer { answer, chat }) = self
+        let callback_answers = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.bots.last_callback_answer.take())
-        {
+            .map(|live| std::mem::take(&mut live.driver.session.bots.callback_answers))
+            .unwrap_or_default();
+        for quill::state::CallbackAnswer { answer, chat } in callback_answers {
             // A URL in it opens as a link clicked where the button was.
             let asker = chat.and_then(|chat| self.window_showing(chat));
             self.as_asked_by(asker, |this| this.present_callback_answer(answer, cx));

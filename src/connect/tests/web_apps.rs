@@ -373,7 +373,10 @@ fn attachment_menu_bots_and_custom_requests_round_trip() {
     ));
     assert_eq!(
         h.driver.session.bots.web_apps.attachment_menu_toggled,
-        Some(Ok((43, true)))
+        [crate::state::AttachmentToggle {
+            bot_user_id: 43,
+            result: Ok(true)
+        }]
     );
 
     let extra = h

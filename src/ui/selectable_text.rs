@@ -692,7 +692,11 @@ impl Element for SelectableRichText {
                 .is_some_and(|(held, _)| *held < order);
             match before {
                 Some(before) if !earlier => selected.before = Some((order, before)),
-                None if selected.before.as_ref().is_some_and(|(held, _)| *held == order) => {
+                None if selected
+                    .before
+                    .as_ref()
+                    .is_some_and(|(held, _)| *held == order) =>
+                {
                     selected.before = None;
                 }
                 _ => {}

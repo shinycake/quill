@@ -74,7 +74,6 @@ GifPanel::search_loading
 GiftCodeLookup::loading
 GiftCodeLookup::loading+error
 GiftManageState::collections_loading
-GiftMarketState::auction_loading
 GiftPurchase::completed
 GiftPurchase::loading
 GiftPurchase::sending

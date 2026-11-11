@@ -13,7 +13,7 @@ impl Session {
         self.payments.verification_url = None;
         self.payments.receipt_error = None;
         self.payments.unlocked_notice = None;
-        self.bots.last_callback_answer = None;
+        self.bots.callback_answers.clear();
         // The consent box and the raw-URL fallback of a login button
         // answered while away: its request goes with its answer. A request
         // still in flight keeps its context for the answer to come.

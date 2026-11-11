@@ -141,15 +141,13 @@ impl QuillApp {
                 cx,
                 {
                     match quote.as_deref() {
-                        Some(quote) => {
-                            this.begin_quote_reply(
-                                chat_id,
-                                message_id,
-                                (quote, selection_nth),
-                                window,
-                                cx,
-                            )
-                        }
+                        Some(quote) => this.begin_quote_reply(
+                            chat_id,
+                            message_id,
+                            (quote, selection_nth),
+                            window,
+                            cx,
+                        ),
                         None => this.begin_reply_from_message(chat_id, message_id, window, cx),
                     }
                     this.message_ui.menu = None;
