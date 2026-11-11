@@ -40,10 +40,16 @@ impl Session {
                     self.stickers.emoji.keyword_lookups.failed(pending.id);
                 }
             }
-            Some(RequestPurpose::Stickers(StickersPurpose::GetMessageEffect { effect_id })) => self
-                .stickers
-                .effects
-                .fail(effect_id, err.code, std::time::Instant::now()),
+            Some(RequestPurpose::Stickers(StickersPurpose::GetMessageEffect { effect_id })) => {
+                if let Some(pending) = pending {
+                    self.stickers.effects.fail(
+                        effect_id,
+                        pending.id,
+                        err.code,
+                        std::time::Instant::now(),
+                    );
+                }
+            }
             Some(RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { set_id })) => {
                 self.fail_sticker_set_view(set_id)
             }

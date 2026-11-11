@@ -148,10 +148,11 @@ fn a_refused_commit_releases_the_stars_and_the_next_tap_starts_fresh() {
         })
         .to_string(),
     );
-    // A refused commit is not tried again on its own: the Stars are let go
-    // and the user is told why.
+    // A refused commit is not tried again on its own: TDLib gave the Stars
+    // back with the error, so they are let go and the user is told why.
     let paid = &driver.session.payments.paid;
     assert_eq!(paid.pending_stars(-100, 7), 0);
+    assert_eq!(paid.total_pending(), 0);
     assert!(
         driver
             .session
@@ -192,6 +193,7 @@ fn a_refused_undo_is_not_committed_later() {
         .to_string(),
     );
     assert_eq!(driver.session.payments.paid.pending_stars(-100, 7), 0);
+    assert_eq!(driver.session.payments.paid.total_pending(), 2);
     assert!(
         driver
             .session

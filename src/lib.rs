@@ -204,6 +204,7 @@ pub mod promotion;
 pub mod proxy;
 pub mod proxy_carrier;
 pub mod proxy_extras;
+pub mod proxy_ops;
 pub mod proxy_sync;
 pub mod proxy_web;
 pub mod psa_about;

@@ -10,6 +10,7 @@
 
 use crate::lang::{keys, tr};
 use crate::local_time::{CivilTime, civil_local, utc_offset_at};
+use crate::search_tabs::SearchTab;
 
 /// `searchMessagesChatTypeFilter*` (schema 1.8.67, lines 6335-6341) — the
 /// chat-type filter of global message search.
@@ -135,29 +136,37 @@ impl SearchDateRange {
             Self::Month => 30,
             Self::Year => 365,
         };
-        (now - days * 86_400).clamp(0, i64::from(i32::MAX)) as i32
+        now.saturating_sub(days * 86_400)
+            .clamp(0, i64::from(i32::MAX)) as i32
     }
 
     /// `max_date` for `searchMessages` at `now` (0 = no upper bound): only
     /// "Older" closes the window, a year back.
     pub fn max_date(self, now: i64) -> i32 {
         match self {
-            Self::Older => (now - 365 * 86_400).clamp(0, i64::from(i32::MAX)) as i32,
+            Self::Older => now
+                .saturating_sub(365 * 86_400)
+                .clamp(0, i64::from(i32::MAX)) as i32,
             _ => 0,
         }
     }
 }
 
-/// Everything the global-search filter bar can narrow by.
+/// Everything the global-search filter bar can narrow by. The tab is the one
+/// value for what is searched: the scope (my messages, public posts, apps,
+/// downloads) and the media kind are read off it, never stored beside it, so
+/// a scope of public posts with a media kind of photos cannot exist. The
+/// date window and the archive toggle are independent of the tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GlobalSearchFilters {
-    pub chat_type: SearchChatType,
-    pub media: SearchMediaKind,
+    tab: SearchTab,
+    /// The Private / Groups choice of the Chats tab, kept while another tab
+    /// shows so the Chats tab comes back as it was. Never `Channels`: that
+    /// is the Channels tab.
+    chat_type: SearchChatType,
     pub date: SearchDateRange,
     /// Search the archive only (`chatListArchive`).
     pub archived: bool,
-    /// Where the query is looked up (My messages / Public posts).
-    pub scope: SearchScope,
 }
 
 /// The tabs of tdesktop's search (`lng_search_tab_my_messages`,
@@ -206,6 +215,85 @@ impl GlobalSearchFilters {
     pub fn is_default(&self) -> bool {
         *self == Self::default()
     }
+
+    /// The tab the filters are on.
+    pub fn tab(&self) -> SearchTab {
+        self.tab
+    }
+
+    /// Where the query is looked up.
+    pub fn scope(&self) -> SearchScope {
+        match self.tab {
+            SearchTab::Posts => SearchScope::PublicPosts,
+            SearchTab::Apps => SearchScope::Apps,
+            SearchTab::Downloads => SearchScope::Downloads,
+            _ => SearchScope::MyMessages,
+        }
+    }
+
+    /// The media kind of the tab (`All` for the tabs that list chats).
+    pub fn media(&self) -> SearchMediaKind {
+        match self.tab {
+            SearchTab::Photos => SearchMediaKind::Photos,
+            SearchTab::Videos => SearchMediaKind::Videos,
+            SearchTab::Links => SearchMediaKind::Links,
+            SearchTab::Files => SearchMediaKind::Files,
+            SearchTab::Music => SearchMediaKind::Music,
+            SearchTab::Voice => SearchMediaKind::Voice,
+            _ => SearchMediaKind::All,
+        }
+    }
+
+    /// The chat-type filter: Channels on the Channels tab, else the choice
+    /// of the Chats tab.
+    pub fn chat_type(&self) -> SearchChatType {
+        if self.tab == SearchTab::Channels {
+            SearchChatType::Channels
+        } else {
+            self.chat_type
+        }
+    }
+
+    /// The filters moved onto `tab`. The date window and the archive toggle
+    /// carry over; the Chats tab's chat type stays for when it comes back,
+    /// and the Channels tab starts clean, so leaving it leaves nothing of
+    /// its chat type behind.
+    pub fn on_tab(mut self, tab: SearchTab) -> Self {
+        if tab == SearchTab::Channels {
+            self.chat_type = SearchChatType::All;
+        }
+        self.tab = tab;
+        self
+    }
+
+    /// The scope's own tab: where a hashtag search with that scope lands.
+    /// Filters already in that scope stay on their tab (a hashtag searched
+    /// from the Photos tab keeps the media kind).
+    pub fn in_scope(self, scope: SearchScope) -> Self {
+        if self.scope() == scope {
+            return self;
+        }
+        self.on_tab(match scope {
+            SearchScope::MyMessages => SearchTab::Chats,
+            SearchScope::PublicPosts => SearchTab::Posts,
+            SearchScope::Apps => SearchTab::Apps,
+            SearchScope::Downloads => SearchTab::Downloads,
+        })
+    }
+
+    /// The chat-type choice of the chips: Channels is its own tab, any
+    /// other kind is the Chats tab's (and brings the Chats tab back from
+    /// Channels).
+    pub fn with_chat_type(mut self, kind: SearchChatType) -> Self {
+        if kind == SearchChatType::Channels {
+            return self.on_tab(SearchTab::Channels);
+        }
+        if self.tab == SearchTab::Channels {
+            self.tab = SearchTab::Chats;
+        }
+        self.chat_type = kind;
+        self
+    }
 }
 
 pub fn is_leap_year(year: i64) -> bool {
@@ -241,7 +329,7 @@ impl YearMonth {
     pub fn prev(self) -> Self {
         if self.month == 1 {
             Self {
-                year: self.year - 1,
+                year: self.year.saturating_sub(1),
                 month: 12,
             }
         } else {
@@ -255,7 +343,7 @@ impl YearMonth {
     pub fn next(self) -> Self {
         if self.month == 12 {
             Self {
-                year: self.year + 1,
+                year: self.year.saturating_add(1),
                 month: 1,
             }
         } else {
@@ -330,7 +418,9 @@ pub fn local_day_number(unix: i64) -> i64 {
 /// later than `date`" the one just before `day_number` begins; the message
 /// after it is the first of the day.
 pub fn before_day_date(day_number: i64) -> i32 {
-    (local_midnight(day_number) - 1).clamp(0, i64::from(i32::MAX)) as i32
+    local_midnight(day_number)
+        .saturating_sub(1)
+        .clamp(0, i64::from(i32::MAX)) as i32
 }
 
 #[cfg(test)]

@@ -284,7 +284,7 @@ fn an_older_program_page_does_not_land_on_the_list_a_sort_reset() {
 }
 
 #[test]
-fn a_commit_that_cannot_be_sent_releases_the_stars_and_is_not_retried() {
+fn a_commit_that_cannot_be_sent_keeps_the_stars_stuck_and_is_not_retried() {
     use crate::ids::{ChatId, MessageId};
     let mut t = Flaky::new();
     t.driver
@@ -296,7 +296,8 @@ fn a_commit_that_cannot_be_sent_releases_the_stars_and_is_not_retried() {
             .paid_reaction_tick(crate::paid_reaction::ACCUMULATE_MS)
     );
     let paid = &t.driver.session.payments.paid;
-    assert_eq!(paid.total_pending(), 0, "the Stars are let go");
+    assert_eq!(paid.total_pending(), 3, "TDLib still holds the Stars");
+    assert!(!paid.has_pending(), "no toast and no Undo for them");
     assert_eq!(t.driver.session.payments.notices.len(), 1);
     // No later window sends it again, with the sender working or not.
     t.sender.refuse(&[]);
@@ -309,7 +310,7 @@ fn a_commit_that_cannot_be_sent_releases_the_stars_and_is_not_retried() {
 }
 
 #[test]
-fn a_refused_commit_answer_tells_the_user_and_ends_the_entry() {
+fn a_refused_commit_answer_tells_the_user_and_keeps_the_stars_stuck() {
     use crate::ids::{ChatId, MessageId};
     let mut t = Flaky::new();
     t.driver
@@ -318,7 +319,8 @@ fn a_refused_commit_answer_tells_the_user_and_ends_the_entry() {
     t.driver
         .paid_reaction_tick(crate::paid_reaction::ACCUMULATE_MS);
     t.fail("commitPendingPaidMessageReactions", "BALANCE_TOO_LOW");
-    assert_eq!(t.driver.session.payments.paid.total_pending(), 0);
+    assert_eq!(t.driver.session.payments.paid.total_pending(), 3);
+    assert!(!t.driver.session.payments.paid.in_flight());
     assert!(
         t.driver
             .session
@@ -352,7 +354,10 @@ fn a_late_refusal_of_an_earlier_tap_leaves_the_newer_tap_alone() {
     refused["@extra"] = first["@extra"].clone();
     t.feed(refused);
     let paid = &t.driver.session.payments.paid;
-    assert_eq!(paid.toast().map(|p| p.stars), Some(4));
+    assert_eq!(
+        paid.toast().map(crate::paid_reaction::PendingPaid::stars),
+        Some(4)
+    );
     assert_eq!(paid.total_pending(), 4);
 }
 
@@ -859,10 +864,10 @@ fn a_stale_proxy_list_whose_refetch_cannot_be_sent_is_not_asked_every_tick() {
     use crate::proxy::ProxyFetch;
     let mut t = Flaky::new();
     t.sender.refuse(&["getProxies"]);
-    t.driver.session.settings.proxy.fetch = ProxyFetch::Stale;
+    t.driver.session.settings.proxy.ops.invalidate();
     assert!(t.driver.refresh_proxies_if_stale().is_err());
     assert_eq!(
-        t.driver.session.settings.proxy.fetch,
+        t.driver.session.settings.proxy.ops.fetch(),
         ProxyFetch::FailedStale
     );
     assert!(

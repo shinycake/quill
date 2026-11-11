@@ -420,25 +420,23 @@ fn jump_to_a_date_before_the_chat_starts_goes_to_the_oldest_message() {
 
 #[test]
 fn global_search_filters_reach_search_messages() {
-    use crate::search_filters::{
-        GlobalSearchFilters, SearchChatType, SearchDateRange, SearchMediaKind,
-    };
+    use crate::search_filters::{GlobalSearchFilters, SearchChatType, SearchDateRange};
+    use crate::search_tabs::SearchTab;
     let mut fx = Fixture::new();
     commit_typed_search(&mut fx.driver, "dune");
     fx.driver
-        .set_search_filters(GlobalSearchFilters {
-            chat_type: SearchChatType::Channels,
-            media: SearchMediaKind::Files,
-            date: SearchDateRange::Week,
-            ..GlobalSearchFilters::default()
-        })
+        .set_search_filters(GlobalSearchFilters::default().with_chat_type(SearchChatType::Channels))
         .unwrap();
     let search = fx.last_request("searchMessages");
-    assert_eq!(search["query"], "dune");
     assert_eq!(
         search["chat_type_filter"]["@type"],
         "searchMessagesChatTypeFilterChannel"
     );
+    let mut files = GlobalSearchFilters::default().on_tab(SearchTab::Files);
+    files.date = SearchDateRange::Week;
+    fx.driver.set_search_filters(files).unwrap();
+    let search = fx.last_request("searchMessages");
+    assert_eq!(search["query"], "dune");
     assert_eq!(search["filter"]["@type"], "searchMessagesFilterDocument");
     assert!(search["min_date"].as_i64().unwrap() > 0);
     assert_eq!(search["max_date"], 0);
