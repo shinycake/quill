@@ -405,11 +405,15 @@ fn folder_invite_links_list_create_edit_and_errors() {
             extra.0
         ),
     );
-    assert_eq!(session.chat_list.folder_invite_links[&3].len(), 1);
-    assert_eq!(
-        session.chat_list.folder_invite_links[&3][0].chat_ids,
-        vec![5, 6]
-    );
+    let links = |session: &Session| {
+        session.chat_list.folder_shares[&3]
+            .links
+            .data()
+            .cloned()
+            .unwrap_or_default()
+    };
+    assert_eq!(links(&session).len(), 1);
+    assert_eq!(links(&session)[0].chat_ids, vec![5, 6]);
     // A create adds a link and flips the one-shot + the folder flags.
     let extra = session.request_for_folder(RequestPurpose::CreateChatFolderInviteLink, 3);
     apply_json(
@@ -421,8 +425,13 @@ fn folder_invite_links_list_create_edit_and_errors() {
             extra.0
         ),
     );
-    assert_eq!(session.chat_list.folder_invite_links[&3].len(), 2);
-    assert!(session.chat_list.folder_link_saved);
+    assert_eq!(links(&session).len(), 2);
+    // The box that sent the create takes its answer by request id.
+    assert_eq!(
+        session.chat_list.dialog_answers.take(extra),
+        Some(DialogAnswer::Done)
+    );
+    assert_eq!(session.chat_list.dialog_answers.take(extra), None, "once");
     assert!(session.chat_list.chat_folders[0].is_shareable);
     // An edit replaces by link, never duplicates.
     let extra = session.request_for_folder(RequestPurpose::EditChatFolderInviteLink, 3);
@@ -435,8 +444,8 @@ fn folder_invite_links_list_create_edit_and_errors() {
             extra.0
         ),
     );
-    assert_eq!(session.chat_list.folder_invite_links[&3].len(), 2);
-    assert_eq!(session.chat_list.folder_invite_links[&3][1].name, "Renamed");
+    assert_eq!(links(&session).len(), 2);
+    assert_eq!(links(&session)[1].name, "Renamed");
     // Too many links opens the limit box rather than an error line.
     let extra = session.request_for_folder(RequestPurpose::CreateChatFolderInviteLink, 3);
     apply_json(
@@ -450,10 +459,12 @@ fn folder_invite_links_list_create_edit_and_errors() {
     );
     assert_eq!(
         session.chat_list.folder_limit_hit.take(),
-        Some(crate::folder_limits::FolderLimitKind::InviteLinks)
+        Some((
+            crate::folder_limits::FolderLimitKind::InviteLinks,
+            Some(extra)
+        ))
     );
-    assert!(session.chat_list.folder_share_error.is_none());
-    // Any other refusal surfaces for the dialog.
+    // Any other refusal surfaces for the dialog that sent it.
     let extra = session.request_for_folder(RequestPurpose::CreateChatFolderInviteLink, 3);
     apply_json(
         &mut session,
@@ -464,7 +475,10 @@ fn folder_invite_links_list_create_edit_and_errors() {
             extra.0
         ),
     );
-    assert!(session.chat_list.folder_share_error.is_some());
+    assert!(matches!(
+        session.chat_list.dialog_answers.take(extra),
+        Some(DialogAnswer::Failed(_))
+    ));
 }
 
 #[test]
@@ -492,7 +506,6 @@ fn recommended_folders_and_addlist_check_are_cached() {
     assert_eq!(recommended[0].description, "All unread chats");
 
     let extra = session.request(RequestPurpose::CheckChatFolderInviteLink, None);
-    session.chat_list.folder_invite_request = Some(extra);
     apply_json(
         &mut session,
         &seq,
@@ -502,23 +515,26 @@ fn recommended_folders_and_addlist_check_are_cached() {
             extra.0
         ),
     );
-    let info = session.chat_list.folder_invite_info.as_ref().expect("info");
+    let Some(DialogAnswer::Checked(info)) = session.chat_list.dialog_answers.take(extra) else {
+        panic!("the check answers its box with the folder");
+    };
     assert_eq!(info.folder.id, 0);
     assert_eq!(info.missing_chat_ids, vec![8, 9]);
     assert_eq!(info.added_chat_ids, vec![4]);
 
     // Adding confirms through `ok`; a failure shows its reason.
     let extra = session.request(RequestPurpose::AddChatFolderByInviteLink, None);
-    session.chat_list.folder_invite_request = Some(extra);
     apply_json(
         &mut session,
         &seq,
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(session.chat_list.folder_invite_done);
+    assert_eq!(
+        session.chat_list.dialog_answers.take(extra),
+        Some(DialogAnswer::Done)
+    );
     let extra = session.request(RequestPurpose::AddChatFolderByInviteLink, None);
-    session.chat_list.folder_invite_request = Some(extra);
     apply_json(
         &mut session,
         &seq,
@@ -528,7 +544,10 @@ fn recommended_folders_and_addlist_check_are_cached() {
             extra.0
         ),
     );
-    assert!(session.chat_list.folder_invite_error.is_some());
+    assert!(matches!(
+        session.chat_list.dialog_answers.take(extra),
+        Some(DialogAnswer::Failed(_))
+    ));
 }
 
 #[test]
@@ -546,7 +565,7 @@ fn folder_link_chats_are_cached_per_folder() {
         ),
     );
     assert_eq!(
-        session.chat_list.folder_link_chats.get(&3),
+        session.chat_list.folder_shares[&3].chats.data(),
         Some(&vec![5, 6])
     );
 }

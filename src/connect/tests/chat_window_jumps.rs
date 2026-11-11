@@ -154,3 +154,33 @@ fn a_reply_in_a_chat_window_fetches_its_original() {
     assert_eq!(asked.len(), 1, "the strip asks for the original");
     assert_eq!(asked[0]["message_id"], 61);
 }
+
+#[test]
+fn the_calendar_goes_when_its_chat_is_left_and_a_stale_one_jumps_nowhere() {
+    let mut h = Harness::two_chats();
+    let page = h.driver.select_chat(ALICE).unwrap().unwrap();
+    h.answer(ALICE, page, &(50..=60).collect::<Vec<_>>());
+    h.driver.session.open_history_calendar(1_700_000_000);
+    assert!(h.driver.session.search.history_calendar.is_some());
+    h.driver.select_chat(BOB).unwrap();
+    assert!(
+        h.driver.session.search.history_calendar.is_none(),
+        "leaving the chat closes its Jump to date box"
+    );
+
+    // A box that somehow outlives its chat jumps nowhere.
+    h.driver.session.open_history_calendar(1_700_000_000);
+    h.driver.session.search.history_calendar =
+        h.driver
+            .session
+            .search
+            .history_calendar
+            .take()
+            .map(|mut calendar| {
+                calendar.chat_id = ALICE;
+                calendar
+            });
+    let sent = h.sent("getChatMessageByDate", ALICE).len();
+    assert_eq!(h.driver.jump_to_date(19_000).unwrap(), None);
+    assert_eq!(h.sent("getChatMessageByDate", ALICE).len(), sent);
+}

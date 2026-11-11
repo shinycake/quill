@@ -234,7 +234,7 @@ fn the_folder_limit_box_follows_the_box_that_hit_it(cx: &mut TestAppContext) {
         app.set_window_scope(None);
         if let Some(session) = app.demo_session.as_mut() {
             session.chat_list.folder_limit_hit =
-                Some(quill::folder_limits::FolderLimitKind::Folders);
+                Some((quill::folder_limits::FolderLimitKind::Folders, None));
         }
         app.unasked(|app| assert!(app.drain_folder_limit(cx)));
     });

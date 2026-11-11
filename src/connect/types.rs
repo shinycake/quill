@@ -257,6 +257,18 @@ pub enum ConnectSendError {
     CallsUnavailable,
 }
 
+impl ConnectSendError {
+    /// The line a stage ends in when its request could not be sent (a
+    /// spinner nothing would end becomes this, with a Retry).
+    pub fn stage_line(&self) -> String {
+        match self {
+            Self::Native => crate::lang::tr(crate::lang::keys::Q_NOTES_NO_CONNECTION),
+            _ => crate::lang::tr(crate::lang::keys::Q_NOTES_SOMETHING_WENT_WRONG),
+        }
+        .to_string()
+    }
+}
+
 /// MED4: outcome of an Instant View open attempt (TGX
 /// `TdlibUi.fetchInstantView` + browser fallback).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

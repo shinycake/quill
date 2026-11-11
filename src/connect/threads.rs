@@ -99,7 +99,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(thread) = self.session.threads.thread.as_mut() {
             thread.needs_chat_switch = false;
         }
-        self.send_open_chat(chat_id)?;
+        if let Err(err) = self.send_open_chat(chat_id) {
+            // TDLib never heard of the chat: it is not open here either
+            // (the thread closes with it), so a retry opens it again.
+            self.session.leave_open_chat();
+            return Err(err);
+        }
         self.begin_thread_reading(chat_id);
         self.fetch_thread_history()
     }

@@ -748,6 +748,16 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The Retry strip under a failed older page of results.
+    pub(super) fn chat_search_retry_more(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && live.driver.load_more_chat_search().is_err()
+        {
+            self.set_note(StatusNote::error(tr(keys::Q_CHAT_SEARCH_IN_CHAT_FAILED)));
+        }
+        cx.notify();
+    }
+
     pub(super) fn chat_search_older(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.screen.connection.set_note_for(

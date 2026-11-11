@@ -5187,3 +5187,107 @@ land and the typed form was gone.
 - **Inline results Start.** `InlineStage::Started` carries a `Baseline`: when
   the bot chat's history was not loaded at the start, only messages after the
   user's own start count, not old ones that load later (10-139).
+
+### Sweep fixes (s3-chat-list)
+
+- **A box waits for its own answer.** The folder editor, the Share Folder
+  form, the "Add folder" box, the recommended-folder Add and the Add
+  Contact box keep the id of the request they sent in one stage value
+  (`FolderLoad::Saving`, `LinkOp::Saving`, `InviteStage::Adding`,
+  `ContactSave::Saving`) and take only that request's end from
+  `ChatListState::dialog_answers` (`DialogAnswers`, filled in one place,
+  `Session::apply_payload`, for the purposes `answered_to_a_box` lists).
+  Nothing closes on the send any more (03-048, 09-106, 09-X002); a refusal
+  shows in the box (09-034, 09-108); a late answer of a form that was
+  cancelled lands nowhere. The one-shots `folder_link_saved`,
+  `folder_share_error`, `folder_invite_{info,error,done,request,link}` are
+  gone (05-054). `scripts/check-dialog-answers.py` keeps a purpose from
+  joining the list without a box that takes it.
+- **A limit hit names its asker.** `folder_limit_hit` carries the request id;
+  the limit box opens in that box's window and only that box's own answer
+  ends its wait (09-100).
+- **Ends in an error.** The Share Folder box's links and chats are
+  `Fetch`es per folder (`FolderShare`), its spec the existing
+  `folder_spec_errors`; the "Add to folder" box is `Fetch<Vec<ChatList>>`
+  per chat; both draw the error with a Retry (09-X053, 05-062, 09-X057).
+  A failed `getChatFolder` ends the editor in `FolderLoad::Failed`
+  (09-033, 09-105: already `FolderLoad` from the s12-ui sweep; a test now
+  walks the answer). A check of an `addlist` link that cannot be sent or
+  answers an error is `InviteStage::Failed` (09-X054, 09-109).
+- **Save does not overwrite.** When the folder changed since the editor
+  was filled (`fresh_spec` is none), Save fetches it (`FolderLoad::Merging`)
+  and sends the person's edits onto the fresh folder
+  (`FolderEditor::merged_onto`: pinned chats are the fresh ones, added and
+  removed chats are the person's diff against `base`). tdesktop saves the
+  box's own copy whole; the merge is the smallest choice that cannot undo a
+  pin made elsewhere (03-049).
+- **Optimistic edits roll back.** `reorderChatFolders`, `toggleChatFolderTags`,
+  `removeRecentlyFoundChat`, `removeTopChat` and `setOption(disable_top_chats)`
+  carry `RequestRollback` values (`FolderOrder`, `FolderTags`,
+  `RecentSearchRemoved`, `TopChatRemoved`, `TopChatsDisabled`); each puts
+  back only if what it showed is still there (02-020, 05-131, 02-202).
+- **Recommended Add.** `FolderUi::recommended_adds` is the request per
+  recommendation name; a second tap waits, the row resolves by name
+  (09-107).
+- **Sidebar tab.** `SidebarTab { Chats, Contacts, Calls }` replaces
+  `contacts_tab_open` and `calls_tab_open`; a folder switch, Escape and a
+  community's "View chats" set `Chats` (08-068, 07-043, 08-092).
+- **Pages that fail wait.** In-chat search paging is
+  `ChatSearchPaging { End, More, Loading, Failed }` with the cursor inside;
+  a failed older page keeps the results and draws a Retry strip (05-130).
+  Global search paging is `SearchPaging`; a refused ask (client not ready)
+  is `Failed`, not asked again every frame (12-074).
+- **Smaller.** `ArchiveMute::reload` is `ArchiveReload { Idle, Reloading,
+  Failed }`, left by the error answer and by a send that did not go
+  (01-045). A failed `openChat` send closes the chat locally, so the next
+  select sends it again (02-023; same for `open_chat_window`). The
+  leave-then-delete queue keeps the chats it did not send (02-019). The
+  shared-folder "N new chats" bar goes on the `ok` of
+  `processChatFolderNewChats`, stays and says so on a refusal, and a fetch
+  counts as asked when it answers, not when it is sent (02-058). The date
+  jump box, its resolved jump and its note close with the chat that opened
+  them and with the account leaving the screen (05-133); a picked day whose
+  box belongs to another chat than the view in place jumps nowhere
+  (02-194: the search and the pending jump were already per-window views).
+  Chat previews are kept by chat, so a late answer for one chat never
+  replaces another's (05-061). A found chat or message the driver refuses
+  does not enter the chat UI or clear the field (12-075). A bulk Pin stops
+  at the first refusal with the limit box up (08-073; the pre-check already
+  counted the pins of the batch, since the driver flips a chat when it sends
+  its `toggleChatIsPinned`, so only the repeated limit box was wrong).
+- **Review round: the twin, the merge, the limit line.**
+  - *Edit Contact* (09-X002 twin): its `addContact` Save is
+    `ContactSave::Saving(request)` in `EditContactDialog::save`, settled from
+    `dialog_answers` by `settle_edit_contact`. The box closes with the
+    "Contact saved" toast only on `ok`; a refusal is an inline line and Save
+    sends again. The note-only `setUserNote` path is unchanged (nothing asks
+    on its answer).
+  - *Save onto the current folder* (03-049): Save sends
+    `FolderEditor::spec_onto_current(base, fresh)`: the merge whenever a
+    fresh copy exists and differs from `base` (another consumer refetched
+    after `updateChatFolders`), the form as it is when they are equal, and a
+    fetch first (`Merging`) when there is no fresh copy.
+  - *Merging has an exit*: the fetch is asked once on entry
+    (`start_folder_editor_merge`); a send that fails goes back to `Ready`
+    with the error. The per-frame settle asks nothing while the request is
+    in flight; a copy that went stale again with nothing in flight is asked
+    for once, and a failing send ends the stage in `Ready` with the error,
+    so it cannot loop (an `Err` from the inactive path writes no
+    `folder_spec_errors`).
+  - *Limit errors say it once*: a folder request whose error carries a limit
+    hint (`RequestPurpose::folder_op`) answers `DialogAnswer::LimitHit`, so
+    the box draws no line (nor toast, for a recommended Add) on top of the
+    limit box, as in tdesktop.
+  - *Answers nobody waits for are not queued*: the remove-from-folder chain
+    sends `RemoveChatFromFolder` (not `EditChatFolder`), which
+    `answered_to_a_box` does not list, so its edits cannot push a waiting
+    box's answer out of the 16 `DialogAnswers` keeps. (A box that closes
+    before its answer still leaves one until it ages out.)
+  - *Smaller*: no "Jumping to date" toast when `jump_to_date` sent nothing
+    (`Ok(None)`: the guard refused, or the target was already in view); a
+    refused `reorderChatFolders` / `toggleChatFolderTags` says why in the
+    toast as its rollback snaps the UI back (02-020); the `purpose.rs` docs
+    name `ChatListState` fields, not removed `Session` ones.
+- **Skipped.** 08-072: `set_pinned_chat_order` already refuses an order
+  whose id set differs from the current pinned set
+  (`cl2_set_pinned_chat_order_id_mismatch_is_noop`).

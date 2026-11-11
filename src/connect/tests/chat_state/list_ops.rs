@@ -730,3 +730,42 @@ fn the_reply_bar_fetches_a_target_that_left_memory() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_pin_counts_for_the_next_chats_limit_check_as_soon_as_it_is_sent() {
+    // The UI's pin-limit pre-check counts pinned chats in the session; a
+    // bulk Pin sends one request per chat, so each must see the ones
+    // before it without waiting for their answers (sweep 08-073).
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = ViewCtlSender::new();
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    ready_private_chat(&mut driver, &seq, &dyn_sink);
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateNewChat","chat":{"id":8,"title":"Bob","type":{"@type":"chatTypePrivate","user_id":8},"unread_count":0}}"#,
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let pinned = |driver: &ConnectDriver<Arc<ViewCtlSender>>| {
+        driver
+            .session
+            .chats
+            .values()
+            .filter(|chat| chat.is_pinned)
+            .count()
+    };
+    driver.toggle_chat_pin(ChatId(7), true).unwrap();
+    assert_eq!(pinned(&driver), 1);
+    driver.toggle_chat_pin(ChatId(8), true).unwrap();
+    assert_eq!(pinned(&driver), 2, "both count before any answer");
+    let _ = std::fs::remove_dir_all(&dir);
+}

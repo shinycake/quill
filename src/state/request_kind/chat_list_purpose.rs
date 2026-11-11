@@ -35,6 +35,7 @@ impl ChatListPurpose {
             | Self::SetArchiveChatListSettings
             | Self::CreateChatFolder
             | Self::EditChatFolder
+            | Self::RemoveChatFromFolder
             | Self::DeleteChatFolder
             | Self::ReorderChatFolders
             | Self::ToggleChatFolderTags

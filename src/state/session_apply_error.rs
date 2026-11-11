@@ -218,7 +218,12 @@ impl Session {
                 rollback @ (RequestRollback::ForumTopicMute { .. }
                 | RequestRollback::PollVote { .. }
                 | RequestRollback::BusinessBotBar { .. }
-                | RequestRollback::ChatLinkDelete { .. }),
+                | RequestRollback::ChatLinkDelete { .. }
+                | RequestRollback::FolderOrder { .. }
+                | RequestRollback::FolderTags { .. }
+                | RequestRollback::RecentSearchRemoved { .. }
+                | RequestRollback::TopChatRemoved { .. }
+                | RequestRollback::TopChatsDisabled { .. }),
             ) => self.restore_optimistic(rollback),
             None => {}
         }

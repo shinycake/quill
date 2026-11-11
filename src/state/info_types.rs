@@ -540,15 +540,6 @@ pub enum WelcomeMessagesFetch {
     Failed(String),
 }
 
-/// Slice CL: the chat-list peek preview result — the latest
-/// `getChatHistory` answer for one unopened chat.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PreviewHistoryFetch {
-    pub chat_id: ChatId,
-    pub messages: Vec<ParsedMessage>,
-    pub failed: Option<String>,
-}
-
 /// Phase D3c: relative timestamp for admin-log rows. The log only
 /// covers the last 48 hours (schema 1.8.67, line 15252), so relative
 /// forms are always meaningful; no date crate is pulled in for this.

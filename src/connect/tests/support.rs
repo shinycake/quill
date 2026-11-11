@@ -64,6 +64,7 @@ pub(crate) fn ready_driver(
 pub(crate) struct ViewCtlSender {
     pub(crate) sent: Mutex<Vec<String>>,
     pub(crate) fail_view: Mutex<bool>,
+    pub(crate) fail_open_chat: Mutex<bool>,
 }
 
 impl ViewCtlSender {
@@ -71,6 +72,7 @@ impl ViewCtlSender {
         Arc::new(Self {
             sent: Mutex::new(Vec::new()),
             fail_view: Mutex::new(false),
+            fail_open_chat: Mutex::new(false),
         })
     }
 
@@ -80,6 +82,10 @@ impl ViewCtlSender {
 
     pub(crate) fn set_fail_view(&self, fail: bool) {
         *self.fail_view.lock().expect("view ctl sender") = fail;
+    }
+
+    pub(crate) fn set_fail_open_chat(&self, fail: bool) {
+        *self.fail_open_chat.lock().expect("view ctl sender") = fail;
     }
 
     pub(crate) fn view_count(&self) -> usize {

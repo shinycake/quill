@@ -3,17 +3,26 @@ use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::*;
 use quill::folder_picker::PickerMode;
 use quill::folders::FolderEditor;
+use quill::ids::RequestId;
 use quill::lang::{keys, tr};
-use quill::telegram::envelope::ChatFolderSpec;
+use quill::telegram::envelope::{ChatFolderInviteLinkInfo, ChatFolderSpec};
 use std::collections::HashSet;
 /// Where the folder editor's form stands: an edited folder is fetched first
-/// (Save would send a blank spec over the real folder), and a failed fetch
-/// offers Retry or closing.
+/// (Save would send a blank spec over the real folder), a failed fetch
+/// offers Retry or closing, and a Save waits for its own answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FolderLoad {
     Loading,
     Failed(String),
     Ready,
+    /// Save found the folder changed since the form opened: the fresh
+    /// folder is being fetched so the person's edits go onto it, not over
+    /// it (`FolderEditor::merged_onto`). A failed fetch is back in `Ready`
+    /// with the error, the edits kept.
+    Merging,
+    /// Save went out: the box closes on the answer to this request and
+    /// shows the error (back in `Ready`) when it fails.
+    Saving(RequestId),
 }
 
 /// Parity slice: create/edit chat-folder dialog. The editable folder model
@@ -23,6 +32,9 @@ pub struct FolderEditorDialog {
     /// `None` = create; `Some(id)` = edit.
     pub(crate) folder_id: Option<i32>,
     pub(crate) editor: FolderEditor,
+    /// The folder as the form was filled from it (`getChatFolder`): what
+    /// the person's edits are measured against when the folder changed.
+    pub(crate) base: ChatFolderSpec,
     pub(crate) name_input: Entity<TextareaState>,
     /// Edit flow: `getChatFolder` before the editor prefills.
     pub(crate) load: FolderLoad,
@@ -60,6 +72,7 @@ impl FolderEditorDialog {
         Self {
             folder_id,
             editor: FolderEditor::new(),
+            base: ChatFolderSpec::default(),
             name_input,
             load: if folder_id.is_some() {
                 FolderLoad::Loading
@@ -80,6 +93,7 @@ impl FolderEditorDialog {
         cx: &mut Context<QuillApp>,
     ) {
         self.editor = FolderEditor::from_spec(spec);
+        self.base = spec.clone();
         self.load = FolderLoad::Ready;
         self.error = None;
         let name = spec.name.clone();
@@ -102,6 +116,15 @@ pub enum FolderShareView {
     Edit { link: Option<String> },
 }
 
+/// The link request the Share Folder box waits on. Only the answer to this
+/// request settles it; leaving the form lets go of it, so a late answer
+/// does not land in the next form.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkOp {
+    Idle,
+    Saving(RequestId),
+}
+
 /// Share Folder (tdesktop `boxes/filters/edit_filter_links.cpp`): the
 /// folder's invite links, and the create / edit form.
 pub struct FolderShareDialog {
@@ -110,8 +133,8 @@ pub struct FolderShareDialog {
     pub(crate) name_input: Entity<TextareaState>,
     /// Chats ticked in the create / edit form.
     pub(crate) selected: HashSet<i64>,
-    /// A create / edit / delete request is in flight.
-    pub(crate) busy: bool,
+    /// The create / edit / delete request the box waits on.
+    pub(crate) op: LinkOp,
     /// The link whose delete is waiting for confirmation.
     pub(crate) confirm_delete: Option<String>,
     /// The link last copied to the clipboard.
@@ -132,7 +155,7 @@ impl FolderShareDialog {
             view: FolderShareView::List,
             name_input,
             selected: HashSet::new(),
-            busy: false,
+            op: LinkOp::Idle,
             confirm_delete: None,
             copied: None,
             error: None,
@@ -144,25 +167,47 @@ impl FolderShareDialog {
 /// `ui/chatlist_box`'s `ShowImportToast` / `ToggleChatsBox`).
 pub struct FolderInviteDialog {
     pub(crate) link: String,
-    /// Chats of the link left ticked; seeded with every missing chat once
-    /// the link has been checked.
+    pub(crate) stage: InviteStage,
+    /// Chats of the link left ticked; seeded with every missing chat when
+    /// the check answers.
     pub(crate) selected: HashSet<i64>,
-    pub(crate) seeded: bool,
-    /// `addChatFolderByInviteLink` is in flight.
-    pub(crate) adding: bool,
     /// Chats whose title `getChat` was asked for: each is asked once, so a
     /// failed answer does not repeat on every poll tick.
     pub(crate) asked_chats: HashSet<i64>,
 }
 
+/// Where the "Add folder" box stands. The check and the add each wait for
+/// the answer to their own request; a failed check ends in `Failed` (Close),
+/// a failed add goes back to `Ready` with the error.
+#[derive(Debug, Clone, PartialEq)]
+pub enum InviteStage {
+    Checking(RequestId),
+    Ready {
+        info: Box<ChatFolderInviteLinkInfo>,
+        error: Option<String>,
+    },
+    Adding {
+        request: RequestId,
+        info: Box<ChatFolderInviteLinkInfo>,
+    },
+    Failed(String),
+}
+
 impl FolderInviteDialog {
-    pub(crate) fn new(link: String) -> Self {
+    pub(crate) fn new(link: String, stage: InviteStage) -> Self {
         Self {
             link,
+            stage,
             selected: HashSet::new(),
-            seeded: false,
-            adding: false,
             asked_chats: HashSet::new(),
+        }
+    }
+
+    /// What the link offers, once checked.
+    pub(crate) fn info(&self) -> Option<&ChatFolderInviteLinkInfo> {
+        match &self.stage {
+            InviteStage::Ready { info, .. } | InviteStage::Adding { info, .. } => Some(info),
+            InviteStage::Checking(_) | InviteStage::Failed(_) => None,
         }
     }
 }

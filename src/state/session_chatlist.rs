@@ -182,8 +182,11 @@ impl Session {
             self.media.shared_media.close();
         }
         let previous = self.open_chat.replace(chat_id);
+        // The Jump to date box and a date jump in the making belong to the
+        // chat that was open.
         if let Some(left) = previous.filter(|previous| *previous != chat_id) {
             self.clear_sponsored_placements(left);
+            self.clear_date_jump_ui(Some(left));
         }
         // Phase 5.1: switching chats leaves the topic view (re-selecting the
         // chat leaves it too, so the topic's history is released here).

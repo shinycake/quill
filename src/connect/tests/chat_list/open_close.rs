@@ -259,26 +259,33 @@ fn driver_folder_share_requests_and_optimistic_delete() {
         1
     );
 
-    driver.session.chat_list.folder_invite_links.insert(
-        5,
-        vec![crate::telegram::envelope::ChatFolderInviteLink {
+    driver
+        .session
+        .chat_list
+        .folder_shares
+        .entry(5)
+        .or_default()
+        .links
+        .succeed(vec![crate::telegram::envelope::ChatFolderInviteLink {
             invite_link: "https://t.me/addlist/a".into(),
             name: String::new(),
             chat_ids: vec![7],
-        }],
-    );
+        }]);
     driver
         .delete_folder_invite_link(5, "https://t.me/addlist/a")
         .expect("delete");
-    assert!(driver.session.chat_list.folder_invite_links[&5].is_empty());
+    assert!(
+        driver.session.chat_list.folder_shares[&5]
+            .links
+            .data()
+            .is_some_and(Vec::is_empty)
+    );
 
     driver
         .check_folder_invite_link("https://t.me/addlist/b")
         .expect("check");
-    assert_eq!(
-        driver.session.chat_list.folder_invite_link.as_deref(),
-        Some("https://t.me/addlist/b")
-    );
+    let sent = recorder.snapshot().last().cloned().unwrap();
+    assert!(sent.contains("checkChatFolderInviteLink") && sent.contains("addlist/b"));
     driver
         .add_folder_by_invite_link("https://t.me/addlist/b", &[7, 8])
         .expect("add");

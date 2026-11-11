@@ -324,7 +324,10 @@ impl QuillApp {
         }
         self.poll_folder_new_chats();
         self.prune_drop_topic();
-        if self.drain_folder_share(cx)
+        if self.settle_folder_share(cx)
+            | self.settle_recommended_adds(cx)
+            | self.settle_add_contact(cx)
+            | self.settle_edit_contact(cx)
             | self.drive_folder_invite(cx)
             | self.drain_folder_limit(cx)
             | self.drain_chat_look(cx)

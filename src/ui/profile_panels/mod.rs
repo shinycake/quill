@@ -431,6 +431,7 @@ pub(in crate::ui) mod common_groups;
 pub(in crate::ui) mod contact_photo_rows;
 mod details_card;
 mod disable_sharing;
+mod edit_contact_save;
 mod main_profile_tab_dialog;
 mod more_menu;
 mod photo_delete;

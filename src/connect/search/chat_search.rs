@@ -337,11 +337,15 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Fetch the next older page of hits (the first page holds
-    /// [`CHAT_SEARCH_LIMIT`]; "N of M" counts the server's total).
+    /// [`CHAT_SEARCH_LIMIT`]; "N of M" counts the server's total). Also the
+    /// Retry of a page that failed.
     pub fn load_more_chat_search(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.chats_path_active() || !self.session.search.chat_search.can_load_more() {
+        if !self.chats_path_active() {
             return Ok(None);
         }
+        let Some(from) = self.session.search.chat_search.page_to_ask() else {
+            return Ok(None);
+        };
         let Some(chat_id) = self
             .session
             .search
@@ -352,9 +356,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         };
         let state = &self.session.search.chat_search;
-        let (search_gen, from, query, sender, media) = (
+        let (search_gen, query, sender, media) = (
             state.generation,
-            state.next_from_message_id,
             state.query.clone(),
             state.sender,
             state.media,
@@ -364,7 +367,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             chat_id,
             search_gen,
         );
-        self.session.search.chat_search.loading_more = true;
+        self.session.search.chat_search.begin_more(from);
         match self.sender.send_json(&search_chat_messages_from(
             extra,
             chat_id,
@@ -379,7 +382,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.search.chat_search.loading_more = false;
+                self.session.search.chat_search.fail_more();
                 Err(err)
             }
         }
@@ -470,6 +473,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         };
         self.session.search.date_jump_note = None;
+        // The jump runs in the view in place: it must be the chat the box
+        // was opened for (a box left over from a view that is gone has
+        // nothing to jump in).
+        if self.session.open_chat != Some(calendar.chat_id) {
+            return Ok(None);
+        }
         if let Some(day) = calendar.day(day_number) {
             return self.jump_to_message_with(day.message_id, DateJumpMode::Exact);
         }

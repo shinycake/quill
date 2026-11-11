@@ -60,8 +60,8 @@ impl Session {
         if self.search.chat_search.matches_generation(pending)
             && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessagesMore)
         {
-            self.search.chat_search.loading_more = false;
-            self.search.chat_search.next_from_message_id = MessageId(0);
+            // The page stays askable: the Retry strip asks it again.
+            self.search.chat_search.fail_more();
         }
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::GetChatMessageByDate) => {

@@ -185,6 +185,7 @@ impl Session {
         self.search.chat_search.close();
         self.media.shared_media.close();
         self.open_topic = None;
+        self.clear_date_jump_ui(Some(prev));
         self.threads.saved.close_views();
         if self
             .threads

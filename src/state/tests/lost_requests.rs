@@ -49,13 +49,13 @@ fn sweeping_an_in_chat_search_page_clears_its_loading_flag() {
     let generation = session.search.chat_search.generation;
     session.search.chat_search.open = true;
     session.search.chat_search.chat_id = Some(chat);
-    session.search.chat_search.next_from_message_id = MessageId(9);
-    session.search.chat_search.loading_more = true;
+    session.search.chat_search.begin_more(MessageId(9));
     session.request_chat_search(RequestPurpose::SearchChatMessagesMore, chat, generation);
 
     assert!(sweep(&mut session));
 
-    assert!(!session.search.chat_search.loading_more);
+    assert!(!session.search.chat_search.loading_more());
+    assert!(session.search.chat_search.more_failed(), "Retry is offered");
 }
 
 #[test]

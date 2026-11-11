@@ -20,6 +20,7 @@
 
 use super::app::{ChatListFilter, QuillApp};
 use super::chat_row::{ChatListItem, chat_row_height};
+use crate::ui::chat_list_state::SidebarTab;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -327,10 +328,7 @@ impl QuillApp {
     /// The list the keys drive now, or `None` when the chat list does not
     /// have the keyboard (the key then goes to the next binding).
     fn chat_list_key_scope(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<Scope> {
-        if self.shortcut_blocked(window, cx)
-            || self.chat_list.contacts_tab_open
-            || self.chat_list.calls_tab_open
-        {
+        if self.shortcut_blocked(window, cx) || self.chat_list.tab != SidebarTab::Chats {
             return None;
         }
         let list_focused = self.focus_sidebar.is_focused(window);

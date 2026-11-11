@@ -713,11 +713,10 @@ fn cl_chat_preview_cached_for_unopened_chat() {
     let fetch = session
         .chat_list
         .chat_preview_fetch
-        .as_ref()
+        .get(&ChatId(12))
         .expect("preview fetch");
-    assert_eq!(fetch.chat_id, ChatId(12));
-    assert_eq!(fetch.messages.len(), 1);
-    assert_eq!(fetch.failed, None);
+    assert_eq!(fetch.data().map(Vec::len), Some(1));
+    assert_eq!(fetch.error(), None);
     assert!(
         session
             .histories
@@ -738,14 +737,49 @@ fn cl_chat_preview_cached_for_unopened_chat() {
     let fetch = session
         .chat_list
         .chat_preview_fetch
-        .as_ref()
+        .get(&ChatId(12))
         .expect("preview fetch");
+    assert!(fetch.error().unwrap().contains("Could not load preview"));
+}
+
+#[test]
+fn a_late_preview_answer_for_another_chat_keeps_the_one_on_screen() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let a = session.request(RequestPurpose::GetChatPreview, Some(ChatId(11)));
+    let b = session.request(RequestPurpose::GetChatPreview, Some(ChatId(12)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","messages":[{{"@type":"message","id":7,"chat_id":12,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"hi","entities":[]}}}}}}],"total_count":1}}"#,
+            b.0
+        ),
+    );
+    // Chat 11's request fails after chat 12 answered.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"Timeout"}}"#,
+            a.0
+        ),
+    );
+    let previews = &session.chat_list.chat_preview_fetch;
+    assert_eq!(
+        previews
+            .get(&ChatId(12))
+            .and_then(|fetch| fetch.data())
+            .map(Vec::len),
+        Some(1),
+        "chat 12 keeps its messages"
+    );
     assert!(
-        fetch
-            .failed
-            .as_ref()
-            .unwrap()
-            .contains("Could not load preview")
+        previews
+            .get(&ChatId(11))
+            .is_some_and(|fetch| fetch.error().is_some())
     );
 }
 
