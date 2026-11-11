@@ -166,8 +166,9 @@ impl QuillApp {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                    this.chat_list.menu =
-                        crate::ui::chat_list_state::ContextMenu::Archive(event.position);
+                    this.open_context_menu(crate::ui::chat_list_state::ContextMenu::Archive(
+                        event.position,
+                    ));
                     cx.notify();
                 }),
             )
@@ -225,8 +226,9 @@ impl QuillApp {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                    this.chat_list.menu =
-                        crate::ui::chat_list_state::ContextMenu::Archive(event.position);
+                    this.open_context_menu(crate::ui::chat_list_state::ContextMenu::Archive(
+                        event.position,
+                    ));
                     cx.notify();
                 }),
             )
@@ -266,7 +268,7 @@ impl QuillApp {
                 cx,
             )
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.chat_list.menu.close();
+                this.message_ui.menu.close();
                 on_click(this, cx);
                 cx.notify();
             }))
@@ -337,7 +339,7 @@ impl QuillApp {
         DismissLayer::new(
             "archive-menu-overlay",
             cx.listener(|this, _, _, cx| {
-                this.chat_list.menu.close();
+                this.message_ui.menu.close();
                 cx.notify();
             }),
         )

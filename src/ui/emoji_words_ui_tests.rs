@@ -438,7 +438,10 @@ fn suggest_emoji_settles_by_its_own_request(cx: &mut TestAppContext) {
         app.answer_asked_word(cx);
         assert!(matches!(
             app.composer_ui.emoji_words.bar,
-            WordBar::Asking { request: RequestId(1), .. }
+            WordBar::Asking {
+                request: RequestId(1),
+                ..
+            }
         ));
         // Its request fails, and another lookup of the word answers.
         let Some(session) = app.demo_session.as_mut() else {

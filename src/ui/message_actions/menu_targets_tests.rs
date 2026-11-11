@@ -86,14 +86,14 @@ fn chat_menu_closes_when_its_chat_is_removed(cx: &mut TestAppContext) {
             .expect("another chat")
     });
     app.update(vcx, |app, cx| {
-        app.chat_list.menu = crate::ui::chat_list_state::ContextMenu::Chat(ChatMenuState::at(
+        app.message_ui.menu = crate::ui::chat_list_state::ContextMenu::Chat(ChatMenuState::at(
             chat,
             point(px(100.), px(200.)),
         ));
         cx.notify();
     });
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.chat_list.menu.chat().is_some()));
+    assert!(app.read_with(vcx, |app, _| app.message_ui.menu.chat().is_some()));
     app.update(vcx, |app, cx| {
         if let Some(session) = app.session_mut() {
             session.chats.remove(&chat.0);
@@ -101,7 +101,7 @@ fn chat_menu_closes_when_its_chat_is_removed(cx: &mut TestAppContext) {
         cx.notify();
     });
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.chat_list.menu.chat().is_none()));
+    assert!(app.read_with(vcx, |app, _| app.message_ui.menu.chat().is_none()));
 }
 
 fn other_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> (ChatId, ChatId) {

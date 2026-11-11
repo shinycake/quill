@@ -65,9 +65,10 @@ impl ChatListView {
     }
 }
 
-/// The chat list's context menu, one at a time: opening one replaces
-/// whatever menu was open, so no opener has to close the others.
-#[derive(Clone, Copy, Debug, Default)]
+/// The window's context menu, one at a time: the chat list's (row, archive
+/// row, folder tab) or a message's. Opening one replaces whatever menu was
+/// open, so no opener has to close the others.
+#[derive(Clone, Debug, Default)]
 pub(super) enum ContextMenu {
     #[default]
     None,
@@ -77,6 +78,9 @@ pub(super) enum ContextMenu {
     Archive(Point<Pixels>),
     /// A folder tab's menu.
     FolderTab(super::folder_extras::FolderTabMenu),
+    /// A message's menu, with what was true when it opened
+    /// (`message_menu_state`).
+    Message(super::message_menu_state::OpenMenu),
 }
 
 impl ContextMenu {
@@ -284,7 +288,6 @@ pub(crate) struct ChatListUi {
     pub(super) row_fx: std::cell::RefCell<quill::row_fx::RowFxMap>,
     /// The chat list's open right-click menu: a chat row's (target and
     /// window position), the "Archived chats" row's, or a folder tab's.
-    pub(super) menu: ContextMenu,
     /// Contacts tab, stories menu, suggestions and search tabs.
     pub(super) global: super::chatlist_global::ChatlistGlobal,
     /// The pinned-row gesture: press, drag (or its release slide).
@@ -348,7 +351,6 @@ impl ChatListUi {
             swipe: Default::default(),
             downloads_panel_open: false,
             row_fx: Default::default(),
-            menu: ContextMenu::None,
             global,
             pin: PinStage::Idle,
             peek: PeekPreview::Idle,

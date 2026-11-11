@@ -60,7 +60,7 @@ struct Surfaces {
 fn surfaces(app: &QuillApp) -> Surfaces {
     Surfaces {
         rich_editor: app.chat_ui.rich.editor_open(),
-        context_menu: app.chat_list.menu.archive().is_some(),
+        context_menu: app.message_ui.menu.archive().is_some(),
         selection: app.chat_list.selected.len(),
         player_chat: app.playback.player.chat,
     }
@@ -92,7 +92,7 @@ fn open_everything(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     frames(vcx);
     app.update(vcx, |app, cx| {
         app.chat_ui.rich.set_editor(true);
-        app.chat_list.menu =
+        app.message_ui.menu =
             crate::ui::chat_list_state::ContextMenu::Archive(point(px(10.), px(10.)));
         app.chat_list.selected.insert(CHAT.0);
         app.playback.active = crate::ui::playback_state::ActiveTrack::Audio(MessageId(1));
@@ -214,7 +214,7 @@ fn a_field_no_list_named_goes_too(cx: &mut TestAppContext) {
     frames(&mut vcx);
     app.update(&mut vcx, |app, _| {
         app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
-        app.chat_list.menu = crate::ui::chat_list_state::ContextMenu::FolderTab(
+        app.message_ui.menu = crate::ui::chat_list_state::ContextMenu::FolderTab(
             crate::ui::folder_extras::FolderTabMenu {
                 folder_id: Some(2),
                 position: point(px(10.), px(10.)),
@@ -224,7 +224,7 @@ fn a_field_no_list_named_goes_too(cx: &mut TestAppContext) {
     switch(&app, &mut vcx, "other");
     app.read_with(&vcx, |app, _| {
         assert!(!app.pickers.media_panel.is_open());
-        assert!(app.chat_list.menu.folder_tab().is_none());
+        assert!(app.message_ui.menu.folder_tab().is_none());
     });
 }
 

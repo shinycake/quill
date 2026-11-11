@@ -524,7 +524,7 @@ pub(super) fn session_chat_row(
         .on_mouse_down(
             MouseButton::Right,
             cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                this.chat_list.menu = crate::ui::chat_list_state::ContextMenu::Chat(ChatMenuState::at(id, event.position));
+                this.open_context_menu(crate::ui::chat_list_state::ContextMenu::Chat(ChatMenuState::at(id, event.position)));
                 cx.notify();
             }),
         )

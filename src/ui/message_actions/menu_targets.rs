@@ -22,7 +22,7 @@ impl QuillApp {
         });
         let chat_menu_gone = !self.windows.in_window()
             && self
-                .chat_list
+                .message_ui
                 .menu
                 .chat()
                 .is_some_and(|menu| !session.chats.contains_key(&menu.chat_id.0));
@@ -36,7 +36,7 @@ impl QuillApp {
             self.close_message_menu();
         }
         if chat_menu_gone {
-            self.chat_list.menu.close();
+            self.message_ui.menu.close();
         }
     }
 }

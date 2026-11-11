@@ -7,9 +7,9 @@ use quill::ids::ChatId;
 use quill::ids::MessageId;
 
 pub(crate) struct MessageUi {
-    /// M1: right-click context menu target + window position, and what
-    /// it was opened over (`message_menu_state`).
-    pub(super) menu: super::message_menu_state::MessageMenu,
+    /// The window's open context menu: a message's (target, window position
+    /// and what it was opened over, `message_menu_state`) or the chat list's.
+    pub(super) menu: super::chat_list_state::ContextMenu,
     /// Page, report and sticker-set dialogs of the message menu's extras.
     pub(super) menu_ui: super::message_menu_ui::MessageMenuUi,
     /// The link under the latest right-press, and where it was pressed.

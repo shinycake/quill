@@ -376,15 +376,24 @@ impl QuillApp {
     /// The menus only the main window draws: the chat list's row, archive
     /// and story menus, a playlist's and a folder tab's.
     fn main_menu_open(&self) -> bool {
-        !matches!(self.chat_list.menu, ContextMenu::None)
+        !matches!(self.message_ui.menu, ContextMenu::None)
             || self.admin.community.flow.row_menu.is_some()
             || self.chat_list.global.story_menu.is_some()
             || self.playback.playlist.menu().is_some()
     }
 
-    /// Close the message menu and forget the reaction options it asked for.
+    /// Open `menu` in place of whatever menu is open. One value holds them
+    /// all, so none stays beside the new one; a message menu it replaces
+    /// forgets the reaction options it asked for.
+    pub(super) fn open_context_menu(&mut self, menu: ContextMenu) {
+        self.close_message_menu();
+        self.message_ui.menu = menu;
+    }
+
+    /// Close the message menu (another menu stays) and forget the reaction
+    /// options it asked for.
     pub(super) fn close_message_menu(&mut self) {
-        self.message_ui.menu.close();
+        self.message_ui.menu.close_message();
         let session = match self.live.as_mut() {
             Some(live) => Some(&mut live.driver.session),
             None => self.demo_session.as_deref_mut(),
@@ -403,7 +412,7 @@ impl QuillApp {
         self.close_message_menu();
         if !self.windows.in_window() {
             self.playback.playlist.close_menu();
-            self.chat_list.menu.close();
+            self.message_ui.menu.close();
             self.admin.community.flow.row_menu = None;
             self.chat_list.global.story_menu = None;
         }
@@ -446,7 +455,7 @@ impl QuillApp {
             return None;
         }
         match (
-            &self.chat_list.menu.chat(),
+            &self.message_ui.menu.chat(),
             &self.admin.community.flow.row_menu,
         ) {
             (Some(menu), _) => menu.submenu,

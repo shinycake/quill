@@ -103,11 +103,10 @@ impl QuillApp {
         position: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        self.close_message_menu();
-        self.chat_list.menu = ContextMenu::FolderTab(FolderTabMenu {
+        self.open_context_menu(ContextMenu::FolderTab(FolderTabMenu {
             folder_id,
             position,
-        });
+        }));
         cx.notify();
     }
 
@@ -166,7 +165,7 @@ impl QuillApp {
             };
             context_menu_item(id, icon, label, color, true, &self.frame.menu.items, cx)
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    this.chat_list.menu.close();
+                    this.message_ui.menu.close();
                     on_click(this, window, cx);
                     cx.notify();
                 }))
@@ -247,7 +246,7 @@ impl QuillApp {
         DismissLayer::new(
             "folder-tab-menu-overlay",
             cx.listener(|this, _, _, cx| {
-                this.chat_list.menu.close();
+                this.message_ui.menu.close();
                 cx.notify();
             }),
         )
@@ -256,7 +255,7 @@ impl QuillApp {
             backdrop.on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, _, _, cx| {
-                    this.chat_list.menu.close();
+                    this.message_ui.menu.close();
                     cx.notify();
                 }),
             )
