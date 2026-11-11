@@ -18,8 +18,11 @@ struct MediaSpecks;
 impl Render for MediaSpecks {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div().size_full().child(
-            canvas(|_, _, _| {}, |bounds, _, window, _| paint_media_specks(bounds, window))
-                .size_full(),
+            canvas(
+                |_, _, _| {},
+                |bounds, _, window, _| paint_media_specks(bounds, window),
+            )
+            .size_full(),
         )
     }
 }

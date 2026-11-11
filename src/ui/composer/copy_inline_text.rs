@@ -105,7 +105,9 @@ impl QuillApp {
         });
         self.spawn_scoped(cx, async move |this, cx| {
             let result = probe.await;
-            let _ = this.update(cx, |this, cx| this.finish_edit_replacement_probe(&path, result, cx));
+            let _ = this.update(cx, |this, cx| {
+                this.finish_edit_replacement_probe(&path, result, cx)
+            });
         })
         .detach();
     }
@@ -119,12 +121,9 @@ impl QuillApp {
         let Some(edit) = self.chat_ui.pending_edit_mut() else {
             return;
         };
-        let Some(replacement) = edit
-            .media_edit
-            .replacement
-            .as_mut()
-            .filter(|rep| rep.path == path && rep.probe == quill::composer::ReplacementProbe::Probing)
-        else {
+        let Some(replacement) = edit.media_edit.replacement.as_mut().filter(|rep| {
+            rep.path == path && rep.probe == quill::composer::ReplacementProbe::Probing
+        }) else {
             return;
         };
         match result {

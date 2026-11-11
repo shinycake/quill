@@ -121,8 +121,14 @@ mod tests {
         let mut watch = SaveWatch::default();
         watch.watch(RequestId(1));
         // Out of flight (a TDLib restart dropped it), never answered.
-        assert_eq!(watch.take_outcome(RequestId(1), false), SaveOutcome::Unknown);
-        assert_eq!(watch.take_outcome(RequestId(1), false), SaveOutcome::Unknown);
+        assert_eq!(
+            watch.take_outcome(RequestId(1), false),
+            SaveOutcome::Unknown
+        );
+        assert_eq!(
+            watch.take_outcome(RequestId(1), false),
+            SaveOutcome::Unknown
+        );
     }
 
     #[test]
@@ -133,7 +139,10 @@ mod tests {
         // takes the slot.
         watch.watch(RequestId(2));
         watch.answered(RequestId(1));
-        assert_eq!(watch.take_outcome(RequestId(1), false), SaveOutcome::Unknown);
+        assert_eq!(
+            watch.take_outcome(RequestId(1), false),
+            SaveOutcome::Unknown
+        );
         watch.answered(RequestId(2));
         assert_eq!(watch.take_outcome(RequestId(2), false), SaveOutcome::Saved);
     }
@@ -143,9 +152,15 @@ mod tests {
         let mut watch = SaveWatch::default();
         watch.failed(RequestId(9), "no".into());
         watch.answered(RequestId(9));
-        assert_eq!(watch.take_outcome(RequestId(9), false), SaveOutcome::Unknown);
+        assert_eq!(
+            watch.take_outcome(RequestId(9), false),
+            SaveOutcome::Unknown
+        );
         watch.watch(RequestId(9));
         watch.forget(RequestId(9));
-        assert_eq!(watch.take_outcome(RequestId(9), false), SaveOutcome::Unknown);
+        assert_eq!(
+            watch.take_outcome(RequestId(9), false),
+            SaveOutcome::Unknown
+        );
     }
 }

@@ -50,8 +50,7 @@ pub use draft_topic::{DraftKey, DraftTopic};
 pub use edit::{
     ComposerEdit, ComposerEditKind, EDIT_MEDIA_ALBUM_ERROR, EDIT_MEDIA_INVALID_FILE, EditMediaKind,
     EditMediaReplacement, EditableMedia, LinkPreviewChoice, MediaEdit, ReplacementProbe,
-    begin_edit_draft,
-    begin_edit_keeping_reply, cancel_edit_draft, cancel_edit_keeping_reply,
+    begin_edit_draft, begin_edit_keeping_reply, cancel_edit_draft, cancel_edit_keeping_reply,
 };
 pub use edit_media_tools::{
     CLEAR_COVER_LABEL, EditMediaTool, ExistingVideo, cover_peer_allows, cover_send_path,

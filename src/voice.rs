@@ -428,9 +428,9 @@ impl VoiceCapture {
         // The encoder only returns once the microphone is closed, so a
         // finished thread under a live capture panicked or failed.
         let error = error.or_else(|| {
-            live.worker
-                .is_finished()
-                .then(|| crate::lang::tr(crate::lang::keys::Q_AV_THE_VOICE_ENCODER_STOPPED).to_string())
+            live.worker.is_finished().then(|| {
+                crate::lang::tr(crate::lang::keys::Q_AV_THE_VOICE_ENCODER_STOPPED).to_string()
+            })
         });
         error.or_else(|| {
             let idle = self.clock.elapsed_at(Instant::now()).as_secs() >= NO_AUDIO_SECS

@@ -299,7 +299,12 @@ fn an_ended_automatic_download_reads_as_ended_without_a_file() {
     session.begin_download(FileId(70));
     assert!(!ended(&session, 70));
     session.media.downloads.end(70);
-    apply_json(&mut session, &seq, &sink, &update_file(70, false, true, 100));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &update_file(70, false, true, 100),
+    );
     assert!(!ended(&session, 70));
 }
 
