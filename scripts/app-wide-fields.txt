@@ -120,7 +120,6 @@ calls.notify_clicks | Accept/Decline from OS call notifications; each pick names
 calls.tick | the call window's clock tick runs
 calls.panel_view | the call window's view
 calls.window | the call window, opened and closed by the sync with the session on screen
-calls.raised_for | the ringing call id whose call window was raised once; calls are process-wide (one call at a time across accounts)
 calls.sounds * | the call sound output and the loop playing; what a call has already played is the screen's (`call_screen.sound_marks`)
 background.clients * | the accounts running in the background, each with its key: the ids inside are that client's
 background.screen_preparing | how many screen clients are being prepared

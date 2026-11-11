@@ -512,6 +512,33 @@ impl BoostBoxState {
         )
     }
 
+    /// The slots read `request` asked for arrived: kept only while the box
+    /// waits for that request (a box that closed, or reopened with its own
+    /// read out, has nothing to hand them to).
+    pub fn slots_arrived(&mut self, request: RequestId, slots: Vec<ParsedBoostSlot>) {
+        if matches!(
+            self.phase,
+            BoostPhase::Working(BoostWork::Slots(id)) if id == request
+        ) {
+            self.phase = BoostPhase::Working(BoostWork::SlotsReady(slots));
+        }
+    }
+
+    /// `boostChat` `request` was answered: the box goes back to its
+    /// counters, with a line about boosts that moved here. Only the answer
+    /// of the request the box works on ends it.
+    pub fn boost_answered(&mut self, request: RequestId) {
+        if !self.works_on(request) {
+            return;
+        }
+        let moved = match std::mem::replace(&mut self.phase, BoostPhase::Main) {
+            BoostPhase::Working(BoostWork::Boosting { reassign, .. }) => reassign,
+            _ => None,
+        };
+        self.note =
+            moved.map(|moved| reassign_done_text(moved.count, moved.groups, moved.channels));
+    }
+
     /// Whether the box waits for the boost slots or has them to read.
     pub fn awaiting_slots(&self) -> bool {
         matches!(

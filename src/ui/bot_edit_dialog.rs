@@ -17,7 +17,7 @@ use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::owned_bots::{self, ABOUT_MAX, ManagerScreen, NAME_MAX};
 use quill::state::DeepLinkAction;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::path::Path;
 use std::rc::Rc;
 
@@ -472,16 +472,13 @@ impl QuillApp {
                 .child(body)
                 .child(footer)
                 .into_any_element();
-            let content = Rc::new(RefCell::new(Some(content)));
+            let content = Rc::new(Cell::new(Some(content)));
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(keys::EDIT_BOT_TITLE)))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |slot, _, _| {
-                        let body = content
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = content.take().unwrap_or_else(|| div().into_any_element());
                         slot.child(body)
                     },
                 ))

@@ -23,7 +23,7 @@ use quill::lang::{keys, tr, tr_with};
 use quill::state::ChatSummary;
 use quill::telegram::envelope::ChatKind;
 use quill::telegram::requests::MessageSenderRef;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// Chats the list shows at most (the list is the loaded chat list).
@@ -552,16 +552,13 @@ impl QuillApp {
                 .child(body)
                 .child(footer)
                 .into_any_element();
-            let content = Rc::new(RefCell::new(Some(content)));
+            let content = Rc::new(Cell::new(Some(content)));
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(title))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |slot, _, _| {
-                        let body = content
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = content.take().unwrap_or_else(|| div().into_any_element());
                         slot.child(body)
                     },
                 ))

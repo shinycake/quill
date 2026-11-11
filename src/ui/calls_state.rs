@@ -8,12 +8,21 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-/// The 1s call clock: at most one task, which exits when unwanted.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// The 1s call clock: at most one task, which exits when unwanted. The
+/// stage holds the task, so replacing it ends the clock.
+#[derive(Debug, Default)]
 pub(crate) enum CallTick {
     #[default]
     Idle,
-    Running,
+    Running {
+        _task: Task<()>,
+    },
+}
+
+impl CallTick {
+    pub(crate) fn is_running(&self) -> bool {
+        matches!(self, CallTick::Running { .. })
+    }
 }
 
 /// The call window: not there, being opened (at most one open at a time),
