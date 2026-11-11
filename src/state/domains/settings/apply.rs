@@ -159,9 +159,7 @@ impl Session {
                     self.settings
                         .sound_file_ids
                         .retain(|_, sound_id| live_ids.contains(sound_id));
-                    self.settings.saved_notification_sounds = sounds;
-                    self.settings.saved_sounds_loaded = true;
-                    self.settings.saved_sounds_stale = false;
+                    self.settings.saved_notification_sounds.succeed(sounds);
                 }
             }
             SettingsPayload::UpdateSavedNotificationSounds { .. } => {

@@ -128,6 +128,7 @@ fn the_new_sound_joins_the_list_and_is_reported_once() {
         .session
         .settings
         .saved_notification_sounds
+        .items()
         .iter()
         .map(|sound| sound.id)
         .collect();
@@ -177,7 +178,15 @@ fn deleting_a_saved_sound_sends_its_id_and_refetches() {
         "removeSavedNotificationSound",
         r#"{"@type":"ok"}"#,
     );
-    assert!(driver.session.settings.saved_sounds_stale);
+    // The list is outdated and the same ingest reads it again.
+    assert!(
+        driver
+            .session
+            .settings
+            .saved_notification_sounds
+            .is_loading()
+    );
+    sent_request(&recorder, "getSavedNotificationSounds");
     assert!(driver.remove_notification_tone(0).is_err());
 }
 
@@ -185,7 +194,13 @@ fn deleting_a_saved_sound_sends_its_id_and_refetches() {
 fn a_refused_delete_says_so_and_reads_the_list_again() {
     let (mut driver, recorder, sink, seq) = driver();
     driver.remove_notification_tone(900).unwrap();
-    assert!(!driver.session.settings.saved_sounds_stale);
+    assert!(
+        !driver
+            .session
+            .settings
+            .saved_notification_sounds
+            .is_outdated()
+    );
     answer(
         &mut driver,
         &recorder,
@@ -194,7 +209,14 @@ fn a_refused_delete_says_so_and_reads_the_list_again() {
         "removeSavedNotificationSound",
         r#"{"@type":"error","code":400,"message":"NOTIFICATION_SOUND_NOT_FOUND"}"#,
     );
-    assert!(driver.session.settings.saved_sounds_stale);
+    assert!(
+        driver
+            .session
+            .settings
+            .saved_notification_sounds
+            .is_loading()
+    );
+    sent_request(&recorder, "getSavedNotificationSounds");
     assert_eq!(
         driver.session.chats_state.chat_action_error.last(),
         Some(crate::lang::tr(crate::lang::keys::Q_TONE_DELETE_FAILED))

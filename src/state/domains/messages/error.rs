@@ -23,6 +23,21 @@ impl Session {
         {
             self.chat_list.history_preloads.remove(&chat_id.0);
         }
+        // A failed pinned-messages fetch ends in `Failed`: the pull to the
+        // next channel does not ask again, the chat opening does.
+        if let Some(p) = pending
+            && p.purpose == RequestPurpose::GetPinnedMessages
+            && let Some(chat_id) = p.chat_id
+        {
+            self.messages
+                .pinned_messages
+                .entry(chat_id.0)
+                .or_default()
+                .fail(format!(
+                    "could not load the pinned messages (error {})",
+                    err.code
+                ));
+        }
         if let Some(RequestPurpose::GetRepliedMessage {
             chat_id,
             message_id,

@@ -72,8 +72,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             paths: prepared.paths,
             claimed_owner: None,
             database_key: prepared.database_key,
-            typed_search: Default::default(),
-            typed_chat_search: Default::default(),
             outgoing_typing: None,
             outgoing_voice: None,
             pending_draft: Default::default(),

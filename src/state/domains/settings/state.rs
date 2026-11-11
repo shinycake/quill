@@ -76,12 +76,10 @@ pub struct SettingsState {
     pub default_auto_delete: Fetch<i32>,
     /// Parity slice: `getSavedNotificationSounds` cache (titles / durations
     /// for the sound picker; `sound` files download on demand).
-    pub saved_notification_sounds: Vec<NotificationSound>,
-    /// Parity slice: the saved-sound list has been fetched at least once.
-    pub saved_sounds_loaded: bool,
-    /// Parity slice: `updateSavedNotificationSounds` arrived since the last
-    /// fetch — the driver refetches on the next ingest.
-    pub saved_sounds_stale: bool,
+    /// Never fetched, in flight, answered, outdated by
+    /// `updateSavedNotificationSounds` (the driver refetches on the next
+    /// ingest) or failed (not asked again from every ingest).
+    pub saved_notification_sounds: Fetch<Vec<NotificationSound>>,
     /// "Upload Sound": the file in flight, or how it ended until the
     /// screen has reacted.
     pub tone_upload: crate::tone_upload::ToneUpload,
@@ -361,9 +359,7 @@ impl SettingsState {
             disable_contact_registered_notifications: false,
             shown_notification_chats: std::collections::HashSet::new(),
             default_auto_delete: Fetch::Idle,
-            saved_notification_sounds: Vec::new(),
-            saved_sounds_loaded: false,
-            saved_sounds_stale: false,
+            saved_notification_sounds: Fetch::Idle,
             tone_upload: crate::tone_upload::ToneUpload::Idle,
             scope_notification_settings: HashMap::new(),
             notification_exceptions: HashMap::new(),

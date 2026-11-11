@@ -106,3 +106,56 @@ fn preload_loads_history_around_the_read_position_and_pins() {
     assert_eq!(last["offset"], 0);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A failed pinned-messages fetch ends in `Failed`: the next pull toward
+/// the same channel does not send it again, and the channel is not ready
+/// for its pinned bar.
+#[test]
+fn a_failed_pinned_fetch_is_not_sent_again_by_the_next_pull() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    for json in [
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":14,"title":"Next","type":{"@type":"chatTypeSupergroup","supergroup_id":14,"is_channel":true},"unread_count":3,"last_read_inbox_message_id":500}}"#,
+    ] {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    }
+    let next = ChatId(14);
+    let pinned_requests = |recorder: &RecordingSender| -> Vec<Value> {
+        recorder
+            .snapshot()
+            .iter()
+            .map(|json| serde_json::from_str::<Value>(json).unwrap())
+            .filter(|json| {
+                json["@type"] == "searchChatMessages"
+                    && json["filter"]["@type"] == "searchMessagesFilterPinned"
+            })
+            .collect()
+    };
+    driver.preload_next_channel(next).unwrap();
+    let first = pinned_requests(&recorder);
+    assert_eq!(first.len(), 1);
+    let error = format!(
+        r#"{{"@type":"error","@extra":"{}","code":500,"message":"boom"}}"#,
+        first[0]["@extra"].as_str().unwrap()
+    );
+    driver
+        .ingest(copy_and_parse(&error, &seq, &dyn_sink).unwrap())
+        .unwrap();
+    assert!(!driver.next_channel_pinned_ready(next));
+    driver.preload_next_channel(next).unwrap();
+    assert_eq!(pinned_requests(&recorder).len(), 1, "not asked again");
+    // Opening the chat asks again.
+    driver.fetch_pinned_messages(next).unwrap();
+    assert_eq!(pinned_requests(&recorder).len(), 2);
+    drop(driver);
+    std::fs::remove_dir_all(dir).unwrap();
+}

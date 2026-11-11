@@ -321,7 +321,12 @@ impl Session {
                 });
                 // An unpin leaves the pinned list at once; a pin is added
                 // by the refetch the driver sends for the open chat.
-                if !is_pinned && let Some(list) = self.messages.pinned_messages.get_mut(&chat_id.0)
+                if !is_pinned
+                    && let Some(list) = self
+                        .messages
+                        .pinned_messages
+                        .get_mut(&chat_id.0)
+                        .and_then(|fetch| fetch.data_mut())
                 {
                     list.retain(|message| message.id != message_id);
                 }
@@ -399,7 +404,12 @@ impl Session {
                 } else {
                     message_ids
                 };
-                if let Some(list) = self.messages.pinned_messages.get_mut(&chat_id.0) {
+                if let Some(list) = self
+                    .messages
+                    .pinned_messages
+                    .get_mut(&chat_id.0)
+                    .and_then(|fetch| fetch.data_mut())
+                {
                     list.retain(|message| !message_ids.contains(&message.id));
                 }
                 self.forget_conference_invite(chat_id, &message_ids);

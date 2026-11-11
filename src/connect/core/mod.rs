@@ -638,7 +638,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .messages
                 .pinned_messages
-                .insert(chat_id.0, Vec::new());
+                .entry(chat_id.0)
+                .or_default()
+                .succeed(Vec::new());
         }
         if let Some(chat_id) = pins_changed.filter(|chat| self.session.chat_is_shown(*chat)) {
             let _ = self.fetch_pinned_messages(chat_id);

@@ -1,6 +1,7 @@
 //! Connect driver: the pull to the next unread channel (`pull_next`).
 use super::*;
 use crate::ids::{ChatId, MessageId};
+use crate::state::fetch::Fetch;
 use crate::state::{HistoryPreload, RequestPurpose};
 use crate::telegram::requests::get_chat_history;
 
@@ -49,11 +50,14 @@ impl<S: JsonSender> ConnectDriver<S> {
                 return Err(err);
             }
         }
-        if !self
+        // Asked once per pull target: a failed fetch is not sent again by
+        // every preload tick, the chat opening asks for it.
+        if self
             .session
             .messages
             .pinned_messages
-            .contains_key(&chat_id.0)
+            .get(&chat_id.0)
+            .is_none_or(Fetch::is_idle)
         {
             self.fetch_pinned_messages(chat_id)?;
         }
@@ -72,7 +76,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session
             .messages
             .pinned_messages
-            .contains_key(&chat_id.0)
+            .get(&chat_id.0)
+            .is_some_and(|pinned| matches!(pinned, Fetch::Ready(_)))
     }
 
     /// tdesktop `forum->requestTopics()` when the pull in a topic finds no

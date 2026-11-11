@@ -203,7 +203,10 @@ fn sound_list_refetch_prunes_file_ids() {
             sound_file, extra.0
         ),
     );
-    assert!(session.settings.saved_sounds_loaded);
+    assert!(matches!(
+        session.settings.saved_notification_sounds,
+        crate::state::fetch::Fetch::Ready(_)
+    ));
     assert!(!session.settings.sound_file_ids.contains_key(&91));
     assert_eq!(session.settings.sound_file_ids.get(&92), Some(&8));
 }
@@ -219,7 +222,7 @@ fn a_sound_list_answer_older_than_the_stale_mark_is_dropped() {
         &sink,
         r#"{"@type":"updateSavedNotificationSounds","notification_sound_ids":["1"]}"#,
     );
-    assert!(session.settings.saved_sounds_stale);
+    assert!(session.settings.saved_notification_sounds.is_outdated());
     apply_json(
         &mut session,
         &seq,
@@ -230,7 +233,7 @@ fn a_sound_list_answer_older_than_the_stale_mark_is_dropped() {
         ),
     );
     assert!(
-        session.settings.saved_sounds_stale && !session.settings.saved_sounds_loaded,
+        session.settings.saved_notification_sounds.is_outdated(),
         "the older answer must not clear the mark"
     );
     assert!(
@@ -398,4 +401,31 @@ fn a_failed_refetch_keeps_the_shown_sticker_set() {
     session.stickers.sticker_set_view = Some(StickerSetView::loading(5));
     session.fail_sticker_set_view(5);
     assert_eq!(stage(&session), Some(StickerSetViewStage::Failed));
+}
+
+#[test]
+fn a_failed_saved_sounds_fetch_ends_in_failed_and_a_server_change_outdates_it() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.settings.saved_notification_sounds.begin();
+    let extra = session.request(RequestPurpose::GetSavedNotificationSounds, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"boom"}}"#,
+            extra.0
+        ),
+    );
+    let sounds = &session.settings.saved_notification_sounds;
+    assert!(sounds.error().is_some() && !sounds.is_loading());
+    // The server saying the list changed is a reason to ask again.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateSavedNotificationSounds","notification_sound_ids":["1"]}"#,
+    );
+    assert!(session.settings.saved_notification_sounds.is_outdated());
 }

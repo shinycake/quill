@@ -263,3 +263,35 @@ fn hiding_ads_keeps_a_report_in_flight() {
     ));
     assert!(session.messages.sponsored_hidden);
 }
+
+#[test]
+fn closing_a_search_drops_the_query_waiting_out_its_quiet_window() {
+    let (mut session, _sink) = session();
+    let search = &mut session.search.search;
+    search.open_field();
+    search.begin_query("dun");
+    let token = search.typed.arm("dun".into());
+    search.close();
+    assert!(search.typed.is_idle());
+    assert_eq!(search.typed.take_if(token), None);
+
+    let chat = &mut session.search.chat_search;
+    chat.open_for(ChatId(4));
+    chat.begin_query("dun");
+    let token = chat.typed.arm("dun".into());
+    chat.close();
+    assert_eq!(chat.typed.take_if(token), None);
+}
+
+#[test]
+fn a_new_query_makes_the_earlier_timer_stale() {
+    let (mut session, _sink) = session();
+    let search = &mut session.search.search;
+    search.open_field();
+    search.begin_query("du");
+    let first = search.typed.arm("du".into());
+    search.begin_query("dun");
+    let second = search.typed.arm("dun".into());
+    assert_eq!(search.typed.take_if(first), None);
+    assert_eq!(search.typed.take_if(second), Some("dun".to_string()));
+}

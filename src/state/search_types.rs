@@ -2,15 +2,16 @@
 use super::*;
 
 /// Pending inline confirmations of the search panel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SearchConfirm {
     /// `lng_recent_clear_sure`: clear the whole search history.
     ClearRecents,
     /// `lng_recent_hide_sure`: clear and disable the frequent contacts.
     DisableTopChats,
-    /// Spend Stars on one public-posts search once the free ones are gone
-    /// (the price is `SearchTabsState::limits`).
-    PaidPostSearch,
+    /// Spend Stars on one public-posts search once the free ones are gone.
+    /// The query and the price are the ones the box showed: accepting
+    /// spends exactly that, or nothing when either has changed since.
+    PaidPostSearch { query: String, price: i64 },
 }
 
 /// Global search (official sidebar field): recents, then `searchChats` + `searchMessages`.
@@ -120,6 +121,12 @@ pub enum Leg {
     Skipped,
     /// Asked, no answer yet.
     Pending,
+    /// The paid public-posts search, confirmed for `price` Stars, is on its
+    /// way as `request`. Only its answer (or its failure) leaves it.
+    Paying {
+        request: RequestId,
+        price: i64,
+    },
     Done,
     /// A public-posts search answered, and the free searches are used up:
     /// another one costs Stars. Cleared with the results.
@@ -131,6 +138,11 @@ pub enum Leg {
 impl Leg {
     fn answered(error: bool) -> Self {
         if error { Self::Failed } else { Self::Done }
+    }
+
+    /// Asked, no answer yet.
+    fn waiting(self) -> bool {
+        matches!(self, Self::Pending | Self::Paying { .. })
     }
 }
 
@@ -181,6 +193,10 @@ pub struct SearchState {
     pub(crate) messages_leg: Leg,
     /// `searchPublicChats`.
     pub(crate) public: Leg,
+    /// The typed query waiting out its quiet window. A new generation
+    /// (close, clear, filters, a query started) makes it stale, so it is
+    /// dropped there and cannot outlive the search it belongs to.
+    pub(crate) typed: super::debounce::Debounce<String>,
 }
 
 impl Default for SearchState {
@@ -203,11 +219,19 @@ impl Default for SearchState {
             chats: Leg::Idle,
             messages_leg: Leg::Idle,
             public: Leg::Idle,
+            typed: Default::default(),
         }
     }
 }
 
 impl SearchState {
+    /// A new generation: the answers asked before it are dropped, and a
+    /// typed query still waiting its quiet window with them.
+    fn bump_generation(&mut self) {
+        self.generation = self.generation.saturating_add(1);
+        self.typed.cancel();
+    }
+
     /// The global search is open.
     pub fn is_open(&self) -> bool {
         self.surface != SearchSurface::Closed
@@ -235,7 +259,7 @@ impl SearchState {
         self.filters = Default::default();
         self.confirm = None;
         self.top_view = Default::default();
-        self.generation = self.generation.saturating_add(1);
+        self.bump_generation();
         self.clear_results();
     }
 
@@ -246,7 +270,7 @@ impl SearchState {
         }
         self.community_filter = None;
         self.filters = Default::default();
-        self.generation = self.generation.saturating_add(1);
+        self.bump_generation();
         self.clear_results();
     }
 
@@ -257,7 +281,7 @@ impl SearchState {
             return SearchStatus::Closed;
         }
         let legs = [self.chats, self.messages_leg, self.public];
-        if legs.contains(&Leg::Pending) {
+        if legs.iter().any(|leg| leg.waiting()) {
             return SearchStatus::Searching;
         }
         let any = !self.chat_ids.is_empty()
@@ -281,7 +305,7 @@ impl SearchState {
     pub fn begin_recents(&mut self) -> u64 {
         self.surface = SearchSurface::Recents;
         self.query.clear();
-        self.generation = self.generation.saturating_add(1);
+        self.bump_generation();
         self.clear_results();
         self.chats = Leg::Pending;
         self.messages_leg = Leg::Skipped;
@@ -293,7 +317,7 @@ impl SearchState {
     /// the query stays in the field's mirror, the list restarts.
     pub fn begin_browse(&mut self) -> u64 {
         self.surface = SearchSurface::Query;
-        self.generation = self.generation.saturating_add(1);
+        self.bump_generation();
         self.clear_results();
         self.mark_all_pending();
         self.generation
@@ -302,7 +326,7 @@ impl SearchState {
     /// The filter bar changed: what was asked under the old tab is no
     /// longer wanted, and its answers are dropped by the new generation.
     pub fn restart_for_filters(&mut self) {
-        self.generation = self.generation.saturating_add(1);
+        self.bump_generation();
         self.clear_results();
         if self.is_recents() {
             self.surface = SearchSurface::Query;
@@ -318,7 +342,7 @@ impl SearchState {
     pub fn begin_query(&mut self, query: &str) -> u64 {
         self.surface = SearchSurface::Query;
         self.query = query.to_string();
-        self.generation = self.generation.saturating_add(1);
+        self.bump_generation();
         self.clear_results();
         self.mark_all_pending();
         self.generation
@@ -357,6 +381,20 @@ impl SearchState {
     pub fn note_public_limits(&mut self, exceeded: bool) {
         if matches!(self.messages_leg, Leg::Done | Leg::Exceeded) {
             self.messages_leg = if exceeded { Leg::Exceeded } else { Leg::Done };
+        }
+    }
+
+    /// The paid search goes out as `request` for `price` Stars; it replaces
+    /// the posts leg the free attempt left.
+    pub fn begin_paid_posts(&mut self, request: RequestId, price: i64) {
+        self.messages_leg = Leg::Paying { request, price };
+    }
+
+    /// The paid search in flight and the price it was confirmed for.
+    pub fn paying(&self) -> Option<(RequestId, i64)> {
+        match self.messages_leg {
+            Leg::Paying { request, price } => Some((request, price)),
+            _ => None,
         }
     }
 
@@ -550,161 +588,6 @@ pub enum NewerEnd {
     Failed,
 }
 
-/// Phase 5.1: per-topic history for a forum supergroup, fetched with
-/// `searchChatMessages` (`topic_id = messageTopicForum`, empty query).
-/// `next_from_message_id` pages older messages the same way `foundChatMessages`
-/// does for in-chat search; `loaded_complete` once a page returns
-/// `next_from_message_id` 0 (or an empty page). The window is capped at
-/// both ends like the main history (`topic_window`).
-#[derive(Debug)]
-pub struct TopicHistory {
-    pub messages: HistoryMessages,
-    pub next_from_message_id: MessageId,
-    /// Subsection tabs: `foundChatMessages.total_count` of the latest
-    /// page — the topic header's "N messages".
-    pub total_count: i32,
-    /// Ids deleted while this history was loaded (or when it was not): a
-    /// stale page cannot bring them back, and the composer reads them as
-    /// "the message is gone" (`Session::message_deleted`).
-    pub tombstones: HashSet<i64>,
-    pub reader: ReaderPosition,
-    /// The newer end: while it stops short of the newest message, newer
-    /// pages load as the reader scrolls down and live messages wait
-    /// outside the window; a failed page stops auto-paging until a jump.
-    pub newer: NewerEnd,
-    /// The older end: reached the start, or the last older page failed
-    /// and auto-paging stops until a jump.
-    pub older: OlderEnd,
-    /// The newest server id known to lie past the window's newest end
-    /// (trimmed away or held out while `has_newer`).
-    pub latest_seen: i64,
-    /// Bumped whenever the window is replaced, so the UI re-anchors its
-    /// scroll.
-    pub window_epoch: u64,
-    /// Page requests issued for a window end that was dropped or replaced
-    /// since: their answers would land across a gap and are dropped.
-    pub stale_pages: HashSet<u64>,
-}
-
-impl Default for TopicHistory {
-    fn default() -> Self {
-        Self {
-            messages: HistoryMessages::default(),
-            next_from_message_id: MessageId(0),
-            total_count: 0,
-            tombstones: HashSet::new(),
-            reader: ReaderPosition::Tail,
-            newer: NewerEnd::AtLatest,
-            older: OlderEnd::Open,
-            latest_seen: 0,
-            window_epoch: 0,
-            stale_pages: HashSet::new(),
-        }
-    }
-}
-
-impl TopicHistory {
-    /// A page reached the start of the topic.
-    pub fn loaded_complete(&self) -> bool {
-        self.older == OlderEnd::Complete
-    }
-
-    /// The window stops short of the newest message.
-    pub fn has_newer(&self) -> bool {
-        self.newer != NewerEnd::AtLatest
-    }
-
-    /// The last newer page failed.
-    pub fn newer_failed(&self) -> bool {
-        self.newer == NewerEnd::Failed
-    }
-
-    /// A page reached the start of the topic: nothing older to ask for.
-    pub fn mark_complete(&mut self) {
-        self.older = OlderEnd::Complete;
-    }
-
-    /// The oldest end was trimmed away: scrolling up pages it again.
-    pub fn reopen_oldest(&mut self) {
-        if self.older == OlderEnd::Complete {
-            self.older = OlderEnd::Open;
-        }
-    }
-
-    /// The last older page failed (nothing to fail once the start is
-    /// reached).
-    pub fn fail_older(&mut self) {
-        if self.older == OlderEnd::Open {
-            self.older = OlderEnd::Failed;
-        }
-    }
-
-    /// Reopen the older end after a failure (a retry, a landed page or
-    /// re-selecting the topic).
-    pub fn reopen_older(&mut self) {
-        if self.older == OlderEnd::Failed {
-            self.older = OlderEnd::Open;
-        }
-    }
-
-    /// Whether a message past the window's newest end is known: the window
-    /// stops short of it (`true`), or reaches the latest (`false`). A
-    /// failed newer page stays failed while newer messages remain.
-    pub fn newer_exists(&mut self, exists: bool) {
-        self.newer = match (exists, self.newer) {
-            (true, NewerEnd::Failed) => NewerEnd::Failed,
-            (true, _) => NewerEnd::More,
-            (false, _) => NewerEnd::AtLatest,
-        };
-    }
-
-    /// The newer page failed: paging stops until a jump.
-    pub fn fail_newer(&mut self) {
-        self.newer = NewerEnd::Failed;
-    }
-
-    /// A jump asks for newer pages again.
-    pub fn retry_newer(&mut self) {
-        if self.newer == NewerEnd::Failed {
-            self.newer = NewerEnd::More;
-        }
-    }
-
-    /// Drop a deleted row and remember the id.
-    pub(crate) fn remove(&mut self, id: MessageId, permanent: bool) {
-        self.messages.remove(&id.0);
-        if permanent {
-            self.tombstones.insert(id.0);
-        }
-    }
-
-    pub fn is_tombstone(&self, id: MessageId) -> bool {
-        self.tombstones.contains(&id.0)
-    }
-
-    pub fn ordered(&self) -> Vec<&HistoryMessage> {
-        self.messages.values().collect()
-    }
-
-    /// Parity slice 4: live topic messages (incoming updates and own
-    /// sends) land here when the topic is loaded. Entries are only ever
-    /// created by the `GetTopicHistory` fetch — upserting into a missing
-    /// topic would corrupt the paging cursor.
-    pub(crate) fn upsert(&mut self, message: HistoryMessage) {
-        if self.tombstones.contains(&message.id.0) {
-            return;
-        }
-        self.messages.insert(message.id.0, message);
-    }
-
-    /// Parity slice 4: `updateMessageSendSucceeded` / `Failed` replace the
-    /// pending row, mirroring `HistoryState::replace_id`.
-    pub(crate) fn replace_id(&mut self, old: MessageId, new_message: HistoryMessage) {
-        self.messages.remove(&old.0);
-        self.upsert(new_message);
-    }
-}
-
 /// In-chat search (tdesktop `searchInChat` / ComposeSearch): `searchChatMessages`.
 #[derive(Debug, Clone)]
 pub struct ChatSearchState {
@@ -728,6 +611,9 @@ pub struct ChatSearchState {
     pub media: crate::search_filters::SearchMediaKind,
     /// The member picker replacing the results while choosing a sender.
     pub from_picker: Option<FromPicker>,
+    /// The typed query waiting out its quiet window; a new generation
+    /// drops it.
+    pub(crate) typed: super::debounce::Debounce<String>,
 }
 
 /// The older pages of an in-chat search (`foundChatMessages` pages by
@@ -786,11 +672,19 @@ impl Default for ChatSearchState {
             sender: None,
             media: crate::search_filters::SearchMediaKind::All,
             from_picker: None,
+            typed: Default::default(),
         }
     }
 }
 
 impl ChatSearchState {
+    /// A new generation: the answers asked before it are dropped, and a
+    /// typed query still waiting its quiet window with them.
+    fn bump_generation(&mut self) {
+        self.generation = self.generation.saturating_add(1);
+        self.typed.cancel();
+    }
+
     /// A search runs for a non-empty query, a chosen sender or a media tab.
     pub fn has_criteria(&self) -> bool {
         !self.query.is_empty()
@@ -866,7 +760,7 @@ impl ChatSearchState {
         }
         self.chat_id = Some(chat_id);
         self.query.clear();
-        self.generation = self.generation.saturating_add(1);
+        self.bump_generation();
         self.status = SearchStatus::Idle;
         self.sender = None;
         self.media = crate::search_filters::SearchMediaKind::All;
@@ -881,13 +775,13 @@ impl ChatSearchState {
         self.media = crate::search_filters::SearchMediaKind::All;
         self.from_picker = None;
         self.status = SearchStatus::Closed;
-        self.generation = self.generation.saturating_add(1);
+        self.bump_generation();
         self.clear_results();
     }
 
     pub fn begin_query(&mut self, query: &str) -> u64 {
         self.query = query.to_string();
-        self.generation = self.generation.saturating_add(1);
+        self.bump_generation();
         self.status = SearchStatus::Searching;
         self.clear_results();
         self.generation
@@ -895,7 +789,7 @@ impl ChatSearchState {
 
     pub fn clear_query(&mut self) {
         self.query.clear();
-        self.generation = self.generation.saturating_add(1);
+        self.bump_generation();
         self.clear_results();
         if self.is_open() {
             self.status = SearchStatus::Idle;

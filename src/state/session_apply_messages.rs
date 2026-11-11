@@ -281,7 +281,11 @@ impl Session {
                     .map(|message| history_message(message, false))
                     .collect();
                 rows.sort_by_key(|row| std::cmp::Reverse(row.id.0));
-                self.messages.pinned_messages.insert(chat_id.0, rows);
+                self.messages
+                    .pinned_messages
+                    .entry(chat_id.0)
+                    .or_default()
+                    .succeed(rows);
             }
             return;
         }

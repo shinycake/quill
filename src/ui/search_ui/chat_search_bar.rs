@@ -667,12 +667,10 @@ impl QuillApp {
         confirm: SearchConfirm,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let paid_price = self
-            .session()
-            .and_then(|s| s.search.search.tabs.limits)
-            .map_or(0, |limits| limits.star_count);
         let (text, action): (String, String) = match confirm {
-            SearchConfirm::PaidPostSearch => (
+            SearchConfirm::PaidPostSearch {
+                price: paid_price, ..
+            } => (
                 tr_with(
                     keys::Q_CHAT_SEARCH_PUBLIC_POSTS_FOR_THE,
                     &[("paid_price", &paid_price.to_string())],

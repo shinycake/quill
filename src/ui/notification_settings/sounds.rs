@@ -21,6 +21,7 @@ impl QuillApp {
             .and_then(|s| {
                 s.settings
                     .saved_notification_sounds
+                    .items()
                     .iter()
                     .find(|sound| sound.id == settings.sound_id)
                     .map(|sound| sound.title.clone())
@@ -42,6 +43,7 @@ impl QuillApp {
             .and_then(|s| {
                 s.settings
                     .saved_notification_sounds
+                    .items()
                     .iter()
                     .find(|sound| sound.id == settings.story_sound_id)
                     .map(|sound| sound.title.clone())

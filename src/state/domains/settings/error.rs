@@ -189,6 +189,11 @@ impl Session {
                 })
                 | RequestPurpose::HideContactCloseBirthdays),
             ) => self.apply_privacy_data_error(purpose, pending, err),
+            Some(RequestPurpose::GetSavedNotificationSounds) => {
+                self.settings
+                    .saved_notification_sounds
+                    .answer_failed("could not load the saved sounds");
+            }
             Some(RequestPurpose::GetActiveSessions) => {
                 self.settings
                     .sessions

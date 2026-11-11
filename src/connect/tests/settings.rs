@@ -92,26 +92,27 @@ fn a_sound_whose_download_cannot_be_sent_is_not_left_waiting() {
             .unwrap(),
         )
         .unwrap();
-    driver.session.settings.saved_notification_sounds = vec![NotificationSound {
-        id: 7,
-        duration: 1,
-        date: 0,
-        title: "Chime".into(),
-        data: String::new(),
-        sound: ParsedFile {
-            id: FileId(31),
-            size: 10,
-            expected_size: 10,
-            uploading: false,
-            local: crate::telegram::envelope::LocalFileState {
-                path: String::new(),
-                can_be_downloaded: true,
-                is_downloading_active: false,
-                is_downloading_completed: false,
-                downloaded_size: 0,
+    driver.session.settings.saved_notification_sounds =
+        crate::state::fetch::Fetch::Ready(vec![NotificationSound {
+            id: 7,
+            duration: 1,
+            date: 0,
+            title: "Chime".into(),
+            data: String::new(),
+            sound: ParsedFile {
+                id: FileId(31),
+                size: 10,
+                expected_size: 10,
+                uploading: false,
+                local: crate::telegram::envelope::LocalFileState {
+                    path: String::new(),
+                    can_be_downloaded: true,
+                    is_downloading_active: false,
+                    is_downloading_completed: false,
+                    downloaded_size: 0,
+                },
             },
-        },
-    }];
+        }]);
     let resolved = driver.resolve_notification_sound(NotificationSoundKind::Custom(7));
     assert!(matches!(resolved, SoundResolution::Pending));
     assert!(driver.session.settings.pending_sound_downloads.is_empty());

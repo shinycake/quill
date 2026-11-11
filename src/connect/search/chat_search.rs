@@ -206,12 +206,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.search.chat_search.clear_query();
             return Ok(ChatSearchQueryOutcome::Unchanged);
         }
-        if self.typed_chat_search.armed().is_some_and(|q| q == trimmed)
+        if self
+            .session
+            .search
+            .chat_search
+            .typed
+            .armed()
+            .is_some_and(|q| q == trimmed)
             && self.session.search.chat_search.query == trimmed
         {
             return Ok(ChatSearchQueryOutcome::Unchanged);
         }
-        if self.typed_chat_search.is_idle()
+        if self.session.search.chat_search.typed.is_idle()
             && self.session.search.chat_search.query == trimmed
             && matches!(
                 self.session.search.chat_search.status,
@@ -224,7 +230,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(ChatSearchQueryOutcome::Unchanged);
         }
         let _search_gen = self.session.search.chat_search.begin_query(trimmed);
-        let token = self.typed_chat_search.arm(trimmed.to_string());
+        let token = self
+            .session
+            .search
+            .chat_search
+            .typed
+            .arm(trimmed.to_string());
         Ok(ChatSearchQueryOutcome::Debounced { token })
     }
 
@@ -500,14 +511,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         token: u64,
     ) -> Result<Option<ChatSearchFlight>, ConnectSendError> {
-        let Some(query) = self.typed_chat_search.take_if(token) else {
+        let Some(query) = self.session.search.chat_search.typed.take_if(token) else {
             return Ok(None);
         };
         self.send_chat_search(&query)
     }
 
     fn clear_chat_search_debounce(&mut self) {
-        self.typed_chat_search.cancel();
+        self.session.search.chat_search.typed.cancel();
     }
 
     fn send_chat_search(

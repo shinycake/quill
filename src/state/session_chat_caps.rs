@@ -538,7 +538,8 @@ impl Session {
     /// history win, as they carry edits.
     pub fn pinned_list(&self, chat_id: ChatId) -> Vec<&HistoryMessage> {
         let history = self.histories.get(&chat_id.0);
-        match self.messages.pinned_messages.get(&chat_id.0) {
+        let pinned = self.messages.pinned_messages.get(&chat_id.0);
+        match pinned.and_then(crate::state::fetch::Fetch::data) {
             Some(list) => list
                 .iter()
                 .map(|message| {

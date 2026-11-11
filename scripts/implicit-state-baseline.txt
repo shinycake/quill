@@ -99,8 +99,6 @@ SavedMessagesState::topics_requested
 SavedTagSearch::loaded
 
 SettingsState::pending_attention
-SettingsState::saved_sounds_loaded
-SettingsState::saved_sounds_stale
 
 SharedMediaTabState::loading_more
 SharedMediaTabState::loading_more+error
