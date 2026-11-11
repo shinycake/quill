@@ -340,6 +340,13 @@ impl Session {
     /// shown or fetched for the rest of the session.
     pub fn accept_sponsored_hidden(&mut self, chat_id: ChatId) {
         self.messages.sponsored_hidden = true;
+        // A report in flight keeps its place: its answer is still awaited.
+        if matches!(
+            self.messages.sponsored_report,
+            SponsoredReportFlow::Asking(_) | SponsoredReportFlow::Picking { .. }
+        ) {
+            return;
+        }
         self.messages.sponsored_report = SponsoredReportFlow::Done(SponsoredReportOutcome {
             chat_id,
             message_id: 0,

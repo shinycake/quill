@@ -2,6 +2,9 @@
 # One per line: Struct::field <reason>
 State::frame_requested mirrors the C qw_state struct field by field (repr(C)); it is a per-poll flag from the native side, not a stage Quill keeps
 SettingsState::pending_attention+data_storage_error pending_attention is a one-shot signal the UI drains (bounce the Dock icon, flash the taskbar), not a stage of a request or a box; the pair came from the struct's first error line, which is not about it
+
+SettingsState::pending_attention a one-shot dock-bounce event the notifier drains with take (notify_accounts.rs), not a stage of any request
+SettingsState::pending_attention+data_storage_error the dock-bounce event shares no stage with the storage error line; it is drained by take, not a request stage
 ActiveGroupCall::loaded_all_participants TDLib's groupCall.loaded_all_participants: the server's own report that the participant list is complete, mirrored as is
 ActiveGroupCall::loaded_all_participants+screen_share_error TDLib's groupCall.loaded_all_participants beside the screen share's last failure: independent
 

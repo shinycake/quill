@@ -64,9 +64,6 @@ PasswordBox::sending+error
 
 PlayHead::started
 PlaybackHealth::output_failed
-Playlist::loaded
-Playlist::loaded+error
-Playlist::loading
 
 
 ReceivedGift::is_saved
@@ -86,6 +83,8 @@ SettingsState::pending_attention
 SettingsState::pending_attention+data_storage_error
 SettingsState::saved_sounds_loaded
 SettingsState::saved_sounds_stale
+
+SettingsState::pending_attention
 
 SharedMediaTabState::loading_more
 SharedMediaTabState::loading_more+error

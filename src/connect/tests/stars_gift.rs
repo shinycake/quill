@@ -18,7 +18,7 @@ fn a_contact_is_asked_for_their_packs_and_the_answer_lands() {
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
     driver.open_stars_gift().unwrap();
-    assert!(driver.session.payments.stars_gift.open);
+    assert!(driver.session.payments.stars_gift.is_open());
     sent_request(&recorder, "getContacts");
     // The frequent contacts load too, for the top of the list.
     sent_request(&recorder, "getTopChats");
@@ -49,7 +49,7 @@ fn a_contact_is_asked_for_their_packs_and_the_answer_lands() {
             .is_empty()
     );
     driver.close_stars_gift();
-    assert!(!driver.session.payments.stars_gift.open);
+    assert!(!driver.session.payments.stars_gift.is_open());
 }
 
 #[test]

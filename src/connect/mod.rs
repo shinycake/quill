@@ -28,7 +28,6 @@ mod composer;
 mod connect_flow;
 mod contacts;
 mod core;
-mod debounce;
 mod deep_links;
 mod direct_messages;
 mod disk_paused;

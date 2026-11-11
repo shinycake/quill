@@ -422,7 +422,7 @@ impl QuillApp {
         let forwards = recent
             .map(|r| r.forward_count)
             .or(post.as_ref().map(|p| p.forwards));
-        let public = state.map_or(0, |s| s.forwards.total);
+        let public = state.map_or(0, |s| s.forwards.total());
         let mut cells = Vec::new();
         if let Some(views) = views {
             cells.push(OverviewCell::plain(
@@ -552,7 +552,7 @@ impl QuillApp {
         }
         if let Some(state) = state {
             let forwards = &state.forwards;
-            let more = (!forwards.next_offset.is_empty()).then(|| {
+            let more = (!forwards.next_offset().is_empty()).then(|| {
                 Button::new("message-forwards-more")
                     .label(tr(keys::Q_MONEY_SHOW_MORE))
                     .ghost()
@@ -567,10 +567,10 @@ impl QuillApp {
             });
             page = page.child(self.public_shares(
                 "message-forward",
-                forwards.total,
-                &forwards.forwards,
+                forwards.total(),
+                forwards.items(),
                 forwards.loading(),
-                forwards.error.clone(),
+                forwards.error().map(str::to_string),
                 more,
                 cx,
             ));

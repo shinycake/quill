@@ -9,8 +9,9 @@
 //! Voice, GIFs. A tab with no items is hidden (`shown = count > 0`). Saved
 //! Messages and the common-groups / similar tabs are not shared media.
 use super::*;
-use crate::ids::FileId;
+use crate::ids::{FileId, RequestId};
 use crate::premium_hub::GiftsPage;
+use crate::state::paged::{Page, Paged};
 use crate::telegram::envelope::{ChatKind, ProfileAudio, ProfileAudiosPage};
 use std::collections::HashMap;
 
@@ -379,19 +380,93 @@ pub fn gift_item(gift: &crate::premium_hub::ReceivedGift) -> SharedMediaItem {
 /// page and as the profile's music button.
 #[derive(Debug, Clone, Default)]
 pub struct Playlist {
+    /// Not asked, a page in flight, answered, outdated (a change of the
+    /// playlist failed: the driver loads it again) or failed.
+    pub list: Paged<PlaylistData>,
+}
+
+/// The tracks of a playlist so far and the count the server reports.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PlaylistData {
     pub tracks: Vec<ProfileAudio>,
     pub total_count: i32,
-    /// The first page arrived (or failed).
-    pub loaded: bool,
-    pub loading: bool,
-    pub error: Option<String>,
-    /// A change of the playlist failed: the driver loads it again.
-    pub stale: bool,
+}
+
+impl PlaylistData {
+    /// A page of tracks; a track the page repeats is kept once.
+    pub fn from_page(audios: Vec<ProfileAudio>, total_count: i32) -> Self {
+        let mut data = Self::default();
+        data.add(audios);
+        data.total_count = total_count.max(data.tracks.len() as i32);
+        data
+    }
+
+    fn add(&mut self, audios: Vec<ProfileAudio>) {
+        for track in audios {
+            let known =
+                track.file_id.0 != 0 && self.tracks.iter().any(|old| old.file_id == track.file_id);
+            if !known {
+                self.tracks.push(track);
+            }
+        }
+    }
+}
+
+impl Page for PlaylistData {
+    /// The next page is asked by the number of tracks held, not an offset.
+    fn next_offset(&self) -> &str {
+        ""
+    }
+
+    fn append(&mut self, later: Self) {
+        self.add(later.tracks);
+        self.total_count = later.total_count.max(self.tracks.len() as i32);
+    }
 }
 
 impl Playlist {
+    /// Show `tracks` as the answered playlist.
+    pub fn set_ready(&mut self, tracks: Vec<ProfileAudio>) {
+        let total_count = tracks.len() as i32;
+        self.list = Paged::Ready(PlaylistData {
+            tracks,
+            total_count,
+        });
+    }
+
+    pub fn tracks(&self) -> &[ProfileAudio] {
+        self.list.data().map_or(&[], |d| d.tracks.as_slice())
+    }
+
+    pub fn total_count(&self) -> i32 {
+        self.list.data().map_or(0, |d| d.total_count)
+    }
+
+    pub fn loading(&self) -> bool {
+        self.list.loading()
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        self.list.error()
+    }
+
+    /// The first page arrived (or failed).
+    pub fn loaded(&self) -> bool {
+        match &self.list {
+            Paged::Idle => false,
+            Paged::Loading { append, .. } => *append,
+            _ => true,
+        }
+    }
+
+    /// The first page is due: never asked, or a change outdated the list.
+    /// An answer or a failure is not asked again (Retry resets it).
+    pub fn asks_first_page(&self) -> bool {
+        matches!(self.list, Paged::Idle | Paged::Outdated(_))
+    }
+
     pub fn has_more(&self) -> bool {
-        self.loaded && !self.loading && (self.tracks.len() as i32) < self.total_count
+        self.loaded() && !self.loading() && (self.tracks().len() as i32) < self.total_count()
     }
 }
 
@@ -539,39 +614,39 @@ impl Session {
         let Some(user_id) = pending.and_then(|p| p.user_id) else {
             return;
         };
-        let append = matches!(
-            pending.map(|p| p.purpose),
-            Some(RequestPurpose::Media(MediaPurpose::GetProfileAudios {
-                append: true
-            }))
-        );
         self.remember_files(&page.files);
-        let playlist = self.media.playlists.entry(user_id).or_default();
-        if !append {
-            playlist.tracks.clear();
-        }
-        for track in page.audios {
-            let known = track.file_id.0 != 0
-                && playlist
-                    .tracks
-                    .iter()
-                    .any(|old| old.file_id == track.file_id);
-            if !known {
-                playlist.tracks.push(track);
-            }
-        }
-        playlist.total_count = page.total_count.max(playlist.tracks.len() as i32);
-        playlist.loaded = true;
-        playlist.loading = false;
-        playlist.error = None;
+        let Some(request) = pending.map(|p| p.id) else {
+            return;
+        };
+        // Only the page in flight lands; a change that outdated the list
+        // meanwhile dropped it.
+        self.media
+            .playlists
+            .entry(user_id)
+            .or_default()
+            .list
+            .answer(
+                request,
+                PlaylistData::from_page(page.audios, page.total_count),
+            );
     }
 
-    /// A `getUserProfileAudios` request failed: no playlist for this user.
-    pub(crate) fn fail_profile_audios(&mut self, user_id: i64, error: String) {
-        let playlist = self.media.playlists.entry(user_id).or_default();
-        playlist.loaded = true;
-        playlist.loading = false;
-        playlist.error = Some(error);
+    /// A `getUserProfileAudios` request failed. `request` is the page that
+    /// failed; `None` is a page that never left, which fails whatever the
+    /// playlist was doing.
+    pub(crate) fn fail_profile_audios(
+        &mut self,
+        user_id: i64,
+        request: Option<RequestId>,
+        error: String,
+    ) {
+        let list = &mut self.media.playlists.entry(user_id).or_default().list;
+        match request {
+            Some(_) => {
+                list.fail(request, error);
+            }
+            None => list.send_failed(error),
+        }
     }
 
     /// A profile tab's request failed: the tab shows the error and hides
@@ -881,19 +956,22 @@ mod tests {
     fn playlist_pages_until_the_total() {
         let mut playlist = Playlist::default();
         assert!(!playlist.has_more());
-        playlist.loaded = true;
-        playlist.total_count = 2;
+        let track = ProfileAudio {
+            file_id: crate::ids::FileId(1),
+            title: String::new(),
+            performer: String::new(),
+            file_name: "a.mp3".into(),
+            duration: 0,
+        };
+        playlist.list = Paged::Ready(PlaylistData {
+            tracks: vec![track.clone()],
+            total_count: 2,
+        });
         assert!(playlist.has_more());
-        playlist.tracks = vec![
-            ProfileAudio {
-                file_id: crate::ids::FileId(1),
-                title: String::new(),
-                performer: String::new(),
-                file_name: "a.mp3".into(),
-                duration: 0,
-            };
-            2
-        ];
+        playlist.list = Paged::Ready(PlaylistData {
+            tracks: vec![track; 2],
+            total_count: 2,
+        });
         assert!(!playlist.has_more());
     }
 }

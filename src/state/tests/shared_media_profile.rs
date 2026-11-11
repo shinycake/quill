@@ -108,6 +108,13 @@ fn saved_tracks_fill_the_users_playlist_and_page() {
         RequestPurpose::Media(MediaPurpose::GetProfileAudios { append: false }),
         78,
     );
+    session
+        .media
+        .playlists
+        .entry(78)
+        .or_default()
+        .list
+        .begin(extra, false);
     apply_json(
         &mut session,
         &seq,
@@ -118,10 +125,10 @@ fn saved_tracks_fill_the_users_playlist_and_page() {
         ),
     );
     let playlist = &session.media.playlists[&78];
-    assert!(playlist.loaded);
-    assert_eq!(playlist.tracks.len(), 2);
-    assert_eq!(track_name(&playlist.tracks[0]), "Ada — Night Drive");
-    assert_eq!(track_name(&playlist.tracks[1]), "b.ogg");
+    assert!(playlist.loaded());
+    assert_eq!(playlist.tracks().len(), 2);
+    assert_eq!(track_name(&playlist.tracks()[0]), "Ada — Night Drive");
+    assert_eq!(track_name(&playlist.tracks()[1]), "b.ogg");
     assert!(playlist.has_more());
     // The gallery tabs are not touched: the playlist is not a tab.
     assert!(
@@ -136,6 +143,13 @@ fn saved_tracks_fill_the_users_playlist_and_page() {
         RequestPurpose::Media(MediaPurpose::GetProfileAudios { append: true }),
         78,
     );
+    session
+        .media
+        .playlists
+        .entry(78)
+        .or_default()
+        .list
+        .begin(extra, true);
     apply_json(
         &mut session,
         &seq,
@@ -146,7 +160,7 @@ fn saved_tracks_fill_the_users_playlist_and_page() {
         ),
     );
     let playlist = &session.media.playlists[&78];
-    assert_eq!(playlist.tracks.len(), 3);
+    assert_eq!(playlist.tracks().len(), 3);
     assert!(!playlist.has_more());
 }
 
@@ -159,6 +173,13 @@ fn a_failed_playlist_request_is_loaded_and_empty() {
         RequestPurpose::Media(MediaPurpose::GetProfileAudios { append: false }),
         78,
     );
+    session
+        .media
+        .playlists
+        .entry(78)
+        .or_default()
+        .list
+        .begin(extra, false);
     apply_json(
         &mut session,
         &seq,
@@ -169,7 +190,7 @@ fn a_failed_playlist_request_is_loaded_and_empty() {
         ),
     );
     let playlist = &session.media.playlists[&78];
-    assert!(playlist.loaded && playlist.tracks.is_empty() && playlist.error.is_some());
+    assert!(playlist.loaded() && playlist.tracks().is_empty() && playlist.error().is_some());
 }
 
 #[test]

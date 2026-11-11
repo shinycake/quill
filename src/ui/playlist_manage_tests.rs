@@ -52,9 +52,7 @@ fn open_playlist(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
         let session = app.demo_session.as_mut().expect("demo session");
         session.my_user_id = Some(ME);
         let playlist = session.media.playlists.entry(ME).or_default();
-        playlist.tracks = vec![track(1), track(2), track(3)];
-        playlist.total_count = 3;
-        playlist.loaded = true;
+        playlist.set_ready(vec![track(1), track(2), track(3)]);
         session.media.shared_media.playlist_user = Some(ME);
         cx.notify();
     });
@@ -64,7 +62,7 @@ fn open_playlist(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
 fn order(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Vec<i32> {
     app.read_with(vcx, |app, _| {
         app.session().expect("session").media.playlists[&ME]
-            .tracks
+            .tracks()
             .iter()
             .map(|t| t.file_id.0)
             .collect()
@@ -117,7 +115,7 @@ fn the_track_menu_opens_and_delete_asks_before_removing(cx: &mut TestAppContext)
     app.read_with(vcx, |app, _| {
         assert_eq!(app.connection.status_note(), removed_toast());
         assert_eq!(
-            app.session().expect("session").media.playlists[&ME].total_count,
+            app.session().expect("session").media.playlists[&ME].total_count(),
             2
         );
     });

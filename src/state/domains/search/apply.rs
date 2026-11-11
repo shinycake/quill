@@ -75,9 +75,9 @@ impl Session {
                         self.remember_files(&message.files);
                     }
                     let hits = messages.iter().map(SearchMessageHit::from_parsed).collect();
-                    self.search.search.public_limits_exceeded = are_limits_exceeded;
                     self.search.search.set_first_page_offset(next_offset);
                     self.search.search.accept_messages(hits, false);
+                    self.search.search.note_public_limits(are_limits_exceeded);
                 } else if self.search.search.matches_generation(pending)
                     && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchPublicPostsMore)
                 {
@@ -85,8 +85,8 @@ impl Session {
                         self.remember_files(&message.files);
                     }
                     let hits = messages.iter().map(SearchMessageHit::from_parsed).collect();
-                    self.search.search.public_limits_exceeded = are_limits_exceeded;
                     self.search.search.append_page(hits, next_offset);
+                    self.search.search.note_public_limits(are_limits_exceeded);
                 }
             }
             SearchPayload::PublicPostLimits {

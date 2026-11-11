@@ -129,11 +129,17 @@ fn account_loss_resets_the_loading_flags_of_pending_lookups() {
         request: gifts,
         kind: PageKind::First,
     };
-    session.media.playlists.entry(9).or_default().loading = true;
-    session.request_for_user(
+    let audios = session.request_for_user(
         RequestPurpose::Media(MediaPurpose::GetProfileAudios { append: false }),
         9,
     );
+    session
+        .media
+        .playlists
+        .entry(9)
+        .or_default()
+        .list
+        .begin(audios, false);
     let user_action = session.request(RequestPurpose::SendMessage, Some(ChatId(5)));
     session.stale_history_requests.insert(77);
 
@@ -143,7 +149,7 @@ fn account_loss_resets_the_loading_flags_of_pending_lookups() {
     assert!(!session.payments.star_subscriptions.is_loading());
     assert!(!session.payments.hub.tx.is_loading());
     assert!(!session.payments.hub.gifts_page.is_loading());
-    assert!(!session.media.playlists[&9].loading);
+    assert!(!session.media.playlists[&9].loading());
     assert!(session.requests.is_empty());
     assert!(session.requests.get(user_action).is_none());
     assert!(session.stale_history_requests.is_empty());

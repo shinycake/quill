@@ -230,12 +230,7 @@ impl QuillApp {
     /// "Use a security key": the worker looks for a key; with none the
     /// QR stays and a toast says so (`CeremonyEvent::NoKey`).
     fn use_passkey_security_key(&mut self, cx: &mut Context<Self>) {
-        if let Some(ceremony) = self
-            .privacy
-            .passkeys
-            .ceremony()
-            .and_then(|ui| ui.worker())
-        {
+        if let Some(ceremony) = self.privacy.passkeys.ceremony().and_then(|ui| ui.worker()) {
             ceremony.use_security_key();
         }
         cx.notify();

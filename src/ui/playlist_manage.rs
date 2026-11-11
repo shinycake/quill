@@ -159,7 +159,7 @@ impl QuillApp {
             .media
             .playlists
             .values()
-            .flat_map(|playlist| &playlist.tracks)
+            .flat_map(|playlist| playlist.tracks())
             .find(|track| track.file_id == file_id)
             .cloned()
     }
@@ -343,7 +343,7 @@ impl QuillApp {
                 s.media
                     .playlists
                     .get(&me)
-                    .is_some_and(|p| p.tracks.iter().any(|t| t.file_id == file_id))
+                    .is_some_and(|p| p.tracks().iter().any(|t| t.file_id == file_id))
             });
         let local = session
             .and_then(|s| s.media.files.get(&file_id.0))

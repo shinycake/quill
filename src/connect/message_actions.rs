@@ -310,8 +310,20 @@ impl<S: JsonSender> ConnectDriver<S> {
             100,
             Some(search_messages_filter_json("searchMessagesFilterPinned")),
         );
+        self.session
+            .messages
+            .pinned_messages
+            .entry(chat_id.0)
+            .or_default()
+            .begin();
         if let Err(err) = self.sender.send_json(&json) {
             self.session.requests.take(extra);
+            self.session
+                .messages
+                .pinned_messages
+                .entry(chat_id.0)
+                .or_default()
+                .fail("could not send the pinned messages request");
             return Err(err);
         }
         Ok(())

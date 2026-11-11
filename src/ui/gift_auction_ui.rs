@@ -492,7 +492,8 @@ impl QuillApp {
                     cx,
                 ));
             }
-            None | Some(Fetch::Idle | Fetch::Loading { stale: None, .. }) => {
+            None
+            | Some(Fetch::Idle | Fetch::Outdated(None) | Fetch::Loading { stale: None, .. }) => {
                 body = body.child(
                     div()
                         .text_sm()
@@ -502,6 +503,7 @@ impl QuillApp {
             }
             Some(
                 Fetch::Ready(list)
+                | Fetch::Outdated(Some(list))
                 | Fetch::Loading {
                     stale: Some(list), ..
                 },

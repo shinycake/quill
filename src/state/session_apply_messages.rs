@@ -15,8 +15,13 @@ impl Session {
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::PreloadHistory
         {
-            if let Some(chat_id) = pending.chat_id {
-                self.chat_list.preloaded_histories.insert(chat_id.0);
+            if let Some(chat_id) = pending.chat_id
+                && self.chat_list.history_preloads.get(&chat_id.0)
+                    == Some(&HistoryPreload::Loading(pending.id))
+            {
+                self.chat_list
+                    .history_preloads
+                    .insert(chat_id.0, HistoryPreload::Ready);
             }
             return;
         }
@@ -276,7 +281,11 @@ impl Session {
                     .map(|message| history_message(message, false))
                     .collect();
                 rows.sort_by_key(|row| std::cmp::Reverse(row.id.0));
-                self.messages.pinned_messages.insert(chat_id.0, rows);
+                self.messages
+                    .pinned_messages
+                    .entry(chat_id.0)
+                    .or_default()
+                    .succeed(rows);
             }
             return;
         }

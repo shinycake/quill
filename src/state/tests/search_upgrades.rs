@@ -110,7 +110,7 @@ fn public_posts_fill_the_messages_and_flag_an_exhausted_quota() {
     );
     assert_eq!(session.search.search.status(), SearchStatus::Ready);
     assert_eq!(session.search.search.messages.len(), 1);
-    assert!(!session.search.search.public_limits_exceeded);
+    assert!(!session.search.search.public_limits_exceeded());
 
     let search_gen = session.search.search.begin_query("arrakis");
     session.search.search.begin_public_scope();
@@ -121,7 +121,7 @@ fn public_posts_fill_the_messages_and_flag_an_exhausted_quota() {
         &sink,
         &public_post_json(extra, true, false),
     );
-    assert!(session.search.search.public_limits_exceeded);
+    assert!(session.search.search.public_limits_exceeded());
     assert_eq!(session.search.search.status(), SearchStatus::Empty);
 }
 

@@ -87,14 +87,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             |extra| qr::load_messages_request(extra, shortcut_id),
         );
         if sent.is_ok() {
-            self.session
-                .settings
-                .quick_replies
-                .messages
-                .insert(shortcut_id, Fetch::Loading {
+            self.session.settings.quick_replies.messages.insert(
+                shortcut_id,
+                Fetch::Loading {
                     stale: None,
                     request: None,
-                });
+                },
+            );
         }
         sent.map(|_| ())
     }

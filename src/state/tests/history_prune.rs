@@ -254,7 +254,10 @@ fn a_dropped_chat_forgets_its_pinned_list_and_replied_messages() {
         session.accept_replied_message(ChatId(chat), MessageId(5), live(chat, 1));
         session.accept_replied_message(ChatId(chat), MessageId(80), live(chat, 2));
         let pinned = session.histories[&chat].messages[&80].clone();
-        session.messages.pinned_messages.insert(chat, vec![pinned]);
+        session
+            .messages
+            .pinned_messages
+            .insert(chat, crate::state::fetch::Fetch::Ready(vec![pinned]));
     }
     leave(&mut session);
     assert!(!session.histories.contains_key(&1), "the oldest went");

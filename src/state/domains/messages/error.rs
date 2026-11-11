@@ -14,6 +14,30 @@ impl Session {
         // The Edit box's Auto-translate switch is a Messages request: its
         // refusal keeps the box open with the reason.
         self.record_group_info_edit_error(err, pending);
+        // A preload that failed leaves no entry: the next pull asks again.
+        if let Some(p) = pending
+            && p.purpose == RequestPurpose::PreloadHistory
+            && let Some(chat_id) = p.chat_id
+            && self.chat_list.history_preloads.get(&chat_id.0)
+                == Some(&crate::state::HistoryPreload::Loading(p.id))
+        {
+            self.chat_list.history_preloads.remove(&chat_id.0);
+        }
+        // A failed pinned-messages fetch ends in `Failed`: the pull to the
+        // next channel does not ask again, the chat opening does.
+        if let Some(p) = pending
+            && p.purpose == RequestPurpose::GetPinnedMessages
+            && let Some(chat_id) = p.chat_id
+        {
+            self.messages
+                .pinned_messages
+                .entry(chat_id.0)
+                .or_default()
+                .fail(format!(
+                    "could not load the pinned messages (error {})",
+                    err.code
+                ));
+        }
         if let Some(RequestPurpose::GetRepliedMessage {
             chat_id,
             message_id,

@@ -382,7 +382,10 @@ fn bots_games_high_scores_answer_lands_in_panel() {
         session.request_for_message(RequestPurpose::GetGameHighScores, ChatId(7), MessageId(301));
     session.bots.game_scores.insert(
         (7, 301),
-        crate::state::fetch::Fetch::Loading { stale: None, request: None },
+        crate::state::fetch::Fetch::Loading {
+            stale: None,
+            request: None,
+        },
     );
     apply_json(
         &mut session,
@@ -414,7 +417,10 @@ fn a_refused_game_scores_request_leaves_the_panel_failed_to_retry() {
         session.request_for_message(RequestPurpose::GetGameHighScores, ChatId(7), MessageId(301));
     session.bots.game_scores.insert(
         (7, 301),
-        crate::state::fetch::Fetch::Loading { stale: None, request: None },
+        crate::state::fetch::Fetch::Loading {
+            stale: None,
+            request: None,
+        },
     );
     apply_json(
         &mut session,

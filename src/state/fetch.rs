@@ -86,6 +86,9 @@ pub enum Fetch<T> {
     },
     /// The latest request answered.
     Ready(T),
+    /// A change landed after the answer: the old answer, if any, stays
+    /// visible until the refetch replaces it (never optimistic).
+    Outdated(Option<T>),
     /// The latest request failed; `stale` is the last answer, if any.
     Failed { error: String, stale: Option<T> },
 }
@@ -99,6 +102,27 @@ impl<T> Fetch<T> {
     /// last try failed. A request in flight or an answer is not asked again.
     pub fn can_ask(&self) -> bool {
         matches!(self, Self::Idle | Self::Failed { .. })
+    }
+
+    /// The answer is out of date and a refetch is due.
+    pub fn is_outdated(&self) -> bool {
+        matches!(self, Self::Outdated(_))
+    }
+
+    /// A change landed: what is held stays visible and is asked for
+    /// again, also when nothing was held (the change needs the answer). A
+    /// request in flight asked before the change, so it is dropped with its
+    /// mark: a first ask with nothing held becomes `Outdated(None)` too,
+    /// whose answer would otherwise land without the change. The owner that
+    /// refetches asks again.
+    pub fn outdate(&mut self) {
+        *self = Self::Outdated(self.take_data());
+    }
+
+    /// Something is being waited for: a request in flight, or a refetch due
+    /// with nothing held to show meanwhile. What draws a spinner.
+    pub fn shows_loading(&self) -> bool {
+        matches!(self, Self::Loading { .. } | Self::Outdated(None))
     }
 
     pub fn is_loading(&self) -> bool {
@@ -119,7 +143,9 @@ impl<T> Fetch<T> {
         match self {
             Self::Idle => None,
             Self::Ready(value) => Some(value),
-            Self::Loading { stale, .. } | Self::Failed { stale, .. } => stale.as_ref(),
+            Self::Outdated(held)
+            | Self::Loading { stale: held, .. }
+            | Self::Failed { stale: held, .. } => held.as_ref(),
         }
     }
 
@@ -127,7 +153,9 @@ impl<T> Fetch<T> {
         match self {
             Self::Idle => None,
             Self::Ready(value) => Some(value),
-            Self::Loading { stale, .. } | Self::Failed { stale, .. } => stale.as_mut(),
+            Self::Outdated(held)
+            | Self::Loading { stale: held, .. }
+            | Self::Failed { stale: held, .. } => held.as_mut(),
         }
     }
 
@@ -136,7 +164,9 @@ impl<T> Fetch<T> {
         match std::mem::take(self) {
             Self::Idle => None,
             Self::Ready(value) => Some(value),
-            Self::Loading { stale, .. } | Self::Failed { stale, .. } => stale,
+            Self::Outdated(held)
+            | Self::Loading { stale: held, .. }
+            | Self::Failed { stale: held, .. } => held,
         }
     }
 
@@ -156,6 +186,7 @@ impl<T> Fetch<T> {
                 error,
                 stale: Some(make()),
             },
+            Self::Outdated(_) => Self::Outdated(Some(make())),
             Self::Idle | Self::Ready(_) => Self::Ready(make()),
         };
     }
@@ -210,6 +241,27 @@ impl<T> Fetch<T> {
         } else {
             self.fail(error);
         }
+        true
+    }
+
+    /// The request answered, unless a change outdated the list meanwhile:
+    /// that answer predates the change, so it is dropped and the refetch
+    /// that follows asks again. `false` when it was dropped.
+    pub fn answer(&mut self, value: T) -> bool {
+        if self.is_outdated() {
+            return false;
+        }
+        *self = Self::Ready(value);
+        true
+    }
+
+    /// The request failed, unless a change outdated the list meanwhile (the
+    /// refetch that follows asks again). `false` when it was dropped.
+    pub fn answer_failed(&mut self, error: impl Into<String>) -> bool {
+        if self.is_outdated() {
+            return false;
+        }
+        self.fail(error);
         true
     }
 

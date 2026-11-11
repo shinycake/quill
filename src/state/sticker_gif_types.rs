@@ -317,7 +317,9 @@ impl GifPanel {
         match &self.saved {
             Fetch::Idle => false,
             Fetch::Ready(()) => true,
-            Fetch::Loading { stale, .. } | Fetch::Failed { stale, .. } => stale.is_some(),
+            Fetch::Outdated(stale) | Fetch::Loading { stale, .. } | Fetch::Failed { stale, .. } => {
+                stale.is_some()
+            }
         }
     }
 
@@ -399,7 +401,7 @@ impl GifPanel {
     /// The list is out of date: the next ask fetches it again.
     pub fn saved_forgotten(&mut self) {
         self.saved = match std::mem::take(&mut self.saved) {
-            Fetch::Idle | Fetch::Ready(()) => Fetch::Idle,
+            Fetch::Idle | Fetch::Ready(()) | Fetch::Outdated(_) => Fetch::Idle,
             Fetch::Loading { request, .. } => Fetch::Loading {
                 stale: None,
                 request,

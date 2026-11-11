@@ -174,7 +174,7 @@ fn an_offline_playlist_page_fails_and_keeps_its_retry() {
             .media
             .playlists
             .get(&31)
-            .is_some_and(|p| p.error.is_some() && !p.loading)
+            .is_some_and(|p| p.error().is_some() && !p.loading())
     };
     assert!(failed(&driver), "the page shows the failure, not Loading");
     driver.retry_playlist(31);
@@ -184,7 +184,7 @@ fn an_offline_playlist_page_fails_and_keeps_its_retry() {
     let before = recorder.snapshot().len();
     driver.retry_playlist(31);
     assert_eq!(recorder.snapshot().len(), before + 1);
-    assert!(driver.session.media.playlists[&31].loading);
+    assert!(driver.session.media.playlists[&31].loading());
     let _ = std::fs::remove_dir_all(dir);
 }
 

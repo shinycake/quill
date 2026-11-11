@@ -17,7 +17,9 @@ impl UserFullInfos {
     pub fn get(&self, user_id: &i64) -> Option<&UserFullInfoData> {
         match self.by_user.get(user_id)? {
             Fetch::Ready(data) => Some(data),
-            Fetch::Loading { stale, .. } | Fetch::Failed { stale, .. } => stale.as_ref(),
+            Fetch::Outdated(stale) | Fetch::Loading { stale, .. } | Fetch::Failed { stale, .. } => {
+                stale.as_ref()
+            }
             Fetch::Idle => None,
         }
     }
@@ -25,7 +27,9 @@ impl UserFullInfos {
     pub fn get_mut(&mut self, user_id: &i64) -> Option<&mut UserFullInfoData> {
         match self.by_user.get_mut(user_id)? {
             Fetch::Ready(data) => Some(data),
-            Fetch::Loading { stale, .. } | Fetch::Failed { stale, .. } => stale.as_mut(),
+            Fetch::Outdated(stale) | Fetch::Loading { stale, .. } | Fetch::Failed { stale, .. } => {
+                stale.as_mut()
+            }
             Fetch::Idle => None,
         }
     }
@@ -47,7 +51,9 @@ impl UserFullInfos {
     pub fn fail(&mut self, user_id: i64, error: String) {
         let stale = match self.by_user.remove(&user_id) {
             Some(Fetch::Ready(data)) => Some(data),
-            Some(Fetch::Loading { stale, .. } | Fetch::Failed { stale, .. }) => stale,
+            Some(
+                Fetch::Outdated(stale) | Fetch::Loading { stale, .. } | Fetch::Failed { stale, .. },
+            ) => stale,
             Some(Fetch::Idle) | None => None,
         };
         self.by_user.insert(user_id, Fetch::Failed { error, stale });
@@ -66,7 +72,7 @@ impl UserFullInfos {
             }) => {
                 self.by_user.insert(*user_id, Fetch::Ready(data));
             }
-            Some(other @ (Fetch::Ready(_) | Fetch::Loading { .. })) => {
+            Some(other @ (Fetch::Ready(_) | Fetch::Outdated(_) | Fetch::Loading { .. })) => {
                 self.by_user.insert(*user_id, other);
             }
             Some(Fetch::Failed { stale: None, .. } | Fetch::Idle) | None => {}

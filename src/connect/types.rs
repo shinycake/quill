@@ -366,18 +366,13 @@ pub struct ConnectDriver<S: JsonSender> {
     /// folder's owner (`account_data::claim`).
     pub(crate) claimed_owner: Option<i64>,
     pub(crate) database_key: DatabaseKey,
-    /// Whether `setTdlibParameters` went out, and as which request.
-    /// The typed chat-list search waiting out its quiet window.
-    pub(crate) typed_search: super::debounce::Debounce<String>,
-    /// The typed in-chat search waiting out its quiet window.
-    pub(crate) typed_chat_search: super::debounce::Debounce<String>,
     /// Last `chatActionTyping` we sent (Unigram `_lastTypingTime`).
     pub(crate) outgoing_typing: Option<OutgoingTyping>,
     /// Last `chatActionRecordingVoiceNote` (Unigram record button).
     pub(crate) outgoing_voice: Option<OutgoingTyping>,
     /// The composer draft save waiting for its quiet window (tdesktop
     /// `saveDraft`), or kept after a failed send.
-    pub(crate) pending_draft: super::debounce::Debounce<HeldDraft>,
+    pub(crate) pending_draft: crate::state::debounce::Debounce<HeldDraft>,
     /// Q1: idempotent reads waiting out a 429 before being re-sent.
     pub(crate) flood_retries: Vec<super::flood_retry::FloodRetry>,
     /// Q1: re-send count per request id that hit a rate limit.

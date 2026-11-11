@@ -92,7 +92,7 @@ impl Session {
         let queued: HashSet<i32> = media
             .playlists
             .values()
-            .flat_map(|playlist| playlist.tracks.iter().map(|track| track.file_id.0))
+            .flat_map(|playlist| playlist.tracks().iter().map(|track| track.file_id.0))
             .collect();
         media.files.evict(|file| {
             let id = file.id.0;

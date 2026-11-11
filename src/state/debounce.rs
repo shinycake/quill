@@ -7,7 +7,7 @@
 //! another.
 
 /// What waits, if anything.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Stage<T> {
     Idle,
     Armed { token: u64, value: T },
@@ -15,7 +15,7 @@ enum Stage<T> {
 
 /// One debounce: the latest armed value and the counter that tokens come
 /// from. The counter only grows, so a token never comes back.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Debounce<T> {
     issued: u64,
     stage: Stage<T>,

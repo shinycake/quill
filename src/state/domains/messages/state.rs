@@ -151,9 +151,11 @@ pub struct MessagesState {
     /// Last `forwardMessages` outcome for the dest picker success surface.
     pub last_forward: Option<ForwardResult>,
     /// Each chat's pinned messages, newest first, as last fetched
-    /// (`RequestPurpose::GetPinnedMessages`). Absent until fetched; the
-    /// pinned bar then falls back to pinned rows in loaded history.
-    pub pinned_messages: HashMap<i64, Vec<HistoryMessage>>,
+    /// (`RequestPurpose::GetPinnedMessages`). Absent or not answered yet,
+    /// the pinned bar falls back to pinned rows in loaded history; a failed
+    /// fetch stays `Failed` and is not asked again by the next pull, only by
+    /// the chat opening.
+    pub pinned_messages: HashMap<i64, crate::state::fetch::Fetch<Vec<HistoryMessage>>>,
     /// The oldest unread mention/reaction found for the corner buttons,
     /// for the window and chat that asked; the driver takes it and jumps
     /// in that window (`ConnectDriver::ingest`).
@@ -196,6 +198,11 @@ pub struct MessagesState {
 }
 
 impl MessagesState {
+    /// The fetched pinned messages of a chat, when an answer is held.
+    pub fn pinned_data(&self, chat_id: i64) -> Option<&Vec<HistoryMessage>> {
+        self.pinned_messages.get(&chat_id)?.data()
+    }
+
     /// The `forwardMessages` flight answered by (or failed for) `extra`.
     pub(crate) fn take_forward_flight(&mut self, extra: RequestId) -> Option<ForwardFlight> {
         let index = self

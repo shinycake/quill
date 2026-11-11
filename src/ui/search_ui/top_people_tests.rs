@@ -186,7 +186,7 @@ fn the_menu_removes_one_person_or_asks_before_disabling(cx: &mut TestAppContext)
     frames(vcx);
     click(vcx, "top-menu-disable");
     let confirm = app.update(vcx, |app, _| {
-        app.session().and_then(|s| s.search.search.confirm)
+        app.session().and_then(|s| s.search.search.confirm.clone())
     });
     assert_eq!(confirm, Some(SearchConfirm::DisableTopChats));
     app.update(vcx, |app, cx| app.accept_search_confirm(cx));

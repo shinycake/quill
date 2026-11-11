@@ -330,7 +330,7 @@ impl QuillApp {
                             ),
                     );
                 }
-                Some(Fetch::Ready(_) | Fetch::Idle) | None => {
+                Some(Fetch::Ready(_) | Fetch::Idle | Fetch::Outdated(_)) | None => {
                     if messages.is_empty() {
                         body = body.child(
                             div()

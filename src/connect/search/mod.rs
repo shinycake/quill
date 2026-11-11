@@ -95,12 +95,18 @@ impl<S: JsonSender> ConnectDriver<S> {
                 None => SearchQueryOutcome::Unchanged,
             });
         }
-        if self.typed_search.armed().is_some_and(|q| q == trimmed)
+        if self
+            .session
+            .search
+            .search
+            .typed
+            .armed()
+            .is_some_and(|q| q == trimmed)
             && self.session.search.search.query == trimmed
         {
             return Ok(SearchQueryOutcome::Unchanged);
         }
-        if self.typed_search.is_idle()
+        if self.session.search.search.typed.is_idle()
             && self.session.search.search.query == trimmed
             && !self.session.search.search.is_recents()
             && matches!(
@@ -114,7 +120,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(SearchQueryOutcome::Unchanged);
         }
         let _search_gen = self.session.search.search.begin_query(trimmed);
-        let token = self.typed_search.arm(trimmed.to_string());
+        let token = self.session.search.search.typed.arm(trimmed.to_string());
         Ok(SearchQueryOutcome::Debounced { token })
     }
 
@@ -123,14 +129,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         token: u64,
     ) -> Result<Option<SearchFlight>, ConnectSendError> {
-        let Some(query) = self.typed_search.take_if(token) else {
+        let Some(query) = self.session.search.search.typed.take_if(token) else {
             return Ok(None);
         };
         self.send_typed_search(&query)
     }
 
     fn clear_typed_debounce(&mut self) {
-        self.typed_search.cancel();
+        self.session.search.search.typed.cancel();
     }
 
     /// Slice (communities-search-filter): community filter chip in the

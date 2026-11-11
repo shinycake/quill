@@ -115,7 +115,7 @@ impl QuillApp {
                     .media
                     .playlists
                     .values()
-                    .flat_map(|playlist| &playlist.tracks)
+                    .flat_map(|playlist| playlist.tracks())
                     .find(|track| quill::state::playlist_message_id(track.file_id) == id)
             })
         {
@@ -276,7 +276,7 @@ impl QuillApp {
             .iter()
             .find(|(_, playlist)| {
                 playlist
-                    .tracks
+                    .tracks()
                     .iter()
                     .any(|track| quill::state::playlist_message_id(track.file_id) == id)
             })
