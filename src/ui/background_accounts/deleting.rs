@@ -239,14 +239,16 @@ impl QuillApp {
             root,
             accounts,
             |this, deletion, cx| match deletion {
-                Deletion::Done { .. } => {
+                Deletion::Done { error: None } => {
                     this.background.wiping = false;
                     this.disk_accounts_wiped();
                     this.start_connection(cx);
                 }
-                // Nothing opens in this run; the next start deletes the
-                // folders before connecting.
-                Deletion::Deferred => {
+                // Nothing opens in this run (a folder that is not gone would
+                // open its old database); the next start deletes the folders
+                // before connecting. The passcode is already forgotten, so
+                // the data must not be reported as wiped.
+                Deletion::Deferred | Deletion::Done { error: Some(_) } => {
                     this.set_note(StatusNote::silent(tr(
                         keys::Q_REST_RESTART_QUILL_TO_FINISH_LOGGING_OUT,
                     )));

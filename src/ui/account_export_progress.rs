@@ -36,13 +36,12 @@ impl QuillApp {
             return RedrawNeed::Nothing;
         };
         let progress = export.progress();
-        let hidden = self.dialogs.account_export_progress_hidden;
+        let hidden = export.view == quill::export::ExportView::Hidden;
         if progress.is_settled() && hidden {
             if let Some(session) = self.session_mut() {
                 session.settings.account_export = None;
             }
             self.dialogs.account_export_seen = None;
-            self.dialogs.account_export_progress_hidden = false;
             self.set_note(StatusNote::info(ended_note(&progress)));
             return RedrawNeed::Now;
         }
@@ -150,7 +149,7 @@ impl QuillApp {
                         .label(tr(keys::Q_OPS_HIDE))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.dialogs.account_export_progress_hidden = true;
+                            this.set_account_export_view(quill::export::ExportView::Hidden);
                             cx.notify();
                             this.close_kit_dialog_if_done(DialogKind::AccountExport, window, cx);
                         })),

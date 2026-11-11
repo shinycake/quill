@@ -1,7 +1,5 @@
 # Implicit-state debt (scripts/check-implicit-state.py). Only remove lines.
 AccountBoxes::age_verify_started
-AccountNotices::terms_in_flight
-AccountNotices::terms_in_flight+review_error
 ActiveGroupCall::join_as_requested
 ActiveGroupCall::loaded_all_participants
 ActiveGroupCall::loaded_all_participants+transport_error
@@ -268,8 +266,6 @@ StreamFacts::transport_failed
 StyleExamples::loading
 Tempo::done
 Tempo::inner_done
-ThemeGifts::loaded
-ThemeGifts::loading
 ThreadView::reading_started
 ThreadWindow::loaded_complete
 TonWalletState::explorer_url_requested

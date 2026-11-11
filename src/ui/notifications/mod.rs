@@ -348,11 +348,11 @@ impl QuillApp {
         // A locked Quill is not looked at, whichever window has the focus:
         // its open chat notifies and sounds as tdesktop's does under the
         // lock (`markingAsRead` needs the main widget shown).
-        let main_active = !self.refused_while_locked()
-            && self
-                .main_window
+        let main_active = self.looked_at(
+            self.main_window
                 .handle
-                .is_some_and(|main| cx.active_window() == Some(main));
+                .is_some_and(|main| cx.active_window() == Some(main)),
+        );
         let Some(live) = self.live.as_mut() else {
             self.clear_device_qr();
             return false;

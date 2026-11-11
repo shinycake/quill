@@ -870,3 +870,28 @@ fn a_link_hears_its_worker_end_at_once() {
     let far_off = std::time::Instant::now() + Duration::from_secs(3600);
     assert!(export.link.wait_ended(far_off), "no wait once it ended");
 }
+
+/// A worker that unwinds before publishing its last stage still settles:
+/// the box gets its Done button instead of "Saving" for ever.
+#[test]
+fn a_worker_that_dies_settles_its_progress() {
+    use super::handle::SettleOnPanic;
+    use super::worker::{Progress, Stage};
+    use std::sync::{Arc, Mutex};
+    let progress = Arc::new(Mutex::new(Progress::starting()));
+    let guard = SettleOnPanic::new(&progress, Progress::is_settled, |p, why| {
+        p.stage = Stage::Failed(why)
+    });
+    drop(guard);
+    let settled = progress.lock().unwrap().clone();
+    assert!(settled.is_settled());
+    assert!(matches!(settled.stage, Stage::Failed(_)));
+    // A worker that did publish its stage keeps it.
+    let progress = Arc::new(Mutex::new(Progress::starting()));
+    let guard = SettleOnPanic::new(&progress, Progress::is_settled, |p, why| {
+        p.stage = Stage::Failed(why)
+    });
+    progress.lock().unwrap().stage = Stage::Cancelled;
+    drop(guard);
+    assert_eq!(progress.lock().unwrap().stage, Stage::Cancelled);
+}

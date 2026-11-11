@@ -221,10 +221,11 @@ impl Session {
         // Batch 4: a `confirmSession` / `terminateSession` for the
         // new-login alert succeeded.
         if let Some(RequestPurpose::Settings(SettingsPurpose::ReviewUnconfirmedSession {
-            confirmed,
+            session_id,
+            ..
         })) = pending.map(|p| p.purpose)
         {
-            self.finish_login_review(confirmed, None);
+            self.finish_login_review(session_id, None);
         }
         // Batch 4: terms accepted.
         if matches!(
@@ -232,8 +233,7 @@ impl Session {
             Some(RequestPurpose::AcceptTermsOfService)
         ) {
             self.settings.notices.terms = None;
-            self.settings.notices.terms_in_flight = false;
-            self.settings.notices.terms_error = None;
+            self.settings.notices.terms_accept = crate::state::fetch::Fetch::Idle;
         }
         // Batch 6: a 2FA step answered `ok` (cancel reset, login email
         // code check).

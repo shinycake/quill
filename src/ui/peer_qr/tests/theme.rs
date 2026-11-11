@@ -269,7 +269,8 @@ fn scrolling_the_gifts_grid_to_its_end_brings_the_next_page(cx: &mut TestAppCont
             let gifts = &mut session.users_state.peer_qr.gifts;
             let (list, offset) = demo_gifts_page(0, 30);
             gifts.list = list;
-            gifts.complete = false;
+            gifts.stage =
+                quill::peer_qr::theme::GiftsStage::Listed(quill::peer_qr::theme::GiftsRest::More);
             gifts.offset = offset;
         }
     });

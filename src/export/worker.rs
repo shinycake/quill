@@ -655,7 +655,7 @@ pub fn run<T: Tdlib>(job: &Job<'_>, tdlib: &mut T, folder: &Path) -> Result<Summ
     }
     let mut json_writer = if settings.format.wants_json() {
         Some(JsonWriter::start(
-            BufWriter::new(fs::File::create(folder.join("result.json"))?),
+            BufWriter::new(fs::File::create(folder.join(crate::export::RESULT_PART))?),
             &settings.title,
             settings.chat_id,
         )?)
@@ -675,6 +675,7 @@ pub fn run<T: Tdlib>(job: &Job<'_>, tdlib: &mut T, folder: &Path) -> Result<Summ
     let chat = export_chat(job, tdlib, &out, sink, &mut progress)?;
     if let Some(writer) = json_writer {
         writer.finish()?;
+        crate::export::publish_result(folder)?;
     }
     Ok(Summary {
         folder: folder.to_path_buf(),

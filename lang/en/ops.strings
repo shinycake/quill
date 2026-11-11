@@ -1175,3 +1175,6 @@
 "qll_ops_owner_candidate_admin" = "admin";
 "qll_ops_owner_candidate_member" = "member";
 "qll_ops_owner_transfer_confirm" = "This will transfer the full owner rights for {chat_title} to {name}. The new owner will be free to remove any of your admin privileges or even ban you.";
+"qll_ops_logout_failed" = "Couldn't log out. Please try again.";
+"qll_ops_share_theme_not_saved" = "Couldn't save the theme.";
+"qll_ops_request_not_sent" = "Couldn't send the request. Please try again.";

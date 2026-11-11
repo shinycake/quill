@@ -251,7 +251,7 @@ impl Session {
                 }
                 Some(RequestPurpose::Settings(SettingsPurpose::Passkeys(
                     crate::passkeys::PasskeysPurpose::Parameters,
-                ))) => self.apply_passkey_parameters(&text),
+                ))) => self.apply_passkey_parameters(pending.map(|p| p.id), &text),
                 Some(RequestPurpose::Settings(SettingsPurpose::Passkeys(
                     crate::passkeys::PasskeysPurpose::LoginParameters,
                 ))) => self.apply_passkey_login_parameters(&text),

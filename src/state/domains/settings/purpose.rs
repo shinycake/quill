@@ -217,6 +217,7 @@ pub enum SettingsPurpose {
     /// new-login alert ("Yes, it's me" / "No, it's not me!").
     ReviewUnconfirmedSession {
         confirmed: bool,
+        session_id: i64,
     },
     /// Batch 4: `acceptTermsOfService`.
     AcceptTermsOfService,

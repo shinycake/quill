@@ -29,8 +29,10 @@ mod view_model;
 mod demo;
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::peer_qr::free::FreeMode;
 use quill::peer_qr::link::OwnLinkState;
 use quill::peer_qr::session::PeerQrData;
@@ -386,8 +388,21 @@ impl QuillApp {
             .map(|data| data.take_save_answers())
             .unwrap_or_default();
         let any = !answers.is_empty();
+        let shown = self.peer_qr.open.as_ref().map(|open| open.state.id);
         for (ticket, result) in answers {
-            self.qr_act(QrAction::SaveAnswer { ticket, result }, cx);
+            if shown == Some(ticket.box_id) {
+                self.qr_act(QrAction::SaveAnswer { ticket, result }, cx);
+            } else if let Err(reason) = result {
+                // A pick saved as its box closed answers after the box is
+                // gone: a failure is told through the app's note, which
+                // outlives it.
+                let line = if reason.is_empty() {
+                    tr(keys::Q_OPS_SHARE_THEME_NOT_SAVED).to_string()
+                } else {
+                    reason
+                };
+                self.set_note(StatusNote::error(line));
+            }
         }
         any
     }
@@ -440,7 +455,7 @@ impl QuillApp {
     /// Start the once-a-second clock when a countdown shows; it stops
     /// itself when none does or the box closes.
     fn sync_qr_clock(&mut self, cx: &mut Context<Self>) {
-        if !self.qr_counts_down() {
+        if self.lock_waits() || !self.qr_counts_down() {
             return;
         }
         let Some(open) = self.peer_qr.open.as_mut() else {
@@ -471,6 +486,14 @@ impl QuillApp {
         if self.peer_qr.open.as_ref().map(|open| open.state.id) != Some(id) {
             return false;
         }
+        // The box stays open under the lock, but nothing is asked or run
+        // for it; the first poll after the unlock starts the clock again.
+        if self.lock_waits() {
+            if let Some(open) = self.peer_qr.open.as_mut() {
+                open.clock_running = false;
+            }
+            return false;
+        }
         self.ensure_qr_contact_link();
         self.qr_act(QrAction::Tick, cx);
         cx.notify();
@@ -498,8 +521,7 @@ impl QuillApp {
         let answers = data.take_free_answers();
         let failed = if own { data.contact_error.take() } else { None };
         if !open {
-            data.save_answers.clear();
-            return false;
+            return self.qr_take_save_answers(cx);
         }
         let saved = self.qr_take_save_answers(cx);
         let progressed = !answers.is_empty() || failed.is_some() || saved;
@@ -523,6 +545,9 @@ impl QuillApp {
     /// Your own box: the driver asks for a temporary contact link when
     /// there is none (or it ran out) and none is on its way.
     fn ensure_qr_contact_link(&mut self) {
+        if self.lock_waits() {
+            return;
+        }
         let own = self
             .peer_qr
             .open

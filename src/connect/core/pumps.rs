@@ -43,6 +43,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(app_root) = self.paths.root.parent().and_then(std::path::Path::parent) else {
             return;
         };
-        crate::account_data::claim(app_root, &self.session.account, me);
+        let claimed = crate::account_data::claim(
+            app_root,
+            &self.session.account,
+            me,
+            self.session.sign_in_origin,
+        );
+        if let Some(err) = claimed.owner_error {
+            // Not silent: without the owner file the next start cannot tell
+            // whose the folder is, so it drops what is in it.
+            eprintln!("quill: could not save the account owner: {err}");
+        }
     }
 }

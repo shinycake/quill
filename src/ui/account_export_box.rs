@@ -48,6 +48,18 @@ fn format_label(format: ExportFormat) -> &'static str {
 }
 
 impl QuillApp {
+    /// Show or hide the running export's progress box. The choice lives
+    /// with the export in the account's session, so it survives a switch
+    /// to another account and back.
+    pub(super) fn set_account_export_view(&mut self, view: quill::export::ExportView) {
+        if let Some(export) = self
+            .session_mut()
+            .and_then(|s| s.settings.account_export.as_mut())
+        {
+            export.view = view;
+        }
+    }
+
     /// Open the box. While an export is running it shows that export.
     pub(super) fn open_account_export(&mut self, cx: &mut Context<Self>) {
         // No bulk export for an agent driving the window.
@@ -59,7 +71,7 @@ impl QuillApp {
             .is_some_and(|s| s.settings.account_export.is_some())
         {
             self.open_box(DialogKind::AccountExport);
-            self.dialogs.account_export_progress_hidden = false;
+            self.set_account_export_view(quill::export::ExportView::Shown);
             cx.notify();
             return;
         }
@@ -118,7 +130,6 @@ impl QuillApp {
         match started {
             Ok(()) => {
                 self.dialogs.account_export_dialog = None;
-                self.dialogs.account_export_progress_hidden = false;
             }
             Err(error) => draft.error = Some(error.to_string()),
         }
@@ -157,7 +168,7 @@ impl QuillApp {
             QuillShell::on_close_kind(app, shell, DialogKind::AccountExport, |this, _, cx| {
                 this.dialogs.account_export_dialog = None;
                 // A running export keeps going; its result shows as a note.
-                this.dialogs.account_export_progress_hidden = true;
+                this.set_account_export_view(quill::export::ExportView::Hidden);
                 cx.notify();
             });
         app.update(cx, |this, cx| {
@@ -360,12 +371,16 @@ crate::ui::shell::register_dialogs! {
         1510,
         |app| {
             app.dialogs.account_export_dialog.is_some()
-                || (!app.dialogs.account_export_progress_hidden
-                    && app.session().is_some_and(|s| s.settings.account_export.is_some()))
+                || app.session().is_some_and(|s| {
+                    s.settings
+                        .account_export
+                        .as_ref()
+                        .is_some_and(|export| export.view == quill::export::ExportView::Shown)
+                })
         },
         QuillApp::build_account_export_dialog,
     )
-    .close(|app, _, cx| { app.dialogs.account_export_dialog = None; app.dialogs.account_export_progress_hidden = true; cx.notify(); }),
+    .close(|app, _, cx| { app.dialogs.account_export_dialog = None; app.set_account_export_view(quill::export::ExportView::Hidden); cx.notify(); }),
 }
 
 #[cfg(test)]

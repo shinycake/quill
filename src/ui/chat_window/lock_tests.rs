@@ -320,3 +320,35 @@ fn an_unlock_intent_runs_as_its_window_and_only_for_its_account(cx: &mut TestApp
     cx.run_until_parked();
     assert_eq!(ran.borrow().len(), 1, "dropped for the other account");
 }
+
+/// The window that asked for a passcode job closes before it answers: the
+/// answer still lands, in the main window. A correct unlock would
+/// otherwise leave the master key set and every window locked.
+#[gpui_kit::test]
+fn a_passcode_job_answer_lands_when_its_window_closed(cx: &mut TestAppContext) {
+    let (app, main) = new_app(cx);
+    let chat_window = open_chat_window(&app, main, cx);
+    lock(&app, cx);
+    cx.run_until_parked();
+    cx.update_window(chat_window, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.in_window_of(window, cx, |app, window, cx| {
+                app.run_passcode_job(
+                    || -> Result<(), quill::passcode::PasscodeError> { Ok(()) },
+                    QuillApp::unlock_answered,
+                    window,
+                    cx,
+                );
+            })
+        })
+    })
+    .expect("the chat window");
+    app.update(cx, |app, _| app.set_window_scope(None));
+    cx.update_window(chat_window, |_, window, _| window.remove_window())
+        .expect("the chat window");
+    cx.run_until_parked();
+    app.read_with(cx, |app, _| {
+        assert!(!app.account.passcode.is_locked(), "the answer was kept");
+        assert!(!app.account.passcode.job.is_running());
+    });
+}

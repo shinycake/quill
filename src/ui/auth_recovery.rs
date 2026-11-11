@@ -90,7 +90,7 @@ impl QuillApp {
     }
 
     /// Slice A10: submit the emailed recovery code.
-    pub(crate) fn submit_recovery_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn submit_recovery_code(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -110,10 +110,9 @@ impl QuillApp {
         let result = live.driver.submit_recovery_code(&code);
         code.zeroize();
         match result {
+            // The field keeps the code until the step is done: a rejected
+            // one is corrected, not retyped (`sync_auth_forms` clears it).
             Ok(_) => {
-                self.auth_ui
-                    .recovery_code_input
-                    .update(cx, |input, cx| input.set_value("", window, cx));
                 self.set_note(StatusNote::silent(tr(
                     keys::Q_MISC_RECOVERY_CODE_SUBMITTED_2FA_WILL,
                 )));

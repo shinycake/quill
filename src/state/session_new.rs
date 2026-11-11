@@ -16,6 +16,7 @@ impl Session {
             account_generation: AccountGeneration(1),
             auth_view: view_for(&auth),
             auth,
+            sign_in_origin: crate::account_data::SignInOrigin::Resumed,
             connection: ConnectionState::Initial,
             chats: HashMap::new(),
             main_order: Vec::new(),

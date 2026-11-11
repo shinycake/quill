@@ -327,25 +327,48 @@ pub fn can_save(rights: SaveRights) -> bool {
     }
 }
 
+/// Where the gifts panel's list is. The first page and what follows it are
+/// different stages, so a list can never be "loaded" and "complete" at the
+/// same time as "failed".
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GiftsStage {
+    /// No first page yet; its request is on its way (or not sent yet).
+    #[default]
+    First,
+    /// The first page could not be asked for (the driver refused): the
+    /// panel says so and offers Retry.
+    FirstFailed,
+    /// The first page is in; `rest` is about the pages after it.
+    Listed(GiftsRest),
+}
+
+/// The pages after the first one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GiftsRest {
+    /// The list is whole.
+    Complete,
+    /// There is more, and no request is on its way.
+    More,
+    /// A request is on its way (the next page, or a refresh).
+    Loading,
+    /// The next page failed: the panel stops asking for more until `at`
+    /// (unix seconds).
+    Waiting { at: i64 },
+}
+
 /// The gifts panel's list for one owner (tdesktop `CreateQrGiftList`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ThemeGifts {
     pub owner: Option<ThemeOwner>,
     pub list: Vec<ThemeGift>,
     pub offset: String,
-    /// The first page came back.
-    pub loaded: bool,
-    pub complete: bool,
-    pub loading: bool,
+    pub stage: GiftsStage,
     /// Tells a page for the current request from an older one. It keeps
     /// counting when the list moves to another owner, so a late page for
     /// the old owner never matches.
     pub serial: u64,
     /// When the request on its way was sent (unix seconds).
     pub requested_at: i64,
-    /// The next page failed: the panel stops asking for more until
-    /// `retry_at` (unix seconds).
-    pub retry_at: Option<i64>,
 }
 
 /// How long the gifts panel waits after a failed page before it asks for
@@ -375,9 +398,12 @@ impl ThemeGifts {
             return None;
         }
         self.serial += 1;
-        self.loading = true;
         self.requested_at = now;
-        self.retry_at = None;
+        // A refresh keeps showing the list it has until its page lands.
+        self.stage = match self.stage {
+            GiftsStage::Listed(_) => GiftsStage::Listed(GiftsRest::Loading),
+            GiftsStage::First | GiftsStage::FirstFailed => GiftsStage::First,
+        };
         Some(GiftsRequest {
             serial: self.serial,
             offset: if more {
@@ -388,9 +414,25 @@ impl ThemeGifts {
         })
     }
 
+    /// After a failed request at `since`: a whole list stays whole (no
+    /// offset is left), else the next page waits [`GIFTS_RETRY_SECS`].
+    fn wait_until(&self, since: i64) -> GiftsStage {
+        GiftsStage::Listed(if self.offset.is_empty() {
+            GiftsRest::Complete
+        } else {
+            GiftsRest::Waiting {
+                at: since.saturating_add(GIFTS_RETRY_SECS),
+            }
+        })
+    }
+
     /// The panel may ask for the next page.
     pub fn wants_more(&self, now: i64) -> bool {
-        self.loaded && !self.complete && !self.loading && self.retry_at.is_none_or(|at| now >= at)
+        match self.stage {
+            GiftsStage::Listed(GiftsRest::More) => true,
+            GiftsStage::Listed(GiftsRest::Waiting { at }) => now >= at,
+            _ => false,
+        }
     }
 
     /// A page or failure belongs to the request now on its way.
@@ -402,15 +444,25 @@ impl ThemeGifts {
     /// only when there is nothing to list. A failed next page is retried
     /// [`GIFTS_RETRY_SECS`] after it was asked for.
     pub fn fail(&mut self) {
-        self.loading = false;
-        if self.loaded {
-            self.retry_at = Some(self.requested_at.saturating_add(GIFTS_RETRY_SECS));
-        } else {
+        self.stage = match self.stage {
+            GiftsStage::Listed(_) => self.wait_until(self.requested_at),
             // No first page ever came: show what there is (nothing) as
             // a whole list, as tdesktop does.
-            self.loaded = true;
-            self.complete = true;
-        }
+            GiftsStage::First | GiftsStage::FirstFailed => GiftsStage::Listed(GiftsRest::Complete),
+        };
+    }
+
+    /// The driver would not send the request at all (not ready, no right
+    /// to save, the owner not known). A next page waits
+    /// [`GIFTS_RETRY_SECS`] so the panel does not ask again on every
+    /// frame; with no first page the panel says it could not load, with
+    /// Retry (a refusal is not an empty list: reopening is not the only
+    /// way out).
+    pub fn refuse(&mut self, now: i64) {
+        self.stage = match self.stage {
+            GiftsStage::Listed(_) => self.wait_until(now),
+            GiftsStage::First | GiftsStage::FirstFailed => GiftsStage::FirstFailed,
+        };
     }
 
     /// A page came back. The first page replaces the list; burned gifts
@@ -424,11 +476,12 @@ impl ThemeGifts {
                 self.list.push(gift);
             }
         }
-        self.complete = next_offset.is_empty();
+        self.stage = GiftsStage::Listed(if next_offset.is_empty() {
+            GiftsRest::Complete
+        } else {
+            GiftsRest::More
+        });
         self.offset = next_offset;
-        self.loaded = true;
-        self.loading = false;
-        self.retry_at = None;
     }
 }
 
@@ -436,6 +489,8 @@ impl ThemeGifts {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GiftsLayout {
     Loading,
+    /// The first page could not be asked for: a message and Retry.
+    Failed,
     Empty,
     /// One, two or three wide tiles in a row.
     Wide(usize),
@@ -447,11 +502,14 @@ pub const GIFT_COLUMNS: usize = 3;
 
 pub fn gifts_layout(gifts: &ThemeGifts) -> GiftsLayout {
     let count = gifts.list.len();
-    if !gifts.loaded {
-        GiftsLayout::Loading
-    } else if count == 0 {
+    let complete = match gifts.stage {
+        GiftsStage::First => return GiftsLayout::Loading,
+        GiftsStage::FirstFailed => return GiftsLayout::Failed,
+        GiftsStage::Listed(rest) => rest == GiftsRest::Complete,
+    };
+    if count == 0 {
         GiftsLayout::Empty
-    } else if !gifts.complete || count > GIFT_COLUMNS {
+    } else if !complete || count > GIFT_COLUMNS {
         GiftsLayout::Grid
     } else {
         GiftsLayout::Wide(count)

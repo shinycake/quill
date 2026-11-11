@@ -365,44 +365,6 @@ impl QuillApp {
         input.read(cx).value().to_string()
     }
 
-    /// Run a slow passcode operation (PBKDF2) off the UI thread. `done`
-    /// runs in the window that started it, with that window's state in
-    /// place: a wrong passcode empties and refocuses the lock field it was
-    /// typed in (a chat window's is in its slot). If that window closed
-    /// meanwhile, only the job ends.
-    pub(in crate::ui) fn run_passcode_job<T: Send + 'static>(
-        &mut self,
-        job: impl FnOnce() -> T + Send + 'static,
-        done: impl FnOnce(&mut Self, T, &mut Window, &mut Context<Self>) + 'static,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.account.passcode.job = PasscodeJob::Running;
-        self.account.passcode.error = None;
-        let task = cx.background_executor().spawn(async move { job() });
-        // screen-scope: the passcode is one lock over every account; only its window matters.
-        // window-scope: `done` runs in its window (`in_window_of`); a held
-        // lock reaches every window itself (`in_every_window`).
-        cx.spawn_in(window, async move |this, cx| {
-            let out = task.await;
-            let ran = this.update_in(cx, |this, window, cx| {
-                let job = std::mem::take(&mut this.account.passcode.job);
-                this.in_window_of(window, cx, |this, window, cx| done(this, out, window, cx));
-                this.lock_held_for_job(job, cx);
-                cx.notify();
-            });
-            if ran.is_err() {
-                let _ = this.update(cx, |this, cx| {
-                    let job = std::mem::take(&mut this.account.passcode.job);
-                    this.lock_held_for_job(job, cx);
-                    cx.notify();
-                });
-            }
-        })
-        .detach();
-        cx.notify();
-    }
-
     fn submit_create_passcode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let new = self.read_field(&self.account.passcode.new, cx);
         let confirm = self.read_field(&self.account.passcode.confirm, cx);
@@ -989,6 +951,7 @@ crate::ui::shell::register_dialogs! {
 }
 
 mod build_passcode_dialog;
+mod job;
 mod lock_field;
 mod lock_gate;
 mod lock_logout;

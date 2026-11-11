@@ -32,6 +32,14 @@ impl QuillApp {
         self.account.passcode.is_locked()
     }
 
+    /// The one rule for `session.app_active` (docs/decisions/
+    /// lock-is-a-render-state.md section 4): a locked Quill is not looked
+    /// at, whichever window has the focus. The on-screen account and the
+    /// background accounts both take it from here.
+    pub(in crate::ui) fn looked_at(&self, window_focused: bool) -> bool {
+        window_focused && !self.refused_while_locked()
+    }
+
     /// Locked: the pumps that turn a stored request or answer into
     /// something shown or started do not run, and what they would drain
     /// stays where it is for the first pass after the unlock. The main

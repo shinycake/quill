@@ -22,10 +22,13 @@ impl Session {
         let purpose = passkeys_purpose(pending.map(|p| p.purpose));
         match payload {
             PasskeysPayload::List(list) => {
-                // Only our own `getLoginPasskeys` answer replaces the list.
-                if purpose == Some(PasskeysPurpose::List) {
-                    self.settings.passkeys.accept_list(list);
-                    self.settings.passkeys.error = None;
+                // Only our own `getLoginPasskeys` answer replaces the list,
+                // and not one asked before a removal.
+                if let Some(PasskeysPurpose::List(generation)) = purpose {
+                    self.settings.passkeys.accept_list(list, generation);
+                    if generation == self.settings.passkeys.generation {
+                        self.settings.passkeys.error = None;
+                    }
                 }
             }
             PasskeysPayload::Added(passkey) => {
@@ -33,14 +36,25 @@ impl Session {
                     self.settings.passkeys.accept_added(passkey);
                 }
             }
+            PasskeysPayload::AddedUnreadable => {
+                // No passkey to show: the registration ends here, not in
+                // a stage nothing answers.
+                if purpose == Some(PasskeysPurpose::Add) {
+                    let passkeys = &mut self.settings.passkeys;
+                    if passkeys.fail_register(pending.map(|p| p.id)) {
+                        passkeys.error =
+                            Some("Could not add the passkey: unreadable answer".into());
+                    }
+                }
+            }
         }
     }
 
     /// `getPasskeyParameters` answered: the ceremony can start. Options
     /// that cannot be read end the attempt with an error line.
-    pub(crate) fn apply_passkey_parameters(&mut self, json: &str) {
+    pub(crate) fn apply_passkey_parameters(&mut self, id: Option<RequestId>, json: &str) {
         let passkeys = &mut self.settings.passkeys;
-        if !passkeys.accept_parameters(json, Instant::now()) {
+        if !passkeys.accept_parameters(id, json, Instant::now()) {
             passkeys.error = Some("Could not add the passkey: unreadable parameters".into());
         }
     }
@@ -80,14 +94,18 @@ impl Session {
     pub(crate) fn apply_passkeys_error(
         &mut self,
         err: &TdError,
-        purpose: Option<RequestPurpose>,
+        asked: Option<(RequestId, RequestPurpose)>,
     ) -> bool {
         let passkeys = &mut self.settings.passkeys;
-        match passkeys_purpose(purpose) {
-            Some(PasskeysPurpose::List) => {
-                // Retrying is the user's next look, not every ingest.
-                passkeys.stale = false;
-                passkeys.error = Some(sessions_error_line("load the passkeys", err));
+        let id = asked.map(|(id, _)| id);
+        match passkeys_purpose(asked.map(|(_, purpose)| purpose)) {
+            Some(PasskeysPurpose::List(generation)) => {
+                // Retrying is the user's next look, not every ingest. A look
+                // older than a removal says nothing about the list now.
+                if generation == passkeys.generation {
+                    passkeys.stale = false;
+                    passkeys.error = Some(sessions_error_line("load the passkeys", err));
+                }
                 true
             }
             Some(PasskeysPurpose::Remove) => {
@@ -96,14 +114,16 @@ impl Session {
                 true
             }
             Some(PasskeysPurpose::Parameters) => {
-                passkeys.error = Some(sessions_error_line("add the passkey", err));
+                if passkeys.fail_register(id) {
+                    passkeys.error = Some(sessions_error_line("add the passkey", err));
+                }
                 true
             }
             Some(PasskeysPurpose::Add) => {
                 // tdesktop drops the options after a failed registration.
-                passkeys.adding = false;
-                passkeys.registration = None;
-                passkeys.error = Some(sessions_error_line("add the passkey", err));
+                if passkeys.fail_register(id) {
+                    passkeys.error = Some(sessions_error_line("add the passkey", err));
+                }
                 true
             }
             Some(PasskeysPurpose::LoginConfig) => true,

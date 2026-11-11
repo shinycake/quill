@@ -255,7 +255,7 @@ fn run_inner<T: Tdlib>(
         html: settings.format.wants_html(),
         json: if settings.format.wants_json() {
             Some(ResultJson::start(BufWriter::new(fs::File::create(
-                root.join("result.json"),
+                root.join(crate::export::RESULT_PART),
             )?))?)
         } else {
             None
@@ -388,6 +388,7 @@ fn run_inner<T: Tdlib>(
     }
     if let Some(json) = writer.json.take() {
         json.finish()?;
+        crate::export::publish_result(root)?;
     }
     Ok(summary)
 }

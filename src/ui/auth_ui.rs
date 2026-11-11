@@ -2,6 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::signin_ui::PhoneStep;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
@@ -41,17 +42,47 @@ impl QuillApp {
         let mut email = self.screen.auth_ui.email_input.read(cx).value().to_string();
         let result = live.driver.submit_email(&email);
         email.zeroize();
+        // The field keeps the address until the step is done: a rejected
+        // one is corrected, not retyped (`sync_auth_forms` clears it).
         self.set_note(match result {
-            Ok(_) => {
-                self.screen
-                    .auth_ui
-                    .email_input
-                    .update(cx, |input, cx| input.set_value("", window, cx));
-                StatusNote::silent(tr(keys::Q_NOTES_EMAIL_SUBMITTED))
-            }
+            Ok(_) => StatusNote::silent(tr(keys::Q_NOTES_EMAIL_SUBMITTED)),
             Err(_) => StatusNote::error(tr(keys::Q_NOTES_COULDNT_SUBMIT_THE_EMAIL)),
         });
+        let _ = window;
         cx.notify();
+    }
+
+    /// Per frame: a form whose step is over is emptied. The values stay
+    /// while the step does, so a rejected send does not cost the user what
+    /// they typed.
+    pub(super) fn sync_auth_forms(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let auth = self.current_auth();
+        let ui = &self.screen.auth_ui;
+        if !matches!(auth, AuthorizationState::WaitEmailAddress) {
+            let email = ui.email_input.clone();
+            if !email.read(cx).value().is_empty() {
+                email.update(cx, |input, cx| input.set_value("", window, cx));
+            }
+        }
+        let recovering =
+            ui.recovery_mode && matches!(auth, AuthorizationState::WaitPassword { .. });
+        if !recovering {
+            let code = ui.recovery_code_input.clone();
+            if !code.read(cx).value().is_empty() {
+                code.update(cx, |input, cx| input.set_value("", window, cx));
+            }
+        }
+        let ui = &self.screen.auth_ui;
+        if !matches!(auth, AuthorizationState::WaitRegistration { .. }) {
+            for input in [
+                ui.registration_first_input.clone(),
+                ui.registration_last_input.clone(),
+            ] {
+                if !input.read(cx).value().is_empty() {
+                    input.update(cx, |input, cx| input.set_value("", window, cx));
+                }
+            }
+        }
     }
 
     pub(super) fn submit_phone(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -61,7 +92,9 @@ impl QuillApp {
         let allowed = match live.driver.session.auth {
             AuthorizationState::WaitPhoneNumber => true,
             // "Wrong number?" re-sends from the code step.
-            AuthorizationState::WaitCode { .. } => self.auth_ui.signin.editing_phone,
+            AuthorizationState::WaitCode { .. } => {
+                matches!(self.auth_ui.signin.phone_step, PhoneStep::Editing { .. })
+            }
             _ => false,
         };
         if !allowed {
@@ -76,8 +109,12 @@ impl QuillApp {
         match live.driver.submit_phone(&number) {
             Ok(_) => {
                 // The field keeps the number so "Wrong number?" can edit it.
-                self.auth_ui.signin.submitted_phone = shown;
-                self.auth_ui.signin.editing_phone = false;
+                // The code step names it only once TDLib accepted it.
+                let back = std::mem::take(&mut self.auth_ui.signin.phone_step);
+                self.auth_ui.signin.phone_step = PhoneStep::Sending {
+                    phone: shown,
+                    back: Box::new(back),
+                };
                 self.auth_ui.signin.code_clock = None;
                 self.auth_ui.signin.error_clock = None;
                 self.auth_ui.signin.banned_dismissed = false;

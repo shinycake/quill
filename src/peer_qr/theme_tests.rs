@@ -550,6 +550,50 @@ fn a_gifts_request_for_another_owner_never_reuses_a_serial() {
     assert!(gifts.start(channel, true, 10).is_some());
     gifts.fail();
     assert_eq!(gifts.list.len(), 1);
-    assert!(!gifts.complete && !gifts.wants_more(10 + GIFTS_RETRY_SECS - 1));
+    assert!(!gifts.wants_more(10 + GIFTS_RETRY_SECS - 1));
     assert!(gifts.wants_more(10 + GIFTS_RETRY_SECS));
+}
+
+#[test]
+fn a_refused_gifts_request_settles_the_panel_instead_of_asking_every_frame() {
+    use crate::peer_qr::theme::{GIFTS_RETRY_SECS, ThemeOwner};
+    let owner = ThemeOwner::User(1);
+    let mut gifts = ThemeGifts::default();
+    gifts.start(owner, false, 0).unwrap();
+    gifts.accept(vec![gift(1, "r1")], "page2".into(), true);
+    assert!(gifts.wants_more(20));
+    gifts.refuse(20);
+    assert!(!gifts.wants_more(20 + GIFTS_RETRY_SECS - 1));
+    assert!(gifts.wants_more(20 + GIFTS_RETRY_SECS));
+    // No first page ever: a failure with Retry, not an empty list that
+    // stays until the box is reopened, and not a spinner for good.
+    let mut fresh = ThemeGifts::default();
+    fresh.start(owner, false, 20).unwrap();
+    fresh.refuse(20);
+    assert_eq!(gifts_layout(&fresh), GiftsLayout::Failed);
+    assert!(
+        !fresh.wants_more(1_000),
+        "a retry is the user's, not a frame's"
+    );
+    // Retry asks for the first page again; it lands like any first page.
+    let retry = fresh.start(owner, false, 30).unwrap();
+    assert_eq!(gifts_layout(&fresh), GiftsLayout::Loading);
+    assert_eq!(retry.offset, "");
+    fresh.accept(vec![gift(1, "r1")], String::new(), true);
+    assert_eq!(gifts_layout(&fresh), GiftsLayout::Wide(1));
+}
+
+#[test]
+fn retry_on_the_gifts_failure_asks_for_the_first_page_again() {
+    let mut qr = own_box();
+    qr.apply(QrAction::OpenPanel(QrPanel::Gifts), env(true));
+    assert_eq!(
+        qr.apply(QrAction::RetryGifts, env(true)),
+        vec![QrEffect::LoadGifts { more: false }]
+    );
+    qr.apply(QrAction::ClosePanel, env(true));
+    assert!(
+        qr.apply(QrAction::RetryGifts, env(true)).is_empty(),
+        "panel closed"
+    );
 }
