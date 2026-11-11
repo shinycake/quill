@@ -1,18 +1,15 @@
-// Modified by the Quill project (2026) from gpui-base 0.7.3 (Apache-2.0):
-// bidirectional text support and formatting spans in the input engine. See
-// third_party/gpui-base/QUILL-CHANGES.md.
 //! A text input field that allows the user to enter text.
 //!
 //! Based on the `Input` example from the `gpui` crate.
 //! https://github.com/zed-industries/zed/blob/main/crates/gpui/examples/input.rs
 use gpui::TextAlign;
 use gpui::{
-    Action, AnyWindowHandle, App, AppContext, Bounds, ClipboardItem, Context, Edges, Entity,
-    EntityInputHandler, EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement,
-    KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _,
-    Pixels, Point, Render, ScrollEvent, ScrollHandle, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, UTF16Selection, WeakFocusHandle,
-    Window, actions, div, point, prelude::FluentBuilder as _, px,
+    Action, App, AppContext, Bounds, ClipboardItem, Context, Edges, Entity, EntityInputHandler,
+    EventEmitter, FocusHandle, Focusable, Hsla, InteractiveElement as _, IntoElement, KeyBinding,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point,
+    Render, ScrollEvent, ScrollHandle, SharedString, StatefulInteractiveElement as _, Styled as _,
+    Subscription, UTF16Selection, WeakFocusHandle, Window, actions, div, point,
+    prelude::FluentBuilder as _, px,
 };
 use gpui::{Autocapitalize, TextInputAction, TextInputConfiguration};
 use ropey::{Rope, RopeSlice};
@@ -25,8 +22,9 @@ use sum_tree::Bias;
 use unicode_segmentation::*;
 
 use super::{
-    DiagnosticSet, DisplayMap, InputContextMenuCapabilities, InputEditorStyle,
-    InputHighlighterFactory, MASK_CHAR, MaskPattern, NativeMenu, NumberStep, WrappingIndent,
+    DiagnosticSet, DisplayMap, FoldPlaceholderRenderer, InputContextMenuCapabilities,
+    InputEditorStyle, InputHighlighterFactory, MASK_CHAR, MaskPattern, NativeMenu, NumberStep,
+    WrappingIndent,
     blink_cursor::BlinkCursor,
     change::Change,
     cursor::{CursorSelection, Selections},
@@ -301,22 +299,6 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new("cmd-left", MoveHome, Some(CONTEXT)),
         #[cfg(target_os = "macos")]
         KeyBinding::new("ctrl-e", MoveEnd, Some(CONTEXT)),
-        // The rest of Cocoa's standard Ctrl text keys (macOS
-        // StandardKeyBinding.dict), which every native text field honors.
-        #[cfg(target_os = "macos")]
-        KeyBinding::new("ctrl-f", MoveRight, Some(CONTEXT)),
-        #[cfg(target_os = "macos")]
-        KeyBinding::new("ctrl-b", MoveLeft, Some(CONTEXT)),
-        #[cfg(target_os = "macos")]
-        KeyBinding::new("ctrl-n", MoveDown, Some(CONTEXT)),
-        #[cfg(target_os = "macos")]
-        KeyBinding::new("ctrl-p", MoveUp, Some(CONTEXT)),
-        #[cfg(target_os = "macos")]
-        KeyBinding::new("ctrl-d", Delete, Some(CONTEXT)),
-        #[cfg(target_os = "macos")]
-        KeyBinding::new("ctrl-h", Backspace, Some(CONTEXT)),
-        #[cfg(target_os = "macos")]
-        KeyBinding::new("ctrl-k", DeleteToEndOfLine, Some(CONTEXT)),
         #[cfg(target_os = "macos")]
         KeyBinding::new("cmd-right", MoveEnd, Some(CONTEXT)),
         #[cfg(target_os = "macos")]
@@ -390,10 +372,8 @@ struct PasteTarget {
 
 /// Caret positioning geometry from the input's latest prepaint.
 ///
-/// Unlike `last_layout` (published at paint time), this is stashed during
-/// prepaint so caret-anchored popups can position themselves from the
-/// current frame's geometry in their deferred prepaint, instead of the
-/// previous frame's paint.
+/// Stashed during prepaint so caret-anchored popups can position themselves
+/// from the current frame's geometry in their deferred prepaint.
 #[derive(Clone, Copy, Debug)]
 #[doc(hidden)]
 pub struct PrepaintCaretGeometry {
@@ -464,21 +444,9 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) undo_manager: UndoManager,
     pub(super) inline_tokens: Option<Box<super::inline_tokens::InlineTokenStore>>,
     pub(super) pending_token: Option<super::InlineToken>,
-    /// Tokens of content being inserted, relative to it (Quill patch).
-    pub(super) pending_tokens: Option<Vec<super::InlineTokenSpan>>,
-    /// Formatting spans, sorted by start (Quill patch, `text_spans.rs`).
-    pub(super) text_spans: std::rc::Rc<[super::TextSpan]>,
-    /// The tags the next text typed at the caret takes (Quill patch).
-    pub(super) typing_spans: Option<super::text_spans::TypingSpans>,
-    /// Spans of content being inserted, relative to it (Quill patch).
-    pub(super) pending_spans: Option<Vec<super::TextSpan>>,
-    /// Presentation of span tags, installed by the view (Quill patch).
-    pub(super) span_styler: Option<super::TextSpanStyler>,
     pub(super) replaying_history: bool,
     pub(super) validated_token_edit: bool,
     pub(super) document_revision: u64,
-    /// `text` as a string, until the next edit takes it (Quill patch).
-    value_memo: std::cell::Cell<Option<SharedString>>,
     pub(super) token_presentation: super::InlineTokenPresentation,
     pub(super) token_layout_cache: Option<Box<super::token_presentation::TokenLayoutCache>>,
     /// Real per-frame bounds of the placed token elements, keyed by token
@@ -504,9 +472,6 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) scroll_beyond_last_line: Option<usize>,
     pub(super) cursor_surrounding_lines: Option<usize>,
     pub(super) blink_cursor: Entity<BlinkCursor>,
-    /// QUILL: the window that started the caret's blink, the one whose
-    /// paint may stop it (`sync_blink`).
-    pub(super) blink_window: Cell<Option<AnyWindowHandle>>,
     pub(super) loading: bool,
     /// The cursors and selections.
     ///
@@ -522,10 +487,11 @@ pub struct InputBaseState<M: InputModeKind> {
     /// Fresh caret geometry stashed during prepaint for caret-anchored popups.
     ///
     /// Popups are positioned in their deferred prepaint, which runs after the
-    /// input's prepaint but before its paint, so they read this instead of
-    /// the previous frame's `last_layout`.
+    /// input's prepaint but before its paint.
     pub(crate) prepaint_caret_geometry: Option<PrepaintCaretGeometry>,
     pub(super) last_cursor: Option<usize>,
+    /// Where the platform was last told the caret is, for its IME panel.
+    pub(super) ime_anchor: Option<(Point<Pixels>, Option<Bounds<Pixels>>)>,
     /// The input container bounds
     pub(super) input_bounds: Bounds<Pixels>,
     /// The text bounds
@@ -588,6 +554,8 @@ pub struct InputBaseState<M: InputModeKind> {
     /// colours once and then never see them as unset again, which is the same
     /// freeze in a different place.
     projected_editor_style: InputEditorStyle,
+    pub(super) fold_placeholder_renderer: Option<FoldPlaceholderRenderer>,
+    pub(super) fold_background: Option<Hsla>,
     accessibility: Option<InputAccessibility>,
     /// What paints in place of Base's editor scrollbar, when a consumer
     /// supplies its own.
@@ -986,12 +954,13 @@ impl<M: InputModeKind> InputBaseState<M> {
             // Observe the blink cursor to repaint the view when it changes.
             cx.observe(&blink_cursor, |_, _, cx| cx.notify()),
             // Blink the cursor when the window is active, pause when it's not.
-            // QUILL: the paint stops it in an inactive window (`sync_blink`).
             cx.observe_window_activation(window, |input, window, cx| {
                 if window.is_window_active() {
                     let focus_handle = input.focus_handle.clone();
                     if focus_handle.is_focused(window) {
-                        input.start_blink_cursor(window, cx);
+                        input.blink_cursor.update(cx, |blink_cursor, cx| {
+                            blink_cursor.start(cx);
+                        });
                     }
                 }
             }),
@@ -1016,15 +985,9 @@ impl<M: InputModeKind> InputBaseState<M> {
             scroll_beyond_last_line: None,
             cursor_surrounding_lines: None,
             blink_cursor,
-            blink_window: Cell::new(None),
             undo_manager,
             inline_tokens: None,
             pending_token: None,
-            pending_tokens: None,
-            text_spans: std::rc::Rc::from([]),
-            typing_spans: None,
-            pending_spans: None,
-            span_styler: None,
             replaying_history: false,
             validated_token_edit: false,
             document_revision: 0,
@@ -1066,6 +1029,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             last_input_edits: Vec::new(),
             column_select_start: None,
             last_cursor: None,
+            ime_anchor: None,
             scroll_handle: ScrollHandle::new(),
             scroll_bounce: crate::ScrollBounce::enabled_by_default(),
             overscroll: Overscroll::default(),
@@ -1080,6 +1044,8 @@ impl<M: InputModeKind> InputBaseState<M> {
             mask_pattern_set: false,
             editor_style: InputEditorStyle::default(),
             projected_editor_style: InputEditorStyle::default(),
+            fold_placeholder_renderer: None,
+            fold_background: None,
             accessibility: None,
             scrollbar_renderer: None,
             diagnostic_popover: None,
@@ -1089,7 +1055,6 @@ impl<M: InputModeKind> InputBaseState<M> {
             completion_inserting: false,
             overlay_action_handler: None,
             silent_replace_text: false,
-            value_memo: Default::default(),
             emit_events: true,
             _subscriptions,
             _pending_update: false,
@@ -1176,6 +1141,24 @@ impl<M: InputModeKind> InputBaseState<M> {
     pub fn set_editor_style(&mut self, style: InputEditorStyle) {
         self.editor_style = style.clone();
         self.projected_editor_style = style;
+    }
+
+    /// Draws a placeholder right after the text of each folded line, given its
+    /// buffer row. Clicking it unfolds the line.
+    pub fn set_fold_placeholder_renderer(
+        &mut self,
+        renderer: Option<FoldPlaceholderRenderer>,
+        cx: &mut Context<Self>,
+    ) {
+        self.fold_placeholder_renderer = renderer;
+        cx.notify();
+    }
+
+    /// Fills each folded line across the editor, as VS Code's
+    /// `editor.foldBackground`.
+    pub fn set_fold_background(&mut self, color: Option<Hsla>, cx: &mut Context<Self>) {
+        self.fold_background = color;
+        cx.notify();
     }
 
     /// Project semantics onto the editor, never onto a second focus owner.
@@ -1267,17 +1250,6 @@ impl<M: InputModeKind> InputBaseState<M> {
         &self,
         offset: usize,
     ) -> (usize, usize, Option<Point<Pixels>>) {
-        self.line_and_position_for_offset_with_affinity(offset, false)
-    }
-
-    /// Like [`Self::line_and_position_for_offset`], placing a caret that hangs on the
-    /// character before `offset` (see [`Self::cursor_line_end_affinity`]) when
-    /// `line_end_affinity` is set.
-    pub(super) fn line_and_position_for_offset_with_affinity(
-        &self,
-        offset: usize,
-        line_end_affinity: bool,
-    ) -> (usize, usize, Option<Point<Pixels>>) {
         let Some(last_layout) = &self.last_layout else {
             return (0, 0, None);
         };
@@ -1287,8 +1259,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         for (vi, line) in last_layout.lines.iter().enumerate() {
             let prev_lines_offset = last_layout.visible_line_byte_offsets[vi];
             let local_offset = offset.saturating_sub(prev_lines_offset);
-            if let Some(pos) = line.position_for_index(local_offset, last_layout, line_end_affinity)
-            {
+            if let Some(pos) = line.position_for_index(local_offset, last_layout, false) {
                 let sub_line_index = (pos.y / line_height) as usize;
                 let adjusted_pos = point(pos.x + last_layout.line_number_width, pos.y + y_offset);
                 return (vi, sub_line_index, Some(adjusted_pos));
@@ -1315,16 +1286,11 @@ impl<M: InputModeKind> InputBaseState<M> {
     ) {
         let content = value.into();
         self.inline_tokens = None;
-        self.text_spans = std::rc::Rc::from([]);
-        self.typing_spans = None;
-        self.display_map.stage_span_fonts(std::rc::Rc::from([]));
         self.undo_manager.set_ignoring(true);
         self.emit_events = false;
         self.replace_text(content.text().clone(), window, cx);
         self.ime_original_text = None;
-        self.install_spans(&content, cx);
         self.install_tokens(content);
-        self.document_revision = self.document_revision.wrapping_add(1);
         self.undo_manager.set_ignoring(false);
         self.emit_events = true;
 
@@ -1676,25 +1642,12 @@ impl<M: InputModeKind> InputBaseState<M> {
         self
     }
 
-    /// Moves with every change to the text or its spans (Quill patch), so a
-    /// caller can keep what it derived from them until it does.
-    pub fn document_revision(&self) -> u64 {
-        self.document_revision
-    }
-
     /// Return the value of the input field as an owned string.
     ///
-    /// The string is materialized once per edit (Quill patch). See
-    /// [`Self::text`] for the [`Rope`] the state owns, which is borrowed and
-    /// costs nothing to read.
+    /// The string is materialized on each call. See [`Self::text`] for the
+    /// [`Rope`] the state owns, which is borrowed and costs nothing to read.
     pub fn value(&self) -> SharedString {
-        let value = self
-            .value_memo
-            .take()
-            .unwrap_or_else(|| SharedString::new(self.text.to_string()));
-        debug_assert!(self.text == value.as_ref(), "a text edit kept the old value");
-        self.value_memo.set(Some(value.clone()));
-        value
+        SharedString::new(self.text.to_string())
     }
 
     /// Return the portion of the value within the input field that
@@ -1778,7 +1731,9 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// Focus the input field.
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
         self.focus_handle.focus(window, cx);
-        self.start_blink_cursor(window, cx);
+        self.blink_cursor.update(cx, |cursor, cx| {
+            cursor.start(cx);
+        });
     }
 
     /// Refresh the input, so the next render re-runs syntax highlighting and
@@ -1801,19 +1756,11 @@ impl<M: InputModeKind> InputBaseState<M> {
 
     pub(super) fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
         self.undo_manager.break_transaction_coalescing();
-        self.select_all_cursors_to_with_affinity(
-            |s, sel| s.step_horizontally(sel.cursor_offset(), s.line_end_affinity_for(sel), true),
-            false,
-            cx,
-        );
+        self.select_all_cursors_to(|s, sel| s.previous_boundary(sel.cursor_offset()), cx);
     }
 
     pub(super) fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
-        self.select_all_cursors_to_with_affinity(
-            |s, sel| s.step_horizontally(sel.cursor_offset(), s.line_end_affinity_for(sel), false),
-            false,
-            cx,
-        );
+        self.select_all_cursors_to(|s, sel| s.next_boundary(sel.cursor_offset()), cx);
     }
 
     pub(super) fn select_up(&mut self, _: &SelectUp, _: &mut Window, cx: &mut Context<Self>) {
@@ -1921,11 +1868,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         cx: &mut Context<Self>,
     ) {
         self.undo_manager.break_transaction_coalescing();
-        self.select_all_cursors_to_with_affinity(
-            |s, sel| {
-                s.step_word_horizontally(sel.cursor_offset(), s.line_end_affinity_for(sel), true)
-            },
-            false,
+        self.select_all_cursors_to(
+            |s, sel| s.previous_start_of_word_at(sel.cursor_offset()),
             cx,
         );
     }
@@ -1937,13 +1881,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         cx: &mut Context<Self>,
     ) {
         self.undo_manager.break_transaction_coalescing();
-        self.select_all_cursors_to_with_affinity(
-            |s, sel| {
-                s.step_word_horizontally(sel.cursor_offset(), s.line_end_affinity_for(sel), false)
-            },
-            false,
-            cx,
-        );
+        self.select_all_cursors_to(|s, sel| s.next_end_of_word_at(sel.cursor_offset()), cx);
     }
 
     /// Return the start offset of the previous word.
@@ -3026,6 +2964,8 @@ impl<M: InputModeKind> InputBaseState<M> {
                 cx.notify();
             }
         } else {
+            self.overscroll
+                .touch_phase(event.touch_phase, cx.background_executor().now());
             // Axis drift must not drop the end of a vertical drag.
             if matches!(
                 event.touch_phase,
@@ -3175,8 +3115,6 @@ impl<M: InputModeKind> InputBaseState<M> {
         {
             let line = &last_layout.lines[vi];
             let local_offset = offset.saturating_sub(last_layout.visible_line_byte_offsets[vi]);
-            // A right-to-left paragraph rests against the right edge: no margin there.
-            let safety_margin = if line.is_rtl() { px(0.) } else { safety_margin };
             if let Some(pos) = line.position_for_index(local_offset, last_layout, false) {
                 let bounds_width = bounds.size.width - last_layout.line_number_width;
                 let col_offset_x = pos.x;
@@ -3260,7 +3198,7 @@ impl<M: InputModeKind> InputBaseState<M> {
 
         let texts = self.selected_texts();
 
-        cx.write_to_clipboard(self.clipboard_item(texts.join("\n")));
+        cx.write_to_clipboard(ClipboardItem::new_string(texts.join("\n")));
     }
 
     pub(super) fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
@@ -3270,7 +3208,7 @@ impl<M: InputModeKind> InputBaseState<M> {
 
         let texts = self.selected_texts();
 
-        cx.write_to_clipboard(self.clipboard_item(texts.join("\n")));
+        cx.write_to_clipboard(ClipboardItem::new_string(texts.join("\n")));
 
         self.undo_manager.set_pending_intent(EditIntent::Atomic);
         self.replace_text_in_range_silent(None, "", window, cx);
@@ -3338,12 +3276,6 @@ impl<M: InputModeKind> InputBaseState<M> {
         let Some(mut new_text) = clipboard.text().filter(|text| !text.is_empty()) else {
             return;
         };
-        // A copy from an input with formatting spans or tokens carries them;
-        // paste restores them into a single selection (Quill patch).
-        if self.selections.is_single() && self.paste_rich(&clipboard, &new_text, window, cx) {
-            self.scroll_to(self.cursor(), None, cx);
-            return;
-        }
         // A paste is one atomic edit, never part of a typing run.
         self.undo_manager.set_pending_intent(EditIntent::Atomic);
 
@@ -3433,10 +3365,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         selection_before: CursorSelection,
         selection_after: Option<CursorSelection>,
     ) -> bool {
-        let revision = self.document_revision;
         self.document_revision = self.document_revision.wrapping_add(1);
         let token_delta = self.edit_tokens(range, new_text.len());
-        let span_snapshot = self.edit_spans(range, new_text, revision);
         if self.undo_manager.is_ignoring() {
             return false;
         }
@@ -3466,7 +3396,6 @@ impl<M: InputModeKind> InputBaseState<M> {
         let open_transaction = self.undo_manager.has_open_transaction();
         let mut change = Change::new(range, &old_text, new_range, new_text);
         change.token_delta = token_delta;
-        change.spans = span_snapshot;
         let recorded = self.undo_manager.record_transaction(change, intent);
         // A batch records its own cursor sets. This covers a change that is a
         // transaction on its own.
@@ -3498,12 +3427,10 @@ impl<M: InputModeKind> InputBaseState<M> {
             return;
         };
         let token_aware = self.inline_tokens.is_some()
-            || !self.text_spans.is_empty()
             || replay
                 .changes
                 .iter()
-                .any(|change| change.token_delta.is_some() || change.spans.is_some());
-        let spans_before = self.text_spans.clone();
+                .any(|change| change.token_delta.is_some());
         let emit_events = self.emit_events;
         if token_aware {
             self.emit_events = false;
@@ -3517,21 +3444,10 @@ impl<M: InputModeKind> InputBaseState<M> {
             } else {
                 (change.old_range.into(), &change.new_text)
             };
-            if !change.is_span_only() {
-                let range_utf16 = self.range_to_utf16(&range);
-                self.replace_text_in_range_silent(Some(range_utf16), text, window, cx);
-                self.replay_tokens(&range, text.len(), change.token_delta.as_deref(), undo);
-            }
-            if let Some(spans) = &change.spans {
-                self.text_spans = if undo {
-                    spans.before.clone()
-                } else {
-                    spans.after.clone()
-                };
-            }
+            let range_utf16 = self.range_to_utf16(&range);
+            self.replace_text_in_range_silent(Some(range_utf16), text, window, cx);
+            self.replay_tokens(&range, text.len(), change.token_delta.as_deref(), undo);
         }
-        self.document_revision = self.document_revision.wrapping_add(1);
-        self.refresh_span_layout(&spans_before, true, cx);
         self.restore_selections(replay.selections);
         self.mode
             .restore_auto_closed_pairs(replay.auto_closed_pairs.unwrap_or_default());
@@ -3631,13 +3547,6 @@ impl<M: InputModeKind> InputBaseState<M> {
     pub fn set_scroll_offset(&mut self, offset: gpui::Point<gpui::Pixels>, cx: &mut Context<Self>) {
         self.deferred_scroll_offset = Some(offset);
         cx.notify();
-    }
-
-    /// The font and size the input lays its text out with, so an overlay
-    /// (an inline bot's hint) can match it.
-    pub fn text_style(&self) -> (gpui::Font, gpui::Pixels) {
-        let (font, size) = self.display_map.text_style();
-        (font.clone(), size)
     }
 
     /// Laid-out line height; `None` before first layout.
@@ -3830,7 +3739,6 @@ impl<M: InputModeKind> InputBaseState<M> {
             }
 
             // Check if mouse is in this line's bounds
-            let pos = line_layout.nearest_laid_out(pos, line_height);
             if let Some((local_index, line_end_affinity)) =
                 line_layout.closest_index_for_position(pos, last_layout)
             {
@@ -4088,55 +3996,17 @@ impl<M: InputModeKind> InputBaseState<M> {
 
     /// Returns the true to let InputElement to render cursor, when Input is focused and current BlinkCursor is visible.
     pub(crate) fn show_cursor(&self, window: &Window, cx: &App) -> bool {
-        self.caret_can_show(window, cx) && !self.disabled && self.blink_cursor.read(cx).visible()
-    }
-
-    /// QUILL: whether the caret can be drawn at all in `window`: the field
-    /// is focused there, or its context menu keeps it looking focused, and
-    /// the window is active. A blink is only worth its redraws while this
-    /// holds.
-    fn caret_can_show(&self, window: &Window, cx: &App) -> bool {
         (self.focus_handle.is_focused(window) || M::is_context_menu_open(self, cx))
+            && !self.disabled
+            && self.blink_cursor.read(cx).visible()
             && window.is_window_active()
     }
 
-    /// QUILL: keep the caret's blink running exactly while the caret can
-    /// show in `window`, the window painting the field. That need not be
-    /// the window the field was made in, the one its focus and activation
-    /// listeners watch (a call window's message field is made by the main
-    /// window). So the paint starts a blink no listener started (its window
-    /// came back to the front, the field was focused there) and stops one
-    /// that shows nothing (the window went behind another app, or the field
-    /// lost its focus or its menu there). Only the window that started a
-    /// blink stops it, so a field painted in two windows can't have them
-    /// take turns.
-    pub(super) fn sync_blink(&self, window: &Window, cx: &mut Context<Self>) {
-        let can_show = self.caret_can_show(window, cx);
-        let blinking = self.blink_cursor.read(cx).is_blinking();
-        if can_show && !blinking {
-            self.start_blink_cursor(window, cx);
-        } else if !can_show && blinking && self.blink_window.get() == Some(window.window_handle()) {
-            self.blink_cursor.update(cx, |cursor, cx| cursor.stop(cx));
-        }
-    }
-
-    fn on_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.start_blink_cursor(window, cx);
-        cx.emit(InputEvent::Focus);
-    }
-
-    /// QUILL: start the caret's blink in an active window only. An inactive
-    /// one never shows the caret (`show_cursor`), so a blink there redrew
-    /// the window twice a second for nothing and kept it from going idle.
-    /// Activating the window starts it.
-    fn start_blink_cursor(&self, window: &Window, cx: &mut Context<Self>) {
-        if !window.is_window_active() {
-            return;
-        }
-        self.blink_window.set(Some(window.window_handle()));
+    fn on_focus(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         self.blink_cursor.update(cx, |cursor, cx| {
             cursor.start(cx);
         });
+        cx.emit(InputEvent::Focus);
     }
 
     fn on_blur(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -4403,45 +4273,6 @@ impl<M: InputModeKind> InputBaseState<M> {
         ))
     }
 
-    /// The rectangle the caret is drawn at, in window coordinates, with its affinity: at a
-    /// direction change in bidirectional text the caret offset has two places on screen, and
-    /// this is the one the caret is in (the plain [`Self::range_to_bounds`] of an empty range
-    /// is always the leading one). `None` when the caret is not laid out.
-    pub fn caret_bounds(&self) -> Option<Bounds<Pixels>> {
-        let last_layout = self.last_layout.as_ref()?;
-        let last_bounds = self.last_bounds?;
-        let (_, _, pos) =
-            self.line_and_position_for_offset_with_affinity(self.cursor(), self.cursor_line_end_affinity);
-        let pos = last_bounds.origin + pos?;
-        Some(Bounds::new(pos, gpui::size(px(0.), last_layout.line_height)))
-    }
-
-    /// Whether the caret hangs on the character before its offset: at the end of a soft
-    /// wrapped row, or on the near side of a direction change (see [`Self::caret_bounds`]).
-    pub fn caret_hangs_on_previous_character(&self) -> bool {
-        self.cursor_line_end_affinity
-    }
-
-    /// Return the rendered rectangles of a UTF-8 byte range in the current input contents, in
-    /// window coordinates: one per visual line the range crosses, and several on one line where
-    /// the range crosses a direction change in bidirectional text (a logical range is not one
-    /// visual interval there). Empty when the range is not currently laid out or visible.
-    pub fn range_to_rects(&self, range: &Range<usize>) -> Vec<Bounds<Pixels>> {
-        let (Some(last_layout), Some(last_bounds)) =
-            (self.last_layout.as_ref(), self.last_bounds.as_ref())
-        else {
-            return Vec::new();
-        };
-        let Some(corners) = TextElement::<M>::layout_range_corners(range, last_layout) else {
-            return Vec::new();
-        };
-        let origin = last_bounds.origin + point(last_layout.line_number_width, px(0.));
-        corners
-            .into_iter()
-            .map(|c| Bounds::from_corners(origin + c.top_left, origin + c.bottom_right))
-            .collect()
-    }
-
     /// Replace text in range in silent.
     ///
     /// This will not trigger any UI interaction, such as auto-completion.
@@ -4547,9 +4378,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         for (range, new_text) in &sorted {
             let old_text = self.text.clone();
             self.mode.adjust_auto_closed_pair(range, new_text.len());
-            self.value_memo.take();
-            self.value_memo.take();
-        self.text.replace(range.clone(), new_text);
+            self.text.replace(range.clone(), new_text);
 
             M::adjust_annotations(self, range, new_text.len());
             recorded |= self.push_history(
@@ -4815,9 +4644,6 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         if !self.is_editable() {
             return;
         }
-        // An edit places the caret by text offset: it no longer hangs on the character before
-        // a direction change it may have been parked at.
-        self.cursor_line_end_affinity = false;
         let selection_before = *self.active_selection();
         // Committing a composition ends the transaction it opened, whether or
         // not the platform follows up with `unmark_text`.
@@ -4939,7 +4765,6 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
             self.last_input_edits.clear();
         }
         self.mode.adjust_auto_closed_pair(&range, new_text.len());
-        self.value_memo.take();
         self.text.replace(range.clone(), new_text);
 
         let mut new_offset = (range.start + new_text.len()).min(self.text.len());
@@ -4960,7 +4785,6 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                 && !self.is_valid_input(&pending_text, cx)
                 && self.is_valid_input(&old_text.to_string(), cx)
             {
-                self.value_memo.take();
                 self.text = old_text;
                 return;
             }
@@ -4968,7 +4792,6 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
             if !self.replaying_history && !self.mask_pattern.is_none() {
                 let mask_text = self.mask_pattern.mask(&pending_text);
                 mask_changed = mask_text.as_str() != pending_text;
-                self.value_memo.take();
                 self.text = Rope::from(mask_text.as_str());
                 let new_text_len =
                     (new_text.len() + mask_text.len()).saturating_sub(pending_text.len());
@@ -5078,9 +4901,6 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         if !self.is_editable() {
             return;
         }
-        // An edit places the caret by text offset: it no longer hangs on the character before
-        // a direction change it may have been parked at.
-        self.cursor_line_end_affinity = false;
         let selection_before = *self.active_selection();
 
         let starts_composition = self.ime_marked_range.is_none();
@@ -5120,7 +4940,6 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         // the most recent change after it.
         self.last_input_edits.clear();
         self.mode.adjust_auto_closed_pair(&range, new_text.len());
-        self.value_memo.take();
         self.text.replace(range.clone(), new_text);
 
         if self.is_single_line() {
@@ -5131,7 +4950,6 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                 && !self.is_valid_input(&pending_text, cx)
                 && self.is_valid_input(&old_text.to_string(), cx)
             {
-                self.value_memo.take();
                 self.text = old_text;
                 if starts_composition {
                     self.undo_manager.commit_transaction();
@@ -5515,6 +5333,23 @@ impl<M: InputModeKind> Render for InputBaseState<M> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn test_set_value_waits_for_the_first_layout(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (state, cx) = cx.add_window_view(|window, cx| {
+            let mut state = crate::input::InputState::new(window, cx);
+            state.set_value("hello", window, cx);
+            // Made outside drawing, the state only has a placeholder font to shape with.
+            assert_eq!(state.display_map().wrap_row_count(), 0);
+            state
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        state.read_with(cx, |state, _| {
+            assert_eq!(state.value(), "hello");
+            assert_eq!(state.display_map().wrap_row_count(), 1);
+        });
+    }
 
     #[gpui::test]
     fn accessibility_actions_recheck_live_editability(cx: &mut TestAppContext) {
@@ -6593,12 +6428,6 @@ mod tests {
                 })
                 .unwrap()
             });
-            // QUILL: the caret blinks in an active window only, as a real
-            // window that takes a click or a key is.
-            window
-                .update(cx, |_, window, _| window.activate_window())
-                .unwrap();
-            cx.run_until_parked();
 
             Self {
                 input: input.clone().unwrap(),
@@ -10478,12 +10307,10 @@ mod tests {
         let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
         setup_cursors(&mut cx, &view.input, "a|b");
         cx.update(|window, cx| {
-            view.input.update(cx, |state, cx| state.focus(window, cx));
-        });
-        // The focus observer restarts the blink once the focus lands.
-        cx.run_until_parked();
-        cx.update(|_, cx| {
-            view.input.update(cx, |state, cx| state.pause_blink_cursor(cx));
+            view.input.update(cx, |state, cx| {
+                state.focus(window, cx);
+                state.pause_blink_cursor(cx);
+            });
         });
         cx.run_until_parked();
         cx.executor()
@@ -10535,11 +10362,9 @@ mod tests {
         cx.run_until_parked();
 
         // Pressing elsewhere in the focused input, in the hidden phase of the
-        // blink, shows the caret again at the press. The focus observer
-        // restarted the blink from a shown caret after the first press, so
-        // the hidden phase begins one 500 ms interval later.
+        // blink, shows the caret again at the press.
         cx.executor()
-            .advance_clock(std::time::Duration::from_millis(600));
+            .advance_clock(std::time::Duration::from_millis(400));
         cx.run_until_parked();
         assert!(!visible(&mut cx));
         let second = position(px(30.), &mut cx);
@@ -10550,129 +10375,6 @@ mod tests {
         cx.run_until_parked();
         assert!(visible(&mut cx));
         cx.simulate_mouse_up(second, MouseButton::Left, Default::default());
-    }
-
-    /// QUILL: how many times the input repaints over three seconds of the
-    /// test clock, with nothing else going on: six while the caret blinks.
-    fn caret_repaints<M: InputModeKind>(
-        input: &Entity<InputBaseState<M>>,
-        cx: &mut VisualTestContext,
-    ) -> usize {
-        let repaints = Rc::new(Cell::new(0));
-        let _watch = cx.update(|_, cx| {
-            let repaints = repaints.clone();
-            cx.observe(input, move |_, _| repaints.set(repaints.get() + 1))
-        });
-        for _ in 0..6 {
-            cx.executor()
-                .advance_clock(std::time::Duration::from_millis(500));
-            cx.run_until_parked();
-        }
-        repaints.get()
-    }
-
-    /// QUILL: the blur handler leaves the caret blinking while the completion
-    /// menu is open, so the menu keeps the field looking focused. A window
-    /// deactivated with the menu open stopped the blink no more, and the
-    /// inactive window, which never shows the caret, repainted twice a second.
-    #[gpui::test]
-    fn an_open_completion_menu_does_not_blink_the_caret_in_the_background(
-        cx: &mut TestAppContext,
-    ) {
-        let view = InputView::<EditorMode>::new(cx);
-        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
-        cx.update(|window, cx| {
-            view.input.update(cx, |state, cx| state.focus(window, cx));
-        });
-        cx.run_until_parked();
-        view.input.update(&mut cx, |state, _| {
-            state.extras.context_menu_content.completion.open = true;
-        });
-        assert!(caret_repaints(&view.input, &mut cx) >= 5, "it blinks");
-
-        cx.deactivate_window();
-        assert_eq!(caret_repaints(&view.input, &mut cx), 0, "no blink while inactive");
-        view.input.read_with(&cx, |state, cx| {
-            assert!(state.is_context_menu_open(cx), "the menu stays open");
-        });
-
-        cx.update(|window, _| window.activate_window());
-        cx.run_until_parked();
-        assert!(caret_repaints(&view.input, &mut cx) >= 5, "it blinks once active");
-        view.input.update(&mut cx, |state, cx| state.hide_context_menu(cx));
-        cx.run_until_parked();
-        assert!(caret_repaints(&view.input, &mut cx) >= 5, "and after the menu closes");
-    }
-
-    /// QUILL: a field that loses its focus while the completion menu is open
-    /// keeps blinking under the menu, and stops once the menu closes.
-    #[gpui::test]
-    fn a_caret_blinking_under_its_menu_stops_when_the_menu_closes_without_focus(
-        cx: &mut TestAppContext,
-    ) {
-        let view = InputView::<EditorMode>::new(cx);
-        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
-        cx.update(|window, cx| {
-            view.input.update(cx, |state, cx| state.focus(window, cx));
-        });
-        cx.run_until_parked();
-        view.input.update(&mut cx, |state, _| {
-            state.extras.context_menu_content.completion.open = true;
-        });
-        cx.update(|window, cx| window.blur(cx));
-        cx.run_until_parked();
-        assert!(
-            caret_repaints(&view.input, &mut cx) >= 5,
-            "the menu keeps the caret blinking"
-        );
-
-        view.input.update(&mut cx, |state, cx| state.hide_context_menu(cx));
-        cx.run_until_parked();
-        // The next blink finds nothing to show and stops.
-        cx.executor()
-            .advance_clock(std::time::Duration::from_millis(500));
-        cx.run_until_parked();
-        assert_eq!(caret_repaints(&view.input, &mut cx), 0, "no blink left behind");
-    }
-
-    /// QUILL: a field drawn in another window than the one it was made in
-    /// (a call window's message field is made by the main window) blinks by
-    /// the window it is drawn in: not while that window is behind another
-    /// app, again when it comes back, and not once the field loses its focus
-    /// there. The focus and activation listeners watch the window the field
-    /// was made in, so nothing started the blink again on the way back and
-    /// the caret stayed hidden until a click.
-    #[gpui::test]
-    fn a_field_drawn_in_another_window_blinks_by_that_window(cx: &mut TestAppContext) {
-        let view = InputView::<InputMode>::build(cx, |state| state);
-        let input = view.input.clone();
-        let other = cx.update(|cx| {
-            cx.open_window(Default::default(), |_, cx| cx.new(|_| TestRoot(input)))
-                .unwrap()
-        });
-        other
-            .update(cx, |_, window, _| window.activate_window())
-            .unwrap();
-        let mut cx = VisualTestContext::from_window(other.into(), cx);
-        cx.run_until_parked();
-        cx.update(|window, cx| {
-            view.input.update(cx, |state, cx| state.focus(window, cx));
-        });
-        cx.run_until_parked();
-        assert!(caret_repaints(&view.input, &mut cx) >= 5, "it blinks");
-
-        cx.deactivate_window();
-        assert_eq!(caret_repaints(&view.input, &mut cx), 0, "not behind another app");
-
-        cx.update(|window, _| window.activate_window());
-        cx.run_until_parked();
-        let shown = cx.update(|window, cx| view.input.read(cx).show_cursor(window, cx));
-        assert!(shown, "the caret is back with its window");
-        assert!(caret_repaints(&view.input, &mut cx) >= 5, "and blinks again");
-
-        cx.update(|window, cx| window.blur(cx));
-        cx.run_until_parked();
-        assert_eq!(caret_repaints(&view.input, &mut cx), 0, "not once it loses its focus");
     }
 
     #[gpui::test]

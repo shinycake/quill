@@ -1,7 +1,4 @@
 //! Boundary displacement only: the list keeps its clamped logical position.
-//!
-//! Quill patch: [`ScrollBounce::displacement`] reports the edge's offset and
-//! whether a finger holds it (see `QUILL-CHANGES.md`).
 
 use crate::overscroll::Overscroll;
 use crate::{OngoingScrollExt as _, ScrollbarHandle};
@@ -12,11 +9,7 @@ use gpui::{
 };
 #[cfg(not(target_family = "wasm"))]
 use std::time::Instant;
-use std::{
-    cell::{Cell, RefCell},
-    rc::Rc,
-    time::Duration,
-};
+use std::{cell::RefCell, rc::Rc, time::Duration};
 #[cfg(target_family = "wasm")]
 use web_time::Instant;
 
@@ -31,9 +24,6 @@ pub struct ScrollBounceMotion {
     tracking: f32,
     response: Duration,
     max_stretch: Option<f32>,
-    /// Quill: the farthest a fling throws the edge, when that differs from
-    /// `max_stretch`.
-    max_throw: Option<f32>,
 }
 
 impl Default for ScrollBounceMotion {
@@ -51,7 +41,6 @@ impl Default for ScrollBounceMotion {
                 tracking: 0.55,
                 response: Duration::from_millis(524),
                 max_stretch: None,
-                max_throw: None,
             }
         } else {
             Self {
@@ -59,7 +48,6 @@ impl Default for ScrollBounceMotion {
                 // 2π / 12.5
                 response: Duration::from_micros(502_655),
                 max_stretch: Some(36.),
-                max_throw: None,
             }
         }
     }
@@ -112,21 +100,6 @@ impl ScrollBounceMotion {
         self
     }
 
-    /// Quill: the farthest a fling throws the edge, while a finger may still
-    /// stretch it as far as `max_stretch`. Defaults to `max_stretch`.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `max_throw` is not finite or not positive.
-    pub fn with_max_throw(mut self, max_throw: f32) -> Self {
-        assert!(
-            max_throw.is_finite() && max_throw > 0.,
-            "scroll bounce max throw must be finite and positive"
-        );
-        self.max_throw = Some(max_throw);
-        self
-    }
-
     /// Fraction of finger travel the stretched edge follows at first.
     pub fn tracking(&self) -> f32 {
         self.tracking
@@ -148,18 +121,6 @@ impl ScrollBounceMotion {
         let seconds = self.response.as_secs_f32();
         (seconds > 0.).then(|| std::f32::consts::TAU / seconds)
     }
-}
-
-/// How far a [`ScrollBounce`] edge is drawn from its place, as the owner of
-/// the wrapper last saw it.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct ScrollBounceDisplacement {
-    /// Pixels the content is drawn past the start (positive) or the end
-    /// (negative) of the scroll range.
-    pub offset: f32,
-    /// A finger on the trackpad still holds the stretched edge. False while
-    /// the edge returns, and for an edge thrown by a fling.
-    pub held: bool,
 }
 
 /// Adds vertical touch overscroll to an existing scroll viewport.
@@ -187,7 +148,6 @@ pub struct ScrollBounce {
     scroll_wheel: bool,
     motion: ScrollBounceMotion,
     on_scroll: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
-    displacement: Option<Rc<Cell<ScrollBounceDisplacement>>>,
 }
 
 impl ScrollBounce {
@@ -204,7 +164,6 @@ impl ScrollBounce {
             scroll_wheel: true,
             motion: ScrollBounceMotion::default(),
             on_scroll: None,
-            displacement: None,
         }
     }
 
@@ -239,14 +198,6 @@ impl ScrollBounce {
     /// Set how far a drag stretches past an edge and how the edge returns.
     pub fn motion(mut self, motion: ScrollBounceMotion) -> Self {
         self.motion = motion;
-        self
-    }
-
-    /// Write the edge's displacement into `cell` on every frame, so the
-    /// owner can react to a pull (pull to expand) without a second gesture
-    /// handler. Only the wheel-owning mode (the default) reports.
-    pub fn displacement(mut self, cell: Rc<Cell<ScrollBounceDisplacement>>) -> Self {
-        self.displacement = Some(cell);
         self
     }
 
@@ -388,14 +339,7 @@ impl Element for ScrollBounce {
                 if state.overscroll.step(cx.background_executor().now()) {
                     window.request_animation_frame();
                 }
-                let offset = state.overscroll.offset();
-                if let Some(cell) = &self.displacement {
-                    cell.set(ScrollBounceDisplacement {
-                        offset,
-                        held: state.overscroll.is_held(),
-                    });
-                }
-                offset
+                state.overscroll.offset()
             } else {
                 state.physics.motion = self.motion;
                 let now = Instant::now();
@@ -628,6 +572,9 @@ impl Element for ScrollBounce {
                     return;
                 }
                 if delta.x.abs() > delta.y.abs() {
+                    state
+                        .overscroll
+                        .touch_phase(event.touch_phase, cx.background_executor().now());
                     return;
                 }
                 let before = handle.offset();
@@ -811,7 +758,7 @@ impl Physics {
         } else {
             0.
         };
-        if let Some(max) = self.motion.max_throw.or(self.motion.max_stretch) {
+        if let Some(max) = self.motion.max_stretch {
             outward =
                 outward.signum() * limit_throw(self.position.abs(), outward.abs(), omega, max);
         }
