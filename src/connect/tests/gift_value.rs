@@ -58,7 +58,7 @@ fn the_answer_opens_the_box_and_stale_answers_are_dropped() {
     let keys: Vec<&String> = first.as_object().unwrap().keys().collect();
     assert_eq!(keys.len(), 3, "{keys:?}");
     let value = driver.session.payments.hub.gift_value.as_ref().unwrap();
-    assert!(value.loading && !value.open);
+    assert!(value.is_loading() && !value.is_open());
 
     // A second click while it runs sends nothing.
     assert!(driver.request_gift_value(lookup("A-1")).unwrap().is_none());
@@ -71,12 +71,12 @@ fn the_answer_opens_the_box_and_stale_answers_are_dropped() {
     ingest(&mut driver, answer(&first["@extra"], LAST));
     let value = driver.session.payments.hub.gift_value.as_ref().unwrap();
     assert_eq!(value.name, "B-2");
-    assert!(value.loading && value.info.is_none() && !value.open);
+    assert!(value.is_loading() && value.info().is_none() && !value.is_open());
 
     ingest(&mut driver, answer(&second["@extra"], AVERAGE));
     let value = driver.session.payments.hub.gift_value.as_ref().unwrap();
-    assert!(!value.loading && value.open);
-    assert_eq!(value.info.as_ref().unwrap().average_sale_price, 214_900);
+    assert!(!value.is_loading() && value.is_open());
+    assert_eq!(value.info().unwrap().average_sale_price, 214_900);
 
     // Closed and asked again: reopens from what is known, no request.
     driver
@@ -86,7 +86,7 @@ fn the_answer_opens_the_box_and_stale_answers_are_dropped() {
         .gift_value
         .as_mut()
         .unwrap()
-        .open = false;
+        .close();
     assert!(driver.request_gift_value(lookup("B-2")).unwrap().is_none());
     assert_eq!(sent_count(&recorder), 2);
     assert!(
@@ -97,7 +97,7 @@ fn the_answer_opens_the_box_and_stale_answers_are_dropped() {
             .gift_value
             .as_ref()
             .unwrap()
-            .open
+            .is_open()
     );
 }
 
@@ -126,12 +126,12 @@ fn a_failure_shows_under_the_row_and_a_stale_one_is_ignored() {
 
     ingest(&mut driver, error(&first["@extra"]));
     let value = driver.session.payments.hub.gift_value.as_ref().unwrap();
-    assert!(value.loading && value.error.is_none());
+    assert!(value.is_loading() && value.error().is_none());
 
     ingest(&mut driver, error(&second["@extra"]));
     let value = driver.session.payments.hub.gift_value.as_ref().unwrap();
-    assert!(!value.loading && !value.open);
-    let shown = value.error.as_deref().unwrap();
+    assert!(!value.is_loading() && !value.is_open());
+    let shown = value.error().unwrap();
     assert!(shown.starts_with("Couldn't load the value: "), "{shown}");
 
     // A retry after the failure sends again.

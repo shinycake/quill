@@ -138,7 +138,7 @@ fn resale_page_parses_and_sorts_counts() {
     assert_eq!(page.attributes.models[0].item.name, "B");
     assert_eq!(page.attributes.backdrops[0].item.name, "Onyx");
     let mut search = ResaleSearch::new(55, ResaleFilter::default(), true);
-    search.loading = true;
+    search.begin(false);
     search.apply(page.clone(), Some(42), false);
     // Craft mode drops the user's own listings (owner 42 here).
     assert!(search.listings.is_empty());

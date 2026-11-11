@@ -10,7 +10,7 @@ use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, px, size};
-use quill::premium_hub::gift_value::{GiftValueInfo, GiftValueLookup};
+use quill::premium_hub::gift_value::{GiftValueInfo, GiftValueLookup, GiftValueStage};
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     quill::gift_market::set_gift_market_persistence(false);
@@ -90,8 +90,7 @@ fn with_info(
 ) -> impl FnOnce(GiftValueLookup) -> Option<GiftValueLookup> {
     move |lookup| {
         Some(GiftValueLookup {
-            info,
-            open,
+            stage: info.map_or(GiftValueStage::Idle, |info| GiftValueStage::Ready { info, open }),
             ..lookup
         })
     }
@@ -118,7 +117,7 @@ fn the_box_shows_price_about_table_and_links_and_ok_closes_it(cx: &mut TestAppCo
 
     click(vcx, "gift-value-ok");
     let lookup = lookup_of(&app, vcx).expect("lookup");
-    assert!(!lookup.open && lookup.info.is_some());
+    assert!(!lookup.is_open() && lookup.info().is_some());
     assert!(vcx.debug_bounds("gift-value-box").is_none());
     assert!(vcx.debug_bounds("gift-value-row").is_some());
 }
@@ -134,7 +133,7 @@ fn learn_more_spins_while_loading_and_reopens_a_known_value(cx: &mut TestAppCont
     // Nothing known: the pill loads, the box stays closed.
     click(vcx, "gift-value-learn-more");
     let lookup = lookup_of(&app, vcx).expect("lookup");
-    assert!(lookup.loading && !lookup.open);
+    assert!(lookup.is_loading() && !lookup.is_open());
     assert_eq!(lookup.name, "PlushPepe-1204");
     assert!(vcx.debug_bounds("gift-value-spinner").is_some());
     assert!(vcx.debug_bounds("gift-value-box").is_none());
@@ -142,7 +141,7 @@ fn learn_more_spins_while_loading_and_reopens_a_known_value(cx: &mut TestAppCont
     // Known and closed: the click opens the box again.
     set_lookup(&app, vcx, with_info(fixture(AVERAGE), false));
     click(vcx, "gift-value-learn-more");
-    assert!(lookup_of(&app, vcx).is_some_and(|lookup| lookup.open));
+    assert!(lookup_of(&app, vcx).is_some_and(|lookup| lookup.is_open()));
     assert!(vcx.debug_bounds("gift-value-box").is_some());
     // The average answer: no last price, no Fragment listings.
     assert!(vcx.debug_bounds("gift-value-on-telegram").is_some());
@@ -155,7 +154,7 @@ fn a_failed_request_shows_under_the_row(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     set_lookup(&app, vcx, |lookup| {
         Some(GiftValueLookup {
-            error: Some("Couldn't load the value: STARGIFT_SLUG_INVALID".into()),
+            stage: GiftValueStage::Failed("Couldn't load the value: STARGIFT_SLUG_INVALID".into()),
             ..lookup
         })
     });
@@ -169,7 +168,7 @@ fn telegram_listings_open_the_resale_list(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     set_lookup(&app, vcx, with_info(fixture(LAST), true));
     click(vcx, "gift-value-on-telegram");
-    assert!(lookup_of(&app, vcx).is_some_and(|lookup| !lookup.open));
+    assert!(lookup_of(&app, vcx).is_some_and(|lookup| !lookup.is_open()));
     let top = app.read_with(vcx, |app, _| app.gift_market.top().cloned());
     assert_eq!(top, Some(MarketBox::Resale));
     assert!(vcx.debug_bounds("gift-value-box").is_none());
@@ -216,7 +215,7 @@ fn a_lookup_asked_from_a_box_that_is_gone_does_not_open_later(cx: &mut TestAppCo
     let vcx = &mut vcx;
     set_lookup(&app, vcx, |_| None);
     click(vcx, "gift-value-learn-more");
-    assert!(lookup_of(&app, vcx).is_some_and(|lookup| lookup.loading));
+    assert!(lookup_of(&app, vcx).is_some_and(|lookup| lookup.is_loading()));
     // The gift box is left before the answer lands.
     app.update_in(vcx, |app, _, cx| {
         if let Some(session) = app.demo_session.as_mut() {
@@ -240,7 +239,7 @@ fn a_lookup_for_one_gift_is_dropped_when_the_box_shows_another(cx: &mut TestAppC
     let vcx = &mut vcx;
     set_lookup(&app, vcx, |_| None);
     click(vcx, "gift-value-learn-more");
-    assert!(lookup_of(&app, vcx).is_some_and(|lookup| lookup.loading));
+    assert!(lookup_of(&app, vcx).is_some_and(|lookup| lookup.is_loading()));
     app.update_in(vcx, |app, _, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             let hub = &mut session.payments.hub;

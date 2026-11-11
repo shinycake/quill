@@ -62,10 +62,6 @@ GiftManageState::collections_loading
 GiftPurchase::completed
 GiftPurchase::loading
 GiftPurchase::sending
-GiftValueLookup::loading
-GiftValueLookup::loading+error
-GiveawayInfoLookup::loading
-GiveawayInfoLookup::loading+error
 GiveawaySummary::finished
 GramsHub::loaded
 GramsHub::loaded+error
@@ -153,9 +149,6 @@ QuickRepliesState::shortcuts_requested+error
 ReceivedGift::is_saved
 Relay::started
 ResaleBuy::sending
-ResaleSearch::loaded
-ResaleSearch::loading
-ResaleSearch::loading+error
 RowForum::loaded
 RowMenuFacts::is_saved_messages
 RowState::pending

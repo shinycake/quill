@@ -25,15 +25,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::GetGiveawayInfo,
             Some(crate::ids::ChatId(chat_id)),
         );
-        self.session.payments.giveaway.info = Some(GiveawayInfoLookup {
-            chat_id,
-            message_id,
-            summary,
-            info: None,
-            loading: true,
-            error: None,
-            request: extra,
-        });
+        self.session.payments.giveaway.info =
+            Some(GiveawayInfoLookup::new(chat_id, message_id, summary, extra));
         let result = self.send_json_request(extra, &get_giveaway_info(extra, chat_id, message_id));
         if result.is_err() {
             self.session.payments.giveaway.info = None;

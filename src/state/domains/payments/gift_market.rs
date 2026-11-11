@@ -41,13 +41,13 @@ impl Session {
                 }
                 let me = self.my_user_id;
                 let market = &mut self.payments.gift_market;
-                if let Some(search) = market.resale.as_mut().filter(|s| s.request_id == request) {
+                if let Some(search) = market.resale.as_mut().filter(|s| s.waits_for(request)) {
                     search.apply(page, me, index > 0);
                 } else if let Some(search) = market
                     .craft
                     .as_mut()
                     .map(|craft| &mut craft.market)
-                    .filter(|s| s.request_id == request)
+                    .filter(|s| s.waits_for(request))
                 {
                     search.apply(page, me, index > 0);
                 }
@@ -278,11 +278,7 @@ impl Session {
                 {
                     // Only the search that sent this request fails; a newer
                     // filter's search (or the other box's) keeps loading.
-                    if search.loading && request != 0 && search.request_id == request {
-                        search.loading = false;
-                        search.loaded = true;
-                        search.error = Some(note.clone());
-                    }
+                    search.fail(request, note.clone());
                 }
             }
             GiftMarketPurpose::BuyResale => {
