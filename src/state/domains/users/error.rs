@@ -75,12 +75,12 @@ impl Session {
             Some(RequestPurpose::GetProfilePhotoEmojiIcons) => {
                 self.users_state
                     .profile_photo_emoji_icons
-                    .fail("The emoji request failed.");
+                    .fail(error_reason(err));
             }
             Some(RequestPurpose::GetChatPhotoEmojiIcons) => {
                 self.users_state
                     .chat_photo_emoji_icons
-                    .fail("The emoji request failed.");
+                    .fail(error_reason(err));
             }
             Some(RequestPurpose::GetProfileShareThemeBackdrops) => {
                 self.users_state.peer_qr.backdrops.fail();
@@ -104,7 +104,7 @@ impl Session {
             Some(RequestPurpose::GetBackgroundEmojiIcons) => {
                 self.users_state
                     .background_emoji_icons
-                    .fail("The emoji request failed.");
+                    .fail(error_reason(err));
             }
             // B10: profile panel fetches keep the reason for a Retry row;
             // refused edits surface as a toast.

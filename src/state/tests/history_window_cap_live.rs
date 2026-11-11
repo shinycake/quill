@@ -295,7 +295,7 @@ fn a_forum_topic_on_screen_drops_rows_far_from_its_reader() {
         Some(&(cap + 2 - 1200)),
         "the reader keeps their rows"
     );
-    assert!(topic.has_newer, "the newest end went and pages back in");
+    assert!(topic.has_newer(), "the newest end went and pages back in");
     assert_eq!(topic.latest_seen, cap + 400);
 }
 

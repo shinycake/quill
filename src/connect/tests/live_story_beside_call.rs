@@ -193,7 +193,7 @@ fn a_late_join_answer_does_not_land_in_a_new_story_slot() {
         .calls
         .story_stream
         .as_ref()
-        .map(|call| call.join_payload.clone());
+        .map(|call| call.transport.answer().to_string());
     assert_eq!(payload, Some(String::new()), "the old answer is dropped");
 }
 

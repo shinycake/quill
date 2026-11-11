@@ -55,12 +55,11 @@ impl QuillApp {
                 recipient: quill::telegram::envelope::MessageSender::User { user_id: 11 },
                 recipient_name: "Demo chat A".into(),
                 requested_name: quote.name.clone(),
-                price: quote.stars,
-                quote: Some(quote),
-                loading: false,
-                sending: false,
-                completed: false,
-                note: Some("Injected quote — no purchase is sent in this demo.".into()),
+                stage: quill::marketplace::GiftPurchaseStage::Quoted {
+                    price: quote.stars,
+                    quote,
+                    note: Some("Injected quote — no purchase is sent in this demo.".into()),
+                },
             });
         }
         self.payments

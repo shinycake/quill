@@ -97,7 +97,7 @@ impl ThreadView {
     /// the replies are loaded down to it; until then it stays in the
     /// pinned bar, so older pages prepend to the list cleanly.
     pub fn ordered(&self) -> Vec<&HistoryMessage> {
-        let complete = self.history.loaded_complete;
+        let complete = self.history.loaded_complete();
         self.history
             .messages
             .values()
@@ -188,10 +188,12 @@ impl ThreadView {
     /// Recompute `has_newer` after a page landed: the window stops short of
     /// the newest reply the server reported.
     pub(crate) fn refresh_has_newer(&mut self) {
-        self.history.has_newer = self.last_message_id > 0
-            && self
-                .newest_loaded_id()
-                .is_some_and(|newest| newest.0 < self.last_message_id);
+        self.history.newer_exists(
+            self.last_message_id > 0
+                && self
+                    .newest_loaded_id()
+                    .is_some_and(|newest| newest.0 < self.last_message_id),
+        );
     }
 
     /// Incoming replies in the window newer than `till` (the root and own
@@ -220,7 +222,7 @@ impl ThreadView {
         }
         let was = self.last_read_inbox_message_id;
         self.last_read_inbox_message_id = id;
-        if self.history.has_newer {
+        if self.history.has_newer() {
             let read_now = self.incoming_after(was) - self.incoming_after(id);
             self.unread_count = (self.unread_count - read_now as i32).max(0);
         } else {
@@ -245,7 +247,7 @@ impl ThreadView {
                 self.unread_count += 1;
             }
         }
-        if self.history.has_newer {
+        if self.history.has_newer() {
             if incoming {
                 return false;
             }
@@ -264,11 +266,10 @@ impl ThreadView {
         self.history
             .messages
             .retain(|id, _| *id < 0 || root_ids.contains(id));
-        self.history.loaded_complete = false;
+        self.history.reopen_oldest();
         self.history.next_from_message_id = MessageId(0);
         self.history.reader = ReaderPosition::Tail;
-        self.history.has_newer = false;
-        self.history.newer_failed = false;
+        self.history.newer = NewerEnd::AtLatest;
         self.history.older = OlderEnd::Open;
         self.reload_needed = true;
         self.history.window_epoch = self.history.window_epoch.wrapping_add(1);

@@ -274,7 +274,7 @@ fn load_chats_404_marks_exhaustion() {
             extra.0
         ),
     );
-    assert!(session.chat_list.chats_exhausted);
+    assert!(session.chat_list.main_paging.is_exhausted());
     assert!(!sink.rendered().contains("Not Found"));
 }
 
@@ -305,10 +305,16 @@ fn chat_list_paging_restarts_after_logout_and_login() {
             );
         }
         session.chat_list.folder_chats_exhausted.insert(2);
-        assert!(session.chat_list.chats_exhausted && session.chat_list.archive_chats_exhausted);
+        assert!(
+            session.chat_list.main_paging.is_exhausted()
+                && session.chat_list.archive_paging.is_exhausted()
+        );
         apply_json(&mut session, &seq, &sink, &auth(leaving));
-        assert!(!session.chat_list.chats_exhausted, "{leaving}");
-        assert!(!session.chat_list.archive_chats_exhausted, "{leaving}");
+        assert!(!session.chat_list.main_paging.is_exhausted(), "{leaving}");
+        assert!(
+            !session.chat_list.archive_paging.is_exhausted(),
+            "{leaving}"
+        );
         assert!(
             session.chat_list.folder_chats_exhausted.is_empty(),
             "{leaving}"
@@ -420,6 +426,7 @@ fn storage_statistics_error_clears_loading() {
     );
     assert!(session.settings.storage_stats.data().is_none());
     assert!(!session.settings.storage_stats.is_loading());
+    assert!(session.settings.storage_stats.error().is_some());
 }
 
 #[test]

@@ -314,7 +314,7 @@ fn transfer_waits_for_the_security_check_and_never_stores_the_password() {
         .check_can_transfer_ownership()
         .unwrap()
         .expect("sent");
-    assert!(driver.session.groups.ownership.check_in_flight);
+    assert!(driver.session.groups.ownership.check.is_loading());
     answer(
         &mut driver,
         &recorder,
@@ -324,8 +324,10 @@ fn transfer_waits_for_the_security_check_and_never_stores_the_password() {
         r#"{"@type":"canTransferOwnershipResultPasswordTooFresh","retry_after":86400}"#,
     );
     assert_eq!(
-        driver.session.groups.ownership.can_transfer,
-        Some(CanTransferOwnershipResult::PasswordTooFresh { retry_after: 86400 })
+        driver.session.groups.ownership.check,
+        crate::state::fetch::Fetch::Ready(CanTransferOwnershipResult::PasswordTooFresh {
+            retry_after: 86400
+        })
     );
     assert_eq!(
         driver
@@ -378,14 +380,15 @@ fn transfer_waits_for_the_security_check_and_never_stores_the_password() {
         "transferChatOwnership",
         r#"{"@type":"error","code":400,"message":"PASSWORD_HASH_INVALID"}"#,
     );
-    assert!(driver.session.groups.ownership.transfer_in_flight.is_none());
+    assert!(driver.session.groups.ownership.transfer.sending().is_none());
     let error = driver
         .session
         .groups
         .ownership
-        .transfer_error
-        .clone()
-        .unwrap();
+        .transfer
+        .error()
+        .unwrap()
+        .to_string();
     assert!(error.contains("Wrong password"), "{error}");
     assert!(!error.contains("PASSWORD_HASH_INVALID"));
     assert!(!format!("{:?}", driver.session.groups.ownership).contains("hunter2"));
@@ -394,7 +397,7 @@ fn transfer_waits_for_the_security_check_and_never_stores_the_password() {
         .transfer_chat_ownership(ChatId(-100), 8, "correct horse", false)
         .unwrap()
         .expect("retry");
-    assert!(driver.session.groups.ownership.transfer_error.is_none());
+    assert!(driver.session.groups.ownership.transfer.error().is_none());
     answer(
         &mut driver,
         &recorder,
@@ -403,7 +406,13 @@ fn transfer_waits_for_the_security_check_and_never_stores_the_password() {
         "transferChatOwnership",
         r#"{"@type":"ok"}"#,
     );
-    let done = driver.session.groups.ownership.transferred.expect("done");
+    let done = driver
+        .session
+        .groups
+        .ownership
+        .transfer
+        .take_done()
+        .expect("done");
     assert_eq!((done.chat_id, done.user_id), (-100, 8));
 }
 
@@ -433,7 +442,13 @@ fn leave_after_travels_with_the_transfer() {
         "transferChatOwnership",
         r#"{"@type":"ok"}"#,
     );
-    let done = driver.session.groups.ownership.transferred.expect("done");
+    let done = driver
+        .session
+        .groups
+        .ownership
+        .transfer
+        .take_done()
+        .expect("done");
     assert!(done.leave_after);
 }
 

@@ -27,7 +27,7 @@ impl Session {
         let Some(chat_id) = self.open_chat else {
             return;
         };
-        if !self.search.chat_search.open {
+        if !self.search.chat_search.is_open() {
             self.search.chat_search.open_for(chat_id);
         }
         let trimmed = query.trim();
@@ -117,11 +117,14 @@ impl Session {
     }
 
     pub fn apply_local_search_filter(&mut self, query: &str) {
-        self.search.search.open = true;
+        self.search.search.surface = if query.trim().is_empty() {
+            SearchSurface::Recents
+        } else {
+            SearchSurface::Query
+        };
         self.search.search.query = query.to_string();
         self.search.search.generation = self.search.search.generation.saturating_add(1);
         self.search.search.clear_results();
-        self.search.search.recents = query.trim().is_empty();
         let chat_ids: Vec<ChatId> = if query.trim().is_empty() {
             Vec::new()
         } else {

@@ -1,5 +1,6 @@
 //! State reducer tests: mask sticker sets.
 use super::common::*;
+use crate::state::fetch::Fetch;
 use crate::state::{MasksTab, StickersPurpose};
 
 fn mask_set_json(id: i64, title: &str) -> String {
@@ -31,16 +32,17 @@ fn installed_and_archived_masks_stay_out_of_the_regular_panel() {
         &sets_json(extra, &[(11, "Hats"), (12, "Beards")]),
     );
     let masks = &session.stickers.masks;
-    assert!(masks.installed.data().is_some());
+    assert!(matches!(masks.installed, Fetch::Ready(_)));
     assert_eq!(
         masks
-            .installed_sets()
+            .installed
+            .items()
             .iter()
             .map(|s| s.id)
             .collect::<Vec<_>>(),
         [11, 12]
     );
-    assert_eq!(masks.installed_sets()[0].size, 3);
+    assert_eq!(masks.installed.items()[0].size, 3);
     assert!(session.stickers.stickers.sets.is_empty());
     assert!(session.stickers.emoji.installed_sets.is_empty());
 
@@ -63,13 +65,14 @@ fn installed_and_archived_masks_stay_out_of_the_regular_panel() {
     let ids: Vec<_> = session
         .stickers
         .masks
-        .archived_sets()
+        .archived
+        .items()
         .iter()
         .map(|s| s.id)
         .collect();
     assert_eq!(ids, [21, 22]);
     assert!(session.stickers.stickers.archived.is_empty());
-    assert!(session.stickers.masks.archived_more.is_none());
+    assert!(!session.stickers.masks.archived_has_more);
 }
 
 #[test]
@@ -85,7 +88,8 @@ fn a_stray_sticker_sets_answer_is_not_taken_for_masks() {
             mask_set_json(11, "Hats")
         ),
     );
-    assert!(session.stickers.masks.installed.data().is_none());
+    assert!(session.stickers.masks.installed.items().is_empty());
+    assert!(session.stickers.masks.installed.is_idle());
 }
 
 #[test]
@@ -102,7 +106,7 @@ fn a_mask_set_answer_fills_the_strip_for_that_set() {
             extra.0
         ),
     );
-    let stickers = &session.stickers.masks.set_stickers[&11];
+    let stickers = session.stickers.masks.set_stickers(11);
     assert_eq!(stickers.len(), 1);
     assert_eq!(stickers[0].emoji, "🎩");
     assert!(!stickers[0].requires_premium);
@@ -112,10 +116,14 @@ fn a_mask_set_answer_fills_the_strip_for_that_set() {
 fn a_confirmed_change_drops_both_lists_and_an_error_marks_failure() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.stickers.masks.installed.succeed(Vec::new());
-    session.stickers.masks.archived.succeed(Vec::new());
-    session.stickers.masks.archived_more = Some(5);
-    session.stickers.masks.set_requested.insert(11);
+    session.stickers.masks.installed = Fetch::Ready(Vec::new());
+    session.stickers.masks.archived = Fetch::Ready(Vec::new());
+    session.stickers.masks.archived_has_more = true;
+    session
+        .stickers
+        .masks
+        .sets
+        .insert(11, Fetch::Loading { stale: None });
 
     let extra = session.request(
         StickersPurpose::ChangeMaskSet {
@@ -133,13 +141,8 @@ fn a_confirmed_change_drops_both_lists_and_an_error_marks_failure() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
     let masks = &session.stickers.masks;
-    assert!(
-        masks.installed.is_loading()
-            && masks.archived.is_loading()
-            && masks.archived_more.is_none(),
-        "both lists are owed again"
-    );
-    assert!(masks.set_requested.is_empty());
+    assert!(masks.installed.is_idle() && masks.archived.is_idle() && !masks.archived_has_more);
+    assert!(masks.sets.is_empty());
 
     let extra = session.request(StickersPurpose::ReorderInstalledMaskSets.into(), None);
     apply_json(
@@ -151,7 +154,8 @@ fn a_confirmed_change_drops_both_lists_and_an_error_marks_failure() {
             extra.0
         ),
     );
-    assert!(session.stickers.masks.failed());
+    assert!(session.stickers.masks.installed.error().is_some());
+    assert!(session.stickers.masks.archived.error().is_some());
 }
 
 #[test]
@@ -199,7 +203,8 @@ fn installed_order_updates_route_by_sticker_type() {
     let ids: Vec<_> = session
         .stickers
         .masks
-        .installed_sets()
+        .installed
+        .items()
         .iter()
         .map(|s| s.id)
         .collect();

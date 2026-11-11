@@ -137,7 +137,7 @@ fn the_forge_ends_in_the_result(cx: &mut TestAppContext) {
         assert!(app.gift_market.forge_started.is_none());
         assert_eq!(app.gift_market.top(), Some(&MarketBox::CraftResult));
         assert_eq!(
-            app.craft_session().and_then(|c| c.result.clone()),
+            app.craft_session().and_then(|c| c.result().cloned()),
             Some(CraftResult::Fail)
         );
         assert_eq!(app.craft_result_box(cx).title.as_ref(), "Crafting Failed");
@@ -161,8 +161,7 @@ fn the_forge_ends_in_the_result(cx: &mut TestAppContext) {
 /// Ends the running forge with `result` as if `craftGift` had answered.
 fn answer_forge(app: &mut QuillApp, result: CraftResult) {
     if let Some(craft) = app.craft_mut() {
-        craft.crafting = false;
-        craft.result = Some(result);
+        craft.run = quill::gift_market::CraftRun::Done(result);
     }
     app.gift_market.forge_started =
         Instant::now().checked_sub(Duration::from_secs_f32(FORGE_SECONDS + 0.1));
@@ -190,7 +189,7 @@ fn a_refused_craft_keeps_the_craft_box(cx: &mut TestAppContext) {
             }
             other => panic!("expected the notice, got {other:?}"),
         }
-        assert_eq!(app.craft_session().and_then(|c| c.result.clone()), None);
+        assert_eq!(app.craft_session().and_then(|c| c.result().cloned()), None);
         assert_eq!(slot_ids(app), ["own-1204", "own-77", "own-19"]);
         app.market_back(cx);
         assert_eq!(app.gift_market.top(), Some(&MarketBox::Craft));
@@ -205,7 +204,7 @@ fn a_refused_craft_keeps_the_craft_box(cx: &mut TestAppContext) {
             app.connection.status_note(),
             "This gift can't be used for crafting."
         );
-        assert_eq!(app.craft_session().and_then(|c| c.result.clone()), None);
+        assert_eq!(app.craft_session().and_then(|c| c.result().cloned()), None);
         assert_eq!(slot_ids(app), ["own-1204", "own-77", "own-19"]);
     });
 }

@@ -76,17 +76,16 @@ pub struct UsersState {
     pub peer_color_error: Option<String>,
     /// `getDefaultBackgroundCustomEmojiStickers` answer: the custom emoji
     /// the color editor offers as reply and profile icons.
-    /// A failed request shows a retry hint in the editor.
-    pub background_emoji_icons: Fetch<Vec<StickerItem>>,
+    pub background_emoji_icons: crate::state::fetch::Fetch<Vec<StickerItem>>,
     /// `getDefaultProfilePhotoCustomEmojiStickers` answer: the emoji the
     /// avatar builder offers.
-    pub profile_photo_emoji_icons: Fetch<Vec<StickerItem>>,
+    pub profile_photo_emoji_icons: crate::state::fetch::Fetch<Vec<StickerItem>>,
     /// `getDefaultChatPhotoCustomEmojiStickers` answer: the emoji the
     /// builder offers for a group or channel photo.
-    pub chat_photo_emoji_icons: Fetch<Vec<StickerItem>>,
+    pub chat_photo_emoji_icons: crate::state::fetch::Fetch<Vec<StickerItem>>,
     /// Gifts with wearable colors (`getReceivedGifts` with
     /// `exclude_without_colors`), for the color editor.
-    pub wearable_gifts: Fetch<Vec<crate::premium_hub::ReceivedGift>>,
+    pub wearable_gifts: crate::state::fetch::Fetch<Vec<crate::premium_hub::ReceivedGift>>,
     /// Phase B1: secret-chat records keyed by `secret_chat_id`
     /// (`updateSecretChat` / `getSecretChat` answers). Kept at the
     /// session level because `updateSecretChat` is guaranteed to arrive
@@ -237,10 +236,10 @@ impl UsersState {
             bio_length_max: 70,
             profile_edit_error: None,
             peer_color_error: None,
-            background_emoji_icons: Fetch::Idle,
-            profile_photo_emoji_icons: Fetch::Idle,
-            chat_photo_emoji_icons: Fetch::Idle,
-            wearable_gifts: Fetch::Idle,
+            background_emoji_icons: Default::default(),
+            profile_photo_emoji_icons: Default::default(),
+            chat_photo_emoji_icons: Default::default(),
+            wearable_gifts: Default::default(),
             secret_chat_states: HashMap::new(),
             secret_chat_fetch_queue: Vec::new(),
             user_chat_to_open: None,

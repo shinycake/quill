@@ -27,7 +27,7 @@ impl Session {
             self.bots.login_url_request = None;
         }
         let messages = &mut self.messages;
-        messages.message_link_result = None;
+        messages.message_link = None;
         messages.message_link_error.clear();
         messages.forwards.clear_results();
         messages.recognize_speech_error.clear();

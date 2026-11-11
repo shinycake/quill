@@ -33,7 +33,7 @@ impl Session {
                         .settings
                         .rich_html_exports
                         .iter_mut()
-                        .find(|export| export.link.pending == Some(pending.id))
+                        .find(|export| export.link.pending() == Some(pending.id))
                 {
                     export.link.reply(pending.id, value);
                 }

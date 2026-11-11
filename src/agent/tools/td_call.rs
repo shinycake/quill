@@ -451,6 +451,7 @@ fn output(method: String, result: Value) -> ToolOutput {
     ToolOutput {
         text,
         data: Value::Object(data),
+        images: Vec::new(),
     }
 }
 

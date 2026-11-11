@@ -231,7 +231,7 @@ impl QuillApp {
                 .threads
                 .thread
                 .as_ref()
-                .is_none_or(|thread| thread.history.loaded_complete);
+                .is_none_or(|thread| thread.history.loaded_complete());
             if !complete && matches!(live.driver.fetch_thread_history(), Ok(Some(_))) {
                 cx.notify();
             }

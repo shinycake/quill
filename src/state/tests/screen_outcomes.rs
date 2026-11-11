@@ -16,7 +16,10 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
         closes_checkout: true,
         giveaway_chat_id: None,
     });
-    session.messages.message_link_result = Some("https://t.me/c/1/2".into());
+    session.messages.message_link = Some(crate::state::MessageLinkAnswer {
+        link: "https://t.me/c/1/2".into(),
+        is_public: false,
+    });
     session.messages.message_link_error.push("no link".into());
     session.messages.resend_error.push("resend".into());
     session.messages.ai_error.push("ai".into());
@@ -65,7 +68,7 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
     assert!(session.bots.login_url_request.is_none());
 
     assert!(session.payments.verification_url.is_none());
-    assert!(session.messages.message_link_result.is_none());
+    assert!(session.messages.message_link.is_none());
     assert!(session.messages.message_link_error.is_empty());
     assert!(session.messages.resend_error.is_empty());
     assert!(session.messages.ai_error.is_empty());

@@ -250,7 +250,7 @@ fn paging_appends_and_a_fresh_page_replaces() {
     assert_eq!(hub.balance_nano, Some(1));
     // A new tab starts over and keeps the tabs.
     hub.restart(TxFilter::Outgoing);
-    assert!(hub.entries.is_empty() && !hub.loaded);
+    assert!(hub.entries.is_empty() && !hub.load.answered());
     assert!(hub.shows_tabs());
     // Only incoming rows: one "All Transactions" list, no tabs.
     let mut one_way = GramsHub::default();

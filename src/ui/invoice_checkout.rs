@@ -31,7 +31,9 @@ impl QuillApp {
     pub(super) fn payment_dialog_visible(&self) -> bool {
         self.payments.dialog.is_some()
             && self.session().is_some_and(|s| {
-                s.payments.form.is_some() || s.payments.form_loading || s.payments.note.is_some()
+                s.payments.checkout.form().is_some()
+                    || s.payments.checkout.is_loading()
+                    || s.payments.note.is_some()
             })
     }
 
@@ -50,11 +52,9 @@ impl QuillApp {
         }
         let sent = self.live.as_mut().map(|live| {
             let payments = &mut live.driver.session.payments;
-            payments.form = None;
+            payments.checkout = quill::state::CheckoutForm::Closed;
             payments.order_info = quill::state::OrderInfoStage::Unvalidated;
             payments.shipping_id = None;
-            payments.form_paid = false;
-            payments.form_loading = true;
             payments.note = None;
             live.driver.send_payment_form_request(invoice)
         });
@@ -62,9 +62,6 @@ impl QuillApp {
         match sent {
             Some(Ok(_)) => self.open_payment_dialog(window, cx),
             _ => {
-                if let Some(live) = self.live.as_mut() {
-                    live.driver.session.payments.form_loading = false;
-                }
                 self.set_note(StatusNote::error(tr(
                     keys::Q_MONEY_COULD_NOT_LOAD_THE_PAYMENT,
                 )));
@@ -113,7 +110,7 @@ impl QuillApp {
     ) {
         let pack = self
             .session()
-            .and_then(|s| s.payments.star_packs.options.get(index).cloned());
+            .and_then(|s| s.payments.star_packs.options.items().get(index).cloned());
         match pack {
             Some(pack) => self.start_invoice_checkout(stars_pack_invoice(&pack), window, cx),
             None => self.set_status_note(
@@ -204,9 +201,9 @@ impl QuillApp {
     pub(super) fn submit_stars_payment(&mut self, cx: &mut Context<Self>) {
         let snapshot = self.session().map(|session| {
             (
-                session.payments.form.clone(),
+                session.payments.checkout.form().cloned(),
                 session.payments.request.clone(),
-                session.payments.form_paid,
+                session.payments.checkout.is_paid(),
             )
         });
         let Some((Some(form), Some(request), false)) = snapshot else {
@@ -284,7 +281,7 @@ impl QuillApp {
             .primary();
         body.child(if session.payments.checkout_sending() {
             pay.label(tr(keys::Q_MONEY_PROCESSING)).disabled(true)
-        } else if session.payments.form_paid {
+        } else if session.payments.checkout.is_paid() {
             pay.label(tr(keys::SR_MESSAGE_INVOICE_PAID)).disabled(true)
         } else if too_poor {
             pay.disabled(true)

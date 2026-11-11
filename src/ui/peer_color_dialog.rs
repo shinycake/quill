@@ -259,7 +259,8 @@ impl QuillApp {
         let roots = self.media_display_roots();
         let sticker = session.and_then(|s| {
             s.users_state
-                .background_icons()
+                .background_emoji_icons
+                .items()
                 .iter()
                 .find(|sticker| sticker.custom_emoji_id == Some(custom_emoji_id))
         });
@@ -328,7 +329,8 @@ impl QuillApp {
             .session()
             .map(|s| {
                 s.users_state
-                    .background_icons()
+                    .background_emoji_icons
+                    .items()
                     .iter()
                     .enumerate()
                     .filter_map(|(ix, sticker)| {
@@ -379,7 +381,8 @@ impl QuillApp {
         });
         let icons_failed =
             session.is_some_and(|s| s.users_state.background_emoji_icons.error().is_some());
-        let icons_empty = session.is_some_and(|s| s.users_state.background_icons().is_empty());
+        let icons_empty =
+            session.is_some_and(|s| s.users_state.background_emoji_icons.items().is_empty());
         let dark = super::chat_theme::is_dark_palette();
         let theme = cx.theme();
         let muted = theme.muted_foreground;
@@ -404,7 +407,8 @@ impl QuillApp {
             .then(|| {
                 session.and_then(|s| {
                     s.users_state
-                        .wearable_gift_list()
+                        .wearable_gifts
+                        .items()
                         .iter()
                         .filter_map(|gift| gift.gift.colors.as_ref())
                         .find(|colors| colors.id == draft.gift_colors_id)
@@ -703,7 +707,13 @@ impl QuillApp {
             .role(Role::List)
             .aria_label(tr(keys::Q_MISC_COLLECTIBLE_GIFTS));
         let mut count = 0;
-        for (ix, gift) in session.users_state.wearable_gift_list().iter().enumerate() {
+        for (ix, gift) in session
+            .users_state
+            .wearable_gifts
+            .items()
+            .iter()
+            .enumerate()
+        {
             let Some(colors) = gift.gift.colors.clone() else {
                 continue;
             };

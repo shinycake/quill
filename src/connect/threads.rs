@@ -69,7 +69,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// has rows: the failed older page is asked for again.
     pub fn retry_thread_older(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         if let Some(thread) = self.session.threads.thread.as_mut() {
-            thread.history.older = OlderEnd::Open;
+            thread.history.reopen_older();
         }
         self.fetch_thread_history()
     }
@@ -165,7 +165,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         };
         if thread.thread_id == 0
-            || thread.history.loaded_complete
+            || thread.history.loaded_complete()
             || thread.history.older == OlderEnd::Failed
         {
             return Ok(None);
@@ -213,7 +213,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let Some(thread) = self.session.threads.thread.as_ref().filter(|thread| {
-            thread.thread_id != 0 && thread.history.has_newer && !thread.history.newer_failed
+            thread.thread_id != 0 && thread.history.has_newer() && !thread.history.newer_failed()
         }) else {
             return Ok(None);
         };
@@ -256,7 +256,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         };
         thread.unread_anchor = None;
-        if thread.history.has_newer {
+        if thread.history.has_newer() {
             self.session.reset_thread_window();
         }
         if !self.thread_needs_reload() {

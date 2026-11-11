@@ -33,12 +33,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // Already open on a query: a debounce still pending for it keeps
         // its commit. Cleared, the legs stayed Searching with nothing sent.
-        if self.session.search.search.open && !self.session.search.search.query.is_empty() {
+        if self.session.search.search.is_open() && !self.session.search.search.query.is_empty() {
             return Ok(None);
         }
         self.clear_typed_debounce();
-        if self.session.search.search.open
-            && self.session.search.search.recents
+        if self.session.search.search.is_open()
+            && self.session.search.search.is_recents()
             && matches!(
                 self.session.search.search.status(),
                 SearchStatus::Searching | SearchStatus::Ready | SearchStatus::Idle
@@ -80,9 +80,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                     None => SearchQueryOutcome::Unchanged,
                 });
             }
-            if self.session.search.search.open
+            if self.session.search.search.is_open()
                 && self.session.search.search.query.is_empty()
-                && self.session.search.search.recents
+                && self.session.search.search.is_recents()
                 && matches!(
                     self.session.search.search.status(),
                     SearchStatus::Searching | SearchStatus::Ready | SearchStatus::Idle
@@ -105,7 +105,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if self.pending_typed_search.is_none()
             && self.session.search.search.query == trimmed
-            && !self.session.search.search.recents
+            && !self.session.search.search.is_recents()
             && matches!(
                 self.session.search.search.status(),
                 SearchStatus::Searching
@@ -354,7 +354,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.clear_typed_debounce();
-        self.session.search.search.open = true;
         self.session.search.search.filters.scope = scope;
         let _search_gen = self.session.search.search.begin_query(tag);
         self.send_typed_search(tag)

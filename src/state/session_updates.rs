@@ -31,8 +31,8 @@ impl Session {
                 AuthorizationState::LoggingOut | AuthorizationState::Closed
             )
         {
-            self.chat_list.chats_exhausted = false;
-            self.chat_list.archive_chats_exhausted = false;
+            self.chat_list.main_paging = ListPaging::More;
+            self.chat_list.archive_paging = ListPaging::More;
             self.chat_list.folder_chats_exhausted.clear();
         }
         if matches!(state, AuthorizationState::Closed) {

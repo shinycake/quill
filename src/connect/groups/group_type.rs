@@ -125,7 +125,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.groups.group_type.revoke = PublicLinkStage::Revoking(PublicLinkRevoke {
             chat_id,
             requests: vec![clear],
-            failed: false,
         });
         let disable = self.session.request(
             purpose(GroupTypePurpose::DisableAllUsernames),
@@ -135,9 +134,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             disable,
             &disable_all_supergroup_usernames(disable, supergroup_id),
         ) {
-            if let Some(revoke) = self.session.groups.group_type.revoke.revoking_mut() {
-                revoke.failed = true;
-            }
+            self.session.groups.group_type.revoke.request_failed();
             return Err(err);
         }
         if let Some(revoke) = self.session.groups.group_type.revoke.revoking_mut() {

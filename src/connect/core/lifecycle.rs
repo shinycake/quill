@@ -138,7 +138,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(None);
         }
-        if self.session.chat_list.chats_exhausted {
+        if self.session.chat_list.main_paging.is_exhausted() {
             return Ok(None);
         }
         if self.session.requests.has_purpose(RequestPurpose::LoadChats) {
@@ -161,14 +161,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `now`, the main list and the archive each ask for the page again.
     /// Whether a page went out.
     pub(crate) fn chat_list_tick(&mut self, now: std::time::Instant) -> bool {
-        let due = |retry: Option<(std::time::Instant, std::time::Duration)>| {
-            retry.is_some_and(|(at, _)| now >= at)
-        };
         let mut sent = false;
-        if due(self.session.chat_list.chats_retry) {
+        if self.session.chat_list.main_paging.retry_due(now) {
             sent |= matches!(self.maybe_load_main_chats(), Ok(Some(_)));
         }
-        if due(self.session.chat_list.archive_retry) {
+        if self.session.chat_list.archive_paging.retry_due(now) {
             sent |= matches!(self.maybe_load_archive_chats(), Ok(Some(_)));
         }
         sent
@@ -179,7 +176,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// positions only for the loaded part of the list (Telegram X
     /// `TdlibChatList.loadMore`).
     pub fn maybe_load_archive_chats(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.chats_path_active() || self.session.chat_list.archive_chats_exhausted {
+        if !self.chats_path_active() || self.session.chat_list.archive_paging.is_exhausted() {
             return Ok(None);
         }
         if self

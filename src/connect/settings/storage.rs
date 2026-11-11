@@ -1,6 +1,5 @@
 //! Connect driver: storage statistics, auto-download presets and storage limits.
 use super::*;
-use crate::state::fetch::Fetch;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase S2: `getStorageStatistics` for the storage-usage overlay —
@@ -14,23 +13,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.settings.storage_stats.data().is_some()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetStorageStatistics)
-        {
+        if !self.session.settings.storage_stats.can_ask() {
             return Ok(None);
         }
         let extra = self
             .session
             .request(RequestPurpose::GetStorageStatistics, None);
-        self.session.settings.storage_stats.begin();
         match self.sender.send_json(&get_storage_statistics(extra, 50)) {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                self.session.settings.storage_stats.begin();
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.storage_stats.cancel();
                 Err(err)
             }
         }
@@ -43,7 +38,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// data yet." until the old answer lands (late answers to the dropped
     /// `@extra` are ignored by the purpose match).
     pub fn refresh_storage_statistics(&mut self) {
-        self.session.settings.storage_stats = Fetch::Idle;
+        self.session.settings.storage_stats = Default::default();
         self.session
             .requests
             .take_purpose(RequestPurpose::GetStorageStatistics);

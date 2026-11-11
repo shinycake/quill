@@ -208,11 +208,11 @@ impl QuillApp {
         let users = &session.users_state;
         match self.photo_target() {
             Some(PhotoTarget::Chat(_) | PhotoTarget::NewChat) => (
-                users.chat_photo_icons(),
+                users.chat_photo_emoji_icons.items(),
                 users.chat_photo_emoji_icons.error().is_some(),
             ),
             _ => (
-                users.profile_photo_icons(),
+                users.profile_photo_emoji_icons.items(),
                 users.profile_photo_emoji_icons.error().is_some(),
             ),
         }

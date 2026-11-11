@@ -415,13 +415,13 @@ impl QuillApp {
             };
             let mut footer = div().flex().justify_end().gap_2();
             let (title, body) = match &state.phase {
-                BoostPhase::Main | BoostPhase::Working => {
+                BoostPhase::Main | BoostPhase::Working(_) => {
                     let counters = session
                         .groups
                         .chat_boost_details
                         .get(&state.chat_id)
                         .map(BoostCounters::from);
-                    let working = matches!(state.phase, BoostPhase::Working);
+                    let working = matches!(state.phase, BoostPhase::Working(_));
                     footer = footer.child(close_button(tr(keys::CLOSE)));
                     if let Some(counters) = counters {
                         let allow_multi = session.groups.boosts_per_gift.unwrap_or(0) > 0;

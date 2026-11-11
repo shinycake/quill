@@ -200,7 +200,9 @@ impl QuillApp {
         {
             return;
         }
-        let payment_form = self.session().and_then(|s| s.payments.form.clone());
+        let payment_form = self
+            .session()
+            .and_then(|s| s.payments.checkout.form().cloned());
         if let (Some(dialog), Some(form)) = (self.payments.dialog.as_mut(), payment_form) {
             dialog.prefill_from_form(&form, window, cx);
         }

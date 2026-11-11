@@ -170,7 +170,7 @@ pub(super) fn make_presentation(
             context,
             handle,
             screen,
-            connected: false,
+            stage: PresentationStage::Offered,
         };
         let made = Unclaimed::new(presentation, move |presentation| {
             presentation.retire();

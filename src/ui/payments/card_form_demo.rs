@@ -95,7 +95,8 @@ impl QuillApp {
         let mode = std::env::var("QUILL_DEMO_CARD").unwrap_or_default();
         let password = mode == "password";
         if let Some(session) = self.demo_session.as_mut() {
-            session.payments.form = Some(stripe_checkout(!password, password));
+            session.payments.checkout =
+                quill::state::CheckoutForm::Ready(stripe_checkout(!password, password));
         }
         self.open_payment_dialog(window, cx);
     }

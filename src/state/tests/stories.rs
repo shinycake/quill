@@ -307,7 +307,7 @@ fn topic_history_response_is_stored_per_topic() {
     let history = session.threads.topic_histories.get(&(16, 2)).unwrap();
     assert_eq!(history.messages.len(), 2);
     assert_eq!(history.next_from_message_id, MessageId(40));
-    assert!(!history.loaded_complete);
+    assert!(!history.loaded_complete());
     // A response for another topic does not mix in.
     let extra_other =
         session.request_for_topic(RequestPurpose::GetTopicHistory, Some(ChatId(16)), 3);
@@ -331,7 +331,7 @@ fn topic_history_response_is_stored_per_topic() {
         2
     );
     let other = session.threads.topic_histories.get(&(16, 3)).unwrap();
-    assert!(other.loaded_complete);
+    assert!(other.loaded_complete());
     assert!(other.messages.is_empty());
     // next_from_message_id 0 completes the first topic's history.
     let extra2 = session.request_for_topic(RequestPurpose::GetTopicHistory, Some(ChatId(16)), 2);
@@ -345,7 +345,7 @@ fn topic_history_response_is_stored_per_topic() {
         ),
     );
     let history = session.threads.topic_histories.get(&(16, 2)).unwrap();
-    assert!(history.loaded_complete);
+    assert!(history.loaded_complete());
     assert_eq!(history.messages.len(), 3);
 }
 

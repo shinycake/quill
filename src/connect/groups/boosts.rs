@@ -1,6 +1,6 @@
 //! Connect driver: chat boosts.
 use super::*;
-use crate::boost_box::{BoostDecision, BoostPhase, classify, decide};
+use crate::boost_box::{BoostDecision, BoostPhase, BoostWork, classify, decide};
 use crate::telegram::requests::{get_chat_boost_features, set_supergroup_unrestrict_boost_count};
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -64,26 +64,32 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !matches!(
-            self.session.chats.get(&chat_id.0).map(|chat| &chat.kind),
-            Some(ChatKind::Supergroup { .. })
-        ) {
+        let Some(ChatKind::Supergroup { is_channel, .. }) =
+            self.session.chats.get(&chat_id.0).map(|chat| &chat.kind)
+        else {
             return Ok(None);
-        }
-        if self.session.groups.boost_intent == Some(chat_id.0) {
-            return Ok(None);
+        };
+        let group = !*is_channel;
+        // The press belongs to the box of this chat, which holds what it
+        // waits for (a press with no box for the chat makes one); a press
+        // while the box already works does nothing.
+        match self.boost_box_for(chat_id) {
+            Some(state) if matches!(state.phase, BoostPhase::Working(_)) => return Ok(None),
+            Some(_) => {}
+            None => {
+                self.session.groups.boost_box =
+                    Some(crate::boost_box::BoostBoxState::new(chat_id.0, group));
+            }
         }
         // A slots read from a press whose box closed is still out: this
-        // press takes it over, and its answer (stashed only while an
-        // intent waits) continues this boost.
+        // press takes it over, and its answer continues this boost.
         if self
             .session
             .requests
             .has_purpose_for_chat(RequestPurpose::GetBoostSlotsForBoost, chat_id)
         {
-            self.session.groups.boost_intent = Some(chat_id.0);
             if let Some(state) = self.boost_box_for(chat_id) {
-                state.phase = BoostPhase::Working;
+                state.phase = BoostPhase::Working(BoostWork::Slots);
                 state.note = None;
             }
             return Ok(None);
@@ -98,9 +104,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.groups.boost_intent = Some(chat_id.0);
         if let Some(state) = self.boost_box_for(chat_id) {
-            state.phase = BoostPhase::Working;
+            state.phase = BoostPhase::Working(BoostWork::Slots);
             state.note = None;
         }
         Ok(Some(extra))
@@ -112,13 +117,19 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// what tdesktop shows (reassign list, "already boosted", Premium
     /// needed). `boostChat` errors are reported by the reducer.
     pub(crate) fn maybe_continue_boost(&mut self) -> Result<(), ConnectSendError> {
-        let Some(chat_id) = self.session.groups.boost_intent else {
+        let Some(state) = self.session.groups.boost_box.as_mut() else {
             return Ok(());
         };
-        let Some(slots) = self.session.groups.boost_slots_by_chat.remove(&chat_id) else {
+        if !matches!(state.phase, BoostPhase::Working(BoostWork::SlotsReady(_))) {
+            return Ok(());
+        }
+        let chat_id = state.chat_id;
+        let BoostPhase::Working(BoostWork::SlotsReady(slots)) = std::mem::replace(
+            &mut state.phase,
+            BoostPhase::Working(BoostWork::Boosting { reassign: None }),
+        ) else {
             return Ok(());
         };
-        self.session.groups.boost_intent = None;
         let now = crate::local_time::now_unix();
         let choice = classify(chat_id, &slots, now);
         let session = &self.session;
@@ -151,7 +162,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             if let Some(state) = self.boost_box_for(chat) {
                 state.phase = BoostPhase::Main;
-                state.reassigning = None;
             }
             return Err(err);
         }

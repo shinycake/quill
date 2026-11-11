@@ -166,14 +166,14 @@ impl Session {
             // The newer side: an empty page says the window reached the
             // newest reply whatever the server reported before.
             if added == 0 {
-                thread.history.has_newer = false;
+                thread.history.newer_exists(false);
             } else {
                 thread.refresh_has_newer();
             }
         } else {
-            thread.history.older = OlderEnd::Open;
+            thread.history.reopen_older();
             if empty || added == 0 || reached_root || oldest_reply.is_none() {
-                thread.history.loaded_complete = true;
+                thread.history.mark_complete();
             }
             if let Some(oldest) = oldest_reply {
                 thread.history.next_from_message_id = MessageId(oldest);
@@ -223,11 +223,11 @@ impl Session {
             return;
         }
         if newer {
-            thread.history.newer_failed = true;
+            thread.history.fail_newer();
         } else if thread.status != ThreadStatus::Ready {
             thread.status = ThreadStatus::Failed(line);
         } else {
-            thread.history.older = OlderEnd::Failed;
+            thread.history.fail_older();
         }
     }
 

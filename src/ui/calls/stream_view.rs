@@ -86,8 +86,8 @@ impl QuillApp {
             // The stream's own connect failed: the error is shared with
             // later failures (a screen share, a video subscribe) once the
             // transport is up.
-            .filter(|call| call.is_joined && !call.transport_ready)
-            .and_then(|call| call.transport_error.clone());
+            .filter(|call| call.is_joined && !call.transport.is_connected())
+            .and_then(|call| call.transport.error().map(str::to_string));
         let stream = &mut self.group_call.stream;
         follow_live_slot(&mut stream.player, sink.as_ref(), cx);
         Some(StreamPictureParts {

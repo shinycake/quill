@@ -2,7 +2,7 @@
 //! only on the request that asked (sweep s3-payments-2).
 use super::common::*;
 use super::*;
-use crate::gift_market::{CraftSession, GiftMarketPurpose, ResaleFilter, ResaleSearch};
+use crate::gift_market::{CraftSession, GiftMarketPurpose, PageLoad, ResaleFilter, ResaleSearch};
 use crate::ids::RequestId;
 use crate::state::fetch::Fetch;
 
@@ -112,18 +112,17 @@ fn market_failures_hit_only_the_request_that_failed() {
     );
     let market = &mut session.payments.gift_market;
     let mut resale = ResaleSearch::new(5, ResaleFilter::default(), false);
-    resale.loading = true;
-    resale.request_id = new.0;
+    resale.load.begin(new.0, false);
     market.resale = Some(resale);
     fail(&mut session, old, &sink);
     let resale = session.payments.gift_market.resale.as_ref().unwrap();
     assert!(
-        resale.loading && resale.error.is_none(),
+        resale.load.is_loading() && resale.load.error().is_none(),
         "the newer search keeps loading"
     );
     fail(&mut session, new, &sink);
     let resale = session.payments.gift_market.resale.as_ref().unwrap();
-    assert!(!resale.loading && resale.error.is_some());
+    assert!(!resale.load.is_loading() && resale.load.error().is_some());
 
     // Auction A fails after B was asked: B's box still opens.
     let a = session.request(
@@ -165,16 +164,18 @@ fn market_failures_hit_only_the_request_that_failed() {
         None,
     );
     session.payments.gift_market.craft = Some(CraftSession {
-        candidates_loading: true,
-        candidates_request: live.0,
+        candidates_load: PageLoad::Loading {
+            request: live.0,
+            more: false,
+        },
         ..CraftSession::default()
     });
     fail(&mut session, stale, &sink);
     let craft = session.payments.gift_market.craft.as_ref().unwrap();
-    assert!(craft.candidates_loading && !craft.candidates_loaded);
+    assert!(craft.candidates_load.is_loading() && !craft.candidates_load.answered());
     fail(&mut session, live, &sink);
     let craft = session.payments.gift_market.craft.as_ref().unwrap();
-    assert!(!craft.candidates_loading && craft.candidates_loaded);
+    assert!(!craft.candidates_load.is_loading() && craft.candidates_load.answered());
 }
 
 #[test]

@@ -17,6 +17,15 @@ pub struct ReactionUndo {
     pub add: bool,
 }
 
+/// A `messageLink` answer. `is_public`: a public link works for anyone, a
+/// private one only for chat members (Telegram Desktop words the
+/// copied-toast differently).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageLinkAnswer {
+    pub link: String,
+    pub is_public: bool,
+}
+
 pub struct MessagesState {
     /// The composer's `@` suggestions for the open chat.
     pub mention_search: Option<MentionSearch>,
@@ -39,13 +48,10 @@ pub struct MessagesState {
     /// (ban, delete all, report spam); the UI drains it into the status
     /// note.
     pub message_action_note: Notes,
-    /// M1: parsed `messageLink.link` from the last `getMessageLink` response
-    /// (one-shot; the UI copies it to the clipboard and clears it).
-    pub message_link_result: Option<String>,
-    /// `messageLink.is_public` of that answer: a public link works for
-    /// anyone, a private one only for chat members (Telegram Desktop
-    /// words the copied-toast differently).
-    pub message_link_public: bool,
+    /// M1: parsed `messageLink` from the last `getMessageLink` response
+    /// (the link and whether it is public, as one value; the UI copies it
+    /// to the clipboard and takes it, so it is read once).
+    pub message_link: Option<MessageLinkAnswer>,
     /// M1 fix-up: one-shot; set when "Share link" is gated off by
     /// `messageProperties.can_get_link == false` or the `getMessageLink`
     /// request errors. The UI drains it into the status note so the
@@ -88,17 +94,15 @@ pub struct MessagesState {
     /// the page has no Instant View), each for the window that asked. A
     /// window drains its own into the browser (TGX does the same).
     pub instant_view_fallbacks: Vec<InstantViewFallback>,
-    /// `getWebPageInstantView` requests sent while the agent UI driver
-    /// injected input (`guard::injecting`).
-    pub instant_view_agent_requests: HashSet<RequestId>,
-    /// MED4: pending `getWebPageInstantView` URLs by `RequestId`
-    /// (`RequestPurpose` stays `Copy`, so the URL rides here).
-    pub instant_view_urls: HashMap<RequestId, String>,
+    /// MED4: pending `getWebPageInstantView` requests by `RequestId`, with
+    /// the URL asked and whether an agent's step sent it
+    /// ([`InstantViewAsk`]).
+    pub instant_view_requests: HashMap<RequestId, InstantViewAsk>,
     /// MED4b: composer `getLinkPreview` prefetch state, by URL: each
     /// window's chip reads the preview of its own composer's URL.
     pub composer_previews: crate::state::ComposerLinkPreviews,
     /// MED4b: pending `getLinkPreview` URLs by `RequestId` (same
-    /// `Copy`-purpose pattern as `instant_view_urls`).
+    /// `Copy`-purpose pattern as `instant_view_requests`).
     pub composer_preview_urls: HashMap<RequestId, String>,
     /// MED2 fix-up: one-shot; set when TDLib refuses a `recognizeSpeech`
     /// request. The UI drains it into the status note — previously the
@@ -174,13 +178,10 @@ pub struct MessagesState {
     /// Set once Telegram confirmed `reportSponsoredResultAdsHidden`: no ads
     /// are fetched or shown for the rest of this session.
     pub sponsored_hidden: bool,
-    /// In-flight sponsored-message report waiting on an option choice.
-    pub sponsored_report: Option<SponsoredReportFlight>,
-    /// Report target chosen by the user, with the request its answer is
-    /// awaited as; cleared when the flow resolves or is dismissed.
-    pub(crate) sponsored_report_target: Option<SponsoredReportTarget>,
-    /// Last `reportChatSponsoredMessage` outcome note.
-    pub last_sponsored_report: Option<SponsoredReportOutcome>,
+    /// The sponsored-message report flow: its target and the request
+    /// awaited, the option picker, or the last outcome note
+    /// ([`SponsoredReportFlow`]).
+    pub sponsored_report: SponsoredReportFlow,
     /// Translation state (`translateText` / `translateMessageText`, the
     /// chat translate bar).
     pub translate: TranslateState,
@@ -201,8 +202,7 @@ impl MessagesState {
             message_audience: None,
             wanted_reactor_tab: None,
             message_action_note: Notes::default(),
-            message_link_result: None,
-            message_link_public: false,
+            message_link: None,
             message_link_error: Notes::default(),
             ai_composer_text: None,
             ai_composer_blocks: None,
@@ -212,8 +212,7 @@ impl MessagesState {
             message_text_length_max: 4096,
             instant_view: None,
             instant_view_fallbacks: Vec::new(),
-            instant_view_agent_requests: HashSet::new(),
-            instant_view_urls: HashMap::new(),
+            instant_view_requests: HashMap::new(),
             composer_previews: Default::default(),
             composer_preview_urls: HashMap::new(),
             recognize_speech_error: Notes::default(),
@@ -239,9 +238,7 @@ impl MessagesState {
             deferred_captions: Vec::new(),
             sponsored: HashMap::new(),
             sponsored_hidden: false,
-            sponsored_report: None,
-            sponsored_report_target: None,
-            last_sponsored_report: None,
+            sponsored_report: SponsoredReportFlow::Idle,
             translate: TranslateState::default(),
             tone_limits: crate::message_menu::ToneLimits::default(),
             ai_compose: AiComposeState::default(),
@@ -253,9 +250,72 @@ impl MessagesState {
 /// flow waits on. An answer for any other request (a report the user
 /// dismissed, or an earlier step) is dropped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct SponsoredReportTarget {
-    pub(crate) chat_id: ChatId,
-    pub(crate) message_id: i64,
+pub struct SponsoredReportTarget {
+    pub chat_id: ChatId,
+    pub message_id: i64,
     /// `None` between choosing the target and the request going out.
-    pub(crate) request: Option<RequestId>,
+    pub request: Option<RequestId>,
+}
+
+/// The `reportChatSponsoredMessage` flow, one stage at a time.
+///
+/// `Asking` leaves on the answer of its request (`Picking` when TDLib
+/// wants an option, `Done` otherwise), on the request's error (`Idle`), or
+/// on Cancel / a failed send (`Idle`, `dismiss`). `Picking` leaves on the
+/// answer of the option sent from it, on Cancel, or on an error. `Done`
+/// leaves when the UI dismisses the note or a new report starts. An answer
+/// for any other request is dropped.
+#[derive(Debug, Clone, Default)]
+pub enum SponsoredReportFlow {
+    #[default]
+    Idle,
+    /// The ad being reported and the request its answer is awaited as.
+    Asking(SponsoredReportTarget),
+    /// TDLib wants an option; the option sent from here is the request in
+    /// the target.
+    Picking {
+        flight: SponsoredReportFlight,
+        target: SponsoredReportTarget,
+    },
+    /// The last outcome note (also `AdsHidden` from "Hide ads").
+    Done(SponsoredReportOutcome),
+}
+
+impl SponsoredReportFlow {
+    /// The report waiting on an option choice.
+    pub fn flight(&self) -> Option<&SponsoredReportFlight> {
+        match self {
+            Self::Picking { flight, .. } => Some(flight),
+            _ => None,
+        }
+    }
+
+    /// The outcome note of the last report.
+    pub fn outcome(&self) -> Option<&SponsoredReportOutcome> {
+        match self {
+            Self::Done(outcome) => Some(outcome),
+            _ => None,
+        }
+    }
+
+    pub fn target(&self) -> Option<SponsoredReportTarget> {
+        match self {
+            Self::Asking(target) | Self::Picking { target, .. } => Some(*target),
+            Self::Idle | Self::Done(_) => None,
+        }
+    }
+
+    pub fn target_mut(&mut self) -> Option<&mut SponsoredReportTarget> {
+        match self {
+            Self::Asking(target) | Self::Picking { target, .. } => Some(target),
+            Self::Idle | Self::Done(_) => None,
+        }
+    }
+
+    /// The report picker or the request goes; an outcome note stays.
+    pub fn dismiss(&mut self) {
+        if self.target().is_some() {
+            *self = Self::Idle;
+        }
+    }
 }

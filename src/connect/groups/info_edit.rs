@@ -100,25 +100,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.users_state.chat_photo_emoji_icons.can_ask()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetChatPhotoEmojiIcons)
-        {
+        if !self.session.users_state.chat_photo_emoji_icons.can_ask() {
             return Ok(None);
         }
-        self.session.users_state.chat_photo_emoji_icons.begin();
         let extra = self
             .session
             .request(RequestPurpose::GetChatPhotoEmojiIcons, None);
         let json = get_default_chat_photo_custom_emoji_stickers(extra);
         let sent = self.send_json_request(extra, &json).map(Some);
-        if sent.is_err() {
-            self.session
-                .users_state
-                .chat_photo_emoji_icons
-                .fail("The request was not sent.");
+        if sent.is_ok() {
+            self.session.users_state.chat_photo_emoji_icons.begin();
         }
         sent
     }

@@ -125,7 +125,7 @@ fn join_as_answer_fills_options_and_preselects_the_saved_default() {
         ),
     );
     let call = session.calls.active_group_call.as_ref().unwrap();
-    assert_eq!(call.join_as_options.len(), 2);
+    assert_eq!(call.join_as_options.data().map(Vec::len), Some(2));
     assert_eq!(call.join_as, Some(MessageSender::Chat { chat_id: -300 }));
     // The blocked-users list is untouched by a join-as answer.
     assert!(session.settings.blocked_senders.is_idle());
@@ -373,7 +373,10 @@ fn hanging_up(session: &mut Session, call_id: i32) -> RequestId {
     let request = session.request(RequestPurpose::DiscardCall, None);
     let call = session.calls.active_call.as_mut().expect("active call");
     let resume = std::mem::replace(&mut call.state, CallState::HangingUp);
-    session.calls.hang_up = Some(crate::state::HangUp::new(request, call_id, resume));
+    session
+        .calls
+        .progress
+        .hang_up_sent(crate::state::HangUp::new(request, call_id, resume));
     request
 }
 
@@ -403,7 +406,7 @@ fn non_terminal_update_keeps_a_hang_up_in_flight() {
     // The hang-up fails: the call is back in the phase it moved to.
     apply_json(&mut session, &seq, &sink, &error_json(request));
     assert_eq!(state(&session), Some(CallState::ExchangingKeys));
-    assert!(session.calls.hang_up.is_none());
+    assert!(session.calls.progress.hang_up().is_none());
     assert!(session.calls.error.is_some());
 }
 
@@ -439,11 +442,11 @@ fn other_discard_errors_leave_the_hang_up_alone() {
     apply_json(&mut session, &seq, &sink, &error_json(other));
     let call = session.calls.active_call.as_ref().expect("active call");
     assert_eq!(call.state, CallState::HangingUp);
-    assert!(session.calls.hang_up.is_some());
+    assert!(session.calls.progress.hang_up().is_some());
     // TDLib's own hanging-up update is kept as the phase to go back to.
     apply_json(&mut session, &seq, &sink, &hanging_up_update_json(77, 41));
     assert_eq!(
-        session.calls.hang_up.as_ref().map(|h| h.resume.clone()),
+        session.calls.progress.hang_up().map(|h| h.resume.clone()),
         Some(CallState::HangingUp)
     );
 }
@@ -583,4 +586,34 @@ fn muting_someone_else_does_not_hold_back_your_own_row() {
     apply_json(&mut session, &seq, &sink, &own_row(true));
     let call = session.calls.active_group_call.as_ref().unwrap();
     assert!(!call.is_muted_self, "held while your own toggle is out");
+}
+
+#[test]
+fn join_as_failure_leaves_the_picker_out_and_is_not_asked_again() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.calls.active_group_call = Some(ActiveGroupCall::fresh(555));
+    if let Some(call) = session.calls.active_group_call.as_mut() {
+        call.join_as_options.begin();
+    }
+    let extra = session.request(
+        RequestPurpose::Calls(CallsPurpose::GetVideoChatAvailableParticipants {
+            group_call_id: 555,
+        }),
+        None,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_ADMIN_REQUIRED"}}"#,
+            extra.0
+        ),
+    );
+    let call = session.calls.active_group_call.as_ref().unwrap();
+    assert!(!call.join_as_options.is_loading());
+    assert!(call.join_as_options.error().is_some());
+    assert!(!call.join_as_options.is_idle());
+    assert!(call.join_as_options.data().is_none());
 }

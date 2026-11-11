@@ -186,6 +186,7 @@ pub fn list_chats(args: &Value) -> Result<ToolOutput, ToolError> {
     Ok(ToolOutput {
         text,
         data: json!({"list": list_name, "chats": entries}),
+        images: Vec::new(),
     })
 }
 
@@ -211,6 +212,7 @@ pub fn list_folders(_args: &Value) -> Result<ToolOutput, ToolError> {
     Ok(ToolOutput {
         text,
         data: json!({"folders": list}),
+        images: Vec::new(),
     })
 }
 
@@ -324,7 +326,11 @@ pub fn get_chat_info(args: &Value) -> Result<ToolOutput, ToolError> {
             text.push_str(&format!("\n{key}: {shown}"));
         }
     }
-    Ok(ToolOutput { text, data: info })
+    Ok(ToolOutput {
+        text,
+        data: info,
+        images: Vec::new(),
+    })
 }
 
 pub fn members_schema() -> Value {
@@ -455,6 +461,7 @@ pub fn list_members(args: &Value) -> Result<ToolOutput, ToolError> {
     Ok(ToolOutput {
         text,
         data: json!({"chat": target.summary(), "members": out}),
+        images: Vec::new(),
     })
 }
 
@@ -522,5 +529,6 @@ pub fn list_unread(args: &Value) -> Result<ToolOutput, ToolError> {
     Ok(ToolOutput {
         text,
         data: json!({"chats": digest}),
+        images: Vec::new(),
     })
 }

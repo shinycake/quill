@@ -198,7 +198,9 @@ impl QuillApp {
             list = list.child(self.chat_select_bar(count, cx));
         }
         if show_main_list && chats.is_empty() {
-            let loading = self.session().is_some_and(|s| !s.chat_list.chats_exhausted);
+            let loading = self
+                .session()
+                .is_some_and(|s| !s.chat_list.main_paging.is_exhausted());
             list = if loading && folder.is_none() {
                 // kit Phase 9: skeleton rows while the first chat batch is
                 // still loading.

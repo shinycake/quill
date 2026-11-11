@@ -44,7 +44,7 @@ impl Session {
                 active.is_video = call.is_video;
                 // A hang-up in flight keeps showing: the update is where
                 // the call goes back to if the discardCall fails.
-                match self.calls.hang_up.as_mut() {
+                match self.calls.progress.hang_up_mut() {
                     Some(hang_up) if hang_up.call_id == call.id => {
                         hang_up.resume = call.state.clone();
                     }
@@ -185,17 +185,7 @@ impl Session {
         if !self.note_call_migration(call, &summary) {
             self.calls.summary = Some(summary);
         }
-        if self
-            .calls
-            .hang_up
-            .as_ref()
-            .is_some_and(|hang_up| hang_up.call_id == call.id)
-        {
-            self.calls.hang_up = None;
-        }
-        if self.calls.answered_call == Some(call.id) {
-            self.calls.answered_call = None;
-        }
+        self.calls.progress.call_ended(call.id);
         self.calls
             .busy_decline_queue
             .retain(|(id, _, _)| *id != call.id);
@@ -495,7 +485,17 @@ impl Session {
             && tracked.id == group_call_id
         {
             tracked.join_as = pick_join_as(&senders, tracked.join_as, default);
-            tracked.join_as_options = senders;
+            tracked.join_as_options.succeed(senders);
+        }
+    }
+
+    /// `getVideoChatAvailableParticipants` failed: the picker is optional,
+    /// so the call keeps no list and the join goes ahead as yourself.
+    pub(crate) fn fail_group_call_join_as_options(&mut self, group_call_id: i32, error: &str) {
+        if let Some(tracked) = self.calls.active_group_call.as_mut()
+            && tracked.id == group_call_id
+        {
+            tracked.join_as_options.fail(error);
         }
     }
 
@@ -561,7 +561,7 @@ impl Session {
             if let Some(request) = request {
                 tracked.rejoin.attempt_joined(request);
             }
-            tracked.join_payload = payload;
+            tracked.transport.store_answer(payload);
         }
     }
 
@@ -572,7 +572,7 @@ impl Session {
         if let Some(tracked) = self.calls.active_group_call.as_mut()
             && tracked.id == group_call_id
         {
-            tracked.screen_share_answer = payload;
+            tracked.screen_share.store_answer(payload);
         }
     }
 

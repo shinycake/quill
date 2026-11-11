@@ -177,9 +177,8 @@ fn frequent_contacts_load_and_the_option_hides_them() {
 #[test]
 fn removing_one_recent_keeps_the_rest_and_idles_when_empty() {
     let mut search = SearchState {
-        recents: true,
+        surface: SearchSurface::Recents,
         chat_ids: vec![ChatId(1), ChatId(2)],
-        open: true,
         ..SearchState::default()
     };
     assert!(search.remove_recent(ChatId(1)));
@@ -189,7 +188,7 @@ fn removing_one_recent_keeps_the_rest_and_idles_when_empty() {
     assert!(search.remove_recent(ChatId(2)));
     assert_eq!(search.status(), SearchStatus::Idle);
     // Typed results are not "recents": nothing to remove.
-    search.recents = false;
+    search.surface = SearchSurface::Query;
     search.chat_ids = vec![ChatId(3)];
     assert!(!search.remove_recent(ChatId(3)));
 }
