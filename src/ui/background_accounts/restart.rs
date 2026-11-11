@@ -26,6 +26,14 @@ impl Restarts {
             .insert(key.clone(), (count.saturating_add(1), now + delay));
     }
 
+    /// `key`'s delay is over but nothing could start it at `now` (the app
+    /// is locked, or its old client is still closing): look again after the
+    /// first delay. It is not a failure, so the count stays.
+    pub(super) fn put_off(&mut self, key: &AccountKey, now: Instant) {
+        let count = self.failed.get(key).map_or(0, |(count, _)| *count);
+        self.failed.insert(key.clone(), (count, now + FIRST));
+    }
+
     /// `key`'s client reached `Ready`, or the account is gone.
     pub(super) fn forget(&mut self, key: &AccountKey) {
         self.failed.remove(key);
@@ -66,5 +74,20 @@ mod tests {
         assert_eq!(restarts.due_in(&key(), t0), LONGEST);
         restarts.forget(&key());
         assert_eq!(restarts.due_in(&key(), t0), Duration::ZERO);
+    }
+
+    #[test]
+    fn a_start_put_off_waits_the_first_delay_and_is_not_a_failure() {
+        let t0 = Instant::now();
+        let mut restarts = Restarts::default();
+        restarts.failed(&key(), t0);
+        restarts.failed(&key(), t0);
+        let due = t0 + Duration::from_secs(10);
+        assert_eq!(restarts.due_in(&key(), due), Duration::ZERO);
+        restarts.put_off(&key(), due);
+        assert_eq!(restarts.due_in(&key(), due), FIRST);
+        // The next real failure doubles from where the count stood.
+        restarts.failed(&key(), due);
+        assert_eq!(restarts.due_in(&key(), due), Duration::from_secs(20));
     }
 }

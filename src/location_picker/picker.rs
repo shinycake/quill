@@ -138,10 +138,20 @@ impl SearchInput {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TileState {
-    Requested(u64),
+    /// Asked under request `extra`, after `failed` asks for it failed.
+    Requested {
+        extra: u64,
+        failed: u8,
+    },
     Ready(FileId),
-    Failed,
+    /// This many asks in a row failed. Under [`TILE_TRIES`] the tile is
+    /// asked again; at it the tile waits for the map to move or resize.
+    Failed(u8),
 }
+
+/// How many times in a row a tile is asked for before it waits for the map
+/// to move or change size.
+const TILE_TRIES: u8 = 3;
 
 /// The pin: lifted while the map moves; once it rests away from the place
 /// the venues were asked for, the "search this area" button shows.
@@ -267,7 +277,7 @@ impl LocationPicker {
     pub fn set_map_size(&mut self, size: MapSize) {
         if self.map_size != Some(size) {
             self.tiles
-                .retain(|(_, state)| !matches!(state, TileState::Failed));
+                .retain(|(_, state)| !matches!(state, TileState::Failed(_)));
         }
         self.map_size = Some(size);
     }
@@ -305,7 +315,7 @@ impl LocationPicker {
         self.pin = Pin::Resting;
         // A tile that failed is asked again once the map rests.
         self.tiles
-            .retain(|(_, state)| !matches!(state, TileState::Failed));
+            .retain(|(_, state)| !matches!(state, TileState::Failed(_)));
         let location = self.view.center();
         self.address.stage = match std::mem::take(&mut self.address.stage) {
             // Back at the place the address is for.
@@ -565,17 +575,40 @@ impl LocationPicker {
             return None;
         }
         let key = TileKey::for_view(&self.view, self.map_size?);
-        (!self.tiles.iter().any(|(known, _)| *known == key)).then_some(key)
+        match self.tile_state(key) {
+            None => Some(key),
+            // A failed ask is repeated a few times, so a view the user
+            // leaves alone does not stay blank after one lost answer.
+            Some(TileState::Failed(failed)) if failed < TILE_TRIES => Some(key),
+            Some(_) => None,
+        }
+    }
+
+    fn tile_state(&self, key: TileKey) -> Option<TileState> {
+        self.tiles
+            .iter()
+            .find(|(known, _)| *known == key)
+            .map(|(_, state)| *state)
+    }
+
+    /// How many asks for `key` failed in a row so far.
+    fn tile_failures(&self, key: TileKey) -> u8 {
+        match self.tile_state(key) {
+            Some(TileState::Failed(failed) | TileState::Requested { failed, .. }) => failed,
+            Some(TileState::Ready(_)) | None => 0,
+        }
     }
 
     pub(super) fn tile_requested(&mut self, key: TileKey, extra: u64) {
+        let failed = self.tile_failures(key);
         self.tiles.retain(|(known, _)| *known != key);
-        self.tiles.push((key, TileState::Requested(extra)));
+        self.tiles
+            .push((key, TileState::Requested { extra, failed }));
         while self.tiles.len() > TILE_CAP {
             let Some(index) = self
                 .tiles
                 .iter()
-                .position(|(_, state)| !matches!(state, TileState::Requested(_)))
+                .position(|(_, state)| !matches!(state, TileState::Requested { .. }))
             else {
                 break;
             };
@@ -584,19 +617,29 @@ impl LocationPicker {
     }
 
     pub(super) fn tile_answered(&mut self, extra: u64, file_id: Option<FileId>) -> bool {
-        let Some(entry) = self
-            .tiles
-            .iter_mut()
-            .find(|(_, state)| *state == TileState::Requested(extra))
-        else {
-            return false;
-        };
-        entry.1 = file_id.map_or(TileState::Failed, TileState::Ready);
-        true
+        for (_, state) in &mut self.tiles {
+            if let TileState::Requested {
+                extra: asked,
+                failed,
+            } = *state
+                && asked == extra
+            {
+                *state = match file_id {
+                    Some(file_id) => TileState::Ready(file_id),
+                    None => TileState::Failed(failed.saturating_add(1)),
+                };
+                return true;
+            }
+        }
+        false
     }
 
+    /// The ask for `key` could not be sent: one more failed try, so a send
+    /// that is refused every time is not repeated on every pass.
     pub(super) fn tile_unsent(&mut self, key: TileKey) {
+        let failed = self.tile_failures(key).saturating_add(1);
         self.tiles.retain(|(known, _)| *known != key);
+        self.tiles.push((key, TileState::Failed(failed)));
     }
 
     /// Tiles with a file, oldest first; the one for the current view last

@@ -338,6 +338,24 @@ impl QuillApp {
     /// is missing, follow a changed target language, stop when the bar is
     /// no longer offered). Returns whether anything changed.
     pub(in crate::ui) fn pump_translation(&mut self) -> bool {
+        // Only the chats some window shows keep their scan. This runs before
+        // every early return: a chat that was closed, or left for one that
+        // is not translated, must lose its scan, or coming back to it would
+        // not count as shown again and its failures would never be retried.
+        let gone: Vec<i64> = self
+            .translate
+            .pump
+            .keys()
+            .copied()
+            .filter(|chat| {
+                !self
+                    .session()
+                    .is_some_and(|session| session.chat_is_shown(ChatId(*chat)))
+            })
+            .collect();
+        for chat in gone {
+            self.translate.pump.remove(&chat);
+        }
         let Some(chat_id) = self.session().and_then(|s| s.open_chat_id()) else {
             return false;
         };
@@ -427,21 +445,6 @@ impl QuillApp {
             scan.record(key, revision, found.iter().map(|id| id.0).collect());
             found.into_iter().take(room).collect()
         };
-        // Only the chats some window shows keep their scan.
-        let gone: Vec<i64> = self
-            .translate
-            .pump
-            .keys()
-            .copied()
-            .filter(|chat| {
-                !self
-                    .session()
-                    .is_some_and(|session| session.chat_is_shown(ChatId(*chat)))
-            })
-            .collect();
-        for chat in gone {
-            self.translate.pump.remove(&chat);
-        }
         self.translate.pump.insert(chat_id.0, scan);
         let Some(live) = self.live.as_mut() else {
             #[cfg(test)]

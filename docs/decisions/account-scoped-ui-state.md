@@ -8048,14 +8048,14 @@ whose variants carry the data, with a way out of every stage.
 
 | Id | Fix |
 | --- | --- |
-| 03-C010 | A failed map tile is dropped when the map rests (`move_ended`) or its size changes, so the next poll asks again; a pass alone never re-asks (no hot loop on a dead connection). |
+| 03-C010 | A map tile whose ask failed (or could not be sent) is asked again up to three times in a row (`TileState::Failed(count)`), so a view left alone does not stay blank after one lost answer; after that it waits until the map rests after a move (`move_ended`) or its size changes, which drops the failure. |
 | 03-C012 | `moving` and `places_in_area` are one `Pin { Resting, Moving, RestedAway }`. |
 | 03-C011 | Skipped: `venues_failed` shows the empty-list text; tdesktop's venue list has no separate error row either, and the retry is the next move or search. |
 | 03-D007 | The admin delete box sends the moderation plan first; a send that fails keeps the box open, deletes nothing and notes "could not delete" (the steps are idempotent, so a retry repeats them harmlessly). The community ban waits for the plan. Server refusals of a step are not matched back to the box (no UI test can install a failing live driver). |
 | 06-035 | Opener threads are `WorkerLife` too (`State::openers`, `Thread::{Draw, Opener}` in `WorkerEnd`); a clip an opener decodes is `Stage::Decoding { opener }`, and when that opener ends the clip fails. With no opener left `workers_decode` flips so the draw workers decode the waiting clips. `worker_gone` is gone: `wait_idle` reads the per-thread lives. |
 | 06-036 | Skipped: `Clip::delivered` is a one-way "first frame handed out" latch, not a stage: nothing waits on it and no exit is missing. |
 | 07-052 | The AI answers are one queue `MessagesState::ai_answers` of `AiAnswer { request, window, chat, result: Text / Blocks / Failed }`, replacing the two single-slot `Option`s and matched by the request. `AiAsk::Asked { request, markup }` applies only the answer of its own request; a failure answer returns the ask to `Idle`; a newer ask makes the older answer stale. |
-| 08-016 | A background client that died or failed to start is restarted by the poll after a delay that doubles from 5 s to 5 min per failure in a row (`background_accounts::restart::Restarts`, pure and tested with explicit instants); reaching `Ready` forgets it. The poll loop sleeps until the due time instead of ending. |
+| 08-016 | A background client that died or failed to start is restarted by the poll after a delay that doubles from 5 s to 5 min per failure in a row (`background_accounts::restart::Restarts`, pure and tested with explicit instants); reaching `Ready` forgets it. The poll loop sleeps until the due time instead of ending. A client that is due while nothing may start it (the app is locked, or its old client is still closing) is put off by the first delay (`Restarts::put_off`, not a failure), so it never keeps the poll at its fastest pace. |
 | 10-044 | The lock closes the invite/share box (`close_call_box`). |
 | 10-072 | `begin_topic_editor` keeps an editor whose Save is `Sending`. |
 | 10-073 | `TopicEditor::original_emoji` deleted (never read). |
@@ -8072,5 +8072,5 @@ whose variants carry the data, with a way out of every stage.
 | 13-056 | `touch_bar_reorder` maps `Ok(None)` (a reorder in flight, or nothing to send) to `reorder_refused`. |
 | 14-024 | Sound is wanted (`options.want_audio`) only once the reopen succeeded. `Player::open` returns at once and fails only when its thread cannot start, so no test can make it fail. |
 | 14-025 | A seek, step back or reopen drops the pending stepped picture. |
-| 14-042 | A failed message translation is dropped when the chat is shown again (a new pump scan), so it is asked once more; not on every pass. |
+| 14-042 | A failed message translation is dropped when the chat is shown again (a new pump scan), so it is asked once more; not on every pass. The scans of chats no window shows are dropped at the start of every pass, before the early returns, so closing the chat or leaving it for one that is not translated counts. |
 | 14-043 | `ToastStage { None, Shown { toast, _hide } }` replaces the `Option` and `toast_seq`. |

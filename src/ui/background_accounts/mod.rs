@@ -222,6 +222,17 @@ impl BackgroundAccounts {
             .min()
     }
 
+    /// The clients whose delay is over and that the pass still could not
+    /// start wait the first delay again, so a due client never makes
+    /// every poll pass run the start pass.
+    fn put_off_unstarted(&mut self, now: Instant) {
+        for client in self.clients.iter().filter(|client| client.retryable()) {
+            if self.restarts.due_in(&client.key, now).is_zero() {
+                self.restarts.put_off(&client.key, now);
+            }
+        }
+    }
+
     /// Every background account's unread, combined (tdesktop
     /// `OtherAccountsUnreadState`).
     pub(super) fn total_unread(&self) -> AccountUnread {
@@ -304,6 +315,7 @@ impl QuillApp {
             });
         *self.background.clients_mut() = keep;
         for client in gone {
+            self.background.restarts.forget(&client.key);
             if let Some(live) = client.live {
                 self.close_later(client.key, live, false, cx);
             }
@@ -522,6 +534,19 @@ impl QuillApp {
         self.background.poll = Some(poll);
     }
 
+    /// A client that died or failed to start is started again once its
+    /// delay is over (`restart`); nothing else re-runs the pass while the
+    /// user stays on one account. One the pass cannot start now (the app is
+    /// locked, or its old client is still closing) is looked at again after
+    /// the first delay, not on every pass.
+    pub(super) fn restart_due(&mut self, now: Instant, cx: &mut Context<Self>) {
+        if self.background.next_restart(now) != Some(Duration::ZERO) {
+            return;
+        }
+        self.ensure_background_accounts(cx);
+        self.background.put_off_unstarted(now);
+    }
+
     /// The app's proxy list and IPv6 choice: the account on screen's, once
     /// it is loaded and no change of it is in flight.
     fn app_proxy_list(&self) -> Option<(Vec<quill::proxy::ProxyEntry>, bool)> {
@@ -662,12 +687,7 @@ impl QuillApp {
         }
         self.drain_account_clicks(cx);
         self.sync_background_calls(cx);
-        // A client that died or failed to start is started again once its
-        // delay is over (`restart`); nothing else re-runs the pass while
-        // the user stays on one account.
-        if self.background.next_restart(now) == Some(Duration::ZERO) {
-            self.ensure_background_accounts(cx);
-        }
+        self.restart_due(now, cx);
         if changed {
             cx.notify();
         }

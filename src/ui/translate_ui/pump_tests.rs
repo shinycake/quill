@@ -151,8 +151,22 @@ fn a_failed_translation_is_asked_again_when_the_chat_is_reopened(cx: &mut TestAp
         app.pump_translation();
         assert!(failed(app), "not asked again on every pass");
         assert!(app.translate.asked.is_empty());
-        // The chat shown again starts a new scan, which asks once more.
-        app.translate.pump.clear();
+        // Leaving for a chat that is not translated drops the scan, so the
+        // chat shown again starts a new one, which asks once more.
+        let other = app
+            .session()
+            .and_then(|s| s.chats.keys().copied().find(|id| *id != CHANNEL.0))
+            .map(ChatId)
+            .expect("the demo has another chat");
+        if let Some(session) = app.session_mut() {
+            session.open_chat(other);
+        }
+        app.pump_translation();
+        assert!(failed(app), "a chat that is not shown is not asked for");
+        assert!(app.translate.pump.is_empty(), "its scan left with it");
+        if let Some(session) = app.session_mut() {
+            session.open_chat(CHANNEL);
+        }
         app.pump_translation();
         assert!(!failed(app), "the failure is dropped for another ask");
         assert!(
