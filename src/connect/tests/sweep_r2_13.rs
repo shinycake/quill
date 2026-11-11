@@ -1,6 +1,6 @@
-//! Sweep r2-13 (earn): a refused send of one list does not strand the
-//! other, a refused Join reaches the caller, and the revenue page takes
-//! only the answer of the open that asked.
+//! Sweep r2-13: refused sends settle their own part (and not the others), a
+//! refused Join reaches the caller, and answers act only for the request
+//! that asked.
 use super::sweep_s3_payments_1::Flaky;
 use crate::earn::*;
 use serde_json::json;
@@ -115,4 +115,69 @@ fn a_failed_trending_page_is_asked_again_at_its_own_offset() {
         2,
         "the failed page, not the first"
     );
+}
+
+/// 02-052: the invite-links send is refused; the chats half is still asked,
+/// and the links half shows its error.
+#[test]
+fn a_refused_folder_links_send_does_not_strand_the_chats_half() {
+    let mut t = Flaky::new();
+    t.sender.refuse(&["getChatFolderInviteLinks"]);
+    assert!(t.driver.fetch_folder_share(5).is_err());
+    assert_eq!(t.sender.count("getChatsForChatFolderInviteLink"), 1);
+    let share = t.driver.session.chat_list.folder_shares.get(&5).unwrap();
+    assert!(share.links.error().is_some());
+    assert!(share.chats.is_loading());
+}
+
+/// 02-051 is not a bug: a refused `getForumTopic` after "mark all mentions
+/// as read" costs nothing, because the read's own `ok` clears the badge
+/// (`clear_topic_marks`), so the refetch only double-checks.
+#[test]
+fn a_refused_topic_refetch_leaves_the_mention_badge_cleared_by_the_read_ok() {
+    let mut t = Flaky::new();
+    use crate::telegram::envelope::{ChatNotificationSettings, ForumTopic};
+    let topic = ForumTopic {
+        forum_topic_id: 4,
+        name: "Topic".into(),
+        is_general: false,
+        is_closed: false,
+        is_pinned: false,
+        is_hidden: false,
+        unread_count: 3,
+        order: 5,
+        last_message_preview: String::new(),
+        icon_color: 0,
+        icon_custom_emoji_id: 0,
+        last_message_id: 0,
+        last_read_inbox_message_id: 0,
+        notification_settings: ChatNotificationSettings::default(),
+        unread_mention_count: 3,
+        unread_reaction_count: 0,
+        creation_date: 0,
+        creator: None,
+        is_outgoing: false,
+        draft: None,
+    };
+    t.driver
+        .session
+        .threads
+        .forum_topics
+        .insert(-100_777, vec![topic]);
+    let count = |t: &Flaky| {
+        t.driver
+            .session
+            .threads
+            .forum_topics
+            .get(&-100_777)
+            .and_then(|topics| topics.iter().find(|topic| topic.forum_topic_id == 4))
+            .map(|topic| topic.unread_mention_count)
+    };
+    assert_eq!(count(&t), Some(3));
+    t.sender.refuse(&["getForumTopic"]);
+    t.driver
+        .read_all_forum_topic_mentions(crate::ids::ChatId(-100_777), 4)
+        .unwrap();
+    t.answer("readAllForumTopicMentions", json!({"@type": "ok"}));
+    assert_eq!(count(&t), Some(0));
 }

@@ -158,8 +158,25 @@ impl<S: JsonSender> ConnectDriver<S> {
             changed |= self
                 .session
                 .sweep_stale_requests(now, PENDING_REQUEST_TTL, |id| waiting.contains(&id));
+            self.forget_flood_attempts_of_gone_requests();
         }
         changed
+    }
+
+    /// A re-sent read that was swept or taken without any answer leaves its
+    /// attempt count and retained JSON behind: drop those of requests the
+    /// registry no longer holds.
+    fn forget_flood_attempts_of_gone_requests(&mut self) {
+        let gone: Vec<u64> = self
+            .flood_attempts
+            .keys()
+            .copied()
+            .filter(|id| self.session.requests.get(RequestId(*id)).is_none())
+            .collect();
+        for id in gone {
+            self.flood_attempts.remove(&id);
+            self.sender.forget_retained(RequestId(id));
+        }
     }
 
     /// How long until the earliest time-driven work here and in the session
