@@ -112,7 +112,6 @@ impl QuillApp {
             draft: GiveawayDraft::new(chat_id.0, prepaid, now),
             prize_input,
             note: None,
-            confirming: false,
             page: GiveawayPage::Form,
         });
         self.open_box(DialogKind::Giveaway);
@@ -212,7 +211,7 @@ impl QuillApp {
         let limits = draft.limits;
         if let Some(form) = self.giveaway.form.as_mut() {
             match verdict {
-                Ok(()) => form.confirming = true,
+                Ok(()) => form.page = GiveawayPage::Confirming,
                 Err(error) => form.note = Some(error.text_for(&limits)),
             }
         }
@@ -234,7 +233,9 @@ impl QuillApp {
             None => Some(tr(keys::Q_MONEY_STARTING_A_GIVEAWAY_NEEDS_A).to_string()),
         };
         if let Some(form) = self.giveaway.form.as_mut() {
-            form.confirming = false;
+            if form.page == GiveawayPage::Confirming {
+                form.page = GiveawayPage::Form;
+            }
             form.note = note;
         }
         cx.notify();
@@ -470,7 +471,7 @@ impl QuillApp {
                 )))
                 .into_any_element();
         }
-        if form.confirming {
+        if form.page == GiveawayPage::Confirming {
             return div()
                 .id("giveaway-confirm")
                 .text_sm()
@@ -478,7 +479,7 @@ impl QuillApp {
                 .into_any_element();
         }
 
-        if form.page != GiveawayPage::Form {
+        if form.page.is_list() {
             return self.giveaway_pick_page(form, &draft, cx);
         }
         let mut body = div().flex().flex_col().gap_1();
@@ -552,7 +553,7 @@ impl QuillApp {
             let draft = this.settled_draft();
             let prepaid = draft.as_ref().is_some_and(|d| d.prepaid.is_some());
             let settled_chat = draft.as_ref().map(|d| d.boosted_chat_id);
-            let confirming = form.confirming;
+            let confirming = form.page == GiveawayPage::Confirming;
             let launch = this
                 .session()
                 .map(|s| s.payments.giveaway.launch.clone())
@@ -575,7 +576,7 @@ impl QuillApp {
             };
             let footer = div().flex().justify_end().gap_2();
             let page = form.page;
-            let footer = if page != GiveawayPage::Form {
+            let footer = if page.is_list() {
                 footer.child(
                     Button::new("giveaway-page-done")
                         .label(tr(keys::BOX_DONE))
@@ -591,7 +592,7 @@ impl QuillApp {
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 if let Some(form) = this.giveaway.form.as_mut() {
-                                    form.confirming = false;
+                                    form.page = GiveawayPage::Form;
                                 }
                                 cx.notify();
                             })),

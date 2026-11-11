@@ -93,7 +93,7 @@ impl QuillApp {
         Some(StreamPictureParts {
             chat_id,
             player: stream.player.clone(),
-            photo: stream.photo.as_ref().and_then(|(_, image)| image.clone()),
+            photo: stream.photo.image(),
             has_photo,
             name,
             idle,

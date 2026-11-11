@@ -333,13 +333,15 @@ fn another_chat_closes_the_info_cards(cx: &mut TestAppContext) {
     let other = other_chat(&app, &mut vcx);
     open(&app, &mut vcx, CHAT);
     app.update(&mut vcx, |app, cx| {
-        app.chat_ui.topic_info_open = true;
-        app.chat_ui.thread_info_open = true;
+        app.chat_ui.info_card = crate::ui::chat_ui_state::InfoCard::Topic;
         cx.notify();
     });
     open(&app, &mut vcx, other);
     app.read_with(&vcx, |app, _| {
-        assert!(!app.chat_ui.topic_info_open && !app.chat_ui.thread_info_open);
+        assert_eq!(
+            app.chat_ui.info_card,
+            crate::ui::chat_ui_state::InfoCard::Closed
+        );
     });
 }
 

@@ -234,8 +234,8 @@ impl QuillApp {
                 .collect(),
             None => (0..len).collect(),
         };
-        if let Ok(mut drawn) = self.history.chrome_due.try_borrow_mut() {
-            due.append(&mut drawn);
+        if let Ok(mut refresh) = self.history.chrome_refresh.try_borrow_mut() {
+            due.append(&mut refresh.take_due());
         }
         due.sort_unstable();
         due.dedup();
@@ -250,18 +250,14 @@ impl QuillApp {
         if row.chrome_stamp() == self.history.chrome_epoch {
             return;
         }
-        let Ok(mut due) = self.history.chrome_due.try_borrow_mut() else {
+        let Ok(mut refresh) = self.history.chrome_refresh.try_borrow_mut() else {
             return;
         };
-        if due.contains(&ix) {
+        if refresh.contains(ix) {
             return;
         }
-        // Keyed on its own flag: a render that skips the kept-rows branch
-        // (the chat is hidden) leaves `due` filled, and the next row must
-        // still get its notify.
-        let first = !self.history.chrome_notify_pending.replace(true);
-        due.push(ix);
-        drop(due);
+        let first = refresh.note(ix);
+        drop(refresh);
         if first {
             let app = cx.weak_entity();
             // The flag lives in this window's history: reset it in the
@@ -287,7 +283,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let scoped = self.in_window_scope(scope, cx, |this, cx| {
-            this.history.chrome_notify_pending.set(false);
+            if let Ok(mut refresh) = this.history.chrome_refresh.try_borrow_mut() {
+                refresh.notified();
+            }
             cx.notify();
         });
         if scoped.is_some() {

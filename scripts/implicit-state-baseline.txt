@@ -75,12 +75,10 @@ GramsHub::loaded
 GramsHub::loaded+error
 GramsHub::loading
 GroupCallUi::window_opening
-HdrViewer::in_flight
 HeaderFacts::is_saved_messages
 HistoryState::load_failed
 HistoryState::loaded_complete
 HistoryState::newer_failed
-HistoryUi::anchor_pending
 InlineMembersUi::admins_asked
 InstallResult::failed
 InviteLinkMembersState::loading
@@ -157,9 +155,6 @@ QuickRepliesState::shortcuts_requested+error
 ReceivedGift::is_saved
 Relay::started
 ResaleBuy::sending
-ResaleSearch::loaded
-ResaleSearch::loading
-ResaleSearch::loading+error
 RowForum::loaded
 RowMenuFacts::is_saved_messages
 RowState::pending

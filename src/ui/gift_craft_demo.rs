@@ -8,7 +8,7 @@
 use super::app::QuillApp;
 use super::gift_craft_ui::gate_notice;
 use super::gift_market_demo::{ME, RESALE_GIFT, listing, resale_page, seed_gift_market_session};
-use super::gift_market_state::MarketBox;
+use super::gift_market_state::{CraftStage, MarketBox};
 use super::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::diagnostics::MemorySink;
@@ -96,9 +96,10 @@ pub(super) fn seed_gift_craft_session(sink: Arc<MemorySink>) -> Session {
 impl QuillApp {
     fn demo_gift_craft(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         let mode = std::env::var("QUILL_DEMO_MARKET").unwrap_or_default();
-        self.gift_market.craft_primary = self
+        self.gift_market.craft = self
             .craft_session()
-            .and_then(|craft| craft.slots.first().cloned());
+            .and_then(|craft| craft.slots.first().cloned())
+            .map_or(CraftStage::Idle, CraftStage::Chosen);
         self.gift_market.stack = vec![MarketBox::Craft];
         match mode.as_str() {
             "info" => self.gift_market.stack = vec![MarketBox::CraftInfo],
@@ -108,8 +109,9 @@ impl QuillApp {
                 if let Some(craft) = self.craft_mut() {
                     craft.crafting = true;
                 }
-                self.gift_market.forge_started =
-                    Instant::now().checked_sub(Duration::from_millis(1_400));
+                if let Some(since) = Instant::now().checked_sub(Duration::from_millis(1_400)) {
+                    self.gift_market.craft.start_forge(since);
+                }
             }
             "success" | "failed" => {
                 let crafted = self.craft_session().and_then(|craft| {

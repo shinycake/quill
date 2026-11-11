@@ -190,7 +190,9 @@ impl QuillApp {
             live.driver.session.view_generation.bump();
         }
         // Choosing a chat from the list ends the peek at it.
-        self.history.forum_chats_peek = false;
+        if self.history.forum_column.peeking() {
+            self.history.forum_column = crate::ui::history_state::ForumColumnUi::Hidden;
+        }
         // A chat opened from anywhere (a link, a notification) shows over
         // Settings' place.
         self.close_settings();

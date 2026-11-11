@@ -38,8 +38,8 @@ impl QuillApp {
         // Not landed yet (tdesktop answers "to the unread" before
         // `_historyInited`): the open in progress goes there already.
         if session.history_loading(chat)
-            || self.history.anchor_pending
-            || self.history.key.is_none_or(|key| key.0 != chat.0)
+            || self.history.anchor.is_pending()
+            || self.history.anchor.key().is_none_or(|key| key.0 != chat.0)
         {
             return;
         }
@@ -88,7 +88,7 @@ impl QuillApp {
     /// The reader sent a message or jumped to the latest: the position left
     /// behind is not where the chat reopens.
     pub(in crate::ui) fn forget_scroll_on_return_to_latest(&mut self) {
-        if let Some(key) = self.history.key {
+        if let Some(key) = self.history.anchor.key() {
             self.history.scroll_memory.forget(key);
         }
     }
@@ -98,8 +98,8 @@ impl QuillApp {
     /// tail the position is forgotten (`forgetScrollState`). Nothing is
     /// recorded before the opened history has anchored.
     pub(in crate::ui) fn remember_scroll(&mut self, key: ScrollKey, cx: &App) {
-        if self.history.key != Some(key)
-            || self.history.anchor_pending
+        if self.history.anchor.key() != Some(key)
+            || self.history.anchor.is_pending()
             || self.history.rows.is_empty()
         {
             return;

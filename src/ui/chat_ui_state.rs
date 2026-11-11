@@ -24,6 +24,32 @@ use quill::ids::{ChatId, MessageId, TopicId};
 /// reply stashed for it (`DraftType::Normal`), and the "Cancel editing?" box
 /// (`DialogKind::CancelEditConfirm`). One value, so the box cannot outlive
 /// the edit.
+/// Which info card is open in a chat.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum InfoCard {
+    #[default]
+    Closed,
+    /// Under the open forum topic's strip.
+    Topic,
+    /// Under the open reply thread's root bar.
+    Thread,
+}
+
+impl InfoCard {
+    /// The thread view closed (or another opened): its card goes, a
+    /// topic's stays.
+    pub(super) fn close_thread(&mut self) {
+        if *self == Self::Thread {
+            *self = Self::Closed;
+        }
+    }
+
+    /// A tap on the card's button: opens `card`, or closes it again.
+    pub(super) fn toggle(&mut self, card: Self) {
+        *self = if *self == card { Self::Closed } else { card };
+    }
+}
+
 #[derive(Debug)]
 pub(super) struct EditMode {
     /// Told apart from every other edit: a picker or an answer started for
@@ -243,10 +269,9 @@ pub(crate) struct ChatUi {
     /// The attach menu's contact chooser. Here so that a chat change closes
     /// it: the contact goes to the chat this value was made for.
     pub(super) contact_dialog: Option<super::ShareContentDialog>,
-    /// The info card under the open forum topic's strip.
-    pub(super) topic_info_open: bool,
-    /// The info card under the open reply thread's root bar.
-    pub(super) thread_info_open: bool,
+    /// The info card under the open forum topic's strip or the open reply
+    /// thread's root bar: one at a time, and gone with the chat.
+    pub(super) info_card: InfoCard,
     /// Text a chat open handed over without a window at hand, for this
     /// chat's composer (`QuillApp::apply_compose_after_open`).
     pub(super) compose_after_open: Option<String>,

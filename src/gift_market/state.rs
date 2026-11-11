@@ -23,12 +23,26 @@ pub struct ResaleSearch {
     pub next_offset: String,
     /// The next page to ask for.
     pub page: u32,
-    pub loading: bool,
-    /// Whether any page arrived for the current filter.
-    pub loaded: bool,
-    /// The request whose answer this search waits for.
-    pub request_id: u64,
-    pub error: Option<String>,
+    /// Where the search stands; its answer is matched by the request it
+    /// waits for.
+    pub stage: SearchStage,
+}
+
+/// The stage of one resale search. It leaves `Loading` when its page
+/// arrives, when its request fails, or when the send itself is refused.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum SearchStage {
+    /// Never asked, or the first page could not be sent.
+    #[default]
+    Idle,
+    /// A page is on its way. `request` is the one whose answer applies (0
+    /// until the send went out); `loaded` is whether a page already
+    /// arrived for the current filter.
+    Loading { request: u64, loaded: bool },
+    /// The latest page arrived.
+    Ready,
+    /// The latest page failed; the pages before it stay.
+    Failed { error: String },
 }
 
 impl ResaleSearch {
@@ -41,17 +55,80 @@ impl ResaleSearch {
         }
     }
 
+    pub fn is_loading(&self) -> bool {
+        matches!(self.stage, SearchStage::Loading { .. })
+    }
+
+    /// Whether any page arrived for the current filter (a failure ends the
+    /// wait, so it counts: the box says why instead of "none on sale").
+    pub fn is_loaded(&self) -> bool {
+        match self.stage {
+            SearchStage::Idle => false,
+            SearchStage::Loading { loaded, .. } => loaded,
+            SearchStage::Ready | SearchStage::Failed { .. } => true,
+        }
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        match &self.stage {
+            SearchStage::Failed { error } => Some(error),
+            _ => None,
+        }
+    }
+
+    /// The request this search waits for, if it is loading.
+    pub fn waiting_for(&self) -> Option<u64> {
+        match self.stage {
+            SearchStage::Loading { request, .. } => Some(request),
+            _ => None,
+        }
+    }
+
     /// Whether another page can be asked for.
     pub fn has_more(&self) -> bool {
-        self.loaded && !self.loading && !self.next_offset.is_empty()
+        !self.is_loading() && self.is_loaded() && !self.next_offset.is_empty()
+    }
+
+    /// A page goes out: the first of a filter (`more` false) starts over.
+    pub fn begin_page(&mut self, more: bool) {
+        let loaded = more && self.is_loaded();
+        if !more {
+            self.page = 0;
+            self.next_offset.clear();
+        }
+        self.stage = SearchStage::Loading { request: 0, loaded };
+    }
+
+    /// The page went out as `request`.
+    pub fn sent(&mut self, request: u64, next_page: u32) {
+        if let SearchStage::Loading { loaded, .. } = self.stage {
+            self.stage = SearchStage::Loading { request, loaded };
+            self.page = next_page;
+        }
+    }
+
+    /// The page could not be sent.
+    pub fn send_refused(&mut self) {
+        if let SearchStage::Loading { loaded, .. } = self.stage {
+            self.stage = if loaded {
+                SearchStage::Ready
+            } else {
+                SearchStage::Idle
+            };
+        }
+    }
+
+    /// The request `request` failed. Only the search waiting for it fails.
+    pub fn fail(&mut self, request: u64, error: String) {
+        if request != 0 && self.waiting_for() == Some(request) {
+            self.stage = SearchStage::Failed { error };
+        }
     }
 
     /// Takes a page: the first replaces the list, later ones append. Own
     /// listings are dropped in craft mode (tdesktop skips them).
     pub fn apply(&mut self, page: ResalePage, my_user_id: Option<i64>, append: bool) {
-        self.loading = false;
-        self.loaded = true;
-        self.error = None;
+        self.stage = SearchStage::Ready;
         self.total_count = page.total_count;
         self.next_offset = if page.listings.is_empty() {
             String::new()

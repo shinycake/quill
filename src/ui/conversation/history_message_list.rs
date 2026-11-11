@@ -1,7 +1,7 @@
 //! Methods moved out of `conversation.rs` to keep files under 1000 lines.
 
 use super::*;
-use crate::ui::history_state::ScrollGoal;
+use crate::ui::history_state::{Anchor, ScrollGoal};
 use quill::lang::{keys, tr, tr_with};
 
 /// The open thread's window, read once per render: it drives the unread
@@ -147,9 +147,11 @@ impl QuillApp {
         };
         // Rows of the same window keep the view where it is; a new window
         // lands instead (`rows_replaced`).
-        let same_window = self.history.key == Some(history_key)
-            && self.history.window_epoch == window_epoch
-            && !self.history.anchor_pending;
+        let same_window = self.history.anchor
+            == (Anchor::Anchored {
+                key: history_key,
+                epoch: window_epoch,
+            });
         // A goal the reader asked for that these rows reach: it places the
         // view, so nothing is held.
         let goal = self.scroll_goal_now(thread_window.as_ref());
@@ -175,7 +177,7 @@ impl QuillApp {
             // so remeasure rows whose inputs changed. File readiness affects
             // any media row, so a change there remeasures every row.
             let media_signature = self.history_media_signature();
-            if self.history.key == Some(history_key)
+            if self.history.anchor.key() == Some(history_key)
                 && count == self.history.rows.len()
                 && count == self.history.scroller.read(cx).item_count()
             {
@@ -201,21 +203,23 @@ impl QuillApp {
                 }
             }
             self.history.media_signature = media_signature;
-            if self.history.key != Some(history_key) || self.history.window_epoch != window_epoch {
-                // A new or replaced window anchors once its rows are in.
-                self.history.window_epoch = window_epoch;
-                self.history.anchor_pending = true;
+            let new_chat = self.history.anchor.key() != Some(history_key);
+            if new_chat || self.history.anchor.epoch() != window_epoch {
                 // The window of a chat already open was replaced (jump to
                 // the latest, a date jump): the position left behind is not
                 // where the reader goes back to.
-                if self.history.key == Some(history_key) {
+                if !new_chat {
                     self.history.scroll_memory.forget(history_key);
                 }
+                // A new or replaced window anchors once its rows are in.
+                self.history.anchor = Anchor::Pending {
+                    key: history_key,
+                    epoch: window_epoch,
+                };
             }
-            if self.history.key != Some(history_key) {
+            if new_chat {
                 // New chat/topic (or first render): reset; the anchor below
                 // picks the position.
-                self.history.key = Some(history_key);
                 // Message ids are chat-local: a stale highlight id in the new
                 // chat must not suppress its search-jump scroll.
                 self.history.last_highlight = None;
@@ -315,8 +319,8 @@ impl QuillApp {
             self.history.rows = rows;
             self.history.chrome_epoch = mark.epoch;
             self.history.chrome_seen = mark.revision;
-            if let Ok(mut due) = self.history.chrome_due.try_borrow_mut() {
-                due.clear();
+            if let Ok(mut refresh) = self.history.chrome_refresh.try_borrow_mut() {
+                drop(refresh.take_due());
             }
             self.history.row_stats.note_built(rows_started);
             self.history.row_stats.messages_cloned += cloned;
@@ -895,8 +899,8 @@ impl QuillApp {
         self.history_a11y_rows_changed(cx);
         // A new or replaced window: start at the saved position, else the
         // jump target, else the "Unread messages" divider, else the bottom.
-        if self.history.anchor_pending && !self.history.rows.is_empty() {
-            self.history.anchor_pending = false;
+        if self.history.anchor.is_pending() && !self.history.rows.is_empty() {
+            self.history.anchor.settle();
             self.anchor_opened_history(history_key, jump, cx);
         }
         self.land_new_jump(jump, cx);

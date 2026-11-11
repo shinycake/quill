@@ -461,7 +461,9 @@ impl QuillApp {
         if let Some(slot) = self.windows.slot_for(chat_id)
             && let Ok(slot) = slot.try_borrow()
         {
-            slot.history.chrome_notify_pending.set(false);
+            if let Ok(mut refresh) = slot.history.chrome_refresh.try_borrow_mut() {
+                refresh.notified();
+            }
         }
     }
 

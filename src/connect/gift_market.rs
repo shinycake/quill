@@ -110,13 +110,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             market.resale.as_mut()
         }
         .ok_or(ConnectSendError::InvalidRequest)?;
-        if !more {
-            search.page = 0;
-            search.next_offset.clear();
-            search.loaded = false;
-        }
-        search.loading = true;
-        search.error = None;
+        search.begin_page(more);
         let (gift_id, page) = (search.gift_id, search.page);
         let filter = search.filter.clone();
         let offset = search.next_offset.clone();
@@ -132,11 +126,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         if let Some(search) = search {
             match &result {
-                Ok(extra) => {
-                    search.request_id = extra.0;
-                    search.page = page.saturating_add(1);
-                }
-                Err(_) => search.loading = false,
+                Ok(extra) => search.sent(extra.0, page.saturating_add(1)),
+                Err(_) => search.send_refused(),
             }
         }
         result
@@ -419,7 +410,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .ok_or(ConnectSendError::InvalidRequest)?;
         let (own, market) = (
             !craft.candidates_loaded && !craft.candidates_loading,
-            !craft.market.loaded && !craft.market.loading,
+            !craft.market.is_loaded() && !craft.market.is_loading(),
         );
         if own {
             self.craft_candidates_page(false)?;
@@ -439,7 +430,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .gift_market
             .craft
             .as_ref()
-            .is_some_and(|craft| craft.market.error.is_some() && !craft.market.loading);
+            .is_some_and(|craft| craft.market.error().is_some() && !craft.market.is_loading());
         if !failed {
             return Err(ConnectSendError::InvalidRequest);
         }

@@ -126,15 +126,18 @@ fn the_forge_ends_in_the_result(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     app.update_in(vcx, |app, _, cx| {
         app.craft_now(cx);
-        assert!(app.gift_market.forge_started.is_some());
+        assert!(app.gift_market.craft.forge_since().is_some());
         assert_eq!(app.craft_box(cx).title.as_ref(), "Crafting");
         // Not before the forge ran its time.
         app.craft_frame_upkeep(cx);
         assert_eq!(app.gift_market.top(), Some(&MarketBox::Craft));
-        app.gift_market.forge_started =
-            Instant::now().checked_sub(Duration::from_secs_f32(FORGE_SECONDS + 0.1));
+        if let Some(since) =
+            Instant::now().checked_sub(Duration::from_secs_f32(FORGE_SECONDS + 0.1))
+        {
+            app.gift_market.craft.start_forge(since);
+        }
         app.craft_frame_upkeep(cx);
-        assert!(app.gift_market.forge_started.is_none());
+        assert!(app.gift_market.craft.forge_since().is_none());
         assert_eq!(app.gift_market.top(), Some(&MarketBox::CraftResult));
         assert_eq!(
             app.craft_session().and_then(|c| c.result.clone()),
@@ -164,8 +167,9 @@ fn answer_forge(app: &mut QuillApp, result: CraftResult) {
         craft.crafting = false;
         craft.result = Some(result);
     }
-    app.gift_market.forge_started =
-        Instant::now().checked_sub(Duration::from_secs_f32(FORGE_SECONDS + 0.1));
+    if let Some(since) = Instant::now().checked_sub(Duration::from_secs_f32(FORGE_SECONDS + 0.1)) {
+        app.gift_market.craft.start_forge(since);
+    }
 }
 
 #[gpui_kit::test]
@@ -179,7 +183,7 @@ fn a_refused_craft_keeps_the_craft_box(cx: &mut TestAppContext) {
         app.craft_now(cx);
         answer_forge(app, CraftResult::TooEarly(3_600));
         app.craft_frame_upkeep(cx);
-        assert!(app.gift_market.forge_started.is_none());
+        assert!(app.gift_market.craft.forge_since().is_none());
         match app.gift_market.top() {
             Some(MarketBox::Notice { title, text }) => {
                 assert_eq!(title, "Crafting unavailable");
@@ -199,7 +203,7 @@ fn a_refused_craft_keeps_the_craft_box(cx: &mut TestAppContext) {
         app.craft_now(cx);
         answer_forge(app, CraftResult::InvalidGift);
         app.craft_frame_upkeep(cx);
-        assert!(app.gift_market.forge_started.is_none());
+        assert!(app.gift_market.craft.forge_since().is_none());
         assert_eq!(app.gift_market.top(), Some(&MarketBox::Craft));
         assert_eq!(
             app.connection.status_note(),

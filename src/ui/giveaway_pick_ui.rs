@@ -387,7 +387,7 @@ impl QuillApp {
                 GiveawayPage::Countries => {
                     let _ = live.driver.retry_countries();
                 }
-                GiveawayPage::Form => {}
+                GiveawayPage::Form | GiveawayPage::Confirming => {}
             }
         }
         if let Some(form) = self.giveaway.form.as_mut() {
@@ -611,7 +611,7 @@ impl QuillApp {
                     }
                 }
             }
-            GiveawayPage::Form => {}
+            GiveawayPage::Form | GiveawayPage::Confirming => {}
         }
         if let Some(note) = form.note.as_ref() {
             body = body.child(

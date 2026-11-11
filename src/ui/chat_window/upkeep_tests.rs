@@ -275,9 +275,14 @@ fn a_forward_from_a_chat_window_answers_there(cx: &mut TestAppContext) {
 fn a_chat_windows_frame_leaves_the_main_windows_peek(cx: &mut TestAppContext) {
     let h = new_app(cx);
     let chat_window = h.open_in_new_window(OTHER, cx);
-    read(&h, None, cx, |app, _| app.history.forum_chats_peek = true);
+    read(&h, None, cx, |app, _| {
+        app.history.forum_column = crate::ui::history_state::ForumColumnUi::Peek
+    });
     draw(chat_window, cx);
-    assert!(read(&h, None, cx, |app, _| app.history.forum_chats_peek));
+    assert!(read(&h, None, cx, |app, _| app
+        .history
+        .forum_column
+        .peeking()));
 }
 
 #[gpui_kit::test]
@@ -360,10 +365,18 @@ fn a_chat_windows_history_tracks_its_own_screen_reader_focus(cx: &mut TestAppCon
     draw(chat_window, cx);
     draw(chat_window, cx);
     assert!(
-        read(&h, Some(OTHER), cx, |app, _| app.message_ui.a11y.focused),
+        read(&h, Some(OTHER), cx, |app, _| app
+            .message_ui
+            .a11y
+            .focus
+            .is_focused()),
         "the window's history took the focus"
     );
-    assert!(!read(&h, None, cx, |app, _| app.message_ui.a11y.focused));
+    assert!(!read(&h, None, cx, |app, _| app
+        .message_ui
+        .a11y
+        .focus
+        .is_focused()));
 }
 
 /// Round 13 B, finding 6: a chat window's title is the main window's title

@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::history_state::HistoryWidthSource;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::*;
 use quill::bubble_layout::HistoryWidth;
@@ -50,10 +51,12 @@ impl QuillApp {
     /// frame is not the wide layout shrinking a frame later. The paint
     /// probe is the source of truth from then on.
     pub(in crate::ui) fn seed_history_width(&self, pane: f32) {
-        if !self.history.width_probed.get() {
+        if !self.history.width.get().is_measured() {
             self.history
                 .width
-                .set(HistoryWidth::new(history_pane_width(pane)));
+                .set(HistoryWidthSource::Seeded(HistoryWidth::new(
+                    history_pane_width(pane),
+                )));
         }
     }
 
@@ -72,7 +75,6 @@ impl QuillApp {
     pub(super) fn history_width_probe(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let layout = self.history.chat_layout.clone();
         let history_width = self.history.width.clone();
-        let probed = self.history.width_probed.clone();
         let pane_width = self.history.pane_width.clone();
         let app = cx.weak_entity();
         let screen = self.screen_epoch();
@@ -84,8 +86,10 @@ impl QuillApp {
                 let now = ChatLayout::for_width(width);
                 let layout_changed = layout.replace(now) != now;
                 let measured = HistoryWidth::new(history_pane_width(width));
-                probed.set(true);
-                let width_changed = history_width.replace(measured) != measured;
+                let width_changed = history_width
+                    .replace(HistoryWidthSource::Measured(measured))
+                    .width()
+                    != measured;
                 if layout_changed || width_changed {
                     let app = app.clone();
                     window.defer(cx, move |window, cx| {

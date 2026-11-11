@@ -9,6 +9,7 @@ use super::history_state::ScrollGoal;
 use super::message_text::kit_avatar_element;
 use super::nested_click::SwallowPress;
 use super::*;
+use crate::ui::chat_ui_state::InfoCard;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
@@ -125,7 +126,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         // The info card belongs to the thread that showed it.
-        self.chat_ui.thread_info_open = false;
+        self.chat_ui.info_card.close_thread();
         // The composer still belongs to the chat (or topic) the thread is
         // opened from: save it there before TDLib resolves the thread.
         self.flush_leaving_draft(cx);
@@ -240,7 +241,7 @@ impl QuillApp {
 
     /// Back to where the thread was opened from.
     pub(super) fn leave_thread_view(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.chat_ui.thread_info_open = false;
+        self.chat_ui.info_card.close_thread();
         let Some(live) = self.live.as_mut() else {
             if let Some(session) = self.demo_session.as_mut() {
                 session.close_thread();
@@ -387,7 +388,7 @@ impl QuillApp {
                         // Keep the root bar's own click (jump to the original) out of it.
                         .swallow_press()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.chat_ui.thread_info_open = !this.chat_ui.thread_info_open;
+                            this.chat_ui.info_card.toggle(InfoCard::Thread);
                             cx.notify();
                         })),
                 )

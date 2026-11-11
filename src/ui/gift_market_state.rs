@@ -71,6 +71,8 @@ pub(crate) struct BidSliderUi {
     /// The `(min, max)` the track was built for; rebuilt when a new bid
     /// moves them.
     pub(super) bounds: (i64, i64),
+    /// The "Custom Amount" field, open only over this slider.
+    pub(super) custom: Option<CustomBidUi>,
 }
 
 /// "Custom Amount" for a bid.
@@ -98,8 +100,9 @@ pub(crate) struct GiftMarketUi {
     /// user.
     pub(super) recipient: Option<GiftRecipient>,
     pub(super) hide_name: bool,
-    pub(super) slider: Option<BidSliderUi>,
-    pub(super) custom: Option<CustomBidUi>,
+    /// The open bid box's slider and its custom field: one value that
+    /// goes with the bid box.
+    pub(super) bid: Option<BidSliderUi>,
     /// A tile or link asked for an auction; its box opens when the state
     /// arrives.
     pub(super) auction_open: AuctionOpen,
@@ -109,10 +112,58 @@ pub(crate) struct GiftMarketUi {
     /// How often the chat-list bar opened its box (one tap, one open).
     #[cfg(test)]
     pub(super) bar_opens: usize,
+    /// Where the craft stands: the gift its boxes were opened for, and the
+    /// forge once it runs.
+    pub(super) craft: CraftStage,
+}
+
+/// The craft flow of the open boxes: one value, so the forge cannot run
+/// without the gift it was started for.
+#[derive(Debug, Clone, Default)]
+pub(crate) enum CraftStage {
+    #[default]
+    Idle,
     /// The gift the craft info box was opened for.
-    pub(super) craft_primary: Option<CraftGift>,
-    /// When the forge started; it runs at least `FORGE_SECONDS`.
-    pub(super) forge_started: Option<Instant>,
+    Chosen(CraftGift),
+    /// The forge runs at least `FORGE_SECONDS` from `since`; it ends when
+    /// its answer is in, and `primary` is kept for the boxes below.
+    Forging {
+        primary: Option<CraftGift>,
+        since: Instant,
+    },
+}
+
+impl CraftStage {
+    pub(super) fn primary(&self) -> Option<&CraftGift> {
+        match self {
+            Self::Idle => None,
+            Self::Chosen(gift) => Some(gift),
+            Self::Forging { primary, .. } => primary.as_ref(),
+        }
+    }
+
+    pub(super) fn forge_since(&self) -> Option<Instant> {
+        match self {
+            Self::Forging { since, .. } => Some(*since),
+            _ => None,
+        }
+    }
+
+    /// The forge starts (or restarts) at `since`.
+    pub(super) fn start_forge(&mut self, since: Instant) {
+        let primary = self.primary().cloned();
+        *self = Self::Forging { primary, since };
+    }
+
+    /// The forge ended: the chosen gift stays for the boxes below.
+    pub(super) fn end_forge(&mut self) {
+        if let Self::Forging { primary, .. } = self {
+            *self = match primary.take() {
+                Some(gift) => Self::Chosen(gift),
+                None => Self::Idle,
+            };
+        }
+    }
 }
 
 /// The auction a bid box follows (`openGiftAuction`) is followed by the
@@ -137,14 +188,12 @@ impl GiftMarketUi {
             stack: Vec::new(),
             recipient: None,
             hide_name: false,
-            slider: None,
-            custom: None,
+            bid: None,
             auction_open: AuctionOpen::Idle,
             requested_files: Vec::new(),
             #[cfg(test)]
             bar_opens: 0,
-            craft_primary: None,
-            forge_started: None,
+            craft: CraftStage::Idle,
         }
     }
 
@@ -177,8 +226,7 @@ impl GiftMarketUi {
             .iter()
             .any(|entry| matches!(entry, MarketBox::AuctionBid { .. }));
         if !bid {
-            self.slider = None;
-            self.custom = None;
+            self.bid = None;
         }
         let naming = self.stack.iter().any(|entry| {
             matches!(

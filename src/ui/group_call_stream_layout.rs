@@ -41,6 +41,7 @@ use super::calls::stream_volume::{KEY_STEP, VolumeHost};
 use super::group_call_panel::LEAVE_BG;
 use super::group_call_state::StreamJoining;
 use super::group_call_stream_boxes::StreamOverlay;
+use super::group_call_stream_photo::StreamPhoto;
 use super::video_player::VideoPlayer;
 use super::video_player::controls::{
     BADGE_GAP, BAR_HEIGHT, CONTROLS_BG, ControlsFade, LiveActions, LiveFacts, LiveKeyAction,
@@ -109,9 +110,8 @@ impl StreamJoinIntent {
 pub(crate) struct StreamWindow {
     /// The stream's live player, over the driver's feed for the chat.
     pub(super) player: Option<VideoPlayer>,
-    /// The blurred chat photo for a photo path (`None` while it blurs).
-    pub(super) photo: Option<(String, Option<Arc<RenderImage>>)>,
-    photo_task: Option<Task<()>>,
+    /// The blurred chat photo for a photo path.
+    pub(super) photo: StreamPhoto,
     pub(super) controls: ControlsFade,
     /// The task that hides the controls when the deadline passes: present
     /// while the timer runs (one task; a move only pushes its deadline).
@@ -134,13 +134,12 @@ impl StreamWindow {
     /// photo from every window and forget what the window showed.
     pub(super) fn clear(&mut self, cx: &mut App) {
         self.close_boxes();
-        if let Some(image) = self.photo.take().and_then(|(_, image)| image) {
+        if let Some(image) = self.photo.take_image() {
             cx.drop_image(image, None);
         }
         if let Some(player) = self.player.take() {
             player.release_live(cx);
         }
-        self.photo_task = None;
         self.demo_feed = None;
         self.volume = None;
     }
@@ -776,36 +775,37 @@ impl QuillApp {
         let Some(path) = path else {
             // No photo for this chat: the previous chat's blur must not
             // stand in for it.
-            if let Some((_, Some(old))) = self.group_call.stream.photo.take() {
+            if let Some(old) = self.group_call.stream.photo.take_image() {
                 cx.drop_image(old, Some(window));
             }
-            self.group_call.stream.photo_task = None;
+            self.group_call.stream.photo = StreamPhoto::None;
             return None;
         };
-        if let Some((cached, image)) = self.group_call.stream.photo.as_ref()
-            && *cached == path
-        {
-            return image.clone();
+        if self.group_call.stream.photo.path() == Some(path.as_str()) {
+            return self.group_call.stream.photo.image();
         }
-        if let Some((_, Some(old))) = self.group_call.stream.photo.take() {
+        if let Some(old) = self.group_call.stream.photo.take_image() {
             cx.drop_image(old, Some(window));
         }
-        self.group_call.stream.photo = Some((path.clone(), None));
+        let waiting = path.clone();
         let task = cx.spawn(async move |this, cx| {
             let source = path.clone();
             let image = cx
                 .background_spawn(async move { blurred_photo(Path::new(&source)) })
                 .await;
             let _ = this.update(cx, |app, cx| {
-                if let Some((cached, slot)) = app.group_call.stream.photo.as_mut()
-                    && *cached == path
+                if matches!(&app.group_call.stream.photo,
+                    StreamPhoto::Blurring { path: cached, .. } if *cached == path)
                 {
-                    *slot = image;
+                    app.group_call.stream.photo = StreamPhoto::Blurred { path, image };
                     cx.notify();
                 }
             });
         });
-        self.group_call.stream.photo_task = Some(task);
+        self.group_call.stream.photo = StreamPhoto::Blurring {
+            path: waiting,
+            _task: task,
+        };
         None
     }
 

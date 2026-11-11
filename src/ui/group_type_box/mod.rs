@@ -33,10 +33,33 @@ use std::time::Duration;
 pub(crate) struct GroupTypeBox {
     pub(crate) draft: GroupTypeData,
     pub(crate) link_input: Entity<InputState>,
-    /// Counts keystrokes; a check timer for an older one does nothing.
-    version: u64,
-    /// Save found the link unusable; the line under the field says why.
-    save_refused: bool,
+    /// The link field's keystrokes and Save's verdict on them.
+    link: LinkCheck,
+}
+
+/// Where the link field stands. `version` counts keystrokes: a check timer
+/// for an older one does nothing. `Refused` (Save found the link unusable;
+/// the line under the field says why) leaves with the next keystroke or a
+/// change of the Public / Private choice.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum LinkCheck {
+    #[default]
+    Idle,
+    Typed {
+        version: u64,
+    },
+    Refused {
+        version: u64,
+    },
+}
+
+impl LinkCheck {
+    fn version(self) -> u64 {
+        match self {
+            Self::Idle => 0,
+            Self::Typed { version } | Self::Refused { version } => version,
+        }
+    }
 }
 
 /// What the box knows about its chat, read from the session each frame.
@@ -60,8 +83,7 @@ impl GroupTypeBox {
         Self {
             draft,
             link_input,
-            version: 0,
-            save_refused: false,
+            link: LinkCheck::Idle,
         }
     }
 
@@ -81,7 +103,9 @@ impl GroupTypeBox {
             .session()
             .is_some_and(|s| s.group_username_check_failed(facts.chat_id, &text));
         match link_status(&text, &facts.editable, verdict) {
-            LinkStatus::Empty if self.save_refused => LinkStatus::Problem(LinkProblem::TooShort),
+            LinkStatus::Empty if matches!(self.link, LinkCheck::Refused { .. }) => {
+                LinkStatus::Problem(LinkProblem::TooShort)
+            }
             LinkStatus::Pending if failed => LinkStatus::Problem(LinkProblem::CheckFailed),
             status => status,
         }
@@ -91,14 +115,14 @@ impl GroupTypeBox {
 impl QuillApp {
     pub(crate) fn group_type_box(&self) -> Option<&GroupTypeBox> {
         match self.group_edit_box() {
-            Some(edit) => edit.type_box.as_ref(),
+            Some(edit) => edit.type_box(),
             None => self.new_chat_type_box(),
         }
     }
 
     fn group_type_box_mut(&mut self) -> Option<&mut GroupTypeBox> {
         if self.group_edit_box().is_some() {
-            return self.group_edit_box_mut()?.type_box.as_mut();
+            return self.group_edit_box_mut()?.type_box_mut();
         }
         self.new_chat_type_box_mut()
     }
@@ -106,7 +130,7 @@ impl QuillApp {
     /// The Type box open as its own dialog over the Edit box.
     fn group_type_box_dialog_open(&self) -> bool {
         self.group_edit_box()
-            .is_some_and(|edit| edit.type_box.is_some())
+            .is_some_and(|edit| edit.type_box().is_some())
     }
 
     /// The chat the Type box edits, and whether it is a creation step.
@@ -185,14 +209,17 @@ impl QuillApp {
             }
         }
         if let Some(edit) = self.group_edit_box_mut() {
-            edit.type_box = Some(GroupTypeBox::new(draft, link_input));
+            edit.sub =
+                crate::ui::group_edit_box::EditSub::Type(GroupTypeBox::new(draft, link_input));
         }
         cx.notify();
     }
 
     pub(in crate::ui) fn close_group_type_box(&mut self, cx: &mut Context<Self>) {
-        if let Some(edit) = self.group_edit_box_mut() {
-            edit.type_box = None;
+        if let Some(edit) = self.group_edit_box_mut()
+            && edit.type_box().is_some()
+        {
+            edit.sub = crate::ui::group_edit_box::EditSub::None;
         }
         if let Some(session) = self.session_mut() {
             session.groups.group_type.toggle_error = None;
@@ -210,9 +237,8 @@ impl QuillApp {
             return;
         };
         let text = type_box.link_text(cx);
-        type_box.save_refused = false;
-        type_box.version = type_box.version.wrapping_add(1);
-        let version = type_box.version;
+        let version = type_box.link.version().wrapping_add(1);
+        type_box.link = LinkCheck::Typed { version };
         if facts.setup {
             self.new_chat_link_edited();
         }
@@ -233,7 +259,7 @@ impl QuillApp {
         let Some(type_box) = self.group_type_box() else {
             return;
         };
-        if type_box.version != version || !type_box.draft.public {
+        if type_box.link.version() != version || !type_box.draft.public {
             return;
         }
         let text = type_box.link_text(cx);
@@ -270,7 +296,7 @@ impl QuillApp {
         };
         let text = type_box.link_text(cx);
         if local_link_status(&text) == LinkStatus::Pending && text != facts.editable {
-            let version = type_box.version;
+            let version = type_box.link.version();
             self.check_group_link(version, cx);
         }
     }
@@ -300,11 +326,14 @@ impl QuillApp {
             return;
         };
         type_box.draft.public = public;
+        type_box.link = LinkCheck::Typed {
+            version: type_box.link.version(),
+        };
         if !join_approval_applies(public, facts.group) {
             type_box.draft.request_to_join = false;
         }
         let pending = public && local_link_status(&type_box.link_text(cx)) == LinkStatus::Pending;
-        let version = type_box.version;
+        let version = type_box.link.version();
         if pending {
             self.check_group_link(version, cx);
         }
@@ -343,7 +372,9 @@ impl QuillApp {
                 self.recheck_group_type_link(cx);
             }
             if let Some(type_box) = self.group_type_box_mut() {
-                type_box.save_refused = true;
+                type_box.link = LinkCheck::Refused {
+                    version: type_box.link.version(),
+                };
                 type_box
                     .link_input
                     .update(cx, |input, cx| input.focus(window, cx));
@@ -449,7 +480,8 @@ impl QuillApp {
         let Some(edit) = self.group_edit_box_mut() else {
             return;
         };
-        let Some(mut type_box) = edit.type_box.take() else {
+        let crate::ui::group_edit_box::EditSub::Type(mut type_box) = std::mem::take(&mut edit.sub)
+        else {
             return;
         };
         if blocked {

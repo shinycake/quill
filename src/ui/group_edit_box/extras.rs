@@ -194,12 +194,8 @@ impl QuillApp {
         ]
         .iter()
         .any(|p| session.requests.has_purpose_for_chat(*p, chat_id));
-        let loading = [
-            RequestPurpose::GetInstalledStickerSets,
-            RequestPurpose::GetInstalledEmojiSets,
-        ]
-        .iter()
-        .any(|p| session.requests.has_purpose(*p));
+        let loading = session.stickers.stickers.lists.installed.is_loading()
+            || session.stickers.emoji.lists.installed.is_loading();
         let mut section = div().flex().flex_col().gap_1().child(
             Button::new("group-load-sticker-packs")
                 .label(if loading {
