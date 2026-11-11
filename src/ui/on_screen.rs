@@ -162,7 +162,7 @@ on_screen_fields! {
     /// Standalone boxes: profiles, contacts, chat look, export, tags and call rating (`ui/dialogs_state.rs`).
     dialogs: Box<super::dialogs_state::DialogUi>,
     /// Group and channel management boxes: invite links, admins, members, permissions (`ui/admin_state.rs`).
-    admin: super::admin_state::AdminUi,
+    admin: Box<super::admin_state::AdminUi>,
     /// Payments and the gift marketplace (`ui/payments_state.rs`).
     payments: super::payments_state::PaymentUi,
     /// Revenue pages, withdrawals and affiliate programs (`ui/earn_state.rs`).
@@ -341,7 +341,7 @@ impl OnScreen {
             notify: super::notify_state::NotifyUi::new(),
             folders: super::folders_state::FolderUi::new(),
             dialogs: Box::new(super::dialogs_state::DialogUi::new(window, cx)),
-            admin: super::admin_state::AdminUi::new(),
+            admin: Box::new(super::admin_state::AdminUi::new()),
             payments: super::payments_state::PaymentUi::new(window, cx),
             earn: super::earn_state::EarnUi::new(window, cx),
             gift_market: super::gift_market_state::GiftMarketUi::new(),

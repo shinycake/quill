@@ -97,7 +97,7 @@ fn the_grid_has_more_while_the_archive_is_not_fully_loaded(cx: &mut TestAppConte
 }
 
 /// A page "is loading" for the chat whose story page is open, read from
-/// the request: another chat's page, or a status op that replaced the
+/// that chat's own page op: another chat's page, or a status op that replaced the
 /// page's own, change nothing.
 #[gpui_kit::test]
 fn a_story_page_is_loading_for_its_own_chat_only(cx: &mut TestAppContext) {
@@ -107,13 +107,21 @@ fn a_story_page_is_loading_for_its_own_chat_only(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, window, cx| {
         app.stories.page = Some(StoryPage::new(ChatId(1), window, cx));
         if let Some(session) = app.demo_session.as_mut() {
-            session.request(RequestPurpose::GetChatArchivedStories, Some(ChatId(2)));
+            let other = session.request(RequestPurpose::GetChatArchivedStories, Some(ChatId(2)));
+            session.begin_story_page_check(
+                quill::story_page::story_page_op_label(RequestPurpose::GetChatArchivedStories),
+                other,
+            );
         }
     });
     assert!(!app.read_with(vcx, |app, _| app.archived_loading()));
     app.update_in(vcx, |app, _, _| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.request(RequestPurpose::GetChatArchivedStories, Some(ChatId(1)));
+            let own = session.request(RequestPurpose::GetChatArchivedStories, Some(ChatId(1)));
+            session.begin_story_page_check(
+                quill::story_page::story_page_op_label(RequestPurpose::GetChatArchivedStories),
+                own,
+            );
             // Another op takes the page's one status slot.
             session.begin_story_page_op("hiding", quill::ids::RequestId(0));
         }
