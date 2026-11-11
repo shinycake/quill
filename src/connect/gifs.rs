@@ -181,4 +181,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         })
     }
+
+    /// A saved-GIF list request out predates a change: its answer is not
+    /// waited for, and the list is fetched again.
+    pub(crate) fn drop_saved_animations_request(&mut self) {
+        let dropped = self
+            .session
+            .requests
+            .take_purpose(RequestPurpose::GetSavedAnimations);
+        if dropped.is_some() {
+            self.session.stickers.gifs.saved.owe_refetch();
+        }
+    }
 }

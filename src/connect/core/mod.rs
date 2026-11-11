@@ -413,18 +413,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }),
             _ => None,
         };
-        // Settings > Ask a Question: the `getSupportUser` answer names the
-        // user whose chat opens after apply.
-        let support_chat: Option<i64> = match &owned.envelope.payload {
-            EnvelopePayload::Users(UsersPayload::Me { user_id, .. }) => owned
-                .envelope
-                .extra
-                .and_then(|id| self.session.requests.purpose(id))
-                .and_then(|purpose| {
-                    (purpose == RequestPurpose::GetSupportUser).then_some(*user_id)
-                }),
-            _ => None,
-        };
+        let support_chat = self.support_chat_answer(&owned.envelope);
         // Slice G2: capture forum/welcome/boost mutations before `apply`
         // takes the pending request. The state drops the stale cache on
         // confirmed success; the post-apply refetch reloads it now that
@@ -707,14 +696,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(chat_id) = created_chat {
             let _ = self.select_chat(chat_id);
         }
-        // Settings > Ask a Question (the support account) or a contact
-        // just created by phone: open (or create) the private chat.
-        if let Some(user_id) = support_chat {
-            let _ = self.create_private_chat_for(user_id);
-        }
-        if let Some(user_id) = self.session.users_state.new_contact.take_opening() {
-            let _ = self.create_private_chat_for(user_id);
-        }
+        self.open_chats_named_by_answers(support_chat);
         // Slice (communities backend core): resolve a just-created
         // community id into its full-info pack. `let _` on purpose: the
         // community is already in the model; a failed send must not
@@ -861,15 +843,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.maybe_search_gifs(false)?;
         }
         if gif_mutation_ok || gif_saved_changed {
-            // A list request out predates the change: its answer is not
-            // waited for, and the list is fetched again.
-            let dropped = self
-                .session
-                .requests
-                .take_purpose(RequestPurpose::GetSavedAnimations);
-            if dropped.is_some() {
-                self.session.stickers.gifs.saved.owe_refetch();
-            }
+            self.drop_saved_animations_request();
         }
         if installed_stickers_answer
             && self.session.stickers.stickers.suggest_waiting_for_sets
