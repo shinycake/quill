@@ -254,8 +254,11 @@ pub(super) fn album_history_row(
     let chip_row = album_reactions_owner(messages).and_then(|owner| {
         message_reactions_row(
             owner,
-            &footer_meta,
-            bubbleless,
+            if bubbleless {
+                ChipPlace::Outside
+            } else {
+                ChipPlace::InBubble(&footer_meta)
+            },
             session,
             files,
             media_roots,
@@ -575,7 +578,8 @@ use row_parts::{row_footer_meta, row_reply_bar};
 mod row_hover;
 pub(in crate::ui) use row_hover::{CornerActions, RowHover};
 pub(in crate::ui) mod text_measure;
-use reaction_chip_row::{album_reactions_owner, message_reactions_row};
+use reaction_chip_row::album_reactions_owner;
+pub(in crate::ui) use reaction_chip_row::{ChipPlace, message_reactions_row};
 mod album_tile;
 pub(in crate::ui) use album_tile::album_tile;
 mod community_rows;

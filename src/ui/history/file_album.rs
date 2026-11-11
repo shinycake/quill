@@ -130,7 +130,14 @@ pub(in crate::ui) fn file_album_history_row(
     let footer_meta = row_footer_meta(first, receipt, session, files, media_roots);
     chrome.footer = message_footer_meta(&footer_meta);
     let chip_row = album_reactions_owner(messages).and_then(|owner| {
-        message_reactions_row(owner, &footer_meta, false, session, files, media_roots, cx)
+        message_reactions_row(
+            owner,
+            ChipPlace::InBubble(&footer_meta),
+            session,
+            files,
+            media_roots,
+            cx,
+        )
     });
     if chip_row.is_some() {
         chrome.footer = None;

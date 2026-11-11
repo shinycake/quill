@@ -179,8 +179,11 @@ pub(in crate::ui) fn session_history_row(
         .needs_bubble();
     let chip_row = message_reactions_row(
         message,
-        &footer_meta,
-        bubbleless,
+        if bubbleless {
+            ChipPlace::Outside
+        } else {
+            ChipPlace::InBubble(&footer_meta)
+        },
         session,
         files,
         media_roots,
