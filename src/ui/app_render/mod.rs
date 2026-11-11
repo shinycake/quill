@@ -5,8 +5,8 @@ use super::actions::{
     CancelSearch, CloseWindow, FirstChat, FocusSidebar, LastChat, LockApp, MarkChatRead,
     MinimizeWindow, NextChat, NextFolder, OpenArchive, OpenContacts, OpenHelp, OpenPinnedChat,
     OpenSavedMessages, OpenSearch, OpenSettings, OpenShortcuts, PrevChat, PrevFolder, QuitApp,
-    ShowChatMenu, ShowChatPreview, StoryTogglePause, SubmitCode, SubmitPassword, SubmitPhone,
-    ToggleFullscreen, ToggleSidebar, ToggleTheme, ZoomWindow,
+    ShowAccount, ShowChatMenu, ShowChatPreview, StoryTogglePause, SubmitCode, SubmitPassword,
+    SubmitPhone, ToggleFullscreen, ToggleSidebar, ToggleTheme, ZoomWindow,
 };
 use super::app::QuillApp;
 use super::command_shortcuts::CommandActions;
@@ -237,6 +237,11 @@ impl Render for QuillApp {
             // list's keys are the main window's.
             .on_action(cx.listener(|this, action: &OpenPinnedChat, window, cx| {
                 if !this.open_pinned_by_key(action.index, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, action: &ShowAccount, window, cx| {
+                if !this.show_account_by_key(action.index, window, cx) {
                     cx.propagate();
                 }
             }))

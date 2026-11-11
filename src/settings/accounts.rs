@@ -351,6 +351,35 @@ pub fn add_account(app_root: &Path, display_name: &str) -> std::io::Result<Accou
     }
 }
 
+/// Give an account a new local name (the label shown in the Accounts list,
+/// the Dock and tray menus). Errors when `key` is not in the registry or
+/// the name is blank.
+pub fn rename_account(
+    app_root: &Path,
+    key: &AccountKey,
+    display_name: &str,
+) -> std::io::Result<()> {
+    let name = display_name.trim();
+    if name.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "an account name cannot be empty",
+        ));
+    }
+    let mut registry = load_registry(app_root);
+    let Some(record) = registry.accounts.iter_mut().find(|r| &r.key == key) else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("no such account: {key}"),
+        ));
+    };
+    if record.display_name == name {
+        return Ok(());
+    }
+    record.display_name = name.to_string();
+    save_registry(app_root, &registry)
+}
+
 /// Refusing to remove the last remaining account, or deleting an account's
 /// directory tree, must not panic — typed error instead.
 #[derive(Debug)]
@@ -694,6 +723,33 @@ mod account_registry_tests {
     }
 
     #[test]
+    fn rename_changes_only_that_accounts_name_and_survives_other_edits() {
+        let root = tmp_root("rename");
+        let work = add_account(&root, "Work").expect("add works");
+        rename_account(&root, &work, "  Office  ").expect("rename works");
+        let names: Vec<String> = list_accounts(&root)
+            .into_iter()
+            .map(|r| r.display_name)
+            .collect();
+        assert_eq!(names, vec!["Primary".to_string(), "Office".to_string()]);
+        set_active_account(&root, &work).expect("set works");
+        assert_eq!(
+            list_accounts(&root).get(1).map(|r| r.display_name.clone()),
+            Some("Office".to_string())
+        );
+        // A blank name or an unknown account is refused and changes nothing.
+        let blank = rename_account(&root, &work, "   ").unwrap_err();
+        assert_eq!(blank.kind(), std::io::ErrorKind::InvalidInput);
+        let unknown = rename_account(&root, &AccountKey::new("nope").unwrap(), "X").unwrap_err();
+        assert_eq!(unknown.kind(), std::io::ErrorKind::NotFound);
+        assert_eq!(
+            list_accounts(&root).get(1).map(|r| r.display_name.clone()),
+            Some("Office".to_string())
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn remove_refuses_last_remaining_account() {
         let root = tmp_root("last");
         // Fresh registry holds only primary.
@@ -782,6 +838,8 @@ mod account_registry_tests {
         moved("set_active_account");
         set_notify_from_all(&root, false).expect("set works");
         moved("set_notify_from_all");
+        rename_account(&root, &key, "Office").expect("rename works");
+        moved("rename_account");
         mark_for_deletion(&root, std::slice::from_ref(&key)).expect("mark works");
         moved("mark_for_deletion");
         remove_account(&root, &key).expect("remove works");

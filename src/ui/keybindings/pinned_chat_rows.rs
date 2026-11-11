@@ -48,6 +48,26 @@ pub(super) fn pinned_chat_rows() -> Vec<ShortcutRow> {
         .collect()
 }
 
+/// The account switch defaults (`REBINDABLE_ACTIONS`' `show-account-N`),
+/// for the startup keymap and the reference list.
+pub(super) fn account_rows() -> Vec<ShortcutRow> {
+    REBINDABLE_ACTIONS
+        .iter()
+        .filter(|ra| ra.id.starts_with("show-account-"))
+        .enumerate()
+        .flat_map(|(index, ra)| {
+            ra.defaults.iter().map(move |chord| {
+                row(
+                    chord,
+                    tr(ra.label),
+                    tr(keys::Q_PREFS_NAVIGATION),
+                    ShowAccount { index },
+                )
+            })
+        })
+        .collect()
+}
+
 /// The message-history shortcuts: reply navigation, attach, scrolling and
 /// deleting a selection (tdesktop `HistoryWidget::keyPressEvent`,
 /// `HistoryInner::keyPressEvent`).

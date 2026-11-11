@@ -152,6 +152,14 @@ pub struct OpenPinnedChat {
     pub index: usize,
 }
 
+/// Switch to the Nth account of the Accounts list (tdesktop
+/// `Command::ShowAccount1..6`; `index` is zero-based).
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = quill_ui, no_json)]
+pub struct ShowAccount {
+    pub index: usize,
+}
+
 /// codex:spellcheck-native: composer context-menu "spelling" items. They
 /// carry their word, so they are built per menu and dispatched by the
 /// native menu (`NativeMenu` items are actions); never bound to keys.

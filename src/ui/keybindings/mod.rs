@@ -9,7 +9,7 @@ use super::actions::{
     OpenPinnedChat, OpenSavedMessages, OpenSearch, OpenSettings, OpenShortcuts, PrevChat,
     PrevFolder, QuitApp, RecordRoundMessage, ReopenClosedWindow, ReplyToNext, ReplyToPrevious,
     ScheduleSend, SelectionExtendNewer, SelectionExtendOlder, SelectionFocusNewer,
-    SelectionFocusOlder, SendSilently, ShowAdminLog, ShowChatMenu, ShowChatPreview,
+    SelectionFocusOlder, SendSilently, ShowAccount, ShowAdminLog, ShowChatMenu, ShowChatPreview,
     ShowScheduledMessages, StoryTogglePause, ToggleFullscreen, ToggleLinkPreview,
     ToggleMessageSelection, ToggleSidebar, ToggleTheme, ViewerCopy, ViewerFlipHorizontal,
     ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn, ViewerZoomOut,
@@ -33,6 +33,24 @@ macro_rules! primary {
             concat!("cmd-", $key)
         } else {
             concat!("ctrl-", $key)
+        }
+    };
+}
+
+/// The default chords of the account switch actions. tdesktop
+/// lists `ShowAccount1..6` with no keys; Quill binds Alt+N, as asked, and
+/// Ctrl+N on macOS, where Option+digit types a character and Cmd+N opens
+/// the pinned chats.
+macro_rules! account_action {
+    ($id:literal, $label:expr, $n:literal) => {
+        RebindableAction {
+            id: $id,
+            label: $label,
+            defaults: &[if cfg!(target_os = "macos") {
+                concat!("ctrl-", $n)
+            } else {
+                concat!("alt-", $n)
+            }],
         }
     };
 }
@@ -303,6 +321,12 @@ pub const REBINDABLE_ACTIONS: &[RebindableAction] = &[
         label: keys::SHORTCUTS_AI_COMPOSE_APPLY,
         defaults: &[],
     },
+    account_action!("show-account-1", keys::Q_PREFS_SWITCH_TO_ACCOUNT_1, "1"),
+    account_action!("show-account-2", keys::Q_PREFS_SWITCH_TO_ACCOUNT_2, "2"),
+    account_action!("show-account-3", keys::Q_PREFS_SWITCH_TO_ACCOUNT_3, "3"),
+    account_action!("show-account-4", keys::Q_PREFS_SWITCH_TO_ACCOUNT_4, "4"),
+    account_action!("show-account-5", keys::Q_PREFS_SWITCH_TO_ACCOUNT_5, "5"),
+    account_action!("show-account-6", keys::Q_PREFS_SWITCH_TO_ACCOUNT_6, "6"),
 ];
 
 /// Parity slice (platform-custom-keybindings): build the key binding for a
@@ -356,7 +380,10 @@ pub fn keybinding_for(id: &str, keystroke: &str, cx: &App) -> Option<KeyBinding>
         "record-round" => Box::new(RecordRoundMessage),
         "ai-compose-apply" => Box::new(AiComposeApply),
         "show-admin-log" => Box::new(ShowAdminLog),
-        _ => return None,
+        _ => match id.strip_prefix("show-account-")?.parse::<usize>() {
+            Ok(n @ 1..=6) => Box::new(ShowAccount { index: n - 1 }),
+            _ => return None,
+        },
     };
     KeyBinding::load(keystroke, action, None, false, None, cx).ok()
 }
@@ -754,7 +781,7 @@ mod tests {
     // attribute and fail macro expansion ("recursion limit reached").
     use super::{
         Action, HOST_OS, KeybindingConflict, Keystroke, Modifiers, OpenPinnedChat, QuitApp,
-        REBINDABLE_ACTIONS, canonical_event_chord, capture_active, composer_bindings,
+        REBINDABLE_ACTIONS, ShowAccount, canonical_event_chord, capture_active, composer_bindings,
         composer_scoped_bindings, conflict_message, context_menu_captures_key, default_bindings,
         fixed_keystrokes, invalidate_account_keybindings, keybinding_conflict, resolve_keybindings,
     };
@@ -778,7 +805,7 @@ mod tests {
     fn reference_table_matches_resolved_defaults() {
         let defaults = default_bindings();
         // macOS adds Hide and Hide Others.
-        let expected = if cfg!(target_os = "macos") { 99 } else { 97 };
+        let expected = if cfg!(target_os = "macos") { 105 } else { 103 };
         assert_eq!(defaults.len(), expected);
         for row in resolve_keybindings(&[]) {
             for chord in row.live {
@@ -1294,6 +1321,34 @@ mod tests {
             resolve(&primary("alt-1"), &[]).as_deref(),
             Some("quill_ui::FocusSidebar")
         );
+    }
+
+    #[test]
+    fn account_chord_n_switches_to_account_n() {
+        let keymap = keymap();
+        let modifier = if cfg!(target_os = "macos") {
+            "ctrl"
+        } else {
+            "alt"
+        };
+        for n in 1..=6usize {
+            let chord = format!("{modifier}-{n}");
+            let input = [Keystroke::parse_with_os(&chord, HOST_OS).unwrap()];
+            let (found, _) = keymap.bindings_for_input(&input, &[]);
+            let action = found.first().unwrap().action();
+            assert!(
+                action.partial_eq(&ShowAccount { index: n - 1 }),
+                "{chord} switches to the wrong account"
+            );
+        }
+        // Rebinding keeps the index.
+        let custom = vec![custom("show-account-3", "ctrl-alt-shift-3")];
+        let row = resolve_keybindings(&custom)
+            .into_iter()
+            .find(|row| row.id == "show-account-3")
+            .unwrap();
+        assert_eq!(row.live, vec!["ctrl-alt-shift-3".to_string()]);
+        assert_eq!(row.rejected, None);
     }
 
     #[test]

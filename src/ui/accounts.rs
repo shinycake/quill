@@ -8,7 +8,8 @@
 //! reports for it (fresh account → the phone/QR/code flow; returning
 //! account → session restore). Hosted in a kit `Dialog` via `window.open_dialog` (the kit
 //! Phase 2 redo pattern). Removing the active account is not offered in
-//! the UI — switch away from it first.
+//! the UI — switch away from it first. Any account can be renamed: the name
+//! is Quill's local label, never sent to Telegram.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
@@ -17,25 +18,49 @@ use super::*;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
-use gpui_kit::component::input::{Textarea, TextareaState};
+use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::AccountKey;
 use quill::lang::{keys, tr, tr_with};
 use quill::settings::{
-    AccountRecord, active_account, add_account, list_accounts, safe_app_root, set_active_account,
+    AccountRecord, active_account, add_account, list_accounts, rename_account, safe_app_root,
+    set_active_account,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
 
+/// What one account row of the dialog shows besides its name: at most one
+/// row is mid-question at a time, so the dialog holds one of these.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) enum AccountRowEdit {
+    #[default]
+    None,
+    /// A non-active account awaiting inline remove confirmation — no second
+    /// `DialogKind` for what is a two-button inline question.
+    ConfirmRemove(AccountKey),
+    /// The account's name in `rename_name`, with Save and Cancel.
+    Rename(AccountKey),
+}
+
+impl AccountRowEdit {
+    fn removing(&self, key: &AccountKey) -> bool {
+        matches!(self, Self::ConfirmRemove(k) if k == key)
+    }
+
+    fn renaming(&self, key: &AccountKey) -> bool {
+        matches!(self, Self::Rename(k) if k == key)
+    }
+}
+
 /// Slice parity:auth-multi-account: working state for the Accounts dialog.
 pub(crate) struct AccountsUiState {
     pub(crate) open: bool,
-    /// Non-active account awaiting inline remove confirmation — no second
-    /// `DialogKind` for what is a two-button inline question.
-    pub(crate) remove_confirm: Option<AccountKey>,
+    pub(crate) row_edit: AccountRowEdit,
     pub(crate) add_name: Entity<TextareaState>,
-    /// Add/remove failure text, shown inside the dialog. Switch failures
+    /// The new name while a row is in `AccountRowEdit::Rename`; Enter saves.
+    pub(crate) rename_name: Entity<InputState>,
+    /// Add/rename/remove failure text, shown inside the dialog. Switch failures
     /// close the dialog and go to the status-note/notification path.
     pub(crate) error: Option<String>,
 }
@@ -48,10 +73,26 @@ impl AccountsUiState {
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
+        let rename_name = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(tr(keys::Q_OPS_ACCOUNT_DISPLAY_NAME))
+                .submit_on_enter(false)
+        });
+        cx.subscribe_in(
+            &rename_name,
+            window,
+            |this, _, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.save_account_name(window, cx);
+                }
+            },
+        )
+        .detach();
         Self {
             open: false,
-            remove_confirm: None,
+            row_edit: AccountRowEdit::None,
             add_name,
+            rename_name,
             error: None,
         }
     }
@@ -68,7 +109,7 @@ impl QuillApp {
         }
         self.account.accounts.open = true;
         self.open_box(DialogKind::Accounts);
-        self.account.accounts.remove_confirm = None;
+        self.account.accounts.row_edit = AccountRowEdit::None;
         self.account.accounts.error = None;
         cx.notify();
     }
@@ -77,7 +118,7 @@ impl QuillApp {
     /// working state (pending remove confirm, error, add-name input).
     pub(crate) fn close_accounts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.account.accounts.open = false;
-        self.account.accounts.remove_confirm = None;
+        self.account.accounts.row_edit = AccountRowEdit::None;
         self.account.accounts.error = None;
         self.account
             .accounts
@@ -245,6 +286,67 @@ impl QuillApp {
         }
     }
 
+    /// Put `record`'s row into rename mode with its current name selected.
+    pub(super) fn start_account_rename(
+        &mut self,
+        record: &AccountRecord,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.account.accounts.row_edit = AccountRowEdit::Rename(record.key.clone());
+        self.account.accounts.error = None;
+        let input = self.account.accounts.rename_name.clone();
+        let name = record.display_name.clone();
+        input.update(cx, |input, cx| input.set_value(name, window, cx));
+        window.defer(cx, move |window, cx| {
+            input.update(cx, |input, cx| {
+                input.focus(window, cx);
+                input.select_all(window, cx);
+            });
+        });
+        cx.notify();
+    }
+
+    /// Save the name typed into the row being renamed. A blank name or a
+    /// failed write keeps the row open with the reason above the list.
+    pub(crate) fn save_account_name(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let AccountRowEdit::Rename(key) = self.account.accounts.row_edit.clone() else {
+            return;
+        };
+        let name = self
+            .account
+            .accounts
+            .rename_name
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+        if name.is_empty() {
+            self.account.accounts.error = Some(tr(keys::Q_OPS_GIVE_THE_ACCOUNT_A_NAME).into());
+            cx.notify();
+            return;
+        }
+        let Some(root) = safe_app_root() else {
+            self.account.accounts.error =
+                Some(tr(keys::Q_OPS_ACCOUNTS_ARE_UNAVAILABLE_NO_APP).into());
+            cx.notify();
+            return;
+        };
+        match rename_account(&root, &key, &name) {
+            Ok(()) => {
+                self.account.accounts.row_edit = AccountRowEdit::None;
+                self.account.accounts.error = None;
+            }
+            Err(e) => {
+                self.account.accounts.error = Some(tr_with(
+                    keys::Q_OPS_COULD_NOT_RENAME_THE_ACCOUNT,
+                    &[("e", &e.to_string())],
+                ));
+            }
+        }
+        cx.notify();
+    }
+
     /// Slice parity:auth-multi-account: remove a non-active account (the
     /// UI never offers the active one — switch away from it first).
     pub(crate) fn remove_account_key(&mut self, key: &AccountKey, cx: &mut Context<Self>) {
@@ -257,26 +359,79 @@ impl QuillApp {
         self.remove_account_in(root, key, cx);
     }
 
+    /// The row of the account being renamed: the name field, Save, Cancel.
+    fn account_rename_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(
+                div().flex_1().min_w_0().child(
+                    Input::new(&self.account.accounts.rename_name)
+                        .aria_label(tr(keys::Q_OPS_ACCOUNT_DISPLAY_NAME)),
+                ),
+            )
+            .child(
+                Button::new("accounts-rename-save")
+                    .label(tr(keys::SETTINGS_SAVE))
+                    .primary()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.save_account_name(window, cx);
+                    })),
+            )
+            .child(
+                Button::new("accounts-rename-cancel")
+                    .label(tr(keys::CANCEL))
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.account.accounts.row_edit = AccountRowEdit::None;
+                        this.account.accounts.error = None;
+                        cx.notify();
+                    })),
+            )
+            .into_any_element()
+    }
+
     /// One account row: name, the active badge or Switch/Remove actions,
-    /// and the inline remove confirm.
+    /// Rename, and the inline remove confirm.
     fn account_row(
         &self,
         record: &AccountRecord,
         is_active: bool,
-        confirming_remove: bool,
+        edit: &AccountRowEdit,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if edit.renaming(&record.key) {
+            return self.account_rename_row(cx);
+        }
+        let confirming_remove = edit.removing(&record.key);
         let name = if record.display_name.trim().is_empty() {
             record.key.to_string()
         } else {
             record.display_name.clone()
         };
         let mut row = div().flex().flex_col().gap_1();
+        let rename = Button::new(format!("accounts-rename-{}", record.key))
+            .label(tr(keys::Q_PREFS_RENAME))
+            .ghost()
+            .on_click({
+                let record = record.clone();
+                cx.listener(move |this, _, window, cx| {
+                    this.start_account_rename(&record, window, cx);
+                })
+            });
         let actions: AnyElement = if is_active {
             div()
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .child(tr(keys::Q_OPS_ACTIVE_2))
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(tr(keys::Q_OPS_ACTIVE_2)),
+                )
+                .child(rename)
                 .into_any_element()
         } else {
             let key_switch = record.key.clone();
@@ -292,12 +447,14 @@ impl QuillApp {
                             this.switch_account(&key_switch, &name_c, window, cx);
                         })),
                 )
+                .child(rename)
                 .child(
                     Button::new(format!("accounts-remove-{key_remove_arm}"))
                         .label(tr(keys::BOX_REMOVE))
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.account.accounts.remove_confirm = Some(key_remove_arm.clone());
+                            this.account.accounts.row_edit =
+                                AccountRowEdit::ConfirmRemove(key_remove_arm.clone());
                             this.account.accounts.error = None;
                             cx.notify();
                         })),
@@ -364,7 +521,7 @@ impl QuillApp {
                                     .label(tr(keys::CANCEL))
                                     .ghost()
                                     .on_click(cx.listener(|this, _, _, cx| {
-                                        this.account.accounts.remove_confirm = None;
+                                        this.account.accounts.row_edit = AccountRowEdit::None;
                                         cx.notify();
                                     })),
                             ),
@@ -395,7 +552,7 @@ impl QuillApp {
                 .unwrap_or_default();
             let active: Option<AccountKey> = root.as_ref().map(|root| active_account(root));
             let error = this.account.accounts.error.clone();
-            let remove_confirm = this.account.accounts.remove_confirm.clone();
+            let row_edit = this.account.accounts.row_edit.clone();
             let mut body = div().flex().flex_col().gap_3();
             if let Some(line) = error {
                 body = body.child(
@@ -407,12 +564,7 @@ impl QuillApp {
             }
             for record in &accounts {
                 let is_active = active.as_ref().is_some_and(|a| a == &record.key);
-                body = body.child(this.account_row(
-                    record,
-                    is_active,
-                    remove_confirm.as_ref() == Some(&record.key),
-                    cx,
-                ));
+                body = body.child(this.account_row(record, is_active, &row_edit, cx));
             }
             body = body
                 .child(

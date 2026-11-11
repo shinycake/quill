@@ -1180,3 +1180,5 @@
 "qll_ops_logout_failed" = "Couldn't log out. Please try again.";
 "qll_ops_share_theme_not_saved" = "Couldn't save the theme.";
 "qll_ops_request_not_sent" = "Couldn't send the request. Please try again.";
+"qll_ops_give_the_account_a_name" = "Give the account a name.";
+"qll_ops_could_not_rename_the_account" = "Could not rename the account: {e}";
