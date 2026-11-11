@@ -42,6 +42,7 @@ GroupTypeBox | - | inside `admin.group_edit_box` (screen)
 LanguageLink | close_language_box | `settings.language_link`
 LocationPicker | close_location_picker | `location.picker`
 MaskSets | close_mask_sets | `stickers.masks.open`
+MessageReport | close_message_report | `messages.message_report`
 Money | close_money | `ton_wallet.money.open`
 PaidSendConfirm | cancel_paid_confirm | `paid_messages.confirm` (screen) or the driver's held paid send
 PaymentForm | close_payment_dialog | `payments.dialog` (screen) over the session's form

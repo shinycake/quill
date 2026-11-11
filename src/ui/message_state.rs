@@ -106,10 +106,16 @@ impl MessageUi {
 impl super::on_screen::Farewell for MessageUi {
     fn farewell(
         app: &mut super::app::QuillApp,
-        _: &mut gpui_kit::Window,
+        window: &mut gpui_kit::Window,
         cx: &mut gpui_kit::Context<super::app::QuillApp>,
     ) {
         super::emoji_effect::forget_account_notes();
+        if app
+            .session()
+            .is_some_and(|session| session.messages.message_report.is_some())
+        {
+            app.close_message_report(window, cx);
+        }
         if app
             .session()
             .is_some_and(|session| session.users_state.replies_block.is_some())
