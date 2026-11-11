@@ -11,6 +11,15 @@ impl Session {
     /// is not reported on the screen it comes back to.
     pub fn forget_screen_outcomes(&mut self) {
         self.payments.verification_url = None;
+        self.payments.receipt_error = None;
+        self.payments.unlocked_notice = None;
+        self.bots.last_callback_answer = None;
+        // The consent box and the raw-URL fallback of a login button
+        // answered while away: its request goes with its answer. A request
+        // still in flight keeps its context for the answer to come.
+        if self.bots.last_login_url_info.take().is_some() {
+            self.bots.login_url_request = None;
+        }
         let messages = &mut self.messages;
         messages.message_link_result = None;
         messages.message_link_error = None;
@@ -19,6 +28,8 @@ impl Session {
         messages.ai_error = None;
         messages.resend_error = None;
         messages.message_action_note = None;
+        messages.send_permission_error = None;
+        messages.flood_notice = None;
         self.groups.community_error = None;
         self.groups.invite_link_error = None;
         self.chats_state.chat_action_error = None;
