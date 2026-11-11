@@ -77,7 +77,10 @@ impl Session {
                     if result.success {
                         self.note_paid_media_unlocked(&paid);
                         if let Some(chat_id) = paid.invoice.giveaway_chat_id() {
-                            self.payments.giveaway.launch = GiveawayLaunch::Paid { chat_id };
+                            self.payments
+                                .giveaway
+                                .launches
+                                .set(chat_id, GiveawayLaunch::Paid);
                         }
                         if !shown && self.payments.unlocked_notice.is_none() {
                             // The checkout was closed while it paid.
@@ -101,7 +104,10 @@ impl Session {
                         // Whatever the checkout shows, the giveaway's
                         // payment is now in the provider's hands.
                         if let Some(chat_id) = paid.invoice.giveaway_chat_id() {
-                            self.payments.giveaway.launch = GiveawayLaunch::Verifying { chat_id };
+                            self.payments
+                                .giveaway
+                                .launches
+                                .set(chat_id, GiveawayLaunch::Verifying);
                         }
                         self.payments.verification_url = Some(PaymentVerification {
                             url: result.verification_url,

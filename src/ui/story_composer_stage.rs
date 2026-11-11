@@ -107,7 +107,7 @@ impl QuillApp {
                     .unwrap_or(StoryManageOutcome::Lost);
                 match outcome {
                     StoryManageOutcome::InFlight => {}
-                    StoryManageOutcome::Saved => self.close_story_composer(cx),
+                    StoryManageOutcome::Saved => self.end_story_composer(cx),
                     StoryManageOutcome::Failed => {
                         let reason = self
                             .session()

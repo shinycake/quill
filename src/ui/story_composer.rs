@@ -119,8 +119,19 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Phase 9.3: close the story composer (Escape / backdrop / Close).
+    /// Phase 9.3: close the story composer (Escape / backdrop / Close). A
+    /// press that is out keeps it open: closing would drop the request that
+    /// reports a failed post or edit (`story_composer_upkeep`).
     pub(super) fn close_story_composer(&mut self, cx: &mut Context<Self>) {
+        if self.stories.composer.stage.in_flight() {
+            return;
+        }
+        self.end_story_composer(cx);
+    }
+
+    /// The composer is done (a saved edit) or its screen goes: closes it
+    /// whatever stage it was in.
+    pub(super) fn end_story_composer(&mut self, cx: &mut Context<Self>) {
         self.stories.composer.close();
         cx.notify();
     }

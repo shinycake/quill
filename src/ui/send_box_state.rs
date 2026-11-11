@@ -4,7 +4,6 @@
 //! `send_box_options.rs` and `video_editor.rs`.
 #![deny(clippy::indexing_slicing)]
 
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -88,8 +87,9 @@ impl<T> Reads<T> {
 /// neither reads again nor misses the result, and a read one window
 /// started lands for all of them.
 pub(crate) struct TrayReads {
-    /// Sizes read from the header of tray photos, once per file.
-    pub(super) photo_sizes: RefCell<HashMap<PathBuf, Option<(u32, u32)>>>,
+    /// Sizes read from the header of tray photos by the media check's
+    /// worker, once per file (`send_box_media_check.rs`).
+    pub(super) photo_sizes: HashMap<PathBuf, Option<(u32, u32)>>,
     /// Tray videos whose sound track is being read in the background, or
     /// already read (tdesktop `hasAudio`). Each read has its own number,
     /// like the thumbnails below, so a stale read (a removed and re-added
@@ -110,7 +110,7 @@ pub(crate) struct TrayReads {
 impl Default for TrayReads {
     fn default() -> Self {
         Self {
-            photo_sizes: RefCell::new(HashMap::new()),
+            photo_sizes: HashMap::new(),
             sound: Reads::default(),
             sound_jobs: 0,
             thumbnails: Reads::default(),
@@ -126,9 +126,8 @@ impl TrayReads {
     /// file attached again is read again. Callers pass only files no tray
     /// holds any more (`QuillApp::forget_tray_checks`).
     pub(super) fn forget<'a>(&mut self, paths: impl Iterator<Item = &'a Path>) {
-        let mut sizes = self.photo_sizes.borrow_mut();
         for path in paths {
-            sizes.remove(path);
+            self.photo_sizes.remove(path);
             self.sound.forget(path);
             self.thumbnails.forget(path);
             self.media.forget(path);

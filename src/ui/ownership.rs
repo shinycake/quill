@@ -24,6 +24,13 @@ use quill::telegram::envelope::{CanTransferOwnershipResult, MessageSender, Parse
 use std::cell::RefCell;
 use std::rc::Rc;
 
+/// The member lists the Pick step draws from.
+enum OwnershipPool {
+    Ready,
+    Loading,
+    Failed(String),
+}
+
 impl QuillApp {
     /// Chats the transfer applies to: basic groups, supergroups and
     /// channels the viewer owns.
@@ -77,25 +84,9 @@ impl QuillApp {
         self.admin.ownership_dialog = Some(OwnershipDialog::new(window, cx, chat_id, stage));
         self.open_box(DialogKind::Ownership);
         if let Some(live) = self.live.as_mut() {
-            let session = &mut live.driver.session;
-            session.groups.ownership.transfer.forget_settled();
-            // Asked once per dialog so a stale answer never decides.
-            session
-                .groups
-                .ownership
-                .owner_after_leaving
-                .remove(&chat_id.0);
-            let _ = live.driver.check_can_transfer_ownership();
-            let _ = live.driver.fetch_chat_owner_after_leaving(chat_id);
-            let _ = live.driver.refresh_supergroup_members(
-                chat_id,
-                MemberListFilter::Administrators,
-                "",
-            );
-            let _ = live
-                .driver
-                .refresh_supergroup_members(chat_id, MemberListFilter::Recent, "");
-            let _ = live.driver.fetch_basic_group_members(chat_id);
+            // A request that cannot be sent leaves its stage `Failed`: the
+            // box draws it with Retry.
+            live.driver.open_ownership(chat_id);
         }
         cx.notify();
     }
@@ -103,6 +94,46 @@ impl QuillApp {
     pub(super) fn close_ownership_dialog(&mut self, cx: &mut Context<Self>) {
         self.admin.ownership_dialog = None;
         cx.notify();
+    }
+
+    /// Where the member lists the new owner is picked from stand: loading
+    /// while one is out and none has people yet, the first failure when
+    /// there is nobody to show.
+    fn ownership_pool_state(&self, chat_id: ChatId) -> OwnershipPool {
+        let Some(session) = self.session() else {
+            return OwnershipPool::Ready;
+        };
+        let groups = &session.groups;
+        let lists = [
+            groups
+                .supergroup_members
+                .get(&(chat_id.0, MemberListFilter::Administrators)),
+            groups
+                .supergroup_members
+                .get(&(chat_id.0, MemberListFilter::Recent)),
+            groups.basic_group_members.get(&chat_id.0),
+        ];
+        let has_people = lists.iter().any(|list| {
+            matches!(list, Some(SupergroupMembersFetch::Loaded { members, .. }) if !members.is_empty())
+        });
+        if has_people {
+            return OwnershipPool::Ready;
+        }
+        if lists
+            .iter()
+            .any(|list| matches!(list, Some(SupergroupMembersFetch::Loading)))
+        {
+            return OwnershipPool::Loading;
+        }
+        lists
+            .iter()
+            .find_map(|list| match list {
+                Some(SupergroupMembersFetch::Failed(error)) => {
+                    Some(OwnershipPool::Failed(error.clone()))
+                }
+                _ => None,
+            })
+            .unwrap_or(OwnershipPool::Ready)
     }
 
     /// The people the new owner may be: admins, then members.
@@ -176,14 +207,22 @@ impl QuillApp {
             return;
         };
         let password = input.read(cx).value().to_string();
+        let missing_password = password.is_empty();
         let sent = self.live.as_mut().map(|live| {
             live.driver
                 .transfer_chat_ownership(chat_id, user_id, &password, leave_after)
         });
-        input.update(cx, |input, cx| input.set_value("", window, cx));
         drop(password);
+        // The field is emptied only when the password went to TDLib: a
+        // refused call keeps what was typed.
+        if matches!(sent, Some(Ok(Some(_)))) {
+            input.update(cx, |input, cx| input.set_value("", window, cx));
+        }
         self.set_note(match sent {
             Some(Ok(Some(_))) => StatusNote::silent(tr(keys::Q_OPS_TRANSFERRING_OWNERSHIP)),
+            Some(_) if missing_password => {
+                StatusNote::error(tr(keys::Q_OPS_PLEASE_ENTER_YOUR_TWO_STEP))
+            }
             Some(_) => StatusNote::error(tr(keys::Q_OPS_OWNERSHIP_CANT_BE_TRANSFERRED_RIGHT)),
             None => StatusNote::info(tr(keys::Q_OPS_TRANSFERRING_OWNERSHIP_NEEDS_A_LIVE)),
         });
@@ -310,7 +349,27 @@ impl QuillApp {
                         Some(OwnerLookup::Failed(message)) => message.clone(),
                         _ => tr(keys::Q_OPS_FINDING_OUT_WHO_BECOMES_THE).to_string(),
                     };
+                    let lookup_failed = matches!(
+                        ownership.owner_after_leaving.get(&chat_id.0),
+                        Some(OwnerLookup::Failed(_))
+                    );
                     body = body.child(div().text_sm().text_color(muted).child(line));
+                    if lookup_failed {
+                        body = body.child(
+                            div().flex().child(
+                                Button::new("own-lookup-retry")
+                                    .label(tr(keys::Q_PEOPLE_RETRY))
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        if let Some(live) = this.live.as_mut() {
+                                            let _ =
+                                                live.driver.fetch_chat_owner_after_leaving(chat_id);
+                                        }
+                                        cx.notify();
+                                    })),
+                            ),
+                        );
+                    }
                     footer = footer
                         .child(
                             Button::new("own-cancel")
@@ -373,12 +432,45 @@ impl QuillApp {
                         .max_h(px(260.))
                         .overflow_y_scroll();
                     if choices.is_empty() {
-                        list = list.child(
-                            div()
-                                .text_sm()
-                                .text_color(muted)
-                                .child(tr(keys::SELECT_NEXT_OWNER_BOX_EMPTY_LIST)),
-                        );
+                        list = match this.ownership_pool_state(chat_id) {
+                            OwnershipPool::Loading => list.child(
+                                div()
+                                    .text_sm()
+                                    .text_color(muted)
+                                    .child(tr(keys::Q_OPS_CHECKING)),
+                            ),
+                            OwnershipPool::Failed(error) => list.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_1()
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .text_sm()
+                                            .text_color(cx.theme().danger)
+                                            .child(error),
+                                    )
+                                    .child(
+                                        Button::new("own-candidates-retry")
+                                            .label(tr(keys::Q_PEOPLE_RETRY))
+                                            .ghost()
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                if let Some(live) = this.live.as_mut() {
+                                                    live.driver
+                                                        .request_ownership_candidates(chat_id);
+                                                }
+                                                cx.notify();
+                                            })),
+                                    ),
+                            ),
+                            OwnershipPool::Ready => list.child(
+                                div()
+                                    .text_sm()
+                                    .text_color(muted)
+                                    .child(tr(keys::SELECT_NEXT_OWNER_BOX_EMPTY_LIST)),
+                            ),
+                        };
                     }
                     for (user_id, is_admin) in choices.into_iter().take(100) {
                         let name = this.contact_display_name(user_id);
@@ -439,6 +531,7 @@ impl QuillApp {
                         .copied()
                         .and_then(transfer_block_reason)
                         .or_else(|| ownership.check.error().map(str::to_string));
+                    let check_failed = ownership.check.error().is_some();
                     let ready = ownership.check.data() == Some(&CanTransferOwnershipResult::Ok);
                     let in_flight = ownership.transfer.sending().is_some();
                     if let Some(reason) = blocked {
@@ -458,7 +551,24 @@ impl QuillApp {
                                 &[("name", &name)],
                             )))
                             .child(div().text_sm().text_color(cx.theme().danger).child(reason));
+                        if check_failed {
+                            body = body.child(
+                                div().flex().child(
+                                    Button::new("own-check-retry")
+                                        .label(tr(keys::Q_PEOPLE_RETRY))
+                                        .ghost()
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            if let Some(live) = this.live.as_mut() {
+                                                let _ = live.driver.check_can_transfer_ownership();
+                                            }
+                                            cx.notify();
+                                        })),
+                                ),
+                            );
+                        }
                     } else if !ready {
+                        // `Idle` (nothing asked yet) is drawn as checking too:
+                        // the box asks when it opens and on Retry.
                         body = body.child(
                             div()
                                 .text_sm()

@@ -56,7 +56,7 @@ impl UpdateControl {
             UpdateState::Staged(..) => Self::Restart,
             UpdateState::Installing(_) => Self::Restarting,
             UpdateState::Idle
-            | UpdateState::Installed(_)
+            | UpdateState::Installed(..)
             | UpdateState::UpToDate
             | UpdateState::NoRelease
             | UpdateState::Failed(_) => Self::Check { busy: false },

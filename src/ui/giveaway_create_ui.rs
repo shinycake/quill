@@ -28,7 +28,7 @@ use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with, trn};
 use quill::local_time::now_unix;
 use quill::premium_hub::group_digits;
-use quill::state::{GiveawayLaunch, GiveawayOptions, Session};
+use quill::state::{GiveawayOptions, Session};
 use quill::telegram::envelope::{
     ChatKind, GiveawayPrize, ParsedPrepaidGiveaway, PremiumGiveawayOption, StarGiveawayOption,
     format_payment_price,
@@ -103,8 +103,10 @@ impl QuillApp {
         });
         if let Some(live) = self.live.as_mut() {
             let giveaway = &mut live.driver.session.payments.giveaway;
-            giveaway.launch = std::mem::take(&mut giveaway.launch).for_form();
+            giveaway.launches.for_form(chat_id.0);
             if new_giveaway {
+                // A failed send leaves the lists `Failed` (the form draws
+                // it with Retry), so the result carries nothing more.
                 let _ = live.driver.request_giveaway_options(chat_id.0);
             }
         }
@@ -122,16 +124,12 @@ impl QuillApp {
         let boosted = self.giveaway.form.take().map(|f| f.draft.boosted_chat_id);
         if let Some(live) = self.live.as_mut() {
             let giveaway = &mut live.driver.session.payments.giveaway;
-            let launched = boosted.is_some_and(|chat| {
-                matches!(
-                    giveaway.launch,
-                    GiveawayLaunch::Launched { chat_id } | GiveawayLaunch::Paid { chat_id }
-                        if chat_id == chat
-                )
-            });
-            giveaway.launch = std::mem::take(&mut giveaway.launch).for_form();
-            if launched && let Some(chat) = boosted {
-                let _ = live.driver.fetch_chat_boost_status(ChatId(chat));
+            if let Some(chat) = boosted {
+                let launched = giveaway.launches.is_started_for(chat);
+                giveaway.launches.for_form(chat);
+                if launched {
+                    let _ = live.driver.fetch_chat_boost_status(ChatId(chat));
+                }
             }
         }
         cx.notify();
@@ -314,7 +312,7 @@ impl QuillApp {
                     .unwrap_or_else(|| {
                         tr(keys::Q_MONEY_PREMIUM_GIVEAWAYS_ARE_NOT_AVAILABLE).to_string()
                     });
-                return section.child(about_line(error));
+                return self.giveaway_options_unavailable(section, error, draft, cx);
             }
             if draft.is_specific_users() {
                 return self.giveaway_gift_code_months(section, draft, options, cx);
@@ -365,7 +363,7 @@ impl QuillApp {
                 .error()
                 .map(str::to_string)
                 .unwrap_or_else(|| tr(keys::Q_MONEY_STARS_GIVEAWAYS_ARE_NOT_AVAILABLE).to_string());
-            return section.child(about_line(error));
+            return self.giveaway_options_unavailable(section, error, draft, cx);
         }
         section = section.child(section_title(tr(keys::GIVEAWAY_CREDITS_OPTIONS_TITLE)));
         let mut rows = div().flex().flex_col().gap_1();
@@ -415,6 +413,40 @@ impl QuillApp {
             .child(about_line(tr(keys::GIVEAWAY_CREDITS_QUANTITY_ABOUT)))
     }
 
+    /// The prices did not load: the reason, with Retry when the list failed
+    /// (a list that answered empty is "not available").
+    fn giveaway_options_unavailable(
+        &self,
+        section: Div,
+        reason: String,
+        draft: &GiveawayDraft,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let options = self.session().map(|s| &s.payments.giveaway.options);
+        let failed = options.is_some_and(|o| match draft.kind {
+            GiveawayKind::Premium => o.premium.error().is_some(),
+            GiveawayKind::Stars => o.stars.error().is_some(),
+        });
+        let section = section.child(about_line(reason));
+        if !failed {
+            return section;
+        }
+        let chat_id = draft.boosted_chat_id;
+        section.child(
+            div().flex().child(
+                Button::new("giveaway-options-retry")
+                    .label(tr(keys::Q_PEOPLE_RETRY))
+                    .small()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(live) = this.live.as_mut() {
+                            let _ = live.driver.request_giveaway_options(chat_id);
+                        }
+                        cx.notify();
+                    })),
+            ),
+        )
+    }
+
     /// The price line of a giveaway that is not paid for yet.
     fn giveaway_price(draft: &GiveawayDraft, options: &GiveawayOptions) -> Option<String> {
         if draft.prepaid.is_some() {
@@ -454,7 +486,7 @@ impl QuillApp {
             .unwrap_or_else(|| tr(keys::Q_MONEY_THIS_CHAT).into());
         let boosts = draft.boost_count(options.stars_options());
 
-        if giveaway.launch.is_done_for(draft.boosted_chat_id) {
+        if giveaway.launches.is_done_for(draft.boosted_chat_id) {
             return div()
                 .id("giveaway-launched")
                 .flex()
@@ -516,7 +548,7 @@ impl QuillApp {
         }
         let note = form.note.clone().or_else(|| {
             giveaway
-                .launch
+                .launches
                 .failure_for(draft.boosted_chat_id)
                 .map(str::to_owned)
         });
@@ -556,7 +588,7 @@ impl QuillApp {
             let confirming = form.page == GiveawayPage::Confirming;
             let launch = this
                 .session()
-                .map(|s| s.payments.giveaway.launch.clone())
+                .map(|s| s.payments.giveaway.launches.clone())
                 .unwrap_or_default();
             let launching = settled_chat.is_some_and(|chat| launch.is_launching_for(chat));
             let launched = settled_chat.is_some_and(|chat| launch.is_done_for(chat));

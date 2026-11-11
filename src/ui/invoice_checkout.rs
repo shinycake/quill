@@ -170,7 +170,7 @@ impl QuillApp {
             s.payments.giveaway_paying(draft.boosted_chat_id)
                 || s.payments
                     .giveaway
-                    .launch
+                    .launches
                     .is_done_for(draft.boosted_chat_id)
         });
         if settled {

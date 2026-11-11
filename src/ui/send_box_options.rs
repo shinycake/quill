@@ -9,6 +9,7 @@
 
 use super::app::QuillApp;
 use super::composer_sends::{SendSlot, TrayItem};
+use super::send_box_thumbnails::GIVE_UP_AFTER;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
@@ -86,15 +87,15 @@ impl QuillApp {
         }
     }
 
-    /// Size from the file header, read once per photo.
+    /// Size from the file header, read once per photo by the media check's
+    /// worker (never on the render thread); unknown until that lands.
     fn tray_photo_size(&self, path: &Path) -> Option<(u32, u32)> {
-        *self
-            .composer_sends
+        self.composer_sends
             .reads
             .photo_sizes
-            .borrow_mut()
-            .entry(path.to_path_buf())
-            .or_insert_with(|| image::image_dimensions(path).ok())
+            .get(path)
+            .copied()
+            .flatten()
     }
 
     /// tdesktop `hasSendLargePhotosOption`: a compressed photo over 1280 px.
@@ -131,11 +132,28 @@ impl QuillApp {
             let probed = path.clone();
             let worker =
                 cx.background_spawn(async move { quill::composer::without_sound_track(&probed) });
-            self.spawn_scoped(cx, async move |this, cx| {
+            // The reads belong to the app, not to the window or account that
+            // started them: a closed window or a switched account must not
+            // drop the answer and leave the read running for good.
+            let timer = cx.background_executor().timer(GIVE_UP_AFTER);
+            let waited = path.clone();
+            Self::spawn_app(cx, async move |this, cx| {
+                timer.await;
+                let _ = this.update(cx, |this, cx| {
+                    // A probe that never answers must not hold Send: the
+                    // video goes as it is, with its sound.
+                    if this.composer_sends.reads.sound.finish(&waited, job, ()) {
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+            Self::spawn_app(cx, async move |this, cx| {
                 let silent = worker.await;
                 let _ = this.update(cx, |this, cx| {
                     let send_box = &mut this.composer_sends.reads;
-                    // The batch may have been sent or cleared meanwhile.
+                    // The batch may have been sent or cleared, or the read
+                    // given up on, meanwhile.
                     if !send_box.sound.finish(&path, job, ()) {
                         return;
                     }

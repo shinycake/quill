@@ -78,7 +78,9 @@ impl QuillApp {
             }),
         };
         self.preferences.update_state = match demo {
-            UpdateDemo::Changelog => quill::updater::UpdateState::Installed(release),
+            UpdateDemo::Changelog => {
+                quill::updater::UpdateState::Installed(release, Default::default())
+            }
             UpdateDemo::Failure => quill::updater::UpdateState::DownloadFailed(
                 release,
                 "Download interrupted. Retry the update.",

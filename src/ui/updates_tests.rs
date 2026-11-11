@@ -31,17 +31,17 @@ fn release() -> ReleaseInfo {
     }
 }
 
-/// The 4-hour timer must not replace "Updated to Quill X": the changelog
-/// is acknowledged by the user, not by a recheck.
+/// Neither the 4-hour timer nor the Check button may replace "Updated to
+/// Quill X": the changelog is acknowledged by the user, not by a check.
 #[gpui_kit::test]
-fn the_timer_leaves_the_updated_notice_for_the_user(cx: &mut TestAppContext) {
+fn a_check_leaves_the_updated_notice_for_the_user(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update(&mut vcx, |app, cx| {
-        app.preferences.update_state = UpdateState::Installed(release());
-        app.recheck_for_updates(cx);
+        app.preferences.update_state = UpdateState::Installed(release(), Default::default());
+        app.check_for_updates(cx);
         assert!(matches!(
             app.preferences.update_state,
-            UpdateState::Installed(_)
+            UpdateState::Installed(..)
         ));
     });
 }

@@ -8043,3 +8043,37 @@ whose variants carry the data, with a way out of every stage.
 - **A refused refetch of a stale proxy list** lands in
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
+
+### Sweep fixes (r2-07)
+
+| id | outcome |
+| --- | --- |
+| 08-018 | `open_bot_create` resets the create state only when no `createBot` is in flight; the new box adopts the `Creating` stage and `drain_bot_create` reports the answer. |
+| 02-005, 08-107 | `open_collectible_info` opens the box only when the lookup was sent; a refused send posts the error note. |
+| 10-021 | `GiveawayState::launch` is `launches: GiveawayLaunches`, one `GiveawayLaunch` stage per boosted chat (the variants no longer carry `chat_id`); answers find their chat by request id. |
+| 10-022 | A giveaway price list whose send fails is `Fetch::Failed` (`send_failed_line`), and the form draws Retry (`giveaway-options-retry`) for any failed list. |
+| 10-070 | A welcome-message load that cannot be sent leaves the pack `Failed`; an `Idle` pack is drawn as loading, not as the empty list. |
+| 10-071 | `WelcomeDialog::editing` + `save` are one `WelcomeEdit { Idle, Row { welcome_id, save } }`. Cancel and Edit are refused while the row's Save is out. |
+| 11-038, 11-039 | `ConnectDriver::open_ownership` / `request_ownership_candidates` mark every request that cannot be sent `Failed`. The Confirm step, the Leave box and the pick list draw loading, failure with Retry, or empty from the real stage. |
+| 11-040 | The password field is emptied only when the transfer was sent; an empty password says so. |
+| 02-001, 12-D013 | The tray video sound read runs as an app task (`spawn_app`), so a closed window or a switched account cannot drop its answer, and gives up after `GIVE_UP_AFTER` like the thumbnail and media reads. |
+| 12-D008 | The photo header size is read by the media-check worker and stored in `TrayReads::photo_sizes`; the render thread only looks it up. |
+| 13-032 | The composer stays open while its Check, Post or Save is out (`ComposerStage::in_flight`); the saved edit ends it (`end_story_composer`). |
+| 13-041 | `StoryComposer::open` is gone: `ComposerMode::Closed` is the closed stage and `is_open()` reads it. |
+| 14-001 | `check_for_updates` refuses to start over `Installed` (button and timer alike). |
+| 14-003 | `UpdateState::Installed(release, ChangelogBanner)` carries whether the banner is dismissed; `update_banner_dismissed` is deleted. |
+
+- **Skipped.** 08-108: tdesktop shows the box when the lookup answers too, and
+  TDLib always answers (a result or an error), so `Loading` ends. 10-023: no
+  signal ends `Verifying` (the provider's page is outside Quill), so keeping it
+  past the form would block that chat's giveaway for the session; unchanged.
+  10-024 and 10-025: the form's own note (a refused field) and the session's
+  per-chat launch stage have different owners and lifetimes (`Launching`
+  survives the form), drawn by one rule with the form's note first. 10-080:
+  the one-shot cell is the kit `content` bridge every dialog uses; the body is
+  rebuilt each render. 13-037: the native file dialog is modal, so the
+  composer cannot be closed and reopened while it is up. 14-002: tdesktop's
+  updater retries a failed download on its timer too. 14-004: the updater is
+  the app's own work (`spawn_app` by design), not an account's. 14-005: the
+  quit follows a successful hand-off; an exit held by an export is checked
+  before `restart_to_update`.

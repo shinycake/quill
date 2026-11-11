@@ -42,8 +42,14 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let lookup = CollectibleLookup::new(entity, owner_name, owner_chat, copy_text);
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.request_collectible_info(lookup);
+        if let Some(live) = self.live.as_mut()
+            && live.driver.request_collectible_info(lookup).is_err()
+        {
+            self.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULD_NOT_LOAD_THE_COLLECTIBLE,
+            )));
+            cx.notify();
+            return;
         }
         self.open_box(crate::ui::shell::DialogKind::CollectibleInfo);
         cx.notify();

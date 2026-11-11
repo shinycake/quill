@@ -16,14 +16,23 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
-use quill::updater::{DownloadProgress, UpdateControl, UpdateState, check_latest_release};
+use quill::updater::{
+    ChangelogBanner, DownloadProgress, UpdateControl, UpdateState, check_latest_release,
+};
 use std::time::Duration;
 
 /// How often a running Quill looks for a new release.
 const RECHECK_EVERY: Duration = Duration::from_secs(4 * 60 * 60);
 
 impl QuillApp {
+    /// "Updated to Quill X" stays until the user has seen the changelog
+    /// (`acknowledge_changelog`): a check would replace it without that, and
+    /// the banner would come back at the next launch. So no check, from the
+    /// button or the timer, starts over it.
     pub(super) fn check_for_updates(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.preferences.update_state, UpdateState::Installed(..)) {
+            return;
+        }
         if !matches!(
             self.update_control(),
             UpdateControl::Check { busy: false }
@@ -33,7 +42,6 @@ impl QuillApp {
             return;
         }
         self.preferences.update_state = UpdateState::Checking;
-        self.preferences.update_banner_dismissed = false;
         let check = cx
             .background_executor()
             .spawn(async move { check_latest_release() });
@@ -43,16 +51,6 @@ impl QuillApp {
         })
         .detach();
         cx.notify();
-    }
-
-    /// The timer's check. "Updated to Quill X" stays until the user has seen
-    /// the changelog (`acknowledge_changelog`): a check would replace it
-    /// without that, and the banner would come back at the next launch.
-    fn recheck_for_updates(&mut self, cx: &mut Context<Self>) {
-        if matches!(self.preferences.update_state, UpdateState::Installed(_)) {
-            return;
-        }
-        self.check_for_updates(cx);
     }
 
     /// Checks at launch, then every few hours while Quill runs (tdesktop's
@@ -67,7 +65,7 @@ impl QuillApp {
             loop {
                 cx.background_executor().timer(RECHECK_EVERY).await;
                 if this
-                    .update(cx, |this, cx| this.recheck_for_updates(cx))
+                    .update(cx, |this, cx| this.check_for_updates(cx))
                     .is_err()
                 {
                     break;
@@ -349,7 +347,7 @@ impl QuillApp {
                 self.update_release_notes(cx)
                     .map(|notes| self.setting_spot(&["system.release_notes"], notes, cx)),
             );
-        if matches!(self.preferences.update_state, UpdateState::Installed(_)) {
+        if matches!(self.preferences.update_state, UpdateState::Installed(..)) {
             section = section.child(
                 div().flex().child(
                     Button::new("acknowledge-update-changelog")
@@ -378,7 +376,7 @@ impl QuillApp {
             | UpdateState::InstallFailed(release, _)
             | UpdateState::Staged(release, _)
             | UpdateState::Installing(release)
-            | UpdateState::Installed(release) => Some(release),
+            | UpdateState::Installed(release, _) => Some(release),
             UpdateState::Idle
             | UpdateState::Checking
             | UpdateState::UpToDate
@@ -566,7 +564,7 @@ impl QuillApp {
     /// "Updated to Quill X" after an update, with its notes; the update
     /// itself is offered in the title bar.
     pub(super) fn update_banner(&self, cx: &mut Context<Self>) -> AnyElement {
-        if !matches!(self.preferences.update_state, UpdateState::Installed(_)) {
+        if !matches!(self.preferences.update_state, UpdateState::Installed(..)) {
             return div().into_any_element();
         }
         let label = self.preferences.update_state.label();
@@ -599,7 +597,11 @@ impl QuillApp {
                             .label(tr(keys::Q_OPS_DISMISS))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.preferences.update_banner_dismissed = true;
+                                if let UpdateState::Installed(_, banner) =
+                                    &mut this.preferences.update_state
+                                {
+                                    *banner = ChangelogBanner::Dismissed;
+                                }
                                 cx.notify();
                             })),
                     ),

@@ -518,8 +518,8 @@ fn a_paid_giveaway_finishes_its_form_even_with_the_checkout_closed() {
         ),
     );
     assert!(!session.payments.giveaway_paying(-100));
-    assert!(session.payments.giveaway.launch.is_done_for(-100));
-    assert!(!session.payments.giveaway.launch.is_done_for(-200));
+    assert!(session.payments.giveaway.launches.is_done_for(-100));
+    assert!(!session.payments.giveaway.launches.is_done_for(-200));
 }
 
 /// The 3-D Secure step of a giveaway payment names the chat whose form
@@ -570,6 +570,6 @@ fn a_giveaway_verification_with_the_checkout_closed_keeps_start_refused() {
     );
     let step = session.payments.verification_url.clone().expect("step");
     assert!(!step.closes_checkout);
-    assert!(session.payments.giveaway.launch.is_done_for(-100));
-    assert!(!session.payments.giveaway.launch.is_done_for(-200));
+    assert!(session.payments.giveaway.launches.is_done_for(-100));
+    assert!(!session.payments.giveaway.launches.is_done_for(-200));
 }

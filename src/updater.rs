@@ -162,6 +162,14 @@ pub fn progress_text(ready: u64, total: u64) -> String {
     format!("{} / {} MB", tenths(ready.min(total)), tenths(total))
 }
 
+/// Whether the "Updated to Quill X" banner is still drawn.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ChangelogBanner {
+    #[default]
+    Shown,
+    Dismissed,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum UpdateState {
     #[default]
@@ -172,7 +180,10 @@ pub enum UpdateState {
     Installing(ReleaseInfo),
     DownloadFailed(ReleaseInfo, &'static str),
     InstallFailed(ReleaseInfo, &'static str),
-    Installed(ReleaseInfo),
+    /// Updated since the last run; the changelog waits for the user. The
+    /// banner above the window can be dismissed on its own
+    /// (`ChangelogBanner`); the Settings button acknowledges the changelog.
+    Installed(ReleaseInfo, ChangelogBanner),
     /// Downloaded and verified in the background ("Install updates
     /// automatically"); the path is the install plan, applied the next time
     /// Quill starts or when the user presses "Restart to update".
@@ -197,7 +208,7 @@ impl UpdateState {
             ),
             Self::Installing(_) => "Installing update and restarting…".into(),
             Self::DownloadFailed(_, message) | Self::InstallFailed(_, message) => (*message).into(),
-            Self::Installed(release) => format!("Updated to Quill {}", release.version),
+            Self::Installed(release, _) => format!("Updated to Quill {}", release.version),
             Self::Staged(release, _) => crate::lang::tr_with(
                 crate::lang::keys::Q_OPS_UPDATE_READY_RESTART,
                 &[("release_version", release.version.as_str())],

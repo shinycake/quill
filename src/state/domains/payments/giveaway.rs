@@ -111,62 +111,94 @@ impl GiveawayOptions {
     }
 }
 
-/// Starting a prepaid giveaway.
+/// The stage of one chat's giveaway launch or payment.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum GiveawayLaunch {
     #[default]
     Idle,
-    /// `launchPrepaidGiveaway` `request` is in flight for the boosted
-    /// chat `chat_id`. Only its answer ends it, so a form opened for
-    /// another chat keeps it (see [`GiveawayLaunch::for_form`]): that form
-    /// and the driver compare `chat_id`, and coming back to this chat's form
-    /// still shows the launch in flight.
-    Launching { chat_id: i64, request: u64 },
-    /// The prepaid giveaway of `chat_id` started.
-    Launched { chat_id: i64 },
-    /// A new giveaway for `chat_id` was paid for. Its form is done: Start
-    /// must not buy the same giveaway again.
-    Paid { chat_id: i64 },
-    /// The payment of a new giveaway for `chat_id` waits on the provider's
-    /// verification page (3-D Secure). The form stays done: Start must not
-    /// buy a second one while that is pending. It ends with the form.
-    Verifying { chat_id: i64 },
-    /// The launch for `chat_id` failed, with the line its form shows.
-    Failed { chat_id: i64, reason: String },
+    /// `launchPrepaidGiveaway` `request` is in flight. Only its answer ends
+    /// it, so closing or reopening the form keeps it (see
+    /// [`GiveawayLaunches::for_form`]) and the form shows the launch still
+    /// in flight.
+    Launching { request: u64 },
+    /// The prepaid giveaway started.
+    Launched,
+    /// A new giveaway was paid for. Its form is done: Start must not buy the
+    /// same giveaway again.
+    Paid,
+    /// The payment of a new giveaway waits on the provider's verification
+    /// page (3-D Secure). The form stays done: Start must not buy a second
+    /// one while that is pending. It ends with the form.
+    Verifying,
+    /// The launch failed, with the line its form shows.
+    Failed { reason: String },
 }
 
-impl GiveawayLaunch {
+/// The launch stage of every chat's giveaway form, one per boosted chat: a
+/// launch for chat A is not overwritten by chat B's, and each answer lands
+/// on the chat that asked.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GiveawayLaunches(std::collections::BTreeMap<i64, GiveawayLaunch>);
+
+impl GiveawayLaunches {
+    /// The stage of `chat_id`'s giveaway.
+    pub fn stage(&self, chat_id: i64) -> &GiveawayLaunch {
+        self.0.get(&chat_id).unwrap_or(&GiveawayLaunch::Idle)
+    }
+
+    /// Move `chat_id`'s giveaway to `stage`; `Idle` forgets it.
+    pub fn set(&mut self, chat_id: i64, stage: GiveawayLaunch) {
+        if stage == GiveawayLaunch::Idle {
+            self.0.remove(&chat_id);
+        } else {
+            self.0.insert(chat_id, stage);
+        }
+    }
+
     /// The giveaway of `chat_id` is created or paid for.
     pub fn is_done_for(&self, chat_id: i64) -> bool {
-        match self {
-            Self::Launched { chat_id: done }
-            | Self::Paid { chat_id: done }
-            | Self::Verifying { chat_id: done } => *done == chat_id,
-            _ => false,
-        }
+        matches!(
+            self.stage(chat_id),
+            GiveawayLaunch::Launched | GiveawayLaunch::Paid | GiveawayLaunch::Verifying
+        )
     }
 
     /// Whether a `launchPrepaidGiveaway` for `chat_id` is in flight.
     pub fn is_launching_for(&self, chat_id: i64) -> bool {
-        matches!(self, Self::Launching { chat_id: c, .. } if *c == chat_id)
+        matches!(self.stage(chat_id), GiveawayLaunch::Launching { .. })
     }
 
     /// Why the launch for `chat_id` failed, if it did.
     pub fn failure_for(&self, chat_id: i64) -> Option<&str> {
-        match self {
-            Self::Failed { chat_id: c, reason } if *c == chat_id => Some(reason),
+        match self.stage(chat_id) {
+            GiveawayLaunch::Failed { reason } => Some(reason),
             _ => None,
         }
     }
 
-    /// What a form starts from when it opens or closes. A launch still in
-    /// flight is never forgotten: only its answer ends it, and the form of
-    /// its chat must keep Start disabled. An answer already seen is.
-    pub fn for_form(self) -> Self {
-        match self {
-            Self::Launching { .. } => self,
-            _ => Self::Idle,
+    /// The launch of `chat_id` started or paid, so its boost status is stale.
+    pub fn is_started_for(&self, chat_id: i64) -> bool {
+        matches!(
+            self.stage(chat_id),
+            GiveawayLaunch::Launched | GiveawayLaunch::Paid
+        )
+    }
+
+    /// What `chat_id`'s form starts from when it opens or closes. A launch
+    /// still in flight is never forgotten: only its answer ends it, and the
+    /// form of its chat must keep Start disabled. An answer already seen is.
+    pub fn for_form(&mut self, chat_id: i64) {
+        if !self.is_launching_for(chat_id) {
+            self.0.remove(&chat_id);
         }
+    }
+
+    /// The launch whose `request` is `pending`, with its chat.
+    pub fn launching(&self, request: u64) -> Option<i64> {
+        self.0.iter().find_map(|(chat, stage)| {
+            matches!(stage, GiveawayLaunch::Launching { request: r } if *r == request && request != 0)
+                .then_some(*chat)
+        })
     }
 }
 
@@ -175,7 +207,7 @@ impl GiveawayLaunch {
 pub struct GiveawayState {
     pub info: Option<GiveawayInfoLookup>,
     pub options: GiveawayOptions,
-    pub launch: GiveawayLaunch,
+    pub launches: GiveawayLaunches,
     /// Limits from TDLib's `giveaway_*` options.
     pub limits: crate::giveaway::GiveawayLimits,
     /// The "Choose members" list.
@@ -256,11 +288,9 @@ impl Session {
             self.groups.chat_boost_status.remove(&chat_id.0);
             self.groups.chat_boost_details.remove(&chat_id.0);
         }
-        if let GiveawayLaunch::Launching { chat_id, request } = self.payments.giveaway.launch
-            && request != 0
-            && request == pending.id.0
-        {
-            self.payments.giveaway.launch = GiveawayLaunch::Launched { chat_id };
+        let launches = &mut self.payments.giveaway.launches;
+        if let Some(chat_id) = launches.launching(pending.id.0) {
+            launches.set(chat_id, GiveawayLaunch::Launched);
         }
     }
 
@@ -289,14 +319,13 @@ impl Session {
                 state.options.stars.fail_dropping_data(reason);
             }
             Some(RequestPurpose::LaunchPrepaidGiveaway) => {
-                if let GiveawayLaunch::Launching { chat_id, request } = state.launch
-                    && request != 0
-                    && Some(request) == pending.map(|p| p.id.0)
-                {
-                    state.launch = GiveawayLaunch::Failed {
+                if let Some(chat_id) = pending.and_then(|p| state.launches.launching(p.id.0)) {
+                    state.launches.set(
                         chat_id,
-                        reason: format!("Couldn't start the giveaway: {reason}"),
-                    };
+                        GiveawayLaunch::Failed {
+                            reason: format!("Couldn't start the giveaway: {reason}"),
+                        },
+                    );
                 }
             }
             _ => {}

@@ -129,7 +129,14 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(live) = self.live.as_mut() {
+        // An earlier createBot may still be in flight (its box was closed
+        // while "Creating..."): resetting would bump the generation and its
+        // answer would no longer match, so it is never reported. The new box
+        // adopts that stage and `drain_bot_create` reports the answer.
+        let creating = self
+            .session()
+            .is_some_and(|session| session.bots.owned.create.creating());
+        if !creating && let Some(live) = self.live.as_mut() {
             live.driver.reset_create_bot();
         }
         let name = cx.new(|cx| {

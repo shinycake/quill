@@ -213,26 +213,44 @@ fn acquired_gifts_and_preview_failures_say_so_and_can_be_asked_again() {
 
 #[test]
 fn a_giveaway_launch_in_flight_is_never_forgotten_by_a_form() {
-    use crate::state::GiveawayLaunch;
-    let launching = GiveawayLaunch::Launching {
-        chat_id: 5,
-        request: 9,
-    };
-    assert_eq!(launching.clone().for_form(), launching);
-    assert!(launching.is_launching_for(5));
-    assert!(!launching.is_launching_for(6));
+    use crate::state::{GiveawayLaunch, GiveawayLaunches};
+    let mut launches = GiveawayLaunches::default();
+    launches.set(5, GiveawayLaunch::Launching { request: 9 });
+    launches.for_form(5);
+    assert!(launches.is_launching_for(5));
+    assert!(!launches.is_launching_for(6));
     for seen in [
-        GiveawayLaunch::Launched { chat_id: 5 },
-        GiveawayLaunch::Paid { chat_id: 5 },
-        GiveawayLaunch::Verifying { chat_id: 5 },
-        GiveawayLaunch::Failed {
-            chat_id: 5,
-            reason: "x".into(),
-        },
-        GiveawayLaunch::Idle,
+        GiveawayLaunch::Launched,
+        GiveawayLaunch::Paid,
+        GiveawayLaunch::Verifying,
+        GiveawayLaunch::Failed { reason: "x".into() },
     ] {
-        assert_eq!(seen.for_form(), GiveawayLaunch::Idle);
+        launches.set(5, seen);
+        launches.for_form(5);
+        assert_eq!(launches.stage(5), &GiveawayLaunch::Idle);
     }
+}
+
+/// Each chat has its own launch stage: a second launch does not overwrite
+/// the first, and each answer lands on the chat that asked.
+#[test]
+fn two_chats_launch_at_once_and_each_answer_lands_on_its_own_chat() {
+    use crate::state::{GiveawayLaunch, GiveawayLaunches};
+    let mut launches = GiveawayLaunches::default();
+    launches.set(1, GiveawayLaunch::Launching { request: 10 });
+    launches.set(2, GiveawayLaunch::Launching { request: 11 });
+    assert!(launches.is_launching_for(1) && launches.is_launching_for(2));
+    assert_eq!(launches.launching(10), Some(1));
+    assert_eq!(launches.launching(11), Some(2));
+    assert_eq!(launches.launching(0), None);
+    launches.set(
+        1,
+        GiveawayLaunch::Failed {
+            reason: "no".into(),
+        },
+    );
+    assert_eq!(launches.failure_for(1), Some("no"));
+    assert!(launches.is_launching_for(2), "B is still out");
 }
 
 #[test]

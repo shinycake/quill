@@ -227,7 +227,7 @@ fn a_save_settles_by_its_own_request(cx: &mut TestAppContext) {
             session.stories.manage.settle(RequestId(30), None);
         }
         app.story_composer_upkeep(cx);
-        assert!(!app.stories.composer.open, "its own answer closed it");
+        assert!(!app.stories.composer.is_open(), "its own answer closed it");
     });
 }
 
@@ -251,7 +251,7 @@ fn a_failed_save_shows_its_reason(cx: &mut TestAppContext) {
             app.stories.composer.error(),
             Some("Story update failed: GONE")
         );
-        assert!(app.stories.composer.open);
+        assert!(app.stories.composer.is_open());
     });
 }
 
@@ -277,5 +277,30 @@ fn a_failed_cover_save_shows_under_its_story(cx: &mut TestAppContext) {
             .session()
             .and_then(|s| s.stories.manage.error_for(5, 3).map(str::to_string));
         assert_eq!(shown.as_deref(), Some("Story update failed: COVER"));
+    });
+}
+
+/// A press that is out keeps the composer open: closing would drop the
+/// request, and a failed post would never be shown.
+#[gpui_kit::test]
+fn the_composer_stays_open_while_a_post_is_out_and_shows_its_failure(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.open_story_composer(window, cx);
+        let request = send(app, RequestPurpose::PostStory);
+        app.stories.composer.stage = ComposerStage::Posting { request };
+        app.close_story_composer(cx);
+        assert!(app.stories.composer.is_open(), "Esc waits for the answer");
+        record_outcome(
+            app,
+            StoryPostOutcome::Failed {
+                request,
+                message: "No luck".into(),
+            },
+        );
+        app.story_composer_upkeep(cx);
+        assert_eq!(app.stories.composer.error(), Some("No luck"));
+        app.close_story_composer(cx);
+        assert!(!app.stories.composer.is_open(), "answered: it closes");
     });
 }

@@ -129,12 +129,18 @@ fn high_quality_is_offered_for_photos_over_1280_only(cx: &mut TestAppContext) {
         .unwrap();
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
-    app.update_in(vcx, |app, _, _| {
+    app.update_in(vcx, |app, _, cx| {
         tray(app, &[("demo-thumb.png", AttachmentKind::Photo)]);
         assert!(!app.tray_has_large_photo());
         let photo = ComposerAttachment::pick(&big, AttachmentKind::Photo).unwrap();
         app.update_pending_attachments(|tray| tray.push(photo))
             .expect("an open chat");
+        // The header is read by the media check's worker, not on render.
+        assert!(!app.tray_has_large_photo());
+        app.check_tray_videos(cx);
+    });
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, _| {
         assert!(app.tray_has_large_photo());
         assert!(!app.composer_media_options().hd_photos);
         app.update_pending_send(|send| send.hd_photos = true);
@@ -185,6 +191,48 @@ fn a_soundless_mp4_becomes_a_gif_after_the_background_check(cx: &mut TestAppCont
     app.read_with(vcx, |app, _| {
         assert!(!app.tray_videos_checking());
         assert!(app.pending_attachments()[0].extras.is_gif());
+    });
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[gpui_kit::test]
+fn a_video_read_settles_when_the_screen_moves_on_before_it_lands(cx: &mut TestAppContext) {
+    let dir = std::env::temp_dir().join(format!("quill-send-box-switch-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let clip = dir.join("silent.mp4");
+    let made = quill::media_tools::command("ffmpeg")
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=1:size=64x64:rate=5",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+        ])
+        .arg(&clip)
+        .output()
+        .is_ok_and(|out| out.status.success());
+    if !made {
+        // Skipped where ffmpeg isn't installed.
+        return;
+    }
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.attach_dropped_files(std::slice::from_ref(&clip), cx);
+        assert!(app.composer_sends.reads.sound.is_reading(&clip));
+        // The account changes before the probe answers.
+        app.switch_account(&quill::ids::AccountKey("other".into()), "", window, cx);
+    });
+    vcx.run_until_parked();
+    app.read_with(vcx, |app, _| {
+        assert!(
+            !app.composer_sends.reads.sound.is_reading(&clip),
+            "the read ended with its answer, not with the screen"
+        );
     });
     let _ = std::fs::remove_dir_all(&dir);
 }

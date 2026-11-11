@@ -1,0 +1,116 @@
+//! Sweep fixes (r2-07): requests that cannot be sent land in a `Failed`
+//! stage the box draws with Retry, not in an idle or loading one.
+use super::support::toggle_driver;
+use crate::connect::ConnectDriver;
+use crate::diagnostics::DiagnosticSink;
+use crate::ids::ChatId;
+use crate::state::fetch::Fetch;
+use crate::state::{MemberListFilter, OwnerLookup, SupergroupMembersFetch};
+use crate::telegram::client::copy_and_parse;
+use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+
+const OWNED_GROUP: &str = r#"{"@type":"updateNewChat","chat":{"id":-100,"title":"Group","type":{"@type":"chatTypeSupergroup","supergroup_id":100,"is_channel":false},"unread_count":0}}"#;
+const CREATOR: &str = r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":100,"status":{"@type":"chatMemberStatusCreator","is_member":true}}}"#;
+
+fn feed_owned_group<S: crate::connect::JsonSender>(
+    driver: &mut ConnectDriver<S>,
+    sink: &Arc<dyn DiagnosticSink>,
+    seq: &AtomicU64,
+) {
+    for json in [OWNED_GROUP, CREATOR] {
+        driver
+            .ingest(copy_and_parse(json, seq, sink).expect("parse"))
+            .expect("ingest");
+    }
+}
+
+/// 11-038 / 11-039: the box opens while sends are refused: the gate, the
+/// heir lookup and the member lists are `Failed`, so the box draws Retry
+/// instead of "Checking..." for good.
+#[test]
+fn the_ownership_box_opened_while_sends_fail_shows_failures_to_retry() {
+    let (_dir, mut driver, sender, sink, seq) = toggle_driver();
+    feed_owned_group(&mut driver, &sink, &seq);
+    sender.refuse(true);
+    driver.open_ownership(ChatId(-100));
+    let ownership = &driver.session.groups.ownership;
+    assert!(ownership.check.error().is_some(), "the gate failed to send");
+    assert!(matches!(
+        ownership.owner_after_leaving.get(&-100),
+        Some(OwnerLookup::Failed(_))
+    ));
+    for filter in [MemberListFilter::Administrators, MemberListFilter::Recent] {
+        assert!(matches!(
+            driver
+                .session
+                .groups
+                .supergroup_members
+                .get(&(-100, filter)),
+            Some(SupergroupMembersFetch::Failed(_))
+        ));
+    }
+    // Retry once the connection is back: asked again, `Loading` this time.
+    sender.refuse(false);
+    driver.request_ownership_candidates(ChatId(-100));
+    assert!(driver.check_can_transfer_ownership().is_ok());
+    assert!(driver.fetch_chat_owner_after_leaving(ChatId(-100)).is_ok());
+    assert!(driver.session.groups.ownership.check.is_loading());
+    assert_eq!(
+        driver
+            .session
+            .groups
+            .ownership
+            .owner_after_leaving
+            .get(&-100),
+        Some(&OwnerLookup::Loading)
+    );
+    assert!(matches!(
+        driver
+            .session
+            .groups
+            .supergroup_members
+            .get(&(-100, MemberListFilter::Recent)),
+        Some(SupergroupMembersFetch::Loading)
+    ));
+}
+
+/// 10-070: a welcome-message load that cannot be sent leaves the pack
+/// `Failed` (Retry), not absent (drawn as "No welcome messages yet").
+#[test]
+fn a_welcome_load_that_cannot_be_sent_is_failed_not_empty() {
+    let (_dir, mut driver, sender, sink, seq) = toggle_driver();
+    feed_owned_group(&mut driver, &sink, &seq);
+    sender.refuse(true);
+    assert!(driver.load_chat_welcome_messages(ChatId(-100)).is_err());
+    assert!(matches!(
+        driver.session.groups.welcome_messages.get(&-100),
+        Some(Fetch::Failed { .. })
+    ));
+    sender.refuse(false);
+    assert!(driver.load_chat_welcome_messages(ChatId(-100)).is_ok());
+    assert!(
+        driver
+            .session
+            .groups
+            .welcome_messages
+            .get(&-100)
+            .is_some_and(Fetch::is_loading)
+    );
+}
+
+/// 10-022: the giveaway price lists whose send fails are `Failed` (the form
+/// says why and offers Retry), not `Idle` ("not available").
+#[test]
+fn giveaway_options_that_cannot_be_sent_are_failed_with_a_retry() {
+    let (_dir, mut driver, sender, _sink, _seq) = toggle_driver();
+    sender.refuse(true);
+    assert!(driver.request_giveaway_options(-100).is_err());
+    let options = &driver.session.payments.giveaway.options;
+    assert!(options.premium.error().is_some());
+    assert!(options.stars.error().is_some());
+    sender.refuse(false);
+    assert!(driver.request_giveaway_options(-100).is_ok());
+    let options = &driver.session.payments.giveaway.options;
+    assert!(options.premium.is_loading() && options.stars.is_loading());
+}

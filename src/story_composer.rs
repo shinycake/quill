@@ -230,13 +230,25 @@ impl ComposerStage {
     pub fn busy(&self) -> bool {
         !matches!(self, Self::Editing | Self::Failed(_))
     }
+
+    /// A request of this press is out and only its answer can report it:
+    /// the composer stays open until then.
+    pub fn in_flight(&self) -> bool {
+        matches!(
+            self,
+            Self::Checking { .. } | Self::Posting { .. } | Self::Saving { .. }
+        )
+    }
 }
 
-/// What the composer is for. Edit and repost are exclusive; each carries
+/// Whether the composer is open, and what it is for. Edit and repost are exclusive; each carries
 /// `(poster_chat_id, story_id)` of the story it works on.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ComposerMode {
+    /// No composer on screen.
     #[default]
+    Closed,
+    /// A new story.
     New,
     /// Phase 9.5: the source story, sent as `postStory.from_story_full_id`
     /// (`td_api.tl:13715`).
@@ -251,7 +263,6 @@ pub enum ComposerMode {
 /// syncs them into this before posting.
 #[derive(Debug, Clone, Default)]
 pub struct StoryComposer {
-    pub open: bool,
     /// Picked with the native file dialog or dropped on the composer. In
     /// edit mode `None` keeps the story's current media.
     pub media: Option<StoryMedia>,
@@ -278,15 +289,19 @@ pub struct StoryComposer {
 impl StoryComposer {
     pub fn open() -> Self {
         Self {
-            open: true,
+            mode: ComposerMode::New,
             ..Default::default()
         }
+    }
+
+    /// The composer is on screen: its mode is anything but `Closed`.
+    pub fn is_open(&self) -> bool {
+        self.mode != ComposerMode::Closed
     }
 
     /// Phase 9.5: open the composer in edit mode for a posted story.
     pub fn open_edit(poster_chat_id: i64, story_id: i32) -> Self {
         Self {
-            open: true,
             mode: ComposerMode::Edit(poster_chat_id, story_id),
             ..Default::default()
         }
@@ -295,7 +310,6 @@ impl StoryComposer {
     /// Phase 9.5: open the composer in repost mode for a source story.
     pub fn open_repost(poster_chat_id: i64, story_id: i32) -> Self {
         Self {
-            open: true,
             mode: ComposerMode::Repost(poster_chat_id, story_id),
             ..Default::default()
         }
@@ -484,7 +498,7 @@ mod tests {
     #[test]
     fn composer_open_close_toggle_users() {
         let mut c = StoryComposer::open();
-        assert!(c.open);
+        assert!(c.is_open());
         assert!(!c.needs_users());
         c.privacy = StoryPrivacy::SelectedUsers;
         assert!(c.needs_users());
@@ -493,7 +507,7 @@ mod tests {
         c.toggle_user(7);
         assert!(c.needs_users());
         c.close();
-        assert!(!c.open);
+        assert!(!c.is_open());
         assert!(c.selected_user_ids.is_empty());
     }
 
@@ -597,11 +611,11 @@ mod tests {
     #[test]
     fn edit_and_repost_modes() {
         let c = StoryComposer::open_edit(11, 5);
-        assert!(c.open && c.is_edit());
+        assert!(c.is_open() && c.is_edit());
         assert_eq!(c.edit_target(), Some((11, 5)));
         assert_eq!(c.repost_source(), None);
         let c = StoryComposer::open_repost(22, 3);
-        assert!(c.open && !c.is_edit());
+        assert!(c.is_open() && !c.is_edit());
         assert_eq!(c.repost_source(), Some((22, 3)));
         assert_eq!(c.as_chat_id, None);
     }
