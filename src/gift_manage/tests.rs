@@ -375,3 +375,29 @@ fn only_the_send_the_dialog_waits_for_leaves_sending() {
     send.stage = SendStage::Failed("no".into());
     assert_eq!(send.error_line(), Some("no"));
 }
+
+#[test]
+fn a_gift_list_failure_leaves_a_send_in_flight_alone() {
+    use crate::gift_manage::{GiftListFetch, SendGiftState, SendStage};
+    use crate::ids::RequestId;
+    let mut send = SendGiftState {
+        stage: SendStage::Sending(RequestId(5)),
+        gifts_fetch: GiftListFetch::Failed("Couldn't load the gifts.".into()),
+        ..Default::default()
+    };
+    assert!(send.sending(), "the send keeps its request");
+    assert_eq!(send.error_line(), Some("Couldn't load the gifts."));
+    send.stage = SendStage::Failed("no".into());
+    assert_eq!(send.error_line(), Some("no"));
+}
+
+#[test]
+fn a_mutation_answer_without_a_request_frees_the_lock() {
+    use crate::ids::RequestId;
+    use crate::premium_hub::GiftMutation;
+    let mut lock = GiftMutation::Busy(RequestId(3));
+    lock.settle(Some(RequestId(4)));
+    assert!(lock.is_busy(), "another request's answer keeps it");
+    lock.settle(None);
+    assert!(!lock.is_busy());
+}

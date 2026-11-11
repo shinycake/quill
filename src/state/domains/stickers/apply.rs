@@ -106,7 +106,12 @@ impl Session {
                 if is_regular {
                     self.stickers.stickers.trending_stale = true;
                 } else {
-                    self.stickers.emoji.trending_stale = true;
+                    // The shown tab asks again; any other is asked when
+                    // it is selected.
+                    let emoji = &mut self.stickers.emoji;
+                    if emoji.open && emoji.tab == crate::emoji::EmojiSetTab::Trending {
+                        emoji.lists.trending = crate::state::fetch::Fetch::Idle;
+                    }
                 }
             }
             payload @ (StickersPayload::MessageEffect { .. }

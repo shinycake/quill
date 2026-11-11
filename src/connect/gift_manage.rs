@@ -565,8 +565,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .is_err()
         {
             let send = &mut self.session.payments.gifts_manage.send;
-            send.gifts_fetch = GiftListFetch::Failed;
-            send.stage = SendStage::Failed("Couldn't load the gifts.".into());
+            send.gifts_fetch = GiftListFetch::Failed("Couldn't load the gifts.".into());
         }
         if with_premium {
             let extra = self.session.request(
@@ -578,7 +577,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .send_json_request(extra, &rq::get_premium_gift_payment_options(extra))
                 .is_err()
             {
-                self.session.payments.gifts_manage.send.premium_fetch = GiftListFetch::Failed;
+                self.session.payments.gifts_manage.send.premium_fetch =
+                    GiftListFetch::Failed(String::new());
             }
         }
         if self.session.payments.gift_text_length_max.is_none()

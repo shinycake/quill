@@ -749,8 +749,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             stickers.trending_stale,
         );
         let emoji = &mut self.session.stickers.emoji;
-        emoji.trending_stale &= emoji.open && emoji.tab == crate::emoji::EmojiSetTab::Trending;
-        let emoji_trending = emoji.trending_stale;
+        // An update of the shown trending tab left its list `Idle`.
+        let emoji_trending = emoji.open
+            && emoji.tab == crate::emoji::EmojiSetTab::Trending
+            && emoji.lists.trending.is_idle();
         let reactions = self.session.stickers.reaction_options_stale;
         if !self.chats_path_active() {
             return Ok(());
@@ -786,7 +788,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if emoji_trending {
             self.select_emoji_set_tab(crate::emoji::EmojiSetTab::Trending)?;
-            self.session.stickers.emoji.trending_stale = false;
         }
         if reactions {
             // With no picker open there is nothing to refetch.

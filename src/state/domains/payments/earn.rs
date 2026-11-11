@@ -531,7 +531,11 @@ impl Session {
             }
             EarnPurpose::AdAccountUrl { .. } => {}
             EarnPurpose::WithdrawalUrl { with_password } => {
-                if earn.withdraw.as_ref().is_some_and(|w| w.takes_answer(request)) {
+                if earn
+                    .withdraw
+                    .as_ref()
+                    .is_some_and(|w| w.takes_answer(request))
+                {
                     Self::apply_withdrawal_error(earn, err, with_password, &reason);
                 }
             }

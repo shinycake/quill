@@ -913,9 +913,10 @@ impl GiftMutation {
     }
 
     /// The answer or error of `request` frees the list; another request's
-    /// does not.
+    /// does not. An answer that names no request (its entry is gone) frees
+    /// it too, or the list would stay locked for good.
     pub fn settle(&mut self, request: Option<crate::ids::RequestId>) {
-        if matches!(*self, Self::Busy(busy) if Some(busy) == request) {
+        if matches!(*self, Self::Busy(busy) if request.is_none_or(|id| id == busy)) {
             *self = Self::Idle;
         }
     }

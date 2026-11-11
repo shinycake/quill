@@ -181,8 +181,6 @@ pub struct EmojiPanel {
     pub trending_offset: i32,
     pub trending_next_offset: i32,
     pub trending_total: i32,
-    /// `updateTrendingStickerSets` for custom emoji arrived.
-    pub trending_stale: bool,
     pub trending_has_more: bool,
     /// Slice S10: installed emoji sets (`getInstalledStickerSets` with
     /// `stickerTypeCustomEmoji`) — the "Emoji Sets" settings list.

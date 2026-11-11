@@ -400,9 +400,25 @@ impl QuillApp {
             .as_ref()
             .and_then(|s| s.settings.storage_stats.data().cloned());
         let loading = session.is_some_and(|s| s.settings.storage_stats.is_loading());
+        let stats_error = session
+            .and_then(|s| s.settings.storage_stats.error())
+            .map(str::to_owned);
         let mut usage = div().flex().flex_col().gap_2().px_3().py_2();
         let has_stats = stats.is_some();
         usage = match stats {
+            None if stats_error.is_some() => usage
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().danger)
+                        .child(stats_error.unwrap_or_default()),
+                )
+                .child(
+                    Button::new("storage-usage-retry")
+                        .label(tr(keys::Q_MONEY_RETRY))
+                        .small()
+                        .on_click(cx.listener(|this, _, _, cx| this.refresh_storage_usage(cx))),
+                ),
             None => usage.child(
                 div()
                     .text_xs()

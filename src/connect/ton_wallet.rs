@@ -15,6 +15,9 @@ use crate::ton_wallet::{
     TonWalletPurpose, WalletPrefs, fiat,
 };
 
+/// The line a list shows when its page request could not be sent.
+const WALLET_SEND_FAILED: &str = "The request could not be sent.";
+
 impl<S: JsonSender> ConnectDriver<S> {
     /// Ask `getApplicationConfig` once per session for
     /// `ton_blockchain_explorer_url`, the prefix "View in Explorer" opens
@@ -123,9 +126,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             String::new()
         };
-        let sent = self.send_wallet(TonWalletPurpose::Transactions, None, |extra| {
+        let sent = match self.send_wallet(TonWalletPurpose::Transactions, None, |extra| {
             get_ton_wallet_transactions(extra, &offset, HISTORY_PAGE)
-        })?;
+        }) {
+            Ok(sent) => sent,
+            Err(err) => {
+                self.session
+                    .ton_wallet
+                    .money
+                    .history
+                    .send_failed(WALLET_SEND_FAILED.into());
+                return Err(err);
+            }
+        };
         self.session.ton_wallet.money.history.begin(sent, append);
         Ok(())
     }
@@ -144,9 +157,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             String::new()
         };
-        let sent = self.send_wallet(TonWalletPurpose::Nfts, None, |extra| {
+        let sent = match self.send_wallet(TonWalletPurpose::Nfts, None, |extra| {
             get_ton_wallet_nfts(extra, &offset, NFT_PAGE)
-        })?;
+        }) {
+            Ok(sent) => sent,
+            Err(err) => {
+                self.session
+                    .ton_wallet
+                    .money
+                    .nfts
+                    .send_failed(WALLET_SEND_FAILED.into());
+                return Err(err);
+            }
+        };
         self.session.ton_wallet.money.nfts.begin(sent, append);
         Ok(())
     }

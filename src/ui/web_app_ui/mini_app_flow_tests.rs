@@ -75,7 +75,6 @@ fn open_window(app: &mut QuillApp, cx: &mut gpui_kit::App) -> mpsc::Receiver<Hos
         popups: Default::default(),
         popup_seq: 0,
         waiting_write_access: false,
-        data_sent: false,
         privacy_policy_url: None,
         in_attachment_menu: false,
         emoji: Default::default(),

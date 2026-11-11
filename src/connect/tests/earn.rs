@@ -232,11 +232,23 @@ fn withdrawal_asks_without_password_then_with_it() {
     assert_eq!(withdraw.step, WithdrawStep::Password { error: None });
     p.0.submit_withdrawal_password("hunter2").unwrap();
     let sent = sent_request(&p.1, "getStarWithdrawalUrl")["@extra"].clone();
-    let step = p.0.session.payments.earn.withdraw.as_ref().unwrap().step.clone();
+    let step =
+        p.0.session
+            .payments
+            .earn
+            .withdraw
+            .as_ref()
+            .unwrap()
+            .step
+            .clone();
     let WithdrawStep::PasswordSending(id) = step else {
         panic!("the password is out: {step:?}");
     };
-    assert_eq!(sent, json!(id.0.to_string()), "the step carries its request");
+    assert_eq!(
+        sent,
+        json!(id.0.to_string()),
+        "the step carries its request"
+    );
     assert_eq!(
         sent_request(&p.1, "getStarWithdrawalUrl")["password"],
         "hunter2"

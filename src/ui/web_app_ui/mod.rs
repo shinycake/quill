@@ -163,7 +163,6 @@ pub(super) struct MiniAppWindow {
     popups: HashMap<String, PopupPurpose>,
     popup_seq: u64,
     waiting_write_access: bool,
-    data_sent: bool,
     privacy_policy_url: Option<String>,
     in_attachment_menu: bool,
     emoji: emoji_status::EmojiStatusFlow,

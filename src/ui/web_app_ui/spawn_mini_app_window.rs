@@ -122,7 +122,6 @@ impl QuillApp {
             popups: HashMap::new(),
             popup_seq: 0,
             waiting_write_access: false,
-            data_sent: false,
             privacy_policy_url,
             in_attachment_menu,
             emoji: Default::default(),
@@ -564,13 +563,12 @@ impl QuillApp {
     }
 
     pub(super) fn handle_web_app_event(&mut self, event: WebAppEvent, cx: &mut Context<Self>) {
-        let Some((bot_id, bot_name, source, data_sent, waiting_write_access)) =
+        let Some((bot_id, bot_name, source, waiting_write_access)) =
             self.mini_apps.window.as_ref().map(|window| {
                 (
                     window.launch.bot_user_id,
                     window.launch.bot_name.clone(),
                     window.launch.source.clone(),
-                    window.data_sent,
                     window.waiting_write_access,
                 )
             })
@@ -582,10 +580,9 @@ impl QuillApp {
             WebAppEvent::Haptic => {}
             WebAppEvent::Close => self.close_mini_app_window(cx),
             WebAppEvent::DataSend { data } => {
-                if !source.allows_data_send() || data_sent {
+                if !source.allows_data_send() {
                     return;
                 }
-                self.with_window(|window| window.data_sent = true);
                 let button_text = match &source {
                     LaunchSource::KeyboardButton { button_text } => button_text.clone(),
                     _ => String::new(),

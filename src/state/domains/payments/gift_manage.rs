@@ -359,11 +359,11 @@ impl Session {
             PaymentsPurpose::GetAvailableGifts if !manage.send.asked_gifts(pending) => {}
             PaymentsPurpose::GetPremiumGiftOptions if !manage.send.asked_premium(pending) => {}
             PaymentsPurpose::GetAvailableGifts => {
-                manage.send.gifts_fetch = GiftListFetch::Failed;
-                manage.send.stage = SendStage::Failed(format!("Couldn't load the gifts: {reason}"));
+                manage.send.gifts_fetch =
+                    GiftListFetch::Failed(format!("Couldn't load the gifts: {reason}"));
             }
             PaymentsPurpose::GetPremiumGiftOptions => {
-                manage.send.premium_fetch = GiftListFetch::Failed;
+                manage.send.premium_fetch = GiftListFetch::Failed(String::new());
             }
             PaymentsPurpose::TransferGift => {
                 if let (Some(picker), Some(request)) =

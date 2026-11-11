@@ -47,7 +47,7 @@ impl GiftFlow {
 /// One list the send-gift dialog asks for when it opens. The dialog is
 /// rebuilt for each recipient, so only the answer (or failure) of the
 /// request named here lands; an earlier box's is dropped.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum GiftListFetch {
     /// Not asked (the demo, or Premium options for yourself or a channel).
     #[default]
@@ -56,17 +56,19 @@ pub enum GiftListFetch {
     Asking(crate::ids::RequestId),
     /// The answer landed.
     Answered,
-    /// The request failed or could not be sent.
-    Failed,
+    /// The request failed or could not be sent; the line the box shows.
+    /// Apart from `SendStage`, so a list failure never overwrites a
+    /// `sendGift` in flight.
+    Failed(String),
 }
 
 impl GiftListFetch {
     /// Whether `pending` is the request this list waits for.
-    pub(crate) fn asked_by(self, pending: Option<&crate::state::PendingRequest>) -> bool {
-        matches!((self, pending), (Self::Asking(id), Some(pending)) if id == pending.id)
+    pub(crate) fn asked_by(&self, pending: Option<&crate::state::PendingRequest>) -> bool {
+        matches!((self, pending), (Self::Asking(id), Some(pending)) if *id == pending.id)
     }
 
-    pub fn is_loading(self) -> bool {
+    pub fn is_loading(&self) -> bool {
         matches!(self, Self::Asking(_))
     }
 }
@@ -83,8 +85,7 @@ pub enum SendStage {
     Sending(crate::ids::RequestId),
     /// The gift went out; the line the box shows.
     Sent(String),
-    /// The send, or the list of gifts to send, failed; the line the box
-    /// shows.
+    /// The send failed; the line the box shows.
     Failed(String),
 }
 
@@ -124,8 +125,8 @@ impl SendGiftState {
 
     /// The line after a failed send or gift list.
     pub fn error_line(&self) -> Option<&str> {
-        match &self.stage {
-            SendStage::Failed(line) => Some(line),
+        match (&self.stage, &self.gifts_fetch) {
+            (SendStage::Failed(line), _) | (_, GiftListFetch::Failed(line)) => Some(line),
             _ => None,
         }
     }
