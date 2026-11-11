@@ -747,7 +747,7 @@ fn g2_boost_slots_stashed_for_chain() {
     let extra = session.request(RequestPurpose::GetBoostSlotsForBoost, Some(ChatId(13)));
     // Kept only while the box of that chat waits for the slots.
     let mut open = crate::boost_box::BoostBoxState::new(13, false);
-    open.phase = crate::boost_box::BoostPhase::Working(crate::boost_box::BoostWork::Slots);
+    open.phase = crate::boost_box::BoostPhase::Working(crate::boost_box::BoostWork::Slots(extra));
     session.groups.boost_box = Some(open);
     apply_json(
         &mut session,

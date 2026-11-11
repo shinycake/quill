@@ -280,10 +280,14 @@ impl Session {
                         .boost_box
                         .as_mut()
                         .filter(|state| state.chat_id == chat_id.0)
-                    && matches!(
-                        state.phase,
-                        crate::boost_box::BoostPhase::Working(crate::boost_box::BoostWork::Slots)
-                    )
+                    && pending.is_some_and(|p| {
+                        matches!(
+                            state.phase,
+                            crate::boost_box::BoostPhase::Working(
+                                crate::boost_box::BoostWork::Slots(id)
+                            ) if id == p.id
+                        )
+                    })
                 {
                     state.phase = crate::boost_box::BoostPhase::Working(
                         crate::boost_box::BoostWork::SlotsReady(slots),
@@ -299,18 +303,17 @@ impl Session {
                     self.groups.chat_boost_details.remove(&chat_id.0);
                     // The boost box goes back to its counters, with a line
                     // about boosts that moved here (`lng_boost_reassign_done`).
-                    if let Some(state) = self
-                        .groups
-                        .boost_box
-                        .as_mut()
-                        .filter(|state| state.chat_id == chat_id.0)
-                    {
+                    // Only the answer to the `boostChat` the box works on
+                    // ends it: a reopened box has its own request out.
+                    if let Some(state) = self.groups.boost_box.as_mut().filter(|state| {
+                        state.chat_id == chat_id.0 && pending.is_some_and(|p| state.works_on(p.id))
+                    }) {
                         let moved = match std::mem::replace(
                             &mut state.phase,
                             crate::boost_box::BoostPhase::Main,
                         ) {
                             crate::boost_box::BoostPhase::Working(
-                                crate::boost_box::BoostWork::Boosting { reassign },
+                                crate::boost_box::BoostWork::Boosting { reassign, .. },
                             ) => reassign,
                             _ => None,
                         };

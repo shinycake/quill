@@ -1,6 +1,6 @@
 //! Connect driver: the boost box (`crate::boost_box`).
 use super::*;
-use crate::boost_box::{BoostBoxState, BoostPhase, BoostWork, ReassignSummary, sources};
+use crate::boost_box::{BoostBoxState, BoostPhase, ReassignSummary, sources};
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// The open boost box, if it is for this chat.
@@ -81,15 +81,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             channels,
         };
         let before = state.phase.clone();
-        if let Some(state) = self.boost_box_for(chat) {
-            state.phase = BoostPhase::Working(BoostWork::Boosting {
-                reassign: Some(summary),
-            });
-            state.note = None;
-        }
         // A click that never left puts the list back, so the user can pick
         // again or go back instead of facing a box that is stuck working.
-        if let Err(err) = self.send_boost_chat(chat, &picked) {
+        if let Err(err) = self.send_boost_chat(chat, &picked, Some(summary)) {
             if let Some(state) = self.boost_box_for(chat) {
                 state.phase = before;
             }

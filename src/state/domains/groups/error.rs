@@ -606,11 +606,9 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::GetBoostSlotsForBoost | RequestPurpose::BoostChat)
         ) && let Some(chat_id) = pending.and_then(|p| p.chat_id)
-            && let Some(state) = self
-                .groups
-                .boost_box
-                .as_mut()
-                .filter(|state| state.chat_id == chat_id.0)
+            && let Some(state) = self.groups.boost_box.as_mut().filter(|state| {
+                state.chat_id == chat_id.0 && pending.is_some_and(|p| state.works_on(p.id))
+            })
         {
             state.phase = crate::boost_box::BoostPhase::Main;
             state.note = Some(call_request_error_line(err, "Could not boost"));

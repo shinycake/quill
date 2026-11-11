@@ -77,13 +77,15 @@ fn watch_saver(cx: &mut App) {
             // drives (a new session pokes the wake as well).
             let takeover_shown = quill::agent::ui_driver::takeover::current()
                 != quill::agent::ui_driver::takeover::Phase::Idle;
-            let wait = if quill::battery_saving::event_driven()
-                || (quill::battery_saving::ignored() && !takeover_shown)
-            {
-                PARKED
-            } else {
-                POLL
-            };
+            // Hidden or behind another app, nothing draws, so nothing needs
+            // the answer: activation pokes the wake and the probe runs then.
+            let in_front = cx.update(|cx| cx.active_window().is_some());
+            let wait = probe_wait(
+                quill::battery_saving::event_driven(),
+                quill::battery_saving::ignored(),
+                takeover_shown,
+                in_front,
+            );
             super::wake_wait::sleep_or_wake(
                 cx.background_executor(),
                 &quill::wake::BATTERY,
@@ -94,6 +96,16 @@ fn watch_saver(cx: &mut App) {
         }
     })
     .detach();
+}
+
+/// How long the probe loop rests before asking again.
+#[cfg(target_os = "linux")]
+fn probe_wait(event_driven: bool, ignored: bool, takeover_shown: bool, in_front: bool) -> Duration {
+    if event_driven || (ignored && !takeover_shown) || !in_front {
+        PARKED
+    } else {
+        POLL
+    }
 }
 
 /// Follow the system thermal state: read it once, then on each change.
@@ -133,5 +145,20 @@ fn apply_answer(answer: Option<bool>, cx: &mut App) {
     if before != after {
         cx.set_reduce_motion(quill::power_saving::reduce_motion_now());
         cx.refresh_windows();
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::{PARKED, POLL, probe_wait};
+
+    #[test]
+    fn the_probe_polls_only_while_something_is_shown_and_asks() {
+        assert_eq!(probe_wait(false, false, false, true), POLL);
+        assert_eq!(probe_wait(false, false, false, false), PARKED, "hidden");
+        assert_eq!(probe_wait(true, false, false, true), PARKED, "signalled");
+        assert_eq!(probe_wait(false, true, false, true), PARKED, "switch off");
+        assert_eq!(probe_wait(false, true, true, true), POLL, "agent drives");
+        assert_eq!(probe_wait(false, true, true, false), PARKED, "agent hidden");
     }
 }

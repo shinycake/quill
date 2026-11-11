@@ -3,7 +3,7 @@
 //! a second click.
 use super::super::*;
 use super::*;
-use crate::boost_box::{BoostNotice, BoostPhase};
+use crate::boost_box::{BoostNotice, BoostPhase, BoostWork};
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::{ChatId, RequestId};
 use crate::platform::MemorySecretStore;
@@ -383,4 +383,61 @@ fn slots_answered_after_the_box_closed_are_not_kept_for_the_next_press() {
     assert_eq!(rig.phase(), BoostPhase::Main);
     assert!(rig.driver.request_chat_boost(ChatId(13)).unwrap().is_some());
     assert!(rig.sent_all("boostChat").is_empty());
+}
+
+/// A `boostChat` sent by a box that was closed is still out when the chat's
+/// box is reopened and its Boost pressed again: the old request's answer or
+/// error must not end the new box's own wait.
+fn reopened_box_with_old_boost_out(rig: &mut Rig) -> RequestId {
+    rig.driver.open_boost_box(ChatId(13)).unwrap();
+    rig.driver.request_chat_boost(ChatId(13)).unwrap();
+    rig.answer_slots(&format!("[{}]", slot(5, 0, 0)));
+    let old = rig.boost_extra();
+    rig.driver.close_boost_box();
+    rig.driver.open_boost_box(ChatId(13)).unwrap();
+    rig.driver.request_chat_boost(ChatId(13)).unwrap();
+    assert!(matches!(rig.phase(), BoostPhase::Working(_)));
+    old
+}
+
+fn boost_error(rig: &mut Rig, extra: RequestId) {
+    rig.ingest(&format!(
+        r#"{{"@type":"error","code":400,"message":"BOOST_NOT_MODIFIED","@extra":"{}"}}"#,
+        extra.0
+    ));
+}
+
+#[test]
+fn the_old_boosts_error_does_not_end_the_reopened_boxes_wait() {
+    let mut rig = Rig::new(true);
+    let old = reopened_box_with_old_boost_out(&mut rig);
+    boost_error(&mut rig, old);
+    let state = rig.driver.session.groups.boost_box.as_ref().unwrap();
+    assert!(
+        matches!(state.phase, BoostPhase::Working(_)),
+        "still reading the slots"
+    );
+    assert_eq!(state.note, None);
+    // The new box's own answer still carries on to its boost.
+    rig.answer_slots(&format!("[{}]", slot(6, 0, 0)));
+    assert_eq!(rig.sent_all("boostChat").len(), 2);
+    assert!(matches!(rig.phase(), BoostPhase::Working(_)));
+    // And the old boost's error arriving now leaves the new boost working.
+    boost_error(&mut rig, old);
+    assert!(matches!(rig.phase(), BoostPhase::Working(_)));
+}
+
+#[test]
+fn the_new_boosts_error_ends_it_whichever_request_failed_first() {
+    let mut rig = Rig::new(true);
+    let old = reopened_box_with_old_boost_out(&mut rig);
+    rig.answer_slots(&format!("[{}]", slot(6, 0, 0)));
+    let BoostPhase::Working(BoostWork::Boosting { request: new, .. }) = rig.phase() else {
+        panic!("the new boost is out");
+    };
+    assert_ne!(new, old);
+    boost_error(&mut rig, new);
+    let state = rig.driver.session.groups.boost_box.as_ref().unwrap();
+    assert_eq!(state.phase, BoostPhase::Main);
+    assert_eq!(state.note.as_deref(), Some("Could not boost (error 400)"));
 }
