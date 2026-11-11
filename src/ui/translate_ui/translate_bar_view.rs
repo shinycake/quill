@@ -134,7 +134,7 @@ impl QuillApp {
     ) -> Option<AnyElement> {
         self.translate
             .toast
-            .as_ref()
+            .toast()
             .filter(|toast| toast.chat_id == chat_id)?;
         self.translate_toast_view_body(chat_id, cx)
     }
@@ -152,7 +152,7 @@ impl QuillApp {
         let toast = self
             .translate
             .toast
-            .as_ref()
+            .toast()
             .filter(|toast| toast.chat_id == chat_id)?
             .clone();
         let action = toast.action;
@@ -177,7 +177,7 @@ impl QuillApp {
                         .small()
                         .text_color(accent())
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.translate.toast = None;
+                            this.translate.toast = ToastStage::None;
                             match action {
                                 ToastAction::ShowBar => {
                                     this.set_translate_bar_hidden(chat_id, false, cx)
@@ -201,27 +201,24 @@ impl QuillApp {
         action: ToastAction,
         cx: &mut Context<Self>,
     ) {
-        self.translate.toast_seq += 1;
-        let id = self.translate.toast_seq;
-        self.translate.toast = Some(TranslateToast {
-            chat_id,
-            text,
-            label,
-            action,
-            id,
-        });
-        // The toast is the screen's: a timer from an account switched away
-        // must not clear the next account's toast with the same id.
-        self.spawn_screen(cx, async move |this, cx| {
+        // The toast is the screen's: its timer lives in the stage, so an
+        // account switch or a newer toast drops it.
+        let hide = self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(TOAST_DURATION).await;
             let _ = this.update(cx, |this, cx| {
-                if this.translate.toast.as_ref().is_some_and(|t| t.id == id) {
-                    this.translate.toast = None;
-                    cx.notify();
-                }
+                this.translate.toast = ToastStage::None;
+                cx.notify();
             });
-        })
-        .detach();
+        });
+        self.translate.toast = ToastStage::Shown {
+            toast: TranslateToast {
+                chat_id,
+                text,
+                label,
+                action,
+            },
+            _hide: hide,
+        };
         cx.notify();
     }
 
