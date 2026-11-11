@@ -148,7 +148,8 @@ fn apply_answer(answer: Option<bool>, cx: &mut App) {
     }
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
+#[cfg(target_os = "linux")]
 mod tests {
     use super::{PARKED, POLL, probe_wait};
 
