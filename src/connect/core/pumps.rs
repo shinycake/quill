@@ -45,28 +45,37 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// The account's user id is known: a folder last signed in as someone
     /// else drops what they left (`account_data::claim`), once per user.
-    fn claim_account_owner(&mut self) {
+    pub(in crate::connect) fn claim_account_owner(&mut self) {
         let Some(me) = self.session.my_user_id else {
             return;
         };
-        if self.claimed_owner == Some(me) {
+        if self.owner_claim == OwnerClaim::Saved(me) {
             return;
         }
-        self.claimed_owner = Some(me);
         // `<app root>/accounts/<key>`.
         let Some(app_root) = self.paths.root.parent().and_then(std::path::Path::parent) else {
             return;
         };
-        let claimed = crate::account_data::claim(
-            app_root,
-            &self.session.account,
-            me,
-            self.session.sign_in_origin,
-        );
-        if let Some(err) = claimed.owner_error {
-            // Not silent: without the owner file the next start cannot tell
-            // whose the folder is, so it drops what is in it.
-            eprintln!("quill: could not save the account owner: {err}");
-        }
+        let owner_error = if self.owner_claim == OwnerClaim::Unsaved(me) {
+            crate::account_data::write_owner(app_root, &self.session.account, me).err()
+        } else {
+            crate::account_data::claim(
+                app_root,
+                &self.session.account,
+                me,
+                self.session.sign_in_origin,
+            )
+            .owner_error
+        };
+        self.owner_claim = match owner_error {
+            None => OwnerClaim::Saved(me),
+            Some(err) => {
+                // Not silent: without the owner file the next start cannot
+                // tell whose the folder is, so it drops what is in it. The
+                // next ingest retries the write.
+                eprintln!("quill: could not save the account owner: {err}");
+                OwnerClaim::Unsaved(me)
+            }
+        };
     }
 }

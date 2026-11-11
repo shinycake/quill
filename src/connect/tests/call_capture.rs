@@ -244,6 +244,27 @@ fn a_refused_microphone_shows_the_error_and_the_call_goes_on() {
 }
 
 #[test]
+fn a_refused_microphone_is_put_on_the_call_for_its_window() {
+    let (dir, mut driver, _engine, mics) = group_driver();
+    mics.fail.store(true, Ordering::SeqCst);
+    driver.session.calls.active_group_call = Some(joined_group_call(false));
+    driver.pump_call_media(Instant::now());
+    while driver.call_capture().opening() {
+        std::thread::yield_now();
+        driver.pump_call_media(Instant::now());
+    }
+    assert_eq!(
+        driver.session.calls.group_call_error.as_deref(),
+        Some("Quill can't use the microphone.")
+    );
+    // Dismissed, it stays gone until the failure changes.
+    driver.session.calls.group_call_error = None;
+    driver.pump_call_media(Instant::now());
+    assert_eq!(driver.session.calls.group_call_error, None);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
 fn your_level_comes_from_the_call_microphone() {
     let (dir, mut driver, _engine, _mics) = group_driver();
     driver.session.calls.active_group_call = Some(joined_group_call(false));

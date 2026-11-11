@@ -341,10 +341,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let shown = |driver: &Self| {
             (
                 driver.call_capture.target(),
-                driver.call_capture.error().map(str::to_string),
                 driver.call_screen.target(),
                 driver.call_screen.paused(),
-                driver.call_screen.error().map(str::to_string),
+                driver.call_media_error(),
             )
         };
         let before = shown(self);
@@ -354,7 +353,40 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.key_group_call_by_chat();
         self.pump_call_capture(now);
         self.pump_call_screen(now);
-        listed || landed || before != shown(self)
+        let after = shown(self);
+        // A microphone, tap or screen-share failure that is new goes on the
+        // call, whose overlay draws it with a way to dismiss it.
+        if after.3 != before.3
+            && let Some(error) = after.3.clone()
+        {
+            self.note_call_media_error(error);
+        }
+        listed || landed || before != after
+    }
+
+    /// Why the call's microphone, level tap or shared screen stopped, the
+    /// newest first.
+    fn call_media_error(&self) -> Option<String> {
+        self.call_capture
+            .error()
+            .or(self.call_audio.error())
+            .or(self.call_screen.error())
+            .map(str::to_string)
+    }
+
+    /// Put a media failure on the call being shown: the group call's error
+    /// line while joined, else the 1:1 call's note.
+    fn note_call_media_error(&mut self, error: String) {
+        let calls = &mut self.session.calls;
+        if calls
+            .active_group_call
+            .as_ref()
+            .is_some_and(|call| call.is_joined)
+        {
+            calls.group_call_error = Some(error);
+        } else if let Some(call) = calls.active_call.as_mut() {
+            call.media_note = Some(error);
+        }
     }
 
     fn warm_call_devices(&mut self) {

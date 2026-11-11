@@ -245,18 +245,23 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// The toast's Undo: the pending Stars are dropped.
     pub fn undo_live_story_reaction(&mut self) -> Result<(), ConnectSendError> {
-        let Some(live) = self.session.stories.live.as_mut() else {
+        let Some(live) = self.session.stories.live.as_ref() else {
             return Ok(());
         };
-        if live.pending_reaction.take().is_none() {
+        if live.pending_reaction.is_none() {
             return Ok(());
         }
         let group_call_id = live.group_call_id;
+        // The pending Stars are dropped only once the removal went out: a
+        // refused send leaves them (and the Undo) as they were.
         self.live_story_request(
             LiveStoryPurpose::RemovePendingReactions { group_call_id },
             |extra| remove_pending_live_story_reactions(extra, group_call_id),
-        )
-        .map(|_| ())
+        )?;
+        if let Some(live) = self.session.live_story_mut(group_call_id) {
+            live.pending_reaction = None;
+        }
+        Ok(())
     }
 
     /// Commits the pending Stars once their Undo window is over. Returns

@@ -62,13 +62,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        // R5: a failed first page waits for the explicit Retry row
-        // (`retry_history`) instead of re-sending on every render.
+        // A failed page (the first, or an older one on a window that holds
+        // messages) waits for the explicit Retry row (`retry_history`) or a
+        // scroll away from the edge, instead of re-sending on every render.
         if self
             .session
             .histories
             .get(&chat_id.0)
-            .is_some_and(|h| h.load_failed() && h.messages.is_empty())
+            .is_some_and(|h| h.load_failed())
         {
             return Ok(None);
         }

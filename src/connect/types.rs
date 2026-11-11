@@ -362,9 +362,9 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) call_sound_watch: Option<(i32, crate::calls::stream_audio::watch::PlaybackWatch)>,
     pub(crate) credentials: TelegramCredentials,
     pub(crate) paths: AccountPaths,
-    /// The Telegram user this client was last checked against the account
-    /// folder's owner (`account_data::claim`).
-    pub(crate) claimed_owner: Option<i64>,
+    /// Where this client is with the account folder's owner
+    /// (`account_data::claim`).
+    pub(crate) owner_claim: OwnerClaim,
     pub(crate) database_key: DatabaseKey,
     /// Last `chatActionTyping` we sent (Unigram `_lastTypingTime`).
     pub(crate) outgoing_typing: Option<OutgoingTyping>,
@@ -458,4 +458,18 @@ pub enum DraftSaveOutcome {
 pub(crate) enum ToggleSessionKind {
     SecretChats,
     Calls,
+}
+
+/// The account folder's owner file, from this client's side: one value, so
+/// a failed save is retried on the next ingest.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum OwnerClaim {
+    /// Nobody checked yet (the user id is not known).
+    #[default]
+    Unclaimed,
+    /// The folder's owner is this user and the file says so.
+    Saved(i64),
+    /// The folder was checked for this user but the owner file could not be
+    /// written: only the write is retried.
+    Unsaved(i64),
 }
