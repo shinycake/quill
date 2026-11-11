@@ -50,31 +50,34 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
         },
         chat: None,
     });
-    session.bots.last_login_url_info = Some(LoginUrlInfo::Open {
-        url: "https://site.example".into(),
-    });
-    session.bots.login_url_request = Some(LoginUrlRequest {
-        chat_id: ChatId(1),
-        message_id: MessageId(2),
-        button_id: 3,
-        raw_url: "https://site.example".into(),
-        from_agent: false,
-    });
+    session.bots.login_url = crate::state::LoginUrlStage::Answered {
+        press: None,
+        info: LoginUrlInfo::Open {
+            url: "https://site.example".into(),
+        },
+    };
 
-    session.bots.web_apps.data_sent = Some(Ok(()));
+    session
+        .bots
+        .web_apps
+        .data_sent
+        .push(crate::state::DataSent {
+            request: crate::ids::RequestId(9),
+            result: Ok(()),
+        });
     session.bots.web_apps.emoji_access = Some((5, true));
     session
         .bots
         .web_apps
         .custom_replies
         .push(CustomRequestReply {
-            req_id: "r".into(),
+            request: crate::ids::RequestId(8),
             result: Ok("{}".into()),
         });
 
     session.forget_screen_outcomes();
 
-    assert!(session.bots.web_apps.data_sent.is_none());
+    assert!(session.bots.web_apps.data_sent.is_empty());
     assert!(session.bots.web_apps.emoji_access.is_none());
     assert!(session.bots.web_apps.custom_replies.is_empty());
     assert!(session.payments.receipt_error.is_none());
@@ -82,8 +85,7 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
     assert!(session.messages.send_permission_error.is_empty());
     assert!(session.messages.flood_notice.is_empty());
     assert!(session.bots.callback_answers.is_empty());
-    assert!(session.bots.last_login_url_info.is_none());
-    assert!(session.bots.login_url_request.is_none());
+    assert!(!session.bots.login_url.is_busy());
 
     assert!(session.payments.verification_url.is_none());
     assert!(session.messages.message_link.is_none());
@@ -105,15 +107,18 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
 fn a_login_request_in_flight_survives_the_return() {
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
     let mut session = Session::new(AccountKey::primary(), sink);
-    session.bots.login_url_request = Some(LoginUrlRequest {
-        chat_id: ChatId(1),
-        message_id: MessageId(2),
-        button_id: 3,
-        raw_url: "https://site.example".into(),
-        from_agent: false,
-    });
+    session.bots.login_url.ask(
+        crate::ids::RequestId(4),
+        LoginUrlRequest {
+            chat_id: ChatId(1),
+            message_id: MessageId(2),
+            button_id: 3,
+            raw_url: "https://site.example".into(),
+            from_agent: false,
+        },
+    );
     session.forget_screen_outcomes();
-    assert!(session.bots.login_url_request.is_some());
+    assert!(session.bots.login_url.is_busy());
 }
 
 /// Every outcome `poll_drains` takes from the session is one the return

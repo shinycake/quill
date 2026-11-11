@@ -73,15 +73,11 @@ pub struct BotsState {
     /// Mini apps (docs/decisions/codex-miniapp-webview.md): open answers,
     /// consent answers and the attachment menu bots.
     pub web_apps: WebApps,
-    /// B1: last `loginUrlInfo*` / `httpUrl` answer for a login-URL button
-    /// press. The UI takes it on the next poll: `Open` opens the URL in the
-    /// OS browser, `RequestConfirmation` asks for consent, `Failed` opens
-    /// the button's raw URL in the browser.
-    pub last_login_url_info: Option<LoginUrlInfo>,
-    /// B1: the login button's request context, kept while `getLoginUrlInfo`
-    /// (then `getLoginUrl`) is in flight so an error can degrade to a plain
-    /// URL button press.
-    pub login_url_request: Option<LoginUrlRequest>,
+    /// B1: the login-URL button press in flight, then its answer
+    /// (`loginUrlInfo*` / `httpUrl`) until the UI takes it on the next
+    /// poll: `Open` opens the URL in the OS browser, `RequestConfirmation`
+    /// asks for consent, `Failed` opens the button's raw URL.
+    pub login_url: LoginUrlStage,
     /// B1: force-reply targets set when an incoming message carrying
     /// force-reply markup (`replyMarkupForceReply`, or `force_reply` on an
     /// inline / show-keyboard markup) arrives, one per chat (a newer
@@ -125,8 +121,7 @@ impl BotsState {
             callback_answers: Default::default(),
             callback_presses: Vec::new(),
             web_apps: WebApps::default(),
-            last_login_url_info: None,
-            login_url_request: None,
+            login_url: LoginUrlStage::Idle,
             pending_force_replies: std::collections::HashMap::new(),
             reply_keyboards: ReplyKeyboardState::default(),
             inline_query: None,

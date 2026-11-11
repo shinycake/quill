@@ -162,6 +162,10 @@ pub(super) struct MiniAppWindow {
     popups: HashMap<String, PopupPurpose>,
     popup_seq: u64,
     write_access: launch_flow::WriteAccess,
+    /// The custom-method calls this window sent and the app's `req_id` for
+    /// each: an answer of a request not here is another window's (or a
+    /// closed one's) and is dropped.
+    custom_calls: HashMap<quill::ids::RequestId, String>,
     privacy_policy_url: Option<String>,
     in_attachment_menu: bool,
     emoji: emoji_status::EmojiStatusFlow,
@@ -277,6 +281,10 @@ pub(super) struct MiniApps {
     /// Bots whose "Emoji Status" switch has been on screen this run, so it
     /// stays when the person turns it off (`bot_permissions`).
     pub(super) emoji_access_shown: std::collections::HashSet<quill::ids::OfAccount<i64>>,
+    /// The `sendWebAppData` requests this account's apps sent and whose
+    /// outcome is still to be reported: an outcome of any other request is
+    /// not reported here.
+    data_sends: Vec<quill::ids::RequestId>,
     /// The poll task, alive while a window is.
     poll: Option<Task<()>>,
     /// The window the last mini-app flow was started in (`None`: the main

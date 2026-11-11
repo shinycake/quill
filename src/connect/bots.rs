@@ -3,7 +3,8 @@ use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::{BotsPurpose, CallbackButtonKey, CallbackPress, UsersPurpose};
 use crate::state::{
-    InlineBotResolve, InlineQueryFetch, InlineQuerySlot, LoginUrlRequest, RequestPurpose,
+    InlineBotResolve, InlineQueryFetch, InlineQuerySlot, LoginUrlRequest, LoginUrlStage,
+    RequestPurpose,
 };
 use crate::telegram::envelope::ChatKind;
 use crate::telegram::requests::{
@@ -393,10 +394,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// The session holds one login-URL context, which the answer reads: a
     /// second button waits until the first one's answer is in.
     fn refuse_login_url_overlap(&self) -> Result<(), ConnectSendError> {
-        let requests = &self.session.requests;
-        if requests.has_purpose(RequestPurpose::GetLoginUrlInfo)
-            || requests.has_purpose(RequestPurpose::GetLoginUrl)
-        {
+        if self.session.bots.login_url.is_busy() {
             return Err(ConnectSendError::InvalidRequest);
         }
         Ok(())
@@ -415,15 +413,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.refuse_login_url_overlap()?;
         let extra =
             self.callback_query_extra(chat_id, message_id, RequestPurpose::GetLoginUrlInfo)?;
-        self.session.bots.login_url_request = Some(LoginUrlRequest {
-            chat_id,
-            message_id,
-            button_id,
-            raw_url: fallback_url.to_string(),
-            from_agent: crate::agent::ui_driver::guard::injecting(),
-        });
         let json = get_login_url_info(extra, chat_id, message_id, button_id);
-        self.send_json_request(extra, &json)
+        self.session.bots.login_url.ask(
+            extra,
+            LoginUrlRequest {
+                chat_id,
+                message_id,
+                button_id,
+                raw_url: fallback_url.to_string(),
+                from_agent: crate::agent::ui_driver::guard::injecting(),
+            },
+        );
+        let sent = self.send_json_request(extra, &json);
+        if sent.is_err() {
+            self.session.bots.login_url = LoginUrlStage::Idle;
+        }
+        sent
     }
 
     /// B1: the authorized URL after the user consented to a
@@ -441,10 +446,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             request.message_id,
             RequestPurpose::GetLoginUrl,
         )?;
-        self.session.bots.login_url_request = Some(LoginUrlRequest {
-            from_agent: request.from_agent || crate::agent::ui_driver::guard::injecting(),
-            ..request.clone()
-        });
+        self.session.bots.login_url.ask(
+            extra,
+            LoginUrlRequest {
+                from_agent: request.from_agent || crate::agent::ui_driver::guard::injecting(),
+                ..request.clone()
+            },
+        );
         let json = get_login_url(
             extra,
             request.chat_id,
@@ -452,7 +460,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             request.button_id,
             allow_write_access,
         );
-        self.send_json_request(extra, &json)
+        let sent = self.send_json_request(extra, &json);
+        if sent.is_err() {
+            self.session.bots.login_url = LoginUrlStage::Idle;
+        }
+        sent
     }
 
     /// B1: `deleteChatReplyMarkup` after a one-time custom keyboard was used

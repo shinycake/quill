@@ -105,8 +105,8 @@ fn b1_login_url_info_error_degrades_to_url() {
         from_agent: false,
     };
     for purpose in [RequestPurpose::GetLoginUrlInfo, RequestPurpose::GetLoginUrl] {
-        session.bots.login_url_request = Some(login_request.clone());
         let extra = session.request(purpose, Some(ChatId(21)));
+        session.bots.login_url.ask(extra, login_request.clone());
         apply_json(
             &mut session,
             &seq,
@@ -117,12 +117,31 @@ fn b1_login_url_info_error_degrades_to_url() {
             ),
         );
         assert_eq!(
-            session.bots.last_login_url_info,
-            Some(LoginUrlInfo::Failed {
-                fallback_url: "https://example.com/login".to_string()
-            })
+            session.bots.login_url.take_answer(),
+            Some((
+                LoginUrlInfo::Failed {
+                    fallback_url: "https://example.com/login".to_string()
+                },
+                None
+            ))
         );
     }
+    // A press refused under another request than the one asked changes
+    // nothing: two presses never swap their answers.
+    let asked = session.request(RequestPurpose::GetLoginUrlInfo, Some(ChatId(21)));
+    session.bots.login_url.ask(asked, login_request.clone());
+    let other = session.request(RequestPurpose::GetLoginUrlInfo, Some(ChatId(21)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"BUTTON_ID_INVALID"}}"#,
+            other.0
+        ),
+    );
+    assert!(session.bots.login_url.take_answer().is_none());
+    assert!(session.bots.login_url.is_busy());
 }
 
 #[test]
@@ -133,6 +152,16 @@ fn b1_get_login_url_http_url_opens() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(1);
     let extra = session.request(RequestPurpose::GetLoginUrl, Some(ChatId(21)));
+    session.bots.login_url.ask(
+        extra,
+        LoginUrlRequest {
+            chat_id: ChatId(21),
+            message_id: MessageId(301),
+            button_id: 11,
+            raw_url: "https://example.com/login".to_string(),
+            from_agent: false,
+        },
+    );
     apply_json(
         &mut session,
         &seq,
@@ -142,12 +171,10 @@ fn b1_get_login_url_http_url_opens() {
             extra.0
         ),
     );
-    assert_eq!(
-        session.bots.last_login_url_info,
-        Some(LoginUrlInfo::Open {
-            url: "https://example.com/authed".to_string()
-        })
-    );
+    assert!(matches!(
+        session.bots.login_url.take_answer(),
+        Some((LoginUrlInfo::Open { url }, Some(_))) if url == "https://example.com/authed"
+    ));
 }
 
 #[test]

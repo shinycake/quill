@@ -210,13 +210,7 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::GetLoginUrlInfo) | Some(RequestPurpose::GetLoginUrl)
         ) {
-            let fallback_url = self
-                .bots
-                .login_url_request
-                .take()
-                .map(|request| request.raw_url)
-                .unwrap_or_default();
-            self.bots.last_login_url_info = Some(LoginUrlInfo::Failed { fallback_url });
+            self.bots.login_url.refused(pending.map(|p| p.id));
         }
         self.apply_web_app_error(pending, err);
     }

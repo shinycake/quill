@@ -121,6 +121,7 @@ impl QuillApp {
             popups: HashMap::new(),
             popup_seq: 0,
             write_access: launch_flow::WriteAccess::Idle,
+            custom_calls: HashMap::new(),
             privacy_policy_url,
             in_attachment_menu,
             emoji: Default::default(),
@@ -213,7 +214,7 @@ impl QuillApp {
         self.mini_apps.window.is_some()
             || self.mini_apps.flow.is_waiting()
             || self.session().is_some_and(|session| {
-                !session.bots.web_apps.pending.is_empty() || session.web_app_answer_due()
+                session.bots.web_apps.opening.is_some() || session.web_app_answer_due()
             })
     }
 
@@ -232,7 +233,7 @@ impl QuillApp {
         let attach_bot = apps.attachment_menu_bot.take();
         let toggled = std::mem::take(&mut apps.attachment_menu_toggled);
         let found = apps.found.take();
-        let data_sent = apps.data_sent.take();
+        let data_sent = std::mem::take(&mut apps.data_sent);
 
         if let Some(result) = open_result {
             match result {
@@ -270,13 +271,15 @@ impl QuillApp {
             self.finish_write_access(answer, cx);
         }
         for reply in custom_replies {
-            if let Some(window) = self.mini_apps.window.as_mut() {
+            if let Some(window) = self.mini_apps.window.as_mut()
+                && let Some(req_id) = window.custom_calls.remove(&reply.request)
+            {
                 let reply = match reply.result {
                     Ok(json) => BridgeReply::custom_method_result(
-                        &reply.req_id,
+                        &req_id,
                         serde_json::from_str(&json).unwrap_or(serde_json::Value::Null),
                     ),
-                    Err(error) => BridgeReply::custom_method_error(&reply.req_id, &error),
+                    Err(error) => BridgeReply::custom_method_error(&req_id, &error),
                 };
                 window.emit(reply);
             }
@@ -335,8 +338,13 @@ impl QuillApp {
         {
             self.as_asked_by(window, |this| this.found_web_app_answer(then, result, cx));
         }
-        if let Some(result) = data_sent {
-            match result {
+        for sent in data_sent {
+            let sends = &mut self.mini_apps.data_sends;
+            let Some(at) = sends.iter().position(|request| *request == sent.request) else {
+                continue;
+            };
+            sends.remove(at);
+            match sent.result {
                 Ok(()) => {
                     self.set_status_note(StatusNote::silent(tr(keys::Q_MEDIA_SENT_TO_THE_BOT)), cx)
                 }
@@ -586,7 +594,9 @@ impl QuillApp {
                     .live
                     .as_mut()
                     .map(|live| live.driver.send_web_app_data(bot_id, &button_text, &data));
-                if !matches!(sent, Some(Ok(_))) {
+                if let Some(Ok(request)) = sent {
+                    self.mini_apps.data_sends.push(request);
+                } else {
                     self.set_status_note(
                         StatusNote::error(tr(keys::Q_MEDIA_COULDNT_SEND_THE_APPS_DATA)),
                         cx,
@@ -726,18 +736,15 @@ impl QuillApp {
                 params,
             } => {
                 let sent = self.live.as_mut().map(|live| {
-                    live.driver.send_web_app_custom_request(
-                        bot_id,
-                        &req_id,
-                        &method,
-                        &params.to_string(),
-                    )
+                    live.driver
+                        .send_web_app_custom_request(bot_id, &method, &params.to_string())
                 });
-                if !matches!(sent, Some(Ok(_))) {
-                    self.with_window(|window| {
-                        window.emit(BridgeReply::custom_method_error(&req_id, "UNKNOWN_ERROR"));
-                    });
-                }
+                self.with_window(|window| match sent {
+                    Some(Ok(request)) => {
+                        window.custom_calls.insert(request, req_id);
+                    }
+                    _ => window.emit(BridgeReply::custom_method_error(&req_id, "UNKNOWN_ERROR")),
+                });
             }
             WebAppEvent::Unsupported { reply, .. } => {
                 if let Some(reply) = reply {

@@ -73,10 +73,9 @@ impl Session {
             BotsPayload::CustomRequestResult { result } => {
                 if let Some(p) = pending
                     && p.purpose == RequestPurpose::SendWebAppCustomRequest
-                    && let Some(req_id) = self.bots.web_apps.custom_requests.remove(&p.id.0)
                 {
                     self.bots.web_apps.custom_replies.push(CustomRequestReply {
-                        req_id,
+                        request: p.id,
                         result: Ok(result),
                     });
                 }
@@ -125,9 +124,13 @@ impl Session {
     /// The context of the open call that `request` answers.
     fn take_web_app_pending(&mut self, request: Option<&PendingRequest>) -> Option<WebAppPending> {
         let id = request?.id;
-        let pending = &mut self.bots.web_apps.pending;
-        let index = pending.iter().position(|p| p.request == id)?;
-        Some(pending.remove(index))
+        match self.bots.web_apps.opening.take() {
+            Some(opening) if opening.request == id => Some(opening),
+            other => {
+                self.bots.web_apps.opening = other;
+                None
+            }
+        }
     }
 
     /// `getGrossingWebAppBots` returns `foundUsers`, which the envelope
@@ -173,7 +176,12 @@ impl Session {
                     });
             }
             Some(RequestPurpose::SendWebAppData) => {
-                self.bots.web_apps.data_sent = Some(Ok(()));
+                if let Some(pending) = pending {
+                    self.bots.web_apps.data_sent.push(DataSent {
+                        request: pending.id,
+                        result: Ok(()),
+                    });
+                }
             }
             _ => {}
         }
@@ -257,19 +265,20 @@ impl Session {
                     .fail(format!("error {}", err.code));
             }
             RequestPurpose::SendWebAppCustomRequest => {
-                if let Some(req_id) = self.bots.web_apps.custom_requests.remove(&p.id.0) {
-                    self.bots.web_apps.custom_replies.push(CustomRequestReply {
-                        req_id,
-                        result: Err(if err.code == 400 {
-                            "BAD_REQUEST".into()
-                        } else {
-                            "UNKNOWN_ERROR".into()
-                        }),
-                    });
-                }
+                self.bots.web_apps.custom_replies.push(CustomRequestReply {
+                    request: p.id,
+                    result: Err(if err.code == 400 {
+                        "BAD_REQUEST".into()
+                    } else {
+                        "UNKNOWN_ERROR".into()
+                    }),
+                });
             }
             RequestPurpose::SendWebAppData => {
-                self.bots.web_apps.data_sent = Some(Err(web_app_error_text(err)));
+                self.bots.web_apps.data_sent.push(DataSent {
+                    request: p.id,
+                    result: Err(web_app_error_text(err)),
+                });
             }
             _ => {}
         }

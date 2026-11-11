@@ -100,8 +100,11 @@ impl Session {
             BotsPayload::LoginUrlInfo(info) => {
                 // B1: `getLoginUrlInfo` response to our own login-button
                 // press (matched by `@extra`).
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetLoginUrlInfo) {
-                    self.bots.last_login_url_info = Some(info);
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::GetLoginUrlInfo | RequestPurpose::GetLoginUrl)
+                ) {
+                    self.bots.login_url.answered(pending.map(|p| p.id), info);
                 }
             }
         }

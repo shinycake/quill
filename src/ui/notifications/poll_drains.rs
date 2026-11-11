@@ -255,11 +255,10 @@ impl QuillApp {
         // presses. The button's request context (kept in the session while
         // the request was in flight) backs the confirmation dialog and the
         // error degrade.
-        let login_url = self.live.as_mut().and_then(|live| {
-            let info = live.driver.session.bots.last_login_url_info.take()?;
-            let request = live.driver.session.bots.login_url_request.take();
-            Some((info, request))
-        });
+        let login_url = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.bots.login_url.take_answer());
         if let Some((info, request)) = login_url {
             // Its consent box and its link belong to the window showing
             // the button's chat, not to the main window this poll runs in.

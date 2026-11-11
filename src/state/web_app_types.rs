@@ -3,14 +3,12 @@
 
 use crate::telegram::envelope::{AttachmentMenuBot, FoundWebApp};
 use crate::web_app::LaunchSource;
-use std::collections::HashMap;
 
 /// The open call in flight (`openWebApp`, `getWebAppUrl`, `getMainWebApp`,
 /// `getWebAppLinkUrl`): what the answer is for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WebAppPending {
-    /// The open call this is for: a second launch before the first
-    /// answers keeps its own context.
+    /// The open call this is for: only its answer opens the launch.
     pub request: crate::ids::RequestId,
     pub bot_user_id: i64,
     pub chat_id: Option<i64>,
@@ -99,10 +97,12 @@ pub struct AttachmentToggle {
     pub result: Result<bool, String>,
 }
 
-/// `sendWebAppCustomRequest` answers, keyed by the app's `req_id`.
+/// The answer of one `sendWebAppCustomRequest`, by the request that sent
+/// it: the window that sent it maps it back to the app's `req_id`; a
+/// window that did not (or none) drops it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CustomRequestReply {
-    pub req_id: String,
+    pub request: crate::ids::RequestId,
     /// The JSON result, or an error word for the app.
     pub result: Result<String, String>,
 }
@@ -121,11 +121,21 @@ impl WebApps {
     }
 }
 
+/// The outcome of one `sendWebAppData`, by the request that sent it: only
+/// the flow that sent that request reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataSent {
+    pub request: crate::ids::RequestId,
+    /// `Ok` or a failure message.
+    pub result: Result<(), String>,
+}
+
 /// Everything mini-app related on the session.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WebApps {
-    /// The open calls in flight, each with what its answer is for.
-    pub pending: Vec<WebAppPending>,
+    /// The open call in flight and what its answer is for. A newer launch
+    /// replaces it: the older answer opens nothing.
+    pub opening: Option<WebAppPending>,
     /// One-shot: the open call's answer.
     pub open_result: Option<WebAppOpenResult>,
     /// Launches TDLib started for an open call that was dropped before
@@ -151,16 +161,15 @@ pub struct WebApps {
     /// (of the same bot too) clicked before the first answered takes only
     /// its own answer.
     pub found: Option<(crate::ids::RequestId, Result<FoundWebApp, String>)>,
-    /// `req_id`s of custom requests in flight, by `RequestId`.
-    pub custom_requests: HashMap<u64, String>,
-    /// One-shot: custom request answers.
+    /// One-shot: custom request answers, each by its request.
     pub custom_replies: Vec<CustomRequestReply>,
     /// Apps tab: `getGrossingWebAppBots` bot ids. One request at a time,
     /// so its answer and its error need no key; a failure is drawn with
     /// the tab's reopen as the retry.
     pub grossing: crate::state::fetch::Fetch<Vec<i64>>,
-    /// One-shot: `sendWebAppData` outcome (`Ok` or a failure message).
-    pub data_sent: Option<Result<(), String>>,
+    /// One-shot: `sendWebAppData` outcomes, oldest first, each by its
+    /// request.
+    pub data_sent: Vec<DataSent>,
     /// One-shot: the contact card sent for `web_app_request_phone` was
     /// taken by TDLib or refused, with the request it answers.
     pub phone_share: Option<PhoneShare>,
