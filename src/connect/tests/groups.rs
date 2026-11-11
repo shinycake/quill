@@ -564,13 +564,18 @@ fn driver_recognize_speech_sends_and_gates() {
         .unwrap();
     let extra = driver
         .recognize_speech(ChatId(11), MessageId(90))
-        .expect("real message sends");
+        .expect("real message sends")
+        .expect("a request went out");
     let last = recorder.snapshot().into_iter().last().unwrap();
     let value: Value = serde_json::from_str(&last).unwrap();
     assert_eq!(value["@type"], "recognizeSpeech");
     assert_eq!(value["chat_id"], 11);
     assert_eq!(value["message_id"], 90);
     assert_eq!(value["@extra"], extra.0.to_string());
+    // A second press before the answer sends nothing more.
+    let sent = recorder.snapshot().len();
+    assert_eq!(driver.recognize_speech(ChatId(11), MessageId(90)), Ok(None));
+    assert_eq!(recorder.snapshot().len(), sent);
     // Pending (unsent) message: rejected.
     let history = driver.session.histories.get_mut(&11).unwrap();
     let mut pending_msg = history.messages.get(&90).unwrap().clone();

@@ -111,6 +111,15 @@ impl QuillApp {
         let items = quill::story_viewer::collect_found_story_items(&keys, &session.stories.stories);
         if let Some(index) = items.iter().position(|item| item.story_id == story_id) {
             self.begin_story_viewer(items, index, cx);
+        } else {
+            // Not fetched yet (or expired): ask for it; the open waits for
+            // the answer and says so when the story could not be loaded.
+            self.open_story_viewer(
+                chat_id,
+                story_id,
+                quill::story_viewer::StoryOpenScope::Single,
+                cx,
+            );
         }
     }
 
@@ -309,6 +318,39 @@ impl QuillApp {
             return;
         };
         session.media.shared_media.playlist_user = Some(user_id);
+        // A page for a playlist that is not held asks for it as it opens
+        // (deduped while one is loading or loaded); a failure shows with
+        // a Retry.
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.fetch_playlist(user_id, false);
+        }
+        cx.notify();
+    }
+
+    /// Retry on the Playlist page after its first page failed.
+    fn retry_playlist(&mut self, user_id: i64, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let failed = live
+                .driver
+                .session
+                .media
+                .playlists
+                .get(&user_id)
+                .is_some_and(|playlist| playlist.error.is_some() && playlist.tracks.is_empty());
+            if failed {
+                live.driver.session.media.playlists.remove(&user_id);
+            }
+            let _ = live.driver.fetch_playlist(user_id, false);
+        }
+        cx.notify();
+    }
+
+    /// The Playlist page closes back to the gallery under it (or to
+    /// nothing when it was opened without one).
+    pub(super) fn close_playlist_ui(&mut self, cx: &mut Context<Self>) {
+        if let Some(session) = self.session_mut_for_playlist() {
+            session.media.shared_media.playlist_user = None;
+        }
         cx.notify();
     }
 
@@ -332,7 +374,12 @@ impl QuillApp {
         let chat = session
             .and_then(|s| s.open_chat)
             .unwrap_or(quill::ids::ChatId(0));
-        let playing = self.playback.playing_audio;
+        // The track playing for this chat: the same file in another chat
+        // shares the id, not the row.
+        let playing = self
+            .playback
+            .playing_audio
+            .filter(|_| self.playback.player.chat == Some(chat));
         let is_playing = self.is_playing();
         let mut list = div()
             .id("playlist-tracks")
@@ -441,7 +488,8 @@ impl QuillApp {
                 );
             }
         }
-        let empty = playlist.is_none_or(|p| p.loaded && p.tracks.is_empty());
+        let failed = playlist.is_some_and(|p| p.loaded && p.tracks.is_empty() && p.error.is_some());
+        let empty = !failed && playlist.is_none_or(|p| p.loaded && p.tracks.is_empty());
         div()
             .id("playlist-panel")
             .flex_1()
@@ -475,11 +523,27 @@ impl QuillApp {
                             .text_color(cx.theme().muted_foreground)
                             .child("✕")
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.close_shared_media_ui(cx);
+                                this.close_playlist_ui(cx);
                             })),
                     ),
             )
             .child(list)
+            .when(failed, |panel| {
+                panel.child(
+                    div().px_3().py_2().child(
+                        action_row(
+                            "playlist-retry",
+                            Some(IconName::RotateCw),
+                            tr(keys::Q_PEOPLE_COULDNT_LOAD_RETRY),
+                            false,
+                            cx,
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.retry_playlist(user_id, cx);
+                        })),
+                    ),
+                )
+            })
             .when(empty, |panel| {
                 panel.child(
                     div()

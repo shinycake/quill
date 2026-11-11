@@ -5464,3 +5464,47 @@ land and the typed form was gone.
 - **Skipped.** 13-069: `AgentUi::pick_account` already resets the activity
   filter wherever `picked` changes, with a test
   (`picking_another_account_resets_the_activity_filter`).
+
+### Sweep fixes (s4-media-2)
+
+- **Viewer.** A Shared Media viewer merges older pages and asks for more only
+  while the session's shared-media panel is for the chat of the viewer's
+  current item (11-p1-008). A Picture-in-Picture clip's deletion is looked up
+  in the clip's own account, the one on screen or a background client
+  (11-p2-005). Speed and volume reach every window's viewer player through
+  `in_every_window` (11-p2-006). "Share at" keeps its position only when the
+  forward picker is open over that very message (11-p2-004). The edit-video
+  frame strip is matched by its own cancel token, so an encode's serial bump
+  (and a failed encode) no longer orphans a strip still being cut (14-003).
+  The set video editor keeps the cut time with its cover still and hands the
+  box none rather than an older frame (14-004).
+- **Transcribe** shares the request in flight for the message
+  (`recognize_speech` returns `Ok(None)`), so a second press sends nothing
+  (11-p3-005).
+- **Sticker editor.** "Keep original aspect ratio" uses the ratio of the
+  picture as it lies after Rotate (12-003).
+- **Profile.** A failed profile chat list keeps its Failed entry and Retry
+  when nothing went out (12-039). The personal-photo picker names no box host
+  until it is answered, and applies the answer only over the same dialog stage
+  it started from (12-038, 12-053 for the camera: the answer also names the
+  photo target it was asked for). Take photo stops the stream when pressed, so
+  the frozen preview is the frame saved; a failed save clears `busy` and
+  offers Retake (12-054). The rating box ends at build when the person's
+  rating is gone (12-035).
+- **Gallery.** A story tile whose story is not loaded asks for it through the
+  story opener (its note says when it could not load) (13-086). The Playlist
+  page closes back to the gallery under it, Esc included (13-085); its rows
+  count as playing only for the chat the track plays for (13-088); it asks for
+  its playlist as it opens and a failed first page draws Retry (13-087).
+- **Keys.** The sender status head is keyed by `ChatMessage` (13-016). A
+  switch of account ends the spoiler reveal fades, which last 200 ms (13-042).
+- **Players.** A speed drag cut off by the clip ending is cleared with the
+  clip (14-018). A player still opening asks for per-vsync frames for 10 s,
+  not for ever (14-028).
+- **Skipped.** 11-p1-009: the menu actions are already a map keyed by
+  (chat, message) in `messages.menu_actions`. 12-044: tdesktop counts the box
+  as shown when it opens (`kDisableSharingBoxMaxShowsCount`); not changed.
+  12-056: `SliderState::set_value` emits no event, so syncing the controls
+  cannot feed back. 14-061: a failed clip is `Failed` for good by design
+  (`transport.rs`, "Failed stays failed"), so the decode error left after a
+  seek is never read.

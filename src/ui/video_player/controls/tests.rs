@@ -63,11 +63,13 @@ fn a_stopped_clip_drops_its_gestures() {
     state.volume_dragging = true;
     assert!(state.dragging());
     state.hover = Some(0.4);
+    state.speed_preview = Some(1.5);
     let t0 = Instant::now();
     state.boost.press(t0);
     assert!(state.boost.tick(t0 + Duration::from_millis(250)));
     assert!(state.clear_clip(), "the boost was on");
     assert!(!state.dragging());
+    assert_eq!(state.speed_preview, None, "a cut-off speed drag ends too");
     assert_eq!(state.hover, None);
     assert!(!state.boost.is_active());
 }

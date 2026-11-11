@@ -160,6 +160,7 @@ impl QuillApp {
             return;
         }
         self.clear_device_qr();
+        super::spoiler_fx::forget_reveals();
         self.close_accounts(window, cx);
         // Quill's notification windows point at the account on screen.
         self.close_all_notify_windows(cx);

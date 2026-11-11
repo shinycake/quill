@@ -269,7 +269,17 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app| app.session().is_some_and(|session| {
             session.media.shared_media.open || session.media.shared_media.playlist_user.is_some()
         }),
-        |app, _, cx| app.close_shared_media_ui(cx)
+        |app, _, cx| {
+            // Esc leaves the Playlist page first, back to the gallery.
+            if app
+                .session()
+                .is_some_and(|session| session.media.shared_media.playlist_user.is_some())
+            {
+                app.close_playlist_ui(cx);
+            } else {
+                app.close_shared_media_ui(cx);
+            }
+        }
     ),
     layer!(
         "chat-search",
