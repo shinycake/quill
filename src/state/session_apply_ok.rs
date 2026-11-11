@@ -671,6 +671,7 @@ impl Session {
             // Optimistic: `updateChatMember` confirms. TDLib errors
             // keep the old status (Error arm below does not touch it).
             chat.set_member_status(ChannelMemberStatus::Left, None);
+            self.drop_similar_strip_if_not_member(chat_id);
             self.release_chat_history(chat_id);
         }
         // Slice G1: `deleteChat` confirmed — drop the chat locally.
@@ -681,6 +682,7 @@ impl Session {
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
             self.chats.remove(&chat_id.0);
+            self.groups.similar_strips.remove(&chat_id.0);
             self.forget_chat_history(chat_id);
             self.groups
                 .supergroup_members

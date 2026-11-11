@@ -132,6 +132,15 @@ impl Session {
         );
     }
 
+    /// The viewer is no longer a member (left, removed or banned): the
+    /// joined notice and strip of the earlier join go, so a channel joined
+    /// again later starts a new one.
+    pub(crate) fn drop_similar_strip_if_not_member(&mut self, chat_id: ChatId) {
+        if self.chat_not_joined(chat_id) {
+            self.groups.similar_strips.remove(&chat_id.0);
+        }
+    }
+
     /// The strip state of a channel joined in this session.
     pub fn similar_strip(&self, chat_id: ChatId) -> Option<&SimilarStrip> {
         self.groups.similar_strips.get(&chat_id.0)

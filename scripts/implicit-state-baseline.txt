@@ -169,8 +169,6 @@ PremiumHub::tx_loading
 PrivacyData::network_loading
 PrivacyData::network_loading+error
 ProfileModal::closing
-ProxyState::loading
-ProxyState::loading+error
 PublicForwardsList::loading
 PublicForwardsList::loading+error
 PublicLinkRevoke::failed

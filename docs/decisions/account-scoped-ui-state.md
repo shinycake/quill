@@ -5464,3 +5464,62 @@ land and the typed form was gone.
 - **Skipped.** 13-069: `AgentUi::pick_account` already resets the activity
   filter wherever `picked` changes, with a test
   (`picking_another_account_resets_the_activity_filter`).
+
+### Sweep fixes (s4-accounts-1)
+
+- **Answers matched to their request.** `PendingRequest` carries
+  `subject_id` (the terms `acceptTermsOfService` accepts, the gift `sellGift`
+  sells) and `user_ids` (what `setCloseFriends` saved), so an id-less `ok`
+  settles that subject only: newer terms pushed while accepting stay
+  (05-022), selecting another gift while one sells keeps its panel and
+  convert box (05-223), and the close friends list takes the ids of the
+  save that was acknowledged (05-221; `close_friends_pending` is gone). A
+  failure of older terms' accept does not fail the current box. Profile chat
+  lists are `ProfileChatsFetch::{Loading(RequestId), Loaded { ids, more },
+  Failed}` with `MorePage::{Idle, Loading(RequestId), Exhausted}` inside the
+  loaded list (05-264, 05-265): an old page-2 answer or an old failure after
+  the list was asked for again changes nothing; `CommonGroupsPaging` is
+  gone. The proxy list waits for one `getProxies` as `ProxyFetch::
+  Loading(RequestId)` (04-069): an explicit refresh does not send a second
+  fetch, a mutation's success drops the awaited id so an answer sent before
+  the change cannot clear `stale`, and `ProxyState::loading` left the
+  baseline.
+- **Dropped answers settle.** An envelope ignored as out of order takes its
+  pending request and settles it as lost, so a download is no longer counted
+  as running and a mutation's spinner clears (05-199).
+- **Guards before the send.** The 2FA sign-in requests (password, recovery
+  request, recovery code) go through `login_request`, one per purpose
+  (02-081). `request_twofa_recovery_code` and `set_login_email` clear their
+  "code sent to" step only after the request was accepted (02-080). The
+  password screen still enters recovery code entry when the first recovery
+  request is accepted, not on its answer: tdesktop switches on the answer,
+  Quill shows the failure line and the Resend button on that screen.
+- **Writers.** `update_registry` is the one way to change `accounts.json`
+  and holds a lock across load and save (04-083). The deferred settings
+  writer starts its thread under the queue lock (04-092) and a
+  `WriterExit` drop guard resets `writer_running`, marks the cut-short write
+  failed and wakes `flush` when a sink panics (04-091). A failed
+  `window_state.json` write puts the state back and raises the status note
+  (04-094). A stray `recent_hashtags.json` is kept when its owner folder
+  cannot be created (04-084). The web view delete that waits for a helper
+  checks the salt it read when the account left, so the next sign-in's
+  folder is not wiped (01-006). A failed first-run write is logged (04-096).
+- **Smaller seams.** A call created while another took the slot is
+  discarded (`created_call_discards`, no "declined" banner; 05-225).
+  Switching chats releases the left chat's open topic (05-243). `Initial`
+  is not offline, like the connection strip (05-246). A deleted direct
+  messages conversation forgets its count and revenue (05-248). A draft save
+  that failed and was left behind clears the slot's unsaved mark
+  (05-244). The peer-QR theme save answer applies only for the save in
+  flight (04-014). Leaving, being removed from, or deleting a channel drops
+  its joined notice and strip (05-276).
+- **Skipped.** 05-019: already fixed by f51f1abc (`ReviewStage`; a failed
+  send settles the unsent ids). 05-275: both paths that call
+  `set_supergroup_member_counts` insert the full-info entry first (tested by
+  `connect::tests::permissions_box`). 05-257: `send_proxy_mutation` refuses
+  a second mutation while one is out (`a_mutation_refetches_the_authoritative_list`
+  asserts it), so the first answer cannot free a second. 04-093: retrying
+  on a timer needs a waiting writer thread; every later submit and the quit
+  flush already retry, the failure is shown once, and tdesktop does not
+  retry either. 04-096: when the "started" write fails nothing durable can
+  tell an install from an upgrade; only the log line was added.

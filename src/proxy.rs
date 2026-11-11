@@ -17,6 +17,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::calls::proxy::{EnabledProxy, ProxyKind};
+use crate::ids::RequestId;
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -648,6 +649,26 @@ impl SystemStepState {
     }
 }
 
+/// Whether a `getProxies` is awaited, and which one.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ProxyFetch {
+    #[default]
+    Idle,
+    /// This request is the one whose answer replaces the list.
+    Loading(RequestId),
+}
+
+impl ProxyFetch {
+    pub fn loading(self) -> bool {
+        matches!(self, Self::Loading(_))
+    }
+
+    /// `request` is the fetch the list waits for.
+    pub fn answers(self, request: RequestId) -> bool {
+        self == Self::Loading(request)
+    }
+}
+
 /// Everything the proxy UI and driver cache (`Session::proxy`).
 #[derive(Debug, Clone, Default)]
 pub struct ProxyState {
@@ -657,7 +678,10 @@ pub struct ProxyState {
     /// The system proxy's entries (`crate::system_proxy`), oldest first:
     /// never listed, shared or rotated.
     pub system: Vec<ProxyEntry>,
-    pub loading: bool,
+    /// The `getProxies` the list waits for. Only that request's answer or
+    /// failure lands; a mutation's success drops it (its answer may
+    /// predate the change).
+    pub fetch: ProxyFetch,
     /// The list changed under us (an add / edit / enable / remove
     /// succeeded): refetch the authoritative answer.
     pub stale: bool,

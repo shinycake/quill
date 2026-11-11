@@ -3,7 +3,9 @@
 //! the gate is "not shutting down", not "auth Ready".
 use super::*;
 use crate::ids::RequestId;
-use crate::proxy::{PingStatus, ProxyDraft, ProxyEntry, RotationAction, SystemStepState};
+use crate::proxy::{
+    PingStatus, ProxyDraft, ProxyEntry, ProxyFetch, RotationAction, SystemStepState,
+};
 use crate::proxy_sync::{ProxySyncStep, plan_proxy_sync};
 use crate::settings::save_proxy_prefs;
 use crate::state::SettingsPurpose;
@@ -29,12 +31,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let proxy = &self.session.settings.proxy;
         let wanted = (proxy.list.is_none() && !proxy.fetch_attempted) || proxy.stale;
-        if !wanted
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetProxies)
-        {
+        if !wanted || proxy.fetch.loading() {
             return Ok(None);
         }
         // Background refetch: the box's error line is the user's, and a
@@ -45,6 +42,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Explicit refresh (the dialog's open / Refresh).
     pub fn fetch_proxies(&mut self) -> Result<RequestId, ConnectSendError> {
         self.session.settings.proxy.error = None;
+        // A fetch already out is the one to wait for, not a second one.
+        if let ProxyFetch::Loading(out) = self.session.settings.proxy.fetch {
+            return Ok(out);
+        }
         self.send_get_proxies()
     }
 
@@ -53,13 +54,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(RequestPurpose::GetProxies, None);
-        self.session.settings.proxy.loading = true;
+        self.session.settings.proxy.fetch = ProxyFetch::Loading(extra);
         self.session.settings.proxy.fetch_attempted = true;
         match self.sender.send_json(&get_proxies(extra)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.proxy.loading = false;
+                self.session.settings.proxy.fetch = ProxyFetch::Idle;
                 Err(err)
             }
         }
@@ -305,14 +306,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return true;
         }
         let proxy = &self.session.settings.proxy;
-        if proxy.mutating
-            || proxy.stale
-            || proxy.loading
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetProxies)
-        {
+        if proxy.mutating || proxy.stale || proxy.fetch.loading() {
             return false;
         }
         let Some(current) = proxy.all_entries() else {
@@ -348,15 +342,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return false;
         }
         let proxy = &self.session.settings.proxy;
-        if proxy.list.is_none()
-            || proxy.mutating
-            || proxy.stale
-            || proxy.loading
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetProxies)
-        {
+        if proxy.list.is_none() || proxy.mutating || proxy.stale || proxy.fetch.loading() {
             return false;
         }
         let step = plan_system_proxy(
