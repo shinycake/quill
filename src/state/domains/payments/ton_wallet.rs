@@ -2,7 +2,9 @@
 //! state, history, NFTs, profile addresses and exchange rates. Answers only
 //! land when they match the request that asked for them.
 use crate::state::*;
-use crate::ton_wallet::{ProfileAddress, TonWalletPayload, TonWalletPurpose, TxLookup, WalletTx};
+use crate::ton_wallet::{
+    MoneyView, ProfileAddress, TonWalletPayload, TonWalletPurpose, TxLookup, WalletTx,
+};
 
 impl Session {
     pub(crate) fn apply_ton_wallet(
@@ -95,9 +97,7 @@ impl Session {
                 .actions
                 .contains(crate::ton_wallet::FIRST_TRANSFER_HINT);
         let money = &mut self.ton_wallet.money;
-        money.tx_lookup = TxLookup::Idle;
-        money.selected_nft = None;
-        money.selected_tx = Some(tx);
+        money.view = MoneyView::Tx(tx);
         if hint {
             money.hint_open = true;
         }
@@ -153,8 +153,9 @@ impl Session {
             }
             TonWalletPurpose::Transaction => {
                 if wallet.money.tx_lookup_waits_for(request) {
-                    wallet.money.tx_lookup =
-                        TxLookup::Failed(format!("Couldn't load the transfer: {reason}"));
+                    wallet.money.view = MoneyView::Lookup(TxLookup::Failed(format!(
+                        "Couldn't load the transfer: {reason}"
+                    )));
                 }
             }
         }

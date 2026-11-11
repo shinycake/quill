@@ -114,9 +114,6 @@ NewChatView::busy+failure
 OutputState::opening
 OwnershipState::check_in_flight
 OwnershipState::check_in_flight+check_error
-Paged::loaded
-Paged::loading
-Paged::loading+error
 PaidMessages::trust_loaded
 PanelMotion::opening
 ParsedFile::uploading
