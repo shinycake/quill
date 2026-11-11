@@ -10,9 +10,8 @@ impl QuillApp {
     /// that ends the long press, or Escape). Also cancels a pending
     /// long press.
     pub(in crate::ui) fn close_chat_preview(&mut self, cx: &mut Context<Self>) {
-        if self.chat_list.preview.is_some() || self.chat_list.preview_press.is_some() {
-            self.chat_list.preview = None;
-            self.chat_list.preview_press = None;
+        if self.chat_list.peek.is_active() {
+            self.chat_list.peek.close();
             cx.notify();
         }
     }
@@ -722,7 +721,7 @@ impl QuillApp {
                             ChatId(0),
                             MessageId(0),
                             &page.rich,
-                            &std::collections::HashSet::new(),
+                            &crate::ui::message_text::revealed::Revealed::default(),
                             false,
                             // Settings → Appearance: message font size.
                             self.msg_font(),

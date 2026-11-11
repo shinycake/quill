@@ -579,7 +579,7 @@ impl Render for QuillApp {
             // messages beside the pressed chat-list row. Rendered above
             // the row menu; any click or the long-press release closes
             // it.
-            .when_some(self.chat_list.preview, |this, preview| {
+            .when_some(self.chat_list.peek.preview(), |this, preview| {
                 this.child(self.chat_preview_overlay(preview, cx))
             })
             // MED4: Instant View reader overlay (above the menu).

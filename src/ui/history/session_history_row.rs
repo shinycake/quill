@@ -34,7 +34,7 @@ pub(in crate::ui) fn session_history_row(
     inline: Option<super::super::inline_video::InlineFrame>,
     // A widget message's card (`QuillApp::widget_bubble`).
     widget: Option<crate::ui::widget_bubble::WidgetCard>,
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &crate::ui::message_text::revealed::Revealed,
     // Phase B4: whether the row's chat is a secret chat — selects the
     // "Self-destruct" vs "Auto-delete" service-row wording.
     _is_secret: bool,
@@ -322,7 +322,7 @@ pub(in crate::ui) fn session_history_row(
     // A spoiler stays covered until clicked; once revealed, it renders as
     // the plain media it is.
     let reveal_key = super::super::spoiler_fx::media_key(message.chat_id, message.id);
-    let media_revealed = revealed.contains(&reveal_key);
+    let media_revealed = revealed.spoiler_shown(&reveal_key);
     // Media corners follow the bubble (Telegram Desktop `BubbleRounding`): a
     // picture that leads the bubble takes its radius on the edges that are
     // free of the sender name, a caption above/below, badges or reactions.

@@ -84,7 +84,7 @@ impl QuillApp {
         let rich = self.shown_rich_draft()?;
         let blocks = rich.preview_blocks();
         let label = rich.summary();
-        let revealed = std::collections::HashSet::new();
+        let revealed = crate::ui::message_text::revealed::Revealed::default();
         let font = self.msg_font();
         let mut body = div()
             .id("rich-draft-preview-blocks")

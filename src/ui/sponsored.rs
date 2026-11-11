@@ -76,7 +76,7 @@ pub(super) fn sponsored_message_row(
     files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &crate::ui::message_text::revealed::Revealed,
     // Settings → Appearance: font size + bubble/plain style.
     look: BubbleLook,
     cx: &mut Context<QuillApp>,
@@ -420,7 +420,7 @@ impl QuillApp {
                 files,
                 downloading,
                 &media_roots,
-                &self.message_ui.spoiler_revealed,
+                &self.message_ui.revealed,
                 look,
                 cx,
             );

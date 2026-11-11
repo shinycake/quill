@@ -55,7 +55,7 @@ impl QuillApp {
                     && menu.message_id == message_id
                     && menu.option_id == *option_id
             })
-            .and_then(|menu| menu.properties)
+            .and_then(|menu| menu.properties.data().copied())
     }
 
     pub(in crate::ui) fn menu_item_rows(
@@ -405,7 +405,7 @@ mod demo_facts {
                 chat_id: GROUP,
                 message_id: POLL,
                 option_id: "b".into(),
-                properties: Some(PollOptionProperties {
+                properties: quill::state::fetch::Fetch::Ready(PollOptionProperties {
                     can_be_deleted: true,
                     can_get_link: true,
                     can_be_replied: true,

@@ -380,7 +380,10 @@ fn bots_games_high_scores_answer_lands_in_panel() {
     let seq = AtomicU64::new(0);
     let extra =
         session.request_for_message(RequestPurpose::GetGameHighScores, ChatId(7), MessageId(301));
-    session.bots.game_scores.insert((7, 301), None);
+    session.bots.game_scores.insert(
+        (7, 301),
+        crate::state::fetch::Fetch::Loading { stale: None },
+    );
     apply_json(
         &mut session,
         &seq,
@@ -394,7 +397,7 @@ fn bots_games_high_scores_answer_lands_in_panel() {
         .bots
         .game_scores
         .get(&(7, 301))
-        .and_then(|panel| panel.as_ref())
+        .and_then(|panel| panel.data())
         .expect("scores loaded");
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].position, 1);

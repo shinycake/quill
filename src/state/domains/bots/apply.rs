@@ -85,9 +85,10 @@ impl Session {
                         .game_scores
                         .contains_key(&(chat_id.0, message_id.0))
                     {
-                        self.bots
-                            .game_scores
-                            .insert((chat_id.0, message_id.0), Some(scores));
+                        self.bots.game_scores.insert(
+                            (chat_id.0, message_id.0),
+                            crate::state::fetch::Fetch::Ready(scores),
+                        );
                     }
                 }
             }

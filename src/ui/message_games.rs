@@ -13,7 +13,7 @@ use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::state::Session;
 use quill::telegram::envelope::GameContent;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Slice bots-games: `messageGame` card — thumbnail (glyph when the game
@@ -29,7 +29,7 @@ pub(super) fn game_card(
     files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
-    revealed: &HashSet<(i64, u64, u64, bool)>,
+    revealed: &crate::ui::message_text::revealed::Revealed,
     font: Pixels,
     // The widest the card's photo may be: the bubble's room less the
     // card's own padding and border.
@@ -120,7 +120,7 @@ pub(super) fn game_card(
 }
 
 /// Slice bots-games: the inline high-score panel under a game card.
-/// Present in `Session::game_scores` = open; `None` = request in flight.
+/// Present in `Session::game_scores` = open; `Loading` = request in flight.
 fn game_scores_panel(
     chat_id: ChatId,
     message_id: MessageId,
@@ -139,7 +139,9 @@ fn game_scores_panel(
         .rounded_md()
         .bg(bg_subtle());
     match scores {
-        None => {
+        quill::state::fetch::Fetch::Idle
+        | quill::state::fetch::Fetch::Loading { .. }
+        | quill::state::fetch::Fetch::Failed { .. } => {
             panel = panel.child(
                 div()
                     .text_xs()
@@ -147,7 +149,7 @@ fn game_scores_panel(
                     .child(tr(keys::Q_MISC_LOADING_SCORES)),
             );
         }
-        Some(rows) if rows.is_empty() => {
+        quill::state::fetch::Fetch::Ready(rows) if rows.is_empty() => {
             panel = panel.child(
                 div()
                     .text_xs()
@@ -155,7 +157,7 @@ fn game_scores_panel(
                     .child(tr(keys::Q_MISC_NO_SCORES_YET_BE_THE)),
             );
         }
-        Some(rows) => {
+        quill::state::fetch::Fetch::Ready(rows) => {
             for row in rows {
                 let name = session
                     .users
@@ -214,7 +216,11 @@ impl QuillApp {
             return;
         };
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.bots.game_scores.insert(key, None);
+            live.driver
+                .session
+                .bots
+                .game_scores
+                .insert(key, quill::state::fetch::Fetch::Loading { stale: None });
             live.driver
                 .send_game_high_scores(chat_id, message_id, user_id)
         });

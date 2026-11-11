@@ -298,7 +298,7 @@ impl QuillApp {
                             &[],
                             (user_id, 0),
                             false,
-                            &self.message_ui.spoiler_revealed,
+                            &self.message_ui.revealed,
                             gpui_kit::px(14.0),
                             &std::collections::HashMap::new(),
                             cx,

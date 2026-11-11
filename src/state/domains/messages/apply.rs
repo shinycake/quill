@@ -599,7 +599,7 @@ impl Session {
                     && menu.message_id == message_id
                     && poll_option_key(&menu.option_id) == option_key
                 {
-                    menu.properties = Some(properties);
+                    menu.properties = crate::state::fetch::Fetch::Ready(properties);
                 }
             }
             MessagesPayload::MessageProperties(actions) => match pending.map(|p| p.purpose) {

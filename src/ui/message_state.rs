@@ -5,7 +5,6 @@ use super::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::ids::MessageId;
-use std::collections::HashSet;
 
 pub(crate) struct MessageUi {
     /// M1: right-click context menu target + window position, and what
@@ -38,7 +37,7 @@ pub(crate) struct MessageUi {
     /// Phase 4.1: revealed text-entity spoilers, keyed by
     /// (chat id, message id, run index, is-caption block). Message ids are
     /// only unique within a chat, so the chat id is part of the key.
-    pub(super) spoiler_revealed: HashSet<(i64, u64, u64, bool)>,
+    pub(super) revealed: super::message_text::revealed::Revealed,
     /// B1: one-time custom keyboards the user already tapped
     /// (`(chat_id, message_id)`), hidden locally after use.
     pub(super) dismissed_keyboards: std::collections::HashSet<(i64, i64)>,
@@ -86,7 +85,7 @@ impl MessageUi {
             history_focus: cx.focus_handle(),
             a11y: Default::default(),
             swipe_reply_start: None,
-            spoiler_revealed: HashSet::new(),
+            revealed: Default::default(),
             dismissed_keyboards: std::collections::HashSet::new(),
             collapsed_keyboards: std::collections::HashSet::new(),
             request_share: None,

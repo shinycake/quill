@@ -118,7 +118,7 @@ impl QuillApp {
                 &item.caption_entities,
                 (item.chat_id.0, row_id),
                 true,
-                &self.message_ui.spoiler_revealed,
+                &self.message_ui.revealed,
                 // Settings → Appearance: captions follow the message font size.
                 self.msg_font(),
                 &caption_emoji,

@@ -63,7 +63,7 @@ fn deleting_an_option_waits_for_the_properties() {
         ),
     );
     let menu = driver.session.messages.poll_option_menu.clone().unwrap();
-    assert!(menu.properties.is_some_and(|p| p.can_be_replied));
+    assert!(menu.properties.data().is_some_and(|p| p.can_be_replied));
     assert_eq!(driver.delete_poll_option(chat, message, "a").unwrap(), None);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -234,7 +234,7 @@ fn a_late_answer_for_another_option_is_dropped() {
     ingest(&mut driver, &seq, &dyn_sink, &answer(for_a, true, true));
     let menu = driver.session.messages.poll_option_menu.clone().unwrap();
     assert_eq!(menu.option_id, "b");
-    assert_eq!(menu.properties, None, "A's answer is not B's");
+    assert!(menu.properties.data().is_none(), "A's answer is not B's");
     let before = recorder.snapshot().len();
     assert_eq!(driver.delete_poll_option(chat, message, "b").unwrap(), None);
     assert_eq!(driver.delete_poll_option(chat, message, "a").unwrap(), None);

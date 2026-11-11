@@ -28,7 +28,7 @@ use quill::translate::{
     offer_language, replace_content_text, search_languages, tracking_enabled, translatable_content,
 };
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -657,7 +657,7 @@ impl QuillApp {
             .is_some_and(|s| s.chat_has_protected_content(chat_id));
         let long = original.chars().count() > LONG_ORIGINAL || original.contains('\n');
         let collapsed = long && !dialog.original_expanded;
-        let seen: HashSet<(i64, u64, u64, bool)> = HashSet::new();
+        let seen = crate::ui::message_text::revealed::Revealed::default();
         let no_emoji = HashMap::new();
 
         let mut original_box =

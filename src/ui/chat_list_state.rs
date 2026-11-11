@@ -10,7 +10,6 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use std::collections::HashSet;
 use std::rc::Rc;
-use std::time::Instant;
 
 /// A pinned-chat drag (or its release slide) and the pinned list it
 /// reorders: the main list's, or the archive's. One value, so the list
@@ -49,12 +48,9 @@ pub(crate) struct ChatListUi {
     /// Where the last press on a pinned row went down, so the dragged row
     /// starts under the pointer instead of where the drag threshold fired.
     pub(super) pin_press: Option<(i64, f32)>,
-    /// Slice CL: the open peek preview — hovered/press-and-hold chat,
-    /// or `None`. Transient; never an open chat.
-    pub(super) preview: Option<ChatPreviewState>,
-    /// Slice CL: an in-progress long press on a chat-list row — the
-    /// row's chat id + press start, for the peek preview.
-    pub(super) preview_press: Option<(ChatId, Instant)>,
+    /// Slice CL: the peek preview — a long press on a row, then the open
+    /// preview. Transient; never an open chat.
+    pub(super) peek: ChatPeek,
     /// Slice CL3: multi-select mode — checked chat ids. Non-empty while
     /// selecting; rows toggle the check instead of opening the chat and
     /// the select bar offers the bulk actions.
@@ -116,8 +112,7 @@ impl ChatListUi {
             global,
             pin_reorder: None,
             pin_press: None,
-            preview: None,
-            preview_press: None,
+            peek: ChatPeek::Idle,
             selected: HashSet::new(),
             filter: ChatListFilter::All,
             archive_hint_open: false,
@@ -134,3 +129,47 @@ impl ChatListUi {
 
 /// Nothing to say: its state is the account's only app-side.
 impl super::on_screen::Farewell for ChatListUi {}
+
+/// The peek preview of a chat-list row. `Pressing` holds the long-press
+/// timer: dropping it (a release, a newer press, a drag, the screen going)
+/// is the cancel. `Open` is the floating panel.
+pub(super) enum ChatPeek {
+    Idle,
+    Pressing { chat: ChatId, _timer: Task<()> },
+    Open(ChatPreviewState),
+}
+
+impl ChatPeek {
+    /// The open preview.
+    pub(super) fn preview(&self) -> Option<ChatPreviewState> {
+        match self {
+            Self::Open(preview) => Some(*preview),
+            Self::Idle | Self::Pressing { .. } => None,
+        }
+    }
+
+    /// The chat of a press that has not opened the preview yet.
+    pub(super) fn pressing(&self) -> Option<ChatId> {
+        match self {
+            Self::Pressing { chat, .. } => Some(*chat),
+            Self::Idle | Self::Open(_) => None,
+        }
+    }
+
+    /// A press or a preview is up.
+    pub(super) fn is_active(&self) -> bool {
+        !matches!(self, Self::Idle)
+    }
+
+    /// The pointer left the row or was released: a pending long press
+    /// ends, an open preview stays.
+    pub(super) fn release_press(&mut self) {
+        if matches!(self, Self::Pressing { .. }) {
+            *self = Self::Idle;
+        }
+    }
+
+    pub(super) fn close(&mut self) {
+        *self = Self::Idle;
+    }
+}

@@ -671,8 +671,7 @@ impl QuillApp {
                         }
                     });
             // A reorder is not a long press: no peek preview over the drag.
-            self.chat_list.preview_press = None;
-            self.chat_list.preview = None;
+            self.chat_list.peek.close();
         }
         self.notify_sidebar(cx);
     }
