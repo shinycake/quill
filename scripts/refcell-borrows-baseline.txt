@@ -56,7 +56,6 @@ QuillApp::advance_effects::active.borrow_mut 1
 QuillApp::arm_send_fly::cells.borrow 1
 QuillApp::arm_send_fly::fly.borrow_mut 1
 QuillApp::arm_send_fly::source.borrow_mut 1
-QuillApp::begin_widget_pass::passes.borrow_mut 2
 QuillApp::build_account_lifecycle_dialog::body.borrow_mut 1
 QuillApp::build_account_notice_dialog::body.borrow_mut 1
 QuillApp::build_accounts_dialog::body.borrow_mut 1
@@ -192,13 +191,11 @@ QuillApp::media_panel_reveal::media_panel.borrow_mut 1
 QuillApp::message_effects_pass::waiting.borrow 1
 QuillApp::message_effects_pass::waiting.borrow_mut 2
 QuillApp::note_layer_drawn::layers_drawn.borrow_mut 1
-QuillApp::note_widget::passes.borrow_mut 1
 QuillApp::pinned_message_banner::pinned_bar.borrow_mut 1
 QuillApp::premium_autoplay::played.borrow 1
 QuillApp::premium_autoplay::played.borrow_mut 2
 QuillApp::premium_autoplay::seen.borrow 1
 QuillApp::premium_autoplay::seen.borrow_mut 1
-QuillApp::reconcile_widgets::passes.borrow_mut 1
 QuillApp::render::media_roots_frame.borrow_mut 1
 QuillApp::report_visible_sponsored::rendered_sponsored.borrow_mut 1
 QuillApp::request_app_tick_unless::animation_targets.borrow 1
@@ -235,7 +232,6 @@ QuillApp::translate_offer::offer.borrow 1
 QuillApp::translate_offer::offer.borrow_mut 1
 QuillApp::tray_photo_size::photo_sizes.borrow_mut 1
 QuillApp::try_open_chat_window_at::slot.borrow 1
-QuillApp::widgets_left_window::passes.borrow_mut 1
 QuillApp::window_title_in_place::title_badge.borrow_mut 1
 QuillShell::sync_host_dialogs::dialogs_closed.borrow_mut 1
 RichPreview::blocks::editor.borrow_mut 1

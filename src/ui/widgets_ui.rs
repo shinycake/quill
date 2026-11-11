@@ -11,8 +11,8 @@ use super::owned_image::OwnedImage;
 use super::status_note::StatusNote;
 use super::widget_runtime::{Launch, Runtime, RuntimeEvent, WIDGETS};
 use super::widgets_state::{
-    Identity, Live, Noted, Poll, PresenceChange, Showing, WidgetEntry, WidgetStorage, prune_hidden,
-    write_pending,
+    Identity, Lander, Live, Noted, Poll, PresenceChange, Showing, WidgetEntry, WidgetStorage,
+    prune_hidden, write_pending,
 };
 use gpui_kit::*;
 use quill::ids::ChatId;
@@ -69,17 +69,20 @@ impl QuillApp {
     /// widgets it did not draw go off screen ([`Self::reconcile_widgets`]).
     pub(super) fn begin_widget_pass(&self, view: Option<EntityId>, cx: &mut Context<Self>) {
         let window = self.windows.scope;
-        let mut passes = self.widgets.passes.borrow_mut();
+        // Taken and put back, so no guard is held over the defer below.
+        let mut passes = self.widgets.passes.take();
         passes.seen.insert(window, Default::default());
         passes.views.insert(window, view);
-        if passes.queued.insert(window) {
+        let first = passes.queued.insert(window);
+        self.widgets.passes.set(passes);
+        if first {
             // The pass's window's state in place: its chat's theme colors
             // the widgets it shows.
             self.defer_screen(cx, move |this, cx| {
                 let ran =
                     this.in_window_scope(window, cx, |this, cx| this.reconcile_widgets(window, cx));
                 if ran.is_none() {
-                    this.widgets.passes.borrow_mut().queued.remove(&window);
+                    this.widgets.passes.get_mut().queued.remove(&window);
                 }
             });
         }
@@ -88,13 +91,13 @@ impl QuillApp {
     /// A widget row rendered in this pass at `width` CSS px.
     pub(super) fn note_widget(&self, key: WidgetKey, width: f32) {
         let window = self.windows.scope;
-        self.widgets
-            .passes
-            .borrow_mut()
+        let mut passes = self.widgets.passes.take();
+        passes
             .seen
             .entry(window)
             .or_default()
             .insert(key, Noted { width });
+        self.widgets.passes.set(passes);
     }
 
     /// A frame of the window `window` (`None`: the main one) starts: the
@@ -183,7 +186,7 @@ impl QuillApp {
     /// some other window.
     pub(super) fn widgets_left_window(&mut self, window: Option<ChatId>) {
         {
-            let mut passes = self.widgets.passes.borrow_mut();
+            let passes = self.widgets.passes.get_mut();
             passes.seen.remove(&window);
             passes.views.remove(&window);
             passes.queued.remove(&window);
@@ -208,7 +211,7 @@ impl QuillApp {
     /// did not show of that window's widgets is not.
     fn reconcile_widgets(&mut self, window: Option<ChatId>, cx: &mut Context<Self>) {
         let (seen, view) = {
-            let mut passes = self.widgets.passes.borrow_mut();
+            let passes = self.widgets.passes.get_mut();
             passes.queued.remove(&window);
             let view = passes.views.get(&window).copied().flatten();
             (passes.seen.get(&window).cloned().unwrap_or_default(), view)
@@ -459,7 +462,7 @@ impl QuillApp {
     /// The loop that takes what the runtimes left whenever one pokes [`WIDGETS`].
     /// It is held, not detached: it ends with the screen that owns it.
     fn watch_widget_runtimes(&mut self, cx: &mut Context<Self>) {
-        if self.widgets.lander.is_some() {
+        if self.widgets.lander.running() {
             return;
         }
         let mut seen = WIDGETS.epoch();
@@ -473,7 +476,7 @@ impl QuillApp {
                 }
             }
         });
-        self.widgets.lander = Some(lander);
+        self.widgets.lander = Lander::Running(lander);
     }
 
     fn land_widgets(&mut self, cx: &mut Context<Self>) {
@@ -607,12 +610,17 @@ impl QuillApp {
             }
             RuntimeEvent::Request { token, data } => {
                 let ours = super::widgets_state::next_query_token();
-                let Some(entry) = self.widgets.entries.get_mut(&key) else {
+                // A runtime that is gone (stopped or failed earlier in this
+                // batch) has nobody to answer: nothing goes to TDLib.
+                let Some(live) = self
+                    .widgets
+                    .entries
+                    .get_mut(&key)
+                    .and_then(|entry| entry.live_mut())
+                else {
                     return;
                 };
-                if let Some(live) = entry.live_mut() {
-                    live.queries.insert(ours, token);
-                }
+                live.queries.insert(ours, token);
                 let sent = self
                     .live
                     .as_mut()

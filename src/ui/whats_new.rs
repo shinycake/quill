@@ -25,11 +25,20 @@ mod demo;
 #[path = "whats_new_tests.rs"]
 mod tests;
 
+/// The release notes: not asked for yet, being fetched, loaded, or the
+/// fetch failed (Retry asks again).
 #[derive(Default)]
 pub(crate) enum Notes {
     #[default]
     Idle,
-    Loading,
+    /// The fetch is out; it is `_fetch`, so another load or the app
+    /// going away drops it and a late answer never lands. `stale` are the
+    /// notes of an earlier load, shown meanwhile and kept if this fetch
+    /// fails.
+    Loading {
+        stale: Option<Rc<Vec<ReleaseNote>>>,
+        _fetch: Task<()>,
+    },
     Loaded(Rc<Vec<ReleaseNote>>),
     Failed,
 }
@@ -51,12 +60,10 @@ pub(crate) struct WhatsNewUi {
 
 impl QuillApp {
     /// Shows the window, raising it when it is already open, and loads the
-    /// notes the first time (or again after a failure).
+    /// notes each time it is asked for (a release may have come out since
+    /// the last load; the notes shown stay until the new ones land).
     pub(crate) fn open_whats_new(&mut self, cx: &mut Context<Self>) {
-        if matches!(
-            self.preferences.whats_new.notes,
-            Notes::Idle | Notes::Failed
-        ) {
+        if !matches!(self.preferences.whats_new.notes, Notes::Loading { .. }) {
             self.load_release_notes(cx);
         }
         match self.preferences.whats_new.window {
@@ -86,21 +93,40 @@ impl QuillApp {
         if self.demo_session.is_some() {
             return;
         }
-        self.preferences.whats_new.notes = Notes::Loading;
+        let stale = match std::mem::take(&mut self.preferences.whats_new.notes) {
+            Notes::Loaded(notes) => Some(notes),
+            Notes::Loading { stale, .. } => stale,
+            Notes::Idle | Notes::Failed => None,
+        };
         let fetch = cx
             .background_executor()
             .spawn(async move { quill::release_notes::fetch() });
-        cx.spawn(async move |this, cx| {
+        let task = cx.spawn(async move |this, cx| {
             let result = fetch.await;
-            let _ = this.update(cx, |app, cx| {
-                app.preferences.whats_new.notes = match result {
-                    Ok(notes) => Notes::Loaded(Rc::new(notes)),
-                    Err(_) => Notes::Failed,
-                };
-                cx.notify();
-            });
-        })
-        .detach();
+            let _ = this.update(cx, |app, cx| app.finish_release_notes(result.ok(), cx));
+        });
+        self.preferences.whats_new.notes = Notes::Loading {
+            stale,
+            _fetch: task,
+        };
+        cx.notify();
+    }
+
+    /// The fetch answered (`None` when it failed): the new notes, or the
+    /// ones shown before, or the failure when there were none.
+    fn finish_release_notes(&mut self, fetched: Option<Vec<ReleaseNote>>, cx: &mut Context<Self>) {
+        if !matches!(self.preferences.whats_new.notes, Notes::Loading { .. }) {
+            return;
+        }
+        let Notes::Loading { stale, .. } = std::mem::take(&mut self.preferences.whats_new.notes)
+        else {
+            return;
+        };
+        self.preferences.whats_new.notes = match (fetched, stale) {
+            (Some(notes), _) => Notes::Loaded(Rc::new(notes)),
+            (None, Some(stale)) => Notes::Loaded(stale),
+            (None, None) => Notes::Failed,
+        };
         cx.notify();
     }
 
@@ -223,8 +249,21 @@ impl QuillApp {
     /// The window's content, from the loaded notes alone.
     fn whats_new_body(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let muted = cx.theme().muted_foreground;
-        let content = match &self.preferences.whats_new.notes {
-            Notes::Idle | Notes::Loading => div()
+        let notes = match &self.preferences.whats_new.notes {
+            Notes::Loaded(notes)
+            | Notes::Loading {
+                stale: Some(notes), ..
+            } => Some(notes.clone()),
+            Notes::Idle | Notes::Loading { stale: None, .. } | Notes::Failed => None,
+        };
+        let content = match (&self.preferences.whats_new.notes, notes) {
+            (_, Some(notes)) => div()
+                .flex()
+                .flex_col()
+                .gap_8()
+                .children(notes.iter().map(|note| release_section(note, cx)))
+                .into_any_element(),
+            (Notes::Idle | Notes::Loading { .. } | Notes::Loaded(_), None) => div()
                 .id("whats-new-loading")
                 .flex()
                 .items_center()
@@ -235,7 +274,7 @@ impl QuillApp {
                 .child(Spinner::new().small())
                 .child(tr(keys::Q_WHATS_NEW_LOADING))
                 .into_any_element(),
-            Notes::Failed => div()
+            (Notes::Failed, None) => div()
                 .id("whats-new-failed")
                 .flex()
                 .flex_col()
@@ -255,15 +294,6 @@ impl QuillApp {
                         .on_click(cx.listener(|this, _, _, cx| this.load_release_notes(cx))),
                 )
                 .into_any_element(),
-            Notes::Loaded(notes) => {
-                let notes = notes.clone();
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_8()
-                    .children(notes.iter().map(|note| release_section(note, cx)))
-                    .into_any_element()
-            }
         };
         div()
             .w_full()
