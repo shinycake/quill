@@ -184,3 +184,30 @@ fn an_account_that_could_not_start_is_started_again_by_the_next_pass(cx: &mut Te
     });
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// A failed client is started again by the poll once its delay is over,
+/// without a connect, switch or unlock.
+#[gpui_kit::test]
+fn a_failed_background_start_waits_for_its_delay_then_is_due(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    vcx.run_until_parked();
+    let root = temp_root();
+    isolate(&app, &mut vcx, &root, &[account(1)]);
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.credentials = Some(credentials());
+        app.finish_background_start(account(1), Err(ConnectBlocker::StoreError), cx);
+        let now = std::time::Instant::now();
+        let wait = app
+            .background
+            .next_restart(now)
+            .expect("a failed client waits for a restart");
+        assert!(wait > std::time::Duration::ZERO && wait <= std::time::Duration::from_secs(5));
+        assert_eq!(
+            app.background
+                .next_restart(now + std::time::Duration::from_secs(5)),
+            Some(std::time::Duration::ZERO),
+            "due once the delay is over"
+        );
+    });
+    let _ = std::fs::remove_dir_all(&root);
+}

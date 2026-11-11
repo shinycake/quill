@@ -45,6 +45,7 @@ mod clicks;
 pub(super) mod closing;
 pub(in crate::ui) mod deleting;
 mod prepare;
+mod restart;
 mod switch;
 
 /// Clicks on notifications, each with the account it was shown for, queued
@@ -134,6 +135,8 @@ pub(crate) struct BackgroundAccounts {
     /// Clients sent `close` and drained a little per poll (`closing`):
     /// switching, signing out or logging out never waits on TDLib.
     pub(super) closing: ClosingSet,
+    /// When a client that died or failed to start starts again.
+    restarts: restart::Restarts,
     /// The quit observer that closes every client together.
     quit_close: Option<Subscription>,
     /// Accounts whose folder is being deleted (`deleting`): nothing opens
@@ -161,6 +164,7 @@ impl BackgroundAccounts {
             attention: false,
             ringing: None,
             closing: ClosingSet::new(),
+            restarts: restart::Restarts::default(),
             quit_close: None,
             deleting: HashSet::new(),
             local: LocalData::Fresh,
@@ -205,6 +209,17 @@ impl BackgroundAccounts {
         self.prepare.any_wanted()
             || !self.closing.is_empty()
             || self.clients.iter().any(|client| client.live.is_some())
+            || self.clients.iter().any(BackgroundClient::retryable)
+    }
+
+    /// How long until the soonest failed client may start again: `Some`
+    /// while one waits, zero when one may start now.
+    pub(super) fn next_restart(&self, now: Instant) -> Option<Duration> {
+        self.clients
+            .iter()
+            .filter(|client| client.retryable())
+            .map(|client| self.restarts.due_in(&client.key, now))
+            .min()
     }
 
     /// Every background account's unread, combined (tdesktop
@@ -410,10 +425,13 @@ impl QuillApp {
                 self.disk.refused_start();
                 return;
             }
-            Err(_) => (
-                None,
-                BackgroundStatus::Failed(tr(keys::Q_STARTUP_FAILED_TITLE).into()),
-            ),
+            Err(_) => {
+                self.background.restarts.failed(&key, Instant::now());
+                (
+                    None,
+                    BackgroundStatus::Failed(tr(keys::Q_STARTUP_FAILED_TITLE).into()),
+                )
+            }
         };
         self.background.clients_mut().push(BackgroundClient {
             key,
@@ -488,7 +506,7 @@ impl QuillApp {
                         if this.background.has_work() {
                             Some(PassEnd {
                                 work_left,
-                                due: None,
+                                due: this.background.next_restart(Instant::now()),
                             })
                         } else {
                             this.background.poll = None;
@@ -535,6 +553,8 @@ impl QuillApp {
         let mut stopped: Vec<(AccountKey, LiveConnect)> = Vec::new();
         let mut signed_out: Vec<AccountKey> = Vec::new();
         let mut export_notes: Vec<StatusNote> = Vec::new();
+        let mut ready: Vec<AccountKey> = Vec::new();
+        let mut failed: Vec<AccountKey> = Vec::new();
         let mut clients = self.background.clients_mut();
         for client in clients.iter_mut() {
             let Some(live) = client.live.as_mut() else {
@@ -589,6 +609,9 @@ impl QuillApp {
                     drain_background(&mut live.driver.session, notify_from_all),
                 ));
             }
+            if status == BackgroundStatus::Ready {
+                ready.push(client.key.clone());
+            }
             if status == BackgroundStatus::Ready && client.status != BackgroundStatus::Ready {
                 // tdesktop `Updates::updateOnline`: only the account in an
                 // active window is online.
@@ -607,12 +630,21 @@ impl QuillApp {
             if status.stops_client()
                 && let Some(live) = client.live.take()
             {
+                if matches!(status, BackgroundStatus::Failed(_)) {
+                    failed.push(client.key.clone());
+                }
                 stopped.push((client.key.clone(), live));
                 client.unread = AccountUnread::default();
                 changed = true;
             }
         }
         drop(clients);
+        for key in &ready {
+            self.background.restarts.forget(key);
+        }
+        for key in &failed {
+            self.background.restarts.failed(key, now);
+        }
         for (key, live) in stopped {
             self.background.push_closing(key, live, false);
         }
@@ -630,6 +662,12 @@ impl QuillApp {
         }
         self.drain_account_clicks(cx);
         self.sync_background_calls(cx);
+        // A client that died or failed to start is started again once its
+        // delay is over (`restart`); nothing else re-runs the pass while
+        // the user stays on one account.
+        if self.background.next_restart(now) == Some(Duration::ZERO) {
+            self.ensure_background_accounts(cx);
+        }
         if changed {
             cx.notify();
         }
