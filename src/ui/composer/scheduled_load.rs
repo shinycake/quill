@@ -30,14 +30,21 @@ impl ScheduledDialog {
 }
 
 impl QuillApp {
-    /// M1: load the chat's scheduled sends and open the dialog.
-    pub(in crate::ui) fn open_scheduled_dialog(&mut self, cx: &mut Context<Self>) {
-        self.chat_ui.hide_schedule_popup();
-        if let Some(request) = self.chat_ui.scheduled_dialog.loading()
+    /// The dialog closes from any stage: a load still out is let go of, so
+    /// its answer is kept for nobody.
+    pub(in crate::ui) fn close_scheduled_dialog(&mut self) {
+        let old = std::mem::take(&mut self.chat_ui.scheduled_dialog);
+        if let Some(request) = old.loading()
             && let Some(live) = self.live.as_mut()
         {
             live.driver.session.acks.forget(request);
         }
+    }
+
+    /// M1: load the chat's scheduled sends and open the dialog.
+    pub(in crate::ui) fn open_scheduled_dialog(&mut self, cx: &mut Context<Self>) {
+        self.chat_ui.hide_schedule_popup();
+        self.close_scheduled_dialog();
         self.chat_ui.scheduled_dialog = match self.live.as_mut() {
             Some(live) => match live
                 .driver

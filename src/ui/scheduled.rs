@@ -570,7 +570,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::Scheduled, |this, _, cx| {
-                this.chat_ui.scheduled_dialog = ScheduledDialog::Closed;
+                this.close_scheduled_dialog();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
@@ -702,7 +702,7 @@ impl QuillApp {
                     .ghost()
                     .small()
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.chat_ui.scheduled_dialog = ScheduledDialog::Closed;
+                        this.close_scheduled_dialog();
                         this.open_schedule_picker(ScheduleTarget::RescheduleSelected, window, cx);
                         this.close_kit_dialog_if_done(DialogKind::Scheduled, window, cx);
                     })),
@@ -831,7 +831,7 @@ impl QuillApp {
                         .label(tr(keys::Q_OPS_RESCHEDULE))
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.chat_ui.scheduled_dialog = ScheduledDialog::Closed;
+                            this.close_scheduled_dialog();
                             this.open_schedule_picker(ScheduleTarget::Reschedule(id), window, cx);
                             this.close_kit_dialog_if_done(DialogKind::Scheduled, window, cx);
                         })),
@@ -842,7 +842,7 @@ impl QuillApp {
                         .label(tr(keys::Q_OPS_EDIT))
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.chat_ui.scheduled_dialog = ScheduledDialog::Closed;
+                            this.close_scheduled_dialog();
                             this.begin_edit(edit.clone(), window, cx);
                             this.close_kit_dialog_if_done(DialogKind::Scheduled, window, cx);
                         })),
@@ -918,7 +918,7 @@ crate::ui::shell::register_dialogs! {
     )
     .per_window()
     .close(|app, _, cx| {
-            app.chat_ui.scheduled_dialog = ScheduledDialog::Closed;
+            app.close_scheduled_dialog();
             cx.notify();
         }),
 }
