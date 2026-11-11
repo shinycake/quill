@@ -22,7 +22,7 @@ use super::app::QuillApp;
 use super::frame_grid::{self, Lattice, Source, Vsync};
 use super::frame_state::ClockLoop;
 use gpui_kit::*;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -195,28 +195,31 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let target = self.frame.tick_view.get().or(self.slices.app_only_id());
-        let unasked = !self.frame.animation_targets.borrow().contains(&target);
+        let unasked = with_cell(&self.frame.animation_targets, |targets| {
+            !targets.contains(&target)
+        })
+        .unwrap_or(false);
         let alone = unasked || target.is_some_and(|id| self.still_tick_of(id));
         self.request_animation_tick_for(target, fps, cx);
         if let Some(id) = target.filter(|_| alone) {
             let tick = StillTick { fps, still };
-            self.frame.still_ticks.borrow_mut().insert(id, tick);
+            with_cell(&self.frame.still_ticks, |ticks| ticks.insert(id, tick));
         }
     }
 
     fn still_tick_of(&self, target: EntityId) -> bool {
-        self.frame.still_ticks.borrow().contains_key(&target)
+        with_cell(&self.frame.still_ticks, |ticks| ticks.contains_key(&target)).unwrap_or(false)
     }
 
     /// Whether the tick of `target` draws nothing new
     /// ([`Self::request_app_tick_unless`]): it then keeps ticking.
     fn still_tick(&self, target: EntityId, draw: TickDraw, cx: &mut Context<Self>) -> bool {
-        let tick = self.frame.still_ticks.borrow_mut().remove(&target);
+        let tick = with_cell(&self.frame.still_ticks, |ticks| ticks.remove(&target)).flatten();
         let Some(tick) = tick.filter(|tick| (tick.still)(draw)) else {
             return false;
         };
         self.request_animation_tick_for(Some(target), tick.fps, cx);
-        self.frame.still_ticks.borrow_mut().insert(target, tick);
+        with_cell(&self.frame.still_ticks, |ticks| ticks.insert(target, tick));
         true
     }
 
@@ -240,7 +243,7 @@ impl QuillApp {
         fps: u32,
         cx: &mut Context<Self>,
     ) {
-        self.frame.window_views.borrow_mut().insert(view);
+        with_cell(&self.frame.window_views, |views| views.insert(view));
         let gate = TickGate::OwnWindow {
             active: window.is_window_active(),
         };
@@ -297,9 +300,11 @@ impl QuillApp {
                 .get()
                 .max(fps.clamp(1, MAX_TICK_FPS)),
         );
-        self.frame.animation_targets.borrow_mut().insert(target);
+        with_cell(&self.frame.animation_targets, |targets| {
+            targets.insert(target)
+        });
         if let Some(id) = target {
-            self.frame.still_ticks.borrow_mut().remove(&id);
+            with_cell(&self.frame.still_ticks, |ticks| ticks.remove(&id));
         }
         if plays_sound {
             self.frame.animation_sound.set(true);
@@ -328,9 +333,10 @@ impl QuillApp {
                         }
                         let demand = this.frame.animation_demand.replace(0);
                         let targets =
-                            std::mem::take(&mut *this.frame.animation_targets.borrow_mut());
-                        let window_views =
-                            std::mem::take(&mut *this.frame.window_views.borrow_mut());
+                            with_cell(&this.frame.animation_targets, std::mem::take)
+                                .unwrap_or_default();
+                        let window_views = with_cell(&this.frame.window_views, std::mem::take)
+                            .unwrap_or_default();
                         let sound = this.frame.animation_sound.replace(false);
                         let own_window = this.frame.own_window_tick.replace(false);
                         let app_ticks = tick_wanted(this.frame.window_active.get(), sound);
@@ -343,7 +349,7 @@ impl QuillApp {
                             if app_ticks {
                                 if targets.contains(&None) {
                                     for id in targets.iter().flatten() {
-                                        this.frame.layers_drawn.borrow_mut().ticked(*id);
+                                        this.layer_ticked(*id);
                                     }
                                     this.tick_app(cx);
                                 } else {
@@ -364,7 +370,7 @@ impl QuillApp {
                                         if this.still_tick(id, draw, cx) {
                                             continue;
                                         }
-                                        this.frame.layers_drawn.borrow_mut().ticked(id);
+                                        this.layer_ticked(id);
                                         let app: &mut App = cx;
                                         app.notify(id);
                                     }
@@ -373,7 +379,7 @@ impl QuillApp {
                                 // Only the window views' own window is
                                 // active: the rest holds still.
                                 for id in &window_views {
-                                    this.frame.layers_drawn.borrow_mut().ticked(*id);
+                                    this.layer_ticked(*id);
                                 }
                             }
                             let app: &mut App = cx;
@@ -427,11 +433,13 @@ impl QuillApp {
         fps: u32,
         planned: Option<Instant>,
     ) -> Option<(Duration, Option<Instant>)> {
-        let redrawn = self
-            .frame
-            .layers_drawn
-            .borrow()
-            .redrawn(self.frame.animation_targets.borrow().iter().copied());
+        let redrawn = with_cell(&self.frame.layers_drawn, |drawn| {
+            with_cell(&self.frame.animation_targets, |targets| {
+                drawn.redrawn(targets.iter().copied())
+            })
+        })
+        .flatten()
+        .flatten();
         let fps = fps.max(self.frame.animation_demand.get());
         later_tick(self.clock_display(), Instant::now(), fps, planned, redrawn)
     }
@@ -460,9 +468,11 @@ impl QuillApp {
         if !layer_redrawn_by_clip(self.clock_display(), painter, fps, Instant::now()) {
             return true;
         }
-        let mut targets = self.frame.animation_targets.borrow_mut();
-        targets.remove(&Some(painter));
-        if targets.is_empty() {
+        let emptied = with_cell(&self.frame.animation_targets, |targets| {
+            targets.remove(&Some(painter));
+            targets.is_empty()
+        });
+        if emptied == Some(true) {
             self.frame.animation_demand.set(0);
         }
         false
@@ -474,11 +484,14 @@ impl QuillApp {
     pub(super) fn note_layer_drawn(&self, painter: EntityId, fps: u32) {
         if let Some((_, vsync)) = self.clock_display() {
             let counts = clip_frame_keeps_time(Some(painter), vsync, content_frame(fps));
-            self.frame
-                .layers_drawn
-                .borrow_mut()
-                .drawn(painter, vsync.at, counts);
+            with_cell(&self.frame.layers_drawn, |drawn| {
+                drawn.drawn(painter, vsync.at, counts)
+            });
         }
+    }
+
+    fn layer_ticked(&self, id: EntityId) {
+        with_cell(&self.frame.layers_drawn, |drawn| drawn.ticked(id));
     }
 
     /// Note the main window's display, its refresh period and how far
@@ -505,6 +518,12 @@ impl QuillApp {
             ));
         }
     }
+}
+
+/// Run `f` on a frame cell. Nothing runs if the cell is already borrowed,
+/// so a re-entrant request skips its bookkeeping instead of panicking.
+fn with_cell<T, R>(cell: &RefCell<T>, f: impl FnOnce(&mut T) -> R) -> Option<R> {
+    cell.try_borrow_mut().ok().map(|mut value| f(&mut value))
 }
 
 /// How long until the next tick at `now` of content at `fps`, and the

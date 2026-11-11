@@ -13,24 +13,24 @@ use gpui_kit::*;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-struct State {
-    path: String,
-    last_write: Instant,
-    started: bool,
+/// The profiler's one stage. `Off` without `QUILL_FRAME_PROFILE`; `Armed`
+/// until the first frame turns tracing on; then `Running`, writing a report
+/// every two seconds. The process ends it.
+enum Profiler {
+    Off,
+    Armed { path: String },
+    Running { path: String, last_write: Instant },
 }
 
-static STATE: OnceLock<std::sync::Mutex<State>> = OnceLock::new();
+static STATE: OnceLock<std::sync::Mutex<Profiler>> = OnceLock::new();
 
-fn state() -> Option<&'static std::sync::Mutex<State>> {
-    STATE
-        .get_or_init(|| {
-            std::sync::Mutex::new(State {
-                path: std::env::var("QUILL_FRAME_PROFILE").unwrap_or_default(),
-                last_write: Instant::now(),
-                started: false,
-            })
+fn state() -> &'static std::sync::Mutex<Profiler> {
+    STATE.get_or_init(|| {
+        std::sync::Mutex::new(match std::env::var("QUILL_FRAME_PROFILE") {
+            Ok(path) if !path.is_empty() => Profiler::Armed { path },
+            _ => Profiler::Off,
         })
-        .into()
+    })
 }
 
 // The histograms are `hdrhistogram::Histogram`, which Quill doesn't name;
@@ -54,20 +54,25 @@ macro_rules! line {
 impl QuillApp {
     /// Called once per frame from `frame_upkeep`.
     pub(super) fn frame_profile_tick(&mut self, window: &mut Window) {
-        let Some(lock) = state() else { return };
-        let Ok(mut st) = lock.lock() else { return };
-        if st.path.is_empty() {
+        let Ok(mut stage) = state().lock() else {
             return;
-        }
-        if !st.started {
-            st.started = true;
+        };
+        if let Profiler::Armed { path } = &mut *stage {
+            let path = std::mem::take(path);
             profiler::set_trace_enabled(true);
             window.set_debug_frame_overlay_mode(DebugFrameOverlayMode::Full);
+            *stage = Profiler::Running {
+                path,
+                last_write: Instant::now(),
+            };
         }
-        if st.last_write.elapsed() < Duration::from_secs(2) {
+        let Profiler::Running { path, last_write } = &mut *stage else {
+            return;
+        };
+        if last_write.elapsed() < Duration::from_secs(2) {
             return;
         }
-        st.last_write = Instant::now();
+        *last_write = Instant::now();
         let frames = window.frame_duration_snapshot();
         let input = window.input_latency_snapshot();
         let report = [
@@ -77,6 +82,6 @@ impl QuillApp {
             line!("input_latency", input.latency_histogram),
         ]
         .concat();
-        let _ = std::fs::write(&st.path, report);
+        let _ = std::fs::write(&*path, report);
     }
 }
