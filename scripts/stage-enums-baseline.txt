@@ -68,7 +68,6 @@ bare:GoalNow::Waiting 1
 bare:GraphFetch::Loading 1
 bare:Health::Running 1
 bare:HelperState::Starting 1
-bare:InlineQueryFetch::Loading 1
 bare:InviteLinkCountsFetch::Loading 1
 bare:Kind::Applying 1
 bare:Leg::Pending 1
@@ -103,7 +102,6 @@ bare:Phase::Requested 1
 bare:Phase::Waiting 1
 bare:PhoneFlow::Asking 1
 bare:PhoneLookups::Asked 1
-bare:PhonePrompt::Asking 1
 bare:Picture::Loading 1
 bare:PictureState::Waiting 1
 bare:PinTarget::Loading 1
@@ -119,7 +117,6 @@ bare:PollVotersFetch::Loading 1
 bare:ProfileAddress::Loading 1
 bare:PublicChatsFetch::Loading 1
 bare:Refire::Running 1
-bare:ReplacementProbe::Probing 1
 bare:ReplyState::Loading 1
 bare:Restore::Pending 1
 bare:RichHtmlStage::Running 1
@@ -129,7 +126,6 @@ bare:Run::Running 1
 bare:SaveAnswer::Waiting 1
 bare:SearchPaging::Loading 1
 bare:SearchStatus::Searching 1
-bare:Seed::InFlight 1
 bare:SendState::Sending 1
 bare:SendState::Sent 1
 bare:SendToMenu::Reading 1
@@ -229,7 +225,6 @@ unkeyed:IdLookup::Asking 1
 unkeyed:InlineBotResolve::Resolving 1
 unkeyed:InlineStage::Opening 1
 unkeyed:LanguageStage::Fetching 1
-unkeyed:Launcher::Pending 1
 unkeyed:Lifecycle::Loading 1
 unkeyed:Lifecycle::Running 1
 unkeyed:Lifecycle::Waiting 1

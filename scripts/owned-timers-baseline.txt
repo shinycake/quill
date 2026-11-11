@@ -38,7 +38,6 @@ detached:QuillApp::wake_takeover_at 1
 detached:QuillApp::with_device_access 1
 detached:SyntheticChat::new 1
 detached:hide_main_window 1
-detached:open_main_window 1
 detached:request_video_frame 1
 detached:run_screenshot_demo 2
 detached:spawn_menu_sync 1
@@ -87,7 +86,6 @@ poll:QuillApp::viewer_note_activity 1
 poll:QuillApp::with_device_access 1
 poll:VideoPlayer::spawn_open_poll 1
 poll:closed 1
-poll:open_main_window 1
 poll:poll_answer_unless 1
 poll:scan 1
 poll:spawn_menu_sync 1

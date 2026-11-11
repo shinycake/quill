@@ -19,7 +19,6 @@ purpose:ConnectDriver::enable_private_sharing 1
 purpose:ConnectDriver::ensure_earn_app_config 1
 purpose:ConnectDriver::fail_earn_page_loads 2
 purpose:ConnectDriver::fetch_archived_stickers 1
-purpose:ConnectDriver::fetch_auto_download_presets 1
 purpose:ConnectDriver::fetch_boosts_per_gift 1
 purpose:ConnectDriver::fetch_contacts 1
 purpose:ConnectDriver::fetch_country_code 1
@@ -71,8 +70,6 @@ purpose:ConnectDriver::refetch_installed_sets_after_edit 2
 purpose:ConnectDriver::refresh_emoji_pack_catalog 2
 purpose:ConnectDriver::refresh_stale_panels 3
 purpose:ConnectDriver::refresh_storage_statistics 1
-purpose:ConnectDriver::refuse_login_url_overlap 2
-purpose:ConnectDriver::reload_archive_chat_list_settings 1
 purpose:ConnectDriver::request_qr_login 1
 purpose:ConnectDriver::search_emoji_packs 1
 purpose:ConnectDriver::search_keyword_emojis 1
@@ -143,7 +140,6 @@ unmatched:Session::apply_business_extra_error 1
 unmatched:Session::apply_chat_links 1
 unmatched:Session::apply_chat_list_payload 2
 unmatched:Session::apply_chats 4
-unmatched:Session::apply_chats_payload 1
 unmatched:Session::apply_connected_bot 1
 unmatched:Session::apply_found_chat_messages 1
 unmatched:Session::apply_grams 1
@@ -158,7 +154,7 @@ unmatched:Session::apply_premium_giveaway_options 1
 unmatched:Session::apply_privacy_data_payload 1
 unmatched:Session::apply_quick_replies_ok 1
 unmatched:Session::apply_saved_tags 1
-unmatched:Session::apply_settings_payload 6
+unmatched:Session::apply_settings_payload 5
 unmatched:Session::apply_star_giveaway_options 1
 unmatched:Session::apply_stickers_payload 3
 unmatched:Session::apply_time_zones 1

@@ -159,18 +159,18 @@ pub const COUNTDOWN_REFRESH_SECS: u64 = 10;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateJoinAs {
     pub chat_id: i64,
-    pub request: RequestId,
     pub stage: JoinAsStage,
 }
 
-/// Where the "join as" request stands. The answer or the failure ends
-/// `Asking`, only for the request that asked; the box that waits for it
-/// takes the slot ([`CreateJoinAs::answer`]) and clears it.
+/// Where the "join as" request stands. Every stage names its request: the
+/// answer or the failure ends `Asking` only for the request that asked, and
+/// the box that waits takes the slot ([`CreateJoinAs::answer`]) only when
+/// the request is the one it sent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JoinAsStage {
-    Asking,
-    Answered(Vec<MessageSender>),
-    Failed,
+    Asking(RequestId),
+    Answered(RequestId, Vec<MessageSender>),
+    Failed(RequestId),
 }
 
 impl CreateJoinAs {
@@ -178,37 +178,49 @@ impl CreateJoinAs {
     pub fn asking(chat_id: i64, request: RequestId) -> Self {
         Self {
             chat_id,
-            request,
-            stage: JoinAsStage::Asking,
+            stage: JoinAsStage::Asking(request),
+        }
+    }
+
+    /// The request this list was asked with.
+    pub fn request(&self) -> RequestId {
+        match &self.stage {
+            JoinAsStage::Asking(request)
+            | JoinAsStage::Answered(request, _)
+            | JoinAsStage::Failed(request) => *request,
         }
     }
 
     /// The list for `request` arrived; an answer to another request, or a
     /// second answer, changes nothing.
     pub fn accept(&mut self, request: Option<RequestId>, senders: Vec<MessageSender>) -> bool {
-        if request != Some(self.request) || self.stage != JoinAsStage::Asking {
-            return false;
+        match self.stage {
+            JoinAsStage::Asking(asked) if request == Some(asked) => {
+                self.stage = JoinAsStage::Answered(asked, senders);
+                true
+            }
+            JoinAsStage::Asking(_) | JoinAsStage::Answered(..) | JoinAsStage::Failed(_) => false,
         }
-        self.stage = JoinAsStage::Answered(senders);
-        true
     }
 
     /// `request` failed.
     pub fn fail(&mut self, request: Option<RequestId>) -> bool {
-        if request != Some(self.request) || self.stage != JoinAsStage::Asking {
-            return false;
+        match self.stage {
+            JoinAsStage::Asking(asked) if request == Some(asked) => {
+                self.stage = JoinAsStage::Failed(asked);
+                true
+            }
+            JoinAsStage::Asking(_) | JoinAsStage::Answered(..) | JoinAsStage::Failed(_) => false,
         }
-        self.stage = JoinAsStage::Failed;
-        true
     }
 
     /// What the box takes once the request ended: the list, or `Err` for a
     /// failed request; `None` while it is in flight.
     pub fn answer(&self) -> Option<Result<Vec<MessageSender>, ()>> {
         match &self.stage {
-            JoinAsStage::Asking => None,
-            JoinAsStage::Answered(senders) => Some(Ok(senders.clone())),
-            JoinAsStage::Failed => Some(Err(())),
+            JoinAsStage::Asking(_) => None,
+            JoinAsStage::Answered(_, senders) => Some(Ok(senders.clone())),
+            JoinAsStage::Failed(_) => Some(Err(())),
         }
     }
 }

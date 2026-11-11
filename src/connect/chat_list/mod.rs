@@ -386,10 +386,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chat_list
             .archive_chat_list_settings()
             .is_some()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetArchiveChatListSettings)
+            || self.session.chat_list.archive_settings_loading()
         {
             return Ok(None);
         }

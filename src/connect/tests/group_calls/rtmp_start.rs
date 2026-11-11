@@ -352,7 +352,7 @@ fn the_join_as_list_is_asked_for_before_creating() {
         }),
     );
     let join_as = driver.session.calls.create_join_as.as_ref().expect("kept");
-    assert_eq!(join_as.request, sent);
+    assert_eq!(join_as.request(), sent);
     assert_eq!(
         join_as.answer(),
         Some(Ok(vec![

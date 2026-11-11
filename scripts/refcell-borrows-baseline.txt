@@ -354,7 +354,6 @@ reverse_geocode::pending.borrow_mut 1
 rotate::r.borrow_mut 1
 see::seen.borrow_mut 1
 seen::badges.borrow 1
-set::slot.borrow_mut 1
 set_app::slot.borrow_mut 1
 set_display::displays.borrow_mut 1
 set_zoom::list.borrow_mut 1
@@ -381,7 +380,6 @@ tracker::played.borrow 1
 tracker::seen.borrow_mut 1
 tray_available::cell.borrow 2
 tray_registering::cell.borrow 1
-utc_offset_at::cell.borrow_mut 1
 video_output_ready::slot.borrow 1
 video_redraws::asks.borrow 1
 video_request::asks.borrow_mut 1
