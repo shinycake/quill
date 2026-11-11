@@ -121,7 +121,7 @@ pub enum GiveawayLaunch {
     /// another chat keeps it (see [`GiveawayLaunch::for_form`]): that form
     /// and the driver compare `chat_id`, and coming back to this chat's form
     /// still shows the launch in flight.
-    Launching { chat_id: i64, request: u64 },
+    Launching { chat_id: i64, request: RequestId },
     /// The prepaid giveaway of `chat_id` started.
     Launched { chat_id: i64 },
     /// A new giveaway for `chat_id` was paid for. Its form is done: Start
@@ -225,12 +225,14 @@ impl Session {
         options: Vec<PremiumGiveawayOption>,
         pending: Option<&PendingRequest>,
     ) {
-        // Only the answer for the chat the form shows now.
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPremiumGiveawayOptions)
-            && pending.and_then(|p| p.chat_id).map(|c| c.0)
-                == Some(self.payments.giveaway.options.for_chat)
-        {
-            self.payments.giveaway.options.premium.succeed(options);
+        // Only the answer to the request the form waits on (it was sent
+        // for the chat the form shows now).
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPremiumGiveawayOptions) {
+            self.payments
+                .giveaway
+                .options
+                .premium
+                .answered(pending.map(|p| p.id), options);
         }
     }
 
@@ -241,7 +243,11 @@ impl Session {
         pending: Option<&PendingRequest>,
     ) {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarGiveawayOptions) {
-            self.payments.giveaway.options.stars.succeed(options);
+            self.payments
+                .giveaway
+                .options
+                .stars
+                .answered(pending.map(|p| p.id), options);
         }
     }
 
@@ -257,8 +263,7 @@ impl Session {
             self.groups.chat_boost_details.remove(&chat_id.0);
         }
         if let GiveawayLaunch::Launching { chat_id, request } = self.payments.giveaway.launch
-            && request != 0
-            && request == pending.id.0
+            && request == pending.id
         {
             self.payments.giveaway.launch = GiveawayLaunch::Launched { chat_id };
         }
@@ -281,17 +286,20 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetPremiumGiveawayOptions) => {
-                if pending.and_then(|p| p.chat_id).map(|c| c.0) == Some(state.options.for_chat) {
-                    state.options.premium.fail_dropping_data(reason);
-                }
+                state
+                    .options
+                    .premium
+                    .failed(pending.map(|p| p.id), reason, true);
             }
             Some(RequestPurpose::GetStarGiveawayOptions) => {
-                state.options.stars.fail_dropping_data(reason);
+                state
+                    .options
+                    .stars
+                    .failed(pending.map(|p| p.id), reason, true);
             }
             Some(RequestPurpose::LaunchPrepaidGiveaway) => {
                 if let GiveawayLaunch::Launching { chat_id, request } = state.launch
-                    && request != 0
-                    && Some(request) == pending.map(|p| p.id.0)
+                    && Some(request) == pending.map(|p| p.id)
                 {
                     state.launch = GiveawayLaunch::Failed {
                         chat_id,

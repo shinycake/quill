@@ -52,6 +52,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::GetPremiumGiveawayOptions,
             Some(crate::ids::ChatId(boosted_chat_id)),
         );
+        self.session.payments.giveaway.options.premium.sent(extra);
         let premium = self.send_json_request(
             extra,
             &get_premium_giveaway_payment_options(extra, boosted_chat_id),
@@ -62,6 +63,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetStarGiveawayOptions, None);
+        self.session.payments.giveaway.options.stars.sent(extra);
         let stars = self.send_json_request(extra, &get_star_giveaway_payment_options(extra));
         if stars.is_err() {
             self.session.payments.giveaway.options.stars = crate::state::fetch::Fetch::Idle;
@@ -106,7 +108,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         self.session.payments.giveaway.launch = GiveawayLaunch::Launching {
             chat_id,
-            request: extra.0,
+            request: extra,
         };
         let json = launch_prepaid_giveaway(
             extra,

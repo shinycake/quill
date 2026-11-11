@@ -217,7 +217,7 @@ fn a_giveaway_launch_in_flight_is_never_forgotten_by_a_form() {
     use crate::state::GiveawayLaunch;
     let launching = GiveawayLaunch::Launching {
         chat_id: 5,
-        request: 9,
+        request: crate::ids::RequestId(9),
     };
     assert_eq!(launching.clone().for_form(), launching);
     assert!(launching.is_launching_for(5));
