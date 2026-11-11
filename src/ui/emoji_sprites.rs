@@ -22,8 +22,9 @@ use quill::emoji_sets_style::pack::{Cell, SpritePack, sheet_path};
 use smallvec::SmallVec;
 
 /// Reads of an unreadable sheet before it stays on the system glyphs, and
-/// the wait before the first retry (it doubles).
-const READ_ATTEMPTS: u32 = 3;
+/// the wait before the first retry (it doubles: 1, 2, 4, 8 and 16 s, so a
+/// disk that stalls for half a minute still gets its sheet).
+const READ_ATTEMPTS: u32 = 6;
 const RETRY_AFTER: Duration = Duration::from_secs(1);
 
 /// One sheet of the atlas. `Loading` holds the decode (and its retries

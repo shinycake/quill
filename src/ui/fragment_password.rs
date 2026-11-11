@@ -243,10 +243,9 @@ pub(super) struct PasswordField {
 /// The field's stage. `Typing` is the idle phase after the field took the
 /// keyboard, so it takes it once per phase and not on every frame.
 enum FieldStage {
-    /// The box is off screen; the field is empty.
+    /// The box is off screen or a try is out (the field is disabled until
+    /// its answer): the keyboard is taken again when the box is idle.
     Away,
-    /// A try is out; the field is disabled until its answer.
-    Disabled,
     /// Idle, and the field has taken the keyboard.
     Typing,
 }
@@ -276,8 +275,7 @@ impl PasswordField {
                 self.input.update(cx, |input, cx| input.focus(window, cx));
                 FieldStage::Typing
             }
-            (ShowingView::Sending, _) => FieldStage::Disabled,
-            (ShowingView::Off, _) => FieldStage::Away,
+            (ShowingView::Sending | ShowingView::Off, _) => FieldStage::Away,
         };
         if showing == ShowingView::Off && !self.input.read(cx).value().is_empty() {
             self.input

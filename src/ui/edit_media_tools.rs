@@ -189,17 +189,15 @@ impl QuillApp {
             }
         });
         let asked = match (file_id, self.live.as_mut()) {
-            (Some(file_id), Some(live)) => live
-                .driver
-                .download_file(file_id, 8)
-                .map(|request| (file_id, request))
-                .ok(),
+            (Some(file_id), Some(live)) => {
+                live.driver.download_file(file_id, 8).map(|_| file_id).ok()
+            }
             _ => None,
         };
         match asked {
-            Some((file_id, request)) => {
+            Some(file_id) => {
                 if let Some(edit) = self.chat_ui.pending_edit_mut() {
-                    edit.media_edit.image = EditImageFetch::Downloading { file_id, request };
+                    edit.media_edit.image = EditImageFetch::Downloading { file_id };
                 }
                 self.set_note(StatusNote::silent(tr(keys::Q_MISC_DOWNLOADING)));
             }
@@ -217,7 +215,7 @@ impl QuillApp {
         let Some(edit) = self.chat_ui.pending_edit() else {
             return;
         };
-        let EditImageFetch::Downloading { file_id, .. } = edit.media_edit.image else {
+        let EditImageFetch::Downloading { file_id } = edit.media_edit.image else {
             return;
         };
         let landed = self

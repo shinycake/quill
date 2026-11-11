@@ -43,12 +43,10 @@ pub enum EditImageFetch {
     /// Nothing asked.
     #[default]
     Idle,
-    /// The photo is being downloaded; the editor opens when it lands
-    /// (`request` is `None` when TDLib was already fetching it).
-    Downloading {
-        file_id: FileId,
-        request: Option<crate::ids::RequestId>,
-    },
+    /// The photo is being downloaded; the editor opens when it lands. The
+    /// download tracker owns the request and says when it ended
+    /// (`downloads.ended_without_file(file_id)`).
+    Downloading { file_id: FileId },
 }
 
 /// tdesktop `lng_context_clear_cover`.

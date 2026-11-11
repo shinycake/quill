@@ -75,7 +75,7 @@ fn driver_new_chats_folder_read_and_premium_limit() {
     assert_eq!(last["@type"], "processChatFolderNewChats");
     assert_eq!(last["added_chat_ids"], serde_json::json!([41]));
     assert!(driver.session.chat_list.folder_new_chats.contains_key(&5));
-    assert_eq!(driver.process_folder_new_chats(5, &[41]), Ok(None));
+    assert_eq!(driver.process_folder_new_chats(5, &[41]), Ok(Some(process)));
     let refused = format!(
         r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHATLIST_EXCLUDE_INVALID"}}"#,
         process.0

@@ -433,8 +433,10 @@ impl QuillApp {
                         n => StatusNote::silent(trn(keys::Q_CHATLIST_JOINING_CHATS, n)),
                     });
                 }
-                // One for this folder is already out: its answer settles it.
-                Ok(None) => {}
+                // Nothing to wait on (no connection path took it).
+                Ok(None) => self.set_note(StatusNote::error(tr(
+                    keys::Q_NOTES_FAILED_PROCESS_NEW_CHATS,
+                ))),
                 // Nothing went out: the box stays for another try.
                 Err(err) => self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_PROCESS_NEW_CHATS,

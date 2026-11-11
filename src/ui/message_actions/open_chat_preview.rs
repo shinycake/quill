@@ -16,6 +16,8 @@ impl QuillApp {
     ) {
         let started = Instant::now();
         self.chat_list.peek.press(chat_id, started);
+        // window-scope: a press on a chat-list row is the main window's; the
+        // preview closes the main window's menu, which no chat window shares.
         self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(Self::CHAT_PREVIEW_LONG_PRESS)

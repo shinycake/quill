@@ -10,8 +10,6 @@ detached:QuillApp::business_bot_watch 1
 detached:QuillApp::close_earn_layer 1
 detached:QuillApp::close_profile_modal 1
 detached:QuillApp::custom_emoji_card_body 1
-detached:QuillApp::download_update 1
-detached:QuillApp::emoji_sets_search_typed 1
 detached:QuillApp::ensure_call_tick 1
 detached:QuillApp::ensure_self_destruct_tick 1
 detached:QuillApp::general_link_handler_section 1
@@ -48,7 +46,6 @@ poll:QuillApp::arm_stream_hide_timer 1
 poll:QuillApp::arm_viewer_swipe_timeout 1
 poll:QuillApp::autoscroll_press 1
 poll:QuillApp::business_bot_watch 1
-poll:QuillApp::download_emoji_set 1
 poll:QuillApp::download_update 1
 poll:QuillApp::ensure_call_tick 1
 poll:QuillApp::ensure_live_location_tick 1

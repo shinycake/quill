@@ -296,7 +296,8 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// `processChatFolderNewChats`: join the chosen new chats, or dismiss the
     /// bar with an empty list. The bar goes away when the answer is `ok`;
-    /// a refusal keeps it (and says so). `Ok(None)`: one is already in flight.
+    /// a refusal keeps it (and says so). One already in flight for the
+    /// folder is returned as it is, for the caller to wait on.
     pub fn process_folder_new_chats(
         &mut self,
         folder_id: i32,
@@ -305,12 +306,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self
+        if let Some(out) = self
             .session
             .requests
-            .has_purpose_for_folder(RequestPurpose::ProcessChatFolderNewChats, folder_id)
+            .request_for_purpose_folder(RequestPurpose::ProcessChatFolderNewChats, folder_id)
         {
-            return Ok(None);
+            return Ok(Some(out));
         }
         let extra = self
             .session
