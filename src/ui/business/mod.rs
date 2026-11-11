@@ -29,8 +29,9 @@ mod state;
 mod tests;
 
 pub(crate) use state::{
-    AwayDraft, BusinessDialog, ChatbotDraft, DayRow, GreetingDraft, HoursDraft, LinkEditDraft,
-    LocationDraft, MessageKind, PickerDraft, Recipients, ScheduleChoice, StartPageDraft, View,
+    AwayDraft, BotLink, BotNotice, BusinessDialog, ChatbotDraft, DayRow, GreetingDraft, HoursDraft,
+    LinkEditDraft, LocationDraft, MessageKind, PickerDraft, Recipients, ScheduleChoice,
+    StartPageDraft, View,
 };
 
 use super::app::QuillApp;

@@ -6,22 +6,126 @@ use crate::state::*;
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct BotEditTexts {
     pub bot_id: i64,
-    /// `None` until `getBotName` answers.
-    pub name: Option<String>,
-    /// `None` until `getBotInfoShortDescription` answers.
-    pub about: Option<String>,
-    /// A load failed; the dialog says so instead of waiting forever.
-    pub load_failed: bool,
+    /// The name and about text, from the two loads.
+    pub texts: BotTexts,
     /// Texts sent and not yet confirmed by `ok`.
     pub pending_name: Option<String>,
     pub pending_about: Option<String>,
-    /// The two loads in flight; an answer for another dialog drops.
-    pub(crate) loads: Vec<RequestId>,
     /// Saves in flight (name, about, photo); only these settle the dialog.
     pub(crate) saves: Vec<RequestId>,
     /// Confirmed saves since the dialog opened.
     pub saved: u8,
     pub error: Option<String>,
+}
+
+/// Where the two loads of the edit dialog stand.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BotTexts {
+    /// `getBotName` and `getBotInfoShortDescription` are out; an answer
+    /// for another dialog drops (it is not in `loads`).
+    Loading {
+        name: Option<String>,
+        about: Option<String>,
+        loads: Vec<RequestId>,
+    },
+    Loaded {
+        name: String,
+        about: String,
+    },
+    /// A load failed; the dialog says so instead of waiting forever.
+    Failed,
+}
+
+impl Default for BotTexts {
+    fn default() -> Self {
+        Self::Loading {
+            name: None,
+            about: None,
+            loads: Vec::new(),
+        }
+    }
+}
+
+impl BotTexts {
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            Self::Loading { name, .. } => name.as_deref(),
+            Self::Loaded { name, .. } => Some(name),
+            Self::Failed => None,
+        }
+    }
+
+    pub fn about(&self) -> Option<&str> {
+        match self {
+            Self::Loading { about, .. } => about.as_deref(),
+            Self::Loaded { about, .. } => Some(about),
+            Self::Failed => None,
+        }
+    }
+
+    /// Both texts are in.
+    pub fn is_loaded(&self) -> bool {
+        matches!(self, Self::Loaded { .. })
+    }
+
+    pub fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed)
+    }
+
+    /// A load of this dialog was sent.
+    pub(crate) fn expect(&mut self, request: RequestId) {
+        if let Self::Loading { loads, .. } = self {
+            loads.push(request);
+        }
+    }
+
+    /// The loads still out, to be dropped with the dialog.
+    pub(crate) fn outstanding(&self) -> Vec<RequestId> {
+        match self {
+            Self::Loading { loads, .. } => loads.clone(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// `pending` is one of the loads: settle it. Whether it was.
+    fn settle(&mut self, pending: Option<&PendingRequest>) -> bool {
+        match self {
+            Self::Loading { loads, .. } => BotEditTexts::take(loads, pending),
+            _ => false,
+        }
+    }
+
+    fn fill(&mut self, name: Option<String>, about: Option<String>) {
+        match self {
+            Self::Loading {
+                name: held_name,
+                about: held_about,
+                ..
+            } => {
+                if let Some(name) = name {
+                    *held_name = Some(name);
+                }
+                if let Some(about) = about {
+                    *held_about = Some(about);
+                }
+                if let (Some(name), Some(about)) = (held_name.clone(), held_about.clone()) {
+                    *self = Self::Loaded { name, about };
+                }
+            }
+            Self::Loaded {
+                name: held_name,
+                about: held_about,
+            } => {
+                if let Some(name) = name {
+                    *held_name = name;
+                }
+                if let Some(about) = about {
+                    *held_about = about;
+                }
+            }
+            Self::Failed => {}
+        }
+    }
 }
 
 /// The "Create Bot" dialog's server state.
@@ -79,12 +183,12 @@ impl Session {
             return;
         };
         if let Some(edit) = self.bots.owned.edit.as_mut()
-            && BotEditTexts::take(&mut edit.loads, pending)
+            && edit.texts.settle(pending)
         {
             if about {
-                edit.about = Some(text);
+                edit.texts.fill(None, Some(text));
             } else {
-                edit.name = Some(text);
+                edit.texts.fill(Some(text), None);
             }
         }
     }
@@ -109,12 +213,12 @@ impl Session {
         match purpose {
             BotsPurpose::SetBotName { .. } => {
                 if let Some(name) = edit.pending_name.take() {
-                    edit.name = Some(name);
+                    edit.texts.fill(Some(name), None);
                 }
             }
             BotsPurpose::SetBotAbout { .. } => {
                 if let Some(about) = edit.pending_about.take() {
-                    edit.about = Some(about);
+                    edit.texts.fill(None, Some(about));
                 }
             }
             _ => {}
@@ -166,9 +270,9 @@ impl Session {
         match purpose {
             BotsPurpose::GetBotEditText { .. } => {
                 if let Some(edit) = self.bots.owned.edit.as_mut()
-                    && BotEditTexts::take(&mut edit.loads, pending)
+                    && edit.texts.settle(pending)
                 {
-                    edit.load_failed = true;
+                    edit.texts = BotTexts::Failed;
                 }
             }
             BotsPurpose::SetBotName { .. }

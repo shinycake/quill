@@ -62,6 +62,19 @@ macro_rules! submit_on_enter {
 }
 
 impl AuthUi {
+    /// The authorization state moved on: what the user ticked for the
+    /// registration terms holds only while those same terms are asked.
+    pub(super) fn follow_auth(&mut self, auth: &AuthorizationState) {
+        let still_asked = matches!(
+            auth,
+            AuthorizationState::WaitRegistration { terms: Some(terms) }
+                if self.accepted_registration_terms.as_ref() == Some(terms)
+        );
+        if !still_asked {
+            self.accepted_registration_terms = None;
+        }
+    }
+
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         let email_input = cx.new(|cx| {
             TextareaState::new(window, cx)

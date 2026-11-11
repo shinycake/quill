@@ -180,19 +180,46 @@ pub(crate) struct LinkEditDraft {
     pub(super) name: Entity<InputState>,
 }
 
+/// Where the connected bot stands: not known yet, none, or connected (or
+/// just added).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BotLink {
+    /// The server's bot has not been reported; nothing can save.
+    Loading,
+    /// The username field shows.
+    Empty,
+    Connected(i64),
+}
+
+impl BotLink {
+    pub(super) fn is_loaded(self) -> bool {
+        self != Self::Loading
+    }
+
+    pub(super) fn connected(self) -> Option<i64> {
+        match self {
+            Self::Connected(id) => Some(id),
+            _ => None,
+        }
+    }
+}
+
+/// The box over the Chatbots screen, if any.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BotNotice {
+    None,
+    /// tdesktop's warning box after turning on a risky right.
+    Warning(String),
+    /// "No Bot Added": leaving while found bots were not added.
+    ConfirmLeave,
+}
+
 pub(crate) struct ChatbotDraft {
     pub(super) username: Entity<InputState>,
-    /// The connected (or just added) bot; the username field shows when
-    /// there is none.
-    pub(super) committed: Option<i64>,
+    pub(super) bot: BotLink,
     pub(super) recipients: BusinessRecipients,
     pub(super) rights: BotRights,
-    /// Whether the server's bot was known when the draft was made.
-    pub(super) loaded: bool,
-    /// tdesktop's warning box after turning on a risky right.
-    pub(super) warning: Option<String>,
-    /// "No Bot Added": leaving while found bots were not added.
-    pub(super) confirm_leave: bool,
+    pub(super) notice: BotNotice,
 }
 
 pub(crate) struct BusinessDialog {

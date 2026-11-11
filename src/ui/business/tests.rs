@@ -1,7 +1,7 @@
 //! UI integration tests for the Telegram Business dialog against the demo
 //! `QuillApp` (gpui-kit's test support needs the `demo-capture` feature).
 //! Nothing here reaches a live account: demo mode refuses every save.
-use super::{MessageKind, Recipients, ScheduleChoice, View};
+use super::{BotNotice, MessageKind, Recipients, ScheduleChoice, View};
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -749,7 +749,8 @@ fn a_found_bot_is_added_and_asked_about_on_leave(cx: &mut TestAppContext) {
             .chatbot
             .as_ref()
             .unwrap()
-            .confirm_leave
+            .notice
+            == BotNotice::ConfirmLeave
     });
     assert!(asked);
     act(&app, vcx, |app, _, cx| app.add_business_bot(bot, cx));
@@ -768,12 +769,12 @@ fn a_found_bot_is_added_and_asked_about_on_leave(cx: &mut TestAppContext) {
             .chatbot
             .as_ref()
             .unwrap()
-            .warning
+            .notice
             .clone()
     });
     assert_eq!(
-        warning.as_deref(),
-        Some("The bot Shop will be able to transfer your stars.")
+        warning,
+        BotNotice::Warning("The bot Shop will be able to transfer your stars.".into())
     );
     // A bot's exclusions in "Only Selected Chats" are chats only.
     act(&app, vcx, |app, _, cx| {

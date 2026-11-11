@@ -26,17 +26,23 @@ pub(super) struct BotEditDialog {
     bot_id: i64,
     name: Entity<InputState>,
     about: Entity<TextareaState>,
-    /// The fields hold the server's texts (set once they arrive).
-    filled: bool,
-    /// What the last Save press found before anything was sent.
-    check: SaveCheck,
+    stage: EditStage,
+}
+
+/// The box waits for the server's texts, then edits them.
+enum EditStage {
+    /// The fields are empty until the texts arrive; Save is off.
+    Loading,
+    /// The fields hold the server's texts. `check` is what the last Save
+    /// press found before anything was sent.
+    Editing(SaveCheck),
 }
 
 /// The outcome of the last Save press that sent nothing. A rejection holds
 /// the texts it was found for and stands only while the fields still hold
 /// them: the next edit puts the box back to editing.
 enum SaveCheck {
-    Editing,
+    Accepted,
     Rejected {
         problem: &'static str,
         name: String,
@@ -124,8 +130,7 @@ impl QuillApp {
             bot_id,
             name,
             about,
-            filled: false,
-            check: SaveCheck::Editing,
+            stage: EditStage::Loading,
         });
         self.open_box(DialogKind::BotEdit);
         // The texts arrive from the session on the poll; fill the fields
@@ -179,23 +184,24 @@ impl QuillApp {
         let Some(dialog) = self.dialogs.bot_edit_dialog.as_ref() else {
             return true;
         };
-        if dialog.filled {
+        if matches!(dialog.stage, EditStage::Editing(_)) {
             return true;
         }
         let Some(edit) = self.session().and_then(|s| s.bots.owned.edit.clone()) else {
             return true;
         };
-        if edit.load_failed {
+        if edit.texts.is_failed() {
             return true;
         }
-        let (Some(name), Some(about)) = (edit.name, edit.about) else {
+        let (Some(name), Some(about)) = (edit.texts.name(), edit.texts.about()) else {
             return false;
         };
+        let (name, about) = (name.to_string(), about.to_string());
         let (name_input, about_input) = (dialog.name.clone(), dialog.about.clone());
         name_input.update(cx, |input, cx| input.set_value(name, window, cx));
         about_input.update(cx, |input, cx| input.set_value(about, window, cx));
         if let Some(dialog) = self.dialogs.bot_edit_dialog.as_mut() {
-            dialog.filled = true;
+            dialog.stage = EditStage::Editing(SaveCheck::Accepted);
         }
         cx.notify();
         true
@@ -215,7 +221,7 @@ impl QuillApp {
             .dialogs
             .bot_edit_dialog
             .as_ref()
-            .filter(|dialog| dialog.filled)
+            .filter(|dialog| matches!(dialog.stage, EditStage::Editing(_)))
         else {
             return;
         };
@@ -225,25 +231,26 @@ impl QuillApp {
         let Some(edit) = self.session().and_then(|s| s.bots.owned.edit.clone()) else {
             return;
         };
-        let (Some(current_name), Some(current_about)) = (edit.name, edit.about) else {
+        let (Some(current_name), Some(current_about)) = (edit.texts.name(), edit.texts.about())
+        else {
             return;
         };
         let changes = match owned_bots::edit_changes(&current_name, &current_about, &name, &about) {
             Ok(changes) => changes,
             Err(problem) => {
                 if let Some(dialog) = self.dialogs.bot_edit_dialog.as_mut() {
-                    dialog.check = SaveCheck::Rejected {
+                    dialog.stage = EditStage::Editing(SaveCheck::Rejected {
                         problem,
                         name,
                         about,
-                    };
+                    });
                 }
                 cx.notify();
                 return;
             }
         };
         if let Some(dialog) = self.dialogs.bot_edit_dialog.as_mut() {
-            dialog.check = SaveCheck::Editing;
+            dialog.stage = EditStage::Editing(SaveCheck::Accepted);
         }
         if let Some(live) = self.live.as_mut()
             && !changes.is_empty()
@@ -332,11 +339,9 @@ impl QuillApp {
             let edit = this.session().and_then(|s| s.bots.owned.edit.clone());
             // Save diffs the fields against the bot's texts: until the
             // fields hold them, an empty field would clear the bot's.
-            let loaded = state.filled
-                && edit
-                    .as_ref()
-                    .is_some_and(|e| e.name.is_some() && e.about.is_some());
-            let load_failed = edit.as_ref().is_some_and(|e| e.load_failed);
+            let loaded = matches!(state.stage, EditStage::Editing(_))
+                && edit.as_ref().is_some_and(|e| e.texts.is_loaded());
+            let load_failed = edit.as_ref().is_some_and(|e| e.texts.is_failed());
             let saving = edit.as_ref().is_some_and(|e| e.saving() > 0);
             let server_error = edit.as_ref().and_then(|e| e.error.clone());
             let username = this
@@ -350,21 +355,24 @@ impl QuillApp {
                 name.read(cx).value().to_string(),
                 about.read(cx).value().to_string(),
             );
-            let local_error = state.check.problem_for(&typed_name, &typed_about);
+            let local_error = match &state.stage {
+                EditStage::Editing(check) => check.problem_for(&typed_name, &typed_about),
+                EditStage::Loading => None,
+            };
             // "Saved" says the fields hold what the server has: an edit
             // after the save takes it away.
-            let unsaved =
-                edit.as_ref()
-                    .is_none_or(|e| match (e.name.as_deref(), e.about.as_deref()) {
-                        (Some(current_name), Some(current_about)) => !owned_bots::edit_changes(
-                            current_name,
-                            current_about,
-                            &typed_name,
-                            &typed_about,
-                        )
-                        .is_ok_and(|changes| changes.is_empty()),
-                        _ => true,
-                    });
+            let unsaved = edit
+                .as_ref()
+                .is_none_or(|e| match (e.texts.name(), e.texts.about()) {
+                    (Some(current_name), Some(current_about)) => !owned_bots::edit_changes(
+                        current_name,
+                        current_about,
+                        &typed_name,
+                        &typed_about,
+                    )
+                    .is_ok_and(|changes| changes.is_empty()),
+                    _ => true,
+                });
             let saved = edit.as_ref().is_some_and(|e| e.saved > 0) && !unsaved;
 
             let status = if load_failed {

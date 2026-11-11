@@ -17,8 +17,6 @@ Backdrops::loading
 BackendStatus::failed
 BarFacts::bot_start_pending
 BotCreateDialog::submitted
-BotEditTexts::load_failed
-BotEditTexts::load_failed+error
 BusinessSettingsState::time_zones_requested
 BusinessSettingsState::time_zones_requested+error
 CallSnap::connecting
@@ -31,7 +29,6 @@ ChatSummary::my_rights_fetched
 ChatSwipeFacts::is_saved
 ChatUi::inline_query_waiting
 ChatWindowsState::asked
-ChatbotDraft::loaded
 Checklist::others_can_mark_tasks_as_done
 ChecklistDialog::others_can_mark_tasks_as_done
 ChecklistDialog::others_can_mark_tasks_as_done+error

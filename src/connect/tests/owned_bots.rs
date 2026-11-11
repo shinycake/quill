@@ -70,8 +70,9 @@ fn opening_the_editor_asks_for_the_name_and_the_about_text() {
         &answer(&extra_of(&about), r#"{"@type":"text","text":"Short"}"#),
     );
     let edit = driver.session.bots.owned.edit.clone().unwrap();
-    assert_eq!(edit.name.as_deref(), Some("Old"));
-    assert_eq!(edit.about.as_deref(), Some("Short"));
+    assert_eq!(edit.texts.name(), Some("Old"));
+    assert_eq!(edit.texts.about(), Some("Short"));
+    assert!(edit.texts.is_loaded());
 }
 
 #[test]
@@ -96,7 +97,7 @@ fn saving_sends_only_what_changed_and_keeps_the_texts_on_ok() {
         &answer(&extra_of(&request), r#"{"@type":"ok"}"#),
     );
     let edit = driver.session.bots.owned.edit.clone().unwrap();
-    assert_eq!(edit.name.as_deref(), Some("New"));
+    assert_eq!(edit.texts.name(), Some("New"));
     assert_eq!((edit.saving(), edit.saved), (0, 1));
 }
 
@@ -118,7 +119,7 @@ fn a_refused_save_is_reported_and_not_kept() {
     );
     let edit = driver.session.bots.owned.edit.clone().unwrap();
     assert_eq!(edit.saving(), 0);
-    assert!(edit.about.is_none());
+    assert!(edit.texts.about().is_none());
     assert!(edit.error.unwrap().contains("400"));
 }
 
@@ -159,12 +160,12 @@ fn a_reopened_editor_takes_only_its_own_answers() {
     let edit = driver.session.bots.owned.edit.clone().unwrap();
     assert_eq!((edit.saving(), edit.saved), (1, 0));
     assert_eq!(edit.pending_name.as_deref(), Some("Newer"));
-    assert!(edit.name.is_none() && edit.error.is_none());
+    assert!(edit.texts.name().is_none() && edit.error.is_none());
 
     let save = sent_request(&recorder, "setBotName");
     feed(&mut driver, &seq, &sink, &answer(&extra_of(&save), ok));
     let edit = driver.session.bots.owned.edit.clone().unwrap();
-    assert_eq!(edit.name.as_deref(), Some("Newer"));
+    assert_eq!(edit.texts.name(), Some("Newer"));
     assert_eq!((edit.saving(), edit.saved), (0, 1));
 }
 
