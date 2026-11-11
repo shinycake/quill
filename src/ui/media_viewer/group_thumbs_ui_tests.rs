@@ -251,12 +251,13 @@ fn a_photo_that_lands_has_its_thumb_asked_for_by_the_same_pass(cx: &mut TestAppC
     let vcx = &mut vcx;
     let (asked, gallery) = app.update(vcx, |app, cx| {
         let gallery = app.viewer.state.items().to_vec();
-        app.viewer.state = MediaViewer::open_profile(
-            quill::state::PhotoOwner::User(1),
-            gallery[..2].to_vec(),
-            0,
-            2,
-        );
+        let owner = app
+            .viewer
+            .state
+            .source()
+            .profile_owner()
+            .expect("the fixture opened a profile gallery");
+        app.viewer.state = MediaViewer::open_profile(owner, gallery[..2].to_vec(), 0, 2);
         app.viewer.extra.strip_asked.clear();
         app.pump_profile_gallery(cx);
         (app.viewer.extra.strip_asked.clone(), gallery)
