@@ -447,10 +447,10 @@ mod tests {
         let source = QuotableText::plain("ok. fine. ok. done");
         let first = source.quote_for_nth("ok.", 0).expect("first");
         let second = source.quote_for_nth("ok.", 1).expect("second");
-        assert_eq!((first.position, second.position), (0, 11));
+        assert_eq!((first.position, second.position), (0, 10));
         // A count past the last occurrence takes the last.
         let past = source.quote_for_nth("ok.", 7).expect("last");
-        assert_eq!(past.position, 11);
+        assert_eq!(past.position, 10);
         assert_eq!(source.quote_for("ok.").map(|q| q.position), Some(0));
     }
 
