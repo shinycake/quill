@@ -6,6 +6,7 @@ use super::country_box::CountryHost;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::dialogs::poll::QuizLock;
+use crate::ui::dialogs::poll_voters::PollView;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -97,7 +98,7 @@ impl QuillApp {
             chat_id,
             message_id,
             selected_option: None,
-            show_stats: false,
+            view: PollView::Voters,
         });
         self.select_poll_voters_option(0, cx);
     }
@@ -135,7 +136,7 @@ impl QuillApp {
             chat_id,
             message_id,
             selected_option: None,
-            show_stats: true,
+            view: PollView::Stats,
         });
         let can_get_voters = self
             .session()
@@ -237,7 +238,7 @@ impl QuillApp {
                 _ => None,
             });
         let mut body = div().flex().flex_col().gap_1();
-        if dialog.show_stats {
+        if dialog.view == PollView::Stats {
             body = body.child(self.poll_stats_section(chat_id, message_id, cx));
         }
         if let Some(poll) = poll.as_ref().filter(|poll| poll.can_get_voters) {
@@ -549,7 +550,7 @@ impl QuillApp {
                         .message_ui
                         .poll_voters_dialog
                         .as_ref()
-                        .is_some_and(|dialog| dialog.show_stats)
+                        .is_some_and(|dialog| dialog.view == PollView::Stats)
                     {
                         tr(keys::POLLS_STATS_TITLE)
                     } else {

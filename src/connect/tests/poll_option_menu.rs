@@ -275,3 +275,30 @@ fn the_option_link_is_asked_only_when_allowed() {
     assert_eq!(request["poll_option_id"], "a");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_refused_properties_lookup_leaves_loading() {
+    let (dir, mut driver, _recorder, _sink, dyn_sink, seq) = poll_driver();
+    ingest(&mut driver, &seq, &dyn_sink, POLL);
+    let (chat, message) = (ChatId(7), MessageId(120));
+    let extra = driver
+        .fetch_poll_option_properties(chat, message, "a")
+        .unwrap();
+    let menu = driver.session.messages.poll_option_menu.clone().unwrap();
+    assert!(menu.properties.is_loading());
+    ingest(
+        &mut driver,
+        &seq,
+        &dyn_sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"MESSAGE_ID_INVALID"}}"#,
+            extra.0
+        ),
+    );
+    let menu = driver.session.messages.poll_option_menu.clone().unwrap();
+    assert!(
+        menu.properties.error().is_some() && !menu.properties.is_loading(),
+        "the page stops waiting"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

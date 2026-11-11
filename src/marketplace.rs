@@ -158,3 +158,40 @@ impl GiftPurchase {
         }
     }
 }
+
+#[cfg(test)]
+mod stage_tests {
+    use super::*;
+    use crate::telegram::envelope::MessageSender;
+
+    fn purchase(stage: GiftStage) -> GiftPurchase {
+        GiftPurchase {
+            chat_id: ChatId(1),
+            recipient: MessageSender::User { user_id: 1 },
+            recipient_name: String::new(),
+            requested_name: String::new(),
+            quote: None,
+            price: None,
+            stage,
+            note: None,
+        }
+    }
+
+    #[test]
+    fn each_request_leaves_only_its_own_stage() {
+        let mut gift = purchase(GiftStage::Loading);
+        gift.sending_ended();
+        assert!(gift.is_loading(), "a send's end is not the quote's");
+        gift.loading_ended();
+        assert_eq!(gift.stage, GiftStage::Ready);
+        let mut gift = purchase(GiftStage::Sending);
+        gift.loading_ended();
+        assert!(gift.is_sending() && gift.is_busy());
+        gift.sending_ended();
+        assert_eq!(gift.stage, GiftStage::Ready);
+        let mut done = purchase(GiftStage::Completed);
+        done.sending_ended();
+        done.loading_ended();
+        assert!(done.is_completed() && !done.is_busy());
+    }
+}

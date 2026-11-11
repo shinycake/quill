@@ -7,7 +7,14 @@ pub struct PollVotersDialog {
     pub(crate) chat_id: ChatId,
     pub(crate) message_id: MessageId,
     pub(crate) selected_option: Option<usize>,
-    /// B15: opened from "Poll Stats" — shows the vote graph above the
-    /// per-option voter lists (`getPollVoteStatistics`).
-    pub(crate) show_stats: bool,
+    /// What the dialog opened as.
+    pub(crate) view: PollView,
+}
+
+/// B15: the voter lists alone, or opened from "Poll Stats" with the vote
+/// graph above them (`getPollVoteStatistics`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PollView {
+    Voters,
+    Stats,
 }

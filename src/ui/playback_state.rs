@@ -6,7 +6,6 @@
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::ids::FileId;
 use quill::ids::MessageId;
 use std::collections::HashMap;
 use std::time::Instant;
@@ -50,27 +49,24 @@ pub(crate) struct PlaybackUi {
     pub(super) playing_audio: Option<MessageId>,
     /// What a press asked to play once its file is downloaded (`play_intent`).
     pub(super) intent: Option<super::play_intent::PlayIntent>,
-    /// The right-click menu of a Playlist page track.
-    pub(super) playlist_menu: Option<super::playlist_manage::PlaylistMenu>,
-    /// A track of your own playlist waiting for the "remove" confirmation.
-    pub(super) playlist_remove: Option<FileId>,
+    /// The right-click menu of a Playlist page track, or the "remove"
+    /// confirmation of one of your own tracks.
+    pub(super) playlist: super::playlist_manage::PlaylistFlow,
     /// Length of the loaded track (TDLib's rounded duration). Plain data:
     /// whether a track is active comes from `playing_voice`/`playing_audio`
     /// (see `track_duration`) and whether it plays, and where, from `audio`.
     pub(super) track_length: Option<f64>,
     /// Interactive seek slider bound to the active row (Phase 4.6).
     pub(super) seek_slider: Option<Entity<SliderState>>,
-    /// True while the user is dragging the seek slider (Change without Release yet).
-    pub(super) seek_scrubbing: bool,
-    /// Drag preview position in seconds, shown in the time label while scrubbing.
+    /// Drag preview position in seconds, shown in the time label while the
+    /// user is dragging the seek slider (a Change without its Release yet):
+    /// `Some` is the scrubbing.
     pub(super) seek_preview_secs: Option<f64>,
     /// Where the pointer rests over a seek control of the active track.
     pub(super) seek_hover: Option<SeekHover>,
-    /// Guard for the playback progress tick task.
-    pub(super) tick: bool,
-    /// What the seek bars, the player bar and the Touch Bar showed of the
-    /// track at the last tick: the tick redraws them only when it changed.
-    pub(super) tick_shown: Option<TrackShown>,
+    /// The playback progress tick task, with what the seek bars, the player
+    /// bar and the Touch Bar showed of the track at its last tick.
+    pub(super) tick: PlaybackTick,
     /// Last known position per chat message, so rows keep their seek bar fill (and
     /// resume from it) after pause/stop.
     pub(super) positions: HashMap<ChatMessage, f64>,
@@ -101,6 +97,31 @@ pub(crate) struct PlayingGif {
     pub(super) message: ChatMessage,
 }
 
+/// The progress tick: not running, or the task that is and what it showed
+/// at its last tick (it redraws only when that changed).
+pub(super) enum PlaybackTick {
+    Off,
+    Running {
+        _task: Task<()>,
+        shown: Option<TrackShown>,
+    },
+}
+
+impl PlaybackUi {
+    /// The user is dragging the seek slider (`seek_preview_secs`).
+    pub(super) fn seek_scrubbing(&self) -> bool {
+        self.seek_preview_secs.is_some()
+    }
+
+    /// Record what the tick shows now; whether it differs from the last.
+    pub(super) fn note_tick_shown(&mut self, now: TrackShown) -> bool {
+        match &mut self.tick {
+            PlaybackTick::Running { shown, .. } => shown.replace(now) != Some(now),
+            PlaybackTick::Off => true,
+        }
+    }
+}
+
 impl PlaybackUi {
     /// The playing GIF, for its history row.
     pub(super) fn gif_play(&self) -> Option<super::gif_clip::GifPlay> {
@@ -123,15 +144,12 @@ impl PlaybackUi {
             playing_voice: None,
             playing_audio: None,
             intent: None,
-            playlist_menu: None,
-            playlist_remove: None,
+            playlist: Default::default(),
             track_length: None,
             seek_slider: None,
-            seek_scrubbing: false,
             seek_preview_secs: None,
             seek_hover: None,
-            tick: false,
-            tick_shown: None,
+            tick: PlaybackTick::Off,
             positions: HashMap::new(),
             playing_animation: None,
             autoplayed_gifs: Default::default(),

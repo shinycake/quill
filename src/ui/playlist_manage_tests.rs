@@ -97,12 +97,12 @@ fn the_track_menu_opens_and_delete_asks_before_removing(cx: &mut TestAppContext)
     });
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
-        let menu: Option<PlaylistMenu> = app.playback.playlist_menu;
+        let menu: Option<PlaylistMenu> = app.playback.playlist.menu();
         assert_eq!(menu.map(|m| m.file_id), Some(FileId(2)));
     });
     // Delete: the confirmation opens and nothing is removed yet.
     app.update_in(vcx, |app, _, cx| {
-        app.playback.playlist_menu = None;
+        app.playback.playlist.close_menu();
         app.ask_remove_playlist_track(FileId(2), cx);
     });
     vcx.run_until_parked();
@@ -154,7 +154,7 @@ fn escape_closes_the_track_menu(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
         assert!(
-            app.playback.playlist_menu.is_none(),
+            app.playback.playlist.menu().is_none(),
             "Escape closed the menu"
         );
         assert!(!app.context_menu_open());

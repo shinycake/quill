@@ -186,6 +186,10 @@ pub(crate) struct ChatUi {
     /// (phase B3). Held by the chat's value, so the chat changing drops it
     /// and a return to the chat starts one task, not two.
     pub(super) self_destruct_tick: Option<(ChatId, gpui_kit::Task<()>)>,
+    /// The chat whose live-location countdowns are being refreshed and its
+    /// task (`live_location_tick`): the chat changing replaces `ChatUi` and
+    /// stops the task.
+    pub(super) live_location_tick: Option<(ChatId, gpui_kit::Task<()>)>,
     /// Cross-fade timeline of the round Send / Record / Save button. A
     /// chat starts with none, so its button begins settled instead of
     /// fading from the chat before.

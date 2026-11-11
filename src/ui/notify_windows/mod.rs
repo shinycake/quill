@@ -21,11 +21,13 @@
 #![deny(clippy::indexing_slicing)]
 
 mod corner_preview;
+mod hold;
 mod position;
 mod view;
 
 use super::app::QuillApp;
 use gpui_kit::*;
+use hold::{Clock, Hold};
 use quill::ids::{AccountKey, ChatId};
 use quill::notify::custom::{
     self, DELTA_Y, FAST_ANIM_MS, HIDE_ALL_HEIGHT, INPUT_CHECK_MS, MIN_HEIGHT, NativeService,
@@ -135,62 +137,6 @@ impl Popup {
     }
 }
 
-struct Shown {
-    id: u64,
-    key: Key,
-    popup: Popup,
-    stage: Stage,
-    started: Instant,
-    hold: Hold,
-}
-
-/// Why the window has not started its slow fade. It stays up until the
-/// user has touched the computer after it appeared (`notify_check_input`),
-/// then lingers until `hide_at`; the pointer leaving the stack can bring
-/// that time forward at any point. The time is never cleared while the
-/// window is up; whether it fades now is derived from it and the hold
-/// (`notify_settle_hiding`).
-#[derive(Clone, Copy)]
-enum Hold {
-    /// Nobody has touched the computer yet; `Some` once the pointer left.
-    WaitingForInput { hide_at: Option<Instant> },
-    /// The slow fade is due at this time.
-    Lingering { hide_at: Instant },
-}
-
-impl Hold {
-    fn hide_at(self) -> Option<Instant> {
-        match self {
-            Self::WaitingForInput { hide_at } => hide_at,
-            Self::Lingering { hide_at } => Some(hide_at),
-        }
-    }
-
-    fn waiting(self) -> bool {
-        matches!(self, Self::WaitingForInput { .. })
-    }
-
-    /// The fade is due no later than `due`.
-    fn due_by(self, due: Instant) -> Self {
-        let sooner = |at: Option<Instant>| at.map_or(due, |at| at.min(due));
-        match self {
-            Self::WaitingForInput { hide_at } => Self::WaitingForInput {
-                hide_at: Some(sooner(hide_at)),
-            },
-            Self::Lingering { hide_at } => Self::Lingering {
-                hide_at: sooner(Some(hide_at)),
-            },
-        }
-    }
-
-    /// The user is back: the linger starts, due no later than `due`.
-    fn input_back(self, due: Instant) -> Self {
-        Self::Lingering {
-            hide_at: self.hide_at().map_or(due, |at| at.min(due)),
-        }
-    }
-}
-
 /// Where a shown notification stands. Unlinking leaves `Replying`: a window
 /// that is fading out holds nothing.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -200,6 +146,15 @@ enum Stage {
     Replying,
     /// Read, closed or replaced: fading out, no longer counted.
     Unlinked,
+}
+
+struct Shown {
+    id: u64,
+    key: Key,
+    popup: Popup,
+    stage: Stage,
+    started: Instant,
+    hold: Hold,
 }
 
 impl Shown {
@@ -220,13 +175,6 @@ impl Shown {
             self.stage = Stage::Replying;
         }
     }
-}
-
-/// The tick that moves the windows: stopped, or the task that runs it.
-/// The tick stops itself when nothing is up; dropping the windows drops it.
-enum Clock {
-    Stopped,
-    Running { _task: Task<()> },
 }
 
 struct Pending {

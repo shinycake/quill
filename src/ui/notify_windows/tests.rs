@@ -215,7 +215,7 @@ fn a_window_clicked_under_the_pointer_lets_the_others_fade(cx: &mut TestAppConte
         let later = now + std::time::Duration::from_secs(600);
         // The user was back at the computer: both are due later.
         for shown in app.delivery.windows.shown.iter_mut() {
-            shown.hold = super::Hold::Lingering { hide_at: later };
+            shown.hold = super::hold::Hold::Lingering { hide_at: later };
         }
         let (x, y) = (shown_id(app, 7), shown_id(app, 8));
         app.notify_window_event(x, ViewEvent::Hover(true), cx);

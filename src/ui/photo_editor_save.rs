@@ -71,10 +71,10 @@ impl QuillApp {
                 })
                 .detach();
             }
-            EditorPurpose::Set { set_id, kind } => {
+            EditorPurpose::Set { set_id, kind, edit } => {
                 // The turn, the canvas render and the fit run off the UI
                 // thread.
-                let corners = editor.corners;
+                let corners = edit.corners;
                 let job = editor.into_set_render_job();
                 self.finish_set_image(set_id, kind, job, corners, cx);
             }

@@ -29,7 +29,7 @@ impl QuillApp {
         };
         // A running tick keeps itself alive: no need to scan the history
         // again every frame.
-        if matches!(&self.history.live_location_tick, Some((running, _)) if *running == chat_id) {
+        if matches!(&self.chat_ui.live_location_tick, Some((running, _)) if *running == chat_id) {
             return;
         }
         if self
@@ -67,15 +67,15 @@ impl QuillApp {
                 }
             }
             let _ = this.update(cx, |this, cx| {
-                if matches!(&this.history.live_location_tick, Some((running, _)) if *running == chat_id)
+                if matches!(&this.chat_ui.live_location_tick, Some((running, _)) if *running == chat_id)
                 {
-                    this.history.live_location_tick = None;
+                    this.chat_ui.live_location_tick = None;
                 }
                 // The last share ended: draw its "ended" state.
                 cx.notify();
             });
         });
-        self.history.live_location_tick = Some((chat_id, task));
+        self.chat_ui.live_location_tick = Some((chat_id, task));
     }
 
     /// How long to wait before `chat_id`'s next refresh, or `None` when
