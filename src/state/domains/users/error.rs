@@ -50,7 +50,9 @@ impl Session {
                     })
                 });
                 if let Some(user) = user {
-                    self.users_state.user_full_info_failed.insert(user);
+                    self.users_state
+                        .user_full_infos
+                        .fail(user, error_reason(err));
                 }
             }
             Some(RequestPurpose::GetProfilePhotoEmojiIcons) => {

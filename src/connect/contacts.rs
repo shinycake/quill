@@ -59,8 +59,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<Option<RequestId>, ConnectSendError> {
         self.session
             .users_state
-            .user_full_info_failed
-            .remove(&user_id);
+            .user_full_infos
+            .forget_failure(&user_id);
         self.send_user_full_info(user_id)
     }
 
@@ -70,12 +70,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         user_id: i64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if self
-            .session
-            .users_state
-            .user_full_info_failed
-            .contains(&user_id)
-        {
+        if self.session.users_state.user_full_infos.failed(&user_id) {
             return Ok(None);
         }
         self.send_user_full_info(user_id)
