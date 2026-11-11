@@ -61,7 +61,7 @@ const NEW_SOUND: &str = r#"{"@type":"notificationSound","id":"900","duration":3,
 fn a_picked_file_goes_up_as_a_local_input_file() {
     let (mut driver, recorder, _sink, _seq) = driver();
     let path = tone_file("Soft Bell.mp3", 4000);
-    let id = driver
+    driver
         .upload_notification_tone(&path, ToneTarget::Reaction)
         .unwrap();
     let request = sent_request(&recorder, "addSavedNotificationSound");
