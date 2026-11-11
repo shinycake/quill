@@ -57,8 +57,10 @@ pub(crate) struct PendingSend {
 }
 
 /// The options a single send carries and the next does not: "Send without
-/// sound" and "Send with Effect" (passed down the send path). A send that waits (a paid-message confirm, a photo
-/// edit still rendering) keeps its own copy, so it goes out with them.
+/// sound" and "Send with Effect". They are an argument of the send path
+/// (`submit_composer`), never a field. A send that waits (a paid-message
+/// confirm, a photo edit still rendering) keeps its own copy, so it goes
+/// out with them.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct SendOnce {
     pub(super) silent: bool,

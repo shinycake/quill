@@ -252,6 +252,10 @@ fn a_chat_that_leaves_the_list_drops_out_of_the_bulk_selection(cx: &mut TestAppC
         app.read_with(vcx, |app, _| app.selected_chat_ids().len()),
         2
     );
+    assert!(
+        !app.read_with(vcx, |app, _| app.chat_list.selected.contains(&9_999)),
+        "the list rebuild forgot the chat that left"
+    );
     assert!(app.read_with(vcx, |app, _| app.selecting_chats()));
     let rows = app.read_with(vcx, |app, _| app.rows_selecting());
     assert!(rows, "the drawn rows agree with the count");
