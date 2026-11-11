@@ -1,3 +1,4 @@
 # In-flight variants that wait for nothing Quill started (scripts/check-stage-enums.py).
 # One per line: <rule>:<Enum>::<Variant> <reason>
 unkeyed:Stage::Writing src/export/worker.rs: the export worker's own progress report (messages saved so far, of how many), which the progress box reads; nothing answers it. The export is ended by its owner (`ChatExport`: the worker link's cancel, and `SettleOnPanic` for a worker that dies), and every run ends in Finished, Failed or Cancelled
+unkeyed:Stage::Decoding src/sticker_playback/player/engine.rs: the clip holds the index of the opener thread decoding it, which is what ends it: `WorkerEnd` (dropped when that thread returns, panics or never starts) fails every clip of its index (`State::opener_ended`). The index is a `usize`, which the check cannot tell from plain data

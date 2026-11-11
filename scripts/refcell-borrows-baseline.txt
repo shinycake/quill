@@ -91,7 +91,6 @@ QuillApp::build_fact_check_dialog::body.borrow_mut 1
 QuillApp::build_file_open_dialog::body.borrow_mut 1
 QuillApp::build_folder_delete_dialog::body.borrow_mut 1
 QuillApp::build_folder_editor_dialog::body.borrow_mut 1
-QuillApp::build_forum_manage_dialog::body.borrow_mut 1
 QuillApp::build_gift_market_dialog::body.borrow_mut 1
 QuillApp::build_gift_transfer_dialog::body.borrow_mut 1
 QuillApp::build_gift_value_dialog::body.borrow_mut 1
