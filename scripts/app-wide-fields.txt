@@ -207,3 +207,4 @@ composer_sends.reads * | what was read about the files of every tray (sound trac
 pending_deep_link.link | a link waiting for the deep-link pump: one from outside Quill (launch, OS) is taken by whichever account is on screen; one clicked in an account is followed only by that account (`QueuedLink::account`, `for_screen`) and dropped once another is on screen
 pending_deep_link.window | the chat window the link was clicked in; followed only with its account (`QueuedLink::for_screen`)
 pending_deep_link.by_agent | an agent's step queued the link; followed only with its account (`QueuedLink::for_screen`)
+main_window.dialogs_closed | the main window's dialogs were closed this switch

@@ -137,6 +137,12 @@ pub(crate) struct MainWindow {
     place: Option<WindowPlace>,
     /// New windows cascade from the main window; this counts them.
     cascade: u32,
+    /// The windows whose kit dialog was closed from outside their shell
+    /// (an account switch closed every one in the main window; an action's
+    /// `close_kit_dialog_if_done`): the shell forgets the one it showed
+    /// (`QuillShell::sync_kit_dialogs_in`) and does not close again, which
+    /// would close an unrelated dialog now on top.
+    pub(super) dialogs_closed: std::cell::RefCell<std::collections::HashSet<WindowId>>,
     /// The exit a Quit left waiting behind the "Stop and quit" alert. The
     /// alert is the window's and the Quit is the app's, so an account
     /// switch under the alert does not take the exit with it.
@@ -160,6 +166,7 @@ impl MainWindow {
             handle: None,
             place: None,
             cascade: 0,
+            dialogs_closed: Default::default(),
             export_stop: None,
             _key_scope: key_scope,
         }
@@ -645,6 +652,19 @@ impl QuillApp {
         }
         self.end_recording_of_window(chat_id, cx);
         self.close_location_picker_of_window(chat_id, cx);
+        // A mark that its kit dialog was closed from outside goes with the
+        // window: nothing is left to read it.
+        if let Some(open) = self
+            .windows
+            .open
+            .iter()
+            .find(|open| open.chat_id == chat_id)
+        {
+            self.main_window
+                .dialogs_closed
+                .borrow_mut()
+                .remove(&open.handle.window_id());
+        }
         self.windows.open.retain(|open| open.chat_id != chat_id);
         // Its media panel goes: the GIF downloads follow the panels left.
         self.sync_gif_downloads();

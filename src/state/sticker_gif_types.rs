@@ -345,7 +345,10 @@ impl SavedGifs {
                     stale: true,
                 }
             }
-            Self::Unloaded(_) | Self::Loading(_) => {}
+            // The request in flight answers for a list the server has since
+            // changed: its answer is dropped, so ask again.
+            Self::Loading(_) => *self = Self::Unloaded(self.take_items()),
+            Self::Unloaded(_) => {}
         }
     }
 

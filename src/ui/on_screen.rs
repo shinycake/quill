@@ -562,6 +562,10 @@ impl QuillApp {
         } else {
             let _ = main.update(cx, |_, window, cx| window.close_all_dialogs(cx));
         }
+        self.main_window
+            .dialogs_closed
+            .borrow_mut()
+            .insert(main.window_id());
     }
 }
 

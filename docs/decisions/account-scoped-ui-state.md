@@ -6800,7 +6800,7 @@ hand. The shape is gone (one enum or `Fetch<T>` per stage), not commented.
 | 08-107 | `InlineMode { Closed, Open{selected, wait: Idle \| Session \| Armed{.., timer}} }` (`inline_stage.rs`). The debounce timer is owned by the stage: closing or a newer query drops it, so the token counter is gone. |
 | 08-115 | `HistoryMeasure { Seeded, Measured{width,layout,pane} }` in one shared cell; the paint probe replaces the seed whole. |
 | 10-161 | Already fixed: `MainWindowState`. |
-| 13-052 | The closed-window mailbox (`MainWindow::dialogs_closed`) is gone: the shell asks the kit layer (`has_active_dialog`) whether the dialog it showed is still there. `QuillShell::open_dialog` and the host map stay: the shell's kind is what it opened, the host map is the Asker's. |
+| 13-052 | Partly: the mailbox (`MainWindow::dialogs_closed`) is dropped when its window is forgotten, so a mark no shell will read does not stay. Deriving it from the kit layer (`has_active_dialog`) was tried and fails `an_action_that_closed_a_box_leaves_the_alert_opened_after_it`: the kit says whether a dialog is up, not which, so an alert opened right after the box closed looks like the box. `QuillShell::open_dialog`, the host map and the mailbox stay; a single per-window host value needs the kit to name its dialogs. |
 | 08-112 | Already fixed: `SaveTimer`. |
 | 08-147 | `ChatWindowView::closed` is gone: `closing` runs only while the app lists the view (`ChatWindows::lists_view`); the bookkeeping unlists it, so an account switch's earlier close, or a window of the same chat opened since, is not closed twice. |
 | 08-148 | `clear_calls: Option<ClearCallsBox{revoke}>`; closing drops the checkbox. |

@@ -441,9 +441,15 @@ impl QuillShell {
             Self::close_left_dialogs(&app, window, cx);
         }
         // The kit dialog this shell showed was already closed (an account
-        // switch, or the action that finished it): the kit layer is the
-        // truth, and closing again would take whichever dialog is on top now.
-        if self.open_dialog.is_some() && !window.has_active_dialog(cx) {
+        // switch, or the action that finished it): closing again would
+        // take whichever dialog is on top now.
+        let window_id = window.window_handle().window_id();
+        if app.update(cx, |app, _| {
+            app.main_window
+                .dialogs_closed
+                .borrow_mut()
+                .remove(&window_id)
+        }) {
             self.open_dialog = None;
         }
         // A session-wide box this window showed whose flag is clear (its own
@@ -608,6 +614,10 @@ impl QuillApp {
         }
         if !QuillShell::dialog_is_open(self, kind) {
             window.close_dialog(cx);
+            self.main_window
+                .dialogs_closed
+                .borrow_mut()
+                .insert(window.window_handle().window_id());
         }
     }
 

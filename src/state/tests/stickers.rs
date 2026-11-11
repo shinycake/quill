@@ -423,6 +423,11 @@ fn the_saved_gifs_walk_their_stages_and_keep_the_list_in_each() {
     assert!(saved.needs_load() && !saved.is_loaded());
     saved.begin_load();
     assert!(saved.is_loading() && !saved.needs_load());
+    // The saved list changed under the request in flight: its answer is for
+    // the old list, so the list is asked for again.
+    saved.mark_stale();
+    assert!(saved.needs_load() && !saved.is_loading());
+    saved.begin_load();
     saved.loaded(vec![saved_gif(1)]);
     assert!(saved.is_loaded() && !saved.needs_load());
     // `updateSavedAnimations`: fetched again, the list shown meanwhile.
