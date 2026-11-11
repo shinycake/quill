@@ -96,3 +96,11 @@ An Opus reviewer reads every bundle before it merges. In the first bundles about
 - Behaviour that differs from Telegram Desktop because the register entry assumed it should: check tdesktop's
   source behaviour first, and skip the entry (saying so) when tdesktop does the same.
 - An entry wrongly skipped as "already handled": prove it with a test or fix it.
+
+## S4 bundles
+
+S4 entries are minor, and most are `plausible`. Prove each one first (read the code path end to end, check what
+tdesktop does); skip it with a one-line reason when it is not real, cannot happen, or tdesktop behaves the same.
+Fix the real ones with the smallest change that removes the cause. A test per fix still applies where testable.
+The integration branch already carries every S1–S3 fix: re-read the code, many S4 lines moved or were fixed in
+passing (say "already fixed by <commit>" and skip).
