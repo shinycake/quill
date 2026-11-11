@@ -225,7 +225,7 @@ pub struct GifPanel {
     pub search_provider: String,
     pub provider_emojis: Vec<String>,
     /// The searches answered lately, so a window's GIF tab shows its own
-    /// search while another window's is the one in `search_results`.
+    /// search while another window's is the one in the search's `results`.
     pub searches_kept: GifSearches,
 }
 
@@ -267,7 +267,7 @@ impl GifSearches {
 
 /// Which list a GIF panel holds. A search is a stage of its own: for one
 /// query, asked (`Loading`), answered (`Ready`, the results are in
-/// `search_results`), or refused (`Failed`). Its pages are matched to the
+/// `GifSearch::results`), or refused (`Failed`). Its pages are matched to the
 /// request that asked, so a late page of an earlier search changes nothing.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum GifList {
