@@ -319,8 +319,7 @@ impl Session {
                 // clears any stale error.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetAccountTtl) {
                     self.settings.account_ttl_days = Some(days);
-                    self.settings.account_ttl_loading = false;
-                    self.settings.account_error = None;
+                    self.settings.account_op.settle(pending.map(|p| p.id));
                 }
             }
             SettingsPayload::ConnectedWebsites { websites } => {

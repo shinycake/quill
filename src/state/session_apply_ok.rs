@@ -149,9 +149,7 @@ impl Session {
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds })) =
             pending.map(|p| p.purpose)
         {
-            self.settings.default_auto_delete_secs = Some(seconds);
-            self.settings.default_auto_delete_busy = false;
-            self.settings.default_auto_delete_error = None;
+            self.settings.default_auto_delete.succeed(seconds);
         }
         // Slice A7: a `setAccountTtl` succeeded — the server
         // confirmed the write of exactly the sent value, so it
@@ -165,15 +163,13 @@ impl Session {
             pending.map(|p| p.purpose)
         {
             self.settings.account_ttl_days = Some(days);
-            self.settings.account_mutating = false;
-            self.settings.account_error = None;
+            self.settings.account_op.settle(pending.map(|p| p.id));
         }
         if matches!(
             pending.map(|p| p.purpose),
             Some(RequestPurpose::DeleteAccount)
         ) {
-            self.settings.account_mutating = false;
-            self.settings.account_error = None;
+            self.settings.account_op.settle(pending.map(|p| p.id));
         }
         // Slice A8: a `checkPhoneNumberCode` succeeded — the
         // server completed the number change of the number the

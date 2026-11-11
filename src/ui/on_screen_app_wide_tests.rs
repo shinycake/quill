@@ -67,7 +67,7 @@ fn the_account_dialog_does_not_reopen_over_the_next_account(cx: &mut TestAppCont
     frames(&mut vcx);
     app.update_in(&mut vcx, |app, window, cx| {
         app.open_account_lifecycle(cx);
-        app.account_boxes.lifecycle.confirm_delete = true;
+        app.account_boxes.lifecycle.stage = crate::ui::LifecycleStage::ConfirmDelete;
         app.account_boxes
             .lifecycle
             .password
@@ -81,7 +81,7 @@ fn the_account_dialog_does_not_reopen_over_the_next_account(cx: &mut TestAppCont
     assert!(!dialog_up(&mut vcx), "it did not come back");
     app.read_with(&vcx, |app, cx| {
         let lifecycle = &app.account_boxes.lifecycle;
-        assert!(!lifecycle.open && !lifecycle.confirm_delete && !lifecycle.confirm_logout);
+        assert!(!lifecycle.is_open());
         assert_eq!(lifecycle.password.read(cx).value().to_string(), "");
         assert!(QuillShell::open_dialog_names(app).is_empty());
     });
@@ -94,7 +94,7 @@ fn logging_out_from_the_account_box_empties_its_inputs(cx: &mut TestAppContext) 
     frames(&mut vcx);
     app.update_in(&mut vcx, |app, window, cx| {
         app.open_account_lifecycle(cx);
-        app.account_boxes.lifecycle.confirm_logout = true;
+        app.account_boxes.lifecycle.stage = crate::ui::LifecycleStage::ConfirmLogout;
         for input in [
             &app.account_boxes.lifecycle.password,
             &app.account_boxes.lifecycle.reason,
@@ -105,7 +105,7 @@ fn logging_out_from_the_account_box_empties_its_inputs(cx: &mut TestAppContext) 
     });
     app.read_with(&vcx, |app, cx| {
         let lifecycle = &app.account_boxes.lifecycle;
-        assert!(!lifecycle.open && !lifecycle.confirm_logout);
+        assert!(!lifecycle.is_open());
         assert_eq!(lifecycle.password.read(cx).value().to_string(), "");
         assert_eq!(lifecycle.reason.read(cx).value().to_string(), "");
     });

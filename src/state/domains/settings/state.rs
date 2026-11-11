@@ -4,6 +4,67 @@
 use crate::state::fetch::Fetch;
 use crate::state::*;
 
+/// The account-lifecycle round trip (`getAccountTtl`, `setAccountTtl`,
+/// `deleteAccount`): one at a time, each answer matched to the request that
+/// asked. The failure line is classified from the TDLib error code, never
+/// the native message, and clears on the next attempt and on success.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum AccountOp {
+    /// Nothing in flight, nothing failed.
+    #[default]
+    Idle,
+    /// `getAccountTtl` is in flight.
+    Loading(RequestId),
+    /// `setAccountTtl` or `deleteAccount` is in flight: the account
+    /// surfaces stay disabled meanwhile.
+    Mutating(RequestId),
+    /// The last op failed.
+    Failed(String),
+}
+
+impl AccountOp {
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading(_))
+    }
+
+    pub fn is_mutating(&self) -> bool {
+        matches!(self, Self::Mutating(_))
+    }
+
+    /// A request is out, so no other may start.
+    pub fn in_flight(&self) -> bool {
+        self.is_loading() || self.is_mutating()
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            Self::Failed(line) => Some(line),
+            _ => None,
+        }
+    }
+
+    /// `request` answered or failed: leaves the stage it is in flight in.
+    /// An older request's late answer leaves a newer one waiting. Returns
+    /// whether it was the one.
+    pub fn settle(&mut self, request: Option<RequestId>) -> bool {
+        match (&*self, request) {
+            (Self::Loading(id) | Self::Mutating(id), Some(answer)) if *id == answer => {
+                *self = Self::Idle;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The failure of `request`, when it is the one in flight. A request
+    /// with no row (the account went away) leaves the failure line too.
+    pub fn fail(&mut self, request: Option<RequestId>, line: String) {
+        if self.settle(request) || request.is_none() {
+            *self = Self::Failed(line);
+        }
+    }
+}
+
 /// The read-date privacy round-trip. A get and a set are told apart, so
 /// a get answered after a set went out never overwrites the set value:
 /// only the answer to the request named here lands.
@@ -70,12 +131,10 @@ pub struct SettingsState {
     /// Chats with an OS notification we showed (or TDLib reports active
     /// from a previous launch); only these produce a clear.
     pub shown_notification_chats: std::collections::HashSet<ChatId>,
-    /// `getDefaultMessageAutoDeleteTime` cache, seconds (0 = off).
-    pub default_auto_delete_secs: Option<i32>,
-    /// A default auto-delete fetch or write is in flight.
-    pub default_auto_delete_busy: bool,
-    /// Honest one-line failure of the last default auto-delete request.
-    pub default_auto_delete_error: Option<String>,
+    /// `getDefaultMessageAutoDeleteTime` cache, seconds (0 = off): the
+    /// fetch or write in flight (the last value stays visible meanwhile)
+    /// and the honest one-line failure of the last request.
+    pub default_auto_delete: Fetch<i32>,
     /// Parity slice: `getSavedNotificationSounds` cache (titles / durations
     /// for the sound picker; `sound` files download on demand).
     pub saved_notification_sounds: Vec<NotificationSound>,
@@ -166,15 +225,9 @@ pub struct SettingsState {
     /// Slice A7: cached `getAccountTtl` answer, in days — drives the
     /// self-destruct-if-away picker (UI half ships post-Phase-9).
     pub account_ttl_days: Option<i32>,
-    /// Slice A7: a `getAccountTtl` round trip is in flight.
-    pub account_ttl_loading: bool,
-    /// Slice A7: a `deleteAccount` / `setAccountTtl` round trip is in
-    /// flight — the account surfaces stay disabled meanwhile.
-    pub account_mutating: bool,
-    /// Slice A7: honest one-line failure of the last account-lifecycle
-    /// op (classified from the TDLib error code, never the native
-    /// message). Cleared on the next attempt and on success.
-    pub account_error: Option<String>,
+    /// Slice A7: the account-lifecycle round trip in flight, or the honest
+    /// one-line failure of the last one.
+    pub account_op: AccountOp,
     /// Slice A4: cached `getConnectedWebsites` answer (TGX
     /// `SettingsWebsitesController` style); drives the Connected Websites
     /// overlay.
@@ -357,9 +410,7 @@ impl SettingsState {
             pending_attention: false,
             disable_contact_registered_notifications: false,
             shown_notification_chats: std::collections::HashSet::new(),
-            default_auto_delete_secs: None,
-            default_auto_delete_busy: false,
-            default_auto_delete_error: None,
+            default_auto_delete: Fetch::Idle,
             saved_notification_sounds: Vec::new(),
             saved_sounds_loaded: false,
             saved_sounds_stale: false,
@@ -388,9 +439,7 @@ impl SettingsState {
             device_login_result: None,
             sessions_stale: false,
             account_ttl_days: None,
-            account_ttl_loading: false,
-            account_mutating: false,
-            account_error: None,
+            account_op: AccountOp::Idle,
             connected_websites: None,
             passkeys: Default::default(),
             connected_websites_loading: false,

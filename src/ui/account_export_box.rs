@@ -8,6 +8,7 @@
 
 use super::app::QuillApp;
 use super::export_box::default_folder;
+use super::export_state::ExportBox;
 use super::folder_share::finish_dialog;
 use super::shell::{DialogKind, QuillShell};
 use gpui_kit::component::button::*;
@@ -85,13 +86,13 @@ impl QuillApp {
         });
         cx.subscribe(&slider, |this, _, event: &SliderEvent, cx| {
             let (SliderEvent::Change(value) | SliderEvent::Release(value)) = event;
-            if let Some(draft) = this.dialogs.account_export_dialog.as_mut() {
+            if let Some(draft) = this.dialogs.account_export.draft_mut() {
                 draft.settings.size_limit = size_limit_by_index(value.end().round() as usize);
             }
             cx.notify();
         })
         .detach();
-        self.dialogs.account_export_dialog = Some(AccountExportDraft {
+        self.dialogs.account_export = ExportBox::Options(AccountExportDraft {
             settings,
             size_slider: slider,
             error: None,
@@ -105,7 +106,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
         edit: impl FnOnce(&mut AccountSettings),
     ) {
-        if let Some(draft) = self.dialogs.account_export_dialog.as_mut() {
+        if let Some(draft) = self.dialogs.account_export.draft_mut() {
             edit(&mut draft.settings);
             draft.error = None;
         }
@@ -118,7 +119,7 @@ impl QuillApp {
         if quill::agent::ui_driver::guard::refuse_if_injecting("export the account's data") {
             return;
         }
-        let Some(draft) = self.screen.dialogs.account_export_dialog.as_mut() else {
+        let Some(draft) = self.screen.dialogs.account_export.draft_mut() else {
             return;
         };
         let started = match self.live.as_mut() {
@@ -129,7 +130,7 @@ impl QuillApp {
         };
         match started {
             Ok(()) => {
-                self.dialogs.account_export_dialog = None;
+                self.dialogs.account_export.reset();
             }
             Err(error) => draft.error = Some(error.to_string()),
         }
@@ -148,7 +149,7 @@ impl QuillApp {
             let _ = this.update(cx, |this, cx| {
                 if let Ok(Ok(Some(paths))) = result
                     && let Some(folder) = paths.first()
-                    && let Some(draft) = this.dialogs.account_export_dialog.as_mut()
+                    && let Some(draft) = this.dialogs.account_export.draft_mut()
                 {
                     draft.settings.dir = folder.clone();
                 }
@@ -166,13 +167,13 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::AccountExport, |this, _, cx| {
-                this.dialogs.account_export_dialog = None;
+                this.dialogs.account_export.reset();
                 // A running export keeps going; its result shows as a note.
                 this.set_account_export_view(quill::export::ExportView::Hidden);
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            match this.dialogs.account_export_dialog.clone() {
+            match this.dialogs.account_export.draft().cloned() {
                 None => {
                     let (body, footer) = this.account_export_progress(cx);
                     finish_dialog(
@@ -349,7 +350,7 @@ impl QuillApp {
                     .label(tr(keys::CANCEL))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.dialogs.account_export_dialog = None;
+                        this.dialogs.account_export.reset();
                         cx.notify();
                         this.close_kit_dialog_if_done(DialogKind::AccountExport, window, cx);
                     })),
@@ -370,7 +371,7 @@ crate::ui::shell::register_dialogs! {
     AccountExport => DialogSpec::new(
         1510,
         |app| {
-            app.dialogs.account_export_dialog.is_some()
+            app.dialogs.account_export.is_options()
                 || app.session().is_some_and(|s| {
                     s.settings
                         .account_export
@@ -380,7 +381,7 @@ crate::ui::shell::register_dialogs! {
         },
         QuillApp::build_account_export_dialog,
     )
-    .close(|app, _, cx| { app.dialogs.account_export_dialog = None; app.set_account_export_view(quill::export::ExportView::Hidden); cx.notify(); }),
+    .close(|app, _, cx| { app.dialogs.account_export.reset(); app.set_account_export_view(quill::export::ExportView::Hidden); cx.notify(); }),
 }
 
 #[cfg(test)]

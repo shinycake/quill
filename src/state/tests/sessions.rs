@@ -317,8 +317,7 @@ fn account_ttl_answer_writes_cache_for_matching_request() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetAccountTtl, None);
-    session.settings.account_ttl_loading = true;
-    session.settings.account_error = Some("stale".into());
+    session.settings.account_op = AccountOp::Loading(extra);
     apply_json(
         &mut session,
         &seq,
@@ -329,16 +328,15 @@ fn account_ttl_answer_writes_cache_for_matching_request() {
         ),
     );
     assert_eq!(session.settings.account_ttl_days, Some(180));
-    assert!(!session.settings.account_ttl_loading);
-    assert!(session.settings.account_error.is_none());
+    assert_eq!(session.settings.account_op, AccountOp::Idle);
 }
 
 #[test]
 fn account_ttl_fetch_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.account_ttl_loading = true;
     let extra = session.request(RequestPurpose::GetAccountTtl, None);
+    session.settings.account_op = AccountOp::Loading(extra);
     apply_json(
         &mut session,
         &seq,
@@ -348,9 +346,8 @@ fn account_ttl_fetch_error_surfaces_honestly() {
             extra.0
         ),
     );
-    assert!(!session.settings.account_ttl_loading);
     assert_eq!(
-        session.settings.account_error.as_deref(),
+        session.settings.account_op.error(),
         Some("Could not load the account inactivity timer: Telegram refused the request")
     );
 }

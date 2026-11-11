@@ -352,10 +352,10 @@ impl QuillApp {
         let terms_id = terms.id.clone();
         let busy_delete = session
             .as_ref()
-            .is_some_and(|s| s.settings.account_mutating);
+            .is_some_and(|s| s.settings.account_op.is_mutating());
         let account_error = session
             .as_ref()
-            .and_then(|s| s.settings.account_error.clone());
+            .and_then(|s| s.settings.account_op.error().map(str::to_string));
         match self.terms_stage(&terms.id) {
             TermsStage::Terms { age_ok, age_error } => {
                 let min_age = terms.min_user_age;

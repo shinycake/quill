@@ -860,8 +860,8 @@ fn default_auto_delete_fetch_and_set() {
         .ingest(copy_and_parse(&answer, &seq, &dyn_sink).unwrap())
         .unwrap();
     assert_eq!(
-        driver.session.settings.default_auto_delete_secs,
-        Some(86_400)
+        driver.session.settings.default_auto_delete,
+        crate::state::fetch::Fetch::Ready(86_400)
     );
     // Cached: no refetch.
     assert!(driver.get_default_auto_delete().expect("cached").is_none());
@@ -886,8 +886,8 @@ fn default_auto_delete_fetch_and_set() {
         .ingest(copy_and_parse(&ok, &seq, &dyn_sink).unwrap())
         .unwrap();
     assert_eq!(
-        driver.session.settings.default_auto_delete_secs,
-        Some(604_800)
+        driver.session.settings.default_auto_delete,
+        crate::state::fetch::Fetch::Ready(604_800)
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -473,25 +473,23 @@ fn b1_force_reply_arms_pending_target() {
 fn delete_account_ok_clears_mutating_without_local_teardown() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.account_mutating = true;
-    session.settings.account_error = Some("stale".into());
     let extra = session.request(RequestPurpose::DeleteAccount, None);
+    session.settings.account_op = AccountOp::Mutating(extra);
     apply_json(
         &mut session,
         &seq,
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!session.settings.account_mutating);
-    assert!(session.settings.account_error.is_none());
+    assert_eq!(session.settings.account_op, AccountOp::Idle);
 }
 
 #[test]
 fn delete_account_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.account_mutating = true;
     let extra = session.request(RequestPurpose::DeleteAccount, None);
+    session.settings.account_op = AccountOp::Mutating(extra);
     apply_json(
         &mut session,
         &seq,
@@ -501,9 +499,8 @@ fn delete_account_error_surfaces_honestly() {
             extra.0
         ),
     );
-    assert!(!session.settings.account_mutating);
     assert_eq!(
-        session.settings.account_error.as_deref(),
+        session.settings.account_op.error(),
         Some("Could not update the account: Telegram refused the request")
     );
 }

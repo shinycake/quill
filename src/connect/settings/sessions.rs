@@ -1,5 +1,6 @@
 //! Connect driver: device login, active sessions, account TTL, auto-delete and connected websites.
 use super::*;
+use crate::state::AccountOp;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Authorize only a validated scan after explicit user confirmation.
@@ -139,12 +140,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         reason: &str,
         password: &str,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.account_mutating {
+        if !self.chats_path_active() || self.session.settings.account_op.in_flight() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.account_error = None;
         let extra = self.session.request(RequestPurpose::DeleteAccount, None);
-        self.session.settings.account_mutating = true;
+        self.session.settings.account_op = AccountOp::Mutating(extra);
         match self
             .sender
             .send_json(&delete_account(extra, reason, password))
@@ -152,7 +152,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.account_mutating = false;
+                self.session.settings.account_op = AccountOp::Idle;
                 Err(err)
             }
         }
@@ -165,22 +165,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.settings.default_auto_delete_secs.is_some()
-            || self.session.settings.default_auto_delete_busy
-        {
+        let auto_delete = &mut self.session.settings.default_auto_delete;
+        if auto_delete.data().is_some() || auto_delete.is_loading() {
             return Ok(None);
         }
-        self.session.settings.default_auto_delete_error = None;
+        auto_delete.begin();
         let extra = self
             .session
             .request(RequestPurpose::GetDefaultAutoDelete, None);
-        self.session.settings.default_auto_delete_busy = true;
         let json = crate::telegram::requests::get_default_message_auto_delete_time(extra);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.default_auto_delete_busy = false;
+                self.session.settings.default_auto_delete.cancel();
                 Err(err)
             }
         }
@@ -191,23 +189,22 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// the authoritative `ok`.
     pub fn set_default_auto_delete(&mut self, seconds: i32) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active()
-            || self.session.settings.default_auto_delete_busy
+            || self.session.settings.default_auto_delete.is_loading()
             || !crate::auto_delete::is_valid_regular_ttl(seconds)
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.default_auto_delete_error = None;
+        self.session.settings.default_auto_delete.begin();
         let extra = self.session.request(
             RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds }),
             None,
         );
-        self.session.settings.default_auto_delete_busy = true;
         let json = crate::telegram::requests::set_default_message_auto_delete_time(extra, seconds);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.default_auto_delete_busy = false;
+                self.session.settings.default_auto_delete.cancel();
                 Err(err)
             }
         }
@@ -222,18 +219,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         if self.session.settings.account_ttl_days.is_some()
-            || self.session.settings.account_ttl_loading
+            || self.session.settings.account_op.in_flight()
         {
             return Ok(None);
         }
-        self.session.settings.account_error = None;
         let extra = self.session.request(RequestPurpose::GetAccountTtl, None);
-        self.session.settings.account_ttl_loading = true;
+        self.session.settings.account_op = AccountOp::Loading(extra);
         match self.sender.send_json(&get_account_ttl(extra)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.account_ttl_loading = false;
+                self.session.settings.account_op = AccountOp::Idle;
                 Err(err)
             }
         }
@@ -243,20 +239,19 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// mutation at a time; the confirmed days land from the
     /// authoritative `ok` (never an optimistic write).
     pub fn set_account_ttl(&mut self, days: i32) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.account_mutating {
+        if !self.chats_path_active() || self.session.settings.account_op.in_flight() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.account_error = None;
         let extra = self.session.request(
             RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days }),
             None,
         );
-        self.session.settings.account_mutating = true;
+        self.session.settings.account_op = AccountOp::Mutating(extra);
         match self.sender.send_json(&set_account_ttl(extra, days)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.account_mutating = false;
+                self.session.settings.account_op = AccountOp::Idle;
                 Err(err)
             }
         }

@@ -342,6 +342,7 @@ mod event_log_rows;
 mod event_log_text;
 mod export_box;
 mod export_progress;
+mod export_state;
 pub(crate) mod export_quit;
 mod fact_check;
 mod first_run_demo;
