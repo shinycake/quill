@@ -267,6 +267,51 @@ fn enable_unlock_and_rate_limit_persist() {
 }
 
 #[test]
+fn the_rate_limit_holds_when_the_counter_cannot_be_saved() {
+    let root = temp_root("unsaved");
+    let inner = MemorySecretStore::new();
+    let a = acct("primary");
+    inner.put(&a, &DatabaseKey::generate()).unwrap();
+    let state = UnlockState::new();
+    enable(
+        &root,
+        &inner,
+        std::slice::from_ref(&a),
+        "pass",
+        FAST,
+        &state,
+    )
+    .unwrap();
+    state.clear();
+    let t0 = 1_000_000;
+    for _ in 0..3 {
+        assert_eq!(
+            unlock(&root, &state, "nope", t0).unwrap_err(),
+            PasscodeError::Wrong
+        );
+    }
+    // The saved counter is lost (a write that failed leaves the old file).
+    let mut config = load_config(&root).unwrap();
+    config.bad_tries = 0;
+    config.last_try_unix_ms = 0;
+    save_config(&root, &config).unwrap();
+    assert_eq!(
+        unlock(&root, &state, "pass", t0 + 1_000).unwrap_err(),
+        PasscodeError::Flood { retry_in_ms: 4_000 }
+    );
+    unlock(&root, &state, "pass", t0 + 5_000).unwrap();
+    // A success clears the count for the next lock.
+    state.clear();
+    for _ in 0..3 {
+        assert_eq!(
+            unlock(&root, &state, "nope", t0 + 6_000).unwrap_err(),
+            PasscodeError::Wrong
+        );
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn enable_moves_the_key_out_of_the_os_store_and_disable_restores_it() {
     let root = temp_root("migrate");
     let inner = MemorySecretStore::new();

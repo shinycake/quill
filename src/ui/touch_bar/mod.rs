@@ -319,13 +319,21 @@ impl QuillApp {
 
     fn touch_bar_reorder(&mut self, ids: Vec<i64>, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            if let Err(err) = live.driver.set_pinned_chat_order(false, ids) {
-                self.set_note(StatusNote::error(user_error_for(
-                    keys::Q_NOTES_FAILED_PIN_REORDER,
-                    &err,
-                )));
-                // The panel shows the order the server holds again.
-                mac::reorder_refused(cx);
+            match live.driver.set_pinned_chat_order(false, ids) {
+                // Out: the panel keeps the dropped order until the model
+                // shows it.
+                Ok(Some(_)) => {}
+                // Nothing was sent (a reorder is already in flight, or the
+                // order is the model's): the panel shows the model's order.
+                Ok(None) => mac::reorder_refused(cx),
+                Err(err) => {
+                    self.set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_PIN_REORDER,
+                        &err,
+                    )));
+                    // The panel shows the order the server holds again.
+                    mac::reorder_refused(cx);
+                }
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.reorder_pinned_chats(false, &ids);

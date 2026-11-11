@@ -10,19 +10,14 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::chatlist_suggestions::{ACTION_PHONE, PhonePrompt, Suggestion};
+use quill::chatlist_suggestions::{PhoneSuggestion, Suggestion};
 use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// The prompt, or `None` when TDLib has no phone suggestion pending.
     pub(super) fn settings_phone_suggestion(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self
-            .session()?
-            .chat_list
-            .suggestions
-            .actions
-            .contains(ACTION_PHONE)
-        {
+        let phone = self.session()?.chat_list.suggestions.phone;
+        if phone == PhoneSuggestion::Absent {
             return None;
         }
         self.settings_phone_suggestion_body(cx)
@@ -35,7 +30,7 @@ impl QuillApp {
     #[inline(never)]
     fn settings_phone_suggestion_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        if !session.chat_list.suggestions.actions.contains(ACTION_PHONE) {
+        if session.chat_list.suggestions.phone == PhoneSuggestion::Absent {
             return None;
         }
         let phone = session
@@ -44,7 +39,7 @@ impl QuillApp {
             .map(|user| format_phone(&user.phone_number))
             .unwrap_or_default();
         let (muted, border) = (cx.theme().muted_foreground, cx.theme().border);
-        let note = session.chat_list.suggestions.phone_prompt == PhonePrompt::NotMine;
+        let note = session.chat_list.suggestions.phone == PhoneSuggestion::NotMine;
         Some(
             div()
                 .id("settings-phone-suggestion")
@@ -83,8 +78,7 @@ impl QuillApp {
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 if let Some(session) = this.session_mut() {
-                                    session.chat_list.suggestions.phone_prompt =
-                                        PhonePrompt::NotMine;
+                                    session.chat_list.suggestions.answer_phone_no();
                                 }
                                 cx.notify();
                             }))

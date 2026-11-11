@@ -23,8 +23,6 @@ use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{ContactRow, MemberListFilter, SupergroupMembersFetch};
 use quill::telegram::envelope::{ChannelMemberStatus, ChatKind, MessageSender};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// How close to the end of a member list the next page is asked for.
 /// A picker row's userpic (tdesktop `peerListItem.photoSize` is 42; the
@@ -347,7 +345,10 @@ impl QuillApp {
                             .child(tr(keys::Q_PEOPLE_LOADING_MEMBERS)),
                     );
                 }
-                Some(SupergroupMembersFetch::Failed(message)) => {
+                Some(
+                    SupergroupMembersFetch::Failed(message)
+                    | SupergroupMembersFetch::NotSent(message),
+                ) => {
                     list = list.child(
                         div()
                             .flex()
@@ -499,18 +500,9 @@ impl QuillApp {
                 } else {
                     tr(keys::Q_PEOPLE_MANAGE_MEMBERS)
                 }))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::one_shot_dialog_content(
+                    body.into_any_element(),
+                ))
                 .on_close(on_close)
         })
     }

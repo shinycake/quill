@@ -166,7 +166,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         let from_event_id = match self.session.groups.event_log_fetch(chat_id.0) {
-            Some(ChatEventLogFetch::Loaded(page)) if page.has_more => {
+            Some(ChatEventLogFetch::Loaded(page)) if page.has_more() => {
                 page.events.last().map(|event| event.id).unwrap_or(0)
             }
             _ => return Ok(None),
@@ -216,7 +216,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         purpose: GroupsPurpose,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         let polling = purpose == GroupsPurpose::PollChatEventLog;
+        let first_page = from_event_id == 0 && !polling;
         if !self.chats_path_active() {
+            self.fail_event_log_send(chat_id, first_page, polling);
             return Err(ConnectSendError::InvalidRequest);
         }
         if !self.session.chat_can_view_event_log(chat_id) {
@@ -233,6 +235,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if !polling && self.event_log_wait(chat_id).page.is_some() {
             return Ok(None);
+        }
+        if !polling && !first_page {
+            self.session.begin_older_events(chat_id.0);
         }
         if from_event_id == 0 && !polling {
             self.session
@@ -259,9 +264,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             &user_ids,
         )) {
             self.session.requests.take(extra);
-            if from_event_id == 0 && !polling {
-                self.session.groups.reset_event_log_fetch(chat_id.0);
-            }
+            self.fail_event_log_send(chat_id, first_page, polling);
             return Err(err);
         }
         let wait = &mut self
@@ -277,6 +280,25 @@ impl<S: JsonSender> ConnectDriver<S> {
             wait.page = Some(extra);
         }
         Ok(Some(extra))
+    }
+
+    /// A first page that could not be sent ends in the failed stage, so the
+    /// page draws its Retry instead of a spinner nothing will end.
+    /// An older page that could not be sent keeps the loaded log and draws
+    /// its own Retry. A poll that could not be sent changes nothing shown.
+    fn fail_event_log_send(&mut self, chat_id: ChatId, first_page: bool, polling: bool) {
+        if first_page {
+            self.session.groups.reset_event_log_fetch(chat_id.0);
+            self.session.groups.set_event_log_fetch(
+                chat_id.0,
+                ChatEventLogFetch::Failed(send_failed_line("Could not load recent actions")),
+            );
+        } else if !polling {
+            self.session.fail_older_events(
+                chat_id.0,
+                send_failed_line("Could not load earlier actions"),
+            );
+        }
     }
 
     /// The requests `chat_id`'s event log waits for.

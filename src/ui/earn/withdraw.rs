@@ -467,7 +467,7 @@ impl QuillApp {
                         );
                     (tr(keys::SETTINGS_CLOUD_PASSWORD_START_TITLE), body, footer)
                 }
-                WithdrawStep::Checking => {
+                WithdrawStep::Checking(_) => {
                     return dialog.on_close(on_close);
                 }
             };
@@ -489,7 +489,7 @@ crate::ui::shell::register_dialogs! {
         |app| {
             app.earn_state()
                 .and_then(|e| e.withdraw.as_ref())
-                .is_some_and(|w| w.step != WithdrawStep::Checking)
+                .is_some_and(|w| !matches!(w.step, WithdrawStep::Checking(_)))
         },
         QuillApp::build_earn_withdraw_dialog,
     )

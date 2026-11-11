@@ -25,36 +25,47 @@ use crate::agent::tools::{td_policy, td_request};
 use serde_json::Value;
 use std::cell::Cell;
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
-enum Mode {
-    /// The input being handled came from the user.
-    #[default]
-    Idle,
-    /// The input being handled came from the driver.
-    Injecting,
+/// The agent and the log name (`ui_click`) of an input command, for
+/// refusals in a step's deferred half ([`with_injecting`]).
+#[derive(Clone)]
+struct Step {
+    agent: String,
+    tool: &'static str,
 }
 
-/// Everything the guard knows on this thread, as one value: whether input
-/// is being injected, what was refused meanwhile, and the commands that
-/// are open.
-#[derive(Default)]
+/// Where the input commands stand: none open (the latest one is kept for
+/// the log lines of a deferred half that runs after its answer), or
+/// `count` open ([`OpenCommand`]) with `step` the latest to begin.
+enum Commands {
+    Closed { latest: Option<Step> },
+    Open { step: Step, count: u32 },
+}
+
+/// Everything the guard knows on this thread, as one value: how many
+/// injecting scopes are live ([`Injecting`], zero is the user's input),
+/// what was refused meanwhile, and the commands that are open.
 struct Guard {
-    mode: Mode,
+    injecting: u32,
     refusals: Vec<String>,
-    /// The agent and the log name (`ui_click`) of the latest input command,
-    /// for refusals in a step's deferred half ([`with_injecting`]).
-    step: Option<(String, &'static str)>,
-    /// Input commands that have not answered yet ([`OpenCommand`]).
-    open: u32,
+    commands: Commands,
+}
+
+impl Default for Guard {
+    fn default() -> Self {
+        Self {
+            injecting: 0,
+            refusals: Vec::new(),
+            commands: Commands::Closed { latest: None },
+        }
+    }
 }
 
 thread_local! {
     static GUARD: Cell<Guard> = const {
         Cell::new(Guard {
-            mode: Mode::Idle,
+            injecting: 0,
             refusals: Vec::new(),
-            step: None,
-            open: 0,
+            commands: Commands::Closed { latest: None },
         })
     };
 }
@@ -80,8 +91,15 @@ impl OpenCommand {
     /// An input command from `agent` starts; `tool` is its log name.
     pub fn begin(agent: &str, tool: &'static str) -> Self {
         on_guard(|guard| {
-            guard.step = Some((agent.to_string(), tool));
-            guard.open = guard.open.saturating_add(1);
+            let step = Step {
+                agent: agent.to_string(),
+                tool,
+            };
+            let count = match &guard.commands {
+                Commands::Open { count, .. } => count.saturating_add(1),
+                Commands::Closed { .. } => 1,
+            };
+            guard.commands = Commands::Open { step, count };
         });
         Self(())
     }
@@ -89,30 +107,67 @@ impl OpenCommand {
 
 impl Drop for OpenCommand {
     fn drop(&mut self) {
-        let left = on_guard(|guard| {
-            guard.open = guard.open.saturating_sub(1);
-            guard.open
+        let closed = on_guard(|guard| {
+            let commands =
+                std::mem::replace(&mut guard.commands, Commands::Closed { latest: None });
+            match commands {
+                Commands::Open { step, count } if count > 1 => {
+                    guard.commands = Commands::Open {
+                        step,
+                        count: count - 1,
+                    };
+                    false
+                }
+                Commands::Open { step, .. } => {
+                    guard.commands = Commands::Closed { latest: Some(step) };
+                    true
+                }
+                Commands::Closed { latest } => {
+                    guard.commands = Commands::Closed { latest };
+                    true
+                }
+            }
         });
-        if left == 0 {
+        if closed {
             log_deferred(take_refusals());
         }
     }
 }
 
-/// Whether the input being handled right now came from the driver.
-pub fn injecting() -> bool {
-    on_guard(|guard| guard.mode == Mode::Injecting)
+/// One scope of injected input on this thread: the driver's step, or the
+/// deferred half of one. Input is the driver's while any is live; dropping
+/// it restores what was there before, so a scope can never leave every
+/// user write refused.
+pub struct Injecting(());
+
+impl Injecting {
+    pub fn begin() -> Self {
+        on_guard(|guard| guard.injecting = guard.injecting.saturating_add(1));
+        Self(())
+    }
 }
 
-/// Mark the start and end of one injected input on this thread.
+impl Drop for Injecting {
+    fn drop(&mut self) {
+        on_guard(|guard| guard.injecting = guard.injecting.saturating_sub(1));
+    }
+}
+
+/// Whether the input being handled right now came from the driver.
+pub fn injecting() -> bool {
+    on_guard(|guard| guard.injecting > 0)
+}
+
+/// Tests: mark the start and end of one injected input on this thread.
+#[cfg(any(test, feature = "test-support"))]
 pub fn set_injecting(on: bool) {
-    on_guard(|guard| guard.mode = if on { Mode::Injecting } else { Mode::Idle });
+    on_guard(|guard| guard.injecting = u32::from(on));
 }
 
 /// Runs `f` under the injecting flag when `on`: the deferred half of an
 /// agent's step (a clicked link run at render, a deep link's chat open
 /// once TDLib resolved it) meets the same refusals as the step itself.
-/// The flag goes back to what it was after.
+/// The scope ends with `f`.
 ///
 /// While the command is still open ([`OpenCommand`]), its reply carries
 /// the refusals. After it answered (TDLib resolved a link later, a render
@@ -123,17 +178,14 @@ pub fn with_injecting<R>(on: bool, f: impl FnOnce() -> R) -> R {
     if !on {
         return f();
     }
-    let was = injecting();
-    if was || on_guard(|guard| guard.open) > 0 {
-        set_injecting(true);
-        let out = f();
-        set_injecting(was);
-        return out;
+    if injecting() || on_guard(|guard| matches!(guard.commands, Commands::Open { .. })) {
+        let _scope = Injecting::begin();
+        return f();
     }
     let outer = take_refusals();
-    set_injecting(true);
+    let scope = Injecting::begin();
     let out = f();
-    set_injecting(false);
+    drop(scope);
     let deferred = take_refusals();
     on_guard(|guard| guard.refusals = outer);
     log_deferred(deferred);
@@ -144,12 +196,17 @@ fn log_deferred(refusals: Vec<String>) {
     if refusals.is_empty() {
         return;
     }
-    let (agent, tool) = on_guard(|guard| guard.step.clone()).unwrap_or_else(|| {
-        (
+    let step = on_guard(|guard| match &guard.commands {
+        Commands::Open { step, .. } => Some(step.clone()),
+        Commands::Closed { latest } => latest.clone(),
+    });
+    let (agent, tool) = match step {
+        Some(step) => (step.agent, step.tool),
+        None => (
             super::takeover::last_agent().unwrap_or_default(),
             "ui_click",
-        )
-    });
+        ),
+    };
     let account = crate::settings::safe_app_root()
         .map(|root| crate::settings::active_account(&root))
         .unwrap_or_else(crate::ids::AccountKey::primary);

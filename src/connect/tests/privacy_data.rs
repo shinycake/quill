@@ -530,13 +530,7 @@ fn phone_number_suggestion_is_hidden_with_the_phone_action() {
         &mut f,
         r#"{"@type":"updateSuggestedActions","added_actions":[{"@type":"suggestedActionCheckPhoneNumber"}],"removed_actions":[]}"#,
     );
-    assert!(
-        f.1.session
-            .chat_list
-            .suggestions
-            .actions
-            .contains(ACTION_PHONE)
-    );
+    assert!(f.1.session.chat_list.suggestions.has_action(ACTION_PHONE));
     f.1.hide_suggestion(&Suggestion::CheckPhone).unwrap();
     let request = last_request(&f);
     assert_eq!(request["@type"], "hideSuggestedAction");
@@ -544,12 +538,6 @@ fn phone_number_suggestion_is_hidden_with_the_phone_action() {
         request["action"]["@type"],
         "suggestedActionCheckPhoneNumber"
     );
-    assert!(
-        !f.1.session
-            .chat_list
-            .suggestions
-            .actions
-            .contains(ACTION_PHONE)
-    );
+    assert!(!f.1.session.chat_list.suggestions.has_action(ACTION_PHONE));
     cleanup(f);
 }

@@ -316,7 +316,7 @@ impl QuillApp {
                         .text_color(danger())
                         .on_click(cx.listener(|this, _, _, cx| {
                             if let Some(setup) = this.earn_mut().and_then(|e| e.setup.as_mut()) {
-                                setup.confirm = Some(SetupConfirm::End);
+                                setup.ask_confirm(SetupConfirm::End);
                             }
                             cx.notify();
                         }))
@@ -464,7 +464,7 @@ impl QuillApp {
                 .loading(setup.is_saving())
                 .on_click(cx.listener(|this, _, _, cx| {
                     if let Some(setup) = this.earn_mut().and_then(|e| e.setup.as_mut()) {
-                        setup.confirm = Some(SetupConfirm::Save);
+                        setup.ask_confirm(SetupConfirm::Save);
                     }
                     cx.notify();
                 })),

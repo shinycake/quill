@@ -223,7 +223,9 @@ impl Session {
                         .archive_settings
                         .answered(pending.map(|p| p.id), settings)
                 {
-                    self.chat_list.archive_mute.note_settings(&settings);
+                    self.chat_list
+                        .archive_mute
+                        .note_settings(pending.map(|p| p.id), &settings);
                 }
             }
         }

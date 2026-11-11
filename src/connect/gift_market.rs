@@ -5,8 +5,8 @@
 //! called from a button that names the price or the gifts.
 use super::*;
 use crate::gift_market::{
-    AuctionFetch, AuctionFollow, BuyPhase, CraftGift, CraftRun, CraftSession, GiftMarketPurpose,
-    PageLoad, ResaleBuy, ResaleFilter, ResaleSearch,
+    AuctionFetch, AuctionFollow, CraftGift, CraftRun, CraftSession, GiftMarketPurpose, PageLoad,
+    ResaleBuy, ResaleFilter, ResaleSearch,
 };
 use crate::ids::RequestId;
 use crate::lang::{keys, tr};
@@ -112,17 +112,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         .ok_or(ConnectSendError::InvalidRequest)?;
         if !more {
-            search.page = 0;
             search.next_offset.clear();
         }
         // A next page extends a list that has an answer; a first page
         // starts it over.
         let extends = more && search.load.answered();
-        let (gift_id, page) = (search.gift_id, search.page);
+        let gift_id = search.gift_id;
         let filter = search.filter.clone();
         let offset = search.next_offset.clone();
         let for_crafting = search.for_crafting;
-        let result = self.send_market(GiftMarketPurpose::SearchResale { gift_id, page }, |extra| {
+        let result = self.send_market(GiftMarketPurpose::SearchResale { gift_id }, |extra| {
             rq::search_gifts_for_resale(extra, gift_id, &filter, for_crafting, &offset)
         });
         let market = &mut self.session.payments.gift_market;
@@ -135,7 +134,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             match &result {
                 Ok(extra) => {
                     search.load.begin(extra.0, extends);
-                    search.page = page.saturating_add(1);
                 }
                 Err(_) => search
                     .load
@@ -220,8 +218,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Ok(extra) = &result
             && let Some(buy) = self.session.payments.gift_market.buy.as_mut()
         {
-            buy.price_changed = None;
-            buy.phase = BuyPhase::Sending { request: extra.0 };
+            buy.begin_send(extra.0);
         }
         result
     }
@@ -258,11 +255,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if was.gift_id() == gift_id {
             return Ok(());
         }
-        // A follow that never opened has nothing to close.
+        // A follow that never opened has nothing to close. A close that did
+        // not go out leaves the follow as it was (the server still sends
+        // that auction's updates), and the next call closes it again: the
+        // send is refused locally until the connection is ready, so nothing
+        // goes out meanwhile.
         if let AuctionFollow::Following { gift_id: old, .. } = was {
-            let _ = self.send_market(GiftMarketPurpose::CloseAuction, |extra| {
+            self.send_market(GiftMarketPurpose::CloseAuction, |extra| {
                 rq::follow_gift_auction(extra, old, false)
-            });
+            })?;
         }
         self.session.payments.gift_market.follow = AuctionFollow::None;
         let Some(new) = gift_id else {
@@ -350,10 +351,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sent = self.send_market(GiftMarketPurpose::AcquiredGifts { gift_id }, |extra| {
             rq::get_gift_auction_acquired_gifts(extra, gift_id)
         });
-        if sent.is_err()
-            && let Some(list) = self.session.payments.gift_market.acquired.get_mut(&gift_id)
-        {
-            list.fail("not sent");
+        if let Some(list) = self.session.payments.gift_market.acquired.get_mut(&gift_id) {
+            match &sent {
+                Ok(request) => list.sent(*request),
+                Err(_) => list.fail("not sent"),
+            }
         }
         sent
     }
@@ -373,10 +375,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sent = self.send_market(purpose, |extra| {
             rq::get_gift_upgrade_preview(extra, gift_id)
         });
-        if sent.is_err()
-            && let Some(preview) = self.session.payments.gift_market.previews.get_mut(&gift_id)
-        {
-            preview.fail("not sent");
+        if let Some(preview) = self.session.payments.gift_market.previews.get_mut(&gift_id) {
+            match &sent {
+                Ok(request) => preview.sent(*request),
+                Err(_) => preview.fail("not sent"),
+            }
         }
         sent
     }
@@ -422,13 +425,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             craft.candidates_load == PageLoad::Idle,
             craft.market.load == PageLoad::Idle,
         );
-        if own {
-            self.craft_candidates_page(false)?;
-        }
-        if market {
-            self.search_resale_page(true, false)?;
-        }
-        Ok(())
+        // The two lists are independent: a refused first send fails its own
+        // list (its error and Retry show) and the other is still asked.
+        let own = if own {
+            self.craft_candidates_page(false).map(|_| ())
+        } else {
+            Ok(())
+        };
+        let market = if market {
+            self.search_resale_page(true, false).map(|_| ())
+        } else {
+            Ok(())
+        };
+        own.and(market)
     }
 
     /// "Retry" of a failed "on sale" list in Select Gifts: the first page
@@ -487,21 +496,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_mut()
             .ok_or(ConnectSendError::InvalidRequest)?;
         if !more {
-            craft.candidates_page = 0;
             craft.candidates_offset.clear();
         }
         let extends = more && craft.candidates_load.answered();
-        let (gift_id, page) = (craft.regular_gift_id, craft.candidates_page);
+        let gift_id = craft.regular_gift_id;
         let offset = craft.candidates_offset.clone();
-        let result = self.send_market(
-            GiftMarketPurpose::GiftsForCrafting { gift_id, page },
-            |extra| rq::get_gifts_for_crafting(extra, gift_id, &offset),
-        );
+        let result = self.send_market(GiftMarketPurpose::GiftsForCrafting { gift_id }, |extra| {
+            rq::get_gifts_for_crafting(extra, gift_id, &offset)
+        });
         if let Some(craft) = self.session.payments.gift_market.craft.as_mut() {
             match &result {
                 Ok(extra) => {
                     craft.candidates_load.begin(extra.0, extends);
-                    craft.candidates_page = page.saturating_add(1);
                 }
                 Err(_) => craft
                     .candidates_load

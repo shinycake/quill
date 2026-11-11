@@ -37,6 +37,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.settings.tone_upload = ToneUpload::Uploading {
                     name: display_name(path),
                     target,
+                    request: extra,
                 };
                 Ok(extra)
             }

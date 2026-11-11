@@ -114,7 +114,7 @@ fn a_removal_waits_for_the_server_then_refetches() {
     answer(&mut p, "removeLoginPasskey", json!({"@type": "ok"}));
     let state = &p.0.session.settings.passkeys;
     assert!(state.find("k2").is_none());
-    assert!(state.removing.is_none());
+    assert!(!state.is_removing());
     assert!(!state.is_known());
     // The same ingest asked for the list again.
     assert_eq!(count(&p.1, "getLoginPasskeys"), 2);
@@ -150,9 +150,9 @@ fn failures_are_shown_and_keep_the_list() {
     );
     let state = &p.0.session.settings.passkeys;
     assert_eq!(state.passkeys().len(), 2);
-    assert!(state.removing.is_none());
+    assert!(!state.is_removing());
     assert_eq!(
-        state.error.as_deref(),
+        state.remove_error(),
         Some("Could not delete the passkey: Telegram refused the request")
     );
     // No refetch after a failed removal.
@@ -169,7 +169,7 @@ fn failures_are_shown_and_keep_the_list() {
     assert!(!state.is_known());
     assert_eq!(state.row_label().text(), "Loading...");
     assert_eq!(
-        state.error.as_deref(),
+        state.list_error(),
         Some("Could not load the passkeys (error 500)")
     );
     // The failure does not loop: no retry on the next ingest.
@@ -258,9 +258,9 @@ fn a_failed_registration_forgets_the_options() {
         json!({"@type": "error", "code": 400, "message": "PASSKEY_CREDENTIAL_NOT_FOUND"}),
     );
     let state = &p.0.session.settings.passkeys;
-    assert!(matches!(state.add, crate::passkeys::PasskeyAdd::Idle));
+    assert!(matches!(state.add, crate::passkeys::PasskeyAdd::Failed(_)));
     assert_eq!(state.passkeys().len(), 2);
-    assert!(state.error.is_some());
+    assert!(state.add_error().is_some());
     // The next try asks for new options.
     p.0.begin_register().unwrap();
     assert_eq!(count(&p.1, "getPasskeyParameters"), 2);
@@ -272,7 +272,7 @@ fn a_failed_registration_forgets_the_options() {
     );
     let state = &p.0.session.settings.passkeys;
     assert!(!state.add_busy());
-    assert!(state.error.is_some());
+    assert!(state.add_error().is_some());
 }
 
 /// Round 17 C finding 23: options that landed after the lock (and were never
@@ -335,7 +335,7 @@ fn an_unreadable_add_answer_ends_the_registration() {
     answer(&mut p, "addLoginPasskey", json!({"@type": "passkey"}));
     let state = &p.0.session.settings.passkeys;
     assert!(!state.add_busy());
-    assert!(state.error.is_some());
+    assert!(state.add_error().is_some());
     assert!(p.0.begin_register().is_ok());
 }
 

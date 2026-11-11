@@ -295,7 +295,12 @@ fn the_gifts_panel_pages_through_your_upgraded_gifts() {
     assert_eq!(gifts.list.len(), 1, "burned gifts are left out");
     assert_eq!(gifts.list[0].id, 101);
     assert_eq!(gifts.list[0].received_id, "r1");
-    assert_eq!(gifts.stage, GiftsStage::Listed(GiftsRest::More));
+    assert_eq!(
+        gifts.stage,
+        GiftsStage::Listed(GiftsRest::More {
+            offset: "page2".into()
+        })
+    );
     rig.driver
         .fetch_share_theme_gifts(QrPeer::User(ME), true, NOW)
         .unwrap();
@@ -331,7 +336,7 @@ fn a_stale_gifts_page_is_dropped() {
         "next_offset": "", "gifts": [upgraded("r1", 101, false)]}),
     );
     let gifts = &rig.driver.session.users_state.peer_qr.gifts;
-    assert!(gifts.list.is_empty() && gifts.stage == GiftsStage::First);
+    assert!(gifts.list.is_empty() && matches!(gifts.stage, GiftsStage::FirstAsking(_)));
 }
 
 #[test]
@@ -380,7 +385,7 @@ fn a_late_page_of_your_gifts_stays_out_of_a_channels_list() {
     );
     let gifts = &rig.driver.session.users_state.peer_qr.gifts;
     assert!(
-        gifts.list.is_empty() && gifts.stage == GiftsStage::First,
+        gifts.list.is_empty() && matches!(gifts.stage, GiftsStage::FirstAsking(_)),
         "your page is dropped"
     );
     rig.feed(

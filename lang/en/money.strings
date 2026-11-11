@@ -934,3 +934,6 @@
 "qll_money_could_not_load_revenue_reason" = "Couldn't load the revenue: {reason}";
 "qll_money_stars_not_sent" = "Stars were not sent";
 "qll_money_stars_not_sent_reason" = "Stars were not sent: {reason}";
+"qll_money_giveaway_payment_pending_title" = "Waiting for the payment";
+"qll_money_giveaway_payment_pending" = "Finish the verification in your browser. Your giveaway starts when the payment goes through. If you did not finish it, start over.";
+"qll_money_giveaway_start_over" = "Start over";

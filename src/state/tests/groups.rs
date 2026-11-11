@@ -1,6 +1,7 @@
 //! State reducer tests: groups.
 use super::common::*;
 use super::*;
+use crate::telegram::envelope::ParsedCommunityFullInfo;
 
 #[test]
 fn custom_title_failure_surfaces_in_member_dialog() {
@@ -396,7 +397,7 @@ fn set_community_name_ok_drops_full_info_for_refetch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!session.groups.community_full_infos.contains_key(&42));
+    assert!(session.groups.community_full_infos.wants_fetch(42));
     // Error path: the cache stays.
     session.groups.community_full_infos.insert(
         42,
@@ -418,7 +419,7 @@ fn set_community_name_ok_drops_full_info_for_refetch() {
             extra.0
         ),
     );
-    assert!(session.groups.community_full_infos.contains_key(&42));
+    assert!(!session.groups.community_full_infos.wants_fetch(42));
 }
 
 #[test]

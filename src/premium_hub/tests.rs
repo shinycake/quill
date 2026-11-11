@@ -216,24 +216,23 @@ fn hub_pages_append_and_replace() {
         },
         true,
     );
-    assert_eq!(hub.transactions.len(), 2);
-    assert!(hub.tx_offset.is_empty());
-    hub.tx_selected = Some("b".into());
+    assert_eq!(hub.stars.rows.len(), 2);
+    assert!(hub.stars.offset.is_empty());
+    hub.stars.open();
+    hub.stars.select(Some("b".into()));
     assert_eq!(hub.selected_tx().map(|t| t.id.as_str()), Some("b"));
     hub.apply_transactions(StarTxPage::default(), false);
-    assert!(hub.transactions.is_empty());
+    assert!(hub.stars.rows.is_empty());
 }
 
 #[test]
 fn only_own_gifts_are_mine() {
-    let mut hub = PremiumHub {
-        gifts_owner: Some(MessageSender::User { user_id: 4 }),
-        ..Default::default()
-    };
+    let mut hub = PremiumHub::default();
+    hub.received.owner = Some(MessageSender::User { user_id: 4 });
     assert!(hub.gifts_are_mine(Some(4)));
     assert!(!hub.gifts_are_mine(Some(5)));
     assert!(!hub.gifts_are_mine(None));
-    hub.gifts_owner = Some(MessageSender::Chat { chat_id: 4 });
+    hub.received.owner = Some(MessageSender::Chat { chat_id: 4 });
     assert!(!hub.gifts_are_mine(Some(4)));
 }
 
@@ -264,4 +263,69 @@ fn the_label_of_the_smallest_star_count_does_not_overflow() {
         nanos: 0,
     };
     assert_eq!(small.label(), "-1,234");
+}
+
+/// 04-026: a filter change replaces the history whole: rows, cursor, page
+/// stage and the open transaction start over, the box stays open.
+#[test]
+fn another_stars_tab_replaces_the_whole_history() {
+    use crate::premium_hub::page_stage::PageStage;
+    let mut hub = PremiumHub::default();
+    hub.stars.open();
+    hub.stars.offset = "next".into();
+    hub.stars.page = PageStage::Ready;
+    hub.stars.select(Some("a".into()));
+    assert_eq!(hub.stars.selected(), Some("a"));
+    hub.stars.switch_filter(TxFilter::Incoming);
+    assert_eq!(hub.stars.filter, TxFilter::Incoming);
+    assert!(hub.stars.is_open() && hub.stars.selected().is_none());
+    assert!(hub.stars.rows.is_empty() && hub.stars.offset.is_empty());
+    assert_eq!(hub.stars.page, PageStage::Idle);
+    // A closed box shows no details, and closing takes the selection.
+    hub.stars.select(Some("b".into()));
+    assert_eq!(hub.stars.selected(), Some("b"));
+    hub.stars.close();
+    assert!(!hub.stars.is_open() && hub.stars.selected().is_none());
+    hub.stars.select(Some("c".into()));
+    assert!(hub.stars.selected().is_none());
+}
+
+/// 04-025: opening the gifts of another owner replaces the whole list; a
+/// change still out keeps its lock, and a refetch owed to the old list goes.
+#[test]
+fn opening_gifts_of_another_owner_replaces_the_list_but_keeps_a_change_in_flight() {
+    use crate::ids::RequestId;
+    use crate::state::fetch::ListOp;
+    let user = MessageSender::User { user_id: 4 };
+    let chat = MessageSender::Chat { chat_id: 9 };
+    let mut list = ReceivedGifts::opened_for(user, ListOp::Idle);
+    assert!(list.is_open() && list.owner == Some(user));
+    list.total = 3;
+    list.offset = "more".into();
+    list.notice = Some("old".into());
+    list.view.select(Some("g".into()));
+    list.op.begin(RequestId(7));
+    list = ReceivedGifts::opened_for(chat, list.op);
+    assert_eq!(list.owner, Some(chat));
+    assert_eq!(
+        (list.total, list.offset.as_str(), list.notice.as_deref()),
+        (0, "", None)
+    );
+    assert!(list.view.selected().is_none() && list.is_open());
+    assert_eq!(list.op, ListOp::Mutating(RequestId(7)));
+    list.op.mark_stale();
+    list.restart();
+    assert_eq!(list.owner, Some(chat), "the same owner's list from the top");
+    assert!(list.op.is_mutating(), "the change in flight stays");
+    let stale = ReceivedGifts::opened_for(user, ListOp::Stale);
+    assert!(
+        !stale.op.is_stale(),
+        "a refetch owed to the old list is not owed"
+    );
+    // Closing keeps the list for a change still out, and shows no panel.
+    let mut closed = stale;
+    closed.close();
+    assert!(!closed.is_open());
+    closed.view.select(Some("x".into()));
+    assert!(closed.view.selected().is_none());
 }

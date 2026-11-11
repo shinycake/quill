@@ -250,13 +250,20 @@ pub fn claim(app_root: &Path, key: &AccountKey, user_id: i64, origin: SignInOrig
     if someone_else {
         forget(app_root, key);
     }
-    let owner_error = std::fs::create_dir_all(&paths.root)
-        .and_then(|()| crate::settings::write_json_atomic(&file, &Owner { user_id }))
-        .err();
     Claimed {
         dropped: someone_else,
-        owner_error,
+        owner_error: write_owner(app_root, key, user_id).err(),
     }
+}
+
+/// Save `user_id` as the folder's owner. Only the write: a retry after a
+/// failed save must not run [`claim`] again, which would take the new
+/// owner's own files for leftovers of someone else.
+pub fn write_owner(app_root: &Path, key: &AccountKey, user_id: i64) -> std::io::Result<()> {
+    let paths = AccountPaths::for_root(app_root, key);
+    std::fs::create_dir_all(&paths.root).and_then(|()| {
+        crate::settings::write_json_atomic(&paths.root.join(OWNER_FILE), &Owner { user_id })
+    })
 }
 
 #[cfg(test)]

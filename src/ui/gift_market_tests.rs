@@ -126,7 +126,7 @@ fn closing_the_buy_box_mid_purchase_keeps_the_purchase(cx: &mut TestAppContext) 
             .as_mut()
             .and_then(|s| s.payments.gift_market.buy.as_mut())
         {
-            buy.phase = quill::gift_market::BuyPhase::Sending { request: 41 };
+            buy.begin_send(41);
         }
         app.market_back(cx);
         assert_eq!(app.gift_market.top(), Some(&MarketBox::Resale));

@@ -2,14 +2,15 @@
 //! `ApiWrap::LoadedFileCache`: a file that occurs again (a sticker sent 200
 //! times, a forwarded video) links to the first copy instead of being
 //! downloaded and copied again.
-use std::cell::RefCell;
+use crate::locks::lock_or_recover;
 use std::collections::{HashMap, VecDeque};
+use std::sync::Mutex;
 
 /// Bounds the map on a huge export; an evicted file is only copied again.
 const LIMIT: usize = 100_000;
 
 #[derive(Debug, Default)]
-pub struct LoadedFiles(RefCell<Cache>);
+pub struct LoadedFiles(Mutex<Cache>);
 
 #[derive(Debug, Default)]
 struct Cache {
@@ -20,11 +21,11 @@ struct Cache {
 impl LoadedFiles {
     /// Where the file was saved, relative to the export root.
     pub fn find(&self, file_id: i32) -> Option<String> {
-        self.0.borrow().paths.get(&file_id).cloned()
+        lock_or_recover(&self.0).paths.get(&file_id).cloned()
     }
 
     pub fn save(&self, file_id: i32, root_relative: String) {
-        let mut cache = self.0.borrow_mut();
+        let mut cache = lock_or_recover(&self.0);
         if cache.paths.insert(file_id, root_relative).is_none() {
             cache.order.push_back(file_id);
         }

@@ -349,9 +349,7 @@ impl QuillApp {
     pub(in crate::ui) fn stars_stats_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         let me = session.my_user_id?;
-        if session.payments.earn.self_stats != Some(true) {
-            return None;
-        }
+        session.payments.earn.self_stats.data()?;
         Some(
             Button::new("stars-view-statistics")
                 .label(tr(keys::Q_MONEY_VIEW_STATISTICS))

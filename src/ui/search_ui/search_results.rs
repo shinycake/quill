@@ -27,8 +27,9 @@ impl QuillApp {
         let tab = session.map_or(SearchTab::Chats, |s| {
             SearchTab::of(&s.search.search.filters)
         });
-        let public_scope = session
-            .is_some_and(|s| s.search.search.filters.scope == SearchScope::PublicPosts && !recents);
+        let public_scope = session.is_some_and(|s| {
+            s.search.search.filters.scope() == SearchScope::PublicPosts && !recents
+        });
         let apps_scope = tab == SearchTab::Apps;
         // The Channels tab lists its channels until a query is typed; the
         // media tabs list their kind of message from every chat.

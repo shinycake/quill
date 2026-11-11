@@ -70,7 +70,7 @@ impl Rig {
             .new_chats
             .creations
             .get(&extra)
-            .and_then(|creation| creation.outcome.clone())
+            .and_then(crate::state::NewChatCreation::outcome)
     }
 
     fn create(
@@ -133,13 +133,14 @@ fn a_channel_is_created_then_gets_photo_link_and_subscribers() {
         progress: CreateProgress::InFlight,
     };
     assert_eq!(
-        rig.driver.session.settled_new_chat(&stage),
-        NewChatStage::Creating {
-            request: extra,
-            back: crate::new_chat::NewChatBack::Info,
-            progress: CreateProgress::Created(chat),
+        rig.driver
+            .session
+            .settled_new_chat(NewChatKind::Channel, &stage),
+        NewChatStage::Type {
+            chat,
+            save: TypeSaveStage::Editing,
         },
-        "the answer is taken into the stage"
+        "the answer moves the stage to the type step, not holding the create"
     );
 
     let sent = rig
@@ -297,7 +298,9 @@ fn a_refused_or_lost_type_save_keeps_the_type_step() {
         save: TypeSaveStage::Saving(sent.clone()),
     };
     assert_eq!(
-        rig.driver.session.settled_new_chat(&stage),
+        rig.driver
+            .session
+            .settled_new_chat(NewChatKind::Channel, &stage),
         stage,
         "the Save is still out"
     );
@@ -307,7 +310,9 @@ fn a_refused_or_lost_type_save_keeps_the_type_step() {
     ));
     assert!(
         matches!(
-            rig.driver.session.settled_new_chat(&stage),
+            rig.driver
+                .session
+                .settled_new_chat(NewChatKind::Channel, &stage),
             NewChatStage::Type {
                 save: TypeSaveStage::Refused(_),
                 ..
@@ -340,12 +345,19 @@ fn an_answered_type_save_moves_the_stage_on() {
         chat,
         save: TypeSaveStage::Saving(sent.clone()),
     };
-    assert_eq!(rig.driver.session.settled_new_chat(&stage), stage);
+    assert_eq!(
+        rig.driver
+            .session
+            .settled_new_chat(NewChatKind::Channel, &stage),
+        stage
+    );
     for id in &sent {
         rig.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, id.0));
     }
     assert_eq!(
-        rig.driver.session.settled_new_chat(&stage),
+        rig.driver
+            .session
+            .settled_new_chat(NewChatKind::Channel, &stage),
         NewChatStage::Subscribers { chat }
     );
     // A create whose request is gone with no answer returns the form.
@@ -355,7 +367,9 @@ fn an_answered_type_save_moves_the_stage_on() {
         progress: CreateProgress::InFlight,
     };
     assert!(matches!(
-        rig.driver.session.settled_new_chat(&lost),
+        rig.driver
+            .session
+            .settled_new_chat(NewChatKind::Channel, &lost),
         NewChatStage::Creating {
             progress: CreateProgress::Lost,
             ..
@@ -380,7 +394,9 @@ fn a_lost_type_save_request_lands_in_refused() {
     };
     assert!(
         matches!(
-            rig.driver.session.settled_new_chat(&stage),
+            rig.driver
+                .session
+                .settled_new_chat(NewChatKind::Channel, &stage),
             NewChatStage::Type {
                 save: TypeSaveStage::Refused(_),
                 ..
@@ -407,7 +423,9 @@ fn a_lost_type_save_request_lands_in_refused() {
         save: TypeSaveStage::Saving(sent),
     };
     assert_eq!(
-        rig.driver.session.settled_new_chat(&stage),
+        rig.driver
+            .session
+            .settled_new_chat(NewChatKind::Channel, &stage),
         NewChatStage::Subscribers { chat }
     );
 }
