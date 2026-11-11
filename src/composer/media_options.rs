@@ -159,7 +159,7 @@ impl PhotoPrep {
 
 impl AttachmentExtras {
     pub fn is_gif(&self) -> bool {
-        self.gif != GifMode::Off
+        matches!(self.gif, GifMode::Gif | GifMode::SoundRemoved)
     }
 
     /// Turn the GIF on (keeping a taken-out sound) or off.
