@@ -72,7 +72,7 @@ fn a_backdrop_picked_in_your_box_is_saved_when_the_panel_closes(cx: &mut TestApp
     );
     app.read_with(vcx, |app, _| {
         let open = app.peer_qr.open.as_ref().expect("the box stays");
-        assert!(open.state.save.out().is_none());
+        assert!(open.state.saving().is_none());
         assert_eq!(
             open.state.served,
             Some(ThemeChoice::Emoji {
@@ -175,11 +175,8 @@ fn the_gifts_panel_lists_your_gifts_and_saves_the_one_picked(cx: &mut TestAppCon
     let picked = demo_gift(1);
     app.read_with(vcx, |app, _| {
         let open = app.peer_qr.open.as_ref().expect("open");
-        assert_eq!(
-            open.state.gift.as_ref().map(|gift| gift.id),
-            Some(picked.id)
-        );
-        assert!(open.state.emoji.is_empty());
+        assert_eq!(open.state.gift().map(|gift| gift.id), Some(picked.id));
+        assert!(open.state.emoji().is_empty());
         assert_eq!(
             app.qr_view().and_then(|view| view.appearance.gift),
             Some(picked.id)
@@ -237,7 +234,7 @@ fn gifts_listed(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> (usize, 
         app.session()
             .map(|session| {
                 let gifts = &session.users_state.peer_qr.gifts;
-                (gifts.list.len(), gifts.offset.clone())
+                (gifts.list.len(), gifts.offset().to_string())
             })
             .unwrap_or_default()
     })
@@ -268,10 +265,10 @@ fn scrolling_the_gifts_grid_to_its_end_brings_the_next_page(cx: &mut TestAppCont
         if let Some(session) = app.demo_session.as_mut() {
             let gifts = &mut session.users_state.peer_qr.gifts;
             let (list, offset) = demo_gifts_page(0, 30);
-            gifts.list = list;
-            gifts.stage =
-                quill::peer_qr::theme::GiftsStage::Listed(quill::peer_qr::theme::GiftsRest::More);
-            gifts.offset = offset;
+            let owner = gifts
+                .owner
+                .unwrap_or(quill::peer_qr::theme::ThemeOwner::User(1));
+            *gifts = quill::peer_qr::theme::ThemeGifts::listed(owner, list, offset);
         }
     });
     click(vcx, "peer-qr-gifts");
@@ -304,7 +301,7 @@ fn scrolling_the_gifts_grid_to_its_end_brings_the_next_page(cx: &mut TestAppCont
     app.read_with(vcx, |app, _| {
         let open = app.peer_qr.open.as_ref().expect("open");
         assert_eq!(
-            open.state.gift.as_ref().map(|gift| gift.id),
+            open.state.gift().map(|gift| gift.id),
             Some(demo_gift(29).id)
         );
     });

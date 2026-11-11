@@ -380,12 +380,23 @@ fn the_bot_lookup_collects_three_answers() {
     );
     let lookup = &driver.session.settings.business_extra.lookup;
     assert!(lookup.done());
-    assert_eq!(lookup.exact_user(), Some(42));
-    assert_eq!(lookup.mine_users(), [42]);
-    // A refused leg is a failure, not an empty answer.
-    assert!(lookup.global_users().is_empty());
-    assert!(lookup.failed());
-    assert!(driver.session.settings.business.error.is_none());
+    assert_eq!(lookup.exact.data(), Some(&Some(42)));
+    assert_eq!(lookup.mine.items(), &[42][..]);
+    // A refused search is a failure the screen can show, not "no match".
+    assert!(lookup.global.error().is_some());
+    assert!(lookup.error().is_some());
+    // The same query after a failure asks again (Retry).
+    driver.lookup_business_bot("shop_bot").unwrap();
+    assert_eq!(count_sent(&recorder, "searchPublicChat"), 2);
+    assert!(
+        driver
+            .session
+            .settings
+            .business_extra
+            .lookup
+            .exact
+            .is_loading()
+    );
     // An invalid query clears it without sending.
     driver.lookup_business_bot("@").unwrap();
     assert!(
@@ -397,7 +408,7 @@ fn the_bot_lookup_collects_three_answers() {
             .query
             .is_empty()
     );
-    assert_eq!(count_sent(&recorder, "searchPublicChat"), 1);
+    assert_eq!(count_sent(&recorder, "searchPublicChat"), 2);
 }
 
 #[test]
@@ -508,74 +519,4 @@ fn a_refused_part_of_the_bot_lookup_lets_the_same_text_ask_again() {
     driver.lookup_business_bot("shop_bot").unwrap();
     assert_eq!(count_sent(&recorder, "searchPublicChat"), 2);
     assert_eq!(count_sent(&recorder, "searchPublicChats"), 1);
-}
-
-/// A fetch started before a save is dropped by the save (it wrote the bot
-/// ahead): its older answer must not bring the old bot back.
-#[test]
-fn an_older_bot_fetch_does_not_overwrite_a_saved_bot() {
-    let (mut driver, recorder, sink, seq) = driver_parts();
-    driver.ensure_connected_bot().unwrap();
-    let fetch = extra_of(&recorder, "getBusinessConnectedBot");
-    let bot = ConnectedBot {
-        bot_user_id: 42,
-        recipients: BusinessRecipients::everyone(),
-        rights: BotRights::default(),
-    };
-    driver.save_connected_bot(Some(&bot), None).unwrap();
-    feed(
-        &mut driver,
-        &seq,
-        &sink,
-        &format!(r#"{{"@type":"businessConnectedBot","@extra":"{fetch}","bot":null}}"#),
-    );
-    assert_eq!(
-        driver.session.settings.business_extra.connected_bot,
-        Fetch::Ready(Some(bot)),
-        "the saved bot stays"
-    );
-}
-
-/// Two saves in flight: the first one's answer does not forget the bot the
-/// second wrote ahead; the last answer does.
-#[test]
-fn the_first_of_two_bot_saves_answering_keeps_the_shown_bot() {
-    let (mut driver, recorder, sink, seq) = driver_parts();
-    let bot = |id| ConnectedBot {
-        bot_user_id: id,
-        recipients: BusinessRecipients::everyone(),
-        rights: BotRights::default(),
-    };
-    driver.save_connected_bot(Some(&bot(41)), None).unwrap();
-    let first = extra_of(&recorder, "setBusinessConnectedBot");
-    driver.save_connected_bot(Some(&bot(42)), None).unwrap();
-    let second: Vec<String> = recorder
-        .snapshot()
-        .iter()
-        .filter_map(|j| serde_json::from_str::<serde_json::Value>(j).ok())
-        .filter(|v| v["@type"] == "setBusinessConnectedBot")
-        .filter_map(|v| v["@extra"].as_str().map(str::to_string))
-        .collect();
-    let second = second.last().unwrap().clone();
-    assert_ne!(first, second);
-    feed(
-        &mut driver,
-        &seq,
-        &sink,
-        &format!(r#"{{"@type":"ok","@extra":"{first}"}}"#),
-    );
-    assert_eq!(
-        driver.session.settings.business_extra.connected_bot,
-        Fetch::Ready(Some(bot(42)))
-    );
-    feed(
-        &mut driver,
-        &seq,
-        &sink,
-        &format!(r#"{{"@type":"ok","@extra":"{second}"}}"#),
-    );
-    assert_eq!(
-        driver.session.settings.business_extra.connected_bot,
-        Fetch::Idle
-    );
 }

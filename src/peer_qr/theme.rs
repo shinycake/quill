@@ -328,14 +328,25 @@ pub fn can_save(rights: SaveRights) -> bool {
     }
 }
 
+/// A gifts request on its way: which one (its serial) and when it was sent
+/// (unix seconds).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GiftsAsk {
+    pub serial: u64,
+    pub at: i64,
+}
+
 /// Where the gifts panel's list is. The first page and what follows it are
 /// different stages, so a list can never be "loaded" and "complete" at the
-/// same time as "failed".
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// same time as "failed". A request on its way and the offset of the next
+/// page live in the stage they belong to.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum GiftsStage {
     /// No first page yet; its request is on its way (or not sent yet).
     #[default]
     First,
+    /// The first page's request is out as `ask`.
+    FirstAsking(GiftsAsk),
     /// The first page could not be asked for (the driver refused): the
     /// panel says so and offers Retry.
     FirstFailed,
@@ -344,17 +355,43 @@ pub enum GiftsStage {
 }
 
 /// The pages after the first one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GiftsRest {
     /// The list is whole.
     Complete,
-    /// There is more, and no request is on its way.
-    More,
-    /// A request is on its way (the next page, or a refresh).
-    Loading,
+    /// There is more from `offset`, and no request is on its way.
+    More { offset: String },
+    /// A request is on its way as `ask` (the next page from `offset`, or a
+    /// refresh that shows the list meanwhile).
+    Loading { ask: GiftsAsk, offset: String },
     /// The next page failed: the panel stops asking for more until `at`
     /// (unix seconds).
-    Waiting { at: i64 },
+    Waiting { at: i64, offset: String },
+}
+
+impl GiftsRest {
+    /// Where the next page starts; empty when the list is whole.
+    fn offset(&self) -> &str {
+        match self {
+            Self::Complete => "",
+            Self::More { offset } | Self::Loading { offset, .. } | Self::Waiting { offset, .. } => {
+                offset
+            }
+        }
+    }
+
+    /// The rest after a request that began at `since` failed: a whole list
+    /// stays whole (no offset is left), else the next page waits
+    /// [`GIFTS_RETRY_SECS`].
+    fn failed_at(&self, since: i64) -> Self {
+        match self.offset() {
+            "" => Self::Complete,
+            offset => Self::Waiting {
+                at: since.saturating_add(GIFTS_RETRY_SECS),
+                offset: offset.to_string(),
+            },
+        }
+    }
 }
 
 /// The gifts panel's list for one owner (tdesktop `CreateQrGiftList`).
@@ -362,14 +399,12 @@ pub enum GiftsRest {
 pub struct ThemeGifts {
     pub owner: Option<ThemeOwner>,
     pub list: Vec<ThemeGift>,
-    pub offset: String,
     pub stage: GiftsStage,
-    /// Tells a page for the current request from an older one. It keeps
-    /// counting when the list moves to another owner, so a late page for
-    /// the old owner never matches.
-    pub serial: u64,
-    /// When the request on its way was sent (unix seconds).
-    pub requested_at: i64,
+    /// The serial of the last request sent (an id generator: the stage
+    /// holds the serial that is current). It keeps counting when the list
+    /// moves to another owner, so a late page for the old owner never
+    /// matches.
+    pub last_serial: u64,
 }
 
 /// How long the gifts panel waits after a failed page before it asks for
@@ -384,6 +419,31 @@ pub struct GiftsRequest {
 }
 
 impl ThemeGifts {
+    /// A list of `owner` that is shown as loaded: `list`, with the next
+    /// page at `offset` (none when it is whole).
+    pub fn listed(owner: ThemeOwner, list: Vec<ThemeGift>, offset: String) -> Self {
+        let rest = if offset.is_empty() {
+            GiftsRest::Complete
+        } else {
+            GiftsRest::More { offset }
+        };
+        Self {
+            owner: Some(owner),
+            list,
+            stage: GiftsStage::Listed(rest),
+            last_serial: 0,
+        }
+    }
+
+    /// Where the next page starts; empty when the list is whole or has no
+    /// page yet.
+    pub fn offset(&self) -> &str {
+        match &self.stage {
+            GiftsStage::Listed(rest) => rest.offset(),
+            GiftsStage::First | GiftsStage::FirstAsking(_) | GiftsStage::FirstFailed => "",
+        }
+    }
+
     /// A request for `owner`'s list: the first page again, or the next
     /// one when there is one, none is on its way and none failed in the
     /// last few seconds. A list for another owner starts empty.
@@ -391,65 +451,70 @@ impl ThemeGifts {
         if self.owner != Some(owner) {
             *self = ThemeGifts {
                 owner: Some(owner),
-                serial: self.serial,
+                last_serial: self.last_serial,
                 ..ThemeGifts::default()
             };
         }
         if more && !self.wants_more(now) {
             return None;
         }
-        self.serial += 1;
-        self.requested_at = now;
+        self.last_serial += 1;
+        let ask = GiftsAsk {
+            serial: self.last_serial,
+            at: now,
+        };
+        let offset = self.offset().to_string();
         // A refresh keeps showing the list it has until its page lands.
-        self.stage = match self.stage {
-            GiftsStage::Listed(_) => GiftsStage::Listed(GiftsRest::Loading),
-            GiftsStage::First | GiftsStage::FirstFailed => GiftsStage::First,
+        self.stage = match std::mem::take(&mut self.stage) {
+            GiftsStage::Listed(rest) => GiftsStage::Listed(GiftsRest::Loading {
+                ask,
+                offset: rest.offset().to_string(),
+            }),
+            GiftsStage::First | GiftsStage::FirstAsking(_) | GiftsStage::FirstFailed => {
+                GiftsStage::FirstAsking(ask)
+            }
         };
         Some(GiftsRequest {
-            serial: self.serial,
-            offset: if more {
-                self.offset.clone()
-            } else {
-                String::new()
-            },
-        })
-    }
-
-    /// After a failed request at `since`: a whole list stays whole (no
-    /// offset is left), else the next page waits [`GIFTS_RETRY_SECS`].
-    fn wait_until(&self, since: i64) -> GiftsStage {
-        GiftsStage::Listed(if self.offset.is_empty() {
-            GiftsRest::Complete
-        } else {
-            GiftsRest::Waiting {
-                at: since.saturating_add(GIFTS_RETRY_SECS),
-            }
+            serial: ask.serial,
+            offset: if more { offset } else { String::new() },
         })
     }
 
     /// The panel may ask for the next page.
     pub fn wants_more(&self, now: i64) -> bool {
-        match self.stage {
-            GiftsStage::Listed(GiftsRest::More) => true,
-            GiftsStage::Listed(GiftsRest::Waiting { at }) => now >= at,
+        match &self.stage {
+            GiftsStage::Listed(GiftsRest::More { .. }) => true,
+            GiftsStage::Listed(GiftsRest::Waiting { at, .. }) => now >= *at,
             _ => false,
         }
     }
 
     /// A page or failure belongs to the request now on its way.
     pub fn is_current(&self, owner: ThemeOwner, serial: u64) -> bool {
-        self.owner == Some(owner) && self.serial == serial
+        let ask = match &self.stage {
+            GiftsStage::FirstAsking(ask) | GiftsStage::Listed(GiftsRest::Loading { ask, .. }) => {
+                ask
+            }
+            _ => return false,
+        };
+        self.owner == Some(owner) && ask.serial == serial
     }
 
     /// The request failed. The list stays as it was; the empty state shows
     /// only when there is nothing to list. A failed next page is retried
     /// [`GIFTS_RETRY_SECS`] after it was asked for.
     pub fn fail(&mut self) {
-        self.stage = match self.stage {
-            GiftsStage::Listed(_) => self.wait_until(self.requested_at),
+        self.stage = match std::mem::take(&mut self.stage) {
+            GiftsStage::Listed(GiftsRest::Loading { ask, offset }) => {
+                GiftsStage::Listed(GiftsRest::Loading { ask, offset }.failed_at(ask.at))
+            }
+            // No request is out: nothing failed.
+            GiftsStage::Listed(rest) => GiftsStage::Listed(rest),
             // No first page ever came: show what there is (nothing) as
             // a whole list, as tdesktop does.
-            GiftsStage::First | GiftsStage::FirstFailed => GiftsStage::Listed(GiftsRest::Complete),
+            GiftsStage::First | GiftsStage::FirstAsking(_) | GiftsStage::FirstFailed => {
+                GiftsStage::Listed(GiftsRest::Complete)
+            }
         };
     }
 
@@ -460,9 +525,11 @@ impl ThemeGifts {
     /// Retry (a refusal is not an empty list: reopening is not the only
     /// way out).
     pub fn refuse(&mut self, now: i64) {
-        self.stage = match self.stage {
-            GiftsStage::Listed(_) => self.wait_until(now),
-            GiftsStage::First | GiftsStage::FirstFailed => GiftsStage::FirstFailed,
+        self.stage = match std::mem::take(&mut self.stage) {
+            GiftsStage::Listed(rest) => GiftsStage::Listed(rest.failed_at(now)),
+            GiftsStage::First | GiftsStage::FirstAsking(_) | GiftsStage::FirstFailed => {
+                GiftsStage::FirstFailed
+            }
         };
     }
 
@@ -480,9 +547,10 @@ impl ThemeGifts {
         self.stage = GiftsStage::Listed(if next_offset.is_empty() {
             GiftsRest::Complete
         } else {
-            GiftsRest::More
+            GiftsRest::More {
+                offset: next_offset,
+            }
         });
-        self.offset = next_offset;
     }
 }
 
@@ -503,10 +571,10 @@ pub const GIFT_COLUMNS: usize = 3;
 
 pub fn gifts_layout(gifts: &ThemeGifts) -> GiftsLayout {
     let count = gifts.list.len();
-    let complete = match gifts.stage {
-        GiftsStage::First => return GiftsLayout::Loading,
+    let complete = match &gifts.stage {
+        GiftsStage::First | GiftsStage::FirstAsking(_) => return GiftsLayout::Loading,
         GiftsStage::FirstFailed => return GiftsLayout::Failed,
-        GiftsStage::Listed(rest) => rest == GiftsRest::Complete,
+        GiftsStage::Listed(rest) => *rest == GiftsRest::Complete,
     };
     if count == 0 {
         GiftsLayout::Empty

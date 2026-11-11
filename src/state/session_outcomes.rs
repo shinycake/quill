@@ -10,10 +10,9 @@ impl Session {
     /// The account comes back on screen: what finished while it was away
     /// is not reported on the screen it comes back to.
     pub fn forget_screen_outcomes(&mut self) {
-        // A payment waiting on its provider's page leaves Verifying with the
-        // page that nobody will open.
-        self.payments.verifications.clear();
-        self.payments.checkout.end_verification();
+        self.payments.verification_url = None;
+        self.payments.receipt_error = None;
+        self.payments.unlocked_notice = None;
         // The earn toasts, a Fragment URL and a setup page's "go back"
         // belong to the screen that asked.
         let earn = &mut self.payments.earn;
@@ -24,9 +23,7 @@ impl Session {
         // The consent box and the raw-URL fallback of a login button
         // answered while away: its request goes with its answer. A request
         // still in flight keeps its context for the answer to come.
-        if self.bots.last_login_url_info.take().is_some() {
-            self.bots.login_url_request = None;
-        }
+        self.bots.login_url.forget_answer();
         let messages = &mut self.messages;
         messages.message_link = None;
         messages.message_link_error.clear();

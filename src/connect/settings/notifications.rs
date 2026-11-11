@@ -88,9 +88,21 @@ impl<S: JsonSender> ConnectDriver<S> {
             ))
         {
             self.session.requests.take(extra);
-            self.session.settings.notification_exceptions.remove(&scope);
+            // The list says so with its Retry; nothing asks again by itself.
+            self.session
+                .settings
+                .notification_exceptions
+                .entry(scope)
+                .or_default()
+                .fail("could not send the request");
             return Err(err);
         }
+        self.session
+            .settings
+            .notification_exceptions
+            .entry(scope)
+            .or_default()
+            .sent(extra);
         Ok(())
     }
 

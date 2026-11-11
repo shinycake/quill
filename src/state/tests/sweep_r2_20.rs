@@ -32,7 +32,8 @@ fn an_older_forum_topics_answer_after_a_created_topic_lands_nowhere() {
     let seq = AtomicU64::new(0);
     let chat = ChatId(16);
     let old = session.request(RequestPurpose::GetForumTopics, Some(chat));
-    session.threads.forum_topics.begin(16, old);
+    session.threads.forum_topics.begin(16);
+    session.threads.forum_topics.sent(16, old);
     // A topic was created: the list is dropped, the row asks again.
     session.threads.forum_topics.remove(&16);
     apply_json(
@@ -50,15 +51,18 @@ fn an_older_forum_topics_answer_after_a_created_topic_lands_nowhere() {
 
 #[test]
 fn a_refused_chatbot_search_leg_is_a_failure_not_an_empty_answer() {
-    use crate::state::{BotLookup, BotLookupPart, LookupLeg};
+    use crate::state::BotLookup;
     let mut lookup = BotLookup::default();
-    lookup.sent(BotLookupPart::Exact, RequestId(1));
+    lookup.exact.begin();
+    lookup.exact.sent(RequestId(1));
     assert!(!lookup.done());
-    lookup.exact = LookupLeg::Failed;
-    lookup.mine = LookupLeg::Found(vec![]);
-    lookup.global = LookupLeg::Found(vec![]);
-    assert!(lookup.done() && lookup.failed());
-    assert_eq!(lookup.exact_user(), None);
+    // Another request's refusal does not end the leg.
+    lookup.exact.failed(Some(RequestId(9)), "x", true);
+    assert!(!lookup.done());
+    lookup.exact.failed(Some(RequestId(1)), "flood", true);
+    assert!(lookup.done());
+    assert_eq!(lookup.error(), Some("flood"));
+    assert!(lookup.exact.data().is_none());
 }
 
 #[test]

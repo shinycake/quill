@@ -724,9 +724,9 @@ fn a_found_bot_is_added_and_asked_about_on_leave(cx: &mut TestAppContext) {
         session.settings.business_extra.lookup = quill::state::BotLookup {
             generation: 1,
             query: "shop_bot".into(),
-            exact: quill::state::LookupLeg::Found(Some(bot)),
-            mine: quill::state::LookupLeg::Found(Vec::new()),
-            global: quill::state::LookupLeg::Found(Vec::new()),
+            exact: quill::state::fetch::Fetch::Ready(Some(bot)),
+            mine: quill::state::fetch::Fetch::Ready(Vec::new()),
+            global: quill::state::fetch::Fetch::Ready(Vec::new()),
         };
     });
     open(&app, vcx);
@@ -895,25 +895,16 @@ fn a_save_refused_after_the_box_closed_goes_to_the_status_line(cx: &mut TestAppC
     assert!(app.read_with(vcx, |app, _| app.dialogs.business_dialog.is_none()));
     app.update(vcx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.settings.business.error = Some(quill::state::BusinessRefusal {
-                area: quill::state::BusinessArea::Save(
-                    quill::business_settings::BusinessSettingKind::Greeting,
-                ),
-                line: "Couldn't save the greeting".into(),
-            });
+            session.settings.business.error = Some("Couldn't save the greeting".into());
         }
         app.business_closed_error_upkeep();
     });
     assert_eq!(status_note(&app, vcx), "Couldn't save the greeting");
     // Said once.
     let left = app.read_with(vcx, |app, _| {
-        app.demo_session.as_ref().and_then(|s| {
-            s.settings
-                .business
-                .error
-                .clone()
-                .map(|refusal| refusal.line)
-        })
+        app.demo_session
+            .as_ref()
+            .and_then(|s| s.settings.business.error.clone())
     });
     assert_eq!(left, None);
 }

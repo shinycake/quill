@@ -84,10 +84,8 @@ impl Session {
             }
             (EarnPayload::TonStats(stats), Some(EarnPurpose::TonStats { peer })) => {
                 earn.ton_balances.insert(peer, stats.amounts);
-                if let Some(page) = earn
-                    .page
-                    .as_mut()
-                    .filter(|p| p.peer == peer && p.ton.waits_for(pending.map(|p| p.id)))
+                if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer)
+                    && page.ton.waits_for(pending.map(|p| p.id))
                 {
                     page.ton = Load::Ready(stats);
                 }
@@ -116,12 +114,10 @@ impl Session {
                 stats.status = stats.status.stamped(crate::local_time::now_unix());
                 earn.star_balances.insert(peer, stats.status.current);
                 if me.is_some_and(|me| peer == EarnPeer::User(me)) {
-                    earn.self_stats = Some(true);
+                    earn.self_stats.succeed(());
                 }
-                if let Some(page) = earn
-                    .page
-                    .as_mut()
-                    .filter(|p| p.peer == peer && p.stars.waits_for(pending.map(|p| p.id)))
+                if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer)
+                    && page.stars.waits_for(pending.map(|p| p.id))
                 {
                     page.stars = Load::Ready(stats);
                 }
@@ -523,7 +519,7 @@ impl Session {
             }
             EarnPurpose::StarStats { peer } => {
                 if self.my_user_id.is_some_and(|me| peer == EarnPeer::User(me)) {
-                    earn.self_stats = Some(false);
+                    earn.self_stats.fail(reason.clone());
                 }
                 if let Some(page) = earn
                     .page
@@ -559,7 +555,10 @@ impl Session {
                     .as_mut()
                     .filter(|p| p.peer == peer && p.ad_account_url.waits_for(request))
                 {
-                    page.ad_account_url = Load::Failed(reason.clone());
+                    page.ad_account_url = Load::Failed(crate::lang::tr_with(
+                        crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_REVENUE_REASON,
+                        &[("reason", &reason)],
+                    ));
                 }
             }
             EarnPurpose::WithdrawalUrl { with_password } => {
@@ -572,10 +571,8 @@ impl Session {
                 }
             }
             EarnPurpose::SetProgram { .. } => {
-                if let Some(setup) = earn.setup.as_mut()
-                    && setup.waits_for(request)
-                {
-                    setup.saving = None;
+                if let Some(setup) = earn.setup.as_mut() {
+                    setup.save_refused(request);
                 }
                 // tdesktop `UpdateProgram`: "Failed: " and the error.
                 earn.note(format!("Failed: {reason}"));

@@ -332,10 +332,10 @@ impl Session {
         self.media.media_library.remove(&set_id);
         if !matches!(purpose, StickerCreatorPurpose::MoveSticker { .. }) {
             self.invalidate_installed_sticker_sets();
-            self.stickers.emoji.outdated_packs.insert(set_id);
             // Outdated, not idle: the driver fetches both installed lists
             // again so menus and the panel show the server's sets.
             self.stickers.stickers.lists.installed.outdate();
+            self.stickers.emoji.lists.installed.outdate();
         }
     }
 

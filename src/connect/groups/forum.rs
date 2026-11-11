@@ -65,7 +65,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.threads.forum_topics.remove(&chat_id.0);
+        self.session.threads.forum_topics.outdate(chat_id.0);
         self.maybe_fetch_forum_topics(chat_id)
     }
 
@@ -87,14 +87,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.chat_has_topics(chat_id) {
             return Ok(());
         }
-        if self.session.threads.forum_topics.contains_key(&chat_id.0) {
-            return Ok(());
-        }
-        if self
-            .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::GetForumTopics, chat_id)
-        {
+        if !self.session.threads.forum_topics.wants_fetch(chat_id.0) {
             return Ok(());
         }
         let extra = self
@@ -118,7 +111,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .fail(chat_id.0, "could not send the request");
             return Err(err);
         }
-        self.session.threads.forum_topics.begin(chat_id.0, extra);
+        self.session.threads.forum_topics.begin(chat_id.0);
+        self.session.threads.forum_topics.sent(chat_id.0, extra);
         Ok(())
     }
 
@@ -238,6 +232,21 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .clear_topic_load_failed(chat_id, forum_topic_id);
         }
         self.fetch_topic_history()
+    }
+
+    /// The Retry strip at an open topic's newer end.
+    pub fn retry_topic_newer(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if let (Some(chat_id), Some(topic)) =
+            (self.session.open_chat_id(), self.session.open_forum_topic())
+            && let Some(history) = self
+                .session
+                .threads
+                .topic_histories
+                .get_mut(&(chat_id.0, topic))
+        {
+            history.retry_newer();
+        }
+        self.fetch_topic_history_newer()
     }
 
     /// The same Retry for a topic that has rows: its failed older page is

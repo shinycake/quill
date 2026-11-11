@@ -46,10 +46,6 @@ impl StorageEditor {
         }
     }
 
-    pub(crate) fn is_saving(&self) -> bool {
-        matches!(self, Self::Saving { .. })
-    }
-
     /// The editor after the answer `answer`: the save it waits for ended.
     pub(crate) fn after_answer(self, answer: Option<AutoDownloadAnswer>) -> Self {
         match (self, answer) {
@@ -73,17 +69,12 @@ impl QuillApp {
     /// A save the server answered closes or reopens the editor that sent it.
     /// Returns whether the editor changed.
     pub(crate) fn drain_storage_editor(&mut self) -> bool {
-        if !self.settings.data_storage_editor.is_saving() {
-            return false;
-        }
-        let crate::ui::dialogs::storage_editor::StorageEditor::Saving { request, .. } =
-            self.settings.data_storage_editor
-        else {
+        let StorageEditor::Saving { request, .. } = self.settings.data_storage_editor else {
             return false;
         };
         let answer = self
             .session_mut()
-            .and_then(|session| session.settings.take_auto_download_answer(request));
+            .and_then(|session| session.settings.auto_download_answers.take(request));
         let next = self.settings.data_storage_editor.after_answer(answer);
         let changed = next != self.settings.data_storage_editor;
         self.settings.data_storage_editor = next;

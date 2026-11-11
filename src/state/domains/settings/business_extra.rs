@@ -39,84 +39,40 @@ pub enum ChatLinkSave {
     Saved,
 }
 
-/// One request of the bot lookup: not sent, out under its request,
-/// answered, or refused. A refused leg is not an empty answer.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum LookupLeg<T> {
-    #[default]
-    Idle,
-    Asking(RequestId),
-    Found(T),
-    Failed,
-}
-
-impl<T> LookupLeg<T> {
-    fn waits_for(&self, request: Option<RequestId>) -> bool {
-        matches!((self, request), (Self::Asking(asked), Some(id)) if *asked == id)
-    }
-
-    fn settled(&self) -> bool {
-        matches!(self, Self::Found(_) | Self::Failed)
-    }
-
-    pub fn found(&self) -> Option<&T> {
-        match self {
-            Self::Found(value) => Some(value),
-            _ => None,
-        }
-    }
-}
-
 /// The bot lookup of the chatbots screen for one typed username.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BotLookup {
     pub generation: u32,
     pub query: String,
-    /// `Found(None)` when nothing matched the exact username.
-    pub exact: LookupLeg<Option<i64>>,
-    pub mine: LookupLeg<Vec<i64>>,
-    pub global: LookupLeg<Vec<i64>>,
+    /// `Ready(None)` when nothing matched; a refused search is `Failed`,
+    /// not an empty result.
+    pub exact: Fetch<Option<i64>>,
+    pub mine: Fetch<Vec<i64>>,
+    pub global: Fetch<Vec<i64>>,
 }
 
 impl BotLookup {
-    /// Every leg answered or refused.
+    /// Every search answered or failed.
     pub fn done(&self) -> bool {
-        self.exact.settled() && self.mine.settled() && self.global.settled()
+        !self.exact.is_loading() && !self.mine.is_loading() && !self.global.is_loading()
     }
 
-    /// Some leg was refused: the results shown are incomplete.
-    pub fn failed(&self) -> bool {
-        [
-            self.exact == LookupLeg::Failed,
-            self.mine == LookupLeg::Failed,
-            self.global == LookupLeg::Failed,
-        ]
-        .contains(&true)
+    /// The first refusal, when any search failed.
+    pub fn error(&self) -> Option<&str> {
+        self.exact
+            .error()
+            .or_else(|| self.mine.error())
+            .or_else(|| self.global.error())
     }
+}
 
-    /// The exact username's user, when it matched one.
-    pub fn exact_user(&self) -> Option<i64> {
-        self.exact.found().copied().flatten()
-    }
-
-    /// The account's own matching chats.
-    pub fn mine_users(&self) -> &[i64] {
-        self.mine.found().map_or(&[], Vec::as_slice)
-    }
-
-    /// The global results.
-    pub fn global_users(&self) -> &[i64] {
-        self.global.found().map_or(&[], Vec::as_slice)
-    }
-
-    /// Record that `part` went out as `request`.
-    pub fn sent(&mut self, part: BotLookupPart, request: RequestId) {
-        match part {
-            BotLookupPart::Exact => self.exact = LookupLeg::Asking(request),
-            BotLookupPart::Mine => self.mine = LookupLeg::Asking(request),
-            BotLookupPart::Global => self.global = LookupLeg::Asking(request),
-        }
-    }
+/// Where the newest `setBusinessConnectedBot` / delete stands.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ConnectedBotSave {
+    #[default]
+    Idle,
+    /// Out as this request; it answered or was refused when this leaves.
+    Saving(RequestId),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -128,6 +84,10 @@ pub struct BusinessExtraState {
     /// `getBusinessConnectedBot`: ready with `None` when no bot is
     /// connected.
     pub connected_bot: Fetch<Option<ConnectedBot>>,
+    /// The newest bot save and the request it waits for: only its answer
+    /// forgets the bot it wrote ahead (an older save's answer finds
+    /// another request here and leaves the shown bot alone).
+    pub bot_save: ConnectedBotSave,
     pub lookup: BotLookup,
     /// TDLib options; tdesktop's defaults until reported.
     pub title_max: Option<usize>,
@@ -212,21 +172,25 @@ impl Session {
         if let Some(RequestPurpose::Settings(SettingsPurpose::SaveConnectedBot)) =
             pending.map(|p| p.purpose)
         {
-            self.forget_written_bot();
+            self.forget_written_bot(pending.map(|p| p.id));
         }
     }
 
     /// A bot save answered (`ok` or refused): the bot it wrote ahead is
-    /// forgotten so the next visit asks TDLib, unless another save is still
-    /// out (it wrote the shown bot) or a fetch started since (its answer is
-    /// the truth).
-    fn forget_written_bot(&mut self) {
-        let other_save = self
-            .requests
-            .has_purpose(RequestPurpose::Settings(SettingsPurpose::SaveConnectedBot));
-        let bot = &mut self.settings.business_extra.connected_bot;
-        if !other_save && matches!(bot, Fetch::Ready(_)) {
-            *bot = Fetch::Idle;
+    /// forgotten so the next visit asks TDLib, when it was the newest save
+    /// (a newer one wrote the shown bot) and no fetch started since (its
+    /// answer is the truth).
+    fn forget_written_bot(&mut self, request: Option<RequestId>) {
+        let extra = &mut self.settings.business_extra;
+        let Some(request) = request else {
+            return;
+        };
+        if extra.bot_save != ConnectedBotSave::Saving(request) {
+            return;
+        }
+        extra.bot_save = ConnectedBotSave::Idle;
+        if matches!(extra.connected_bot, Fetch::Ready(_)) {
+            extra.connected_bot = Fetch::Idle;
         }
     }
 
@@ -245,11 +209,12 @@ impl Session {
             return false;
         };
         let lookup = &mut self.settings.business_extra.lookup;
-        if lookup.generation == generation && lookup.exact.waits_for(pending.map(|p| p.id)) {
-            lookup.exact = LookupLeg::Found(match kind {
+        if lookup.generation == generation {
+            let found = match kind {
                 ChatKind::Private { user_id } => Some(user_id.0),
                 _ => None,
-            });
+            };
+            lookup.exact.answered(pending.map(|p| p.id), found);
         }
         true
     }
@@ -274,16 +239,16 @@ impl Session {
             })
             .collect();
         let lookup = &mut self.settings.business_extra.lookup;
-        let id = pending.map(|p| p.id);
         if lookup.generation == generation {
+            let id = pending.map(|p| p.id);
             match part {
-                BotLookupPart::Mine if lookup.mine.waits_for(id) => {
-                    lookup.mine = LookupLeg::Found(users);
+                BotLookupPart::Mine => {
+                    lookup.mine.answered(id, users);
                 }
-                BotLookupPart::Global if lookup.global.waits_for(id) => {
-                    lookup.global = LookupLeg::Found(users);
+                BotLookupPart::Global => {
+                    lookup.global.answered(id, users);
                 }
-                _ => {}
+                BotLookupPart::Exact => {}
             }
         }
         true
@@ -334,7 +299,7 @@ impl Session {
                 // The save wrote its bot ahead of the answer: forget it, so
                 // the next visit asks TDLib what is connected instead of
                 // showing the refused bot as saved.
-                self.forget_written_bot();
+                self.forget_written_bot(extra_id);
                 (
                     BusinessArea::Chatbot,
                     format!("Couldn't save the chatbot: {reason}"),
@@ -343,18 +308,12 @@ impl Session {
             SettingsPurpose::LookupBusinessBot { generation, part } => {
                 let lookup = &mut extra.lookup;
                 if lookup.generation == generation {
+                    let message = format!("Couldn't search for bots: {reason}");
                     match part {
-                        BotLookupPart::Exact if lookup.exact.waits_for(extra_id) => {
-                            lookup.exact = LookupLeg::Failed;
-                        }
-                        BotLookupPart::Mine if lookup.mine.waits_for(extra_id) => {
-                            lookup.mine = LookupLeg::Failed;
-                        }
-                        BotLookupPart::Global if lookup.global.waits_for(extra_id) => {
-                            lookup.global = LookupLeg::Failed;
-                        }
-                        _ => {}
-                    }
+                        BotLookupPart::Exact => lookup.exact.failed(extra_id, message, true),
+                        BotLookupPart::Mine => lookup.mine.failed(extra_id, message, true),
+                        BotLookupPart::Global => lookup.global.failed(extra_id, message, true),
+                    };
                 }
                 return true;
             }

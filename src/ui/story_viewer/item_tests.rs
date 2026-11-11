@@ -49,7 +49,7 @@ fn the_open_menu_and_the_composer_pause_the_story(cx: &mut TestAppContext) {
         app.stories.with_viewer_ui(|open| open.menu_open = true);
         assert!(app.story_playback_paused(), "the menu is open");
         app.stories.with_viewer_ui(|open| open.menu_open = false);
-        app.stories.composer.open = true;
+        *app.stories.composer = quill::story_composer::StoryComposer::open();
         assert!(
             app.story_playback_paused(),
             "Edit or Repost is open over it"

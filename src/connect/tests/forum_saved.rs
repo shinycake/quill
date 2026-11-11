@@ -150,7 +150,6 @@ fn moving_a_pinned_topic_sends_the_new_order_and_reorders_locally() {
         crate::state::RequestPurpose::GetForumTopics,
         Some(ChatId(16)),
     );
-    f.driver.session.threads.forum_topics.begin(16, extra);
     let topic = |id: i32, order: i64| {
         format!(
             r#"{{"info":{{"@type":"forumTopicInfo","chat_id":16,"forum_topic_id":{id},"name":"T{id}","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"is_general":false,"is_closed":false,"is_hidden":false}},"last_message":null,"order":"{order}","is_pinned":true,"unread_count":0,"last_read_inbox_message_id":0,"notification_settings":{{"@type":"chatNotificationSettings"}}}}"#

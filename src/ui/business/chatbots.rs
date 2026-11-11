@@ -32,8 +32,8 @@ enum Found {
     Bots(Vec<i64>),
     Missing,
     Unsupported,
-    /// A leg of the lookup was refused: its results are not "none".
-    Failed,
+    /// A search was refused: its error line, with a Retry.
+    Failed(String),
 }
 
 impl QuillApp {
@@ -207,15 +207,15 @@ impl QuillApp {
         if !lookup.done() {
             return Found::Loading;
         }
-        let exact = lookup.exact_user();
-        let bots = merge_found_bots(exact, lookup.mine_users(), lookup.global_users(), |id| {
+        let exact = lookup.exact.data().copied().flatten();
+        let bots = merge_found_bots(exact, lookup.mine.items(), lookup.global.items(), |id| {
             self.business_bot_usable(id)
         });
         if !bots.is_empty() {
             return Found::Bots(bots);
         }
-        if lookup.failed() {
-            return Found::Failed;
+        if let Some(error) = lookup.error() {
+            return Found::Failed(error.to_string());
         }
         let exact_bot = exact
             .and_then(|id| self.session()?.users.get(&id))
@@ -560,13 +560,27 @@ impl QuillApp {
                                 .child(tr(keys::CHATBOTS_NOT_SUPPORTED)),
                         );
                     }
-                    Found::Failed => {
+                    Found::Failed(error) => {
+                        let input = username.clone();
                         body = body.child(
                             div()
-                                .text_sm()
-                                .text_color(muted)
-                                .text_center()
-                                .child(tr(keys::Q_MEDIA_COULD_NOT_SEARCH_CHATBOTS)),
+                                .flex()
+                                .flex_col()
+                                .items_start()
+                                .gap_2()
+                                .child(div().text_sm().text_color(muted).child(error.clone()))
+                                .child(
+                                    Button::new("business-bot-lookup-retry")
+                                        .label(tr(keys::Q_CHAT_RETRY))
+                                        .small()
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            let text = input.read(cx).value().to_string();
+                                            if let Some(live) = this.live.as_mut() {
+                                                let _ = live.driver.lookup_business_bot(&text);
+                                            }
+                                            cx.notify();
+                                        })),
+                                ),
                         );
                     }
                     Found::Nothing => {}

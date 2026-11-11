@@ -97,7 +97,7 @@ impl QuillApp {
             .peer_qr
             .open
             .as_ref()
-            .and_then(|open| open.state.gift.as_ref().map(|gift| gift.id));
+            .and_then(|open| open.state.gift().map(|gift| gift.id));
         let foreground = hsla(view.colors.foreground);
         match layout {
             GiftsLayout::Loading => div()

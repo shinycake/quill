@@ -130,6 +130,7 @@ impl Session {
                     self.accept_message_author(chat_id, message_id, user_id);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetMe) {
                     self.my_user_id = Some(user_id);
+                    self.users_state.my_id_probe.answered(extra, ());
                 } else if matches!(
                     pending.map(|p| p.purpose),
                     Some(RequestPurpose::Bots(BotsPurpose::CreateBot { .. }))

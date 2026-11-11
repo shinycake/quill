@@ -111,6 +111,17 @@ impl std::fmt::Debug for MasterKey {
 #[derive(Default)]
 pub struct UnlockState {
     key: Mutex<Option<MasterKey>>,
+    /// The wrong tries of this process. `passcode.json` holds them too, but
+    /// a write that fails must not switch the rate limit off, so the larger
+    /// count of the two applies (tdesktop keeps its count in memory only).
+    tries: Mutex<BadTries>,
+}
+
+/// Wrong passcode tries in a row and when the last one was.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct BadTries {
+    count: u32,
+    last_ms: u64,
 }
 
 impl UnlockState {
@@ -125,6 +136,14 @@ impl UnlockState {
     /// Forget the master key (locking). Dropping it zeroizes the bytes.
     pub fn clear(&self) {
         *self.key.lock_or_recover() = None;
+    }
+
+    fn bad_tries(&self) -> BadTries {
+        *self.tries.lock_or_recover()
+    }
+
+    fn set_bad_tries(&self, tries: BadTries) {
+        *self.tries.lock_or_recover() = tries;
     }
 
     pub fn is_unlocked(&self) -> bool {
@@ -378,14 +397,22 @@ pub fn unlock(
     if passcode.is_empty() {
         return Err(PasscodeError::Empty);
     }
-    if let Some(retry_in_ms) = retry_wait_ms(
-        config.bad_tries,
-        now_unix_ms.saturating_sub(config.last_try_unix_ms),
-    ) {
+    let kept = state.bad_tries();
+    let tries = if kept.count > config.bad_tries {
+        kept
+    } else {
+        BadTries {
+            count: config.bad_tries,
+            last_ms: config.last_try_unix_ms,
+        }
+    };
+    if let Some(retry_in_ms) = retry_wait_ms(tries.count, now_unix_ms.saturating_sub(tries.last_ms))
+    {
         return Err(PasscodeError::Flood { retry_in_ms });
     }
     match unwrap_master(&config, passcode) {
         Ok(master) => {
+            state.set_bad_tries(BadTries::default());
             if config.bad_tries != 0 {
                 config.bad_tries = 0;
                 config.last_try_unix_ms = 0;
@@ -395,8 +422,14 @@ pub fn unlock(
             Ok(master)
         }
         Err(PasscodeError::Wrong) => {
-            config.bad_tries = config.bad_tries.saturating_add(1);
+            config.bad_tries = tries.count.saturating_add(1);
             config.last_try_unix_ms = now_unix_ms;
+            state.set_bad_tries(BadTries {
+                count: config.bad_tries,
+                last_ms: now_unix_ms,
+            });
+            // A failed write leaves the count in `state`, which still
+            // applies for the rest of this run.
             let _ = save_config(root, &config);
             Err(PasscodeError::Wrong)
         }

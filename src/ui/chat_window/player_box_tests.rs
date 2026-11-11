@@ -385,7 +385,7 @@ fn the_checkout_prefills_in_the_window_that_hosts_it(cx: &mut TestAppContext) {
     let chat_window = h.open_in_new_window(OTHER, cx);
     in_window(&h, chat_window, Some(OTHER), cx, |app, window, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.checkout.form = quill::state::CheckoutForm::Closed;
+            session.payments.checkout = quill::state::CheckoutForm::Closed;
         }
         app.open_payment_dialog(window, cx);
         app.windows
@@ -393,8 +393,11 @@ fn the_checkout_prefills_in_the_window_that_hosts_it(cx: &mut TestAppContext) {
     });
     h.app.update(cx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.checkout.form = quill::state::CheckoutForm::Ready(
+            session.payments.checkout = quill::state::CheckoutForm::ready(
                 crate::ui::payments::card_form_demo::stripe_checkout(true, false),
+                quill::state::PaymentRequest {
+                    invoice: quill::payment_invoice::InputInvoice::Name("demo".into()),
+                },
             );
         }
     });

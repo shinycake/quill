@@ -22,14 +22,14 @@ pub struct ManagerCommit {
 }
 
 /// Where the oldest saved change's current step stands. `Sent` leaves on
-/// the step's own failure (`note_commit_failure`) or when the next step
-/// goes out; a set box's `changeStickerSet` that fails is not this
-/// change's.
+/// the step's own answer or failure (`step_answered`,
+/// `note_commit_failure`); a set box's `changeStickerSet` that fails is not
+/// this change's.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum CommitStage {
     /// No step of this change is out.
     #[default]
-    Queued,
+    Idle,
     /// The step is on its way as this request.
     Sent(RequestId),
 }
@@ -64,11 +64,29 @@ impl StickersManager {
         if let Some(front) = self.commits.front_mut()
             && front.stage == CommitStage::Sent(failed)
         {
-            front.stage = CommitStage::Queued;
+            front.stage = CommitStage::Idle;
             self.failure = Some(CommitFailure { masks: front.masks });
             return true;
         }
         false
+    }
+
+    /// The request `answered` came back (it worked, or `note_commit_failure`
+    /// already took its failure): when it was the oldest change's step, the
+    /// next one may go out.
+    pub fn step_answered(&mut self, answered: Option<RequestId>) {
+        if let Some(front) = self.commits.front_mut()
+            && answered.is_some_and(|id| front.stage == CommitStage::Sent(id))
+        {
+            front.stage = CommitStage::Idle;
+        }
+    }
+
+    /// A step of the oldest saved change is on its way.
+    pub fn step_out(&self) -> bool {
+        self.commits
+            .front()
+            .is_some_and(|front| matches!(front.stage, CommitStage::Sent(_)))
     }
 
     /// The failure to tell the user about, once.
@@ -108,7 +126,7 @@ impl ManagerCommit {
         Self {
             masks,
             steps,
-            stage: CommitStage::Queued,
+            stage: CommitStage::Idle,
         }
     }
 

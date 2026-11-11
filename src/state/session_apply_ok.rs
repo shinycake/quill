@@ -205,18 +205,19 @@ impl Session {
         // Slice S4: a `setAutoDownloadSettings` succeeded — apply
         // the confirmed sent settings (the `ok` carries none, so
         // they ride the purpose); the error clears and the driver
-        // persists on this ingest (it differs from `data_storage_persisted`).
+        // persists on this ingest (`data_storage_dirty`).
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetAutoDownloadSettings {
             network,
             settings,
         })) = pending.map(|p| p.purpose)
         {
             *self.settings.data_storage.for_network_mut(network) = settings;
-            self.settings.data_storage.seeded = crate::data_settings::Seed::Seeded;
-            self.settings.data_storage_save.succeed(());
+            self.settings.data_storage.seeded = crate::data_settings::PresetsSeed::Seeded;
+            self.settings.data_storage_dirty = true;
             if let Some(request) = extra {
                 self.settings
-                    .note_auto_download_answer(AutoDownloadAnswer::Saved(request));
+                    .auto_download_answers
+                    .push(AutoDownloadAnswer::Saved(request));
             }
         }
         // Batch 4: a `confirmSession` / `terminateSession` for the
@@ -244,14 +245,6 @@ impl Session {
             pending.map(|p| p.purpose)
         {
             self.apply_password_op_ok(op, pending.map(|p| p.id));
-        }
-        // Batch 6: a storage limit option was accepted; TDLib echoes the
-        // value as `updateOption`.
-        if matches!(
-            pending.map(|p| p.purpose),
-            Some(RequestPurpose::SetStorageOption)
-        ) {
-            self.settings.data_storage_save.succeed(());
         }
         // Slice A4: a `disconnectWebsite` /
         // `disconnectAllWebsites` succeeded — same stale pattern
@@ -281,17 +274,17 @@ impl Session {
         // after a conversion, the Stars balance.
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { .. })) => {
-                self.payments.hub.gifts_op.changed(pending.map(|p| p.id));
-                self.payments.hub.gift_notice = None;
+                self.payments.hub.received.op.changed(pending.map(|p| p.id));
+                self.payments.hub.received.notice = None;
             }
             Some(RequestPurpose::SellGift) => {
-                self.payments.hub.gifts_op.changed(pending.map(|p| p.id));
-                self.payments.hub.gift_notice = None;
+                self.payments.hub.received.op.changed(pending.map(|p| p.id));
+                self.payments.hub.received.notice = None;
                 // The panel and the box close only when they are still the
                 // sold gift's: the user may have opened another meanwhile.
                 let sold = pending.and_then(|p| p.subject_id.as_deref());
-                self.payments.hub.gift_view.close_if_selected(sold);
-                self.payments.hub.tx.invalidate();
+                self.payments.hub.received.view.close_if_selected(sold);
+                self.payments.hub.stars.page.invalidate();
             }
             _ => {}
         }
@@ -417,7 +410,7 @@ impl Session {
             // name itself arrives via `updateCommunity`.
             Some(RequestPurpose::SetCommunityName) => {
                 if let Some(community_id) = pending.and_then(|p| p.community_id) {
-                    self.groups.community_full_infos.remove(&community_id);
+                    self.groups.community_full_infos.outdate(community_id);
                 }
             }
             // TDLib 1.8.68: a deleted community is gone for everyone —

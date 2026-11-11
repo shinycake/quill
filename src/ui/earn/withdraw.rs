@@ -230,6 +230,35 @@ impl QuillApp {
                 )
                 .child(buttons);
         }
+        if let Load::Failed(line) = &page.ad_account_url {
+            // The Buy Ads link was refused: what failed and a Retry.
+            block = block.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(line.clone()),
+                    )
+                    .child(
+                        Button::new("earn-buy-ads-retry")
+                            .label(tr(keys::Q_CHAT_RETRY))
+                            .ghost()
+                            .small()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.earn_call(
+                                    tr(keys::Q_MONEY_COULD_NOT_LOAD_REVENUE),
+                                    cx,
+                                    |driver| driver.retry_earn_ad_account_url(peer),
+                                );
+                            })),
+                    ),
+            );
+        }
         let is_self = matches!(peer, EarnPeer::User(id) if session.my_user_id == Some(id));
         block.child(learn_more_band(
             "earn-learn-stars",
@@ -460,7 +489,7 @@ impl QuillApp {
                         );
                     (tr(keys::SETTINGS_CLOUD_PASSWORD_START_TITLE), body, footer)
                 }
-                WithdrawStep::Checking => {
+                WithdrawStep::Checking(_) => {
                     return dialog.on_close(on_close);
                 }
             };
@@ -490,7 +519,7 @@ crate::ui::shell::register_dialogs! {
         |app| {
             app.earn_state()
                 .and_then(|e| e.withdraw.as_ref())
-                .is_some_and(|w| w.step != WithdrawStep::Checking)
+                .is_some_and(|w| !matches!(w.step, WithdrawStep::Checking(_)))
         },
         QuillApp::build_earn_withdraw_dialog,
     )

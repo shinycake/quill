@@ -22,8 +22,6 @@ use quill::telegram::envelope::{
     StarSubscriptionPricing, StarSubscriptionTypeData, format_payment_price, price_parts_total,
 };
 use quill::telegram::requests::{input_credentials_new, input_credentials_saved};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 impl QuillApp {
     /// Slice P1: create the checkout dialog inputs, prefilling the order
@@ -51,8 +49,7 @@ impl QuillApp {
             s.payments.checkout.is_paid()
                 && s.payments
                     .checkout
-                    .request
-                    .as_ref()
+                    .invoice()
                     .is_some_and(|r| r.invoice.is_giveaway())
         });
         self.payments.dialog = None;
@@ -274,8 +271,8 @@ impl QuillApp {
         if let Some(validated) = session
             .payments
             .checkout
-            .order_info
-            .validated_for(&typed_order)
+            .order_info()
+            .and_then(|stage| stage.validated_for(&typed_order))
             && !validated.shipping_options.is_empty()
         {
             // Phase 6: kit RadioGroup (was: buttons with a ◉/○ prefix).
@@ -286,7 +283,7 @@ impl QuillApp {
                 .map(|option| option.id.clone())
                 .collect();
             let shipping_selected = validated.shipping_options.iter().position(|option| {
-                session.payments.checkout.shipping_id.as_deref() == Some(option.id.as_str())
+                session.payments.checkout.shipping_id() == Some(option.id.as_str())
             });
             body = body.child(
                 div()
@@ -318,8 +315,11 @@ impl QuillApp {
                                 if let Some(live) = this.live.as_mut()
                                     && let Some(id) = shipping_ids.get(ix)
                                 {
-                                    live.driver.session.payments.checkout.shipping_id =
-                                        Some(id.clone());
+                                    live.driver
+                                        .session
+                                        .payments
+                                        .checkout
+                                        .choose_shipping(id.clone());
                                 }
                                 cx.notify();
                             })),
@@ -374,8 +374,8 @@ impl QuillApp {
                 || session
                     .payments
                     .checkout
-                    .order_info
-                    .validated_for(&typed_order)
+                    .order_info()
+                    .and_then(|stage| stage.validated_for(&typed_order))
                     .is_some();
             let creds_ok = match &dialog.method {
                 PaymentMethod::Saved { .. } => true,
@@ -449,7 +449,7 @@ impl QuillApp {
         let order = self.payments.dialog.as_ref().map(|dialog| dialog.order(cx));
         let request = self
             .session()
-            .and_then(|session| session.payments.checkout.request.clone());
+            .and_then(|session| session.payments.checkout.invoice().cloned());
         let allow_save = self
             .payments
             .dialog
@@ -463,7 +463,7 @@ impl QuillApp {
             return;
         };
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.payments.checkout.note = None;
+            live.driver.session.payments.checkout.set_note(None);
             live.driver
                 .validate_payment_order_info(&request.invoice, &order, allow_save)
         });
@@ -483,9 +483,9 @@ impl QuillApp {
         let snapshot = self.session().map(|session| {
             (
                 session.payments.checkout.form().cloned(),
-                session.payments.checkout.request.clone(),
-                session.payments.checkout.order_info.clone(),
-                session.payments.checkout.shipping_id.clone(),
+                session.payments.checkout.invoice().cloned(),
+                session.payments.checkout.order_info().cloned(),
+                session.payments.checkout.shipping_id().map(str::to_string),
                 session.payments.checkout.is_paid(),
             )
         });
@@ -512,7 +512,9 @@ impl QuillApp {
             || invoice.need_shipping_address;
         // Only the answer to the fields now typed counts: an edit after
         // Continue (or a Continue still out) is validated again.
-        let validated = order_info.validated_for(&dialog.order(cx));
+        let validated = order_info
+            .as_ref()
+            .and_then(|stage| stage.validated_for(&dialog.order(cx)));
         if needs_order && validated.is_none() {
             self.set_note(StatusNote::silent(tr(
                 keys::Q_MONEY_VALIDATE_THE_ORDER_INFO_FIRST,
@@ -535,7 +537,7 @@ impl QuillApp {
             .unwrap_or("");
         let shipping_option_id = shipping_id.as_deref().unwrap_or("");
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.payments.checkout.note = None;
+            live.driver.session.payments.checkout.set_note(None);
             live.driver.submit_payment_form(
                 &request.invoice,
                 form.id,
@@ -837,3 +839,6 @@ pub(in crate::ui) mod card_form_demo;
 #[cfg(feature = "demo-capture")]
 mod card_form_tests;
 mod card_form_view;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod start_checkout_tests;

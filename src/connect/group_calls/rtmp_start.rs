@@ -34,12 +34,17 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// "Revoke Stream Key" in the box: the same request with `revoke`.
     pub fn revoke_rtmp_start_key(&mut self) -> Result<(), ConnectSendError> {
-        let Some(chat_id) = self.session.calls.rtmp_start.as_ref().map(|s| s.chat_id) else {
+        let Some(start) = self.session.calls.rtmp_start.as_ref() else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if !self.chats_path_active() {
+        // A second revoke while the first is out waits for that answer.
+        if start.revoke_in_flight() {
+            return Ok(());
+        }
+        if !start.can_revoke() || !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        let chat_id = start.chat_id;
         let request = self.send_rtmp_url_request(chat_id, true)?;
         if let Some(start) = self.session.calls.rtmp_start.as_mut() {
             start.revoking(request);
@@ -81,11 +86,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.calls.create_join_as = Some(CreateJoinAs {
-            chat_id: chat_id.0,
-            request: extra,
-            answer: None,
-        });
+        self.session.calls.create_join_as = Some(CreateJoinAs::asking(chat_id.0, extra));
         Ok(extra)
     }
 

@@ -56,6 +56,21 @@ impl QuillApp {
                     refs.first().and_then(|first| first.sender),
                     cx,
                 );
+                // The first item's headers open the album, as its
+                // sender and time do.
+                let header = refs.first().and_then(|first| {
+                    crate::ui::history::row_header(
+                        first,
+                        chrome.reply_header.clone(),
+                        chrome.forward_header.clone(),
+                        chrome.via_bot.clone(),
+                        first.is_outgoing && !look.plain,
+                        session,
+                        files,
+                        &shared.media_roots,
+                        cx,
+                    )
+                });
                 let kind = refs
                     .first()
                     .and_then(|first| quill::album::album_kind(&first.content));
@@ -73,6 +88,7 @@ impl QuillApp {
                             sender_status,
                             receipt: chrome.receipt,
                             sender_avatar: avatar,
+                            header,
                             look,
                         },
                         files,
@@ -94,6 +110,7 @@ impl QuillApp {
                     sender_status,
                     chrome.receipt,
                     avatar,
+                    header,
                     // Settings → Appearance: font size + bubble/plain style.
                     look,
                     session,
@@ -297,6 +314,13 @@ impl QuillApp {
                                 );
                             }
                             cx.notify();
+                        }),
+                    )
+                    // A press that ends outside its row is not a swipe.
+                    .on_mouse_up_out(
+                        MouseButton::Left,
+                        cx.listener(|this, _: &MouseUpEvent, _, _| {
+                            this.message_ui.swipe_reply_start = None;
                         }),
                     )
                     .on_mouse_up(

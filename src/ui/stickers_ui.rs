@@ -109,10 +109,10 @@ impl QuillApp {
     pub(super) fn animated_emoji_suggestion(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         let emoji = &session.stickers.emoji;
-        if !self.composer_suggests(emoji.animated_emoji_for.as_deref(), cx) {
+        if !self.composer_suggests(emoji.animated.emoji_for(), cx) {
             return None;
         }
-        let sticker = emoji.animated_emoji.as_ref()?;
+        let sticker = emoji.animated.sticker()?;
         let row = div()
             .id("animated-emoji-suggestion")
             .flex()
@@ -152,8 +152,8 @@ impl QuillApp {
         self.sticker_suggestions_shown(cx)
             || self.session().is_some_and(|session| {
                 let emoji = &session.stickers.emoji;
-                emoji.animated_emoji.is_some()
-                    && self.composer_suggests(emoji.animated_emoji_for.as_deref(), cx)
+                emoji.animated.sticker().is_some()
+                    && self.composer_suggests(emoji.animated.emoji_for(), cx)
             })
     }
 

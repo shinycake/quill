@@ -499,6 +499,12 @@ fn notification_exceptions_answer_lands_per_scope() {
         .entry(NotificationSettingsScope::PrivateChats)
         .or_default()
         .begin();
+    session
+        .settings
+        .notification_exceptions
+        .entry(NotificationSettingsScope::PrivateChats)
+        .or_default()
+        .sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -530,6 +536,12 @@ fn failed_notification_exceptions_fetch_retries() {
         .entry(NotificationSettingsScope::GroupChats)
         .or_default()
         .begin();
+    session
+        .settings
+        .notification_exceptions
+        .entry(NotificationSettingsScope::GroupChats)
+        .or_default()
+        .sent(extra);
     apply_json(
         &mut session,
         &seq,

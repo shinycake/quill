@@ -185,3 +185,30 @@ fn others_have_no_pending_rating(cx: &mut TestAppContext) {
     click(&mut vcx, "profile-rating");
     assert!(!find(&mut vcx, "rating-box-preview"));
 }
+
+/// The box settles on its own request: another save of the Last seen rule
+/// (a refusal in the key's state) says nothing about it.
+#[gpui_kit::test]
+fn the_show_box_settles_on_its_own_request(cx: &mut TestAppContext) {
+    use crate::ui::profile_cover::ShowStage;
+    use quill::state::RequestPurpose;
+    let (app, _shell, mut vcx) = new_app(cx, "ready-info-cover-last-seen");
+    click(&mut vcx, "profile-cover-when");
+    app.update_in(&mut vcx, |app, _, cx| {
+        let request = app
+            .demo_session
+            .as_mut()
+            .map(|session| session.request(RequestPurpose::SetReadDatePrivacy, None))
+            .expect("the demo session");
+        if let Some(open) = app.profile_cover.show_or_premium.as_mut() {
+            open.stage = ShowStage::Saving(request);
+        }
+        assert!(!app.drain_show_or_premium(cx), "its request is still out");
+        assert!(app.profile_cover.show_or_premium.is_some());
+        if let Some(session) = app.demo_session.as_mut() {
+            session.requests.take(request);
+        }
+        assert!(app.drain_show_or_premium(cx), "answered");
+        assert!(app.profile_cover.show_or_premium.is_none());
+    });
+}

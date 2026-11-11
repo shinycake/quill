@@ -35,16 +35,16 @@ fn an_older_stars_history_failure_leaves_the_live_request_loading() {
         RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { append: false }),
         None,
     );
-    session.payments.hub.tx = PageStage::Loading {
+    session.payments.hub.stars.page = PageStage::Loading {
         request: new,
         kind: PageKind::First,
     };
     fail(&mut session, old, &sink);
-    assert!(session.payments.hub.tx.is_loading());
-    assert!(session.payments.hub.tx.error().is_none());
+    assert!(session.payments.hub.stars.page.is_loading());
+    assert!(session.payments.hub.stars.page.error().is_none());
     fail(&mut session, new, &sink);
-    assert!(!session.payments.hub.tx.is_loading());
-    assert!(session.payments.hub.tx.error().is_some());
+    assert!(!session.payments.hub.stars.page.is_loading());
+    assert!(session.payments.hub.stars.page.error().is_some());
 }
 
 #[test]
@@ -58,16 +58,16 @@ fn an_older_received_gifts_failure_leaves_the_live_request_loading() {
         RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append: false }),
         None,
     );
-    session.payments.hub.gifts_page = PageStage::Loading {
+    session.payments.hub.received.page = PageStage::Loading {
         request: new,
         kind: PageKind::First,
     };
     fail(&mut session, old, &sink);
-    assert!(session.payments.hub.gifts_page.is_loading());
-    assert!(session.payments.hub.gifts_page.error().is_none());
+    assert!(session.payments.hub.received.page.is_loading());
+    assert!(session.payments.hub.received.page.error().is_none());
     fail(&mut session, new, &sink);
-    assert!(!session.payments.hub.gifts_page.is_loading());
-    assert!(session.payments.hub.gifts_page.error().is_some());
+    assert!(!session.payments.hub.received.page.is_loading());
+    assert!(session.payments.hub.received.page.error().is_some());
 }
 
 #[test]
@@ -85,9 +85,12 @@ fn collections_of_another_owner_are_dropped() {
         None,
     );
     // The channel's list is open now.
-    session.payments.hub.gifts_owner = Some(channel);
-    session.payments.gifts_manage.collections.begin();
-    session.payments.gifts_manage.collections.sent(second);
+    session.payments.hub.received.owner = Some(channel);
+    session
+        .payments
+        .gifts_manage
+        .collections_fetch
+        .begin(second);
     let list = |extra: RequestId, id: i32| {
         format!(
             r#"{{"@type":"giftCollections","@extra":"{}","collections":[{{"@type":"giftCollection","id":{id},"name":"Mine","icon":null,"gift_count":1}}]}}"#,
@@ -95,19 +98,19 @@ fn collections_of_another_owner_are_dropped() {
         )
     };
     apply_json(&mut session, &seq, &sink, &list(first, 7));
-    assert!(session.payments.gifts_manage.collections.items().is_empty());
-    assert!(session.payments.gifts_manage.collections.is_loading());
+    assert!(session.payments.gifts_manage.collections.is_empty());
+    assert!(session.payments.gifts_manage.collections_fetch.is_loading());
     fail(&mut session, first, &sink);
-    assert!(session.payments.gifts_manage.collections.is_loading());
+    assert!(session.payments.gifts_manage.collections_fetch.is_loading());
     apply_json(&mut session, &seq, &sink, &list(second, 9));
-    assert_eq!(session.payments.gifts_manage.collections.items().len(), 1);
-    assert!(!session.payments.gifts_manage.collections.is_loading());
+    assert_eq!(session.payments.gifts_manage.collections.len(), 1);
+    assert!(!session.payments.gifts_manage.collections_fetch.is_loading());
 }
 
 #[test]
 fn market_failures_hit_only_the_request_that_failed() {
     let (mut session, sink) = session();
-    let search = |page| GiftMarketPurpose::SearchResale { gift_id: 5, page };
+    let search = |_page| GiftMarketPurpose::SearchResale { gift_id: 5 };
     let old = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GiftMarket(search(0))),
         None,
@@ -160,7 +163,7 @@ fn market_failures_hit_only_the_request_that_failed() {
     );
 
     // Craft candidates of a closed craft box do not fail the next one.
-    let candidates = |page| GiftMarketPurpose::GiftsForCrafting { gift_id: 5, page };
+    let candidates = |_page| GiftMarketPurpose::GiftsForCrafting { gift_id: 5 };
     let stale = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GiftMarket(candidates(0))),
         None,
@@ -199,6 +202,11 @@ fn acquired_gifts_and_preview_failures_say_so_and_can_be_asked_again() {
         )),
         None,
     );
+    let market = &mut session.payments.gift_market;
+    market.acquired.entry(8).or_default().begin();
+    market.acquired.entry(8).or_default().sent(acquired);
+    market.previews.entry(8).or_default().begin();
+    market.previews.entry(8).or_default().sent(preview);
     fail(&mut session, acquired, &sink);
     fail(&mut session, preview, &sink);
     let market = &session.payments.gift_market;
@@ -214,26 +222,95 @@ fn acquired_gifts_and_preview_failures_say_so_and_can_be_asked_again() {
 
 #[test]
 fn a_giveaway_launch_in_flight_is_never_forgotten_by_a_form() {
-    use crate::state::GiveawayLaunch;
-    let launching = GiveawayLaunch::Launching {
-        chat_id: 5,
-        request: crate::ids::RequestId(9),
-    };
-    assert_eq!(launching.clone().for_form(), launching);
-    assert!(launching.is_launching_for(5));
-    assert!(!launching.is_launching_for(6));
-    for seen in [
-        GiveawayLaunch::Launched { chat_id: 5 },
-        GiveawayLaunch::Paid { chat_id: 5 },
-        GiveawayLaunch::Verifying { chat_id: 5 },
-        GiveawayLaunch::Failed {
-            chat_id: 5,
-            reason: "x".into(),
+    use crate::state::{GiveawayLaunch, GiveawayLaunches};
+    let mut launches = GiveawayLaunches::default();
+    launches.set(
+        5,
+        GiveawayLaunch::Launching {
+            request: RequestId(9),
         },
-        GiveawayLaunch::Idle,
+    );
+    launches.for_form(5);
+    assert!(launches.is_launching_for(5));
+    assert!(!launches.is_launching_for(6));
+    for seen in [
+        GiveawayLaunch::Launched,
+        GiveawayLaunch::Paid,
+        GiveawayLaunch::Failed { reason: "x".into() },
     ] {
-        assert_eq!(seen.for_form(), GiveawayLaunch::Idle);
+        launches.set(5, seen);
+        launches.for_form(5);
+        assert_eq!(launches.stage(5), &GiveawayLaunch::Idle);
     }
+}
+
+/// 10-023: closing the form during the provider's verification, and opening
+/// it again, keeps Start refused until the user ends the verification.
+#[test]
+fn a_giveaway_waiting_on_verification_survives_the_form_closing() {
+    use crate::state::{GiveawayLaunch, GiveawayLaunches};
+    let mut launches = GiveawayLaunches::default();
+    launches.set(5, GiveawayLaunch::Verifying);
+    launches.for_form(5);
+    launches.for_form(5);
+    assert!(launches.is_done_for(5) && launches.is_verifying_for(5));
+    launches.end_verification(6);
+    assert!(
+        launches.is_verifying_for(5),
+        "another chat's does not end it"
+    );
+    launches.end_verification(5);
+    assert_eq!(launches.stage(5), &GiveawayLaunch::Idle);
+}
+
+/// 10-024: editing the form dismisses a failed launch's line, and only that.
+#[test]
+fn editing_the_form_dismisses_a_failed_launch_but_not_one_in_flight() {
+    use crate::state::{GiveawayLaunch, GiveawayLaunches};
+    let mut launches = GiveawayLaunches::default();
+    launches.set(5, GiveawayLaunch::Failed { reason: "x".into() });
+    launches.dismiss_failure(5);
+    assert!(launches.failure_for(5).is_none());
+    launches.set(
+        5,
+        GiveawayLaunch::Launching {
+            request: RequestId(3),
+        },
+    );
+    launches.dismiss_failure(5);
+    assert!(launches.is_launching_for(5));
+}
+
+/// Each chat has its own launch stage: a second launch does not overwrite
+/// the first, and each answer lands on the chat that asked.
+#[test]
+fn two_chats_launch_at_once_and_each_answer_lands_on_its_own_chat() {
+    use crate::state::{GiveawayLaunch, GiveawayLaunches};
+    let mut launches = GiveawayLaunches::default();
+    launches.set(
+        1,
+        GiveawayLaunch::Launching {
+            request: RequestId(10),
+        },
+    );
+    launches.set(
+        2,
+        GiveawayLaunch::Launching {
+            request: RequestId(11),
+        },
+    );
+    assert!(launches.is_launching_for(1) && launches.is_launching_for(2));
+    assert_eq!(launches.launching(RequestId(10)), Some(1));
+    assert_eq!(launches.launching(RequestId(11)), Some(2));
+    assert_eq!(launches.launching(RequestId(0)), None);
+    launches.set(
+        1,
+        GiveawayLaunch::Failed {
+            reason: "no".into(),
+        },
+    );
+    assert_eq!(launches.failure_for(1), Some("no"));
+    assert!(launches.is_launching_for(2), "B is still out");
 }
 
 #[test]
@@ -264,4 +341,26 @@ fn a_join_box_parked_for_a_bot_profile_goes_when_the_profile_closes() {
     park(&mut session);
     session.set_open_info_panel(None);
     assert!(session.payments.earn.recipients.parked().is_none());
+}
+
+#[test]
+fn an_older_acquired_gifts_failure_leaves_the_live_request_loading() {
+    let (mut session, sink) = session();
+    let purpose = || {
+        RequestPurpose::Payments(PaymentsPurpose::GiftMarket(
+            GiftMarketPurpose::AcquiredGifts { gift_id: 8 },
+        ))
+    };
+    let old = session.request(purpose(), None);
+    let live = session.request(purpose(), None);
+    let fetch = session.payments.gift_market.acquired.entry(8).or_default();
+    fetch.begin();
+    fetch.sent(live);
+    fail(&mut session, old, &sink);
+    assert!(session.payments.gift_market.acquired[&8].is_loading());
+    fail(&mut session, live, &sink);
+    assert!(matches!(
+        session.payments.gift_market.acquired.get(&8),
+        Some(Fetch::Failed { .. })
+    ));
 }

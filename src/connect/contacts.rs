@@ -11,20 +11,23 @@ use crate::telegram::requests::{
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase 6: `getContacts` for the contacts tab. Fires once per list
-    /// (deduped by a settled `Session::contacts` + in-flight purpose); a
-    /// failed attempt clears its error flag on retry. The `users` response
+    /// (the list's own stage dedupes it); a failed attempt clears its error flag on retry. The `users` response
     /// lands the id list; user objects arrive via `updateUser`.
     pub fn fetch_contacts(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            // Nothing can go out: a list nothing asked for lands in the
+            // failed stage (with its Retry), not a "Loading contacts..."
+            // nothing will end.
+            let contacts = &mut self.session.users_state.contacts;
+            if contacts.can_ask() {
+                contacts.fail_dropping_data("could not send the request");
+            }
             return Err(ConnectSendError::InvalidRequest);
         }
         let contacts = &self.session.users_state.contacts;
-        if !(contacts.can_ask() || contacts.is_outdated())
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetContacts)
-        {
+        // The list's own stage says whether a fetch is out: an older request
+        // an `Outdated` list no longer waits for is ignored when it lands.
+        if !(contacts.can_ask() || contacts.is_outdated()) {
             return Ok(None);
         }
         self.session.users_state.contacts.begin();
@@ -51,13 +54,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.users_state.contacts.is_outdated() {
             return;
         }
-        // A fetch out from before the change would bring back what it
-        // removed: dropped, so the refetch below goes out.
-        drop(
-            self.session
-                .requests
-                .take_purpose(RequestPurpose::GetContacts),
-        );
+        // A fetch out from before the change is no longer waited for
+        // (`outdate` dropped its request), so the refetch below goes out
+        // and the old answer lands nowhere.
         // A fetch refused before it began (the chats path is not active)
         // leaves the list idle: it ends in the error line and its Retry
         // too, not in a tab that stays on "Loading contacts...".

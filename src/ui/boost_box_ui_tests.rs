@@ -139,7 +139,10 @@ fn a_row_click_picks_a_boost_and_a_waiting_row_does_not(cx: &mut TestAppContext)
             panic!("still the reassign list");
         };
         assert_eq!(selected, &vec![1]);
-        assert_eq!(state.note, Some(quill::boost_box::waiting_note(0)));
+        assert_eq!(
+            state.note(),
+            Some(quill::boost_box::waiting_note(0).as_str())
+        );
     });
 }
 

@@ -148,7 +148,7 @@ impl QuillApp {
             dialog_open: self.payments.dialog.is_some(),
             paid: shown && payments.is_some_and(|p| p.checkout.is_paid()),
             sending: payments.is_some_and(|p| p.is_paying(&invoice)),
-            note: shown && payments.is_some_and(|p| p.checkout.note.is_some()),
+            note: shown && payments.is_some_and(|p| p.checkout.note().is_some()),
             verification: shown && payments.is_some_and(|p| p.checkout.is_verifying()),
         };
         let Some(window) = self.mini_apps.window.as_mut() else {
@@ -315,14 +315,18 @@ mod demo {
         fn demo_mini_app_invoice(&mut self, window: &mut Window, cx: &mut Context<Self>) {
             if let Some(session) = self.demo_session.as_mut() {
                 // box-host: demo
-                session.payments.checkout.form =
-                    quill::state::CheckoutForm::Ready(PaymentFormData {
+                session.payments.checkout = quill::state::CheckoutForm::ready(
+                    PaymentFormData {
                         id: 1,
                         form_type: PaymentFormTypeData::Stars { star_count: 50 },
                         seller_bot_user_id: 900,
                         product_title: "Premium skin pack".into(),
                         product_description: "Ordered from the Quillbot mini app.".into(),
-                    });
+                    },
+                    quill::state::PaymentRequest {
+                        invoice: quill::payment_invoice::InputInvoice::Name("demo".into()),
+                    },
+                );
             }
             self.open_payment_dialog(window, cx);
         }

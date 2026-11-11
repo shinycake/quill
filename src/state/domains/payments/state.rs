@@ -109,166 +109,11 @@ pub struct PaymentVerification {
     pub giveaway_chat_id: Option<i64>,
 }
 
-/// The checkout's form, one stage at a time.
-///
-/// `Loading` leaves on the answer of its own `getPaymentForm` (`Ready`; an
-/// answer to an earlier checkout's fetch is not this one's) or its error
-/// (`Closed`, with the error in `PaymentsState::note`). `Ready` leaves on
-/// the `sendPaymentForm` answer: `Paid` (Pay stays off, so one form is
-/// never sent twice), `Verifying` (the answer asked for a verification
-/// step; nothing drains it, a mini app's checkout reads it to report
-/// `pending`) or back to `Ready` when it failed. Any stage leaves with the
-/// checkout closing.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub enum CheckoutForm {
-    #[default]
-    Closed,
-    /// `getPaymentForm` is out as `request` (the dialog shows a spinner).
-    Loading {
-        request: RequestId,
-    },
-    Ready(PaymentFormData),
-    Verifying(PaymentFormData),
-    Paid(PaymentFormData),
-}
-
-impl CheckoutForm {
-    /// The fetched form, in any stage that has one.
-    pub fn form(&self) -> Option<&PaymentFormData> {
-        match self {
-            Self::Ready(form) | Self::Verifying(form) | Self::Paid(form) => Some(form),
-            Self::Closed | Self::Loading { .. } => None,
-        }
-    }
-
-    pub fn is_loading(&self) -> bool {
-        matches!(self, Self::Loading { .. })
-    }
-
-    pub fn is_paid(&self) -> bool {
-        matches!(self, Self::Paid(_))
-    }
-
-    pub fn is_verifying(&self) -> bool {
-        matches!(self, Self::Verifying(_))
-    }
-
-    /// `request` is the form this checkout waits for.
-    pub(crate) fn waits_for(&self, request: Option<RequestId>) -> bool {
-        matches!((self, request), (Self::Loading { request: asked }, Some(id)) if *asked == id)
-    }
-
-    /// The form was paid.
-    pub fn mark_paid(&mut self) {
-        if let Some(form) = self.form().cloned() {
-            *self = Self::Paid(form);
-        }
-    }
-
-    /// The payment asked for a verification step.
-    pub fn mark_verifying(&mut self) {
-        if let Self::Ready(form) = self {
-            *self = Self::Verifying(form.clone());
-        }
-    }
-
-    /// The verification step is over (the payment answered).
-    pub fn end_verification(&mut self) {
-        if let Self::Verifying(form) = self {
-            *self = Self::Ready(form.clone());
-        }
-    }
-}
-
-/// The checkout on screen: the invoice it pays, its form, order info,
-/// shipping choice and the note the dialog shows. It is replaced whole
-/// when a checkout opens, its form arrives or fails, and when it closes
-/// (`Checkout::default()` is closed), so no part outlives another and no
-/// caller resets a subset by hand.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct Checkout {
-    /// What is being paid (the invoice every request of this checkout
-    /// carries); `None` while no checkout is open, also after its form
-    /// failed to load.
-    pub request: Option<PaymentRequest>,
-    /// The checkout's `paymentForm`, from `getPaymentForm` in flight to
-    /// paid ([`CheckoutForm`]).
-    pub form: CheckoutForm,
-    /// Where the order info stands (`validateOrderInfo`).
-    pub order_info: OrderInfoStage,
-    /// The chosen shipping option id (default: the first).
-    pub shipping_id: Option<String>,
-    /// Latest payment error / outcome note, shown in the checkout dialog
-    /// (never a secret: order fields and credentials are never echoed).
-    pub note: Option<String>,
-}
-
-impl Checkout {
-    /// A checkout for `invoice` whose `getPaymentForm` is out as `request`.
-    pub fn loading(invoice: crate::payment_invoice::InputInvoice, request: RequestId) -> Self {
-        Self {
-            request: Some(PaymentRequest { invoice }),
-            form: CheckoutForm::Loading { request },
-            ..Self::default()
-        }
-    }
-
-    /// The form of this checkout arrived.
-    pub fn with_form(self, form: PaymentFormData) -> Self {
-        Self {
-            request: self.request,
-            form: CheckoutForm::Ready(form),
-            ..Self::default()
-        }
-    }
-
-    /// The form could not be fetched: nothing is open, only the dialog's
-    /// note says why.
-    pub fn failed(note: String) -> Self {
-        Self {
-            note: Some(note),
-            ..Self::default()
-        }
-    }
-
-    /// The fetched form, in any stage that has one.
-    pub fn form(&self) -> Option<&PaymentFormData> {
-        self.form.form()
-    }
-
-    pub fn is_loading(&self) -> bool {
-        self.form.is_loading()
-    }
-
-    pub fn is_paid(&self) -> bool {
-        self.form.is_paid()
-    }
-
-    pub fn is_verifying(&self) -> bool {
-        self.form.is_verifying()
-    }
-
-    /// `request` is the form this checkout waits for.
-    pub(crate) fn waits_for(&self, request: Option<RequestId>) -> bool {
-        self.form.waits_for(request)
-    }
-
-    pub fn mark_paid(&mut self) {
-        self.form.mark_paid();
-    }
-
-    pub fn mark_verifying(&mut self) {
-        self.form.mark_verifying();
-    }
-
-    pub fn end_verification(&mut self) {
-        self.form.end_verification();
-    }
-}
-
 pub struct PaymentsState {
-    /// The checkout on screen ([`Checkout`]).
-    pub checkout: Checkout,
+    /// The checkout, one value: its invoice, form, order info, shipping
+    /// choice and note live in the stage that owns them ([`CheckoutForm`]),
+    /// so closing it takes them all.
+    pub checkout: CheckoutForm,
     /// The receipt dialog: closed, waiting for the `getPaymentReceipt` it
     /// asked, or showing the answer. Closing it forgets the request, so a
     /// late answer cannot reopen it.
@@ -281,14 +126,19 @@ pub struct PaymentsState {
     /// and is disabled while one is in flight for the invoice shown
     /// ([`PaymentsState::checkout_sending`]).
     pub paying: Vec<PaymentInFlight>,
-    /// Outcomes for the status bar ("Media Unlocked", a failed receipt, a
-    /// payment whose box is gone), drained by the UI poll.
+    /// "Media Unlocked" note after a paid-media purchase, drained into the
+    /// status bar by the UI poll.
+    pub unlocked_notice: Option<String>,
+    /// Outcomes nobody on screen would see, drained into the status bar.
     pub notices: Vec<PaymentNotice>,
-    /// `paymentResult.verification_url` of non-successful
-    /// `sendPaymentForm`s, in order: the UI takes them on the next poll and
-    /// opens each in the OS browser (3-D Secure and similar). A second
-    /// payment never replaces the first's page.
-    pub verifications: Vec<PaymentVerification>,
+    /// Slice P1: a failed `getPaymentReceipt`, drained into the status
+    /// note by `poll_live` — the checkout dialog (which renders
+    /// `payment_note`) may be closed when the receipt fetch fails.
+    pub receipt_error: Option<String>,
+    /// Slice P1: `paymentResult.verification_url` from a non-successful
+    /// `sendPaymentForm` — the UI takes it on the next poll and opens it
+    /// in the OS browser (3-D Secure and similar).
+    pub verification_url: Option<PaymentVerification>,
     pub marketplace_gift: Option<crate::marketplace::GiftPurchase>,
     pub gift_text_length_max: Option<usize>,
     /// TDLib `poll_country_count_max`: countries a poll may be limited to.
@@ -398,8 +248,7 @@ impl PaymentsState {
     /// `sendPaymentForm` in flight.
     pub fn checkout_sending(&self) -> bool {
         self.checkout
-            .request
-            .as_ref()
+            .invoice()
             .is_some_and(|request| self.is_paying(&request.invoice))
     }
 
@@ -419,8 +268,7 @@ impl PaymentsState {
     /// The checkout on screen shows `invoice`.
     pub fn shows(&self, invoice: &crate::payment_invoice::InputInvoice) -> bool {
         self.checkout
-            .request
-            .as_ref()
+            .invoice()
             .is_some_and(|request| &request.invoice == invoice)
     }
 
@@ -480,11 +328,13 @@ impl BankCardLookup {
 impl PaymentsState {
     pub(crate) fn new() -> Self {
         Self {
-            checkout: Checkout::default(),
+            checkout: CheckoutForm::Closed,
             receipt: ReceiptStage::Closed,
             paying: Vec::new(),
+            unlocked_notice: None,
             notices: Vec::new(),
-            verifications: Vec::new(),
+            receipt_error: None,
+            verification_url: None,
             marketplace_gift: None,
             gift_text_length_max: None,
             poll_countries_max: None,

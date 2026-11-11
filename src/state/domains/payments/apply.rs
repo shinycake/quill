@@ -36,9 +36,9 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPaymentForm)
                     && extra.is_some()
                     && self.payments.checkout.waits_for(extra)
+                    && let CheckoutForm::Loading { invoice, .. } = &self.payments.checkout
                 {
-                    self.payments.checkout =
-                        std::mem::take(&mut self.payments.checkout).with_form(form);
+                    self.payments.checkout = CheckoutForm::ready(form, invoice.clone());
                 }
             }
             PaymentsPayload::ValidatedOrderInfo(validated) => {
@@ -48,18 +48,17 @@ impl Session {
                 // is not this one's.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::ValidateOrderInfo)
                     && extra.is_some()
-                    && let OrderInfoStage::Validating { request, order } =
-                        &self.payments.checkout.order_info
+                    && let CheckoutForm::Ready(checkout) = &mut self.payments.checkout
+                    && let OrderInfoStage::Validating { request, order } = &checkout.order_info
                     && Some(*request) == extra
                 {
                     let order = order.clone();
-                    self.payments.checkout.shipping_id =
-                        validated.shipping_options.first().map(|o| o.id.clone());
-                    self.payments.checkout.order_info = OrderInfoStage::Validated {
+                    checkout.shipping_id = validated.shipping_options.first().map(|o| o.id.clone());
+                    checkout.order_info = OrderInfoStage::Validated {
                         order,
                         info: validated,
                     };
-                    self.payments.checkout.note = None;
+                    checkout.note = None;
                 }
             }
             PaymentsPayload::PaymentResult(result) => {
@@ -74,11 +73,14 @@ impl Session {
                         self.payments.checkout.end_verification();
                     }
                     if result.success {
-                        let unlocked = self.note_paid_media_unlocked(&paid);
+                        self.note_paid_media_unlocked(&paid);
                         if let Some(chat_id) = paid.invoice.giveaway_chat_id() {
-                            self.payments.giveaway.launch = GiveawayLaunch::Paid { chat_id };
+                            self.payments
+                                .giveaway
+                                .launches
+                                .set(chat_id, GiveawayLaunch::Paid);
                         }
-                        if !shown && !unlocked {
+                        if !shown && self.payments.unlocked_notice.is_none() {
                             // The checkout was closed while it paid.
                             self.payments.notify(
                                 NoticeKind::Info,
@@ -87,10 +89,10 @@ impl Session {
                         }
                         if shown {
                             self.payments.checkout.mark_paid();
-                            self.payments.checkout.note = Some(format!(
+                            self.payments.checkout.set_note(Some(format!(
                                 "✅ {}",
                                 crate::lang::tr(crate::lang::keys::Q_MONEY_PAYMENT_SUCCESS_NOTE)
-                            ));
+                            )));
                         }
                     } else if !result.verification_url.is_empty() {
                         // Schema: the URL is for additional payment
@@ -100,9 +102,12 @@ impl Session {
                         // Whatever the checkout shows, the giveaway's
                         // payment is now in the provider's hands.
                         if let Some(chat_id) = paid.invoice.giveaway_chat_id() {
-                            self.payments.giveaway.launch = GiveawayLaunch::Verifying { chat_id };
+                            self.payments
+                                .giveaway
+                                .launches
+                                .set(chat_id, GiveawayLaunch::Verifying);
                         }
-                        self.payments.verifications.push(PaymentVerification {
+                        self.payments.verification_url = Some(PaymentVerification {
                             url: result.verification_url,
                             closes_checkout: shown,
                             giveaway_chat_id: paid.invoice.giveaway_chat_id(),
@@ -111,9 +116,9 @@ impl Session {
                             self.payments.checkout.mark_verifying();
                         }
                     } else if shown {
-                        self.payments.checkout.note = Some(
+                        self.payments.checkout.set_note(Some(
                             crate::lang::tr(crate::lang::keys::Q_MONEY_PAYMENT_FAILED).to_string(),
-                        );
+                        ));
                     } else {
                         self.payments.notify(
                             NoticeKind::Error,
@@ -138,7 +143,7 @@ impl Session {
                 }
             }
             PaymentsPayload::GiftPurchaseResult(result) if self.is_gift_market_buy(pending) => {
-                self.apply_gift_market_purchase(result, pending.map_or(0, |p| p.id.0));
+                self.apply_gift_market_purchase(result, pending.map(|p| p.id));
             }
             PaymentsPayload::GiftPurchaseResult(result) => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::SendMarketplaceGift)
@@ -180,7 +185,7 @@ impl Session {
                 if let Some(p) = pending
                     && let RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { append }) =
                         p.purpose
-                    && self.payments.hub.tx.waits_for(p.id)
+                    && self.payments.hub.stars.page.waits_for(p.id)
                 {
                     self.payments.hub.apply_transactions(page, append);
                 }
@@ -219,7 +224,7 @@ impl Session {
                 } else if let Some(p) = pending
                     && let RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append }) =
                         p.purpose
-                    && self.payments.hub.gifts_page.waits_for(p.id)
+                    && self.payments.hub.received.page.waits_for(p.id)
                 {
                     let files: Vec<ParsedFile> = page
                         .gifts
@@ -231,18 +236,30 @@ impl Session {
                 }
             }
             PaymentsPayload::PremiumFeatures(info) => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPremiumFeatures) {
-                    self.payments.hub.premium.succeed(info);
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::GetPremiumFeatures
+                {
+                    self.payments.hub.premium.answered(Some(pending.id), info);
                 }
             }
             PaymentsPayload::PremiumState(info) => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPremiumState) {
-                    self.payments.hub.premium_state = Some(info);
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::GetPremiumState
+                {
+                    self.payments
+                        .hub
+                        .premium_state
+                        .answered(Some(pending.id), info);
                 }
             }
             PaymentsPayload::BusinessFeatures(features) => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBusinessFeatures) {
-                    self.payments.hub.business_features.succeed(features);
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::GetBusinessFeatures
+                {
+                    self.payments
+                        .hub
+                        .business_features
+                        .answered(Some(pending.id), features);
                 }
             }
             PaymentsPayload::GiveawayInfo(info) => self.apply_giveaway_info(info, pending),

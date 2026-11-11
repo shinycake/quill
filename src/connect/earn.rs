@@ -91,15 +91,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         };
         let peer = EarnPeer::User(me);
-        if self.session.payments.earn.self_stats.is_some()
+        if !self.session.payments.earn.self_stats.is_idle()
             || self.earn_in_flight(EarnPurpose::StarStats { peer })
         {
             return Ok(());
         }
         self.send_earn(EarnPurpose::StarStats { peer }, |extra| {
             get_star_revenue_statistics(extra, peer, false)
-        })
-        .map(|_| ())
+        })?;
+        self.session.payments.earn.self_stats.begin();
+        Ok(())
     }
 
     /// Open a revenue page and load it the way tdesktop does: TON
@@ -145,7 +146,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 |extra| get_chat_revenue_statistics(extra, chat_id, is_dark),
                 |session, extra| {
                     if let Some(page) = session.payments.earn.page.as_mut() {
-                        page.ton.start(extra);
+                        page.ton = Load::Loading(extra);
                     }
                 },
             )?;
@@ -168,7 +169,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 |extra| get_star_revenue_statistics(extra, peer, is_dark),
                 |session, extra| {
                     if let Some(page) = session.payments.earn.page.as_mut() {
-                        page.stars.start(extra);
+                        page.stars = Load::Loading(extra);
                     }
                 },
             )?;
@@ -183,18 +184,48 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.fetch_earn_star_history(peer, filter, false)?;
             }
             if !is_self {
-                self.send_earn_tracked(
-                    EarnPurpose::AdAccountUrl { peer },
-                    |extra| get_star_ad_account_url(extra, peer),
-                    |session, extra| {
-                        if let Some(page) = session.payments.earn.page.as_mut() {
-                            page.ad_account_url.start(extra);
-                        }
-                    },
-                )?;
+                self.ask_earn_ad_account_url(peer)?;
             }
         }
         Ok(())
+    }
+
+    /// `getStarAdAccountUrl` for the open page; the page waits for this
+    /// request alone.
+    fn ask_earn_ad_account_url(&mut self, peer: EarnPeer) -> Result<(), ConnectSendError> {
+        self.send_earn_tracked(
+            EarnPurpose::AdAccountUrl { peer },
+            |extra| get_star_ad_account_url(extra, peer),
+            |session, extra| {
+                if let Some(page) = session.payments.earn.page.as_mut() {
+                    page.ad_account_url = Load::Loading(extra);
+                }
+            },
+        )
+        .map(|_| ())
+    }
+
+    /// The Buy Ads link was refused: ask again (the "Retry" next to the
+    /// withdraw buttons).
+    pub fn retry_earn_ad_account_url(&mut self, peer: EarnPeer) -> Result<(), ConnectSendError> {
+        self.earn_ready()?;
+        let failed = self
+            .session
+            .payments
+            .earn
+            .page
+            .as_ref()
+            .is_some_and(|p| p.peer == peer && matches!(p.ad_account_url, Load::Failed(_)));
+        if !failed {
+            return Ok(());
+        }
+        self.ask_earn_ad_account_url(peer).inspect_err(|_| {
+            if let Some(page) = self.session.payments.earn.page.as_mut() {
+                page.ad_account_url = Load::Failed(
+                    crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_REVENUE).to_string(),
+                );
+            }
+        })
     }
 
     fn fetch_earn_star_history(
@@ -258,19 +289,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             return;
         };
         let failed = crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_REVENUE).to_string();
+        // A part whose request never left (or was never reached) is failed;
+        // one whose request is still out waits for it.
         let requests = &self.session.requests;
-        // A side the page wants that never went out (Idle) or whose send
-        // was refused (its request is gone) shows the error.
-        let gone = |request: RequestId| requests.get(request).is_none();
-        if page.ton.never_left(want_ton, gone) {
+        let gone = |asked: Option<RequestId>| asked.is_some_and(|id| requests.get(id).is_none());
+        if gone(page.ton.asked()) || (want_ton && matches!(page.ton, Load::Idle)) {
             page.ton = Load::Failed(failed.clone());
         }
-        if page.stars.never_left(want_stars, gone) {
-            page.stars = Load::Failed(failed);
+        if gone(page.stars.asked()) || (want_stars && matches!(page.stars, Load::Idle)) {
+            page.stars = Load::Failed(failed.clone());
         }
-        if matches!(page.ad_account_url, Load::Loading(request) if requests.get(request).is_none())
-        {
-            page.ad_account_url = Load::Idle;
+        // The Buy Ads link whose send was refused says so, with its Retry.
+        if gone(page.ad_account_url.asked()) {
+            page.ad_account_url = Load::Failed(failed);
         }
         let stranded = |load: PageLoad| matches!(load, PageLoad::Loading { request, .. } if requests.get(request).is_none());
         if stranded(page.ton_history.load) {
@@ -377,16 +408,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // The step carries the request, so it is entered once the send went
+        // out; a refused send leaves no withdrawal behind.
+        let request = self.send_withdrawal_request(target, "")?;
         self.session.payments.earn.withdraw = Some(Withdraw {
             target,
-            step: WithdrawStep::Checking,
-            request: None,
+            step: WithdrawStep::Checking(request),
         });
-        let result = self.send_withdrawal(target, "").map(|_| ());
-        if result.is_err() {
-            self.session.payments.earn.withdraw = None;
-        }
-        result
+        Ok(())
     }
 
     /// Submit the password box. The password is used for this one request
@@ -402,25 +431,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         let target = withdraw.target;
         // The step carries the request, so it is entered once the send
         // went out; a failed send leaves the box as it was.
-        let request = self.send_withdrawal(target, password)?;
+        let request = self.send_withdrawal_request(target, password)?;
         if let Some(withdraw) = self.session.payments.earn.withdraw.as_mut() {
             withdraw.step = WithdrawStep::PasswordSending(request);
         }
         Ok(())
-    }
-
-    /// Send the URL request and record it on the withdrawal, so only its
-    /// own answer acts on it.
-    fn send_withdrawal(
-        &mut self,
-        target: WithdrawTarget,
-        password: &str,
-    ) -> Result<RequestId, ConnectSendError> {
-        let request = self.send_withdrawal_request(target, password)?;
-        if let Some(withdraw) = self.session.payments.earn.withdraw.as_mut() {
-            withdraw.request = Some(request);
-        }
-        Ok(request)
     }
 
     fn send_withdrawal_request(
@@ -483,7 +498,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             },
             |extra| set_chat_affiliate_program(extra, bot_user_id, Some(params)),
         );
-        self.setup_waits_for(&result);
+        if let Ok(request) = &result
+            && let Some(setup) = self.session.payments.earn.setup.as_mut()
+        {
+            setup.save_sent(*request);
+        }
         result.map(|_| ())
     }
 
@@ -505,23 +524,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             |extra| set_chat_affiliate_program(extra, bot_user_id, None),
         );
         // The box closes once the send went out; a refused send keeps it.
-        if result.is_ok()
+        if let Ok(request) = &result
             && let Some(setup) = self.session.payments.earn.setup.as_mut()
         {
-            setup.confirm = None;
+            setup.end_sent(*request);
         }
-        self.setup_waits_for(&result);
         result.map(|_| ())
-    }
-
-    /// The setup page waits for the save that left (a refused send leaves
-    /// it as it was).
-    fn setup_waits_for(&mut self, result: &Result<RequestId, ConnectSendError>) {
-        if let Ok(extra) = result
-            && let Some(setup) = self.session.payments.earn.setup.as_mut()
-        {
-            setup.saving = Some(*extra);
-        }
     }
 
     /// Open the join page of `peer` (tdesktop `Join::Make`) and load both
@@ -530,8 +538,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.earn_ready()?;
         self.session.payments.earn.join = Some(JoinPage::new(peer));
         let _ = self.ensure_earn_app_config();
-        self.fetch_connected_programs(false)?;
-        self.fetch_found_programs(false, false)
+        // The two lists are independent: a refused first send fails its
+        // own list (Retry shows) and the second is still asked.
+        let mine = self.fetch_connected_programs(false);
+        let found = self.fetch_found_programs(false, false);
+        mine.and(found)
     }
 
     fn fetch_connected_programs(&mut self, append: bool) -> Result<(), ConnectSendError> {
@@ -849,7 +860,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             join.stage = JoinStage::Open;
         }
-        Ok(())
+        result.map(|_| ())
     }
 
     /// "Revoke Link" confirmed.

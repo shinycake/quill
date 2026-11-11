@@ -515,10 +515,9 @@ impl QuillApp {
         if self.slow_mode_blocked(chat_id, cx) {
             return true;
         }
-        let Some(capture) = self.recording.take_voice() else {
+        let Some(capture) = self.take_voice_capture() else {
             return true;
         };
-        self.stop_record_preview();
         let finish = capture.close_microphone();
         cx.notify();
         // The encoder is joined off the UI thread.

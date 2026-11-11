@@ -266,7 +266,6 @@ fn open_prepared_client(
     // way (seeded from `getAutoDownloadSettingsPresets` on first open
     // when no file exists).
     session.settings.data_storage = load_data_storage_prefs(&prepared.paths);
-    session.settings.data_storage_persisted = session.settings.data_storage.clone();
     // What the file holds is what was saved: the first pause change is
     // compared with it, not with an empty set.
     session.media.disk_paused_persisted = session.settings.data_storage.disk_paused.clone();

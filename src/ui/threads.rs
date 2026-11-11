@@ -64,6 +64,7 @@ pub(super) fn reply_bar(
     let unread = info.has_unread();
     div()
         .id(("reply-bar", message_id.0 as u64))
+        .debug_selector(move || format!("reply-bar-{}", message_id.0))
         .flex()
         .items_center()
         .gap_2()

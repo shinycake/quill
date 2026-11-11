@@ -11,7 +11,7 @@ use crate::ui::search_ui::{apply_ready_search, apply_ready_search_in_chat};
 use crate::ui::status_note::StatusNote;
 use crate::ui::*;
 use gpui_kit::*;
-use quill::composer::{ComposerEdit, ComposerReplyTo, DeleteConfirm, ForwardDraft};
+use quill::composer::{ComposerEdit, ComposerReplyTo, ForwardDraft};
 use quill::ids::{ChatId, MessageId, UserId};
 use quill::state::MessageReactionsState;
 use quill::telegram::envelope::ChatKind;
@@ -120,7 +120,6 @@ impl QuillApp {
                 self.chat_ui.leave_edit();
             }
         }
-        self.chat_ui.pending_delete = DeleteConfirm::own(ChatId(11), MessageId(102), true, false);
     }
 
     fn demo_ready_forward(&mut self, window: &mut Window, cx: &mut Context<Self>) {

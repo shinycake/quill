@@ -73,9 +73,11 @@ impl Session {
             BotsPayload::CustomRequestResult { result } => {
                 if let Some(p) = pending
                     && p.purpose == RequestPurpose::SendWebAppCustomRequest
-                    && let Some(req_id) = self.bots.web_apps.custom_requests.remove(&p.id.0)
+                    && let Some((launch_id, req_id)) =
+                        self.bots.web_apps.custom_requests.remove(&p.id.0)
                 {
                     self.bots.web_apps.custom_replies.push(CustomRequestReply {
+                        launch_id,
                         req_id,
                         result: Ok(result),
                     });
@@ -138,7 +140,11 @@ impl Session {
         pending: Option<&PendingRequest>,
     ) -> bool {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetGrossingWebAppBots) {
-            self.bots.web_apps.grossing.succeed(user_ids.to_vec());
+            // Only the request the list waits for fills it.
+            self.bots
+                .web_apps
+                .grossing
+                .answered(pending.map(|p| p.id), user_ids.to_vec());
             return true;
         }
         false
@@ -251,14 +257,18 @@ impl Session {
                     });
             }
             RequestPurpose::GetGrossingWebAppBots => {
-                self.bots
-                    .web_apps
-                    .grossing
-                    .fail(format!("error {}", err.code));
+                self.bots.web_apps.grossing.failed(
+                    Some(p.id),
+                    crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_LOAD_APPS),
+                    false,
+                );
             }
             RequestPurpose::SendWebAppCustomRequest => {
-                if let Some(req_id) = self.bots.web_apps.custom_requests.remove(&p.id.0) {
+                if let Some((launch_id, req_id)) =
+                    self.bots.web_apps.custom_requests.remove(&p.id.0)
+                {
                     self.bots.web_apps.custom_replies.push(CustomRequestReply {
+                        launch_id,
                         req_id,
                         result: Err(if err.code == 400 {
                             "BAD_REQUEST".into()

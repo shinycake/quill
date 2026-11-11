@@ -1,6 +1,7 @@
 //! State reducer tests: groups.
 use super::common::*;
 use super::*;
+use crate::telegram::envelope::ParsedCommunityFullInfo;
 
 #[test]
 fn custom_title_failure_surfaces_in_member_dialog() {
@@ -265,7 +266,6 @@ fn forum_topics_response_is_cached_per_chat() {
         r#"{"@type":"updateNewChat","chat":{"id":16,"title":"Forum","type":{"@type":"chatTypeSupergroup","supergroup_id":16,"is_channel":false},"unread_count":0}}"#,
     );
     let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(16)));
-    session.threads.forum_topics.begin(16, extra);
     let json = format!(
         r#"{{"@type":"forumTopics","@extra":"{}","total_count":2,"topics":[{{"info":{{"@type":"forumTopicInfo","chat_id":16,"forum_topic_id":2,"name":"Random","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"creation_date":1,"creator_id":{{"@type":"messageSenderUser","user_id":6}},"is_general":false,"is_outgoing":false,"is_closed":false,"is_hidden":false,"is_name_implicit":false}},"last_message":null,"order":"100","is_pinned":false,"unread_count":5,"last_read_inbox_message_id":0,"last_read_outbox_message_id":0,"unread_mention_count":0,"unread_reaction_count":0,"unread_poll_vote_count":0,"notification_settings":{{"@type":"chatNotificationSettings"}},"draft_message":null}},{{"info":{{"@type":"forumTopicInfo","chat_id":16,"forum_topic_id":1,"name":"General","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"creation_date":1,"creator_id":{{"@type":"messageSenderUser","user_id":5}},"is_general":true,"is_outgoing":false,"is_closed":false,"is_hidden":false,"is_name_implicit":false}},"last_message":null,"order":"900","is_pinned":false,"unread_count":0,"last_read_inbox_message_id":0,"last_read_outbox_message_id":0,"unread_mention_count":0,"unread_reaction_count":0,"unread_poll_vote_count":0,"notification_settings":{{"@type":"chatNotificationSettings"}},"draft_message":null}}],"next_offset_date":0,"next_offset_message_id":0,"next_offset_forum_topic_id":0}}"#,
         extra.0
@@ -397,7 +397,7 @@ fn set_community_name_ok_drops_full_info_for_refetch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!session.groups.community_full_infos.contains_key(&42));
+    assert!(session.groups.community_full_infos.wants_fetch(42));
     // Error path: the cache stays.
     session.groups.community_full_infos.insert(
         42,
@@ -419,7 +419,7 @@ fn set_community_name_ok_drops_full_info_for_refetch() {
             extra.0
         ),
     );
-    assert!(session.groups.community_full_infos.contains_key(&42));
+    assert!(!session.groups.community_full_infos.wants_fetch(42));
 }
 
 #[test]

@@ -32,7 +32,7 @@ fn less_data_for_calls_pushes_all_networks_and_refuses_unseeded() {
             .all(|json| !json.contains(r#""@type":"setAutoDownloadSettings""#))
     );
 
-    driver.session.settings.data_storage.seeded = crate::data_settings::Seed::Seeded;
+    driver.session.settings.data_storage.seeded = crate::data_settings::PresetsSeed::Seeded;
     driver.set_less_data_for_calls(true).unwrap();
     let sent: Vec<Value> = recorder
         .snapshot()
@@ -373,7 +373,6 @@ fn driver_send_text_snapshot_in_topic_addresses_message_topic_forum() {
     let extra = driver
         .session
         .request(RequestPurpose::GetForumTopics, Some(ChatId(16)));
-    driver.session.threads.forum_topics.begin(16, extra);
     let topics = [(2, "General", false), (3, "Random", true)]
             .iter()
             .map(|(id, name, closed)| {

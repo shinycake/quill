@@ -4,6 +4,7 @@ use crate::gift_manage::{
     ExportSend, ExportState, ProbeOutcome, TransferPicker, TransferStage, UnlockIn,
     fragment_gift_url, transfer_candidates, unlock_hours,
 };
+use crate::ids::RequestId;
 use crate::premium_hub::parse_received_gift;
 use serde_json::{Value, json};
 
@@ -100,7 +101,7 @@ fn the_picker_walks_its_stages() {
     // Locked: the explanation, OK goes back.
     picker.tap_export(gift.export_state(NOW));
     assert_eq!(picker.stage, TransferStage::Locked { hours: 2 });
-    picker.open_fragment();
+    picker.open_fragment(RequestId(1));
     assert_eq!(picker.stage, TransferStage::Locked { hours: 2 });
     picker.back();
     assert_eq!(picker.stage, TransferStage::Pick);
@@ -110,13 +111,16 @@ fn the_picker_walks_its_stages() {
     assert_eq!(picker.stage, TransferStage::ConfirmExport);
     picker.choose(5, "Maya");
     assert_eq!(picker.stage, TransferStage::ConfirmExport);
-    picker.open_fragment();
-    assert_eq!(picker.stage, TransferStage::Probing);
+    picker.open_fragment(RequestId(1));
+    assert_eq!(picker.stage, TransferStage::Probing(RequestId(1)));
     assert!(picker.export_busy());
     // Nothing goes back while the probe is out.
     picker.back();
-    assert_eq!(picker.stage, TransferStage::Probing);
-    picker.probe_failed(ProbeOutcome::Other, Some(true));
+    assert_eq!(picker.stage, TransferStage::Probing(RequestId(1)));
+    // Another request's refusal changes nothing.
+    picker.probe_failed(Some(RequestId(2)), ProbeOutcome::NoPassword, None);
+    assert_eq!(picker.stage, TransferStage::Probing(RequestId(1)));
+    picker.probe_failed(Some(RequestId(1)), ProbeOutcome::Other, Some(true));
     assert_eq!(
         picker.stage,
         TransferStage::Password {
@@ -125,8 +129,8 @@ fn the_picker_walks_its_stages() {
         }
     );
     // A later answer to an old probe changes nothing.
-    picker.probe_failed(ProbeOutcome::NoPassword, None);
-    picker.probe_answered();
+    picker.probe_failed(Some(RequestId(1)), ProbeOutcome::NoPassword, None);
+    picker.probe_answered(Some(RequestId(1)));
     assert_eq!(
         picker.stage,
         TransferStage::Password {
@@ -166,12 +170,12 @@ fn the_probe_routes_like_pre_password_error_box() {
     let probing = || {
         let mut picker = TransferPicker::new("g", "Plush Pepe #1", "PlushPepe-1");
         picker.stage = TransferStage::ConfirmExport;
-        picker.open_fragment();
+        picker.open_fragment(RequestId(1));
         picker
     };
     let route = |outcome, has_password| {
         let mut picker = probing();
-        picker.probe_failed(outcome, has_password);
+        picker.probe_failed(Some(RequestId(1)), outcome, has_password);
         picker.stage
     };
     let password = TransferStage::Password {
@@ -193,7 +197,7 @@ fn the_probe_routes_like_pre_password_error_box() {
     );
     // A URL answer only opens the password box.
     let mut picker = probing();
-    picker.probe_answered();
+    picker.probe_answered(Some(RequestId(1)));
     assert_eq!(picker.stage, password);
     // The fresh password state lands after the probe's local answer.
     picker.password_state_known(true);

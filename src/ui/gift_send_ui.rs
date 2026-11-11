@@ -95,7 +95,7 @@ impl QuillApp {
                     return false;
                 };
                 session.payments.gifts_manage.send = quill::gift_manage::SendGiftState {
-                    open: true,
+                    stage: quill::gift_manage::SendStage::Idle,
                     recipient: Some(recipient),
                     ..Default::default()
                 };
@@ -149,7 +149,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.close_send_gift();
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.payments.gifts_manage.send.open = false;
+            session.payments.gifts_manage.send.close();
         }
         cx.notify();
     }
@@ -702,7 +702,7 @@ fn premium_section(this: &QuillApp, session: &Session, cx: &mut Context<QuillApp
 crate::ui::shell::register_dialogs! {
     SendGift => DialogSpec::new(
         3950,
-        |app| app.session().is_some_and(|s| s.payments.gifts_manage.send.open),
+        |app| app.session().is_some_and(|s| s.payments.gifts_manage.send.is_open()),
         QuillApp::build_send_gift_dialog,
     )
     .close(|app, _, cx| app.close_send_gift_dialog(cx)),

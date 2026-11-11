@@ -45,6 +45,12 @@ or change state, and the list reviewers check.
   `Fetch<T>`).
 - "Pending, so skip", checked before a reset, or an answer not matched to
   its query.
+- An enum that is the old flag renamed: `Idle`/`Asking` with nothing in
+  `Asking`, so the answer is still matched by purpose, kind or chat id.
+- A stage that names a timer or a watcher whose task is `.detach()`ed, with
+  a counter to tell old wake-ups from the current one.
+- A timer in a loop that keeps running while the window is hidden, the app
+  is locked or the account is logged out.
 - Several fields of one mode (an edit target, its text, its confirm box)
   cleared by hand in some places and missed in others.
 - Upkeep that only the main window runs, so chat windows miss it.
@@ -69,6 +75,83 @@ A bool that really is not a stage (a user setting, a capability TDLib
 reports, a layout choice) goes in `scripts/implicit-state-allow.txt` with
 the reason. Renaming a flag to dodge the word list is not a fix; reviewers
 reject it.
+
+### The shape guards
+
+Two full sweeps of the source (2026-11-09 and 2026-11-11) kept finding the
+same few shapes in code that had just been fixed. Each of these checks
+holds one of them. They work like the check above: every hit in the tree
+when the check was added is in a baseline file, the baseline only shrinks,
+and a new hit fails. A hit is listed by the type and function it is in
+(`rule:Type::function count`), not by path or line, so moving code does
+not change it. `--list` prints every hit with its file and line.
+
+When you fix a hit, run the check with `--prune` and commit the smaller
+baseline. A baseline line that is too high is printed but does not fail
+the build, so a fix that lands on another branch never breaks yours.
+`--prune` only lowers the list; nothing adds to it except a reviewed edit.
+
+#### `check-stage-enums.py`: an in-flight stage holds what it waits for
+
+`enum Load { Idle, Loading }` is `loading: bool` with a new name. It
+cannot tell its own answer from another request's, and it cannot cancel
+its work when it is replaced. The check rejects a variant named as work
+in flight (`Loading`, `Asking`, `Sending`, `Sent`, `Waiting`, `Pending`,
+`Running`, ...) that has no data (`bare`), or whose data holds no
+`RequestId`, `Task`, channel end or deadline (`unkeyed`).
+
+- Fix: `Loading { request: RequestId }`, compared when the answer comes,
+  or `Fetch<T>`, which already does this. For local work hold the `Task`
+  (`Decoding { _job: Task<()> }`), so leaving the stage cancels it.
+- Not a stage of anything Quill started (a TDLib state shown as is, a
+  step the user leaves): `scripts/stage-enums-allow.txt` with the reason.
+
+#### `check-request-match.py`: an answer is matched by its `RequestId`
+
+The check rejects two shortcuts. `purpose`: a call to
+`requests.has_purpose(..)`, `take_purpose(..)` or `has_auth_submit()`.
+"Some request with this purpose is in flight" is also true for another
+window's request, an older one, or one for another chat, so the busy
+state is wrong and a late answer or error ends the wrong stage.
+`unmatched`: a call to `Fetch::succeed`, which takes the answer whatever
+request it came from.
+
+- Fix: record the request in the stage when it is sent
+  (`fetch.sent(request)`), and settle it with
+  `fetch.answered(Some(pending.id), value)` / `failed(..)`. Ask "is mine
+  in flight" with `fetch.waits_for(id)` or `is_loading()`.
+- Needs no matching: `scripts/request-match-allow.txt` with the reason.
+
+#### `check-owned-timers.py`: a timer belongs to the stage that waits for it
+
+`detached`: a task that sleeps on a timer, or loops as a watcher,
+and is then `.detach()`ed. Nothing can cancel it, so it fires after its
+box, chat, account or window is gone, and the code grows a generation
+counter to ignore the old wake-ups. `poll`: a `loop` or `while` that
+sleeps on a bare timer. It keeps waking while the window is hidden, the
+app is locked or the account is logged out.
+
+- Fix for `detached`: hold the `Task` in the stage
+  (`Shown { toast, _hide: Task<()> }`). A new toast replaces the value and
+  the old timer goes with it, so the counter is not needed.
+- Fix for `poll`: wait for the event. A subscription or observer, a
+  channel, `wake_wait::sleep_or_wake` on a `quill::wake` signal (it sleeps
+  until poked), or the frame clock (`request_animation_tick`) for
+  anything that only matters while it is drawn.
+- Must run on a clock: `scripts/owned-timers-allow.txt` with what ends
+  it and why there is no event.
+
+#### `check-refcell-borrows.py`
+
+The fourth guard counts `RefCell` borrows that can panic. It is described
+in [panic-safety.md](panic-safety.md), rule 6.
+
+#### What the guards do not cover
+
+Reviewers still check these by hand: a request sent again from render or
+upkeep after it failed, two fields that must change together, an `Option`
+used as a "started" flag, a two-variant enum that is a bool with other
+names, and state that outlives its owner.
 
 The other guards cover the rest of the rule: `check-screen-state.py`
 (owners, `OnScreen`, `ChatUi`, session dialogs, lock surfaces),

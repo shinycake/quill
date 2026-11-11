@@ -258,20 +258,15 @@ pub struct GifPanel {
     pub search_chat: Option<crate::ids::ChatId>,
     pub search_bot_username: String,
     pub search_bot_user_id: Option<i64>,
-    /// Slice S9: GIF search via the animation search bot
-    /// (`getInlineQueryResults`; schema 1.8.67, lines 6483, 13019).
-    /// First page replaces; later pages append, deduped by file id.
-    pub search_results: Vec<AnimationItem>,
-    /// Slice S9: `next_offset` of the last search page ("" = exhausted).
-    pub search_next_offset: String,
-    pub search_offset: String,
+    // The search's results and paging live in its stage ([`GifSearch`]):
+    // a new search replaces them whole.
     /// Slice S9: `updateAnimationSearchParameters` (schema 1.8.67, line
     /// 11064) — the upstream animation-search provider name and its
     /// suggested search emojis.
     pub search_provider: String,
     pub provider_emojis: Vec<String>,
     /// The searches answered lately, so a window's GIF tab shows its own
-    /// search while another window's is the one in `search_results`.
+    /// search while another window's is the one the panel holds.
     pub searches_kept: GifSearches,
 }
 
@@ -313,7 +308,7 @@ impl GifSearches {
 
 /// Which list a GIF panel holds. A search is a stage of its own: for one
 /// query, asked (`Loading`), answered (`Ready`, the results are in
-/// `search_results`), or refused (`Failed`). Its pages are matched to the
+/// its `results`), or refused (`Failed`). Its pages are matched to the
 /// request that asked, so a late page of an earlier search changes nothing.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum GifList {
@@ -329,6 +324,15 @@ pub struct GifSearch {
     pub query: String,
     pub fetch: Fetch<()>,
     pub request: Option<crate::ids::RequestId>,
+    /// Slice S9: GIF search via the animation search bot
+    /// (`getInlineQueryResults`; schema 1.8.67, lines 6483, 13019). First
+    /// page replaces; later pages append, deduped by file id.
+    pub results: Vec<AnimationItem>,
+    /// `next_offset` of the last page ("" = exhausted).
+    pub next_offset: String,
+    /// The offset the page in flight (or last asked) started at: a
+    /// `next_offset` that repeats it ends the paging.
+    pub asked_offset: String,
 }
 
 const GIF_FAILED: &str = "gif request failed";
@@ -458,7 +462,75 @@ impl GifPanel {
                 request: None,
             },
             request: None,
+            results: Vec::new(),
+            next_offset: String::new(),
+            asked_offset: String::new(),
         });
+    }
+
+    /// The search's GIFs so far (none when the panel shows the saved ones).
+    pub fn search_results(&self) -> &[AnimationItem] {
+        match &self.list {
+            GifList::Search(search) => &search.results,
+            GifList::Saved => &[],
+        }
+    }
+
+    /// Where the next page of the search starts ("" = no more).
+    pub fn search_next_offset(&self) -> &str {
+        match &self.list {
+            GifList::Search(search) => &search.next_offset,
+            GifList::Saved => "",
+        }
+    }
+
+    /// The search starts over (its bot changed): nothing found, no paging,
+    /// and it waits for a request again.
+    pub fn search_restarted(&mut self) {
+        if let GifList::Search(search) = &mut self.list {
+            search.results.clear();
+            search.next_offset.clear();
+            search.asked_offset.clear();
+        }
+        self.search_asked();
+    }
+
+    /// The page starting at `offset` is about to be asked.
+    pub fn search_page_asked(&mut self, offset: String) {
+        self.search_asked();
+        if let GifList::Search(search) = &mut self.list {
+            search.asked_offset = offset;
+        }
+    }
+
+    /// A page of the search answered (the caller checked
+    /// [`Self::search_waits_for`]): a first page replaces the results, a
+    /// later one appends the new GIFs, and a `next_offset` that repeats the
+    /// page's own start ends the paging.
+    pub fn search_page_answered(
+        &mut self,
+        animations: Vec<AnimationItem>,
+        next_offset: String,
+        first_page: bool,
+    ) {
+        self.search_answered();
+        let GifList::Search(search) = &mut self.list else {
+            return;
+        };
+        if first_page {
+            search.results = animations;
+        } else {
+            for item in animations {
+                if !search.results.iter().any(|r| r.file_id == item.file_id) {
+                    search.results.push(item);
+                }
+            }
+        }
+        search.next_offset = if !next_offset.is_empty() && next_offset == search.asked_offset {
+            String::new()
+        } else {
+            next_offset
+        };
     }
 
     /// The panel goes back to the saved GIFs.
@@ -524,7 +596,7 @@ impl GifPanel {
 
     pub fn visible_animations(&self) -> &[AnimationItem] {
         if self.search_mode() {
-            &self.search_results
+            self.search_results()
         } else {
             &self.animations
         }

@@ -121,7 +121,7 @@ impl QuillApp {
         let stickers = feature == PromoFeature::Premium(PremiumFeature::UniqueStickers);
         let clip = hub
             .premium_state
-            .as_ref()
+            .data()
             .and_then(|s| animation_for(&s.animations, feature))
             .cloned();
         let side = px(340.);
@@ -328,7 +328,7 @@ impl QuillApp {
         };
         let hub = &session.payments.hub;
         let subscribed =
-            hub.premium_state.as_ref().is_some_and(|s| s.is_subscribed) || session.my_is_premium();
+            hub.premium_state.data().is_some_and(|s| s.is_subscribed) || session.my_is_premium();
         let order = self.preview_features(feature);
         let mut body = div()
             .flex()

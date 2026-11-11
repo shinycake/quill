@@ -104,8 +104,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         )));
         let sent = self.send_language_switch(&id, &base_id, custom, generation);
         if sent.is_err() {
-            // A send that never left must not leave the switch pending.
+            // A send that never left must not leave the switch pending, and
+            // TDLib must not keep serving the pack the option already named:
+            // the interface stays on the pack it shows.
             self.session.settings.language.stage = crate::state::LanguageStage::Idle;
+            let _ = self.restore_language_option();
         }
         sent
     }

@@ -211,33 +211,41 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// lists again so the "Add to … Set" menus and the panel's "edit" badge
     /// follow the server (tdesktop `notifyUpdated` after `feedSetFull`).
     fn refetch_installed_sets_after_edit(&mut self) -> Result<(), ConnectSendError> {
-        if !self.session.stickers.stickers.lists.installed.is_outdated()
-            || !self.chats_path_active()
-        {
+        let stickers_due = self.session.stickers.stickers.lists.installed.is_outdated();
+        let emoji_due = self.session.stickers.emoji.lists.installed.is_outdated();
+        if !(stickers_due || emoji_due) || !self.chats_path_active() {
             return Ok(());
         }
-        // The list stays `Outdated` until the refetch goes out; a request
-        // out from before the edit is dropped.
-        drop(
-            self.session
-                .requests
-                .take_purpose(RequestPurpose::GetInstalledStickerSets),
-        );
-        self.sticker_request(
-            RequestPurpose::GetInstalledStickerSets,
-            crate::telegram::requests::get_installed_sticker_sets,
-        )
-        .inspect_err(|_| self.session.stickers.stickers.lists.installed.outdate())?;
-        if !self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetInstalledEmojiSets)
-        {
+        // Each list stays `Outdated` until its refetch goes out, also when
+        // the other one's send fails; a request out from before the edit is
+        // dropped.
+        let stickers_sent = if stickers_due {
+            drop(
+                self.session
+                    .requests
+                    .take_purpose(RequestPurpose::GetInstalledStickerSets),
+            );
+            self.sticker_request(
+                RequestPurpose::GetInstalledStickerSets,
+                crate::telegram::requests::get_installed_sticker_sets,
+            )
+            .inspect_err(|_| self.session.stickers.stickers.lists.installed.outdate())
+            .map(|_| ())
+        } else {
+            Ok(())
+        };
+        if emoji_due {
+            drop(
+                self.session
+                    .requests
+                    .take_purpose(RequestPurpose::GetInstalledEmojiSets),
+            );
             self.emoji_set_request(
                 RequestPurpose::GetInstalledEmojiSets,
                 crate::telegram::requests_emoji::get_installed_emoji_sets,
-            )?;
+            )
+            .inspect_err(|_| self.session.stickers.emoji.lists.installed.outdate())?;
         }
-        Ok(())
+        stickers_sent
     }
 }

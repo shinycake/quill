@@ -31,10 +31,20 @@ impl Session {
                     self.chats_state.background_error = Some(error_reason(err));
                 }
             }
-            Some(RequestPurpose::GetInstalledBackgrounds) => {
+            Some(RequestPurpose::Chats(ChatsPurpose::GetInstalledBackgrounds {
+                for_dark_theme,
+            })) => {
                 let reason = error_reason(err);
-                self.chats_state.background_error = Some(reason.clone());
-                self.chats_state.installed_backgrounds.fail(reason);
+                // Only the fetch that waits for this request fails; the page
+                // line stays for the pages.
+                let waiting = self
+                    .chats_state
+                    .installed_backgrounds
+                    .theme_mut(for_dark_theme)
+                    .failed(_extra, reason.clone(), false);
+                if waiting {
+                    self.chats_state.background_error = Some(reason);
+                }
             }
             // The preview that asked reads its own answer, matched by the
             // request; the page-level line stays for the pages.

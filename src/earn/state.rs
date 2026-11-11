@@ -8,12 +8,13 @@ use crate::premium_hub::{StarAmount, StarTx, StarTxPage, TxFilter};
 use crate::state::fetch::Fetch;
 use std::collections::HashMap;
 
-/// A fetch the page waits on.
+/// A fetch the page waits on: a `Fetch` with a fifth outcome,
+/// `Unavailable`. `Loading` holds the request that asked, so only its
+/// answer or error settles it (not another page's of the same peer).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum Load<T> {
     #[default]
     Idle,
-    /// On its way as `request`: only its answer or error settles it.
     Loading(crate::ids::RequestId),
     Ready(T),
     /// The request failed; the text is shown on the page.
@@ -35,24 +36,17 @@ impl<T> Load<T> {
         matches!(self, Self::Loading(_))
     }
 
-    /// `request` is the one this fetch waits on.
-    pub fn waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
-        matches!((self, request), (Self::Loading(held), Some(id)) if *held == id)
-    }
-
-    /// A side the page `wanted` that never went out (Idle), or whose
-    /// request `gone` says is no longer out.
-    pub fn never_left(&self, wanted: bool, gone: impl Fn(crate::ids::RequestId) -> bool) -> bool {
+    /// The request the fetch waits for.
+    pub fn asked(&self) -> Option<crate::ids::RequestId> {
         match self {
-            Self::Idle => wanted,
-            Self::Loading(request) => gone(*request),
-            _ => false,
+            Self::Loading(request) => Some(*request),
+            _ => None,
         }
     }
 
-    /// A send is about to go out as `request`.
-    pub fn start(&mut self, request: crate::ids::RequestId) {
-        *self = Self::Loading(request);
+    /// The fetch waits for the answer of `request`.
+    pub fn waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(self, Self::Loading(asked) if Some(*asked) == request)
     }
 
     /// Settled: loaded, failed or never asked.
@@ -246,7 +240,8 @@ pub struct EarnPage {
     /// The Stars page's history tab.
     pub star_filter: TxFilter,
     /// `getStarAdAccountUrl` (tdesktop's "Buy Ads"). `Unavailable`: the
-    /// server sent an empty link, so the row is left out.
+    /// server sent an empty link, so the row is left out; `Failed` is drawn
+    /// with a Retry.
     pub ad_account_url: Load<String>,
 }
 
@@ -330,8 +325,9 @@ pub enum WithdrawTarget {
 /// Where a withdrawal stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WithdrawStep {
-    /// The first request, without a password, is out.
-    Checking,
+    /// The first request, without a password, is out as this request.
+    /// Only its answer or error moves the step.
+    Checking(crate::ids::RequestId),
     /// tdesktop's password box: "Two-step verification".
     Password { error: Option<String> },
     /// The password went out as this request. Its answer ends the
@@ -348,27 +344,40 @@ pub enum WithdrawStep {
 pub struct Withdraw {
     pub target: WithdrawTarget,
     pub step: WithdrawStep,
-    /// The URL request this withdrawal waits for. An answer to another
-    /// one (sent before a Cancel) neither opens Fragment nor touches this
-    /// attempt.
-    pub request: Option<crate::ids::RequestId>,
 }
 
 impl Withdraw {
-    pub fn waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
-        request.is_some() && self.request == request
-    }
-
     /// Whether `request` is the answer the current step waits for: the
     /// password-less try while `Checking`, the password's own request
-    /// while `PasswordSending`; no other step takes an answer.
+    /// while `PasswordSending`; no other step takes an answer. An answer
+    /// to another one (sent before a Cancel) neither opens Fragment nor
+    /// touches this attempt.
     pub fn takes_answer(&self, request: Option<crate::ids::RequestId>) -> bool {
         match self.step {
-            WithdrawStep::Checking => self.waits_for(request),
-            WithdrawStep::PasswordSending(sent) => request == Some(sent) && self.waits_for(request),
+            WithdrawStep::Checking(sent) | WithdrawStep::PasswordSending(sent) => {
+                request == Some(sent)
+            }
             WithdrawStep::Password { .. } | WithdrawStep::SecurityCheck { .. } => false,
         }
     }
+}
+
+/// Where the setup page's save stands, with the confirmation box that
+/// goes with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetupStage {
+    /// The sliders; no box.
+    Editing,
+    /// A confirmation box is open.
+    Confirming(SetupConfirm),
+    /// The save went out as this request and its `ConfirmUpdate` stays
+    /// open until the answer (tdesktop). Only its answer closes the page;
+    /// its error returns to `Confirming(Save)`.
+    SavingInBox(crate::ids::RequestId),
+    /// A save or end is out with no box open (the end's box closes as it
+    /// goes; a save's box was closed meanwhile). Its error returns to
+    /// `Editing`.
+    Saving(crate::ids::RequestId),
 }
 
 /// The bot setup page (tdesktop `BotStarRef::Setup`).
@@ -379,9 +388,7 @@ pub struct SetupPage {
     pub program: Option<ProgramInfo>,
     /// The sliders' values.
     pub params: ProgramParams,
-    pub confirm: Option<SetupConfirm>,
-    /// The save or end this page waits for; only its answer closes it.
-    pub(crate) saving: Option<crate::ids::RequestId>,
+    stage: SetupStage,
 }
 
 impl SetupPage {
@@ -390,19 +397,80 @@ impl SetupPage {
             bot_user_id,
             program,
             params: setup_start(program),
-            confirm: None,
-            saving: None,
+            stage: SetupStage::Editing,
+        }
+    }
+
+    pub fn stage(&self) -> SetupStage {
+        self.stage
+    }
+
+    /// The confirmation box that is open.
+    pub fn confirm(&self) -> Option<SetupConfirm> {
+        match self.stage {
+            SetupStage::Confirming(confirm) => Some(confirm),
+            SetupStage::SavingInBox(_) => Some(SetupConfirm::Save),
+            SetupStage::Editing | SetupStage::Saving(_) => None,
         }
     }
 
     /// A save or end is in flight.
     pub fn is_saving(&self) -> bool {
-        self.saving.is_some()
+        self.saving_request().is_some()
+    }
+
+    /// The save or end in flight.
+    pub fn saving_request(&self) -> Option<crate::ids::RequestId> {
+        match self.stage {
+            SetupStage::SavingInBox(request) | SetupStage::Saving(request) => Some(request),
+            SetupStage::Editing | SetupStage::Confirming(_) => None,
+        }
     }
 
     /// `request` is the save this page waits for.
     pub(crate) fn waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
-        self.saving.is_some() && self.saving == request
+        self.saving_request().is_some() && self.saving_request() == request
+    }
+
+    /// Open a confirmation box (not while a save is out).
+    pub fn ask_confirm(&mut self, confirm: SetupConfirm) {
+        if !self.is_saving() {
+            self.stage = SetupStage::Confirming(confirm);
+        }
+    }
+
+    /// The box was closed: a save in flight carries on without it.
+    pub fn close_confirm(&mut self) {
+        self.stage = match self.stage {
+            SetupStage::Confirming(_) => SetupStage::Editing,
+            SetupStage::SavingInBox(request) => SetupStage::Saving(request),
+            other => other,
+        };
+    }
+
+    /// The save went out as `request`: its box stays open while it runs.
+    pub(crate) fn save_sent(&mut self, request: crate::ids::RequestId) {
+        self.stage = match self.stage {
+            SetupStage::Confirming(SetupConfirm::Save) => SetupStage::SavingInBox(request),
+            _ => SetupStage::Saving(request),
+        };
+    }
+
+    /// The end went out as `request`: its box closes as it goes.
+    pub(crate) fn end_sent(&mut self, request: crate::ids::RequestId) {
+        self.stage = SetupStage::Saving(request);
+    }
+
+    /// The save or end under `request` was refused: back to the box that
+    /// was open, or to the sliders.
+    pub(crate) fn save_refused(&mut self, request: Option<crate::ids::RequestId>) {
+        if !self.waits_for(request) {
+            return;
+        }
+        self.stage = match self.stage {
+            SetupStage::SavingInBox(_) => SetupStage::Confirming(SetupConfirm::Save),
+            _ => SetupStage::Editing,
+        };
     }
 
     /// A running program (Update instead of Start, End shown, sliders
@@ -695,9 +763,10 @@ pub struct EarnState {
     pub notes: Vec<String>,
     /// A URL the UI opens in the browser (a Fragment withdrawal page).
     pub open_url: Option<String>,
-    /// `getStarRevenueStatistics` for the user worked: the Stars dialog
-    /// shows "View Statistics" (tdesktop `Credits::statsEnabled`).
-    pub self_stats: Option<bool>,
+    /// `getStarRevenueStatistics` for the user: once it worked (`Ready`) the
+    /// Stars dialog shows "View Statistics" (tdesktop
+    /// `Credits::statsEnabled`); a failed one is not asked again.
+    pub self_stats: crate::state::fetch::Fetch<()>,
 }
 
 impl EarnState {
@@ -705,7 +774,7 @@ impl EarnState {
     pub fn is_checking_withdrawal(&self) -> bool {
         self.withdraw
             .as_ref()
-            .is_some_and(|w| w.step == WithdrawStep::Checking)
+            .is_some_and(|w| matches!(w.step, WithdrawStep::Checking(_)))
     }
 
     /// A balance answer of `request`.

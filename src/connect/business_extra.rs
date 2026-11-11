@@ -5,6 +5,7 @@ use crate::business_bots::{self as bots, ConnectedBot};
 use crate::business_chat_links as links;
 use crate::business_settings::BusinessSettingKind;
 use crate::ids::RequestId;
+use crate::state::fetch::Fetch;
 use crate::state::{
     BotLookup, BotLookupPart, ChatLinkOp, ChatLinkSave, RequestPurpose, RequestRollback,
     SettingsPurpose,
@@ -75,9 +76,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.settings.business_extra.chat_links.begin();
         let sent =
             self.send_business_extra(SettingsPurpose::GetChatLinks, links::get_links_request);
-        if let Ok(extra) = sent {
-            self.session.settings.business_extra.chat_links.sent(extra);
-        }
         // A send that never left lands in `Failed` (drawn with Retry), not
         // back in `Idle`, which a page draws as a spinner and asks again.
         if sent.is_err() {
@@ -187,13 +185,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             SettingsPurpose::GetConnectedBot,
             bots::get_connected_bot_request,
         );
-        if let Ok(extra) = sent {
-            self.session
-                .settings
-                .business_extra
-                .connected_bot
-                .sent(extra);
-        }
         if sent.is_err() {
             self.session
                 .settings
@@ -211,33 +202,24 @@ impl<S: JsonSender> ConnectDriver<S> {
         previous: Option<i64>,
     ) -> Result<(), ConnectSendError> {
         self.session.settings.business.error = None;
-        match (bot, previous) {
-            (Some(bot), _) => self
-                .send_business_extra(SettingsPurpose::SaveConnectedBot, |extra| {
-                    bots::set_connected_bot_request(extra, bot)
-                })
-                .map(|_| ())?,
-            (None, Some(previous)) => self
-                .send_business_extra(SettingsPurpose::SaveConnectedBot, |extra| {
+        let sent = match (bot, previous) {
+            (Some(bot), _) => self.send_business_extra(SettingsPurpose::SaveConnectedBot, |extra| {
+                bots::set_connected_bot_request(extra, bot)
+            })?,
+            (None, Some(previous)) => {
+                self.send_business_extra(SettingsPurpose::SaveConnectedBot, |extra| {
                     bots::delete_connected_bot_request(extra, previous)
-                })
-                .map(|_| ())?,
+                })?
+            }
             (None, None) => return Ok(()),
-        }
+        };
+        self.session.settings.business_extra.bot_save = crate::state::ConnectedBotSave::Saving(sent);
         self.session
             .settings
             .business_extra
             .connected_bot
             .succeed(bot.cloned());
         Ok(())
-    }
-
-    fn note_lookup_leg(&mut self, part: BotLookupPart, request: RequestId) {
-        self.session
-            .settings
-            .business_extra
-            .lookup
-            .sent(part, request);
     }
 
     /// Look up bots for a typed username (tdesktop `LookupBots`): the
@@ -258,39 +240,51 @@ impl<S: JsonSender> ConnectDriver<S> {
             };
             return Ok(());
         };
-        if self.session.settings.business_extra.lookup.query == query {
+        let lookup = &self.session.settings.business_extra.lookup;
+        if lookup.query == query && lookup.error().is_none() {
             return Ok(());
         }
         self.session.settings.business_extra.lookup = BotLookup {
             generation,
             query: query.clone(),
-            ..BotLookup::default()
+            exact: Fetch::Loading {
+                stale: None,
+                request: None,
+            },
+            mine: Fetch::Loading {
+                stale: None,
+                request: None,
+            },
+            global: Fetch::Loading {
+                stale: None,
+                request: None,
+            },
         };
         let part = |part| SettingsPurpose::LookupBusinessBot { generation, part };
         let sent = self
             .send_business_extra(part(BotLookupPart::Exact), |extra| {
                 bots::search_public_chat_request(extra, &query)
             })
-            .map(|id| self.note_lookup_leg(BotLookupPart::Exact, id))
-            .and_then(|()| {
+            .and_then(|id| {
+                self.session.settings.business_extra.lookup.exact.sent(id);
                 self.send_business_extra(part(BotLookupPart::Mine), |extra| {
                     bots::search_bots_on_server_request(extra, &query)
                 })
-                .map(|id| self.note_lookup_leg(BotLookupPart::Mine, id))
             })
-            .and_then(|()| {
+            .and_then(|id| {
+                self.session.settings.business_extra.lookup.mine.sent(id);
                 self.send_business_extra(part(BotLookupPart::Global), |extra| {
                     bots::search_public_bots_request(extra, &query)
                 })
-                .map(|id| self.note_lookup_leg(BotLookupPart::Global, id))
-            });
+            })
+            .map(|id| self.session.settings.business_extra.lookup.global.sent(id));
         if sent.is_err() {
             self.session.settings.business_extra.lookup = BotLookup {
                 generation: generation.wrapping_add(1),
                 ..BotLookup::default()
             };
         }
-        sent.map(|_| ())
+        sent
     }
 
     /// `toggleHasSponsoredMessagesEnabled` ("Do Not Hide Ads").

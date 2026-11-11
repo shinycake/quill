@@ -33,7 +33,7 @@ impl QuillApp {
             && self.session().is_some_and(|s| {
                 s.payments.checkout.form().is_some()
                     || s.payments.checkout.is_loading()
-                    || s.payments.checkout.note.is_some()
+                    || s.payments.checkout.note().is_some()
             })
     }
 
@@ -50,14 +50,19 @@ impl QuillApp {
         ) {
             return;
         }
+        // The driver replaces the checkout (and its note) only when the
+        // form's request went out: a refused one, such as a new form while
+        // a payment waits on its verification step, leaves the checkout
+        // on screen as it was.
         let sent = self
             .live
             .as_mut()
             .map(|live| live.driver.send_payment_form_request(invoice));
-        self.open_box(crate::ui::shell::DialogKind::PaymentForm);
         match sent {
             Some(Ok(_)) => self.open_payment_dialog(window, cx),
             _ => {
+                // Nothing was asked: the checkout that was on screen, and
+                // its dialog, stay as they were.
                 self.set_note(StatusNote::error(tr(
                     keys::Q_MONEY_COULD_NOT_LOAD_THE_PAYMENT,
                 )));
@@ -166,7 +171,7 @@ impl QuillApp {
             s.payments.giveaway_paying(draft.boosted_chat_id)
                 || s.payments
                     .giveaway
-                    .launch
+                    .launches
                     .is_done_for(draft.boosted_chat_id)
         });
         if settled {
@@ -198,7 +203,7 @@ impl QuillApp {
         let snapshot = self.session().map(|session| {
             (
                 session.payments.checkout.form().cloned(),
-                session.payments.checkout.request.clone(),
+                session.payments.checkout.invoice().cloned(),
                 session.payments.checkout.is_paid(),
             )
         });
@@ -209,7 +214,7 @@ impl QuillApp {
             return;
         }
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.payments.checkout.note = None;
+            live.driver.session.payments.checkout.set_note(None);
             live.driver.submit_payment_form(
                 &request.invoice,
                 form.id,

@@ -65,6 +65,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         sent
     }
 
+    /// The Retry strip at the thread's newer end.
+    pub fn retry_thread_newer(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if let Some(thread) = self.session.threads.thread.as_mut() {
+            thread.history.retry_newer();
+        }
+        self.fetch_thread_history_newer()
+    }
+
     /// The "Couldn't load older messages · Retry" strip of a thread that
     /// has rows: the failed older page is asked for again.
     pub fn retry_thread_older(&mut self) -> Result<Option<RequestId>, ConnectSendError> {

@@ -16,17 +16,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         // An ask whose request is gone (a reconnect dropped it) is open again.
-        let pending: std::collections::HashSet<i64> = self
+        let pending: std::collections::HashSet<RequestId> = self
             .session
             .requests
             .pending
             .values()
-            .filter_map(|pending| match pending.purpose {
-                RequestPurpose::Stickers(StickersPurpose::GetMessageEffect { effect_id }) => {
-                    Some(effect_id)
-                }
-                _ => None,
+            .filter(|pending| {
+                matches!(
+                    pending.purpose,
+                    RequestPurpose::Stickers(StickersPurpose::GetMessageEffect { .. })
+                )
             })
+            .map(|pending| pending.id)
             .collect();
         self.session.stickers.effects.forget_dropped(&pending);
         let now = std::time::Instant::now();
@@ -40,7 +41,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             let json = get_message_effect(extra, effect_id);
             match self.send_json_request(extra, &json) {
                 Ok(request) => {
-                    self.session.stickers.effects.mark_requested(effect_id);
+                    self.session
+                        .stickers
+                        .effects
+                        .mark_requested(effect_id, request);
                     sent.push(request);
                 }
                 Err(err) => {

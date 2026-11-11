@@ -115,8 +115,11 @@ pub enum GiftValueStage {
     Loading(u64),
     /// Why the last request failed, shown under the Value row.
     Failed(String),
-    /// The value is known; `open` is whether its box is showing.
-    Ready { info: GiftValueInfo, open: bool },
+    /// The value is known; its box is closed.
+    Known(GiftValueInfo),
+    /// The value is known and its box is showing (the dialog host reads
+    /// this stage to show the box).
+    Open(GiftValueInfo),
 }
 
 impl GiftValueLookup {
@@ -147,32 +150,46 @@ impl GiftValueLookup {
     /// The value, once known.
     pub fn info(&self) -> Option<&GiftValueInfo> {
         match &self.stage {
-            GiftValueStage::Ready { info, .. } => Some(info),
+            GiftValueStage::Known(info) | GiftValueStage::Open(info) => Some(info),
             _ => None,
         }
     }
 
     /// The value box is showing.
     pub fn is_open(&self) -> bool {
-        matches!(self.stage, GiftValueStage::Ready { open: true, .. })
+        matches!(self.stage, GiftValueStage::Open(_))
+    }
+
+    /// Nothing is known and the box is not showing: a request out, a failed
+    /// one or none yet. Such a lookup belongs to the gift box that asked,
+    /// and goes with it.
+    pub fn is_pending(&self) -> bool {
+        !matches!(
+            self.stage,
+            GiftValueStage::Known(_) | GiftValueStage::Open(_)
+        )
     }
 
     /// Show the box of a known value; `false` when nothing is known yet.
     pub fn reopen(&mut self) -> bool {
-        match &mut self.stage {
-            GiftValueStage::Ready { open, .. } => {
-                *open = true;
+        match std::mem::take(&mut self.stage) {
+            GiftValueStage::Known(info) | GiftValueStage::Open(info) => {
+                self.stage = GiftValueStage::Open(info);
                 true
             }
-            _ => false,
+            other => {
+                self.stage = other;
+                false
+            }
         }
     }
 
     /// Hide the box; the value stays known for the next "learn more".
     pub fn close(&mut self) {
-        if let GiftValueStage::Ready { open, .. } = &mut self.stage {
-            *open = false;
-        }
+        self.stage = match std::mem::take(&mut self.stage) {
+            GiftValueStage::Open(info) => GiftValueStage::Known(info),
+            other => other,
+        };
     }
 
     /// An answer for request `id` arrived; `false` when it is stale (the
@@ -181,7 +198,7 @@ impl GiftValueLookup {
         if self.stage != GiftValueStage::Loading(id) {
             return false;
         }
-        self.stage = GiftValueStage::Ready { info, open: true };
+        self.stage = GiftValueStage::Open(info);
         true
     }
 

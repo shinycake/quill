@@ -109,19 +109,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.advance_manager_commit()
     }
 
-    fn manager_change_pending(&self, masks: bool) -> bool {
-        if masks {
-            return self.session.mask_change_pending();
-        }
-        self.session.requests.pending.values().any(|pending| {
-            matches!(
-                pending.purpose,
-                RequestPurpose::Stickers(StickersPurpose::ManageStickerSet { .. })
-                    | RequestPurpose::ReorderInstalledStickerSets
-            )
-        })
-    }
-
     /// Send the next step of the oldest saved change once the one before it
     /// has been answered, whether it worked or not.
     pub(crate) fn advance_manager_commit(&mut self) -> Result<(), ConnectSendError> {
@@ -130,7 +117,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 return Ok(());
             };
             let masks = front.masks;
-            if self.manager_change_pending(masks) {
+            if self.session.stickers.manager.step_out() {
                 return Ok(());
             }
             let step = self

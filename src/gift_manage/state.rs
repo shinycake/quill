@@ -5,8 +5,17 @@
 use super::{
     AvailableGift, GiftCollection, GiftLimits, GiftRecipient, PremiumGiftOption, TransferPicker,
 };
-use crate::ids::RequestId;
-use crate::state::fetch::Fetch;
+
+/// Whether the form's request is out: the box that sent it is the one its
+/// answer closes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum FlowAsk {
+    /// The form is being filled in.
+    #[default]
+    Editing,
+    /// The request went out; only its answer closes this form.
+    Sent(crate::ids::RequestId),
+}
 
 /// The inline form or confirmation that is open for the selected gift.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,34 +24,76 @@ pub enum GiftFlow {
     Upgrade {
         id: String,
         keep_details: bool,
+        ask: FlowAsk,
     },
     /// The transfer picker: a contact, or the export through Fragment.
     Transfer(TransferPicker),
     /// Edit the resale price.
     Resale {
         id: String,
+        ask: FlowAsk,
     },
-    NewCollection,
-    RenameCollection(i32),
-    DeleteCollection(i32),
+    NewCollection(FlowAsk),
+    RenameCollection(i32, FlowAsk),
+    DeleteCollection(i32, FlowAsk),
 }
 
 impl GiftFlow {
-    /// Whether the answer of `purpose` belongs to this flow: only the box
-    /// that asked closes on it, not whichever one is open when it lands.
-    pub fn answers(&self, purpose: crate::state::PaymentsPurpose) -> bool {
+    pub fn upgrade(id: String, keep_details: bool) -> Self {
+        Self::Upgrade {
+            id,
+            keep_details,
+            ask: FlowAsk::Editing,
+        }
+    }
+
+    pub fn resale(id: String) -> Self {
+        Self::Resale {
+            id,
+            ask: FlowAsk::Editing,
+        }
+    }
+
+    fn ask_mut(&mut self) -> Option<&mut FlowAsk> {
+        match self {
+            Self::Upgrade { ask, .. } | Self::Resale { ask, .. } => Some(ask),
+            Self::NewCollection(ask)
+            | Self::RenameCollection(_, ask)
+            | Self::DeleteCollection(_, ask) => Some(ask),
+            Self::Transfer(_) => None,
+        }
+    }
+
+    fn ask(&self) -> Option<FlowAsk> {
+        match self {
+            Self::Upgrade { ask, .. } | Self::Resale { ask, .. } => Some(*ask),
+            Self::NewCollection(ask)
+            | Self::RenameCollection(_, ask)
+            | Self::DeleteCollection(_, ask) => Some(*ask),
+            Self::Transfer(_) => None,
+        }
+    }
+
+    /// Whether `purpose` is a request this form sends.
+    fn sends(&self, purpose: crate::state::PaymentsPurpose) -> bool {
         use crate::state::PaymentsPurpose as P;
         matches!(
             (self, purpose),
             (Self::Upgrade { .. }, P::UpgradeGift)
                 | (Self::Resale { .. }, P::SetGiftResalePrice)
                 | (
-                    Self::NewCollection | Self::RenameCollection(_),
+                    Self::NewCollection(_) | Self::RenameCollection(..),
                     P::ChangeGiftCollection
                 )
-                | (Self::DeleteCollection(_), P::DeleteGiftCollection)
-                | (Self::DeleteCollection(_), P::ChangeGiftCollection)
+                | (Self::DeleteCollection(..), P::DeleteGiftCollection)
+                | (Self::DeleteCollection(..), P::ChangeGiftCollection)
         )
+    }
+
+    /// Whether the answer of `request` belongs to this form: only the form
+    /// that sent it closes on it, not whichever one is open when it lands.
+    pub fn answers(&self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!((self.ask(), request), (Some(FlowAsk::Sent(sent)), Some(request)) if sent == request)
     }
 }
 
@@ -75,16 +126,23 @@ impl GiftListFetch {
     }
 }
 
-/// Where the send-gift dialog's `sendGift` stands. The dialog is rebuilt
-/// for each recipient, so only the answer of `Sending`'s own request leaves
-/// it; picking another gift, closing the box or sending again leaves
-/// `Sent` and `Failed`.
+/// Where the send-gift dialog stands, open or not, with its `sendGift`.
+/// The dialog is rebuilt for each recipient, so only the answer of the
+/// sending stage's own request leaves it; picking another gift, closing the
+/// box or sending again leaves `Sent` and `Failed`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum SendStage {
+    /// No dialog: nothing open, nothing out.
     #[default]
+    Closed,
+    /// The dialog is open and nothing is out.
     Idle,
-    /// The `sendGift` in flight.
+    /// The `sendGift` in flight, its dialog open.
     Sending(crate::ids::RequestId),
+    /// The `sendGift` in flight, its dialog closed: the answer is told as a
+    /// notice. Opening the dialog again for the same recipient returns to
+    /// `Sending`.
+    SendingClosed(crate::ids::RequestId),
     /// The gift went out; the line the box shows.
     Sent(String),
     /// The send failed; the line the box shows.
@@ -94,7 +152,6 @@ pub enum SendStage {
 /// The send-gift dialog (`GiftBox` in tdesktop).
 #[derive(Debug, Clone, Default)]
 pub struct SendGiftState {
-    pub open: bool,
     pub recipient: Option<GiftRecipient>,
     pub gifts: Vec<AvailableGift>,
     /// `getAvailableGifts` for `gifts`.
@@ -107,14 +164,42 @@ pub struct SendGiftState {
 }
 
 impl SendGiftState {
-    /// A `sendGift` is in flight.
+    /// The dialog is open.
+    pub fn is_open(&self) -> bool {
+        !matches!(self.stage, SendStage::Closed | SendStage::SendingClosed(_))
+    }
+
+    /// A `sendGift` is in flight, with the dialog open or closed.
     pub fn sending(&self) -> bool {
-        matches!(self.stage, SendStage::Sending(_))
+        matches!(
+            self.stage,
+            SendStage::Sending(_) | SendStage::SendingClosed(_)
+        )
     }
 
     /// Whether `pending` is the `sendGift` this dialog waits for.
     pub(crate) fn waits_for(&self, pending: Option<&crate::state::PendingRequest>) -> bool {
-        pending.is_some_and(|pending| self.stage == SendStage::Sending(pending.id))
+        pending.is_some_and(|pending| {
+            matches!(self.stage, SendStage::Sending(id) | SendStage::SendingClosed(id) if id == pending.id)
+        })
+    }
+
+    /// The dialog is closed: a `sendGift` in flight carries on without it.
+    pub fn close(&mut self) {
+        self.selected = None;
+        self.stage = match self.stage {
+            SendStage::Sending(request) | SendStage::SendingClosed(request) => {
+                SendStage::SendingClosed(request)
+            }
+            _ => SendStage::Closed,
+        };
+    }
+
+    /// The dialog is shown again over the `sendGift` it closed on.
+    pub fn reopen(&mut self) {
+        if let SendStage::SendingClosed(request) = self.stage {
+            self.stage = SendStage::Sending(request);
+        }
     }
 
     /// The line after a sent gift.
@@ -155,22 +240,74 @@ pub struct GiftManageState {
     /// The `getOption` batch behind `limits`: a failed one is asked again
     /// at the next gifts open.
     pub limits_ask: crate::state::fetch::BatchAsk,
-    /// The owner's collections. A change while the list is out outdates
-    /// it (the answer in flight is dropped and the list is asked again);
-    /// a failed list shows a Retry.
-    pub collections: Fetch<Vec<GiftCollection>>,
+    pub collections: Vec<GiftCollection>,
+    /// Where the owner's collections list stands.
+    pub collections_fetch: CollectionsFetch,
     /// The collection tab that is open; 0 = all gifts.
     pub active_collection: i32,
     pub flow: Option<GiftFlow>,
-    /// The gifts whose `deleteGift` is in flight, each under its request:
-    /// an answer removes the gift of its own request only.
-    pub deleting: Vec<(RequestId, String)>,
     /// A one-line result of the last action ("Pinned", "Upgraded to ...").
     pub note: Option<String>,
     pub send: SendGiftState,
     /// What finished that the UI shows once: the window that hosts the
     /// gifts drains them (`take_events`); a list that closes drops them.
     pub events: Vec<GiftEvent>,
+}
+
+/// The collections list of the open gifts owner: current, on its way under
+/// a request, or out of date because a collection changed (the next look
+/// asks again). A change while a request is out leaves it
+/// `LoadingStale`, so that answer is taken but the list is asked for once
+/// more. Only the answer of the request named here settles it: an earlier
+/// owner's does not.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CollectionsFetch {
+    #[default]
+    Idle,
+    Loading(crate::ids::RequestId),
+    LoadingStale(crate::ids::RequestId),
+    Stale,
+}
+
+impl CollectionsFetch {
+    pub fn is_loading(self) -> bool {
+        matches!(self, Self::Loading(_) | Self::LoadingStale(_))
+    }
+
+    pub fn is_stale(self) -> bool {
+        self == Self::Stale
+    }
+
+    /// The ask went out as `request`.
+    pub fn begin(&mut self, request: crate::ids::RequestId) {
+        *self = Self::Loading(request);
+    }
+
+    /// A collection changed: the list is asked again once the answer in
+    /// flight, if any, has landed.
+    pub fn mark_stale(&mut self) {
+        *self = match *self {
+            Self::Loading(request) | Self::LoadingStale(request) => Self::LoadingStale(request),
+            _ => Self::Stale,
+        };
+    }
+
+    /// `request` is the ask this list waits for.
+    pub fn waits_for(self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(self, Self::Loading(asked) | Self::LoadingStale(asked) if Some(asked) == request)
+    }
+
+    /// The answer (or error) of `request`: a list marked stale meanwhile
+    /// stays so. Any other request's changes nothing.
+    pub fn settle(&mut self, request: Option<crate::ids::RequestId>) {
+        if !self.waits_for(request) {
+            return;
+        }
+        *self = match *self {
+            Self::LoadingStale(_) => Self::Stale,
+            _ => Self::Idle,
+        };
+    }
 }
 
 /// A result the UI shows once.
@@ -209,9 +346,33 @@ impl GiftManageState {
         }
     }
 
-    /// The flow that sent `purpose` is done; any other open flow stays.
-    pub fn close_flow_answered_by(&mut self, purpose: crate::state::PaymentsPurpose) {
-        if self.flow.as_ref().is_some_and(|flow| flow.answers(purpose)) {
+    /// The open form sent `request` for `purpose`: its answer closes it.
+    pub fn flow_sent(
+        &mut self,
+        purpose: crate::state::PaymentsPurpose,
+        request: crate::ids::RequestId,
+    ) {
+        if let Some(flow) = self.flow.as_mut()
+            && flow.sends(purpose)
+            && let Some(ask) = flow.ask_mut()
+        {
+            *ask = FlowAsk::Sent(request);
+        }
+    }
+
+    /// `request` was refused: its form is being filled in again.
+    pub fn flow_refused(&mut self, request: Option<crate::ids::RequestId>) {
+        if let Some(flow) = self.flow.as_mut()
+            && flow.answers(request)
+            && let Some(ask) = flow.ask_mut()
+        {
+            *ask = FlowAsk::Editing;
+        }
+    }
+
+    /// The form that sent `request` is done; any other open form stays.
+    pub fn close_flow_answered_by(&mut self, request: Option<crate::ids::RequestId>) {
+        if self.flow.as_ref().is_some_and(|flow| flow.answers(request)) {
             self.flow = None;
         }
     }
@@ -243,25 +404,15 @@ impl GiftManageState {
     }
 
     pub fn collection(&self, id: i32) -> Option<&GiftCollection> {
-        self.collections.items().iter().find(|c| c.id == id)
-    }
-
-    /// The `deleteGift` of `request` was answered or refused: the gift it
-    /// was for, once.
-    pub fn take_deleting(&mut self, request: Option<RequestId>) -> Option<String> {
-        let at = self
-            .deleting
-            .iter()
-            .position(|(asked, _)| Some(*asked) == request)?;
-        Some(self.deleting.remove(at).1)
+        self.collections.iter().find(|c| c.id == id)
     }
 
     /// Forget the per-owner state when another gifts list opens.
     pub fn reset_for_owner(&mut self) {
-        self.collections = Fetch::Idle;
+        self.collections.clear();
+        self.collections_fetch = CollectionsFetch::Idle;
         self.active_collection = 0;
         self.flow = None;
-        self.deleting.clear();
         self.note = None;
         // A result nobody took belongs to the list that was closed.
         self.events.clear();

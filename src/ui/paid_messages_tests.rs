@@ -60,7 +60,7 @@ fn a_paid_chat_asks_once_then_sends_with_the_price(cx: &mut TestAppContext) {
     // "Don't ask me again" for this price makes the next send go through.
     app.update_in(vcx, |app, _, _| {
         let session = app.demo_session.as_mut().unwrap();
-        session.payments.paid_messages.trust.trust(11, 25);
+        session.payments.paid_messages.remember_trust(11, 25);
         app.paid_messages.confirm = None;
     });
     app.update_in(vcx, |app, _, cx| {

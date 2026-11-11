@@ -112,7 +112,6 @@ fn badge_adds_forum_topic_unreads_on_top_of_totals() {
         )
     };
     let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(41)));
-    session.threads.forum_topics.begin(41, extra);
     let topics = [
         topic(482317, 11, 505806848000, 505859276800),
         topic(477080, 1, 500306018304, 505744982016),

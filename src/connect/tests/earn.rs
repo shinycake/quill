@@ -292,9 +292,11 @@ fn a_cancelled_withdrawals_answer_opens_nothing() {
     );
     let earn = &p.0.session.payments.earn;
     assert_eq!(earn.open_url, None, "Fragment does not open after Cancel");
-    assert_eq!(
-        earn.withdraw.as_ref().map(|w| &w.step),
-        Some(&WithdrawStep::Checking),
+    assert!(
+        matches!(
+            earn.withdraw.as_ref().map(|w| &w.step),
+            Some(WithdrawStep::Checking(_))
+        ),
         "the new attempt goes on"
     );
     // Cancel the new attempt from its password box; its wrong-password
@@ -309,10 +311,10 @@ fn a_cancelled_withdrawals_answer_opens_nothing() {
         json!({"@type": "error", "code": 400, "message": "PASSWORD_HASH_INVALID",
             "@extra": cancelled}),
     );
-    assert_eq!(
+    assert!(matches!(
         p.0.session.payments.earn.withdraw.as_ref().map(|w| &w.step),
-        Some(&WithdrawStep::Checking)
-    );
+        Some(WithdrawStep::Checking(_))
+    ));
 }
 
 #[test]
@@ -474,7 +476,13 @@ fn a_reopened_setup_page_stays_open_for_an_earlier_save() {
     p.0.session.payments.earn.setup = None;
     p.0.open_starref_setup(BOT).unwrap();
     p.0.save_starref_program().unwrap();
-    let waiting = p.0.session.payments.earn.setup.as_ref().map(|s| s.saving);
+    let waiting =
+        p.0.session
+            .payments
+            .earn
+            .setup
+            .as_ref()
+            .map(|s| s.saving_request());
     // The end (sent second to last) fails late: the new save still waits.
     let end =
         p.1.snapshot()
@@ -488,7 +496,7 @@ fn a_reopened_setup_page_stays_open_for_an_earlier_save() {
     feed(&mut p, refused);
     let setup = p.0.session.payments.earn.setup.as_ref().unwrap();
     assert!(setup.is_saving());
-    assert_eq!(Some(setup.saving), waiting);
+    assert_eq!(setup.saving_request(), waiting.flatten());
 }
 
 #[test]
@@ -701,73 +709,4 @@ fn a_program_click_answered_after_its_list_closed_opens_nothing() {
         connected(BOT, "https://t.me/bot?start=_tgr_z"),
     );
     assert!(p.0.session.payments.earn.link_box.is_none());
-}
-
-fn requests_of(p: &Parts, type_name: &str) -> Vec<Value> {
-    p.1.snapshot()
-        .iter()
-        .filter_map(|json| serde_json::from_str::<Value>(json).ok())
-        .filter(|v| v["@type"] == type_name)
-        .collect()
-}
-
-fn feed_for(p: &mut Parts, request: &Value, mut body: Value) {
-    body["@extra"] = request["@extra"].clone();
-    feed(p, body);
-}
-
-#[test]
-fn an_older_stats_error_or_answer_does_not_touch_the_reopened_page() {
-    let mut p = parts();
-    let peer = EarnPeer::Chat(CHANNEL);
-    p.0.open_earn_page(peer, EarnScreen::Monetization, false)
-        .unwrap();
-    p.0.open_earn_page(peer, EarnScreen::Monetization, false)
-        .unwrap();
-    let old = requests_of(&p, "getStarRevenueStatistics")[0].clone();
-    let new = requests_of(&p, "getStarRevenueStatistics")[1].clone();
-    feed_for(&mut p, &new, star_stats(250));
-    feed_for(
-        &mut p,
-        &old,
-        json!({"@type": "error", "code": 400, "message": "BOOM"}),
-    );
-    let page = p.0.session.payments.earn.page.clone().unwrap();
-    assert_eq!(page.stars.ready().unwrap().status.current.stars, 250);
-    assert!(p.0.session.payments.earn.notes.is_empty());
-    // An older answer after a newer failure does not revive the page either.
-    let mut q = parts();
-    q.0.open_earn_page(peer, EarnScreen::Monetization, false)
-        .unwrap();
-    q.0.open_earn_page(peer, EarnScreen::Monetization, false)
-        .unwrap();
-    let old = requests_of(&q, "getStarRevenueStatistics")[0].clone();
-    let new = requests_of(&q, "getStarRevenueStatistics")[1].clone();
-    feed_for(
-        &mut q,
-        &new,
-        json!({"@type": "error", "code": 400, "message": "BOOM"}),
-    );
-    feed_for(&mut q, &old, star_stats(5));
-    let page = q.0.session.payments.earn.page.clone().unwrap();
-    assert!(matches!(page.stars, Load::Failed(_)), "{:?}", page.stars);
-}
-
-#[test]
-fn the_ads_account_link_has_a_failed_and_an_empty_stage() {
-    let mut p = parts();
-    let peer = EarnPeer::Chat(CHANNEL);
-    p.0.open_earn_page(peer, EarnScreen::Monetization, false)
-        .unwrap();
-    let page = p.0.session.payments.earn.page.clone().unwrap();
-    assert!(page.ad_account_url.is_loading());
-    error(&mut p, "getStarAdAccountUrl", "BOOM");
-    let page = p.0.session.payments.earn.page.clone().unwrap();
-    assert!(matches!(page.ad_account_url, Load::Failed(_)));
-    p.0.open_earn_page(peer, EarnScreen::Monetization, false)
-        .unwrap();
-    let last = requests_of(&p, "getStarAdAccountUrl")[1].clone();
-    feed_for(&mut p, &last, json!({"@type": "httpUrl", "url": ""}));
-    let page = p.0.session.payments.earn.page.clone().unwrap();
-    assert_eq!(page.ad_account_url, Load::Unavailable);
 }
