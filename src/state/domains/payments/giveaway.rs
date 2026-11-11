@@ -58,8 +58,10 @@ pub enum GiveawayLaunch {
     #[default]
     Idle,
     /// `launchPrepaidGiveaway` `request` is in flight for the boosted
-    /// chat. Only its answer ends it: a form opened since starts `Idle`,
-    /// and the old launch's answer does not land in it.
+    /// chat `chat_id`. Only its answer ends it. A form for another chat
+    /// starts `Idle` (see [`GiveawayLaunch::for_form`]), so this launch's
+    /// answer does not land in that form: it only drops the chat's cached
+    /// boost status.
     Launching {
         chat_id: i64,
         request: u64,
@@ -69,13 +71,14 @@ pub enum GiveawayLaunch {
 }
 
 impl GiveawayLaunch {
-    /// What a form opened or closed now starts from: a launch still in
-    /// flight stays (its answer is for the giveaway being started, and the
-    /// Start button must not send it twice); an answer already seen is
+    /// What the form for chat `form_chat` (`None`: no form, or one for a
+    /// new giveaway) starts from. A launch still in flight stays only for
+    /// the chat it was started for, whose Start button must not send it
+    /// twice; an answer already seen, or another chat's launch, is
     /// forgotten.
-    pub fn for_next_form(self) -> Self {
+    pub fn for_form(self, form_chat: Option<i64>) -> Self {
         match self {
-            Self::Launching { .. } => self,
+            Self::Launching { chat_id, .. } if Some(chat_id) == form_chat => self,
             _ => Self::Idle,
         }
     }

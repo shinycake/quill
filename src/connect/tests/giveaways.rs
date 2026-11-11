@@ -238,6 +238,47 @@ fn a_prepaid_giveaway_launches_only_on_the_explicit_call() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// Start in chat A, open B's form while the launch is out: B's form starts
+/// idle and neither the answer nor an error from A's launch lands in it;
+/// A's cached boost status is still dropped.
+#[test]
+fn a_launch_answer_for_one_chat_does_not_land_in_another_chats_form() {
+    for fail in [false, true] {
+        let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+        let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+        let recorder = Arc::new(RecordingSender::new());
+        let seq = AtomicU64::new(0);
+        let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+        driver.session.groups.chat_boost_status.insert(-100, (1, 2));
+        driver.session.groups.chat_boost_status.insert(-200, (3, 4));
+        let extra = driver
+            .launch_prepaid_giveaway(&prepaid_draft(), NOW)
+            .unwrap();
+        // The form for chat B opens (what `open_giveaway_form` does).
+        let giveaway = &mut driver.session.payments.giveaway;
+        giveaway.launch = std::mem::take(&mut giveaway.launch).for_form(Some(-200));
+        assert_eq!(giveaway.launch, GiveawayLaunch::Idle);
+        let answer = if fail {
+            json!({"@type":"error","@extra":extra.as_extra(),"code":400,"message":"GIVEAWAY_ID_INVALID"})
+        } else {
+            json!({"@type":"ok","@extra":extra.as_extra()})
+        };
+        feed(&mut driver, &seq, &sink, answer);
+        assert_eq!(
+            driver.session.payments.giveaway.launch,
+            GiveawayLaunch::Idle,
+            "B's form shows nothing of A's launch"
+        );
+        assert_eq!(
+            driver.session.groups.chat_boost_status.contains_key(&-100),
+            fail,
+            "A's boost status is dropped when its launch succeeded"
+        );
+        assert!(driver.session.groups.chat_boost_status.contains_key(&-200));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
 #[test]
 fn a_failed_launch_reports_the_reason() {
     let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
