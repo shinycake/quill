@@ -86,7 +86,9 @@ fn chat_menu_closes_when_its_chat_is_removed(cx: &mut TestAppContext) {
             .expect("another chat")
     });
     app.update(vcx, |app, cx| {
-        app.chat_list.menu.open_row(ChatMenuState::at(chat, point(px(100.), px(200.))));
+        app.chat_list
+            .menu
+            .open_row(ChatMenuState::at(chat, point(px(100.), px(200.))));
         cx.notify();
     });
     frames(vcx);

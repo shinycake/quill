@@ -23,10 +23,10 @@ use quill::chat_appearance::{
     FeatureLevels, name_color_level, profile_color_level,
 };
 use quill::ids::{ChatId, RequestId};
-use quill::state::RequestPurpose;
 use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::peer_color::{name_swatches, profile_swatches};
+use quill::state::RequestPurpose;
 use quill::telegram::envelope::ChatKind;
 
 /// The open box: the chat, the tab and the draft the swatches edit.

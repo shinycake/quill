@@ -29,10 +29,10 @@ use quill::lang::{keys, tr, tr_with};
 use std::path::{Path, PathBuf};
 
 mod apply;
-mod choices;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod apply_tests;
+mod choices;
 mod demo;
 mod stage;
 
@@ -829,7 +829,13 @@ impl QuillApp {
                         let current_theme = this
                             .session()
                             .and_then(|s| s.chats_state.chat_theme_names.get(&chat_id).cloned());
-                        !plan_changes(current_theme.as_deref(), own, &state, state.dimming.percent(cx)).is_empty()
+                        !plan_changes(
+                            current_theme.as_deref(),
+                            own,
+                            &state,
+                            state.dimming.percent(cx),
+                        )
+                        .is_empty()
                     };
                     let footer = this.chat_look_footer(
                         apply::FooterState {
@@ -870,8 +876,8 @@ crate::ui::shell::register_dialogs! {
 #[cfg(test)]
 mod tests {
     use super::{
-        ChatLookDialog, Dimming, LookChange, LookStage, LookTarget, WallpaperChoice, WallpaperPick, chat_look_allowed,
-        is_wallpaper_image, plan_changes,
+        ChatLookDialog, Dimming, LookChange, LookStage, LookTarget, WallpaperChoice, WallpaperPick,
+        chat_look_allowed, is_wallpaper_image, plan_changes,
     };
     use std::path::Path;
 
@@ -945,7 +951,10 @@ mod tests {
             plan_changes(None, Some((5, 10)), &dim, 40),
             vec![LookChange::Wallpaper { id: 5, dimming: 40 }]
         );
-        assert!(plan_changes(None, None, &dim, 40).is_empty(), "nothing to dim");
+        assert!(
+            plan_changes(None, None, &dim, 40).is_empty(),
+            "nothing to dim"
+        );
     }
 
     #[test]

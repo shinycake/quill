@@ -478,11 +478,7 @@ impl QuillApp {
                 .child(rows)
                 .children(pull_gap),
         );
-        let reordering = self
-            .chat_list
-            .pin
-            .held()
-            .is_some();
+        let reordering = self.chat_list.pin.held().is_some();
         div()
             .id("chat-rows")
             .role(gpui_kit::Role::Group)

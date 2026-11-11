@@ -19,8 +19,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::{ChatListFilter, QuillApp};
-use super::chat_row::{ChatListItem, chat_row_height};
 use super::chat_list_pick::Pick;
+use super::chat_row::{ChatListItem, chat_row_height};
 use crate::ui::chat_list_state::SidebarTab;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;

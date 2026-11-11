@@ -56,7 +56,9 @@ fn open(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext, ChatId
 
 fn show_menu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, chat_id: ChatId) {
     app.update(vcx, |app, cx| {
-        app.chat_list.menu.open_row(ChatMenuState::at(chat_id, point(px(120.), px(200.))));
+        app.chat_list
+            .menu
+            .open_row(ChatMenuState::at(chat_id, point(px(120.), px(200.))));
         cx.notify();
     });
     frames(vcx);
@@ -394,7 +396,9 @@ fn menu_and_submenu_at(
     let (app, mut vcx, chat_id) = open(cx);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.chat_list.menu.open_row(ChatMenuState::at(chat_id, point(px(x), px(200.))));
+        app.chat_list
+            .menu
+            .open_row(ChatMenuState::at(chat_id, point(px(x), px(200.))));
         cx.notify();
     });
     frames(vcx);

@@ -253,13 +253,12 @@ impl QuillApp {
     ) {
         let now = WallClock::of(cx).now();
         let existing = match target {
-            ScheduleTarget::Composer | ScheduleTarget::ComposerThenSend { .. } => match self
-                .pending_send()
-                .scheduling
-            {
-                ComposerScheduling::SendAtDate { date, .. } => Some(date),
-                _ => None,
-            },
+            ScheduleTarget::Composer | ScheduleTarget::ComposerThenSend { .. } => {
+                match self.pending_send().scheduling {
+                    ComposerScheduling::SendAtDate { date, .. } => Some(date),
+                    _ => None,
+                }
+            }
             ScheduleTarget::Share | ScheduleTarget::RescheduleSelected => None,
             ScheduleTarget::Reschedule(id) => self.session().and_then(|s| {
                 s.scheduled_in(s.open_chat_id()?)

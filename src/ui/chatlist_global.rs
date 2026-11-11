@@ -418,7 +418,10 @@ mod tests {
     #[test]
     fn moving_without_the_button_ends_a_scrub() {
         let bar = IndexBar::Away.moved((0., 0.), true).scrubbed_to(1);
-        assert_eq!(bar.moved((0., 3.), false), IndexBar::Over { cursor: (0., 3.) });
+        assert_eq!(
+            bar.moved((0., 3.), false),
+            IndexBar::Over { cursor: (0., 3.) }
+        );
     }
 
     #[test]

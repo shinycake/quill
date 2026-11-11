@@ -107,7 +107,11 @@ mod tests {
         assert_eq!(b.selected(), &[MessageId(2)], "kept for the new time");
         b.resume();
         assert!(b.is_open());
-        assert_eq!(b.selected(), &[MessageId(2)], "Cancel brings the ticks back");
+        assert_eq!(
+            b.selected(),
+            &[MessageId(2)],
+            "Cancel brings the ticks back"
+        );
         b.close();
         assert!(b.selected().is_empty(), "closing drops the ticks");
         b.resume();

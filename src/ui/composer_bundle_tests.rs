@@ -150,7 +150,10 @@ fn the_schedule_shortcut_asks_for_a_time_and_then_sends(cx: &mut TestAppContext)
             .update(cx, |input, cx| input.set_value("later", window, cx));
         assert!(app.schedule_send_by_key(window, cx));
         let picker = app.chat_ui.schedule_picker.as_ref().expect("the picker");
-        assert_eq!(picker.target, ScheduleTarget::ComposerThenSend { effect: 0 });
+        assert_eq!(
+            picker.target,
+            ScheduleTarget::ComposerThenSend { effect: 0 }
+        );
         // Confirming the time sends, as tdesktop's schedule box does.
         let date = picker.date.state.clone();
         // 01:20, which went by once already as CDT.
