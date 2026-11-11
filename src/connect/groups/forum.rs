@@ -43,6 +43,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::GetSupergroup, Some(chat_id));
         if let Err(err) = self.sender.send_json(&get_supergroup(extra, supergroup_id)) {
             self.session.requests.take(extra);
+            // A send that never left fails the load like an error answer:
+            // the same set the topic views read.
+            self.session.threads.forum_topics_failed.insert(chat_id.0);
             return Err(err);
         }
         Ok(())
@@ -91,6 +94,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(());
         }
+        // A new try clears the last failure; this one's answer sets it again.
+        self.session.threads.forum_topics_failed.remove(&chat_id.0);
         let extra = self
             .session
             .request(RequestPurpose::GetForumTopics, Some(chat_id));
@@ -104,6 +109,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             FORUM_TOPICS_LIMIT,
         )) {
             self.session.requests.take(extra);
+            // A send that never left fails the load like an error answer:
+            // the same set the topic views read.
+            self.session.threads.forum_topics_failed.insert(chat_id.0);
             return Err(err);
         }
         Ok(())

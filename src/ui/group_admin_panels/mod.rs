@@ -207,7 +207,7 @@ impl QuillApp {
                     // An owner sees who inherits first (tdesktop
                     // `select_future_owner_box`).
                     if !this.open_owner_leave(chat_id, window, cx) {
-                        this.open_group_confirm(chat_id, GroupConfirmAction::LeaveChat, cx);
+                        this.open_group_confirm(GroupConfirmAction::LeaveChat { chat_id }, cx);
                     }
                 }))
                 .test_support(),

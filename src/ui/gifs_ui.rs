@@ -17,7 +17,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::gif_grid::{GIF_GRID_PADDING, layout_gifs};
-use quill::ids::{ChatId, FileId};
+use quill::ids::FileId;
 use quill::inline_grid::{MEDIA_HEIGHT, Placed, SKIP, should_load_more};
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{GifPanel, RequestPurpose};
@@ -575,7 +575,6 @@ impl QuillApp {
                         let _ = owner.update(cx, |this, cx| {
                             if saved {
                                 this.open_group_confirm(
-                                    ChatId(0),
                                     GroupConfirmAction::RemoveSavedGif { file_id },
                                     cx,
                                 );

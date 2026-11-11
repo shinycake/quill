@@ -93,12 +93,76 @@ struct OutputState {
     /// Players made while no device was up, connected to the app mixer when
     /// one is.
     parked: Vec<Parked>,
-    device: Option<Device>,
-    failed_at: Option<Instant>,
-    /// A watch thread looks after the open device.
-    watched: bool,
-    /// A device is opening on a thread of its own ([`reopen`]).
-    opening: bool,
+    link: DeviceLink,
+}
+
+/// The output device: none (and when an open failed), opening on a thread
+/// of its own ([`reopen`]), or up.
+enum DeviceLink {
+    Down {
+        /// When the last open failed, so a retry waits [`RETRY_AFTER`].
+        failed_at: Option<Instant>,
+    },
+    Opening,
+    /// The device plays the app mixer, and its watch looks after it.
+    Up {
+        device: Device,
+        watch: Watch,
+    },
+}
+
+impl Default for DeviceLink {
+    fn default() -> Self {
+        Self::Down { failed_at: None }
+    }
+}
+
+impl DeviceLink {
+    fn is_up(&self) -> bool {
+        matches!(self, Self::Up { .. })
+    }
+
+    fn is_opening(&self) -> bool {
+        matches!(self, Self::Opening)
+    }
+
+    fn device(&self) -> Option<&Device> {
+        match self {
+            Self::Up { device, .. } => Some(device),
+            _ => None,
+        }
+    }
+
+    /// Take the device out, leaving no device and no failure. Its watch
+    /// goes with it.
+    fn take_device(&mut self) -> Option<Device> {
+        match std::mem::take(self) {
+            Self::Up { device, .. } => Some(device),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+}
+
+/// The watch thread of an open device. It is owned by the device's stage:
+/// dropping the device drops the handle, and the thread ends at its next
+/// look.
+enum Watch {
+    /// None runs (it failed to start, or it panicked): the next use of the
+    /// device starts one.
+    Unstarted,
+    Running(WatchHandle),
+}
+
+/// Stops its watch thread when dropped.
+struct WatchHandle(Arc<AtomicBool>);
+
+impl Drop for WatchHandle {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
 }
 
 struct AppMixer {
@@ -295,7 +359,7 @@ impl SharedOutput {
             return;
         }
         let mut state = self.0.lock();
-        if let (Some(app), Some(_)) = (&state.app, &state.device) {
+        if let (Some(app), true) = (&state.app, state.link.is_up()) {
             app.mixer.add(queue);
             return;
         }
@@ -324,7 +388,7 @@ impl SharedOutput {
     #[cfg(test)]
     pub(in crate::ui) fn settle_device(&self) {
         let mut state = self.0.lock();
-        while state.opening {
+        while state.link.is_opening() {
             state = self
                 .0
                 .opened
@@ -361,7 +425,7 @@ impl SharedOutput {
         }
         let mut state = self.0.lock();
         state.open(&self.0);
-        state.device.is_some()
+        state.link.is_up()
     }
 
     /// A device is up, or opening.
@@ -371,7 +435,7 @@ impl SharedOutput {
             return forced.is_some();
         }
         let state = self.0.lock();
-        state.device.is_some() || state.opening
+        state.link.is_up() || state.link.is_opening()
     }
 }
 
@@ -410,30 +474,35 @@ impl OutputState {
     /// opened lately.
     fn open(&mut self, output: &Arc<Output>) -> bool {
         output.heard.store(true, Ordering::Relaxed);
-        let stale = self.device.take_if(|device| device.is_stale());
-        if stale.is_some() {
+        let stale = if self.link.device().is_some_and(Device::is_stale) {
             debug_log("audio: output: reopening the default output device");
-            self.failed_at = None;
-        }
-        if self.device.is_some() {
-            self.watch(output);
-            return true;
-        }
-        if self.opening {
-            return true;
-        }
-        if self.failed_at.is_some_and(|at| at.elapsed() < RETRY_AFTER) {
-            return false;
+            self.link.take_device()
+        } else {
+            None
+        };
+        match &self.link {
+            DeviceLink::Up { .. } => {
+                self.start_watch(output);
+                return true;
+            }
+            DeviceLink::Opening => return true,
+            DeviceLink::Down {
+                failed_at: Some(at),
+            } if at.elapsed() < RETRY_AFTER => return false,
+            DeviceLink::Down { .. } => {}
         }
         let opener = output.clone();
         let spawned = quill::thread_guard::spawn_guarded("quill-audio-open", move || {
             reopen(&opener, stale);
         });
-        self.opening = spawned.is_ok();
-        if !self.opening {
-            self.failed_at = Some(Instant::now());
-        }
-        self.opening
+        self.link = if spawned.is_ok() {
+            DeviceLink::Opening
+        } else {
+            DeviceLink::Down {
+                failed_at: Some(Instant::now()),
+            }
+        };
+        self.link.is_opening()
     }
 
     /// Play the app mixer on a device just opened, with a watch to close
@@ -447,25 +516,35 @@ impl OutputState {
             app.mixer.add(parked.queue);
         }
         let feed = Feed::new(app.sound.clone(), output.pulled.clone());
-        self.device = Some(sink.play(feed));
-        self.failed_at = None;
-        self.watch(output);
+        self.link = DeviceLink::Up {
+            device: sink.play(feed),
+            watch: Watch::Unstarted,
+        };
+        self.start_watch(output);
     }
 
     /// Make sure a watch looks after the open device; one that failed to
     /// start is tried again, or the device would never close.
-    fn watch(&mut self, output: &Arc<Output>) {
+    fn start_watch(&mut self, output: &Arc<Output>) {
         // Tests: a gate's device stays open, as the watch looks in real
         // time.
         #[cfg(test)]
         if output.gate.is_some() {
             return;
         }
-        if !self.watched {
-            let watched = output.clone();
-            let spawned =
-                quill::thread_guard::spawn_guarded("quill-audio-idle", move || watch(&watched));
-            self.watched = spawned.is_ok();
+        let DeviceLink::Up { watch, .. } = &mut self.link else {
+            return;
+        };
+        if matches!(watch, Watch::Running(_)) {
+            return;
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        let (watched, ends) = (output.clone(), stop.clone());
+        let spawned = quill::thread_guard::spawn_guarded("quill-audio-idle", move || {
+            watch_device(&watched, &ends)
+        });
+        if spawned.is_ok() {
+            *watch = Watch::Running(WatchHandle(stop));
         }
     }
 }
@@ -496,10 +575,13 @@ struct Reopened<'a> {
 impl Drop for Reopened<'_> {
     fn drop(&mut self) {
         let mut state = self.output.lock();
-        state.opening = false;
         match self.sink.take() {
             Some(sink) => state.install(sink, self.output),
-            None => state.failed_at = Some(Instant::now()),
+            None => {
+                state.link = DeviceLink::Down {
+                    failed_at: Some(Instant::now()),
+                }
+            }
         }
         drop(state);
         self.output.opened.notify_all();
@@ -582,52 +664,57 @@ impl Device {
 /// Looks after the open device: closes it once nothing has played for
 /// [`QUIET_FOR`], and moves the app mixer to the new default device when
 /// the stream ended while something plays. Ends with the device.
-fn watch(output: &Arc<Output>) {
-    let _ended = WatchEnded(output);
+fn watch_device(output: &Arc<Output>, stop: &Arc<AtomicBool>) {
+    let _ended = WatchEnded(output, stop);
     let mut quiet = Quiet::default();
     loop {
         std::thread::sleep(LOOK_EVERY);
-        if !look(output, &mut quiet, Instant::now()) {
+        if !look(output, stop, &mut quiet, Instant::now()) {
             return;
         }
     }
 }
 
-/// A watch that panics in `look` leaves the flag that says one is running
-/// set, and no new watch would ever start; this clears it on the way out.
-/// A watch that ended by itself has already settled the flag (and may have
-/// started its successor), so it is left alone.
-struct WatchEnded<'a>(&'a Arc<Output>);
+/// A watch that panics in `look` leaves its device without a watch, and
+/// none would ever start; this marks the device as unwatched on the way
+/// out. A watch that was stopped has no device to mark.
+struct WatchEnded<'a>(&'a Arc<Output>, &'a Arc<AtomicBool>);
 
 impl Drop for WatchEnded<'_> {
     fn drop(&mut self) {
-        if std::thread::panicking() {
-            self.0.lock().watched = false;
+        if !std::thread::panicking() {
+            return;
+        }
+        if let DeviceLink::Up { watch, .. } = &mut self.0.lock().link
+            && matches!(watch, Watch::Running(handle) if Arc::ptr_eq(&handle.0, self.1))
+        {
+            *watch = Watch::Unstarted;
         }
     }
 }
 
-/// One look of the watch at `now`: whether to look again.
-fn look(output: &Arc<Output>, quiet: &mut Quiet, now: Instant) -> bool {
+/// One look of the watch at `now`: whether to look again. A watch whose
+/// device is gone (`stop`) has nothing to look after.
+fn look(output: &Arc<Output>, stop: &AtomicBool, quiet: &mut Quiet, now: Instant) -> bool {
     let mut state = output.lock();
+    if stop.load(Ordering::Relaxed) {
+        return false;
+    }
     let sounded = output.sounded();
-    let Some(device) = &state.device else {
-        state.watched = false;
+    let Some(device) = state.link.device() else {
         return false;
     };
     if device.is_stale() {
         // Under the lock, so that players always see a device up or
-        // opening: the opener takes the stale one and drops it. The new
-        // device gets a watch of its own.
-        state.watched = false;
+        // opening: the opener takes the stale one (and its watch) and
+        // drops it. The new device gets a watch of its own.
         state.open(output);
         return false;
     }
     if !quiet.long_enough(sounded, now) {
         return true;
     }
-    let closed = state.device.take();
-    state.watched = false;
+    let closed = state.link.take_device();
     drop(state);
     // Dropped unlocked, as stopping a stream takes a while.
     drop(closed);
@@ -985,7 +1072,10 @@ mod gate {
 
 #[cfg(test)]
 mod tests {
-    use super::{Feed, Heard, QUIET_FOR, Quiet, SharedOutput, WatchEnded, look};
+    use super::{
+        DeviceLink, Feed, Heard, QUIET_FOR, Quiet, SharedOutput, Watch, WatchEnded, WatchHandle,
+        look,
+    };
     use rodio::buffer::SamplesBuffer;
     use rodio::mixer::mixer;
     use rodio::{ChannelCount, SampleRate, Source};
@@ -1232,7 +1322,14 @@ mod tests {
         gate.hold_drops(true);
         // The watch's look, on a thread of its own as in the app.
         let watched = output.0.clone();
-        std::thread::spawn(move || look(&watched, &mut Quiet::default(), Instant::now()));
+        std::thread::spawn(move || {
+            look(
+                &watched,
+                &AtomicBool::new(false),
+                &mut Quiet::default(),
+                Instant::now(),
+            )
+        });
         // The stale stream is being stopped.
         gate.wait_dropped(1);
         assert!(!player.lost());
@@ -1245,20 +1342,55 @@ mod tests {
 
     #[test]
     fn a_watch_that_panics_lets_a_new_one_start() {
-        let (output, _gate) = SharedOutput::gated();
-        output.0.lock().watched = true;
+        let (output, gate) = SharedOutput::gated();
+        let _player = output.outlet().unwrap().player();
+        gate.answer(true);
+        output.settle_device();
+        let stop = Arc::new(AtomicBool::new(false));
+        let running = |output: &SharedOutput| {
+            matches!(
+                output.0.lock().link,
+                DeviceLink::Up {
+                    watch: Watch::Running(_),
+                    ..
+                }
+            )
+        };
+        let watching = |output: &SharedOutput| {
+            if let DeviceLink::Up { watch, .. } = &mut output.0.lock().link {
+                *watch = Watch::Running(WatchHandle(stop.clone()));
+            }
+        };
+        watching(&output);
+        drop(WatchEnded(&output.0, &stop));
+        assert!(running(&output), "a watch that ended alone left it");
         let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _ended = WatchEnded(&output.0);
+            let _ended = WatchEnded(&output.0, &stop);
             std::panic::resume_unwind(Box::new("look panicked"));
         }));
         assert!(panicked.is_err());
-        assert!(!output.0.lock().watched);
-        output.0.lock().watched = true;
-        drop(WatchEnded(&output.0));
-        assert!(
-            output.0.lock().watched,
-            "a watch that ended alone settled it"
-        );
+        assert!(!running(&output), "the panicked watch is gone");
+    }
+
+    #[test]
+    fn a_watch_ends_with_its_device() {
+        let (output, gate) = SharedOutput::gated();
+        let _player = output.outlet().unwrap().player();
+        gate.answer(true);
+        output.settle_device();
+        let stop = Arc::new(AtomicBool::new(false));
+        if let DeviceLink::Up { watch, .. } = &mut output.0.lock().link {
+            *watch = Watch::Running(WatchHandle(stop.clone()));
+        }
+        let closed = output.0.lock().link.take_device();
+        drop(closed);
+        assert!(stop.load(Ordering::Relaxed), "the device took its watch");
+        assert!(!look(
+            &output.0,
+            &stop,
+            &mut Quiet::default(),
+            Instant::now()
+        ));
     }
 
     /// A playing player whose device failed to open says so, so its owner

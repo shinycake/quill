@@ -18,7 +18,6 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
-use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::privacy::{PrivacyKeyState, PrivacyRuleDetail};
 use quill::state::fetch::Fetch;
@@ -196,11 +195,7 @@ impl QuillApp {
                             .label(tr(keys::Q_PREFS_CLEAR_SAVED_PAYMENT_SHIPPING_INFO))
                             .custom(super::security::quiet_danger(cx))
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_group_confirm(
-                                    ChatId(0),
-                                    GroupConfirmAction::ClearPaymentInfo,
-                                    cx,
-                                );
+                                this.open_group_confirm(GroupConfirmAction::ClearPaymentInfo, cx);
                             })),
                     ),
                     cx,

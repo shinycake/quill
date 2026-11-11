@@ -675,12 +675,9 @@ impl QuillApp {
             .and_then(|s| s.groups.communities.get(&community_id))
             .map(|community| community.name.clone())
             .unwrap_or_default();
-        // `chat_id` is unused for `CommunityName`; the community id
-        // rides the prompt kind.
         self.admin.username_dialog = Some(UsernameDialog::new(
             window,
             cx,
-            ChatId(community_id),
             TextPromptKind::CommunityName { community_id },
             &current,
             tr(keys::COMMUNITY_MANAGE_NAME),

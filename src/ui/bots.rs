@@ -620,7 +620,7 @@ impl QuillApp {
             "bot-restart",
             tr(keys::Q_MEDIA_RESTART_BOT),
             cx.listener(move |this, _, _, cx| {
-                this.open_group_confirm(open, GroupConfirmAction::RestartBot, cx);
+                this.open_group_confirm(GroupConfirmAction::RestartBot { chat_id: open }, cx);
             }),
         ));
         if !username.is_empty() {
@@ -643,8 +643,10 @@ impl QuillApp {
             },
             cx.listener(move |this, _, _, cx| {
                 this.open_group_confirm(
-                    open,
-                    GroupConfirmAction::BlockUser { block: !blocked },
+                    GroupConfirmAction::BlockUser {
+                        chat_id: open,
+                        block: !blocked,
+                    },
                     cx,
                 );
             }),
@@ -710,7 +712,16 @@ impl QuillApp {
                 }
                 panel = panel.child(row);
             }
-            _ => {
+            Some(SimilarBotsFetch::Loading) => {
+                panel = panel.child(
+                    div()
+                        .id("bot-similar-loading")
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(tr(keys::Q_MEDIA_LOADING_SIMILAR_BOTS)),
+                );
+            }
+            None => {
                 panel = panel.child(ghost_text_button(
                     "bot-similar-fetch",
                     tr(keys::SIMILAR_BOTS_TITLE),
@@ -759,15 +770,7 @@ impl QuillApp {
             .live
             .as_mut()
             .map(|live| match live.driver.fetch_similar_bots(bot_id) {
-                Ok(Some(_)) => {
-                    live.driver
-                        .session
-                        .bots
-                        .similar_bots
-                        .entry(bot_id)
-                        .or_insert(SimilarBotsFetch::Loading);
-                    StatusNote::silent(tr(keys::Q_MEDIA_LOADING_SIMILAR_BOTS))
-                }
+                Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_LOADING_SIMILAR_BOTS)),
                 Ok(None) => StatusNote::silent(tr(keys::Q_MEDIA_ALREADY_LOADING)),
                 Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
             });

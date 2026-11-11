@@ -590,11 +590,10 @@ impl QuillApp {
     }
 
     fn confirm_delete_saved_sublist(&mut self, topic_id: i64, cx: &mut Context<Self>) {
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+        if self.session().and_then(|s| s.open_chat).is_none() {
             return;
-        };
+        }
         self.open_group_confirm(
-            chat_id,
             super::GroupConfirmAction::DeleteSavedSublist { topic_id },
             cx,
         );

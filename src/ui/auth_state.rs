@@ -8,6 +8,7 @@ use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::composer::should_send_on_enter;
 use quill::lang::{keys, tr};
+use quill::telegram::envelope::{AuthorizationState, RegistrationTerms};
 
 /// The sign-in flow's UI for the account on screen: its inputs, the
 /// registration and terms steps, recovery and the QR code. A field of
@@ -16,7 +17,8 @@ pub(crate) struct AuthUi {
     pub(super) signin: super::signin_ui::SignInUi,
     pub(super) registration_first_input: Entity<TextareaState>,
     pub(super) registration_last_input: Entity<TextareaState>,
-    pub(super) accepted_registration_terms: Option<quill::telegram::envelope::RegistrationTerms>,
+    /// The registration step and the terms the user ticked in it.
+    pub(super) registration: RegistrationStep,
     pub(super) registration_notify_contacts: bool,
     pub(super) email_input: Entity<TextareaState>,
     pub(super) phone_input: Entity<TextareaState>,
@@ -60,7 +62,64 @@ macro_rules! submit_on_enter {
     };
 }
 
+/// The registration step by the authorization state: it exists only while
+/// `WaitRegistration` does ([`AuthUi::follow_auth`] builds it from the
+/// state), and what was ticked holds only for the terms it was ticked for.
+#[derive(Default, Clone, PartialEq)]
+pub(crate) enum RegistrationStep {
+    /// Authorization is not at the registration step.
+    #[default]
+    Idle,
+    /// The terms (none when there are none to accept) wait for a tick.
+    Asking(Option<RegistrationTerms>),
+    /// The user accepted these terms; with none to accept, it starts so.
+    Accepted(Option<RegistrationTerms>),
+}
+
+impl RegistrationStep {
+    pub(super) fn is_accepted(&self) -> bool {
+        matches!(self, Self::Accepted(_))
+    }
+
+    /// The terms the registration is sent with.
+    pub(super) fn accepted_terms(&self) -> Option<&RegistrationTerms> {
+        match self {
+            Self::Accepted(terms) => terms.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// The tick of the terms checkbox.
+    pub(super) fn tick(&mut self, terms: &RegistrationTerms, on: bool) {
+        let terms = Some(terms.clone());
+        *self = if on {
+            Self::Accepted(terms)
+        } else {
+            Self::Asking(terms)
+        };
+    }
+}
+
 impl AuthUi {
+    /// The authorization state moved on: the registration step follows it.
+    /// A tick holds only while those same terms are asked.
+    pub(super) fn follow_auth(&mut self, auth: &AuthorizationState) {
+        let AuthorizationState::WaitRegistration { terms } = auth else {
+            self.registration = RegistrationStep::Idle;
+            return;
+        };
+        let same = matches!(
+            &self.registration,
+            RegistrationStep::Asking(asked) | RegistrationStep::Accepted(asked) if asked == terms
+        );
+        if !same {
+            self.registration = match terms {
+                Some(_) => RegistrationStep::Asking(terms.clone()),
+                None => RegistrationStep::Accepted(None),
+            };
+        }
+    }
+
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         let email_input = cx.new(|cx| {
             TextareaState::new(window, cx)
@@ -123,7 +182,7 @@ impl AuthUi {
             signin,
             registration_first_input,
             registration_last_input,
-            accepted_registration_terms: None,
+            registration: RegistrationStep::Idle,
             registration_notify_contacts: false,
             email_input,
             phone_input,

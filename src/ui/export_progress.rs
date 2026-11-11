@@ -75,24 +75,22 @@ impl QuillApp {
 
     fn poll_one_chat_export(&mut self) -> RedrawNeed {
         let Some(export) = self.session().and_then(|s| s.settings.chat_export.as_ref()) else {
-            self.dialogs.chat_export_seen = None;
+            self.dialogs.chat_export.forget_seen();
             return RedrawNeed::Nothing;
         };
         let progress = export.progress();
-        let hidden = self.dialogs.chat_export_progress_hidden;
+        let hidden = export.view == quill::export::ExportView::Hidden;
         if progress.is_settled() && hidden {
             if let Some(session) = self.session_mut() {
                 session.settings.chat_export = None;
             }
-            self.dialogs.chat_export_seen = None;
-            self.dialogs.chat_export_progress_hidden = false;
+            self.dialogs.chat_export.forget_seen();
             self.set_note(StatusNote::info(ended_note(&progress)));
             return RedrawNeed::Now;
         }
-        let changed = self.dialogs.chat_export_seen.as_ref() != Some(&progress);
-        let need = progress_redraw(changed, progress.is_settled(), hidden);
-        self.dialogs.chat_export_seen = Some(progress);
-        need
+        let settled = progress.is_settled();
+        let changed = self.dialogs.chat_export.note_seen(progress);
+        progress_redraw(changed, settled, hidden)
     }
 
     /// Body and footer of the box while an export exists.
@@ -167,7 +165,7 @@ impl QuillApp {
                         if let Some(live) = this.live.as_mut() {
                             live.driver.session.settings.chat_export = None;
                         }
-                        this.dialogs.chat_export_seen = None;
+                        this.dialogs.chat_export.forget_seen();
                         cx.notify();
                         this.close_kit_dialog_if_done(DialogKind::ChatExport, window, cx);
                     })),
@@ -179,7 +177,7 @@ impl QuillApp {
                         .label(tr(keys::Q_OPS_HIDE))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.dialogs.chat_export_progress_hidden = true;
+                            this.set_chat_export_view(quill::export::ExportView::Hidden);
                             cx.notify();
                             this.close_kit_dialog_if_done(DialogKind::ChatExport, window, cx);
                         })),

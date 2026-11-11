@@ -461,10 +461,7 @@ impl QuillApp {
         }
         let err = live.driver.session.auth_state.last_auth_error;
         let new_auth = live.driver.session.auth.clone();
-        if !matches!(&new_auth, AuthorizationState::WaitRegistration { terms: Some(terms) } if self.auth_ui.accepted_registration_terms.as_ref() == Some(terms))
-        {
-            self.auth_ui.accepted_registration_terms = None;
-        }
+        self.auth_ui.follow_auth(&new_auth);
         // Slice auth-logout-warning: the `logOut` flow ends in Closed —
         // restart the live connection at the end of this poll so the user
         // lands back on the login screen instead of the dead "Closed"

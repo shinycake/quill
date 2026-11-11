@@ -16,7 +16,7 @@ impl QuillApp {
         let AuthorizationState::WaitRegistration { terms } = self.current_auth() else {
             return div().into_any_element();
         };
-        let accepted = terms.as_ref() == self.auth_ui.accepted_registration_terms.as_ref();
+        let accepted = terms.is_none() || self.auth_ui.registration.is_accepted();
         let pending = self
             .session()
             .is_some_and(|s| s.requests.has_purpose(RequestPurpose::RegisterUser));
@@ -56,7 +56,7 @@ impl QuillApp {
                         .checked(accepted)
                         .disabled(pending)
                         .on_click(cx.listener(move |this, &on: &bool, _, cx| {
-                            this.auth_ui.accepted_registration_terms = on.then(|| terms.clone());
+                            this.auth_ui.registration.tick(&terms, on);
                             cx.notify();
                         })),
                 );
@@ -105,7 +105,7 @@ impl QuillApp {
         let result = live.driver.register_user(
             &first,
             &last,
-            self.screen.auth_ui.accepted_registration_terms.as_ref(),
+            self.screen.auth_ui.registration.accepted_terms(),
             self.screen.auth_ui.registration_notify_contacts,
         );
         first.zeroize();

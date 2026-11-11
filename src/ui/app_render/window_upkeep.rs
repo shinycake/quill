@@ -120,6 +120,14 @@ impl QuillApp {
         {
             self.proxy_saving_upkeep(window, cx);
         }
+        // A Bot edit box opened before the bot's texts arrived is filled at
+        // the first frame after they land, in the window that hosts it.
+        if self
+            .windows
+            .dialog_may_show_in(crate::ui::shell::DialogKind::BotEdit, self.windows.scope)
+        {
+            self.fill_bot_edit(window, cx);
+        }
         self.business_closed_error_upkeep();
         if self.windows.dialog_may_show_in(
             crate::ui::shell::DialogKind::GroupSettings,

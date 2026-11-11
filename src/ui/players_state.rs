@@ -5,11 +5,24 @@
 //! `OnScreen`.
 #![deny(clippy::indexing_slicing)]
 
+/// The task that lands finished engine builds: not started, or running
+/// (the app's, for as long as it lives).
+pub(crate) enum BuildsWatch {
+    Idle,
+    Watching { _task: gpui_kit::Task<()> },
+}
+
+impl BuildsWatch {
+    pub(super) fn is_watching(&self) -> bool {
+        matches!(self, Self::Watching { .. })
+    }
+}
+
 pub(crate) struct PlayersUi {
     /// Voice and music output.
     pub(super) audio: super::audio::AudioEngine,
-    /// The task that lands finished engine builds is running.
-    pub(super) builds_watched: bool,
+    /// The task that lands finished engine builds.
+    pub(super) builds: BuildsWatch,
     /// Shared across every animated sticker in the history, the panel and
     /// the viewer (`sticker_player`).
     pub(super) stickers: std::rc::Rc<super::sticker_player::Player>,
@@ -35,7 +48,7 @@ impl PlayersUi {
     pub(super) fn new(audio_output: &super::audio::SharedOutput) -> Self {
         Self {
             audio: super::audio::AudioEngine::new(audio_output.clone()),
-            builds_watched: false,
+            builds: BuildsWatch::Idle,
             stickers: std::rc::Rc::new(super::sticker_player::Player::new()),
             emoji_plays: std::cell::RefCell::default(),
             inline_videos: Default::default(),

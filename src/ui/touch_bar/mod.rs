@@ -94,7 +94,7 @@ impl QuillApp {
 
     /// tdesktop shows the player for songs only, from start until stop.
     fn touch_bar_song(&self) -> Option<Track> {
-        self.playback.playing_audio?;
+        self.playback.active.audio()?;
         let (can_previous, can_next) = self.playlist_can_move();
         Some(Track {
             playing: self.is_playing(),

@@ -335,11 +335,24 @@ impl<P> Drop for SettleOnPanic<P> {
     }
 }
 
+/// Whether the running export's progress box is on screen. It lives with
+/// the export, which the account's session holds, so switching to another
+/// account and back leaves a hidden export hidden.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ExportView {
+    /// The box is open (a new export starts here).
+    #[default]
+    Shown,
+    /// "Hide": the export runs on, its result shows as a note.
+    Hidden,
+}
+
 pub struct ChatExport {
     pub link: WorkerLink,
     progress: Arc<Mutex<Progress>>,
     pub folder: PathBuf,
     pub title: String,
+    pub view: ExportView,
 }
 
 impl ChatExport {
@@ -391,6 +404,7 @@ impl ChatExport {
             progress,
             folder,
             title,
+            view: ExportView::Shown,
         })
     }
 
@@ -411,6 +425,7 @@ impl ChatExport {
             progress: Arc::new(Mutex::new(Progress::starting())),
             folder: PathBuf::new(),
             title: String::new(),
+            view: ExportView::Shown,
         };
         (export, worker.into_scripted())
     }

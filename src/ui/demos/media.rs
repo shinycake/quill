@@ -353,7 +353,7 @@ impl QuillApp {
             self.resume_play_intent(cx);
             demo_expect(
                 self.playback.intent.is_none()
-                    && self.playback.playing_voice == Some(MessageId(91)),
+                    && self.playback.active.voice() == Some(MessageId(91)),
                 "a voice note plays once its file lands",
             );
             self.stop_voice_playback();

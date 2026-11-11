@@ -202,13 +202,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let purpose = RequestPurpose::GetBotSimilarBots;
-        if self
-            .session
-            .requests
-            .has_purpose_for_user(purpose, bot_user_id)
-        {
-            return Ok(None);
-        }
         let extra = self.session.request_for_user(purpose, bot_user_id);
         if let Err(err) = self
             .sender
@@ -217,6 +210,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        // The section is loading from the moment the request is out; its
+        // answer or its refusal ends the stage.
+        self.session
+            .bots
+            .similar_bots
+            .insert(bot_user_id, crate::state::SimilarBotsFetch::Loading);
         Ok(Some(extra))
     }
 

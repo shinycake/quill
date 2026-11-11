@@ -2,6 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::composer_state::SlowModeTick;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::ChatId;
@@ -87,15 +88,10 @@ impl QuillApp {
         else {
             return;
         };
-        if self
-            .composer_ui
-            .slow_mode_tick
-            .as_ref()
-            .is_some_and(|(ticking, _)| *ticking == chat_id)
-        {
+        if self.composer_ui.slow_mode_tick.ticks_for(chat_id) {
             return;
         }
-        let tick = self.spawn_scoped(cx, async move |this, cx| {
+        let task = self.spawn_scoped(cx, async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
                 let cont = this
@@ -108,13 +104,9 @@ impl QuillApp {
                         if still_open && still_gated {
                             true
                         } else {
-                            if this
-                                .composer_ui
-                                .slow_mode_tick
-                                .as_ref()
-                                .is_some_and(|(ticking, _)| *ticking == chat_id)
-                            {
-                                this.composer_ui.slow_mode_tick = None;
+                            // The tick task is done: the stage goes with it.
+                            if this.composer_ui.slow_mode_tick.ticks_for(chat_id) {
+                                this.composer_ui.slow_mode_tick = SlowModeTick::Idle;
                             }
                             false
                         }
@@ -125,7 +117,10 @@ impl QuillApp {
                 }
             }
         });
-        // Another chat's tick is dropped (and so stopped) by this one.
-        self.composer_ui.slow_mode_tick = Some((chat_id, tick));
+        // A tick for another chat is replaced, which stops its task.
+        self.composer_ui.slow_mode_tick = SlowModeTick::Ticking {
+            chat: chat_id,
+            _task: task,
+        };
     }
 }

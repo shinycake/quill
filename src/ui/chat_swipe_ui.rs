@@ -341,7 +341,7 @@ impl QuillApp {
             SwipeLabel::Archive | SwipeLabel::Unarchive => self.toggle_archive(id, cx),
             SwipeLabel::Delete => {
                 // Never deletes by itself: the usual confirm dialog.
-                self.open_group_confirm(id, GroupConfirmAction::RemoveFromList, cx);
+                self.open_group_confirm(GroupConfirmAction::RemoveFromList { chat_id: id }, cx);
             }
         }
         // tdesktop's toast; Pin keeps its own note, which may be the

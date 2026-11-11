@@ -34,8 +34,7 @@ impl QuillApp {
         self.admin.username_dialog = Some(UsernameDialog::new(
             window,
             cx,
-            chat_id,
-            TextPromptKind::CustomTitle { user_id },
+            TextPromptKind::CustomTitle { chat_id, user_id },
             current,
             quill::admin_extras::custom_title_placeholder(false),
         ));
@@ -57,11 +56,11 @@ impl QuillApp {
             return;
         }
         let value = dialog.input.read(cx).value().trim().to_string();
-        let (kind, chat_id) = (dialog.kind, dialog.chat_id);
+        let kind = dialog.kind;
         // The request, or the note that says why none was sent; the box
         // stays either way until TDLib answers.
         let sent: Result<RequestId, StatusNote> = match kind {
-            TextPromptKind::CustomTitle { user_id } => {
+            TextPromptKind::CustomTitle { chat_id, user_id } => {
                 // 0-16 characters, no emoji — schema line 13597, TGX
                 // `EditRightsController` enforces the same client-side.
                 let too_long = !quill::admin_extras::custom_title_fits(&value);
@@ -163,11 +162,10 @@ impl QuillApp {
 
     pub(in crate::ui) fn open_group_confirm(
         &mut self,
-        chat_id: ChatId,
         action: GroupConfirmAction,
         cx: &mut Context<Self>,
     ) {
-        self.admin.group_confirm_dialog = Some(GroupConfirmDialog { chat_id, action });
+        self.admin.group_confirm_dialog = Some(GroupConfirmDialog { action });
         self.open_box(DialogKind::GroupConfirm);
         cx.notify();
     }
@@ -207,26 +205,26 @@ impl QuillApp {
         }
         // Slice B2: read before the live borrow — the RestartBot arm
         // needs the session while `live` is mutably borrowed.
-        let restart_bot_user_id = if matches!(dialog.action, GroupConfirmAction::RestartBot) {
-            self.session()
-                .and_then(|session| session.bot_user_id_for_chat(dialog.chat_id))
-        } else {
-            None
+        let restart_bot_user_id = match dialog.action {
+            GroupConfirmAction::RestartBot { chat_id } => self
+                .session()
+                .and_then(|session| session.bot_user_id_for_chat(chat_id)),
+            _ => None,
         };
         // The conversion asks twice (tdesktop): the intro leads to the warning.
-        if matches!(dialog.action, GroupConfirmAction::BroadcastIntro) {
+        if let GroupConfirmAction::BroadcastIntro { chat_id } = dialog.action {
             // box-host: the intro leads to the warning in the same box
             self.admin.group_confirm_dialog = Some(GroupConfirmDialog {
-                chat_id: dialog.chat_id,
-                action: GroupConfirmAction::BroadcastUpgrade,
+                action: GroupConfirmAction::BroadcastUpgrade { chat_id },
             });
             cx.notify();
             return;
         }
         // A basic group must be left before its history goes.
-        let is_basic_group = self
-            .session()
-            .and_then(|session| session.chats.get(&dialog.chat_id.0))
+        let is_basic_group = dialog
+            .action
+            .chat_id()
+            .and_then(|chat_id| self.session()?.chats.get(&chat_id.0))
             .is_some_and(|chat| {
                 matches!(
                     chat.kind,
@@ -239,23 +237,23 @@ impl QuillApp {
         let note = match self.live.as_mut() {
             Some(live) => {
                 let result = match dialog.action {
-                    GroupConfirmAction::DeleteChat => {
-                        live.driver.delete_chat(dialog.chat_id).map(|sent| {
+                    GroupConfirmAction::DeleteChat { chat_id } => {
+                        live.driver.delete_chat(chat_id).map(|sent| {
                             exit_request = sent;
                             sent_note(sent, tr(keys::Q_PEOPLE_DELETING_CHAT))
                         })
                     }
-                    GroupConfirmAction::LeaveChat => {
-                        live.driver.leave_channel(dialog.chat_id).map(|id| {
+                    GroupConfirmAction::LeaveChat { chat_id } => {
+                        live.driver.leave_channel(chat_id).map(|id| {
                             exit_request = Some(id);
-                            self.leaving_line(dialog.chat_id)
+                            self.leaving_line(chat_id)
                         })
                     }
                     // Handled above; never reaches the driver.
-                    GroupConfirmAction::BroadcastIntro => Ok("".to_string()),
-                    GroupConfirmAction::BroadcastUpgrade => live
+                    GroupConfirmAction::BroadcastIntro { .. } => Ok("".to_string()),
+                    GroupConfirmAction::BroadcastUpgrade { chat_id } => live
                         .driver
-                        .upgrade_to_broadcast_group(dialog.chat_id)
+                        .upgrade_to_broadcast_group(chat_id)
                         // Ongoing, not done: TDLib answers `ok`/`error`
                         // asynchronously; the error arm rolls the
                         // optimistic flag back.
@@ -267,31 +265,31 @@ impl QuillApp {
                     // The bot user id is read from the session before the
                     // live borrow; a missing id fails closed with a status
                     // note, never silently.
-                    GroupConfirmAction::RestartBot => match restart_bot_user_id {
+                    GroupConfirmAction::RestartBot { chat_id } => match restart_bot_user_id {
                         Some(bot_user_id) => live
                             .driver
-                            .restart_bot(dialog.chat_id, bot_user_id)
+                            .restart_bot(chat_id, bot_user_id)
                             .map(|sent| sent_note(sent, tr(keys::Q_PEOPLE_RESTARTING_BOT))),
                         None => Ok(tr(keys::Q_PEOPLE_THIS_CHAT_IS_NO_LONGER).to_string()),
                     },
                     // Slice CL1: chat-list "Delete chat" —
                     // `deleteChatHistory` with `remove_from_chat_list:
                     // true` (Telegram X `Tdlib.deleteChat`).
-                    GroupConfirmAction::RemoveFromList if is_basic_group => live
+                    GroupConfirmAction::RemoveFromList { chat_id } if is_basic_group => live
                         .driver
-                        .delete_and_leave_basic_group(dialog.chat_id)
+                        .delete_and_leave_basic_group(chat_id)
                         .map(|sent| sent_note(sent, tr(keys::Q_PEOPLE_DELETING_CHAT))),
-                    GroupConfirmAction::RemoveFromList => live
+                    GroupConfirmAction::RemoveFromList { chat_id } => live
                         .driver
-                        .remove_chat_from_list(dialog.chat_id)
+                        .remove_chat_from_list(chat_id)
                         .map(|sent| sent_note(sent, tr(keys::Q_PEOPLE_DELETING_CHAT))),
                     // Slice CL3: row-menu Block/Unblock
                     // (`setMessageSenderBlockList`, schema 1.8.67, line
                     // 14492). TDLib answers `ok`; the new state arrives
                     // via `updateChatBlockList`.
-                    GroupConfirmAction::BlockUser { block } => live
+                    GroupConfirmAction::BlockUser { chat_id, block } => live
                         .driver
-                        .set_chat_user_blocked(dialog.chat_id, block)
+                        .set_chat_user_blocked(chat_id, block)
                         .map(|sent| {
                             sent_note(
                                 sent,
@@ -360,9 +358,12 @@ impl QuillApp {
                         .driver
                         .set_gif_saved(file_id, false)
                         .map(|id| sent_note(id, tr(keys::Q_PEOPLE_REMOVING_SAVED_GIF))),
-                    GroupConfirmAction::DeleteForumTopic { forum_topic_id } => live
+                    GroupConfirmAction::DeleteForumTopic {
+                        chat_id,
+                        forum_topic_id,
+                    } => live
                         .driver
-                        .delete_forum_topic(dialog.chat_id, forum_topic_id)
+                        .delete_forum_topic(chat_id, forum_topic_id)
                         .map(|_| tr(keys::Q_PEOPLE_DELETING_TOPIC).to_string()),
                     GroupConfirmAction::DeleteSavedSublist { topic_id } => live
                         .driver
@@ -384,20 +385,20 @@ impl QuillApp {
                         .driver
                         .delete_community(community_id)
                         .map(|sent| sent_note(sent, tr(keys::Q_PEOPLE_DELETING_COMMUNITY))),
-                    GroupConfirmAction::RemoveMember { user_id } => live
+                    GroupConfirmAction::RemoveMember { chat_id, user_id } => live
                         .driver
-                        .remove_chat_member(dialog.chat_id, user_id)
+                        .remove_chat_member(chat_id, user_id)
                         .map(|id| sent_note(id, tr(keys::Q_PEOPLE_REMOVING_MEMBER))),
                 };
                 match result {
                     Ok(note) => {
                         // The chat goes: its Edit box goes with it, when
                         // TDLib has answered (`track_chat_exit`).
-                        match (&dialog.action, exit_request) {
-                            (GroupConfirmAction::RemoveFromList, _) => {
-                                self.close_group_edit_box_for(dialog.chat_id, cx);
+                        match (dialog.action.chat_id(), &dialog.action, exit_request) {
+                            (Some(chat_id), GroupConfirmAction::RemoveFromList { .. }, _) => {
+                                self.close_group_edit_box_for(chat_id, cx);
                             }
-                            (_, Some(id)) => self.track_chat_exit(dialog.chat_id, id),
+                            (Some(chat_id), _, Some(id)) => self.track_chat_exit(chat_id, id),
                             _ => {}
                         }
                         note

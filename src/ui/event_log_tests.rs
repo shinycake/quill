@@ -220,10 +220,24 @@ fn the_search_box_follows_the_chat_whose_log_is_open(cx: &mut TestAppContext) {
 /// over, so a page of the same length asks again.
 #[gpui_kit::test]
 fn the_older_events_mark_is_cleared_when_the_list_starts_over(cx: &mut TestAppContext) {
-    let (app, vcx) = new_app(cx);
-    app.read_with(&vcx, |app, _| {
-        app.admin.event_log_autoload.set(Some((CHANNEL, 3)));
+    let (app, mut vcx) = new_app(cx);
+    app.update(&mut vcx, |app, _| {
+        app.event_log_page_for(CHANNEL).autoload.set(Some(3));
         app.event_log_reset_list();
-        assert_eq!(app.admin.event_log_autoload.get(), None);
+        let mark = app.admin.event_log_page.as_ref().map(|p| p.autoload.get());
+        assert_eq!(mark, Some(None));
+    });
+}
+
+/// A second chat's page replaces the first's with its timers, instead of
+/// leaving the first one's mark to answer for it.
+#[gpui_kit::test]
+fn a_second_chats_page_replaces_the_first(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update(&mut vcx, |app, _| {
+        app.event_log_page_for(CHANNEL).autoload.set(Some(3));
+        let other = ChatId(CHANNEL.0 + 1);
+        let page = app.event_log_page_for(other);
+        assert_eq!((page.chat, page.autoload.get()), (other, None));
     });
 }

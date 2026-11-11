@@ -3,24 +3,12 @@
 //! polls. Replaces the earlier raw JSONL account export.
 use super::settings::AccountSettings;
 use super::worker::{AccountJob, AccountProgress, AccountStage, create_folder, run};
-use crate::export::handle::{SettleOnPanic, WorkerLink, publish};
+use crate::export::handle::{ExportView, SettleOnPanic, WorkerLink, publish};
 use crate::export::worker::ExportError;
 use crate::locks::LockExt;
 use std::io;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-
-/// Whether the running export's progress box is on screen. It lives with
-/// the export, which the account's session holds, so switching to another
-/// account and back leaves a hidden export hidden.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum ExportView {
-    /// The box is open (a new export starts here).
-    #[default]
-    Shown,
-    /// "Hide": the export runs on, its result shows as a note.
-    Hidden,
-}
 
 pub struct AccountExport {
     pub link: WorkerLink,

@@ -10,7 +10,7 @@
 #   <struct.field[.field]> [*] | <why it is the process's>
 
 players.audio * | the audio engine: one output device, track and clock for the process; the track is the playback queue's, which is the screen's (PlaybackUi)
-players.builds_watched | whether the engine's build watcher is installed, once per process
+players.builds * | the engine build watcher task, installed once per process
 players.stickers * | the shared sticker player: decoders, frame pump and fixtures keyed by file, not by account; `leave_chat` drops a chat's plays
 players.inline_videos | the shared inline video players; their owner is checked each frame (`InlineVideos::own`)
 players.inline_videos.state | cleared by `InlineVideos::own` when the account on screen changes

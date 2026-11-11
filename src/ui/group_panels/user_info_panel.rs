@@ -262,11 +262,7 @@ impl QuillApp {
                         cx,
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.open_group_confirm(
-                            ChatId(0),
-                            GroupConfirmAction::DeleteContact { user_id },
-                            cx,
-                        );
+                        this.open_group_confirm(GroupConfirmAction::DeleteContact { user_id }, cx);
                     })),
                 );
             }
@@ -290,7 +286,6 @@ impl QuillApp {
                         return;
                     }
                     this.open_group_confirm(
-                        ChatId(0),
                         GroupConfirmAction::BlockContact {
                             user_id,
                             block: !blocked,

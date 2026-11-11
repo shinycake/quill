@@ -4,7 +4,8 @@
 use super::app::QuillApp;
 use super::demo::{demo_file_json, demo_media_allowlist, demo_thumb_png_path};
 use super::play_intent::PlayTarget;
-use super::playback_state::{ChatMessage, PlaybackTick, SeekHover, SeekSite};
+use super::playback_state::{ActiveTrack, ChatMessage, PlaybackTick, Scrub, SeekHover, SeekSite};
+use super::players_state::BuildsWatch;
 use super::*;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::slider::{SliderEvent, SliderState, SliderValue};
@@ -92,24 +93,24 @@ impl QuillApp {
     }
 
     pub(super) fn stop_voice_playback(&mut self) {
-        if self.playback.playing_voice.is_some() {
+        if self.playback.active.voice().is_some() {
             self.kill_shared_player();
         }
         // Save the position before clearing the id: clear_playback_state
         // reads active_playback_id().
         self.clear_playback_state();
-        if let Some(message) = self.playback.playing_voice.take() {
+        if let Some(message) = self.playback.active.take_voice() {
             self.drop_play_intent_for_message(message);
         }
         self.release_player_chat();
     }
 
     pub(super) fn stop_audio_playback(&mut self) {
-        if self.playback.playing_audio.is_some() {
+        if self.playback.active.audio().is_some() {
             self.kill_shared_player();
         }
         self.clear_playback_state();
-        if let Some(message) = self.playback.playing_audio.take() {
+        if let Some(message) = self.playback.active.take_audio() {
             self.drop_play_intent_for_message(message);
         }
         self.release_player_chat();
@@ -138,13 +139,13 @@ impl QuillApp {
         quill::wake::CHROME.poke();
         self.playback.seek_slider = None;
         self.playback.player.sliders.clear();
-        self.playback.seek_preview_secs = None;
+        self.playback.scrub = Scrub::Idle;
         self.playback.seek_hover = None;
     }
 
     /// Message id of the active (playing or paused) track, if any.
     pub(super) fn active_playback_id(&self) -> Option<MessageId> {
-        self.playback.playing_voice.or(self.playback.playing_audio)
+        self.playback.active.id()
     }
 
     /// The active track with its chat, the key of its remembered position.
@@ -157,7 +158,7 @@ impl QuillApp {
 
     /// Kind of the active track, for status notes.
     pub(super) fn active_playback_kind(&self) -> PlaybackKind {
-        if self.playback.playing_voice.is_some() {
+        if self.playback.active.voice().is_some() {
             PlaybackKind::Voice
         } else {
             PlaybackKind::Audio
@@ -189,8 +190,8 @@ impl QuillApp {
         self.viewer.clip.clear_error();
         let playing = self.start_player(path, offset_secs, duration_secs, cx);
         match kind {
-            PlaybackKind::Voice => self.playback.playing_voice = Some(message_id),
-            PlaybackKind::Audio => self.playback.playing_audio = Some(message_id),
+            PlaybackKind::Voice => self.playback.active = ActiveTrack::Voice(message_id),
+            PlaybackKind::Audio => self.playback.active = ActiveTrack::Audio(message_id),
         }
         self.playback.track_length = Some(duration_secs.max(0.0));
         quill::wake::CHROME.poke();
@@ -211,7 +212,7 @@ impl QuillApp {
         })
         .detach();
         self.playback.seek_slider = Some(slider);
-        self.playback.seek_preview_secs = None;
+        self.playback.scrub = Scrub::Idle;
         self.note_track_started(kind, chat_id, message_id, cx);
         self.spawn_playback_tick(cx);
         playing
@@ -257,13 +258,13 @@ impl QuillApp {
     }
 
     fn watch_audio_builds(&mut self, cx: &mut Context<Self>) {
-        if std::mem::replace(&mut self.players.builds_watched, true) {
+        if self.players.builds.is_watching() {
             return;
         }
         self.players.audio.set_on_built(|| AUDIO_BUILT.poke());
         let mut seen = AUDIO_BUILT.epoch();
         // screen-scope: the player is the app's; its builds land for whichever account is on screen.
-        Self::spawn_app(cx, async move |this, cx| {
+        let task = Self::spawn_app(cx, async move |this, cx| {
             loop {
                 AUDIO_BUILT.wait_since(seen).await;
                 seen = AUDIO_BUILT.epoch();
@@ -272,8 +273,8 @@ impl QuillApp {
                     break;
                 }
             }
-        })
-        .detach();
+        });
+        self.players.builds = BuildsWatch::Watching { _task: task };
     }
 
     fn land_audio_build(&mut self, cx: &mut Context<Self>) {
@@ -328,11 +329,11 @@ impl QuillApp {
             SliderEvent::Change(value) => {
                 // Drag (or track click) in progress: show the preview in the
                 // time label, but don't touch the player until Release.
-                self.playback.seek_preview_secs = Some(f64::from(value.end()));
+                self.playback.scrub = Scrub::Dragging(f64::from(value.end()));
                 cx.notify();
             }
             SliderEvent::Release(value) => {
-                self.playback.seek_preview_secs = None;
+                self.playback.scrub = Scrub::Idle;
                 // A drag released off the scrubber gets no leave event;
                 // the next move over it sets the hover again.
                 self.playback.seek_hover = None;
@@ -375,7 +376,7 @@ impl QuillApp {
     /// (`media_session`), a change to the chat list that may move Previous
     /// or Next, or a resume or seek.
     pub(super) fn spawn_playback_tick(&mut self, cx: &mut Context<Self>) {
-        if matches!(self.playback.tick, PlaybackTick::Running { .. }) {
+        if self.playback.tick.is_running() {
             // A new track on a paused tick: it plays now.
             quill::wake::CHROME.poke();
             return;
@@ -426,7 +427,7 @@ impl QuillApp {
                         // rounded duration).
                         this.players.audio.settle();
                         let finished = this.players.audio.is_ended();
-                        if finished && !this.playback.seek_scrubbing() {
+                        if finished && !this.playback.scrub.is_dragging() {
                             // Capture the id first: the stops below save the
                             // (now end-of-track) position via clear_playback_state,
                             // then reset to 0.0 so replay-after-finish starts at the top.
@@ -452,7 +453,7 @@ impl QuillApp {
                         // in a chat not on screen redraws only the chat
                         // list, so the tick watches Previous / Next too.
                         let shown = this.track_shown(this.playlist_can_move());
-                        let moved = this.playback.note_tick_shown(shown);
+                        let moved = this.playback.tick.note_shown(shown);
                         if finished {
                             cx.notify();
                         } else if moved {
@@ -468,12 +469,12 @@ impl QuillApp {
                 wait = next;
             }
             let _ = this.update(cx, |this, _| {
-                this.playback.tick = PlaybackTick::Off;
+                this.playback.tick = PlaybackTick::Idle;
             });
         });
         self.playback.tick = PlaybackTick::Running {
-            _task: task,
             shown: None,
+            _task: task,
         };
     }
 
@@ -490,7 +491,7 @@ impl QuillApp {
     /// `&mut Window`, which `SliderState::set_value` needs). Skipped while
     /// scrubbing so the user's drag is never fought.
     pub(super) fn sync_seek_slider(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.playback.seek_scrubbing() {
+        if self.playback.scrub.is_dragging() {
             return;
         }
         if let (Some(slider), Some(position)) = (
@@ -563,7 +564,8 @@ impl QuillApp {
         if active {
             let display = self
                 .playback
-                .seek_preview_secs
+                .scrub
+                .preview()
                 .or_else(|| self.active_position_secs());
             SeekBarView {
                 slider: self.playback.seek_slider.clone(),
@@ -579,7 +581,7 @@ impl QuillApp {
                     .seek_hover
                     .filter(|hover| hover.site == SeekSite::Row)
                     .map(|hover| hover.at),
-                dragging: self.playback.seek_preview_secs.is_some(),
+                dragging: self.playback.scrub.is_dragging(),
             }
         } else {
             SeekBarView {
@@ -610,7 +612,7 @@ impl QuillApp {
         duration_secs: f64,
         cx: &mut Context<Self>,
     ) {
-        if self.playback.playing_voice == Some(message_id)
+        if self.playback.active.voice() == Some(message_id)
             && self.playback.player.chat.is_none_or(|chat| chat == chat_id)
         {
             // Active row: pause ↔ resume (the row stays active so the seek
@@ -690,7 +692,7 @@ impl QuillApp {
     ) {
         // A saved track (negative id) is the same row from any chat's
         // profile; a message's row is active only in its own chat.
-        if self.playback.playing_audio == Some(message_id)
+        if self.playback.active.audio() == Some(message_id)
             && (message_id.0 < 0 || self.playback.player.chat.is_none_or(|chat| chat == chat_id))
         {
             // Active row: pause ↔ resume (see voice toggle).

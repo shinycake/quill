@@ -19,6 +19,9 @@ ComposerUi.draft_load | carries its own chat and topic (the draft shown, the slo
 ComposerUi.draft_load.Restoring.slot | the slot that asked for its draft to be restored next frame; the restore runs only if that slot is still the open one
 
 ComposerUi.slow_mode_tick | the running 1 s tick task and its chat; it exits by itself when the chat changes and a newer chat's tick drops it, so resetting it would start a second task
+
+ComposerUi.shown_draft | carries its own chat and topic: a draft for another slot never matches
+ComposerUi.slow_mode_tick.Ticking.chat | names the chat of the running 1 s tick task, which owns it and exits by itself when the chat changes; the next gated frame replaces it
 MessageUi.swipe_reply_start | one press gesture, carries its chat; the release checks it
 HistoryUi.painted_ids | rebuilt by every paint of the history list
 HistoryUi.seen | carries its chat; read once at the next render
@@ -31,6 +34,8 @@ HistoryUi.anchor.Anchored.landed | compared with the session's highlight, which 
 
 HistoryUi.live_location_tick | the running tick task and the chat it ticks for, as slow_mode_tick
 
+HistoryUi.last_highlight | compared with the session's highlight, which is the open chat's
+HistoryUi.live_location_tick_chat | marks a running tick task, as slow_mode_tick
 ShareUi.forward.Bar.dest | the chat the forward bar waits in; kept across chats on purpose (dismiss_forward_for_view)
 ShareUi.forward.Picking.bar | the forward bar the share box was opened over, which leaving the box returns to; it goes with the bar (dismiss_forward_for_view)
 ViewerUi.clip.Playing.item | the media viewer's clip, which outlives a chat change (the viewer is the screen's)

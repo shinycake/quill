@@ -353,21 +353,21 @@ fn one_press_on_a_voice_note_plays_it_once_downloaded(cx: &mut TestAppContext) {
     land(&app, vcx);
     app.read_with(vcx, |app, _| {
         assert!(app.playback.intent.is_none());
-        assert_eq!(app.playback.playing_voice, None, "cancelled");
+        assert_eq!(app.playback.active.voice(), None, "cancelled");
     });
     // Pressed once: it plays by itself once downloaded.
     set_local(&app, vcx, VOICE_FILE, false);
     press(&app, vcx);
     app.read_with(vcx, |app, _| {
         assert!(app.playback.intent.is_some(), "parked for the download");
-        assert_eq!(app.playback.playing_voice, None);
+        assert_eq!(app.playback.active.voice(), None);
     });
     set_local(&app, vcx, VOICE_FILE, true);
     land(&app, vcx);
     app.read_with(vcx, |app, _| {
         assert!(app.playback.intent.is_none());
         assert_eq!(
-            app.playback.playing_voice,
+            app.playback.active.voice(),
             Some(MessageId(VOICE)),
             "plays by itself"
         );
@@ -492,6 +492,6 @@ fn the_lock_drops_a_parked_clip_and_keeps_a_parked_voice_note(cx: &mut TestAppCo
     land(&app, vcx);
     app.read_with(vcx, |app, _| {
         assert!(app.account.passcode.is_locked());
-        assert_eq!(app.playback.playing_voice, Some(MessageId(VOICE)));
+        assert_eq!(app.playback.active.voice(), Some(MessageId(VOICE)));
     });
 }

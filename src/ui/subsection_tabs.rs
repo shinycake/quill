@@ -628,8 +628,8 @@ impl QuillApp {
         }
         if action == TopicMenuAction::Delete {
             self.open_group_confirm(
-                chat_id,
                 GroupConfirmAction::DeleteForumTopic {
+                    chat_id,
                     forum_topic_id: topic_id,
                 },
                 cx,

@@ -112,6 +112,25 @@ impl DraftLoad {
     }
 }
 
+/// The slow-mode countdown's tick task: none, or running for a chat. The
+/// task is owned here: a tick for another chat replaces it, and dropping
+/// the composer stops it. It ends by itself when the gate lifts or the
+/// open chat changes, and the next gated frame starts a new one.
+pub(crate) enum SlowModeTick {
+    Idle,
+    Ticking {
+        chat: ChatId,
+        _task: gpui_kit::Task<()>,
+    },
+}
+
+impl SlowModeTick {
+    /// Whether a tick task for `chat_id` was started and has not ended.
+    pub(super) fn ticks_for(&self, chat_id: ChatId) -> bool {
+        matches!(self, Self::Ticking { chat, .. } if *chat == chat_id)
+    }
+}
+
 pub(crate) struct ComposerUi {
     /// Highlighted row of the composer's `@` suggestions.
     pub(super) mention_selected: usize,
@@ -157,10 +176,9 @@ pub(crate) struct ComposerUi {
     pub(super) file_drag: super::drop_zones::FileDrag,
     /// The folder being zipped for "Send as archive" (`drop_zones`).
     pub(super) archive: super::drop_zones::ArchiveJob,
-    /// Phase A1: the open chat whose slow-mode countdown is ticking, with
-    /// the 1s tick task that drives it. Replacing or clearing it drops the
-    /// task. Mirrors `voice_tick`.
-    pub(super) slow_mode_tick: Option<(ChatId, gpui_kit::Task<()>)>,
+    /// Phase A1: the slow-mode countdown's 1s tick task, for the open chat
+    /// it ticks for. Mirrors `voice_tick`.
+    pub(super) slow_mode_tick: SlowModeTick,
     /// The attachment tray's file checks, price box and video editor.
     pub(super) send_box: super::send_box_state::SendBoxUi,
     pub(super) text_limit: super::composer_ui::TextLimitMemo,
@@ -186,7 +204,7 @@ impl ComposerUi {
             inline_bot_alert_shown: false,
             file_drag: super::drop_zones::FileDrag::Idle,
             archive: Default::default(),
-            slow_mode_tick: None,
+            slow_mode_tick: SlowModeTick::Idle,
             send_box: super::send_box_state::SendBoxUi::new(),
             text_limit: Default::default(),
             spelling: Default::default(),

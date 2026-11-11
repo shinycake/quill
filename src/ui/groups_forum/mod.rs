@@ -294,8 +294,8 @@ impl QuillApp {
     ) {
         if action == ForumTopicAction::Delete {
             self.open_group_confirm(
-                chat_id,
                 crate::ui::dialogs::group_confirm::GroupConfirmAction::DeleteForumTopic {
+                    chat_id,
                     forum_topic_id: topic_id,
                 },
                 cx,

@@ -78,17 +78,20 @@ fn deleting_a_forum_topic_asks_first(cx: &mut TestAppContext) {
     let asked = app.read_with(&vcx, |app, _| {
         app.admin.group_confirm_dialog.as_ref().map(|dialog| {
             (
-                dialog.chat_id,
+                dialog.action.chat_id(),
                 matches!(
                     dialog.action,
-                    GroupConfirmAction::DeleteForumTopic { forum_topic_id: 42 }
+                    GroupConfirmAction::DeleteForumTopic {
+                        forum_topic_id: 42,
+                        ..
+                    }
                 ),
             )
         })
     });
     assert_eq!(
         asked,
-        Some((chat, true)),
+        Some((Some(chat), true)),
         "a confirm box, nothing deleted yet"
     );
 }

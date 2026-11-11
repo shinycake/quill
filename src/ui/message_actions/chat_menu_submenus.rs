@@ -431,11 +431,11 @@ impl QuillApp {
             }))
             .on_click(cx.listener(move |this, _, _, cx| {
                 let action = if leave {
-                    GroupConfirmAction::LeaveChat
+                    GroupConfirmAction::LeaveChat { chat_id }
                 } else {
-                    GroupConfirmAction::RemoveFromList
+                    GroupConfirmAction::RemoveFromList { chat_id }
                 };
-                this.open_group_confirm(chat_id, action, cx);
+                this.open_group_confirm(action, cx);
                 this.chat_list.menu = None;
                 cx.notify();
             }))

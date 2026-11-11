@@ -192,7 +192,7 @@ impl QuillApp {
             }
             MemberAction::Ban => self.open_restrict_dialog(chat_id, user_id, true, window, cx),
             MemberAction::Remove => {
-                self.open_group_confirm(chat_id, GroupConfirmAction::RemoveMember { user_id }, cx)
+                self.open_group_confirm(GroupConfirmAction::RemoveMember { chat_id, user_id }, cx)
             }
             MemberAction::AddToGroup => self.add_removed_member(chat_id, user_id, cx),
             MemberAction::Unban => self.remove_from_banned(chat_id, user_id, cx),

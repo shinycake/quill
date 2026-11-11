@@ -2,9 +2,7 @@
 
 ActiveGroupCall::loaded_all_participants
 AppearancePrefs::ignore_battery_saving
-AudioEngine::failed
-AudioEngine::start_failed
-AudioEngine::start_failed+error
+
 AwardMembers::done
 AwardMembers::loading
 AwardMembers::loading+error
@@ -17,7 +15,7 @@ CallSummary::busy
 ChatSwipeFacts::is_saved
 
 ChatSwipeFacts::is_saved
-ChatbotDraft::loaded
+
 Checklist::others_can_mark_tasks_as_done
 ChecklistDialog::others_can_mark_tasks_as_done
 ChecklistDialog::others_can_mark_tasks_as_done+error
@@ -29,7 +27,7 @@ Clip::busy
 DestRow::saved
 DragSelect::pending
 Drawn::leaving
-DropTopic::load_failed
+
 FastShareFacts::sent
 FieldResult::finished
 FooterMeta::pending
@@ -64,7 +62,6 @@ MiniAppWindow::closing_confirmation
 
 NewChatView::busy
 NewChatView::busy+failure
-OutputState::opening
 
 PanelMotion::opening
 ParsedFile::uploading
@@ -91,6 +88,9 @@ SavedTagSearch::loaded
 
 
 SettingsState::pending_attention
+
+SettingsState::pending_attention
+SettingsState::pending_attention+data_storage_error
 SettingsState::saved_sounds_loaded
 SettingsState::saved_sounds_stale
 
