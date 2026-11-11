@@ -24,15 +24,15 @@ delivery.next_preview_wait | the delay before the next preview build, for the pr
 delivery.notification_sounds * | the notification sound output device and player
 delivery.polled_redraw * | when the poll loop last redrew: timing, no ids
 delivery.windows * | Quill's notification windows; the queue is keyed by `(AccountKey, ChatId)` and each shown popup by its key
-preferences.keybinding_capture | the keybinding being recorded in Settings: a key name
-preferences.keybinding_error | the conflict message of that recording
 preferences.keybinding_focus | the focus handle of the recording field
-preferences.keybindings_applied | whether the keymap was installed, once per process
+preferences.keybinding | the rebinding capture in Settings and whether the keymap was installed, once per process
+preferences.keybinding.capture | the action being recorded, or the conflict that refused it
+preferences.keybinding.keymap | whether the keymap was installed, once per process
 preferences.appearance_applied | the theme, accent and font last applied to the windows
 preferences.app_theme * | the app theme: custom themes, palettes, the theme editor, Omarchy; files on disk, not per account
 preferences.system_accent | the OS accent color
+preferences.system_accent.Read.0 | the OS accent color once read
 preferences.send_to * | the Explorer "Send to" shortcut belongs to the machine: read once, written off the UI thread, whichever account is on screen
-preferences.system_accent_probed | whether the OS accent was read
 preferences.system_accent_poll | the one task waiting for the OS accent read to land
 preferences.font_picker | the font family picker entity
 preferences.accent_picker | the accent color picker entity
@@ -80,6 +80,7 @@ language.recent | recently picked languages
 auth_demo.demo_state | the synthetic mode's authorization state, next to demo_session
 auth_demo.demo_inputs | the synthetic mode shows its inputs
 start_files.choosing | files handed to the app at start, waiting for a chat on whichever account
+start_files.choosing.Choosing.files | the files waiting for a chat
 start_files.search | the chat search field of that chooser
 update_pill.from | the update pill's glide start
 update_pill.to | the update pill's glide end
