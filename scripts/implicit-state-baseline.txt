@@ -20,7 +20,6 @@ FooterMeta::pending
 GiveawaySummary::finished
 
 
-HeaderFacts::is_saved_messages
 
 
 LiveInput::failed

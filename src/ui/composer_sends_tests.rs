@@ -446,11 +446,8 @@ fn a_schedule_picker_left_by_a_chat_switch_is_dropped_and_sends_nothing(cx: &mut
         // The picker opens at 01:15, which went by once already as CDT.
         cx.set_global(WallClock::chicago_repeated_hour());
         app.select_listed_chat(A, window, cx);
-        app.open_schedule_picker(ScheduleTarget::Composer, window, cx);
         // The "Schedule" shortcut sends once a time is confirmed.
-        if let Some(picker) = app.chat_ui.schedule_picker.as_mut() {
-            picker.send_after = true;
-        }
+        app.open_schedule_picker(ScheduleTarget::ComposerThenSend { effect: 0 }, window, cx);
         app.select_listed_chat(B, window, cx);
         app.composer
             .update(cx, |input, cx| input.set_value("for B", window, cx));

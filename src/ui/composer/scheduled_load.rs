@@ -1,35 +1,10 @@
-//! The scheduled-messages dialog's load: one stage for the dialog and the
-//! `getChatScheduledMessages` request that fills it.
+//! The scheduled-messages dialog's load (the `getChatScheduledMessages`
+//! request that fills the open `ScheduledBox`) and its deletes.
 use super::*;
+use crate::ui::scheduled_box::ScheduledLoad;
 use crate::ui::status_note::StatusNote;
 use quill::ids::RequestId;
 use quill::lang::{keys, tr};
-
-/// The scheduled-messages dialog of one chat view. `Loading` leaves on the
-/// request's answer (`Ready`, or `Failed` with the line the dialog draws and
-/// a Retry); the dialog closing, or the chat view being replaced, drops it
-/// from any stage.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(in crate::ui) enum ScheduledDialog {
-    #[default]
-    Closed,
-    Loading(RequestId),
-    Ready,
-    Failed(String),
-}
-
-impl ScheduledDialog {
-    pub(in crate::ui) fn is_open(&self) -> bool {
-        !matches!(self, Self::Closed)
-    }
-
-    pub(in crate::ui) fn loading(&self) -> Option<RequestId> {
-        match self {
-            Self::Loading(request) => Some(*request),
-            _ => None,
-        }
-    }
-}
 
 /// A scheduled message's delete that TDLib has not answered. Its row is
 /// already gone from the list; a refusal puts the list back from TDLib. It
@@ -59,22 +34,33 @@ fn take_refused(
 }
 
 impl QuillApp {
-    /// The dialog closes from any stage: a load still out is let go of, so
-    /// its answer is kept for nobody.
-    pub(in crate::ui) fn close_scheduled_dialog(&mut self) {
-        let old = std::mem::take(&mut self.chat_ui.scheduled_dialog);
-        if let Some(request) = old.loading()
+    /// The load still out is let go of, so its answer is kept for nobody.
+    fn forget_scheduled_load(&mut self) {
+        if let Some(request) = self.chat_ui.scheduled_box.loading()
             && let Some(live) = self.live.as_mut()
         {
             live.driver.session.acks.forget(request);
         }
     }
 
-    /// M1: load the chat's scheduled sends and open the dialog.
-    pub(in crate::ui) fn open_scheduled_dialog(&mut self, cx: &mut Context<Self>) {
+    /// The dialog closes from any stage; the ticks go with it.
+    pub(in crate::ui) fn close_scheduled_dialog(&mut self) {
+        self.forget_scheduled_load();
+        self.chat_ui.scheduled_box.close();
+    }
+
+    /// The dialog hides for the schedule picker (Reschedule); the ticked
+    /// messages wait for the new time or for Cancel.
+    pub(in crate::ui) fn hide_scheduled_dialog_for_picker(&mut self) {
+        self.forget_scheduled_load();
+        self.chat_ui.scheduled_box.hide_for_picker();
+    }
+
+    /// Ask for the open chat's scheduled sends: the load the dialog shows.
+    fn ask_scheduled_list(&mut self) -> ScheduledLoad {
         self.chat_ui.hide_schedule_popup();
-        self.close_scheduled_dialog();
-        self.chat_ui.scheduled_dialog = match self.live.as_mut() {
+        self.forget_scheduled_load();
+        match self.live.as_mut() {
             Some(live) => match live
                 .driver
                 .session
@@ -83,21 +69,37 @@ impl QuillApp {
             {
                 Some(Ok(request)) => {
                     live.driver.session.acks.expect(request);
-                    ScheduledDialog::Loading(request)
+                    ScheduledLoad::Loading(request)
                 }
-                _ => ScheduledDialog::Failed(
+                _ => ScheduledLoad::Failed(
                     tr(keys::Q_CHAT_COULD_NOT_LOAD_SCHEDULED_MESSAGES).to_string(),
                 ),
             },
             // The demo holds its list already.
-            None => ScheduledDialog::Ready,
-        };
+            None => ScheduledLoad::Ready,
+        }
+    }
+
+    /// M1: load the chat's scheduled sends and open the dialog, nothing
+    /// ticked.
+    pub(in crate::ui) fn open_scheduled_dialog(&mut self, cx: &mut Context<Self>) {
+        let load = self.ask_scheduled_list();
+        self.chat_ui.scheduled_box.open(load);
+        cx.notify();
+    }
+
+    /// The dialog comes back from the schedule picker (a new time, or
+    /// Cancel), or loads its list again (Retry): the messages ticked before
+    /// stay ticked.
+    pub(in crate::ui) fn resume_scheduled_dialog(&mut self, cx: &mut Context<Self>) {
+        let load = self.ask_scheduled_list();
+        self.chat_ui.scheduled_box.resume(load);
         cx.notify();
     }
 
     /// Frame upkeep: the scheduled list's request answered.
     pub(in crate::ui) fn settle_scheduled_load(&mut self, cx: &mut Context<Self>) {
-        let Some(request) = self.chat_ui.scheduled_dialog.loading() else {
+        let Some(request) = self.chat_ui.scheduled_box.loading() else {
             return;
         };
         let Some(answer) = self
@@ -107,12 +109,13 @@ impl QuillApp {
         else {
             return;
         };
-        self.chat_ui.scheduled_dialog = match answer {
-            quill::state::Answer::Done => ScheduledDialog::Ready,
-            quill::state::Answer::Failed(_) => ScheduledDialog::Failed(
+        let load = match answer {
+            quill::state::Answer::Done => ScheduledLoad::Ready,
+            quill::state::Answer::Failed(_) => ScheduledLoad::Failed(
                 tr(keys::Q_CHAT_COULD_NOT_LOAD_SCHEDULED_MESSAGES).to_string(),
             ),
         };
+        self.chat_ui.scheduled_box.settle(request, load);
         cx.notify();
     }
 

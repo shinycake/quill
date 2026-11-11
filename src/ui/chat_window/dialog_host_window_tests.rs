@@ -121,7 +121,7 @@ fn each_window_shows_its_own_per_window_box(cx: &mut TestAppContext) {
     let chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, _| {
         app.set_window_scope(None);
-        app.chat_ui.scheduled_dialog = crate::ui::composer::ScheduledDialog::Ready;
+        app.chat_ui.scheduled_box.open_fresh();
     });
     draw_both(&h, chat_window, cx);
     assert_eq!(shown(&h.shell, cx), Some(DialogKind::Scheduled));
@@ -129,7 +129,7 @@ fn each_window_shows_its_own_per_window_box(cx: &mut TestAppContext) {
     assert_eq!(shown(&in_chat_window, cx), None, "its own flag is clear");
     h.app.update(cx, |app, cx| {
         app.in_window_scope(Some(OTHER), cx, |app, _| {
-            app.chat_ui.scheduled_dialog = crate::ui::composer::ScheduledDialog::Ready;
+            app.chat_ui.scheduled_box.open_fresh();
         });
     });
     draw_both(&h, chat_window, cx);
@@ -150,9 +150,9 @@ fn a_closing_window_closes_only_its_own_boxes(cx: &mut TestAppContext) {
     let chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, cx| {
         app.set_window_scope(None);
-        app.chat_ui.scheduled_dialog = crate::ui::composer::ScheduledDialog::Ready;
+        app.chat_ui.scheduled_box.open_fresh();
         app.in_window_scope(Some(OTHER), cx, |app, _| {
-            app.chat_ui.scheduled_dialog = crate::ui::composer::ScheduledDialog::Ready;
+            app.chat_ui.scheduled_box.open_fresh();
         });
     });
     draw_both(&h, chat_window, cx);
@@ -163,7 +163,7 @@ fn a_closing_window_closes_only_its_own_boxes(cx: &mut TestAppContext) {
     h.app.update(cx, |app, _| {
         app.set_window_scope(None);
         assert!(
-            app.chat_ui.scheduled_dialog.is_open(),
+            app.chat_ui.scheduled_box.is_open(),
             "the main window's own box was not closed"
         );
     });

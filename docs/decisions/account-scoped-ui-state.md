@@ -8244,7 +8244,7 @@ profile_tabs, ton_wallet}.rs`, `connect/core/{mod, pumps}.rs`,
 | 09-115 | A folder fetch refused before any request (`chats_path_active`) ends in the error the Share, Delete and Add to folder boxes draw with Retry. |
 | 08-113 | A rich send whose chat view is replaced moves to `ComposerSends` (`LeftSend`, per account, with its slot). Its refusal puts the text in that slot's draft; its ack no longer leaks. |
 | 08-114 | `AiAsk::Asked { request, markup }`; AI answers carry the `RequestId`, and the window applies only its own ask's answer. A newer ask drops the older answer, and an error (`ai_failed`) ends the wait. |
-| 08-115 | `ScheduledDialog` (`Closed`, `Loading(RequestId)`, `Ready`, `Failed`) replaces `scheduled_dialog_open`; the dialog draws loading, failure and Retry. |
+| 08-115 | The open box holds its list's load (`ScheduledLoad`: `Loading(RequestId)`, `Ready`, `Failed`; see 08-091 for the box) in place of `scheduled_dialog_open`; the dialog draws loading, failure and Retry. |
 | 14-067 | `PhoneFlow::Unblocking { since, request }`, finished by that request's answer or error (the 15 s timer stays as the backstop). |
 | 14-076 | One `close_refused_launch` for every early return of `spawn_mini_app_window`. |
 | 14-077 | `custom_requests` and `CustomRequestReply` carry the launch id; a window takes only its own launch's answers, and closing a window forgets its entries. |
@@ -8531,7 +8531,7 @@ send settles its own part, and the four-field checkout is one value.
 | id | result |
 | --- | --- |
 | 08-116 | The row still leaves as the delete goes out (as in tdesktop), but the delete is now a `ScheduledDelete { request, chat_id }` on the chat view. A refusal says so and loads that chat's list again, so a row still scheduled comes back. A chat change forgets the waits. |
-| 08-115 | Verified (r2-04): `ScheduledDialog` carries the load stage and its Retry. |
+| 08-115 | Verified (r2-04): the scheduled box carries the load stage and its Retry (`ScheduledLoad`, inside `ScheduledBox::Open` since 08-091). |
 | 09-017 | r2-04's `on_mouse_up_out` on every row ran in the capture phase before the pressed row's own release, so it also cleared a real swipe. The press is now `SwipeReply` (`Idle`, `Pressed { chat, message, x }`): the row's release takes it, the history's release listener ends the gesture after the rows saw it (deferred), and it lives in `ChatUi`, so a chat change drops it. |
 | 09-014, 09-015, 09-034, 09-035, 09-036, 09-031 | Verified against the current code: older and newer pages stop on failure and draw Retry; `leave_data_storage` resets the scroll; `PresetsSeed`, `AutoDownloadAnswers` and `StorageSaveFailures` stand. |
 | 09-030 | Also closed the early returns: `set_auto_download_settings`, `set_less_data_for_calls`, `set_storage_limits`, `clear_storage`, `fetch_auto_download_presets` and `maybe_fetch_storage_statistics` refused before any request now end in the failure line / Retry the page draws. |
@@ -8742,3 +8742,36 @@ bubble theme, add people, call panel, backdrop, sounds, call state).
 | 08-061 | The backdrop cache evicts under a short `try_borrow_mut` and retires the picture after the borrow. |
 | new-01 | The `Rc<RefCell<Option<_>>>` one-shot body cells of the bot edit, bot verify and bots dialogs are `Cell`s (no borrow to panic). |
 | new-02 | `CallTick::{Idle, Running { _task }}` holds the call clock task instead of detaching it. |
+
+### Sweep fixes (r2-24)
+
+Files: capture_block, chat_appearance_dialog, chat_bars, chat_header_menu_ui,
+chat_list_keys, chat_list_state, chat_look_ui, chat_setting_dialogs,
+chat_swipe_ui, chat_ui_state, chatlist_global, command_shortcuts.
+
+| id | result |
+| --- | --- |
+| 08-062 | `apply_sharing` returns whether the platform took the setting; the main and chat windows record `capture_blocked` only then, so a window with no handle yet is retried on the next render. |
+| 08-056 | While `Applying` the Appearance draft is locked (`edit_chat_appearance` refuses). A box closed during Apply leaves its answers to `drain_chat_appearance`, which now takes them all and shows a refusal as a note. |
+| 08-057 | The level line has three arms read from the request table: the level, "checking" while `getChatBoostStatus` is out, and "unavailable" with Retry once it ended without an answer. |
+| 08-081 | The contact bar is dismissed only after both the unarchive and the notification reset were accepted. |
+| 08-083, 08-086 | The take-once `Rc<RefCell<Option<body>>>` slot is `dialog_once_body::once_dialog_body`, a `Cell` that is taken, so no `RefCell` borrow; used by chat bars (block box, join requests), the look box and Appearance. |
+| 08-087 | `HeaderFacts::is_saved_messages` is gone; the profile entry reads `is_self`, which is the same fact. Baseline line dropped. |
+| 08-096 | `ChatSwipeFacts::is_saved` is allow-listed: it is a fact of the chat (the user's own chat cannot be muted), not a stage. Baseline lines dropped. |
+| 08-071, 08-072 | `Pick<R>` (`chat_list_pick.rs`) is one value per list: none, the pointer's row, or the keys' row over the pointer's. A mouse move hands the selection back to the pointer's row. The pointer's row in the chat list counts only while inside the items the last frame laid out. |
+| 08-073 | `search_order` and `search_bounds` are `Cell`s that are taken and put back: no `RefCell` borrow in render. |
+| 04-040 | `PinStage::Sliding` replaces `PinReorder`'s inner stage: `PinReorder` has no stage, the owner's variant says held or sliding (`PinView`). `release` moves only a held row: one release of the button reaches the list more than once, and the later calls leave the slide (and a press) as they are. |
+| 08-067 | `MyChats { Closed, Groups, Channels }` replaces `Option<bool>`. |
+| 08-068 | `close_archive_hint` is the box's one closer; the downloads panel has `close_downloads_panel` and `toggle_downloads_panel`. `pending_close_secret_chat` carries the chat, so it is the box's value. |
+| 08-069 | Skipped: the open holds only the intent. The fetch's stage (cache, in flight, failed with its retry clock) lives in `story_fetch`, read by the story's key, which is the fetch's own identity; every exit (ready, gone, failed, a newer open, the viewer closing, the account going) clears the open. |
+| 08-070 | `ChatListMenu { Closed, Row, Archive }`: opening one replaces the other. |
+| 08-077 | `Dimming::Slider` is the only dimming: no mirrored field and no subscription writing it; Apply and the preview read the slider. |
+| 08-078 | The wallpaper picker's task is held by the dialog (`WallpaperPick::Choosing`), so closing the box drops it; a second press while it is open does nothing. |
+| 08-079 | Every edit of theme, wallpaper or dimming calls `choices_changed`, which returns a `Blocked` stage to `Editing`. |
+| 08-100 | `close_ttl_picker` is the one closer (box close, Esc, leaving the chat, a picked timer). |
+| 08-088 | `enter_chat_ui` forgets the request of a `Sending` edit it does not carry to the next chat. |
+| 08-089, 08-090 | `EditStage { Editing, ConfirmingCancel, Sending }` replaces `confirm_cancel`; a sent edit refuses Esc and the box (the answer decides); sending closes an open box. tdesktop cancels its request locally and the edit lands anyway, which is the case this refuses. |
+| 08-091 | `ScheduledBox { Closed, Open { load, selected }, Rescheduling { selected } }`: the ticks and the list's load (08-115) live and die with the box, and the ticks wait through the picker. |
+| 08-092 | `ReplyBar { Plain, PickingQuote }` carries the reply. |
+| 08-101 | `IndexBar { Away, Over, Scrubbing }` with one reset per way off the bar. |
+| 08-102 | `ScheduleTarget::ComposerThenSend { effect }` replaces `send_after` and `send_effect`. |

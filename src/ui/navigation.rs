@@ -196,7 +196,7 @@ impl QuillApp {
                 });
             }
             NavigationAction::Downloads => {
-                self.chat_list.downloads_panel_open = !self.chat_list.downloads_panel_open;
+                self.toggle_downloads_panel();
                 cx.notify();
             }
             NavigationAction::Group => {

@@ -524,7 +524,7 @@ pub(super) fn session_chat_row(
         .on_mouse_down(
             MouseButton::Right,
             cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                this.chat_list.menu = Some(ChatMenuState::at(id, event.position));
+                this.chat_list.menu.open_row(ChatMenuState::at(id, event.position));
                 cx.notify();
             }),
         )

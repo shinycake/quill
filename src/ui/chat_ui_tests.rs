@@ -305,7 +305,7 @@ fn another_chat_drops_the_reschedule_picker_and_the_scheduled_list(cx: &mut Test
     let other = other_chat(&app, &mut vcx);
     open(&app, &mut vcx, CHAT);
     app.update_in(&mut vcx, |app, window, cx| {
-        app.chat_ui.scheduled_dialog = crate::ui::composer::ScheduledDialog::Ready;
+        app.chat_ui.scheduled_box.open_fresh();
         app.open_schedule_picker(ScheduleTarget::Reschedule(MessageId(5)), window, cx);
     });
     frames(&mut vcx);
@@ -320,7 +320,7 @@ fn another_chat_drops_the_reschedule_picker_and_the_scheduled_list(cx: &mut Test
         );
         assert!(!app.chat_ui.schedule_popup_shown());
         assert!(
-            !app.chat_ui.scheduled_dialog.is_open(),
+            !app.chat_ui.scheduled_box.is_open(),
             "the list was the last chat's"
         );
     });

@@ -557,7 +557,7 @@ impl Render for QuillApp {
                 },
             )
             // Slice CL1: right-click chat-row context menu.
-            .when_some(self.chat_list.menu, |this, menu| {
+            .when_some(self.chat_list.menu.row_copy(), |this, menu| {
                 this.child(self.chat_menu_overlay(menu, cx))
             })
             .when_some(
@@ -569,7 +569,7 @@ impl Render for QuillApp {
             .when_some(self.playback.playlist.menu(), |this, menu| {
                 this.child(self.playlist_menu_overlay(menu, cx))
             })
-            .when_some(self.chat_list.archive_menu, |this, position| {
+            .when_some(self.chat_list.menu.archive(), |this, position| {
                 this.child(self.archive_menu_overlay(position, cx))
             })
             .when_some(self.admin.community.flow.row_menu, |this, menu| {

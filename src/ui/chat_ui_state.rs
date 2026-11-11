@@ -89,7 +89,6 @@ pub(super) struct EditMode {
     pub(super) stashed_draft: String,
     /// Reply that belonged to the stashed draft, restored with it on leaving.
     pub(super) stashed_reply: Option<ComposerReplyTo>,
-    pub(super) confirm_cancel: bool,
     /// B5: "Send as a document" for the replacement file while editing
     /// media (tdesktop `EditCaptionBox::_asFile`). The edit's own choice:
     /// another edit starts without it.
@@ -108,12 +107,15 @@ impl EditId {
     }
 }
 
-/// Where an edit stands: being typed, or sent and waiting for TDLib's
-/// answer. The edit leaves edit mode on the answer (`ok`); an error returns
-/// it to `Editing` with the text still in the field.
+/// Where an edit stands: being typed, asking "Cancel editing?", or sent and
+/// waiting for TDLib's answer. The edit leaves edit mode on the answer
+/// (`ok`); an error returns it to `Editing` with the text still in the
+/// field. A sent edit cannot be cancelled: the answer decides.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum EditStage {
     Editing,
+    /// The "Cancel editing?" box is open over the edit.
+    ConfirmingCancel,
     Sending(quill::ids::RequestId),
 }
 
@@ -133,20 +135,28 @@ impl Default for ChatVisit {
     }
 }
 
-/// The reply bar: the message the composer replies to, and its quote
-/// picker. One value, so the picker goes with the reply however the reply
-/// goes (sent, cancelled, replaced by a reply to another message).
+/// The reply bar: the message the composer replies to, and whether
+/// "Update Quote" is picking the part to quote. The picker is a stage of
+/// the reply, so it goes with it however the reply goes (sent, cancelled,
+/// replaced by a reply to another message).
 #[derive(Debug, Clone)]
-struct ReplyBar {
-    reply: ComposerReplyTo,
-    quote_picker: QuotePicker,
+enum ReplyBar {
+    Plain(ComposerReplyTo),
+    PickingQuote(ComposerReplyTo),
 }
 
-/// "Update Quote" opened the picker for the part of the message to quote.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum QuotePicker {
-    Closed,
-    Open,
+impl ReplyBar {
+    fn reply(&self) -> &ComposerReplyTo {
+        match self {
+            Self::Plain(reply) | Self::PickingQuote(reply) => reply,
+        }
+    }
+
+    fn into_reply(self) -> ComposerReplyTo {
+        match self {
+            Self::Plain(reply) | Self::PickingQuote(reply) => reply,
+        }
+    }
 }
 
 /// One view's state for the chat it shows.
@@ -264,12 +274,11 @@ pub(crate) struct ChatUi {
     /// this chat: a row (Ctrl+Space, Up / Down) or the unread bar. One
     /// value of the chat, so another chat starts with none.
     pub(super) focus: A11yFocus,
-    /// Scheduled messages ticked in the scheduled-messages dialog (send
-    /// now, reschedule or delete together).
-    pub(super) scheduled_selected: Vec<MessageId>,
-    /// M1: the scheduled-messages dialog (view/delete). Here so that a
-    /// chat change closes it: its rows act on the chat shown.
-    pub(super) scheduled_dialog: super::composer::ScheduledDialog,
+    /// M1: the scheduled-messages dialog (view/delete) with the load of
+    /// its list and the messages ticked in it (send now, reschedule or
+    /// delete together). Here so that a chat change closes it: its rows act
+    /// on the chat shown.
+    pub(super) scheduled_box: super::scheduled_box::ScheduledBox,
     /// M1: the swipe-to-reply press of the gesture under way; it names this
     /// chat's rows, so another chat starts with none.
     pub(super) swipe_reply: super::conversation::swipe_reply::SwipeReply,
@@ -365,7 +374,7 @@ impl ChatUi {
     /// The reply the bar shows. Display and bookkeeping only: anything that
     /// sends reads `QuillApp::reply_for_send`, which drops a deleted target.
     pub(super) fn reply(&self) -> Option<&ComposerReplyTo> {
-        self.pending_reply.as_ref().map(|bar| &bar.reply)
+        self.pending_reply.as_ref().map(ReplyBar::reply)
     }
 
     pub(super) fn has_reply(&self) -> bool {
@@ -375,41 +384,36 @@ impl ChatUi {
     /// A new quote for the same message keeps its picker open; a reply to
     /// another message, or none, closes it.
     pub(super) fn set_reply(&mut self, reply: Option<ComposerReplyTo>) {
-        let picker = |next: &ComposerReplyTo| match &self.pending_reply {
-            Some(bar)
-                if (bar.reply.chat_id, bar.reply.message_id) == (next.chat_id, next.message_id) =>
+        self.pending_reply = reply.map(|next| match &self.pending_reply {
+            Some(bar @ ReplyBar::PickingQuote(_))
+                if (bar.reply().chat_id, bar.reply().message_id)
+                    == (next.chat_id, next.message_id) =>
             {
-                bar.quote_picker
+                ReplyBar::PickingQuote(next)
             }
-            _ => QuotePicker::Closed,
-        };
-        self.pending_reply = reply.map(|reply| ReplyBar {
-            quote_picker: picker(&reply),
-            reply,
+            _ => ReplyBar::Plain(next),
         });
     }
 
     pub(super) fn take_reply(&mut self) -> Option<ComposerReplyTo> {
-        self.pending_reply.take().map(|bar| bar.reply)
+        self.pending_reply.take().map(ReplyBar::into_reply)
     }
 
     /// "Update Quote": the picker opens for the reply shown.
     pub(super) fn open_quote_picker(&mut self) {
-        if let Some(bar) = self.pending_reply.as_mut() {
-            bar.quote_picker = QuotePicker::Open;
+        if let Some(bar) = self.pending_reply.take() {
+            self.pending_reply = Some(ReplyBar::PickingQuote(bar.into_reply()));
         }
     }
 
     pub(super) fn close_quote_picker(&mut self) {
-        if let Some(bar) = self.pending_reply.as_mut() {
-            bar.quote_picker = QuotePicker::Closed;
+        if let Some(bar) = self.pending_reply.take() {
+            self.pending_reply = Some(ReplyBar::Plain(bar.into_reply()));
         }
     }
 
     pub(super) fn quote_picker_open(&self) -> bool {
-        self.pending_reply
-            .as_ref()
-            .is_some_and(|bar| bar.quote_picker == QuotePicker::Open)
+        matches!(self.pending_reply, Some(ReplyBar::PickingQuote(_)))
     }
 
     pub(super) fn is_editing(&self) -> bool {
@@ -425,7 +429,7 @@ impl ChatUi {
     pub(super) fn edit_sending(&self) -> Option<quill::ids::RequestId> {
         match self.edit_mode.as_ref()?.stage {
             EditStage::Sending(id) => Some(id),
-            EditStage::Editing => None,
+            EditStage::Editing | EditStage::ConfirmingCancel => None,
         }
     }
 
@@ -438,7 +442,9 @@ impl ChatUi {
 
     /// The send failed: the edit goes on, its text still in the field.
     pub(super) fn back_to_editing(&mut self) {
-        if let Some(mode) = self.edit_mode.as_mut() {
+        if let Some(mode) = self.edit_mode.as_mut()
+            && matches!(mode.stage, EditStage::Sending(_))
+        {
             mode.stage = EditStage::Editing;
         }
     }
@@ -464,7 +470,6 @@ impl ChatUi {
             edit,
             stashed_draft,
             stashed_reply,
-            confirm_cancel: false,
             replace_as_file: false,
         });
     }
@@ -511,14 +516,21 @@ impl ChatUi {
     pub(super) fn cancel_edit_confirm_open(&self) -> bool {
         self.edit_mode
             .as_ref()
-            .is_some_and(|mode| mode.confirm_cancel)
+            .is_some_and(|mode| mode.stage == EditStage::ConfirmingCancel)
     }
 
-    /// Opens or closes the box; opening is ignored without an edit.
+    /// Opens or closes the box. Opening is ignored without an edit and for
+    /// an edit already sent (the answer decides); closing leaves any other
+    /// stage as it is.
     pub(super) fn set_cancel_edit_confirm(&mut self, open: bool) {
-        if let Some(mode) = self.edit_mode.as_mut() {
-            mode.confirm_cancel = open;
-        }
+        let Some(mode) = self.edit_mode.as_mut() else {
+            return;
+        };
+        mode.stage = match (open, mode.stage) {
+            (true, EditStage::Editing) => EditStage::ConfirmingCancel,
+            (false, EditStage::ConfirmingCancel) => EditStage::Editing,
+            (_, stage) => stage,
+        };
     }
 }
 
@@ -553,11 +565,24 @@ impl QuillApp {
         next.pending_reply = old
             .pending_reply
             .take()
-            .filter(|bar| bar.reply.belongs_to(chat));
-        next.edit_mode = old
-            .edit_mode
-            .take()
-            .filter(|mode| mode.edit.chat_id == chat);
+            .filter(|bar| bar.reply().belongs_to(chat));
+        // An edit of another chat's message does not come along; one that
+        // was already sent stops waiting for its answer.
+        let dropped = match old.edit_mode.take() {
+            Some(mode) if mode.edit.chat_id == chat => {
+                next.edit_mode = Some(mode);
+                None
+            }
+            other => other.and_then(|mode| match mode.stage {
+                EditStage::Sending(request) => Some(request),
+                _ => None,
+            }),
+        };
+        if let Some(request) = dropped
+            && let Some(live) = self.live.as_mut()
+        {
+            live.driver.session.acks.forget(request);
+        }
         self.replace_chat_ui(next);
     }
 
@@ -589,7 +614,7 @@ impl QuillApp {
         // A rich send still waiting goes on waiting off the view, so a
         // refusal after the chat changed still gives the text back.
         self.leave_sent_text(std::mem::take(&mut old.sent_text));
-        if let Some(request) = old.scheduled_dialog.loading()
+        if let Some(request) = old.scheduled_box.loading()
             && let Some(live) = self.live.as_mut()
         {
             live.driver.session.acks.forget(request);
@@ -612,7 +637,7 @@ impl QuillApp {
     pub(super) fn close_ttl_picker_of_left_chat(&mut self, next: Option<ChatId>) {
         let left = self.chat_ui.chat.filter(|chat| Some(*chat) != next);
         if left.is_some() && self.notify.ttl_picker == left {
-            self.notify.ttl_picker = None;
+            self.close_ttl_picker();
         }
     }
 

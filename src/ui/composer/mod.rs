@@ -991,7 +991,7 @@ mod field_placeholder;
 mod scheduled_load;
 mod send_bot_command;
 mod sent_text;
-pub(in crate::ui) use scheduled_load::{ScheduledDelete, ScheduledDialog};
+pub(in crate::ui) use scheduled_load::ScheduledDelete;
 pub(in crate::ui) use sent_text::{AiAsk, LeftSend, SentText};
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
