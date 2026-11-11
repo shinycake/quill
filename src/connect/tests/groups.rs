@@ -485,6 +485,27 @@ fn driver_welcome_message_mutations_send_and_gate() {
         .add_chat_welcome_message(ChatId(13), "welcome!")
         .unwrap()
         .expect("add sent");
+    // Another chat's add is not held back by this one; the same chat's is.
+    assert_eq!(
+        driver
+            .add_chat_welcome_message(ChatId(13), "again")
+            .unwrap(),
+        None
+    );
+    ingest_json(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":14,"title":"h","type":{"@type":"chatTypeSupergroup","supergroup_id":14,"is_channel":false},"unread_count":0}}"#,
+    );
+    ingest_json(
+        &mut driver,
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":14,"status":{"@type":"chatMemberStatusCreator","is_member":true}}}"#,
+    );
+    assert!(
+        driver
+            .add_chat_welcome_message(ChatId(14), "other")
+            .unwrap()
+            .is_some()
+    );
     driver
         .edit_chat_welcome_message(ChatId(13), 7, "welcome back")
         .unwrap()

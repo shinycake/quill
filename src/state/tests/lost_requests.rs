@@ -170,3 +170,22 @@ fn a_swept_user_action_still_says_it_failed() {
     session.settle_lost_request(pending);
     assert!(!session.messages.message_action_note.is_empty());
 }
+
+/// A swept upgrade or history toggle takes its waiting step with it and
+/// tells the person (02-074).
+#[test]
+fn a_swept_request_drops_its_admin_followups_and_says_so() {
+    let mut session = ready_session();
+    let id = session.request(RequestPurpose::UpgradeBasicGroup, Some(ChatId(5)));
+    session.queue_admin_followup(
+        id,
+        AdminFollowup::HistoryAfterUpgrade {
+            old: ChatId(5),
+            visible: true,
+        },
+    );
+    let pending = session.requests.take(id).expect("registered");
+    session.settle_lost_request(pending);
+    assert!(session.take_admin_followup(id).is_none());
+    assert!(session.chats_state.chat_action_error.is_some());
+}

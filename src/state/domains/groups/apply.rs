@@ -482,7 +482,8 @@ impl Session {
                         .get(&chat_id.0)
                         .is_none_or(|latest| *latest == pending.id)
                 {
-                    self.groups.join_request_latest.remove(&chat_id.0);
+                    // `latest` stays: an older page that answers later is
+                    // still not the newest and is dropped above.
                     let mut all = Vec::new();
                     if pending.purpose == RequestPurpose::GetMoreChatJoinRequests
                         && let Some(JoinRequestFetch::Loaded(old)) =
@@ -663,7 +664,7 @@ impl Session {
             // 11210) — a new join request arrived. Prepend it to the cached
             // list when one is loaded; otherwise the next fetch picks it up.
             // The total is bumped: the update announces a genuinely new
-            // pending request.
+            // pending request (only while no search hides it).
             GroupsPayload::UpdateNewChatJoinRequest {
                 chat_id, request, ..
             } => {
@@ -681,8 +682,10 @@ impl Session {
                         .is_none_or(|q| q.is_empty())
                     {
                         list.requests.insert(0, request);
+                        // Under a search the total counts matches: a request
+                        // the filter hides is not one of them.
+                        list.total_count = list.total_count.saturating_add(1);
                     }
-                    list.total_count = list.total_count.saturating_add(1);
                     self.groups
                         .join_requests
                         .insert(chat_id, JoinRequestFetch::Loaded(list));
@@ -878,6 +881,11 @@ impl Session {
                 // instead of showing stale data. `accept_own_chat_member`
                 // also refreshes the viewer's own rights below.
                 self.groups.admin_lists.remove(&chat_id.0);
+                // A list asked before this change would put the old
+                // administrators back when it answers: forget the request
+                // (its answer is then ignored) so the next open asks again.
+                self.requests
+                    .take_purpose_for_chat(RequestPurpose::GetChatAdministrators, chat_id);
                 // Phase D3b: per-admin rights for the changed member are
                 // stale too (e.g. after an edit-rights save) — drop them
                 // so the editor refetches instead of showing old rights.

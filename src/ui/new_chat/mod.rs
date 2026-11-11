@@ -216,6 +216,16 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Poll drain: a plain group that was made ends its dialog, which
+    /// takes its creation row with it.
+    pub(in crate::ui) fn drain_new_chat_done(&mut self, cx: &mut Context<Self>) -> bool {
+        if !matches!(self.new_chat_step(), Some(NewChatStep::Done(_))) {
+            return false;
+        }
+        self.close_new_chat(cx);
+        true
+    }
+
     pub(in crate::ui) fn close_new_chat(&mut self, cx: &mut Context<Self>) {
         self.drop_new_chat_dialog();
         cx.notify();

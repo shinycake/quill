@@ -3,6 +3,7 @@
 use super::*;
 use crate::ids::{ChatId, RequestId};
 use crate::state::GroupsPurpose;
+use crate::state::send_failed_line;
 use crate::state::{
     INVITE_ADMIN_PAGE_SIZE, InviteLinkCountsFetch, InviteLinkFetch, InviteLinkMembersState,
     JoinRequestFetch, RequestPurpose,
@@ -147,9 +148,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if self
             .session
-            .groups
-            .join_request_latest
-            .contains_key(&chat_id.0)
+            .requests
+            .has_purpose_for_chat(RequestPurpose::GetMoreChatJoinRequests, chat_id)
         {
             return Ok(None);
         }
@@ -235,6 +235,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         ) {
             return Ok(None);
         }
+        // The creator is the viewer: until getMe has answered there is no
+        // id to ask with (0 would ask for nobody's links).
+        let Some(creator) = self.session.my_user_id else {
+            return Ok(None);
+        };
         let extra = self
             .session
             .request(RequestPurpose::GetRevokedChatInviteLinks, Some(chat_id));
@@ -242,11 +247,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             .groups
             .revoked_invite_links
             .insert(chat_id.0, InviteLinkFetch::Loading);
-        let creator = self.session.my_user_id.unwrap_or(0);
         let payload = get_chat_invite_links(extra, chat_id.0, creator, true, 0, "", 100);
         let sent = self.send_invite_admin(extra, &payload);
         if sent.is_err() {
-            self.session.groups.revoked_invite_links.remove(&chat_id.0);
+            self.session.groups.revoked_invite_links.insert(
+                chat_id.0,
+                InviteLinkFetch::Failed(send_failed_line("Could not load revoked links")),
+            );
         }
         sent
     }
@@ -419,8 +426,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
+        let Some(creator) = self.session.my_user_id else {
+            return Ok(None);
+        };
         let extra = self.session.request(purpose, Some(chat_id));
-        let creator = self.session.my_user_id.unwrap_or(0);
         self.send_invite_admin(
             extra,
             &delete_all_revoked_chat_invite_links(extra, chat_id.0, creator),

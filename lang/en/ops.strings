@@ -447,6 +447,7 @@
 "qll_ops_could_not_decline_the_call" = "Couldn't decline the call";
 "qll_ops_could_not_delete_invite_link" = "Couldn't delete invite link";
 "qll_ops_could_not_load_invite_link_members" = "Couldn't load who joined with this link";
+"qll_ops_could_not_load_revoked_invite_links" = "Couldn't load the revoked links";
 "qll_ops_could_not_delete_revoked_links" = "Couldn't delete revoked links";
 "qll_ops_could_not_delete_the_link" = "Could not delete the link.";
 "qll_ops_could_not_delete_the_message" = "Could not delete the message.";

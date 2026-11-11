@@ -103,8 +103,12 @@ impl QuillApp {
                 StatusNote::error(self.community_error_text(&error, None))
             }
             CommunityOutcome::Created { chat_id, .. } => {
-                if let Some(CommunityBox::CreateVisibility { chat_id: asked, .. }) =
-                    &self.admin.community.flow.open
+                // Cancel on the visibility box goes back to the identity box
+                // while the create is out; either one of this chat's ends here.
+                if let Some(
+                    CommunityBox::CreateVisibility { chat_id: asked, .. }
+                    | CommunityBox::Create { chat_id: asked, .. },
+                ) = &self.admin.community.flow.open
                     && Some(*asked) == chat_id
                 {
                     self.admin.community.flow.open = None;
@@ -136,6 +140,7 @@ impl QuillApp {
         }
         progressed |= self.drain_pending_ban(cx);
         progressed |= self.drain_new_community_chat(cx);
+        progressed |= self.drain_new_chat_done(cx);
         progressed
     }
 }
