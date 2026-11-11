@@ -154,6 +154,7 @@ fn a_chat_windows_hold_ends_when_it_goes_to_the_background(cx: &mut TestAppConte
             );
             let now = cx.background_executor().now();
             let _ = app.viewer.controls.boost.press(now);
+            app.viewer.controls.boost.arm(now, gpui_kit::Task::ready(()));
             let later = now + Duration::from_millis(quill::media_viewer::SPEED_BOOST_HOLD_MS + 50);
             assert!(app.viewer.controls.boost.tick(later), "the hold boosts");
         })

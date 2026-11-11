@@ -84,10 +84,8 @@ pub(crate) struct VideoControlsState {
     pub(crate) demo_speed_open: bool,
     /// The pointer's fraction over the scrubber while it hovers.
     pub(crate) hover: Option<f32>,
-    /// Space held to play at 2×.
-    pub(crate) boost: BoostState,
-    /// The hold check 200 ms after Space went down.
-    pub(crate) boost_timer: Option<Task<()>>,
+    /// Space held to play at 2×; an armed press holds its 200 ms hold check.
+    pub(crate) boost: BoostState<Task<()>>,
     /// The view the controller was last drawn in (the cached viewer slice,
     /// or a chat window), so a hover redraws only that view.
     pub(crate) panel_view: Option<EntityId>,
@@ -115,7 +113,6 @@ impl VideoControlsState {
         // A speed drag cut off by the clip's end never gets its Release.
         self.speed_preview = None;
         self.hover = None;
-        self.boost_timer = None;
         self.waiting = WaitingGate::default();
         self.boost.cancel()
     }

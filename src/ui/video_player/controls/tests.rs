@@ -66,6 +66,7 @@ fn a_stopped_clip_drops_its_gestures() {
     state.speed_preview = Some(1.5);
     let t0 = Instant::now();
     state.boost.press(t0);
+    state.boost.arm(t0, gpui_kit::Task::ready(()));
     assert!(state.boost.tick(t0 + Duration::from_millis(250)));
     assert!(state.clear_clip(), "the boost was on");
     assert!(!state.dragging());
@@ -320,6 +321,7 @@ mod ui {
             host.update(vcx, |host, cx| {
                 let t0 = Instant::now();
                 host.controls.boost.press(t0);
+                host.controls.boost.arm(t0, gpui_kit::Task::ready(()));
                 assert!(host.controls.boost.tick(t0 + Duration::from_millis(200)));
                 cx.notify();
             });

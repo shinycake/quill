@@ -256,12 +256,9 @@ impl QuillApp {
             self.toggle_viewer_video(cx);
             return;
         }
+        let now = cx.background_executor().now();
         let was_boosted = self.viewer.controls.boost.is_active();
-        let press = self
-            .viewer
-            .controls
-            .boost
-            .press(cx.background_executor().now());
+        let press = self.viewer.controls.boost.press(now);
         if was_boosted && !self.viewer.controls.boost.is_active() {
             // The last hold's release never came.
             self.restore_viewer_rate(cx);
@@ -280,12 +277,11 @@ impl QuillApp {
                 .await;
             let _ = this.update(cx, |this, cx| this.viewer_boost_tick(cx));
         });
-        self.viewer.controls.boost_timer = Some(timer);
+        self.viewer.controls.boost.arm(now, timer);
     }
 
     /// The hold check: still held after 200 ms plays at 2×.
     fn viewer_boost_tick(&mut self, cx: &mut Context<Self>) {
-        self.viewer.controls.boost_timer = None;
         if !self
             .viewer
             .controls
@@ -306,7 +302,6 @@ impl QuillApp {
         if key != "space" || !self.viewer.state.is_open() {
             return false;
         }
-        self.viewer.controls.boost_timer = None;
         match self.viewer.controls.boost.release() {
             BoostRelease::TogglePause => {
                 self.viewer_note_activity(cx);
@@ -324,7 +319,6 @@ impl QuillApp {
     /// Forget a Space press whose key-up will not come (the window went to
     /// the background); a running boost ends.
     pub(in crate::ui) fn cancel_viewer_boost(&mut self, cx: &mut Context<Self>) {
-        self.viewer.controls.boost_timer = None;
         if self.viewer.controls.boost.cancel() {
             self.restore_viewer_rate(cx);
         }

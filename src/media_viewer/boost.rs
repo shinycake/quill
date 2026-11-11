@@ -41,27 +41,36 @@ pub enum BoostRelease {
 /// The Space-hold speed boost (`OverlayWidget::handleKeyPress` /
 /// `handleKeyRelease`): a press arms a 200 ms timer, a release before it
 /// fires toggles pause, and a hold past it plays at 2x until the release,
-/// which then does not toggle.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum BoostState {
+/// which then does not toggle. `T` is the hold timer the caller starts for
+/// an armed press: it lives in `Armed`, so every way out of `Armed` (the
+/// tick, a release, a cancel, a stale press) drops it.
+#[derive(Debug)]
+pub enum BoostState<T = ()> {
     /// No press is held.
-    #[default]
     Idle,
     /// Pressed at `since`, the hold timer has not fired: a release is a tap.
     Armed {
         since: Instant,
         /// The last press or key repeat.
         last_seen: Instant,
+        timer: T,
     },
     /// Held long enough: playing at the boost rate until the release.
     Boosting { last_seen: Instant },
 }
 
-impl BoostState {
+impl<T> Default for BoostState<T> {
+    fn default() -> Self {
+        Self::Idle
+    }
+}
+
+impl<T> BoostState<T> {
     /// Space went down at `now` (key repeats included). A press long after
     /// the last one ([`BOOST_STALE_MS`]) drops a hold whose release was
     /// missed, so a boost that was on ends: callers compare
-    /// [`Self::is_active`] before and after.
+    /// [`Self::is_active`] before and after. [`BoostPress::Armed`] asks the
+    /// caller to start the hold timer and hand it to [`Self::arm`].
     pub fn press(&mut self, now: Instant) -> BoostPress {
         let stale = self.last_seen().is_some_and(|seen| {
             now.saturating_duration_since(seen) > Duration::from_millis(BOOST_STALE_MS)
@@ -70,13 +79,7 @@ impl BoostState {
             *self = Self::Idle;
         }
         match self {
-            Self::Idle => {
-                *self = Self::Armed {
-                    since: now,
-                    last_seen: now,
-                };
-                BoostPress::Armed
-            }
+            Self::Idle => BoostPress::Armed,
             Self::Armed { last_seen, .. } | Self::Boosting { last_seen } => {
                 *last_seen = now;
                 BoostPress::Repeat
@@ -84,16 +87,43 @@ impl BoostState {
         }
     }
 
+    /// The hold timer of the press [`Self::press`] asked to arm. Ignored
+    /// unless the press is still new (nothing is held).
+    pub fn arm(&mut self, now: Instant, timer: T) {
+        if matches!(self, Self::Idle) {
+            *self = Self::Armed {
+                since: now,
+                last_seen: now,
+                timer,
+            };
+        }
+    }
+
     /// The hold timer looked at `now`: `true` when the boost starts now.
     pub fn tick(&mut self, now: Instant) -> bool {
-        let Self::Armed { since, last_seen } = *self else {
-            return false;
-        };
-        if now.saturating_duration_since(since) < Duration::from_millis(SPEED_BOOST_HOLD_MS) {
-            return false;
+        match std::mem::take(self) {
+            Self::Armed {
+                since,
+                last_seen,
+                timer,
+            } => {
+                if now.saturating_duration_since(since) < Duration::from_millis(SPEED_BOOST_HOLD_MS)
+                {
+                    *self = Self::Armed {
+                        since,
+                        last_seen,
+                        timer,
+                    };
+                    return false;
+                }
+                *self = Self::Boosting { last_seen };
+                true
+            }
+            other => {
+                *self = other;
+                false
+            }
         }
-        *self = Self::Boosting { last_seen };
-        true
     }
 
     /// Time left until a press becomes a hold, while one is pending.
@@ -157,11 +187,20 @@ mod tests {
         base + Duration::from_millis(ms)
     }
 
+    /// A press that arms its timer, as the viewer does.
+    fn press(boost: &mut BoostState, now: Instant) -> BoostPress {
+        let press = boost.press(now);
+        if press == BoostPress::Armed {
+            boost.arm(now, ());
+        }
+        press
+    }
+
     #[test]
     fn a_tap_toggles_pause_and_never_boosts() {
         let t0 = Instant::now();
         let mut boost = BoostState::default();
-        assert_eq!(boost.press(t0), BoostPress::Armed);
+        assert_eq!(press(&mut boost, t0), BoostPress::Armed);
         assert!(!boost.tick(ms(t0, 120)));
         assert_eq!(boost.release(), BoostRelease::TogglePause);
         assert!(!boost.is_active());
@@ -172,16 +211,16 @@ mod tests {
     fn a_hold_boosts_until_release_and_does_not_toggle() {
         let t0 = Instant::now();
         let mut boost = BoostState::default();
-        boost.press(t0);
+        press(&mut boost, t0);
         assert_eq!(boost.wait(ms(t0, 50)), Some(Duration::from_millis(150)));
         // Key repeats while held change nothing.
-        assert_eq!(boost.press(ms(t0, 100)), BoostPress::Repeat);
+        assert_eq!(press(&mut boost, ms(t0, 100)), BoostPress::Repeat);
         assert!(!boost.tick(ms(t0, 199)));
         assert!(boost.tick(ms(t0, 200)));
         assert!(boost.is_active());
         // Started once: later checks and repeats do nothing.
         assert!(!boost.tick(ms(t0, 400)));
-        assert_eq!(boost.press(ms(t0, 450)), BoostPress::Repeat);
+        assert_eq!(press(&mut boost, ms(t0, 450)), BoostPress::Repeat);
         assert_eq!(boost.wait(ms(t0, 450)), None);
         assert_eq!(boost.release(), BoostRelease::EndBoost);
         assert!(!boost.is_active());
@@ -191,7 +230,7 @@ mod tests {
     fn a_release_before_the_timer_fires_is_a_tap_however_late() {
         let t0 = Instant::now();
         let mut boost = BoostState::default();
-        boost.press(t0);
+        press(&mut boost, t0);
         // The timer has not fired (a busy frame): still a tap, as in
         // tdesktop, where only the hold timer starts the boost.
         assert_eq!(boost.release(), BoostRelease::TogglePause);
@@ -203,9 +242,9 @@ mod tests {
     fn cancel_forgets_the_press_and_reports_a_running_boost() {
         let t0 = Instant::now();
         let mut boost = BoostState::default();
-        boost.press(t0);
+        press(&mut boost, t0);
         assert!(!boost.cancel());
-        assert_eq!(boost.press(ms(t0, 10)), BoostPress::Armed);
+        assert_eq!(press(&mut boost, ms(t0, 10)), BoostPress::Armed);
         assert!(boost.tick(ms(t0, 300)));
         assert!(boost.cancel());
         assert!(!boost.is_active());
@@ -216,14 +255,14 @@ mod tests {
     fn a_missed_release_does_not_wedge_space() {
         let t0 = Instant::now();
         let mut boost = BoostState::default();
-        boost.press(t0);
+        press(&mut boost, t0);
         assert!(boost.tick(ms(t0, 200)));
         // Key repeats keep the hold alive.
-        assert_eq!(boost.press(ms(t0, 1_000)), BoostPress::Repeat);
-        assert_eq!(boost.press(ms(t0, 3_000)), BoostPress::Repeat);
+        assert_eq!(press(&mut boost, ms(t0, 1_000)), BoostPress::Repeat);
+        assert_eq!(press(&mut boost, ms(t0, 3_000)), BoostPress::Repeat);
         assert!(boost.is_active());
         // The release went elsewhere; the next press, seconds later, is new.
-        assert_eq!(boost.press(ms(t0, 6_000)), BoostPress::Armed);
+        assert_eq!(press(&mut boost, ms(t0, 6_000)), BoostPress::Armed);
         assert!(!boost.is_active(), "the stale boost ended");
         assert_eq!(boost.release(), BoostRelease::TogglePause);
     }
