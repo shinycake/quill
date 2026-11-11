@@ -104,6 +104,9 @@ def writer_problems(files, entries):
     return out
 
 
+# `open_reaction_selector` hands the menu over to the selector, which needs
+# the message's reaction options.
+MENU_CLOSERS = ("close_message_menu", "open_reaction_selector")
 MENU_CLOSE = re.compile(r"\bmessage_ui\.menu\s*=\s*None\b")
 
 
@@ -117,7 +120,7 @@ def menu_close_problems(files):
             continue
         body = strip_test_mods(text)
         for match in MENU_CLOSE.finditer(body):
-            if enclosing_fn(body, match.start()) == "close_message_menu":
+            if enclosing_fn(body, match.start()) in MENU_CLOSERS:
                 continue
             line = body.count("\n", 0, match.start()) + 1
             out.append(

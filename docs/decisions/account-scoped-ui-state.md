@@ -5486,7 +5486,8 @@ Thirty-four minor entries; each was proved against the integration branch first.
   (13-008, 13-164). The report's details field is emptied where the flow
   ends, `close_message_report` (11-p3-008).
 - **One place for a close.** Every message-menu close goes through
-  `close_message_menu` (it also resets the reaction strip's request);
+  `close_message_menu` (it also resets the reaction strip's request; the
+  reaction selector alone keeps it, as it shows those options);
   `scripts/single_writers.py` rejects a bare `message_ui.menu = None`
   (11-p4-006).
 - **Lost answers.** A translation job whose request is gone fails, so it no

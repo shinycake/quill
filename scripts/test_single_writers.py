@@ -51,6 +51,7 @@ class MenuClose(unittest.TestCase):
         files = {
             "src/ui/context_menu_keys.rs": "fn close_message_menu(&mut self) { self.message_ui.menu = None; }",
             "src/ui/demos/m.rs": "fn d(&mut self) { self.message_ui.menu = None; }",
+            "src/ui/media_panel/mod.rs": "fn open_reaction_selector(&mut self) { self.message_ui.menu = None; }",
         }
         self.assertEqual(sw.menu_close_problems(files), [])
 

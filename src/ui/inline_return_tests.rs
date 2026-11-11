@@ -140,13 +140,15 @@ fn an_old_bot_message_loaded_after_the_start_does_not_bring_the_user_back(cx: &m
     let (origin, bot_chat, bot_id) = app.read_with(&vcx, |app, _| {
         let session = app.session().expect("demo session");
         let origin = session.open_chat.expect("an open chat");
+        // The lowest id, so the pick does not depend on the map's order.
         let (chat, user) = session
             .chats
             .values()
-            .find_map(|chat| match &chat.kind {
+            .filter_map(|chat| match &chat.kind {
                 ChatKind::Private { user_id } if chat.id != origin => Some((chat.id.0, user_id.0)),
                 _ => None,
             })
+            .min()
             .expect("a private chat to stand for the bot");
         (origin, chat, user)
     });
@@ -161,11 +163,12 @@ fn an_old_bot_message_loaded_after_the_start_does_not_bring_the_user_back(cx: &m
             app.take_inline_start(ChatId(bot_chat), cx),
             "the start goes"
         );
-    });
-    // The user lands in the bot's chat; its history loads: an old answer
-    // of the bot, then the user's own start.
-    app.update_in(&mut vcx, |app, window, cx| {
+        // The user is in the bot's chat when the start goes: a frame
+        // between the two steps would otherwise see the trip's chat left.
         app.demo_session.as_mut().expect("a demo session").open_chat = Some(ChatId(bot_chat));
+    });
+    // Its history loads: an old answer of the bot, then the user's own start.
+    app.update_in(&mut vcx, |app, window, cx| {
         apply_json(app, &bot_message(bot_chat, 5, false, true));
         apply_json(app, &bot_message(bot_chat, 10, true, false));
         app.flush_inline_return(window, cx);
