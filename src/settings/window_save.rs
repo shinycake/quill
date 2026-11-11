@@ -131,7 +131,7 @@ mod tests {
         assert!(crate::settings::take_deferred_write_failure().is_some());
         saver.stage(state(4.));
         saver.write_staged(&path);
-        let staged = saver.staged.lock().ok().and_then(|s| s.clone());
+        let staged = saver.staged.lock().ok().and_then(|s| *s);
         assert_eq!(staged.map(|s| s.x), Some(4.), "the newest state stays");
         let good = dir.join("window_state.json");
         saver.write_staged(&good);

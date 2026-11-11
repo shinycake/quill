@@ -608,7 +608,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.login_request(
             RequestPurpose::RequestAuthenticationPasswordRecovery,
-            |extra| request_authentication_password_recovery(extra),
+            request_authentication_password_recovery,
         )
     }
 
