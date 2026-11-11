@@ -58,6 +58,21 @@ impl QuillApp {
         self.pick_video_for_set(pick, animation.file_id, None, window, cx);
     }
 
+    /// Fetch the picked sticker's file. False when the request was not sent:
+    /// nothing will arrive, so the pick ends with a note instead of waiting.
+    pub(super) fn ask_pick_file(&mut self, file_id: FileId, cx: &mut Context<Self>) -> bool {
+        if let Some(live) = self.live.as_mut()
+            && live.driver.download_file(file_id, 16).is_err()
+        {
+            self.set_note(StatusNote::error(tr(
+                keys::Q_OPS_COULD_NOT_DOWNLOAD_PLEASE_TRY,
+            )));
+            cx.notify();
+            return false;
+        }
+        true
+    }
+
     /// Open the video editor on the chosen file for the set, with `emoji`
     /// already picked (a sticker's own). A file not downloaded yet is
     /// fetched and the editor opens when it arrives
@@ -74,14 +89,7 @@ impl QuillApp {
         self.sticker_box.pick = None;
         self.sticker_box.pending = crate::ui::sticker_set_box::state::PickWait::None;
         let Some(path) = self.local_media_path(file_id) else {
-            if let Some(live) = self.live.as_mut()
-                && live.driver.download_file(file_id, 16).is_err()
-            {
-                // Nothing was asked for, so nothing will arrive.
-                self.set_note(StatusNote::error(tr(
-                    keys::Q_OPS_COULD_NOT_DOWNLOAD_PLEASE_TRY,
-                )));
-                cx.notify();
+            if !self.ask_pick_file(file_id, cx) {
                 return;
             }
             self.sticker_box.pending =
