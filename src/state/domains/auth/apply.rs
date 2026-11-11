@@ -37,17 +37,15 @@ impl Session {
                 // request writes the pending number/timeout (matched by
                 // `@extra`); a late answer for a superseded send has no
                 // pending entry and is ignored.
-                if matches!(
-                    pending.map(|p| p.purpose),
-                    Some(
+                if let Some(pending) = pending
+                    && matches!(
+                        pending.purpose,
                         RequestPurpose::SendPhoneNumberCode | RequestPurpose::ResendPhoneNumberCode
                     )
-                ) {
-                    self.auth_state.change_number.code_sent(
-                        pending.map(|p| p.id),
-                        phone_number,
-                        timeout,
-                    );
+                {
+                    self.auth_state
+                        .change_number
+                        .code_sent(pending.id, phone_number, timeout);
                 }
             }
             // Phase C2g: `joinVideoChat` returns `text` — the tgcalls

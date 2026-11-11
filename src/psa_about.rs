@@ -118,6 +118,14 @@ impl PsaAbout {
         self.toast = Toast::Hidden;
     }
 
+    /// A chat opened before the saved flags were in: it waits for them. A
+    /// box already on screen stays.
+    pub fn wait_for_load(&mut self, chat_id: ChatId) {
+        if !matches!(self.toast, Toast::Showing(_)) {
+            self.toast = Toast::Waiting(chat_id);
+        }
+    }
+
     /// Without a driver (demos, tests) there is nothing to read.
     pub fn restore(&mut self, saved: BTreeSet<i64>) {
         self.seen.extend(saved);
@@ -204,7 +212,7 @@ impl Session {
     pub(crate) fn show_promotion_about(&mut self, chat_id: ChatId, now: Instant) {
         self.chat_list.psa_about.hide();
         if !self.chat_list.psa_about.is_loaded() {
-            self.chat_list.psa_about.toast = Toast::Waiting(chat_id);
+            self.chat_list.psa_about.wait_for_load(chat_id);
             return;
         }
         self.show_about_if_due(chat_id, now);

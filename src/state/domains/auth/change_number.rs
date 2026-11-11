@@ -109,8 +109,8 @@ impl ChangeNumber {
     /// The send / resend answered with the code's target and timeout.
     /// Whether it was the one in flight (a late answer of a superseded
     /// send is not).
-    pub fn code_sent(&mut self, request: Option<RequestId>, phone: String, timeout: i32) -> bool {
-        if !self.send.settle(request) {
+    pub fn code_sent(&mut self, request: RequestId, phone: String, timeout: i32) -> bool {
+        if !self.send.settle(Some(request)) {
             return false;
         }
         self.code = Some(CodeSent { phone, timeout });
@@ -155,10 +155,10 @@ mod tests {
         let mut flow = ChangeNumber::default();
         flow.begin_send(RequestId(2));
         // A superseded send's answer and error change nothing.
-        assert!(!flow.code_sent(Some(RequestId(1)), "+1".into(), 60));
+        assert!(!flow.code_sent(RequestId(1), "+1".into(), 60));
         assert!(!flow.send_failed(Some(RequestId(1)), "late".into()));
         assert!(flow.send.in_flight() && flow.code.is_none());
-        assert!(flow.code_sent(Some(RequestId(2)), "+1".into(), 60));
+        assert!(flow.code_sent(RequestId(2), "+1".into(), 60));
         assert_eq!(flow.phone(), Some("+1"));
         assert_eq!(flow.timeout(), Some(60));
         assert!(!flow.busy());
@@ -168,7 +168,7 @@ mod tests {
     fn a_failure_goes_with_the_next_attempt_and_a_check_may_overlap_a_send() {
         let mut flow = ChangeNumber::default();
         flow.begin_send(RequestId(1));
-        flow.code_sent(Some(RequestId(1)), "+1".into(), 30);
+        flow.code_sent(RequestId(1), "+1".into(), 30);
         flow.begin_send(RequestId(2));
         flow.begin_check(RequestId(3));
         assert!(flow.send.in_flight() && flow.check.in_flight());

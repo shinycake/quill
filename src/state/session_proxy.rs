@@ -157,7 +157,7 @@ impl Session {
         match purpose {
             RequestPurpose::GetProxies => {
                 if pending.is_some_and(|p| self.settings.proxy.fetch.answers(p.id)) {
-                    self.settings.proxy.fetch = ProxyFetch::Idle;
+                    self.settings.proxy.fetch = ProxyFetch::Failed;
                     self.settings.proxy.error =
                         Some(sessions_error_line("load the proxy list", err));
                 }

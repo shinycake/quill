@@ -134,22 +134,6 @@ impl<L> Listing<L> {
         *self = Self::Idle(list);
     }
 
-    /// Forget the error line, keeping the list; a request out is left.
-    pub fn clear_error(&mut self)
-    where
-        L: Default,
-    {
-        if let Self::Failed { append, .. } = self {
-            let append = *append;
-            let list = std::mem::take(self).into_list();
-            *self = if append {
-                Self::Ready(list)
-            } else {
-                Self::Idle(list)
-            };
-        }
-    }
-
     /// Drop everything for a new owner or filter.
     pub fn reset(&mut self)
     where

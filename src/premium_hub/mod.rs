@@ -896,16 +896,14 @@ impl PremiumHub {
         });
     }
 
-    /// A mutation goes out; the error line of the last one is gone.
+    /// A mutation goes out (`gifts_error` shows its line over a page's).
     pub fn begin_gift_mutation(&mut self) {
         self.gift_mutation = GiftMutation::Sending;
-        self.received.clear_error();
     }
 
-    /// The mutation answered (or never left): unlocked, no error line.
+    /// The mutation answered (or never left): unlocked.
     pub fn end_gift_mutation(&mut self) {
         self.gift_mutation = GiftMutation::Idle;
-        self.received.clear_error();
     }
 
     /// The mutation failed: unlocked with this line.

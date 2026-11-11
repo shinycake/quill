@@ -664,6 +664,9 @@ pub enum ProxyFetch {
     Stale,
     /// This request is the one whose answer replaces the list.
     Loading(RequestId),
+    /// The request could not be sent (or its answer was an error): nothing
+    /// asks again by itself, only the dialog's open / Refresh (`Retry`).
+    Failed,
 }
 
 impl ProxyFetch {

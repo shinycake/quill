@@ -53,18 +53,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(RequestPurpose::GetProxies, None);
-        let before = self.session.settings.proxy.fetch;
         self.session.settings.proxy.fetch = ProxyFetch::Loading(extra);
         match self.sender.send_json(&get_proxies(extra)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                // A first fetch that never left is not retried in a tight
-                // loop; an owed refetch stays owed.
-                self.session.settings.proxy.fetch = match before {
-                    ProxyFetch::Stale => ProxyFetch::Stale,
-                    _ => ProxyFetch::Idle,
-                };
+                // Not retried by the tick, owed or not: the dialog's
+                // open / Refresh asks again.
+                self.session.settings.proxy.fetch = ProxyFetch::Failed;
                 Err(err)
             }
         }

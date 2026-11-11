@@ -5,6 +5,7 @@
 
 use super::appearance::{ShareThemeBackdrop, SwatchKey};
 use super::color::Rgb;
+use crate::ids::RequestId;
 use crate::premium_hub::upgraded::{Collectible, parse_collectible};
 use crate::telegram::envelope::{ParsedFile, StickerContent};
 use serde_json::{Value, json};
@@ -520,14 +521,20 @@ pub fn gifts_layout(gifts: &ThemeGifts) -> GiftsLayout {
 /// after the last request.
 pub const BACKDROPS_REFRESH_SECS: i64 = 3600;
 
+/// A request that has not answered this long is given up on, so a dropped
+/// answer cannot keep the list from being asked for again.
+pub const BACKDROPS_LOAD_SECS: i64 = 60;
+
 /// Where the backdrop list is: never asked, on its way, or answered.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum BackdropsStage {
     /// Never asked, or the last request failed (the next box asks again).
     #[default]
     Idle,
-    /// A request sent at this unix time is on its way.
-    Loading { at: i64 },
+    /// The request `id`, sent at this unix time, is on its way. Only its
+    /// own answer or error leaves the stage; if neither comes, it expires
+    /// after [`BACKDROPS_LOAD_SECS`].
+    Loading { id: RequestId, at: i64 },
     /// The list was asked for at this unix time and the answer is in.
     Ready { at: i64 },
 }
@@ -541,31 +548,36 @@ pub struct Backdrops {
 
 impl Backdrops {
     /// tdesktop `backdropsValue`: ask when never asked, or an hour after
-    /// the last request, and never twice at once.
+    /// the last request, and never twice at once (until a request that
+    /// never answered expires).
     pub fn due(&self, now: i64) -> bool {
         match self.stage {
             BackdropsStage::Idle => true,
-            BackdropsStage::Loading { .. } => false,
+            BackdropsStage::Loading { at, .. } => now.saturating_sub(at) >= BACKDROPS_LOAD_SECS,
             BackdropsStage::Ready { at } => now.saturating_sub(at) >= BACKDROPS_REFRESH_SECS,
         }
     }
 
-    pub fn start(&mut self, now: i64) {
-        self.stage = BackdropsStage::Loading { at: now };
+    /// The request `id` goes out; an older one still out is forgotten.
+    pub fn start(&mut self, id: RequestId, now: i64) {
+        self.stage = BackdropsStage::Loading { id, at: now };
     }
 
-    /// A refresh keeps the old list until the new one is here.
-    pub fn accept(&mut self, list: Vec<ShareThemeBackdrop>) {
-        self.list = list;
-        self.stage = match self.stage {
-            BackdropsStage::Loading { at } | BackdropsStage::Ready { at } => {
-                BackdropsStage::Ready { at }
-            }
-            BackdropsStage::Idle => BackdropsStage::Ready { at: 0 },
-        };
+    /// The answer of request `id`, kept with the old list replaced. An
+    /// answer of any other request is dropped.
+    pub fn accept(&mut self, id: RequestId, list: Vec<ShareThemeBackdrop>) {
+        if let BackdropsStage::Loading { id: asked, at } = self.stage
+            && asked == id
+        {
+            self.list = list;
+            self.stage = BackdropsStage::Ready { at };
+        }
     }
 
-    pub fn fail(&mut self) {
-        self.stage = BackdropsStage::Idle;
+    /// Request `id` failed (or could not be sent): the next box asks again.
+    pub fn fail(&mut self, id: RequestId) {
+        if matches!(self.stage, BackdropsStage::Loading { id: asked, .. } if asked == id) {
+            self.stage = BackdropsStage::Idle;
+        }
     }
 }

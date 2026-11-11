@@ -9,8 +9,9 @@ use crate::peer_qr::state::{
     PeerQrBox, QrAction, QrEffect, QrEnv, QrPanel, QrPeer, QrSubject, QrToast, SaveTicket,
 };
 use crate::peer_qr::theme::{
-    BACKDROPS_REFRESH_SECS, Backdrops, GiftsLayout, SaveRights, ShareTheme, ThemeChoice,
-    ThemeEmoji, ThemeGift, ThemeGifts, can_save, gifts_layout, parse_share_theme,
+    BACKDROPS_LOAD_SECS, BACKDROPS_REFRESH_SECS, Backdrops, BackdropsStage, GiftsLayout,
+    SaveRights, ShareTheme, ThemeChoice, ThemeEmoji, ThemeGift, ThemeGifts, can_save, gifts_layout,
+    parse_share_theme,
 };
 use serde_json::{Value, json};
 
@@ -207,19 +208,51 @@ fn the_gifts_request_lists_only_owned_upgraded_gifts() {
 fn backdrops_refresh_an_hour_after_the_last_request() {
     let mut backdrops = Backdrops::default();
     assert!(backdrops.due(0));
-    backdrops.start(100);
+    backdrops.start(RequestId(1), 100);
     assert!(
-        !backdrops.due(100 + BACKDROPS_REFRESH_SECS),
+        !backdrops.due(100 + BACKDROPS_LOAD_SECS - 1),
         "one at a time"
     );
-    backdrops.accept(vec![backdrop(1, DEFAULT_CENTER, DEFAULT_EDGE)]);
+    backdrops.accept(
+        RequestId(1),
+        vec![backdrop(1, DEFAULT_CENTER, DEFAULT_EDGE)],
+    );
     assert!(!backdrops.due(100 + BACKDROPS_REFRESH_SECS - 1));
     assert!(backdrops.due(100 + BACKDROPS_REFRESH_SECS));
-    backdrops.start(5_000);
+    backdrops.start(RequestId(2), 5_000);
     assert_eq!(backdrops.list.len(), 1, "kept during a refresh");
-    backdrops.fail();
+    backdrops.fail(RequestId(2));
     assert!(backdrops.due(5_001), "a failure asks again at once");
     assert_eq!(backdrops.list.len(), 1);
+}
+
+#[test]
+fn a_backdrops_answer_of_another_request_changes_nothing() {
+    let mut backdrops = Backdrops::default();
+    backdrops.start(RequestId(1), 100);
+    backdrops.start(RequestId(2), 200);
+    // The first request's answer and error arrive late.
+    backdrops.accept(
+        RequestId(1),
+        vec![backdrop(1, DEFAULT_CENTER, DEFAULT_EDGE)],
+    );
+    backdrops.fail(RequestId(1));
+    assert!(backdrops.list.is_empty());
+    assert!(matches!(
+        backdrops.stage,
+        BackdropsStage::Loading {
+            id: RequestId(2),
+            ..
+        }
+    ));
+}
+
+#[test]
+fn a_backdrops_request_that_never_answers_expires() {
+    let mut backdrops = Backdrops::default();
+    backdrops.start(RequestId(1), 100);
+    assert!(!backdrops.due(100 + BACKDROPS_LOAD_SECS - 1));
+    assert!(backdrops.due(100 + BACKDROPS_LOAD_SECS), "asked again");
 }
 
 #[test]
