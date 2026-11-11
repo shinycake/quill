@@ -91,14 +91,12 @@ agent_bridge.driver | the UI driver runs agents' input commands one at a time fo
 takeover.wake_at | when the takeover banner next redraws
 connect.generation | which prepared connection may open
 connect.closed_noted | the generation whose close was noted
-disk.state | the disk space level, for the data folder
+disk.stage | the disk space level, a doubted drop below close and a call holding the on-screen client at Full, for the data folder
 disk.free | the free space last read
 disk.floors | the floors for that level
-disk.confirming | the space warning is being confirmed
 disk.waited | how long the disk has been short
 disk.unwritable | the data folder cannot be written
 disk.screen_refused | the on-screen client was refused for space; `disk.on_screen` names it
-disk.held_for_call | the on-screen client is held open for its call; checked at every reading against `disk.on_screen`
 disk.full_notices | how many full-disk notices were shown
 disk.cache_folder | the cache folder measured
 disk.database_bytes | the database size measured

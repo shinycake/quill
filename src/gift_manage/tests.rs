@@ -341,3 +341,37 @@ fn an_auction_gift_is_marked_limited() {
     assert!(auction.gift.limited);
     assert!(!auction.can_delete(true));
 }
+
+#[test]
+fn a_collection_change_while_the_list_loads_asks_again_after_it() {
+    use crate::gift_manage::CollectionsFetch;
+    let mut fetch = CollectionsFetch::Loading;
+    // A collection changed while the request was out: the list is stale.
+    fetch = match fetch {
+        CollectionsFetch::Loading => CollectionsFetch::Stale,
+        other => other,
+    };
+    // The answer of the request in flight does not clear it.
+    fetch.settle();
+    assert!(fetch.is_stale());
+    let mut loading = CollectionsFetch::Loading;
+    loading.settle();
+    assert_eq!(loading, CollectionsFetch::Idle);
+}
+
+#[test]
+fn only_the_send_the_dialog_waits_for_leaves_sending() {
+    use crate::gift_manage::{SendGiftState, SendStage};
+    use crate::ids::RequestId;
+    let mut send = SendGiftState {
+        stage: SendStage::Sending(RequestId(5)),
+        ..Default::default()
+    };
+    assert!(send.sending() && send.done_line().is_none());
+    send.stage = SendStage::Sent("Gift sent.".into());
+    assert!(!send.sending());
+    assert_eq!(send.done_line(), Some("Gift sent."));
+    assert_eq!(send.error_line(), None);
+    send.stage = SendStage::Failed("no".into());
+    assert_eq!(send.error_line(), Some("no"));
+}

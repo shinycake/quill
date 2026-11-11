@@ -9,6 +9,7 @@
 
 use super::*;
 use crate::ui::status_note::StatusNote;
+use crate::ui::stories_state::PanelKind;
 use quill::lang::{keys, tr};
 use quill::state::StoryManageOutcome;
 
@@ -108,7 +109,7 @@ impl QuillApp {
             self.stories.with_viewer_ui(|open| {
                 open.cover_request = None;
                 if done == StoryManageOutcome::Saved {
-                    open.cover = None;
+                    open.close(PanelKind::Cover);
                 }
             });
         }
@@ -119,7 +120,7 @@ impl QuillApp {
                 let story = self
                     .stories
                     .viewer_ui()
-                    .privacy_edit
+                    .privacy_edit()
                     .as_ref()
                     .map(|edit| (edit.chat_id, edit.story_id));
                 self.show_story_manage_failure(request, story);
@@ -127,7 +128,7 @@ impl QuillApp {
             self.stories.with_viewer_ui(|open| {
                 open.privacy_request = None;
                 if done == StoryManageOutcome::Saved {
-                    open.privacy_edit = None;
+                    open.close(PanelKind::Privacy);
                 }
             });
         }

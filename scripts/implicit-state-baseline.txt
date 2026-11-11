@@ -46,8 +46,6 @@ DestRow::saved
 DragSelect::pending
 Drawn::leaving
 DropTopic::load_failed
-EmojiStyleUi::started
-EmojiStyleUi::started+file_error
 FastShareFacts::sent
 FieldResult::finished
 FirstRunPrefs::completed
@@ -59,7 +57,6 @@ GifPanel::search_failed
 GifPanel::search_loading
 GiftCodeLookup::loading
 GiftCodeLookup::loading+error
-GiftManageState::collections_loading
 GiftPurchase::completed
 GiftPurchase::loading
 GiftPurchase::sending

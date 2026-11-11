@@ -119,9 +119,10 @@ pub struct Page<T> {
 /// only when its answer carries the request the list waits for, so a late
 /// answer of an earlier list (the Money page was closed and opened again)
 /// lands nowhere.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Paged<T> {
     /// Never asked.
+    #[default]
     Idle,
     /// `request` asks for the first page, or the next one (`append`).
     Loading {
@@ -136,12 +137,6 @@ pub enum Paged<T> {
         error: String,
         shown: Option<Page<T>>,
     },
-}
-
-impl<T> Default for Paged<T> {
-    fn default() -> Self {
-        Self::Idle
-    }
 }
 
 impl<T> Paged<T> {

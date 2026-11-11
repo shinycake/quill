@@ -588,7 +588,7 @@ fn the_emoji_panel_closes_with_the_reply_row(cx: &mut TestAppContext) {
     app.read_with(vcx, |app, _| {
         assert!(!app.story_reply_panel_active());
         assert!(
-            !app.stories.viewer_ui().reply_open,
+            !app.stories.viewer_ui().reply_open(),
             "the reply row is not left open"
         );
     });
@@ -714,7 +714,7 @@ fn a_stream_in_pip_leaves_the_header_of_another_story_alone(cx: &mut TestAppCont
     // live comment field.
     app.update(vcx, |app, cx| {
         if let Some(open) = app.stories.viewer_ui_mut() {
-            open.reply_open = true;
+            open.open_reply();
         }
         app.toggle_story_reply_panel(crate::ui::media_panel::PanelTab::Emoji, cx);
     });

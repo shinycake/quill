@@ -201,7 +201,7 @@ fn a_story_reply_finished_after_a_switch_is_not_sent(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     vcx.update(|window, cx| window.render_frame(cx));
     app.update(&mut vcx, |app, _| {
-        app.stories.with_viewer_ui(|open| open.reply_open = true)
+        app.stories.with_viewer_ui(|open| open.open_reply())
     });
     fake_microphone(&app, &mut vcx);
     start(&app, CaptureFor::StoryReply, &mut vcx);

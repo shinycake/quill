@@ -3,8 +3,8 @@
 //! lists stale and the connect driver refetches them from the server.
 use crate::earn::EarnErrorHint;
 use crate::gift_manage::{
-    ExportError, ExportSend, GiftListFetch, GiftManagePayload, GiftManageState, ProbeOutcome,
-    TransferStage,
+    CollectionsFetch, ExportError, ExportSend, GiftEvent, GiftListFetch, GiftManagePayload,
+    GiftManageState, ProbeOutcome, SendStage, TransferStage,
 };
 use crate::lang::{keys, tr_with};
 use crate::state::*;
@@ -32,6 +32,7 @@ impl Session {
         let Some(RequestPurpose::Payments(purpose)) = pending.map(|p| p.purpose) else {
             return;
         };
+        let request = pending.map(|p| p.id);
         match (payload, purpose) {
             (
                 GiftManagePayload::Collections(list),
@@ -44,7 +45,7 @@ impl Session {
                     list.iter().flat_map(|c| c.files.iter().cloned()).collect();
                 self.remember_files(&files);
                 let manage = &mut self.payments.gifts_manage;
-                manage.collections_loading = false;
+                manage.collections_fetch.settle();
                 manage.collections = list;
                 if manage.active_collection != 0
                     && manage.collection(manage.active_collection).is_none()
@@ -54,17 +55,17 @@ impl Session {
                 }
             }
             (GiftManagePayload::Collection(_), PaymentsPurpose::ChangeGiftCollection) => {
-                self.payments.gifts_manage.collections_stale = true;
+                self.payments.gifts_manage.collections_fetch = CollectionsFetch::Stale;
                 self.payments
                     .gifts_manage
                     .close_flow_answered_by(PaymentsPurpose::ChangeGiftCollection);
-                self.payments.hub.gift_mutating = false;
+                self.payments.hub.gift_mutation.settle(request);
                 self.payments.hub.gifts_error = None;
                 self.payments.hub.gifts_stale = true;
             }
             (GiftManagePayload::Upgraded(summary), PaymentsPurpose::UpgradeGift) => {
                 let hub = &mut self.payments.hub;
-                hub.gift_mutating = false;
+                hub.gift_mutation.settle(request);
                 hub.gifts_error = None;
                 hub.gift_selected = None;
                 hub.gifts_stale = true;
@@ -112,17 +113,18 @@ impl Session {
         let Some(RequestPurpose::Payments(purpose)) = pending.map(|p| p.purpose) else {
             return;
         };
+        let request = pending.map(|p| p.id);
         let hub = &mut self.payments.hub;
         let manage = &mut self.payments.gifts_manage;
         match purpose {
             PaymentsPurpose::SetPinnedGifts => {
-                hub.gift_mutating = false;
+                hub.gift_mutation.settle(request);
                 hub.gifts_error = None;
                 hub.gifts_stale = true;
                 manage.note = Some("Pinned gifts updated.".into());
             }
             PaymentsPurpose::TransferGift => {
-                hub.gift_mutating = false;
+                hub.gift_mutation.settle(request);
                 hub.gifts_error = None;
                 hub.gifts_stale = true;
                 hub.tx_loaded = false;
@@ -137,7 +139,7 @@ impl Session {
                     _ => None,
                 };
                 if let Some((done, gift_id)) = sent_by {
-                    manage.transferred = Some(done);
+                    manage.events.push(GiftEvent::Transferred(done));
                     manage.flow = None;
                     if hub.gift_selected.as_deref() == Some(gift_id.as_str()) {
                         hub.gift_selected = None;
@@ -146,28 +148,28 @@ impl Session {
                 manage.note = Some("Gift transferred.".into());
             }
             PaymentsPurpose::SetGiftResalePrice => {
-                hub.gift_mutating = false;
+                hub.gift_mutation.settle(request);
                 hub.gifts_error = None;
                 hub.gifts_stale = true;
                 manage.close_flow_answered_by(PaymentsPurpose::SetGiftResalePrice);
                 manage.note = Some("Resale price updated.".into());
             }
             PaymentsPurpose::DeleteGiftCollection => {
-                hub.gift_mutating = false;
+                hub.gift_mutation.settle(request);
                 hub.gifts_error = None;
                 hub.gifts_stale = true;
                 manage.close_flow_answered_by(PaymentsPurpose::DeleteGiftCollection);
                 manage.active_collection = 0;
-                manage.collections_stale = true;
+                manage.collections_fetch = CollectionsFetch::Stale;
                 manage.note = Some("Collection deleted.".into());
             }
-            PaymentsPurpose::DeleteGift => self.finish_gift_delete(),
+            PaymentsPurpose::DeleteGift => self.finish_gift_delete(request),
             PaymentsPurpose::SendStarGift => {
                 // Stars were spent whichever dialog asked.
                 hub.tx_loaded = false;
                 let ours = manage.send.waits_for(pending);
                 if ours {
-                    manage.send.request = None;
+                    manage.send.stage = SendStage::Idle;
                 }
                 // A box closed or rebuilt for another recipient while it was
                 // out has nobody to show it: Stars moved, so say so.
@@ -178,10 +180,9 @@ impl Session {
                     ));
                     return;
                 }
-                manage.send.error = None;
                 manage.send.selected = None;
-                manage.send.done =
-                    Some(crate::lang::tr(crate::lang::keys::Q_MONEY_GIFT_SENT).into());
+                manage.send.stage =
+                    SendStage::Sent(crate::lang::tr(crate::lang::keys::Q_MONEY_GIFT_SENT).into());
             }
             _ => {}
         }
@@ -206,10 +207,10 @@ impl Session {
     /// `deleteGift` succeeded. tdesktop `DeleteStarGift`:
     /// `notifyGiftUpdate(Delete)` drops the gift from the grid and the
     /// box, then the toast.
-    pub fn finish_gift_delete(&mut self) {
+    pub fn finish_gift_delete(&mut self, request: Option<RequestId>) {
         let hub = &mut self.payments.hub;
         let manage = &mut self.payments.gifts_manage;
-        hub.gift_mutating = false;
+        hub.gift_mutation.settle(request);
         hub.gifts_error = None;
         if let Some(id) = manage.deleting.take() {
             let before = hub.gifts.len();
@@ -221,11 +222,11 @@ impl Session {
                 hub.gift_selected = None;
             }
         }
-        manage.collections_stale = true;
+        manage.collections_fetch = CollectionsFetch::Stale;
         // The list may have been reopened while the request was out: the
         // server's list stays the source of truth.
         hub.gifts_stale = true;
-        manage.deleted = true;
+        manage.events.push(GiftEvent::Deleted);
     }
 
     /// The `httpUrl` of `getUpgradedGiftWithdrawalUrl`: tdesktop opens it
@@ -240,7 +241,7 @@ impl Session {
         }
         manage.flow = None;
         if !url.is_empty() {
-            manage.export_url = Some(url);
+            manage.events.push(GiftEvent::ExportUrl(url));
         }
     }
 
@@ -256,7 +257,12 @@ impl Session {
             return;
         }
         if has_password {
-            manage.export_unlocked = true;
+            if let Some(picker) = manage.transfer_mut() {
+                picker.stage = TransferStage::Password {
+                    send: ExportSend::Unlocked,
+                    error: None,
+                };
+            }
         } else if let Some(picker) = manage.transfer_mut() {
             picker.stage = TransferStage::Password {
                 send: ExportSend::Idle,
@@ -347,14 +353,14 @@ impl Session {
             PaymentsPurpose::GetGiftOption(_) => manage.limits_ask.fail(pending.map(|p| p.id)),
             PaymentsPurpose::GetGiftCollections { owner } => {
                 if self.payments.hub.gifts_owner == Some(owner) {
-                    manage.collections_loading = false;
+                    manage.collections_fetch.settle();
                 }
             }
             PaymentsPurpose::GetAvailableGifts if !manage.send.asked_gifts(pending) => {}
             PaymentsPurpose::GetPremiumGiftOptions if !manage.send.asked_premium(pending) => {}
             PaymentsPurpose::GetAvailableGifts => {
                 manage.send.gifts_fetch = GiftListFetch::Failed;
-                manage.send.error = Some(format!("Couldn't load the gifts: {reason}"));
+                manage.send.stage = SendStage::Failed(format!("Couldn't load the gifts: {reason}"));
             }
             PaymentsPurpose::GetPremiumGiftOptions => {
                 manage.send.premium_fetch = GiftListFetch::Failed;
@@ -366,11 +372,17 @@ impl Session {
                     picker
                         .transfer_failed(request, format!("Couldn't transfer the gift: {reason}"));
                 }
-                self.payments.hub.gift_mutating = false;
+                self.payments
+                    .hub
+                    .gift_mutation
+                    .settle(pending.map(|p| p.id));
             }
             PaymentsPurpose::DeleteGift => {
                 manage.deleting = None;
-                self.payments.hub.gift_mutating = false;
+                self.payments
+                    .hub
+                    .gift_mutation
+                    .settle(pending.map(|p| p.id));
                 manage.note = Some(tr_with(
                     keys::Q_MONEY_COULD_NOT_DELETE_THE_GIFT,
                     &[("reason", &reason)],
@@ -383,11 +395,11 @@ impl Session {
             PaymentsPurpose::SendStarGift => {
                 let ours = manage.send.waits_for(pending);
                 if ours {
-                    manage.send.request = None;
+                    manage.send.stage = SendStage::Idle;
                 }
                 let text = format!("Couldn't send the gift: {reason}. The gift may be sold out.");
                 if ours && manage.send.open {
-                    manage.send.error = Some(text);
+                    manage.send.stage = SendStage::Failed(text);
                 } else {
                     self.payments
                         .notices
@@ -395,7 +407,10 @@ impl Session {
                 }
             }
             _ => {
-                self.payments.hub.gift_mutating = false;
+                self.payments
+                    .hub
+                    .gift_mutation
+                    .settle(pending.map(|p| p.id));
                 self.payments.hub.gifts_error = Some(format!("Couldn't update the gift: {reason}"));
             }
         }

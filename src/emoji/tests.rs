@@ -536,3 +536,24 @@ fn a_failed_custom_emoji_lookup_asks_again() {
     assert!(session.custom_emoji_needs_resolving(42));
     assert!(session.stickers.emoji.status_note.is_none());
 }
+
+#[test]
+fn a_set_change_is_settled_only_by_its_own_request() {
+    use crate::emoji::SetMutation;
+    use crate::ids::RequestId;
+    let mut mutation = SetMutation::Running {
+        request: RequestId(3),
+        set_id: 9,
+        installed: true,
+    };
+    assert_eq!(mutation.running(), Some((9, true)));
+    assert!(mutation.waits_for(Some(RequestId(3))));
+    assert!(!mutation.waits_for(Some(RequestId(4))), "another request");
+    assert!(!mutation.waits_for(None));
+    // A running change keeps its stage when an old failure is forgotten.
+    mutation.forget_failure();
+    assert!(mutation.is_running());
+    mutation = SetMutation::Failed;
+    mutation.forget_failure();
+    assert_eq!(mutation, SetMutation::Idle);
+}

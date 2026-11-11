@@ -513,4 +513,21 @@ mod tests {
         assert_eq!(load_data_storage_prefs(&paths), prefs);
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    #[test]
+    fn the_seed_persists_as_the_bool_the_account_folder_always_held() {
+        let mut old = serde_json::to_value(DataStoragePrefs::default()).expect("serializes");
+        old["seeded"] = serde_json::json!(true);
+        old["storage_limits_seeded"] = serde_json::json!(true);
+        let seeded: DataStoragePrefs = serde_json::from_value(old).expect("an old file loads");
+        assert!(seeded.seeded.is_seeded() && seeded.storage_limits_seeded.is_seeded());
+        // A request in flight is never written as known.
+        let prefs = DataStoragePrefs {
+            seeded: Seed::InFlight,
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&prefs).expect("serializes");
+        assert_eq!(json["seeded"], serde_json::json!(false));
+        assert!(Seed::from(true).is_seeded() && !Seed::from(false).is_in_flight());
+    }
 }

@@ -6784,3 +6784,52 @@ Thirty-four minor entries; each was proved against the integration branch first.
   process-wide (`next_query_token`). 13-165: tdesktop toasts the hide at
   once (the bar is optimistic here too, with `RequestRollback`), and the
   local hidden flag is already keyed by account.
+
+### Sweep fixes (is-06)
+
+Thirty-seven implicit-state entries. Each struct was read with every reader
+and writer of its fields; a field pair that formed one stage became one enum
+whose variants carry the data, with a way out of every stage.
+
+| ids | what |
+| --- | --- |
+| 03-017, 06-013 | `ThreadStatus` is the whole open sequence: `Resolving`, `SwitchingChat`, `Starting`, `LoadingHistory`, `Ready`, `ReloadNeeded`, `Failed`. `needs_chat_switch`, `reading_started` and `reload_needed` are gone. The resolve answer is still matched by the thread's origin chat and message. |
+| 03-006, 07-009 | `Paged<T>` is `Idle`, `Loading { request, append, shown }`, `Ready`, `Failed { error, shown }`. A page lands only when it carries the request the list waits for; `TonWalletPurpose::{Transactions, Nfts}` lost `append`. A request that cannot be sent leaves the list as it was. |
+| 07-008 | `MoneyPage.detail` is `MoneyDetail { Overview, Tx { tx, hint }, Nft, Lookup { request }, LookupFailed }`; `selected_tx`, `selected_nft`, `tx_lookup` and `hint_open` are gone. A tab switch returns to the overview. |
+| 03-015 | `ConnectDriver.handshake` is `NotSent` or `Sent(request)`. |
+| 03-016 | `Debounce<T>` owns the token counter and the value. The typed searches and the draft save (`HeldDraft::{Quiet, Kept}`) use it; the draft clock comes from the stage. |
+| 03-003 (part), 06-025, 14-034 | `WebApps.grossing` is `Fetch<Vec<i64>>`; a failed list says so on the Apps tab and the next open of the tab asks again. |
+| 03-018, 09-X020 | `storage_stats` is a `Fetch<StorageStats>`. The seeds of the auto-download presets and of the cache limits are `Seed::{Unseeded, InFlight, Seeded}`, stored as the bool the account folder always held. `auto_download_presets_loading` and `storage_limits_seed_sent` are gone. |
+| 09-043 | `StorageScroll` is `Idle`, `Requested`, `WaitingSettled`, `Placed`. |
+| 03-037 | `DiskStage` is `Healthy`, `Low`, `Doubt`, `Full`, `FullHeld`; `confirmed` is a method of it. `screen_refused` and `start_refused` stay: either can wait in any stage and each leaves by its own retry. |
+| 03-031, 03-030, 03-021, 03-022, 03-029 | `EarnLimits.app_config` is a `Fetch<()>` (a failed one is asked by the next panel to open); `Load::Unavailable` replaces `ton_unavailable`; `WithdrawStep::{Password, PasswordSending}`; the parked join box lives in `Recipients::Loading`; `EarnState.effects` carries `SetupDone` to the UI. |
+| 03-032 | `SetMutation` (settled by its own request), `StatusPicker` (profile or chat appearance) and `StatusChange` (the `setEmojiStatus` in flight). |
+| 03-036 | `EmojiAnimations` holds one `Pack` stage; the messages that wait live only in the stages that still expect a set, and a failed load drops them. |
+| 03-038 | The startup read (`Startup`) and "Install from file" (`FileInstall`) are stages; `started`, `file_task` and `file_error` are gone. |
+| 03-051, 10-024 | `SendGiftState.stage` is `Idle`, `Sending(request)`, `Sent`, `Failed`; the stage is entered once the request is out. |
+| 03-052, 10-016 | `GiftManageState.events` replaces the one-shot `deleted`, `transferred` and `export_url`; `CollectionsFetch` replaces `collections_loading` and `collections_stale`. |
+| 05-117 | `GiftMutation::Busy(request)` replaces `gift_mutating` and is freed only by that request; `export_unlocked` is `ExportSend::Unlocked`. |
+| 13-124, 13-096, 13-148 | `StoryViewerUi.panel` is one `ViewerPanel`: none, reaction picker, reply row (with its media panel), viewers, stats, report, share, close friends (its stage inside), privacy editor, cover picker. A step to another story keeps only the close-friends editor. |
+| 13-126, 13-097 | `StoryTick` owns the 100 ms task; the stealth box owns its tick. |
+
+- **Skipped.** 03-009 and 06-018: the insights forwards and the story search
+  were already `ForwardsPage` and `PageFetch`. 13-150: the statistics
+  panel's forwards are that same `ForwardsPage`; `Asked` is a scroll
+  throttle. 07-010: the three wallet requests were already `Fetch<()>`.
+  03-020: `JoinStage` and `BoxSend` already carry the request. 13-148:
+  the close-friends stage was already `CloseFriendsStage` (it now sits inside
+  `ViewerPanel::CloseFriends`); `page_op` is the request of the status line
+  under the story, which also shows Hide and the profile toggle.
+- **Left as they are, on purpose.** `menu_open` mirrors the kit menu's own
+  visibility and can be up over any panel. `cover_request` and
+  `privacy_request` are two calls that can be out together and outlive their
+  panel. The rest of 03-003 (open result, write access, emoji access, phone
+  share, data sent, attachment toggles): each is an answer keyed by the bot
+  or request that asked, cleared by the next ask and taken by the flow, and
+  `WebApps.pending` is a list of independent launches. `EmojiPanel.open`
+  is the box's visibility with a closer in the `Farewell`; `status_note` is
+  a result line.
+- **Behaviour that changed.** Opening a story panel replaces the open reply
+  row and reaction picker too (they used to stack with the other panels).
+  A failed apps list on the Apps tab shows "Couldn't load apps".
+

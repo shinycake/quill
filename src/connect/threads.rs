@@ -135,10 +135,10 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     fn begin_thread_reading(&mut self, chat_id: ChatId) {
         self.session.prepare_thread_marks(chat_id);
-        if let Some(thread) = self.session.threads.thread.as_mut() {
-            if thread.status.needs_start() {
-                thread.status = ThreadStatus::LoadingHistory;
-            }
+        if let Some(thread) = self.session.threads.thread.as_mut()
+            && thread.status.needs_start()
+        {
+            thread.status = ThreadStatus::LoadingHistory;
         }
     }
 
@@ -198,10 +198,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        if let Some(thread) = self.session.threads.thread.as_mut() {
-            if thread.status == ThreadStatus::ReloadNeeded {
-                thread.status = ThreadStatus::Ready;
-            }
+        if let Some(thread) = self.session.threads.thread.as_mut()
+            && thread.status == ThreadStatus::ReloadNeeded
+        {
+            thread.status = ThreadStatus::Ready;
         }
         Ok(Some(extra))
     }
