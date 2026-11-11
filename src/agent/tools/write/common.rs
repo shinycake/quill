@@ -568,8 +568,9 @@ fn is_new_peer(ctx: &Ctx, target: &Target) -> bool {
 
 /// Let `count` messages to `target` go out: refuses paid chats, waits for
 /// a turn in the paced queue every agent write shares, then checks that
-/// Agent access is still on.
-pub fn admit(ctx: &Ctx, target: &Target, count: u32) -> Result<(), ToolError> {
+/// Agent access is still on. The turn counts only once the caller commits
+/// it after the send went out.
+pub fn admit(ctx: &Ctx, target: &Target, count: u32) -> Result<pacing::Turn, ToolError> {
     if stars_per_message(ctx, target.chat_id)? > 0 {
         return Err(paid_refusal());
     }
