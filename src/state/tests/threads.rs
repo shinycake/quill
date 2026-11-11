@@ -825,3 +825,27 @@ fn only_the_first_pages_own_answer_or_error_leaves_loading_history() {
     );
     assert_eq!(status(&session), ThreadStatus::Ready);
 }
+
+#[test]
+fn a_page_asked_by_a_replaced_view_does_not_land_in_the_new_one() {
+    let (mut session, sink, seq) = resolved();
+    let page = session.request(
+        RequestPurpose::GetMessageThreadHistory { message_id: 101 },
+        Some(ChatId(13)),
+    );
+    // The same post is opened again before the first page answered.
+    session.begin_thread(ChatId(13), MessageId(101));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":1,"messages":[{}]}}"#,
+            page.0,
+            msg(503, 14, 501, "old window")
+        ),
+    );
+    let thread = session.threads.thread.as_ref().unwrap();
+    assert!(!thread.history.messages.contains_key(&503));
+    assert_eq!(thread.status, ThreadStatus::Resolving);
+}

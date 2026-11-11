@@ -2,7 +2,7 @@
 //! reported when it comes back on screen.
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::{AccountKey, ChatId, MessageId};
-use crate::state::{CallbackAnswer, LoginUrlRequest};
+use crate::state::{CallbackAnswer, CustomRequestReply, LoginUrlRequest};
 use crate::state::{PaymentVerification, Session};
 use crate::telegram::envelope::{CallbackQueryAnswer, LoginUrlInfo};
 use std::sync::Arc;
@@ -61,8 +61,22 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
         from_agent: false,
     });
 
+    session.bots.web_apps.data_sent = Some(Ok(()));
+    session.bots.web_apps.emoji_access = Some((5, true));
+    session
+        .bots
+        .web_apps
+        .custom_replies
+        .push(CustomRequestReply {
+            req_id: "r".into(),
+            result: Ok("{}".into()),
+        });
+
     session.forget_screen_outcomes();
 
+    assert!(session.bots.web_apps.data_sent.is_none());
+    assert!(session.bots.web_apps.emoji_access.is_none());
+    assert!(session.bots.web_apps.custom_replies.is_empty());
     assert!(session.payments.receipt_error.is_none());
     assert!(session.payments.unlocked_notice.is_none());
     assert!(session.messages.send_permission_error.is_empty());

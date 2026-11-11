@@ -20,6 +20,17 @@ impl Session {
         earn.open_url = None;
         earn.effects.clear();
         self.bots.callback_answers.clear();
+        // A mini app's one-shot answers that landed while away have no
+        // flow or window left to take them.
+        let apps = &mut self.bots.web_apps;
+        apps.found = None;
+        apps.attachment_menu_bot = None;
+        apps.attachment_menu_toggled.clear();
+        apps.write_access = None;
+        apps.emoji_access = None;
+        apps.data_sent = None;
+        apps.phone_share = None;
+        apps.custom_replies.clear();
         // The consent box and the raw-URL fallback of a login button
         // answered while away: its request goes with its answer. A request
         // still in flight keeps its context for the answer to come.

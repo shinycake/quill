@@ -7,6 +7,22 @@ impl Session {
     /// `chat_id`. Replaces any open thread.
     pub fn begin_thread(&mut self, chat_id: ChatId, message_id: MessageId) {
         let mut view = ThreadView::resolving(chat_id, message_id);
+        // Pages the replaced view asked for answer to a window that is gone.
+        if let Some(old) = self.threads.thread.as_ref() {
+            let id = old.origin_message_id.0;
+            let purposes = [
+                RequestPurpose::GetMessageThreadHistory { message_id: id },
+                RequestPurpose::Threads(ThreadsPurpose::GetMessageThreadHistoryNewer {
+                    message_id: id,
+                }),
+            ];
+            view.history.stale_pages.extend(
+                self.requests
+                    .ids_for_chat(&purposes, old.origin_chat_id)
+                    .into_iter()
+                    .map(|id| id.0),
+            );
+        }
         // A thread opened from inside a forum topic keeps that topic.
         if self.open_chat_id() == Some(chat_id) && self.chat_has_topics(chat_id) {
             view.forum_topic_id = self.open_forum_topic();
