@@ -693,3 +693,29 @@ fn a_refused_create_reports_and_sets_no_photo() {
             .any(|json| json.contains("setCommunityPhoto"))
     );
 }
+
+/// A second Create while one is out is that one (the box tells the two
+/// apart from a chat that left the model, which it does tell in a note).
+#[test]
+fn a_second_create_while_one_is_out_is_told_apart_from_a_lost_chat() {
+    let mut rig = Rig::new();
+    rig.ingest(
+        r#"{"@type":"updateNewChat","chat":{"id":-1007,"title":"Field Notes","type":{"@type":"chatTypeSupergroup","supergroup_id":7,"is_channel":true},"unread_count":0}}"#,
+    );
+    let chat = crate::ids::ChatId(-1007);
+    assert!(!rig.driver.community_create_out(chat));
+    let first = rig
+        .driver
+        .create_community_with_photo(chat, "Notes", false, None)
+        .unwrap();
+    assert!(first.is_some());
+    assert!(rig.driver.community_create_out(chat));
+    let second = rig
+        .driver
+        .create_community_with_photo(chat, "Notes", false, None)
+        .unwrap();
+    assert_eq!(second, None, "nothing more is sent");
+    // A chat that is gone is not "out".
+    let gone = crate::ids::ChatId(-1);
+    assert!(!rig.driver.community_create_out(gone));
+}

@@ -845,7 +845,9 @@ impl Session {
             return;
         };
         let sent = *sent;
-        for later in self.requests.pending_chat_permissions_mut(chat_id) {
+        for later in self.requests.pending.values_mut().filter(|p| {
+            p.purpose == RequestPurpose::SetChatPermissions && p.chat_id == Some(chat_id)
+        }) {
             if let Some(RequestRollback::ChatPermissions {
                 previous,
                 previous_can_send,

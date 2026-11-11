@@ -4094,8 +4094,11 @@ the edit drew); a fetch that cannot be sent ends in `Failed`, not in nothing
   is never asked again from a render; `ensure_*` asks once when the screen
   opens, `retry_*` asks again. A refused delete re-inserts its row
   (`RequestRollback::ChatLinkDelete`). `ensure_user_full_info` (the ask a
-  start-page intro makes from render) skips users whose last ask failed
-  (`user_full_info_failed`); `fetch_user_full_info` stays the explicit retry.
+  start-page intro makes from render) skips users whose last ask failed;
+  `fetch_user_full_info` stays the explicit retry. The failed mark is part
+  of the per-user `Fetch` in `UserFullInfos` (the `user_full_info_failed`
+  set is gone). A links or chatbot load that cannot be sent lands in
+  `Failed` (Retry), not `Idle` (a spinner, asked again from render).
 - **Link box save** (08-003). `ChatLinkSave { Idle, Saving(request), Saved }`
   replaces the `chat_links_saving` counter; the box stays on its draft until
   its own answer, goes back to the list with "Chat link saved." on success
@@ -4120,11 +4123,18 @@ the edit drew); a fetch that cannot be sent ends in `Failed`, not in nothing
 - **New chat** (04-006). A create's dialog is `CreationAsker::Dialog` or
   `Closed` (`abandon_new_chat`, from `close_new_chat`): a closed one does
   not block the next Create and does not open its group over what the
-  person is doing.
+  person is doing. Closing the dialog with a create out stays allowed
+  (tdesktop keeps Cancel live). A `creations` entry is dropped when its
+  answer is applied: at once for a closed dialog's refusal, after the photo
+  and link for its made chat, and by `abandon_new_chat` when the dialog
+  takes the answer into its next step, closes, or is replaced.
 - **Membership probe** (02-118). The probe after `getMe` runs for every chat
   window's chat under its own view, as it did for the main window's.
 - **Permissions** (02-167). A save while `setChatPermissions` is out is
-  sent; its rollback restores the values from before the first.
+  sent; its rollback restores the values from before the first. An accepted
+  save rewrites the rollbacks of saves still out to its own values, and a
+  refusal restores only when no other save is out, so save A (accepted) then
+  B (refused) shows A, which the server has.
 - **Admins page** (05-083). A refused status or title change goes to
   `member_action_error` only (drawn above the list with Close); the loaded
   list is kept.
@@ -4143,8 +4153,11 @@ the edit drew); a fetch that cannot be sent ends in `Failed`, not in nothing
   by frame upkeep); the "load older" mark is per chat and cleared when the
   list starts over or the page opens.
 - **Communities** (08-121, 08-122, 08-123). A waiting ban ends with a note
-  when its ask left no answer (`BanStep::Cancel`) and opens its warning
-  only over the box that was open when Ban was pressed. A send answering
+  when its ask left no answer (`BanStep::Cancel`). Its warning opens when
+  no box is open or the one Ban was pressed from is back; while another box
+  is open the confirmed ban keeps waiting, it is never dropped. A second
+  Create (Enter) while one is out sends nothing and tells nothing. A send
+  answering
   `Ok(None)` (Ban, Remove, Add, Create) is told in a note
   (`community_step_went`). The chooser and the picker draw a failed list
   with Retry instead of an empty one.
