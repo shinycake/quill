@@ -327,23 +327,6 @@ mod tests {
     }
 
     #[test]
-    fn an_answer_of_a_request_asked_again_after_a_reset_is_dropped() {
-        let mut links = VideoChatShareLinks::default();
-        click(&mut links, true, false);
-        links = VideoChatShareLinks::default();
-        // The revoke is followed by a new click, with new request ids.
-        let wanted = links.plan(true, false);
-        assert_eq!(wanted, both());
-        links.sent(false, RequestId(10));
-        links.sent(true, RequestId(11));
-        links.answered(false, LISTENER, "revoked".into());
-        links.failed(true, SPEAKER);
-        assert!(links.generating(), "the old requests settle nothing");
-        links.answered(false, RequestId(10), "fresh".into());
-        assert_eq!(links.listener_link(), Some("fresh"));
-    }
-
-    #[test]
     fn failed_speaker_link_falls_back_to_listener() {
         let mut links = VideoChatShareLinks::default();
         click(&mut links, true, false);

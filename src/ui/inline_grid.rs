@@ -583,12 +583,15 @@ impl QuillApp {
         // A refused send is a failed page like a failed answer: it is not
         // asked again on every poll batch.
         if refused
-            && let Some(slot) = self
+            && let Some(quill::state::InlineQuerySlot {
+                fetch: InlineQueryFetch::Loaded { more, .. },
+                ..
+            }) = self
                 .session_mut()
                 .and_then(|session| session.bots.inline_query.as_mut())
                 .filter(|slot| slot.chat_id == chat_id && slot.query == query)
         {
-            slot.more_failed = Some(offset);
+            *more = InlineMore::Failed { offset };
         }
     }
 }
