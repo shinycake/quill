@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-base 0.7.3 (Apache-2.0):
+// bidirectional text support and inline tokens in bidi rows. See third_party/gpui-base/QUILL-CHANGES.md.
 /// Display mapping system for Editor/Input.
 ///
 /// This module implements a layered display mapping architecture:
@@ -8,16 +10,21 @@
 /// The goal is to provide a clean, unified API where Editor only needs to know
 /// about `BufferPoint ↔ DisplayPoint` mapping, without worrying about internal wrap/fold complexity.
 mod display_map;
+mod bidi;
 mod inline_line;
-pub(crate) use inline_line::{InlineFragment, InputLine};
+pub(crate) use bidi::{
+    BidiLine, Cluster, Fragment, Paragraph, mirror_neutral_run, needs_bidi, starts_rtl,
+};
+pub(crate) use inline_line::{InlineFragment, InputLine, fragment_from_shaped};
 mod fold_map;
 mod folding;
+pub(crate) mod row_wrap;
 mod text_wrapper;
 mod wrap_map;
 
 // Re-export public API
 pub use self::display_map::{DisplayMap, WrappingIndent};
-pub(crate) use self::text_wrapper::LineLayout;
+pub(crate) use self::text_wrapper::{LineLayout, LineWindow};
 
 // Re-export FoldRange and extract_fold_ranges
 pub use folding::FoldRange;

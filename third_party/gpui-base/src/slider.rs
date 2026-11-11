@@ -1,3 +1,5 @@
+// Changed by the Quill project (2026): `SliderState::label` names the slider
+// for assistive technology; see QUILL-CHANGES.md.
 use crate::TestSupportExt as _;
 use std::ops::Range;
 
@@ -183,6 +185,8 @@ pub struct SliderState {
     dragging: bool,
     /// The touch drag this slider claimed, while one is live.
     touch_drag: Option<TouchDrag>,
+    /// The accessible name (Quill change).
+    label: Option<SharedString>,
 }
 
 /// A touch drag claimed by a slider.
@@ -207,7 +211,15 @@ impl SliderState {
             scale: SliderScale::default(),
             dragging: false,
             touch_drag: None,
+            label: None,
         }
+    }
+
+    /// Name the slider for assistive technology (Quill change). Every
+    /// slider drawn from this state carries it, including composed ones.
+    pub fn label(mut self, label: impl Into<SharedString>) -> Self {
+        self.label = Some(label.into());
+        self
     }
 
     /// Set the minimum value of the slider, default: 0.0
@@ -612,9 +624,11 @@ impl RenderOnce for Slider {
             .test_support()
             .when_some(self.focus, |this, focus| this.track_focus(&focus))
             .role(Role::Slider)
-            .when_some(self.accessibility_label, |this, label| {
-                this.aria_label(label)
-            })
+            .when_some(
+                self.accessibility_label
+                    .or_else(|| state.label.clone()),
+                |this, label| this.aria_label(label),
+            )
             .aria_numeric_value(state.value().end() as f64)
             .aria_min_numeric_value(state.min_value() as f64)
             .aria_max_numeric_value(state.max_value() as f64)

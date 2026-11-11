@@ -210,7 +210,7 @@ icu_provider = { version = "2", default-features = false, features = ["sync"] }
 gpui_shared_string = { package = "gpui-pre-shared-string", version = "=0.3.12" }
 
 [dependencies.gpui-kit]
-version = "=0.9.0"
+version = "=0.9.1"
 optional = true
 default-features = false
 features = ["component", "assets", "syntect"]
@@ -218,7 +218,7 @@ features = ["component", "assets", "syntect"]
 # The input engine under gpui-kit (patched below), named directly for the
 # composer's formatting spans (docs/decisions/codex-composer-input.md).
 [dependencies.gpui-base]
-version = "=0.9.0"
+version = "=0.9.1"
 optional = true
 
 # tray-icon is GTK/libappindicator on Linux and needs gtk::init plus a GTK main
@@ -360,11 +360,11 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalizati
 gpui_windows = { package = "gpui-pre-windows", version = "=0.3.12", optional = true, default-features = false }
 
 # Right-to-left composer typing (docs/decisions/codex-rtl-composer.md): gpui-base
-# 0.9.0 with a bidi-aware input engine. Each patched crate's QUILL-CHANGES.md names
+# 0.9.1 with a bidi-aware input engine. Each patched crate's QUILL-CHANGES.md names
 # the commit holding its pristine registry copy; a diff against it isolates the patch.
 [patch.crates-io]
 gpui-base = { path = "third_party/gpui-base" }
-# gpui-component 0.9.0. Folder tabs: the TabBar indicator jumps instead of
+# gpui-component 0.9.1. Folder tabs: the TabBar indicator jumps instead of
 # springing when only the selected tab bounds change
 # (docs/decisions/folder-tabs-no-badge-spring.md).
 gpui-component = { path = "third_party/gpui-component" }

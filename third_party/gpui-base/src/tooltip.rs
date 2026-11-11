@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-base 0.7.3 (Apache-2.0):
+// tooltips hide as soon as the pointer leaves. See third_party/gpui-base/QUILL-CHANGES.md.
 use std::{rc::Rc, time::Duration};
 
 use gpui::{
@@ -77,7 +79,8 @@ impl TooltipDefaults {
         self
     }
 
-    /// Sets how long a tooltip stays after the pointer leaves its trigger.
+    /// Sets how long tooltips count as recently shown after the pointer
+    /// leaves a trigger (Quill: the tooltip itself hides at once).
     ///
     /// Entering another trigger within this period switches to its tooltip
     /// without waiting for the show delay.
@@ -91,7 +94,7 @@ impl TooltipDefaults {
         self.show_delay
     }
 
-    /// How long a tooltip stays after the pointer leaves its trigger.
+    /// How long tooltips count as recently shown after the pointer leaves a trigger.
     pub fn grace_period(&self) -> Duration {
         self.grace_period
     }
@@ -258,17 +261,21 @@ impl TooltipOverlay {
         if self.content.is_none() {
             return;
         }
+        // Quill: the tooltip goes as soon as the pointer leaves its trigger;
+        // only the "recently shown" state lasts the grace period, so moving
+        // straight onto a neighbouring trigger still shows its tooltip at once.
         let epoch = self.next_epoch();
         let grace_period = TooltipDefaults::global(cx).grace_period;
+        self.content = None;
+        self.previous_bounds = None;
+        self.is_switching = false;
         self.had_recent_tooltip = true;
+        cx.notify();
         self.hide_task = Some(cx.spawn_in(window, async move |this, cx| {
             cx.background_executor().timer(grace_period).await;
-            let _ = this.update_in(cx, |this, _, cx| {
+            let _ = this.update_in(cx, |this, _, _| {
                 if this.epoch == epoch {
-                    this.content = None;
-                    this.previous_bounds = None;
                     this.had_recent_tooltip = false;
-                    cx.notify();
                 }
             });
         }));
@@ -389,6 +396,28 @@ mod tests {
             state.update(cx, |tooltip, cx| tooltip.hide(cx));
         });
         cx.update(|_, cx| assert!(state.read(cx).content.is_none()));
+    }
+
+    #[gpui::test]
+    fn hide_is_immediate_and_a_neighbour_shows_at_once(cx: &mut gpui::TestAppContext) {
+        let state = cx.update(|cx| cx.new(|_| TooltipOverlay::new()));
+        let cx = cx.add_empty_window();
+        let request = || {
+            TooltipRequest::new(bounds(0., 0., 20., 20.), |_, _| {
+                panic!("content is not rendered by this lifecycle test")
+            })
+        };
+        cx.update(|window, cx| {
+            state.update(cx, |tooltip, cx| {
+                tooltip.had_recent_tooltip = true;
+                tooltip.request_show(request(), window, cx);
+                tooltip.request_hide(window, cx);
+                assert!(tooltip.content.is_none());
+                // A neighbouring trigger within the grace period shows at once.
+                tooltip.request_show(request(), window, cx);
+                assert!(tooltip.content.is_some());
+            });
+        });
     }
 
     #[gpui::test]
