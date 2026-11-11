@@ -1,5 +1,5 @@
 use super::envelope::{
-    EnvelopePayload, StickerItem, int53, json_field_str, parse_file, parse_sticker_value,
+    EnvelopePayload, SatI32, StickerItem, int53, json_field_str, parse_file, parse_sticker_value,
 };
 use crate::telegram::envelope::StickersPayload;
 use serde_json::Value;
@@ -110,7 +110,8 @@ pub(crate) fn parse_emoji_statuses(value: &Value) -> EnvelopePayload {
                 expiration_date: entry
                     .get("expiration_date")
                     .and_then(Value::as_i64)
-                    .unwrap_or(0) as i32,
+                    .unwrap_or(0)
+                    .sat_i32(),
                 gift,
             })
         })
@@ -127,7 +128,8 @@ fn parse_upgraded_gift_status(type_: &Value) -> UpgradedGiftEmojiStatus {
             .get("backdrop_colors")
             .and_then(|c| c.get(key))
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32
+            .unwrap_or(0)
+            .sat_i32()
     };
     UpgradedGiftEmojiStatus {
         upgraded_gift_id: int53(type_.get("upgraded_gift_id")).unwrap_or(0),

@@ -31,7 +31,7 @@ fn list_title(result: &InlineQueryResultSummary) -> String {
     if !result.title.is_empty() {
         return result.title.clone();
     }
-    let mut kind = result.kind.replace('_', " ");
+    let mut kind = result.kind.name().replace('_', " ");
     if let Some(first) = kind.get_mut(..1) {
         first.make_ascii_uppercase();
     }

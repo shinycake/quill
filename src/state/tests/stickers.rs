@@ -294,11 +294,8 @@ fn gif_panel_downloads_stills_then_preview_loops_then_unpreviewed_clips() {
         file_name: "clip.mp4".into(),
         mime_type: "video/mp4".into(),
         file_id: FileId(file),
-        thumb_file_id: thumb.map(FileId),
-        thumb_width: 160,
-        thumb_height: 90,
+        thumb: crate::telegram::envelope::Thumb::of(thumb.map(FileId), 160, 90, still),
         minithumbnail: None,
-        thumb_still: still,
     };
     session.stickers.gifs.saved_answered(vec![
         // An MP4 preview loop: the loop plays, the GIF itself waits.
@@ -409,11 +406,8 @@ fn saved_gif(id: i32) -> crate::telegram::envelope::AnimationItem {
         file_name: String::new(),
         mime_type: "video/mp4".into(),
         file_id: crate::ids::FileId(id),
-        thumb_file_id: None,
-        thumb_width: 0,
-        thumb_height: 0,
+        thumb: crate::telegram::envelope::Thumb::of(None, 0, 0, true),
         minithumbnail: None,
-        thumb_still: true,
     }
 }
 

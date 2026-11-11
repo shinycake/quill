@@ -257,7 +257,7 @@ fn creating_while_a_one_to_one_call_hangs_up_is_allowed() {
         user_id: 11,
         is_outgoing: true,
         is_video: false,
-        state: CallState::Ready,
+        state: CallState::Ready(Default::default()),
         started_at: std::time::Instant::now(),
         ready: None,
         transport: Default::default(),

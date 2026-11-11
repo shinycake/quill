@@ -35,7 +35,6 @@ use crate::calls::proxy::ProxyKind;
 use crate::locks::lock_or_recover;
 use crate::proxy::{ProxyDraft, ProxyEntry};
 use crate::telegram::envelope::ConnectionState;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -69,9 +68,44 @@ pub fn detect() -> Option<ProxyDraft> {
     platform::detect()
 }
 
-/// Whether the background reader should read (the mode is "Use system
-/// proxy settings" and no custom proxy is on).
-static WANTED: AtomicBool = AtomicBool::new(false);
+/// Whether one client follows the OS proxy, and when it last asked for a
+/// fresh read. Each client owns its own, so one account turning the mode
+/// off cannot hide it from another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Follow {
+    #[default]
+    Off,
+    On {
+        asked: Option<Instant>,
+    },
+}
+
+impl Follow {
+    /// When this client last asked for a read while connecting.
+    pub fn asked(self) -> Option<Instant> {
+        match self {
+            Self::Off => None,
+            Self::On { asked } => asked,
+        }
+    }
+
+    /// Move to the stage for `wanted` at `now`, reading the OS again on the
+    /// edge to following and while `connection` is opening one.
+    pub fn step(&mut self, wanted: bool, connection: ConnectionState, now: Instant) {
+        *self = match (*self, wanted) {
+            (_, false) => Self::Off,
+            (Self::Off, true) => {
+                refresh();
+                Self::On { asked: None }
+            }
+            (Self::On { asked }, true) if reread_due(connection, asked, now) => {
+                refresh();
+                Self::On { asked: Some(now) }
+            }
+            (on, true) => on,
+        };
+    }
+}
 
 struct Reader {
     detected: Arc<Mutex<Detected>>,
@@ -123,22 +157,20 @@ fn reader() -> &'static Reader {
 /// reader. Not wanted: `Direct`, which drops the hidden entry, and nothing
 /// is read. Never blocks.
 pub fn latest(wanted: bool) -> Detected {
-    let was_wanted = WANTED.swap(wanted, Ordering::Relaxed);
     if !wanted {
         return Detected::Direct;
     }
     let reader = reader();
-    if !was_wanted {
+    let found = lock_or_recover(&reader.detected).clone();
+    if found == Detected::Unknown {
         reader.ask();
     }
-    lock_or_recover(&reader.detected).clone()
+    found
 }
 
-/// Read the OS configuration again, when anyone is following it.
+/// Read the OS configuration again; a client that follows it asks.
 pub fn refresh() {
-    if WANTED.load(Ordering::Relaxed)
-        && let Some(reader) = READER.get()
-    {
+    if let Some(reader) = READER.get() {
         reader.ask();
     }
 }

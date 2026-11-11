@@ -530,7 +530,7 @@ fn the_hold_is_over() -> Instant {
 
 #[test]
 fn closing_hangs_up_a_running_call_and_sends_close_behind_the_terminal_update() {
-    let mut client = calling_driver().with_call(true, CallState::Ready);
+    let mut client = calling_driver().with_call(true, CallState::Ready(Default::default()));
     crate::connect::closing::begin_close(&mut client.driver);
     assert_eq!(client.sent(), ["discardCall", "setOption"]);
 
@@ -565,7 +565,7 @@ fn what_a_stopped_export_left_queued_goes_out_ahead_of_close() {
 
 #[test]
 fn a_hang_up_nobody_answers_holds_close_back_only_so_long() {
-    let mut client = calling_driver().with_call(false, CallState::Ready);
+    let mut client = calling_driver().with_call(false, CallState::Ready(Default::default()));
     crate::connect::closing::begin_close(&mut client.driver);
     crate::connect::closing::release_close(&mut client.driver, the_hold_is_over());
     assert_eq!(client.sent(), ["discardCall", "setOption", "close"]);
@@ -711,7 +711,8 @@ fn a_group_call_only_looked_at_is_not_left() {
 fn a_closing_client_sends_close_from_its_poll_once_its_call_ended() {
     let (hub, tx) = dying_hub();
     let (mut client, handle) = test_client(hub, tx);
-    client.driver.session.calls.active_call = Some(active_call(true, CallState::Ready));
+    client.driver.session.calls.active_call =
+        Some(active_call(true, CallState::Ready(Default::default())));
     let mut set = ClosingSet::new();
     set.push(key(1), Box::new(client), false);
     let recorder = handle.recorder.clone();
@@ -745,7 +746,7 @@ fn a_running_call_or_joined_voice_chat_is_a_call_in_progress() {
     assert!(!calling_driver().driver.call_in_progress());
     assert!(
         calling_driver()
-            .with_call(true, CallState::Ready)
+            .with_call(true, CallState::Ready(Default::default()))
             .driver
             .call_in_progress()
     );

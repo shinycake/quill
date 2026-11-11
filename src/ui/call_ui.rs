@@ -159,7 +159,7 @@ impl QuillApp {
                 }
             }
             CallState::ExchangingKeys => (tr(keys::GROUP_CALL_CONNECTING).to_string(), None),
-            CallState::Ready => {
+            CallState::Ready(_) => {
                 use quill::calls::engine::TransportState;
                 let status = match call.transport.state() {
                     Some(TransportState::Connected) if call.muted => {
@@ -248,7 +248,7 @@ impl QuillApp {
         // this build.
         let no_transport_note = matches!(
             call.state,
-            CallState::Ready | CallState::ExchangingKeys | CallState::Pending { .. }
+            CallState::Ready(_) | CallState::ExchangingKeys | CallState::Pending { .. }
         );
         if no_transport_note {
             // Phase C2e: video is real once the driver is ready (engine
@@ -280,7 +280,7 @@ impl QuillApp {
         // Phase C1b: local-only mute state. Tracked on the call but a
         // no-op without media transport — labeled honestly.
         let show_mute_note =
-            call.muted && matches!(call.state, CallState::Ready | CallState::Unknown(_));
+            call.muted && matches!(call.state, CallState::Ready(_) | CallState::Unknown(_));
         if show_mute_note {
             card = card.child(
                 div()
@@ -292,8 +292,8 @@ impl QuillApp {
         // Phase C2i: local screen-share send state — the engine sends
         // the screen instead of the camera (one video track); the flag
         // is the tracked toggle intent.
-        let show_screen_share_note =
-            call.screen_sharing() && matches!(call.state, CallState::Ready | CallState::Unknown(_));
+        let show_screen_share_note = call.screen_sharing()
+            && matches!(call.state, CallState::Ready(_) | CallState::Unknown(_));
         if show_screen_share_note {
             card = card.child(
                 div()
@@ -318,7 +318,7 @@ impl QuillApp {
                     .child(error.to_string()),
             );
         }
-        if matches!(call.state, CallState::Ready) {
+        if matches!(call.state, CallState::Ready(_)) {
             // Phase C2c: microphone/speaker pickers. Live state comes
             // from the driver; the screenshot demo injects demo devices
             // only (no live Telegram, no real hardware). Empty means the
@@ -486,7 +486,7 @@ impl QuillApp {
                         })),
                 );
             }
-            CallState::Ready | CallState::Unknown(_) => {
+            CallState::Ready(_) | CallState::Unknown(_) => {
                 // Phase C1b: mute toggle — local-only state, no-op
                 // without media transport (the card says so above).
                 buttons = buttons.child(

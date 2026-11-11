@@ -35,12 +35,12 @@ impl Session {
             if call.state.is_terminal() {
                 self.end_active_call(call);
             } else {
-                if matches!(call.state, CallState::Ready) {
+                if let CallState::Ready(params) = &call.state {
                     match active.ready.as_mut() {
-                        Some(ready) => ready.params = call.ready.clone(),
+                        Some(ready) => ready.params = Some(params.clone()),
                         None => {
                             active.ready = Some(CallReady {
-                                params: call.ready.clone(),
+                                params: Some(params.clone()),
                                 since: Instant::now(),
                             })
                         }
@@ -113,7 +113,6 @@ impl Session {
             call.is_outgoing,
             call.is_video,
             call.state.clone(),
-            call.ready.clone(),
         ));
         self.calls.summary = None;
         self.calls.error = None;
@@ -214,7 +213,6 @@ impl Session {
                 is_created: true,
                 is_received: false,
             },
-            None,
         ));
         self.calls.summary = None;
         self.calls.error = None;

@@ -356,8 +356,8 @@ fn update_group_call_participant_video_info_parsed() {
         EnvelopePayload::Calls(CallsPayload::UpdateGroupCallParticipant {
             participant, ..
         }) => {
-            assert!(participant.video_enabled);
-            assert!(participant.screen_sharing_enabled);
+            assert!(participant.video_enabled());
+            assert!(participant.screen_sharing_enabled());
             let camera = participant.video_info.expect("camera video info");
             assert_eq!(camera.endpoint_id, "ep-42");
             assert!(!camera.is_paused);

@@ -114,9 +114,16 @@ pub(super) struct FramePlan {
     max: usize,
     /// The duration is known: [`tail`](Self::tail) fills up to `max`.
     timed: bool,
-    base: Option<i64>,
-    last: Option<i64>,
+    clock: SlotClock,
     emitted: usize,
+}
+
+/// Where the slot grid starts and the last slot filled: nothing is taken
+/// until the first picture fixes both at once.
+#[derive(Clone, Copy)]
+enum SlotClock {
+    Empty,
+    Running { base: i64, last: i64 },
 }
 
 impl FramePlan {
@@ -133,8 +140,7 @@ impl FramePlan {
             fps,
             max: slots.map_or(max, |slots| slots.min(max)),
             timed: slots.is_some(),
-            base: None,
-            last: None,
+            clock: SlotClock::Empty,
             emitted: 0,
         }
     }
@@ -154,16 +160,20 @@ impl FramePlan {
         }
         // `as` saturates for huge values; a NaN time counts as slot 0.
         let raw = (pts.max(0.0) * self.fps).round() as i64;
-        let base = *self.base.get_or_insert(raw);
-        let slot = raw.saturating_sub(base).max(0);
-        let repeat_previous = match self.last {
-            Some(last) if slot <= last => return SKIP,
-            Some(last) => usize::try_from(slot.saturating_sub(last).saturating_sub(1))
-                .unwrap_or(usize::MAX)
-                .min(remaining.saturating_sub(1)),
-            None => 0,
+        let (base, repeat_previous, slot) = match self.clock {
+            SlotClock::Empty => (raw, 0, 0),
+            SlotClock::Running { base, last } => {
+                let slot = raw.saturating_sub(base).max(0);
+                if slot <= last {
+                    return SKIP;
+                }
+                let repeat = usize::try_from(slot.saturating_sub(last).saturating_sub(1))
+                    .unwrap_or(usize::MAX)
+                    .min(remaining.saturating_sub(1));
+                (base, repeat, slot)
+            }
         };
-        self.last = Some(slot);
+        self.clock = SlotClock::Running { base, last: slot };
         self.emitted = self
             .emitted
             .saturating_add(repeat_previous)
@@ -177,7 +187,7 @@ impl FramePlan {
     /// At the end: copies of the last frame that hold it until the
     /// sticker's duration ends, so the loop keeps the file's length.
     pub(super) fn tail(&mut self) -> usize {
-        if !self.timed || self.last.is_none() {
+        if !self.timed || matches!(self.clock, SlotClock::Empty) {
             return 0;
         }
         let repeat = self.max.saturating_sub(self.emitted);

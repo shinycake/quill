@@ -338,11 +338,8 @@ impl QuillApp {
                     );
                 }))
             }
-            KeyboardButtonType::RequestPoll {
-                force_regular,
-                force_quiz,
-            } => {
-                let lock = QuizLock::from_button(*force_regular, *force_quiz);
+            KeyboardButtonType::RequestPoll(request) => {
+                let lock = QuizLock::from_button(*request);
                 element.on_click(cx.listener(move |this, _, window, cx| {
                     this.open_poll_dialog_locked(lock, window, cx);
                     // A one-time keyboard hides when the poll is sent: a

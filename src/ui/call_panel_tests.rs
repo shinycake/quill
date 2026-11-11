@@ -29,7 +29,7 @@ fn statuses_follow_tdesktop() {
         call_status(&CallState::ExchangingKeys, true, None, 0).0,
         "exchanging encryption keys…"
     );
-    let ready = |t| call_status(&CallState::Ready, true, t, 75);
+    let ready = |t| call_status(&CallState::Ready(Default::default()), true, t, 75);
     assert_eq!(
         ready(Some(TransportState::Connected)),
         ("1:15".to_string(), false)

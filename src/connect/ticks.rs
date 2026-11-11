@@ -76,6 +76,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Picture-in-Picture, or in another account, with no viewer tick
         // to commit them; held, they would be dropped when it is left.
         let committed = self.live_story_reaction_tick(now_ms) || committed;
+        // `parity:data-proxy-extras`: "Use system proxy settings", for
+        // every account: a background one follows the OS too.
+        self.reread_system_proxy(now);
+        outcome.progress(
+            self.system_proxy_tick(&crate::system_proxy::latest(self.wants_system_proxy())),
+        );
         let TickScope::OnScreen { settings_open } = scope else {
             outcome.progress(committed);
             return outcome;
@@ -88,11 +94,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         outcome.progress(self.group_bot_users_tick());
         // Proxies: auto-switch.
         outcome.redraw(self.proxy_tick(crate::state::unix_ms_now()));
-        // `parity:data-proxy-extras`: "Use system proxy settings".
-        self.reread_system_proxy(now);
-        outcome.progress(
-            self.system_proxy_tick(&crate::system_proxy::latest(self.wants_system_proxy())),
-        );
         // Keep the Undo toast's countdown redrawing while one is waiting.
         outcome.redraw(committed || self.session.payments.paid.has_pending());
         outcome
@@ -135,16 +136,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// TDLib is opening one, and while it waits for a network that a proxy
     /// set just now could give it.
     fn reread_system_proxy(&mut self, now: Instant) {
-        if self.wants_system_proxy()
-            && crate::system_proxy::reread_due(
-                self.session.connection,
-                self.system_proxy_asked,
-                now,
-            )
-        {
-            self.system_proxy_asked = Some(now);
-            crate::system_proxy::refresh();
-        }
+        let wanted = self.wants_system_proxy();
+        self.system_proxy.step(wanted, self.session.connection, now);
     }
 
     /// Whether the OS proxy settings are followed right now: the user

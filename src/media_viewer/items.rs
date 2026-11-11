@@ -175,7 +175,7 @@ pub fn poll_option_viewer_item(
             })
         }
         PollOptionMedia::Animation(animation) => {
-            let thumb = animation.thumb_file_id.filter(|id| id.0 != 0);
+            let thumb = animation.thumb_file_id();
             let download = thumb.unwrap_or(animation.file_id);
             if download.0 == 0 {
                 return None;
@@ -239,7 +239,7 @@ fn viewer_item_for(message: &HistoryMessage, allow_secret: bool) -> Option<Media
             _ => None,
         },
         MessageContent::Video(video) if allow_secret || !video.is_secret => {
-            let thumb = video.thumb_file_id.filter(|id| id.0 != 0);
+            let thumb = video.thumb_file_id();
             let download = thumb.unwrap_or(video.file_id);
             if download.0 == 0 {
                 return None;
@@ -355,11 +355,8 @@ mod tests {
                 supports_streaming: false,
                 has_stickers: false,
                 file_id: FileId(file_id),
-                thumb_file_id: thumb.map(FileId),
-                thumb_width: 320,
-                thumb_height: 240,
+                thumb: crate::telegram::envelope::Thumb::of(thumb.map(FileId), 320, 240, true),
                 minithumbnail: None,
-                thumb_still: true,
                 alternatives: Vec::new(),
             }),
         )
@@ -534,11 +531,8 @@ mod tests {
                 has_spoiler: false,
                 is_secret: secret,
                 file_id: FileId(file),
-                thumb_file_id: Some(FileId(file + 1)),
-                thumb_width: 160,
-                thumb_height: 120,
+                thumb: crate::telegram::envelope::Thumb::of(Some(FileId(file + 1)), 160, 120, true),
                 minithumbnail: None,
-                thumb_still: true,
             }),
         )
     }
