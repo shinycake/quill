@@ -1,5 +1,5 @@
 //! Starting a checkout that cannot be asked (no live connection): the
-//! checkout that was on screen is gone with its dialog, and the user is told.
+//! checkout that was on screen stays with its dialog, and the user is told.
 
 use super::card_form_demo::stripe_checkout;
 use crate::ui::app::QuillApp;
@@ -28,25 +28,29 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     (app, vcx)
 }
 
-/// The form request is refused (nothing to send it with): the open
-/// checkout's dialog closes and a note says why, instead of the old dialog
-/// staying over a checkout that was wiped.
+/// The form request is refused (nothing to send it with): nothing was
+/// written before the ask, so the open checkout and its dialog stay as they
+/// were (never a dialog over a checkout that was wiped) and a note says why.
 #[gpui_kit::test]
-fn a_checkout_that_cannot_be_asked_drops_the_old_dialog_and_says_so(cx: &mut TestAppContext) {
+fn a_checkout_that_cannot_be_asked_leaves_the_old_one_and_says_so(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, window, cx| {
+        let old = PaymentRequest {
+            invoice: InputInvoice::Name("old".into()),
+        };
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.checkout = CheckoutForm::ready(
-                stripe_checkout(true, false),
-                PaymentRequest {
-                    invoice: InputInvoice::Name("old".into()),
-                },
-            );
+            session.payments.checkout =
+                CheckoutForm::ready(stripe_checkout(true, false), old.clone());
         }
         app.open_payment_dialog(window, cx);
         assert!(app.payments.dialog.is_some(), "the old checkout is open");
         app.start_invoice_checkout(InputInvoice::Name("new".into()), window, cx);
-        assert!(app.payments.dialog.is_none(), "its dialog goes");
+        assert!(app.payments.dialog.is_some(), "its dialog stays");
+        assert_eq!(
+            app.session().and_then(|s| s.payments.checkout.invoice()),
+            Some(&old),
+            "and so does the checkout it shows"
+        );
         assert!(
             !app.screen.connection.status_note().is_empty(),
             "the user is told"

@@ -50,6 +50,10 @@ impl QuillApp {
         ) {
             return;
         }
+        // The driver replaces the checkout (and its note) only when the
+        // form's request went out: a refused one, such as a new form while
+        // a payment waits on its verification step, leaves the checkout
+        // on screen as it was.
         let sent = self
             .live
             .as_mut()
@@ -57,9 +61,8 @@ impl QuillApp {
         match sent {
             Some(Ok(_)) => self.open_payment_dialog(window, cx),
             _ => {
-                // Nothing was asked: the checkout that was on screen is
-                // gone (the driver replaced it), so its dialog goes too.
-                self.payments.dialog = None;
+                // Nothing was asked: the checkout that was on screen, and
+                // its dialog, stay as they were.
                 self.set_note(StatusNote::error(tr(
                     keys::Q_MONEY_COULD_NOT_LOAD_THE_PAYMENT,
                 )));

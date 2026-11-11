@@ -498,8 +498,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.earn_ready()?;
         self.session.payments.earn.join = Some(JoinPage::new(peer));
         let _ = self.ensure_earn_app_config();
-        self.fetch_connected_programs(false)?;
-        self.fetch_found_programs(false, false)
+        // The two lists are independent: a refused first send fails its
+        // own list (Retry shows) and the second is still asked.
+        let mine = self.fetch_connected_programs(false);
+        let found = self.fetch_found_programs(false, false);
+        mine.and(found)
     }
 
     fn fetch_connected_programs(&mut self, append: bool) -> Result<(), ConnectSendError> {
@@ -817,7 +820,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             join.stage = JoinStage::Open;
         }
-        Ok(())
+        result.map(|_| ())
     }
 
     /// "Revoke Link" confirmed.

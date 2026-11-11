@@ -65,6 +65,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             share.chats.fail(line);
             return Err(ConnectSendError::InvalidRequest);
         }
+        // The two halves are independent: a refused one fails its own list
+        // (the box draws its error and Retry) and the other is still asked.
+        let mut refused = None;
         if !self
             .session
             .requests
@@ -87,7 +90,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 if let Some(share) = self.session.chat_list.folder_shares.get_mut(&folder_id) {
                     share.links.fail(err.stage_line());
                 }
-                return Err(err);
+                refused = Some(err);
             }
         }
         if !self
@@ -112,10 +115,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 if let Some(share) = self.session.chat_list.folder_shares.get_mut(&folder_id) {
                     share.chats.fail(err.stage_line());
                 }
-                return Err(err);
+                refused.get_or_insert(err);
             }
         }
-        Ok(())
+        refused.map_or(Ok(()), Err)
     }
 
     /// `createChatFolderInviteLink`; the new link joins the cached list when

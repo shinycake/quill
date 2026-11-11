@@ -457,3 +457,21 @@ fn custom_emoji_rate_limit_retries_that_run_out_hold_lookups() {
         .request_tick(Instant::now() + Duration::from_secs(10));
     assert!(h.driver.lookup_custom_emoji(&[41]).unwrap().is_some());
 }
+
+/// A read re-sent after a 429 and then swept without an answer leaves no
+/// attempt count behind.
+#[test]
+fn a_swept_re_sent_read_forgets_its_flood_attempts() {
+    let mut h = Harness::new();
+    let extra = h.open_history();
+    h.flood(extra, "Too Many Requests: retry after 1");
+    let t0 = Instant::now();
+    h.driver.request_tick(t0 + Duration::from_secs(5));
+    assert_eq!(h.sends_of(extra), 2);
+    assert!(h.driver.flood_attempts.contains_key(&extra.0));
+    // No answer ever comes; the sweep drops the request.
+    h.driver
+        .request_tick(t0 + PENDING_REQUEST_TTL + Duration::from_secs(30));
+    assert!(h.driver.session.requests.get(extra).is_none());
+    assert!(h.driver.flood_attempts.is_empty());
+}

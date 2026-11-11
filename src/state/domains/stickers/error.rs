@@ -50,6 +50,14 @@ impl Session {
                     );
                 }
             }
+            Some(RequestPurpose::Stickers(StickersPurpose::EmojiPackTitle { set_id })) => {
+                // The ask failed: the next menu asks for the title again.
+                let titles = &mut self.stickers.emoji_pack_titles;
+                if matches!(titles.get(&set_id), Some(PackTitle::Asking(asked)) if Some(*asked) == pending.map(|p| p.id))
+                {
+                    titles.remove(&set_id);
+                }
+            }
             Some(RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { set_id })) => {
                 self.fail_sticker_set_view(set_id)
             }

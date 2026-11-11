@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 /// Records what it sends and refuses the TDLib types it is told to refuse.
 #[derive(Default)]
 pub(crate) struct FlakySender {
-    guard: crate::paid_messages_guard::PaidGuard,
+    pub(crate) guard: crate::paid_messages_guard::PaidGuard,
     sent: Mutex<Vec<String>>,
     refuse: Mutex<HashSet<&'static str>>,
 }

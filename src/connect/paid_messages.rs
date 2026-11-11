@@ -101,14 +101,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(held) = self.sender.paid_guard().and_then(|guard| guard.held()) else {
             return Ok(());
         };
-        if remember {
-            self.remember_paid_trust(ChatId(held.chat_id), held.per_message);
-        }
         // The send leaves the guard only once it went out: a refused send
-        // keeps it held, so the box can pay again.
+        // keeps it held, so the box can pay again. The price is trusted
+        // only after that, so a send that never left does not skip the next
+        // confirmation.
         self.sender.send_json(&held.with_price())?;
         if let Some(guard) = self.sender.paid_guard() {
             guard.take_held();
+        }
+        if remember {
+            self.remember_paid_trust(ChatId(held.chat_id), held.per_message);
         }
         Ok(())
     }

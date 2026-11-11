@@ -29,7 +29,7 @@ fn payment_form_applies_only_to_own_request() {
 fn payment_request_survives_form_and_validated_answers() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    // Buy press: `getPaymentForm` sent, request context set.
+    // Buy press: `getPaymentForm` sent, the invoice rides with the stage.
     let extra = session.request(RequestPurpose::GetPaymentForm, Some(ChatId(51)));
     session.payments.checkout = crate::state::CheckoutForm::Loading {
         request: extra,

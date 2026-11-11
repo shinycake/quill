@@ -357,3 +357,49 @@ fn a_new_checkout_replaces_the_earlier_one_whole() {
         Some(&InputInvoice::Name("shop_1".into()))
     );
 }
+
+/// 02-092: a new form is refused while a payment waits for its
+/// verification step, and the refusal leaves the checkout whole.
+#[test]
+fn a_new_form_waits_out_a_verification() {
+    use crate::state::{CheckoutForm, PaymentRequest};
+    let (mut driver, _recorder, _sink, _seq) = driver_parts();
+    let form = PaymentFormData {
+        id: 1,
+        form_type: PaymentFormTypeData::Stars { star_count: 5 },
+        seller_bot_user_id: 0,
+        product_title: String::new(),
+        product_description: String::new(),
+    };
+    let old = PaymentRequest {
+        invoice: InputInvoice::Name("old".into()),
+    };
+    let payments = &mut driver.session.payments;
+    payments.checkout = CheckoutForm::ready(form, old);
+    payments.checkout.mark_verifying();
+    payments
+        .checkout
+        .set_note(Some("the old checkout's note".into()));
+    assert!(
+        driver
+            .send_payment_form_request(InputInvoice::Name("new".into()))
+            .is_err()
+    );
+    // The refused form leaves the checkout whole: its stage, its invoice
+    // and its note (the UI writes none of them before asking).
+    let checkout = &driver.session.payments.checkout;
+    assert!(checkout.is_verifying());
+    assert_eq!(
+        checkout.invoice().map(|r| &r.invoice),
+        Some(&InputInvoice::Name("old".into()))
+    );
+    assert!(checkout.note().is_some());
+    // Once the verification step is over a new form replaces it, note
+    // included.
+    driver.session.payments.checkout.end_verification();
+    driver
+        .send_payment_form_request(InputInvoice::Name("new".into()))
+        .unwrap();
+    assert!(driver.session.payments.checkout.is_loading());
+    assert!(driver.session.payments.checkout.note().is_none());
+}

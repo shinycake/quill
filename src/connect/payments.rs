@@ -37,14 +37,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         invoice: InputInvoice,
     ) -> Result<RequestId, ConnectSendError> {
-        // A new checkout replaces the one before it whole (its request,
-        // form, order info, shipping choice and note), here and nowhere in
-        // the UI, so a refused send leaves none of it behind.
-        self.session.close_checkout();
+        // A payment that asked for a verification step is not abandoned by
+        // a new form: that checkout stays until its answer arrives.
+        if self.session.payments.checkout.is_verifying() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let extra = self.payment_extra(&invoice, RequestPurpose::GetPaymentForm)?;
         let json = get_payment_form(extra, &invoice);
         let sent = self.send_json_request(extra, &json)?;
-        // The checkout waits on the form only once the request is out.
+        // The checkout waits on the form only once the request is out. The
+        // new value replaces the one before it whole (its request, form,
+        // order info, shipping choice and note), here and nowhere in the
+        // UI; a refused send leaves the checkout on screen as it was.
         self.session.payments.checkout = crate::state::CheckoutForm::Loading {
             request: extra,
             invoice: PaymentRequest { invoice },

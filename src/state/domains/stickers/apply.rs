@@ -274,8 +274,16 @@ impl Session {
                     set_id,
                 })) = pending.map(|p| p.purpose)
                 {
-                    if !title.is_empty() {
-                        self.stickers.emoji_pack_titles.insert(set_id, title);
+                    // Only the ask this title waits for lands; a pack with
+                    // no title is asked again by the next menu.
+                    let titles = &mut self.stickers.emoji_pack_titles;
+                    if matches!(titles.get(&set_id), Some(PackTitle::Asking(asked)) if Some(*asked) == pending.map(|p| p.id))
+                    {
+                        if title.is_empty() {
+                            titles.remove(&set_id);
+                        } else {
+                            titles.insert(set_id, PackTitle::Known(title));
+                        }
                     }
                 } else if let Some(RequestPurpose::Stickers(StickersPurpose::GetMaskSet {
                     set_id,
