@@ -228,6 +228,11 @@ impl QuillApp {
             return;
         };
         let to = (!model.translated).then_some(model.to);
+        if to.is_some() {
+            // Turning translation on starts a new scan, which asks once more
+            // for what failed before (as showing the chat again does).
+            self.translate.pump.remove(&chat_id.0);
+        }
         if let Some(live) = self.live.as_mut() {
             live.driver.session.set_chat_translated_to(chat_id, to);
             quill::wake::UPDATES.poke();

@@ -162,3 +162,35 @@ fn a_failed_translation_is_asked_again_when_the_chat_is_reopened(cx: &mut TestAp
         );
     });
 }
+
+/// Sweep r2-06b 14-042: the bar's toggle turned on again asks for what
+/// failed, so a failure is not stuck until the chat is closed.
+#[gpui_kit::test]
+fn turning_translation_on_again_asks_for_failed_messages(cx: &mut TestAppContext) {
+    use quill::state::Translation;
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.toggle_chat_translation(CHANNEL, cx);
+        app.open_translate_chooser("en", window, cx);
+    });
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.pump_translation();
+        if let Some(session) = app.session_mut() {
+            session.messages.translate.messages.insert(
+                (CHANNEL.0, NEWEST_POST.0, "en".to_string()),
+                Translation::Failed("send".into()),
+            );
+        }
+        app.pump_translation();
+        app.translate.asked.clear();
+        // Off, then on again.
+        app.toggle_chat_translation(CHANNEL, cx);
+        app.toggle_chat_translation(CHANNEL, cx);
+        app.pump_translation();
+        assert!(
+            app.translate.asked.contains(&(NEWEST_POST, "en")),
+            "asked: {:?}",
+            app.translate.asked
+        );
+    });
+}
