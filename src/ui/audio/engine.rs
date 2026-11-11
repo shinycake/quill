@@ -284,28 +284,66 @@ fn build_paused_player(
     })
 }
 
+/// Whether the sound is where the track is.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Standing {
+    /// The sound is the track's: the position reads from it.
+    Current,
+    /// Seeked while paused: the sound still sits at the old position, so
+    /// resuming restarts it at `parked_secs`.
+    Stale,
+    /// The start or the last build failed: nothing plays, the position is
+    /// parked.
+    Failed,
+}
+
+/// Why the last start, resume or seek did not work, and whether the start
+/// failure was told to the app yet (`take_start_failed`). Cleared by the
+/// next one that works, and by `stop`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Fault {
+    None,
+    Seen(AudioError),
+    /// A build that was to be the only sound failed; the app has not been
+    /// told.
+    Unseen(AudioError),
+}
+
+impl Fault {
+    fn error(self) -> Option<AudioError> {
+        match self {
+            Self::None => None,
+            Self::Seen(error) | Self::Unseen(error) => Some(error),
+        }
+    }
+
+    /// A new build starts: a start failure it replaces is not told.
+    fn build_started(&mut self) {
+        if let Self::Unseen(error) = *self {
+            *self = Self::Seen(error);
+        }
+    }
+}
+
 /// One track's player: play, pause, seek, volume and speed.
 pub(in crate::ui) struct AudioEngine {
     output: SharedOutput,
     track: Option<Track>,
     building: Option<Building>,
     on_built: Option<fn()>,
-    start_failed: bool,
     clock: EngineClock,
     /// The track, kept after a failed start so Play can try again.
     path: Option<PathBuf>,
     speed: SharedSpeed,
     volume: f32,
-    /// Seeked while paused or failed: the sound still sits at the old
-    /// position, so resuming restarts it at `parked_secs`.
-    stale: bool,
+    /// Whether the sound is where the track is.
+    standing: Standing,
     /// Where the track is when no player is consuming it (stopped, failed,
     /// seeked while paused).
     parked_secs: f64,
-    failed: bool,
-    /// Why the last start, resume or seek did not work. Cleared by the next
-    /// one that does, and by `stop`. The row's error line reads only this.
-    error: Option<AudioError>,
+    /// Why the last start, resume or seek did not work. The row's error line
+    /// reads only this.
+    fault: Fault,
     /// Set by the screenshot demos only.
     simulation: Option<Simulation>,
     sim_clock: Option<PlaybackClock>,
@@ -331,15 +369,13 @@ impl AudioEngine {
             track: None,
             building: None,
             on_built: None,
-            start_failed: false,
             clock: EngineClock::new(),
             path: None,
             speed: SharedSpeed::new(1.0),
             volume: 1.0,
-            stale: false,
+            standing: Standing::Current,
             parked_secs: 0.0,
-            failed: false,
-            error: None,
+            fault: Fault::None,
             simulation: None,
             sim_clock: None,
             sim_time: None,
@@ -383,7 +419,7 @@ impl AudioEngine {
         if self.sim_stalled() {
             return Some(AudioError::DeviceStalled);
         }
-        self.error
+        self.fault.error()
     }
 
     fn sim_stalled(&self) -> bool {
@@ -395,12 +431,15 @@ impl AudioEngine {
     }
 
     fn note(&mut self, result: &Result<(), AudioError>) {
-        self.error = result.as_ref().err().copied();
+        self.fault = match result {
+            Ok(()) => Fault::None,
+            Err(error) => Fault::Seen(*error),
+        };
     }
 
     /// What the track is doing, read from the sound itself.
     pub(in crate::ui) fn state(&self) -> EngineState {
-        if self.failed {
+        if self.standing == Standing::Failed {
             return EngineState::Failed;
         }
         if let Some(clock) = &self.sim_clock {
@@ -436,7 +475,11 @@ impl AudioEngine {
         if let Some(building) = &self.building {
             return building.latest_target;
         }
-        let Some(track) = self.track.as_ref().filter(|_| !self.failed && !self.stale) else {
+        let Some(track) = self
+            .track
+            .as_ref()
+            .filter(|_| self.standing == Standing::Current)
+        else {
             return self.parked_secs;
         };
         track.probe.secs()
@@ -499,7 +542,7 @@ impl AudioEngine {
         // thread; this is where one that couldn't open shows.
         if let Some(track) = self.track.as_ref().filter(|t| t.player.lost()) {
             track.player.pause();
-            self.error = Some(AudioError::NoOutput);
+            self.fault = Fault::Seen(AudioError::NoOutput);
         }
     }
 
@@ -532,7 +575,7 @@ impl AudioEngine {
         self.build_threads.push(thread);
         #[cfg(not(test))]
         drop(thread);
-        self.start_failed = false;
+        self.fault.build_started();
         self.building = Some(Building {
             built_for: target,
             latest_target: target,
@@ -579,27 +622,43 @@ impl AudioEngine {
                     player: built.player,
                     probe: built.probe,
                 });
-                self.stale = false;
-                self.failed = false;
-                self.error = (!playing).then_some(AudioError::NoOutput);
+                self.standing = Standing::Current;
+                self.fault = if playing {
+                    Fault::None
+                } else {
+                    Fault::Seen(AudioError::NoOutput)
+                };
             }
         }
     }
 
     fn fail_build(&mut self, error: AudioError, target: f64) {
         let ended = self.track.as_ref().is_none_or(|t| t.player.empty());
-        let silent = ended || self.stale;
+        let silent = ended || self.standing == Standing::Stale;
         if silent {
             self.parked_secs = target;
         }
-        self.failed = ended;
-        self.start_failed = silent;
-        self.error = Some(error);
+        if ended {
+            self.standing = Standing::Failed;
+        } else if self.standing == Standing::Failed {
+            self.standing = Standing::Current;
+        }
+        self.fault = if silent {
+            Fault::Unseen(error)
+        } else {
+            Fault::Seen(error)
+        };
     }
 
     /// A build that was to be the only sound failed since the last call.
     pub(in crate::ui) fn take_start_failed(&mut self) -> bool {
-        std::mem::take(&mut self.start_failed)
+        match self.fault {
+            Fault::Unseen(error) => {
+                self.fault = Fault::Seen(error);
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Play `path` from `offset_secs`, replacing whatever played.
@@ -620,7 +679,11 @@ impl AudioEngine {
         let offset = offset_secs.max(0.0);
         self.parked_secs = offset;
         let started = self.begin(offset);
-        self.failed = started.is_err();
+        self.standing = if started.is_err() {
+            Standing::Failed
+        } else {
+            Standing::Current
+        };
         self.note(&started);
         started
     }
@@ -678,30 +741,34 @@ impl AudioEngine {
                 clock.seek_at(0.0, now);
             }
             clock.resume_at(now);
-            self.error = None;
+            self.fault = Fault::None;
             return Ok(());
         }
         if let Some(building) = self.building.as_mut() {
             building.land_paused = false;
-            self.error = None;
-            if let Some(track) = self.track.as_ref().filter(|_| !self.stale) {
+            self.fault = Fault::None;
+            if let Some(track) = self
+                .track
+                .as_ref()
+                .filter(|_| self.standing != Standing::Stale)
+            {
                 track.player.play();
             }
             return Ok(());
         }
         let ended = self.track.as_ref().is_none_or(|t| t.player.empty());
-        if self.failed || self.stale || ended {
+        if self.standing != Standing::Current || ended {
             if self.path.is_none() {
                 return Ok(());
             }
-            let at = if ended && !self.stale && !self.failed {
+            let at = if ended && self.standing == Standing::Current {
                 0.0
             } else {
                 offset_secs.max(0.0)
             };
             let started = self.begin(at);
-            if started.is_ok() {
-                self.failed = false;
+            if started.is_ok() && self.standing == Standing::Failed {
+                self.standing = Standing::Current;
             }
             self.note(&started);
             return started;
@@ -714,7 +781,7 @@ impl AudioEngine {
             self.note(&woke);
             return woke;
         }
-        self.error = None;
+        self.fault = Fault::None;
         Ok(())
     }
 
@@ -749,7 +816,9 @@ impl AudioEngine {
             return Ok(());
         }
         if !playing {
-            self.stale = true;
+            if self.standing == Standing::Current {
+                self.standing = Standing::Stale;
+            }
             self.parked_secs = offset;
             return Ok(());
         }
@@ -779,13 +848,11 @@ impl AudioEngine {
         self.parked_secs = self.position_secs();
         self.track = None;
         self.building = None;
-        self.start_failed = false;
         self.sim_clock = None;
         self.sim_stalled_since = None;
         self.path = None;
-        self.stale = false;
-        self.failed = false;
-        self.error = None;
+        self.standing = Standing::Current;
+        self.fault = Fault::None;
     }
 }
 

@@ -5,9 +5,6 @@ ActiveGroupCall::loaded_all_participants+transport_error
 ActiveGroupCall::screen_share_pending
 AppearancePrefs::ignore_battery_saving
 Assembly::started
-AudioEngine::failed
-AudioEngine::start_failed
-AudioEngine::start_failed+error
 AuthState::change_number_loading
 AuthState::change_number_loading+last_auth_error
 AwardMembers::done
@@ -113,7 +110,6 @@ MiniAppWindow::waiting_write_access
 MutedSpeechHint::done
 NewChatView::busy
 NewChatView::busy+failure
-OutputState::opening
 OwnershipState::check_in_flight
 OwnershipState::check_in_flight+check_error
 Paged::loaded
