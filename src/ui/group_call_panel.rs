@@ -143,19 +143,6 @@ fn breath_at(now_ms: u64, state: MuteState) -> f32 {
 }
 
 impl QuillApp {
-    /// A join of `call` was sent and has not been answered.
-    fn group_call_join_sent(&self, call: i32) -> bool {
-        self.session().is_some_and(|session| {
-            session
-                .requests
-                .has_purpose(quill::state::RequestPurpose::Calls(
-                    quill::state::CallsPurpose::JoinVideoChat {
-                        group_call_id: call,
-                    },
-                ))
-        })
-    }
-
     /// The group call window's content, built with the app's context.
     pub(super) fn group_call_panel_body(
         &mut self,
@@ -173,8 +160,7 @@ impl QuillApp {
                 .bg(call_chrome::group_surface())
                 .into_any_element();
         };
-        let joining = self.group_call_join_sent(call.id);
-        let state = mute_state(&call, joining);
+        let state = mute_state(&call, call.transport.joining());
         let now = self.group_call_now_ms();
         let still = quill::power_saving::on(quill::power_saving::Flag::Calls);
         if !still {

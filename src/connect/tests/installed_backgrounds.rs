@@ -51,7 +51,11 @@ fn a_list_request_that_cannot_leave_fails_once_and_waits_for_retry() {
 
     sender.refuse.store(true, Ordering::SeqCst);
     assert!(driver.fetch_installed_backgrounds(false).is_err());
-    let list = &driver.session.chats_state.installed_backgrounds;
+    let list = driver
+        .session
+        .chats_state
+        .installed_backgrounds
+        .theme(false);
     assert!(list.error().is_some(), "the refused send is a failed list");
     assert!(!list.shows_loading());
 
@@ -72,6 +76,7 @@ fn a_list_request_that_cannot_leave_fails_once_and_waits_for_retry() {
             .session
             .chats_state
             .installed_backgrounds
+            .theme(false)
             .is_loading()
     );
     let _ = std::fs::remove_dir_all(&dir);

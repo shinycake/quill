@@ -11,11 +11,7 @@ detached:QuillApp::custom_emoji_card_body 1
 detached:QuillApp::emoji_sets_search_typed 1
 detached:QuillApp::ensure_self_destruct_tick 1
 detached:QuillApp::gif_search_typed 1
-detached:QuillApp::group_link_changed 1
 detached:QuillApp::new_chatbot_draft 1
-detached:QuillApp::live_story_header 1
-detached:QuillApp::new_chatbot_draft 2
-detached:QuillApp::ptt_release 1
 detached:QuillApp::schedule_chat_search_commit 1
 detached:QuillApp::schedule_draft_commit 1
 detached:QuillApp::schedule_search_commit 1
@@ -77,8 +73,6 @@ poll:QuillApp::sync_qr_clock 1
 poll:QuillApp::viewer_note_activity 1
 poll:QuillApp::with_device_access 1
 poll:VideoPlayer::spawn_open_poll 1
-poll:open_main_window 1
-poll:closed 1
 poll:poll_answer_unless 1
 poll:scan 1
 poll:spawn_menu_sync 1

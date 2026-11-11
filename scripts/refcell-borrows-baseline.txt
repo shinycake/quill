@@ -1,7 +1,5 @@
 # RefCell borrows that can panic (scripts/check-refcell-borrows.py).
 # <Type::function>::<receiver>.<call> <count>. Only remove lines or lower counts.
-BoundedImageCache::new::current.borrow_mut 1
-CacheScope::enter::scoped.borrow_mut 2
 ChatListKeys::begin_search_rows::search_bounds.borrow_mut 1
 ChatListKeys::begin_search_rows::search_order.borrow_mut 1
 ChatListKeys::push_search_row::search_order.borrow_mut 1
@@ -46,7 +44,6 @@ Layer::register::items.borrow_mut 1
 Layered::paint::items.borrow 1
 MotionState::cancel_reveal::reveal.borrow_mut 1
 MotionState::reveal_now::reveal.borrow_mut 1
-MotionState::reveal_probe::reveal.borrow 1
 MotionState::start_reveal::reveal.borrow_mut 1
 Occluder::prepaint::occluders.borrow_mut 1
 QuillApp::advance_effects::active.borrow 2
@@ -94,7 +91,6 @@ QuillApp::build_grams_withdraw_dialog::body.borrow_mut 1
 QuillApp::build_group_call_create_dialog::body.borrow_mut 1
 QuillApp::build_group_confirm_dialog::body.borrow_mut 1
 QuillApp::build_group_history_box::body.borrow_mut 1
-QuillApp::build_group_settings_dialog::body.borrow_mut 1
 QuillApp::build_import_contacts_dialog::body.borrow_mut 1
 QuillApp::build_invite_link_custom_dialog::field.borrow_mut 1
 QuillApp::build_join_requests_dialog::body.borrow_mut 1
@@ -142,8 +138,6 @@ QuillApp::build_story_stealth_dialog::body.borrow_mut 1
 QuillApp::build_suggest_price_dialog::body.borrow_mut 1
 QuillApp::build_suggest_time_dialog::body.borrow_mut 1
 QuillApp::build_text_box::body.borrow_mut 1
-QuillApp::build_translate_dialog::body.borrow_mut 1
-QuillApp::build_theme_editor_dialog::body.borrow_mut 1
 QuillApp::build_twofa_dialog::body.borrow_mut 1
 QuillApp::build_username_dialog::body.borrow_mut 1
 QuillApp::build_video_editor_dialog::body.borrow_mut 1
@@ -226,11 +220,6 @@ RichPreview::blocks::parsed.borrow_mut 1
 RunningResize::drop::resize.borrow_mut 1
 SelectableRichText::paint::owners.borrow 1
 SelectableRichText::paint::owners.borrow_mut 1
-SizedLoad::get::state.borrow 1
-SizedLoad::new::state.borrow_mut 1
-SizedLoad::use_by::state.borrow_mut 1
-TrayReads::forget::photo_sizes.borrow_mut 1
-StreamSound::start_with::slot.borrow 1
 Wallpaper::with_stored_rotation::r.borrow 1
 WindowZoom::fire_resize::resize.borrow_mut 1
 WindowZoom::register::list.borrow_mut 1
@@ -283,8 +272,6 @@ forget_account_notes::active.borrow_mut 1
 forget_display::displays.borrow_mut 1
 forget_reveals::reveals.borrow_mut 1
 forget_waiting::waiting.borrow_mut 1
-forget_window::slices.borrow_mut 1
-forget_window::whole.borrow_mut 1
 gpu_gone::slot.borrow 1
 hide_until_mouse_moves::slot.borrow 1
 image_of::sheets.borrow 1
@@ -296,11 +283,8 @@ locate::running.borrow_mut 1
 lookup::cache.borrow_mut 1
 lookup::s.borrow_mut 1
 mark_revealed::reveals.borrow_mut 1
-may_be_visible::slices.borrow 1
 measured::cache.borrow_mut 2
 nearest::badges.borrow 1
-newly_shown::slices.borrow 1
-next_frame::whole.borrow_mut 1
 note_playing::playing.borrow_mut 1
 note_source::source.borrow_mut 1
 note_target::last.borrow_mut 1
@@ -311,8 +295,6 @@ open_chat_window::built_out.borrow_mut 1
 open_if_ready::first.borrow_mut 1
 open_pip_window::slot.borrow_mut 1
 open_pip_window::slot_in.borrow_mut 1
-paint_stamp::scoped.borrow 1
-paint_stamp_in::scope.borrow 1
 paint_text_specks::painted.borrow_mut 1
 parsed_chart::charts.borrow_mut 1
 premium_playing::active.borrow 1
@@ -342,10 +324,6 @@ set_zoom::list.borrow_mut 1
 settle::f.borrow_mut 1
 shared::playing.borrow 1
 shown_unwatched::badges.borrow 1
-shows_now::slices.borrow 1
-sized_image_with::scoped.borrow 1
-slice_rendered::slices.borrow_mut 1
-slice_shown::slices.borrow_mut 1
 start_sweeper::seen.borrow_mut 1
 sync::applied.borrow_mut 2
 sync_tray::cell.borrow_mut 2
@@ -361,8 +339,6 @@ tracker::played.borrow 1
 tracker::seen.borrow_mut 1
 tray_available::cell.borrow 2
 tray_registering::cell.borrow 1
-utc_offset_at::cell.borrow_mut 1
-video_output_ready::slot.borrow 1
 video_redraws::asks.borrow 1
 video_request::asks.borrow_mut 1
 video_request_done::answered.borrow_mut 1
@@ -370,7 +346,6 @@ video_request_done::asks.borrow 1
 wake::retired.borrow 1
 wake::slot.borrow_mut 1
 watch_gpu_loss::slot.borrow_mut 1
-whole_of::whole.borrow 1
 with_layer::current.borrow_mut 1
 with_selected::selected.borrow_mut 1
 wrap::fly.borrow 1

@@ -567,7 +567,7 @@ impl Session {
             if let Some(request) = request {
                 tracked.rejoin.attempt_joined(request);
             }
-            tracked.transport.store_answer(payload);
+            tracked.transport.store_answer(request, payload);
         }
     }
 

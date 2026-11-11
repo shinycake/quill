@@ -177,21 +177,18 @@ fn esc_in_the_video_chat_window_closes_the_invite_and_share_boxes(cx: &mut TestA
     open_boxes(&app, &mut vcx);
     app.update_in(&mut vcx, |app, _, cx| {
         app.screen_share.chooser = Default::default();
-        app.group_call_screen.settings_open = false;
-        app.group_call_screen.title_dialog = None;
-        app.group_call_boxes.call_box = CallBox::Share {
-            call: Some(77),
+        assert!(app.open_call_box(CallBox::Share {
             speaker: false,
             copied: false,
-        };
+        }));
         assert!(app.group_call_window_escape(cx), "Esc closes the share box");
-        assert!(matches!(app.group_call_boxes.call_box, CallBox::None));
-        app.group_call_boxes.call_box = CallBox::Invite { call: Some(77) };
+        assert!(matches!(app.call_box(), Some(CallBox::None)));
+        assert!(app.open_call_box(CallBox::Invite));
         assert!(
             app.group_call_window_escape(cx),
             "Esc closes the invite box"
         );
-        assert!(matches!(app.group_call_boxes.call_box, CallBox::None));
+        assert!(matches!(app.call_box(), Some(CallBox::None)));
         assert!(!app.group_call_window_escape(cx), "nothing left to close");
     });
 }

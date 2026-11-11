@@ -5,6 +5,7 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
+use quill::state::ActiveGroupCall;
 
 fn open_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
@@ -27,18 +28,20 @@ fn open_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
 fn the_lock_closes_the_invite_and_share_boxes(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_app(cx);
     for open in [
-        CallBox::Invite { call: Some(1) },
+        CallBox::Invite,
         CallBox::Share {
-            call: Some(1),
             speaker: false,
             copied: false,
         },
     ] {
         app.update_in(&mut vcx, |app, _, cx| {
-            app.group_call_boxes.call_box = open;
+            if let Some(session) = app.demo_session.as_mut() {
+                session.calls.active_group_call = Some(ActiveGroupCall::fresh(1));
+            }
+            assert!(app.open_call_box(open), "a tracked call to open it over");
             app.close_call_layers_for_lock(cx);
-            assert_eq!(app.group_call_boxes.call_box, CallBox::None);
-            assert!(!app.group_call_boxes.share_open());
+            assert!(matches!(app.call_box(), Some(CallBox::None)));
+            assert!(!app.share_open() && !app.invite_open());
         });
     }
 }

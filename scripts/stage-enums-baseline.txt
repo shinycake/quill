@@ -100,8 +100,6 @@ bare:PhoneLookups::Asked 1
 bare:Picture::Loading 1
 bare:PictureState::Waiting 1
 bare:PinTarget::Loading 1
-bare:PingStatus::Checking 1
-bare:PipWindowStage::Opening 1
 bare:PlayHead::Waiting 1
 bare:PlayState::Opening 1
 bare:Playback::Waiting 1

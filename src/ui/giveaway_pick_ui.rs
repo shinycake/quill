@@ -657,7 +657,7 @@ fn members_page_due(stage: &MembersStage, near_end: bool, scrolled: bool) -> boo
     match stage {
         MembersStage::Ready => load_due(near_end, true, false),
         MembersStage::Failed(_) => scrolled && load_due(near_end, true, false),
-        MembersStage::Idle | MembersStage::Loading | MembersStage::Done => false,
+        MembersStage::Idle | MembersStage::Loading { .. } | MembersStage::Done => false,
     }
 }
 
@@ -685,7 +685,9 @@ mod tests {
         assert!(members_page_due(&MembersStage::Ready, true, false));
         for stage in [
             MembersStage::Idle,
-            MembersStage::Loading,
+            MembersStage::Loading {
+                request: quill::ids::RequestId(1),
+            },
             MembersStage::Done,
         ] {
             assert!(!members_page_due(&stage, true, true));

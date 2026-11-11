@@ -51,12 +51,12 @@ impl QuillApp {
             self.close_group_call_title_dialog(cx);
             return true;
         }
-        if self.group_call_boxes.share_open() {
+        if self.share_open() {
             self.close_group_call_share_links(cx);
             return true;
         }
-        if self.group_call_boxes.invite_open() {
-            self.group_call_boxes.close_call_box();
+        if self.invite_open() {
+            self.close_call_box();
             self.close_conference_link();
             cx.notify();
             return true;

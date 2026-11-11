@@ -201,6 +201,9 @@ impl Session {
                 let Some(call) = self.calls.group_call_mut(group_call_id) else {
                     return;
                 };
+                if let Some(request) = extra {
+                    call.transport.join_failed(request);
+                }
                 if extra.is_some_and(|request| call.rejoin.attempt_failed(request)) {
                     // The banner + manual Rejoin stay after exhaustion.
                     let exhausted = call.rejoin == crate::state::GroupCallRejoin::GaveUp;

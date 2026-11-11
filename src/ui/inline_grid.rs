@@ -587,8 +587,9 @@ impl QuillApp {
                 .session_mut()
                 .and_then(|session| session.bots.inline_query.as_mut())
                 .filter(|slot| slot.chat_id == chat_id && slot.query == query)
+            && let quill::state::InlineQueryFetch::Loaded { more, .. } = &mut slot.fetch
         {
-            slot.more_failed = Some(offset);
+            *more = quill::state::InlineMore::Failed { offset };
         }
     }
 }

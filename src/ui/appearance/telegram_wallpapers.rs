@@ -226,7 +226,7 @@ impl QuillApp {
             .map(|b| b.id)
             .filter(|_| self.appearance.telegram_wallpaper);
         session
-            .and_then(|s| s.chats_state.installed_backgrounds.data())
+            .and_then(|s| s.chats_state.installed_backgrounds.theme(dark).data())
             .is_some_and(|list| list.iter().any(|b| b.id == id && removable(b, in_use)))
     }
 
