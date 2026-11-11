@@ -87,11 +87,19 @@ impl ForumTopicsMap {
         topics: Vec<ForumTopic>,
     ) -> bool {
         let unread = counted_unread(&topics);
-        let taken = self
-            .lists
-            .get_mut(&chat_id)
-            .is_some_and(|list| list.answered(request, topics));
+        let list = self.lists.entry(chat_id).or_default();
+        // An ask other than the one waited for, or one a change outdated,
+        // is stale; an answer nobody tracked (TDLib's own) is taken.
+        let taken = match list {
+            Fetch::Loading {
+                request: Some(waiting),
+                ..
+            } => Some(*waiting) == request,
+            Fetch::Outdated(_) => false,
+            _ => true,
+        };
         if taken {
+            list.succeed(topics);
             self.unread.insert(chat_id, unread);
         }
         taken
