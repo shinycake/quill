@@ -132,7 +132,7 @@ impl QuillApp {
         // Phase 9.3: `postStory` already sent, answer not yet landed —
         // the button is disabled while `busy`; this guards a
         // stale-snapshot race from re-running canPostStory→postStory.
-        if self.stories.composer.post_sent || self.stories.composer.save_sent {
+        if self.stories.composer.post_sent || self.stories.composer.is_saving() {
             return;
         }
         let media = self.stories.composer.media.clone();
@@ -238,7 +238,9 @@ impl QuillApp {
             areas,
             Some(&caption),
         ) {
-            Ok(_) => self.stories.composer.save_sent = true,
+            Ok(request) => {
+                self.stories.composer.save = quill::story_composer::SaveStage::Saving { request }
+            }
             Err(_) => {
                 self.stories.composer.local_error =
                     Some(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_EDIT).into());
@@ -372,7 +374,9 @@ impl QuillApp {
         // Phase 9.5: edit-mode save state — the tick closes the
         // composer on success or moves the failure into local_error.
         if composer.is_edit() {
-            return composer.save_sent.then(|| tr(keys::Q_MEDIA_SAVING).into());
+            return composer
+                .is_saving()
+                .then(|| tr(keys::Q_MEDIA_SAVING).into());
         }
         let post = self.session().map(|session| session.stories.post.clone())?;
         match &post.outcome {
@@ -634,7 +638,7 @@ impl QuillApp {
         let status = self.story_composer_status();
         let busy = self.stories.composer.check_sent
             || self.stories.composer.post_sent
-            || self.stories.composer.save_sent
+            || self.stories.composer.is_saving()
             || self.session().is_some_and(|session| {
                 matches!(
                     session.stories.post.outcome,

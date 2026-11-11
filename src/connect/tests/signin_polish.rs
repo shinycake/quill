@@ -121,10 +121,7 @@ fn countries_and_default_code_are_fetched_once_and_stored() {
         &sink,
         json!({"@type":"text","@extra":code.as_extra(),"text":"gb"}),
     );
-    assert_eq!(
-        driver.session.auth_state.countries.as_ref().unwrap().len(),
-        2
-    );
+    assert_eq!(driver.session.auth_state.countries.data().unwrap().len(), 2);
     assert_eq!(
         driver.session.auth_state.guessed_country_iso.as_deref(),
         Some("GB")
@@ -137,6 +134,32 @@ fn countries_and_default_code_are_fetched_once_and_stored() {
             .requests
             .has_purpose(RequestPurpose::GetCountries)
     );
+}
+
+#[test]
+fn a_failed_country_list_is_asked_again_only_when_the_picker_retries() {
+    let (_dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let first = driver.fetch_countries().unwrap().unwrap();
+    ingest(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type":"error","@extra":first.as_extra(),"code":500,"message":"offline"}),
+    );
+    assert!(driver.session.auth_state.countries.error().is_some());
+    assert_eq!(
+        driver.fetch_countries().unwrap(),
+        None,
+        "a frame never re-asks a failed list"
+    );
+    let again = driver.retry_countries().unwrap();
+    assert!(again.is_some(), "opening the picker asks again");
+    assert!(driver.session.auth_state.countries.is_loading());
+    assert_eq!(driver.retry_countries().unwrap(), None, "one in flight");
 }
 
 #[test]

@@ -56,10 +56,15 @@ impl Session {
             // `startGroupCallScreenSharing` returns `text` — the
             // presentation answer, consumed by the driver pump.
             AuthPayload::Countries { countries } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCountries)
-                    && !countries.is_empty()
-                {
-                    self.auth_state.countries = Some(countries);
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCountries) {
+                    self.auth_state.countries = if countries.is_empty() {
+                        crate::state::fetch::Fetch::Failed {
+                            error: "empty list".to_string(),
+                            stale: None,
+                        }
+                    } else {
+                        crate::state::fetch::Fetch::Ready(countries)
+                    };
                 }
             }
         }

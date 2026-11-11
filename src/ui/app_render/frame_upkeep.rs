@@ -98,16 +98,23 @@ impl QuillApp {
         // `story_manage.pending` clears, success closes the composer
         // (the edited story arrives via `updateStory`); failure
         // surfaces `story_manage.error` in the composer.
-        if self.stories.composer.save_sent
-            && self
+        if let quill::story_composer::SaveStage::Saving { request } = self.stories.composer.save
+            && let Some(done) = self
                 .session()
-                .is_some_and(|session| !session.stories.manage.pending)
+                .map(|session| session.stories.manage.outcome(request))
+            && done != StoryManageOutcome::InFlight
         {
-            self.stories.composer.save_sent = false;
-            let failed = self.session().and_then(|s| s.stories.manage.error.clone());
-            match failed {
-                Some(error) => self.stories.composer.local_error = Some(error),
-                None => self.close_story_composer(cx),
+            self.stories.composer.save = quill::story_composer::SaveStage::Idle;
+            match done {
+                StoryManageOutcome::Saved => self.close_story_composer(cx),
+                StoryManageOutcome::Failed => {
+                    self.stories.composer.local_error =
+                        self.session().and_then(|s| s.stories.manage.error.clone());
+                }
+                _ => {
+                    self.stories.composer.local_error =
+                        Some(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_EDIT).into());
+                }
             }
         }
         // Phase 9.5: the viewer cover editor / privacy editor sent a

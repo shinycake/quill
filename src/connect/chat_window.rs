@@ -119,11 +119,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         // else would save it, and its slot would stay dirty (ignoring the
         // drafts other devices save) until something stored it.
         let flushed = self.flush_pending_draft();
-        self.cancel_outgoing_typing()?;
-        self.close_open_chat()?;
+        // The goodbyes to TDLib are best effort: the local teardown below
+        // runs whatever they answer, or the session would keep treating the
+        // chat as shown (and read its new messages) after the main window
+        // cleared it.
+        let typing = self.cancel_outgoing_typing();
+        let closed = self.close_open_chat();
         self.draft_clock = DraftSaveClock::idle();
         self.pending_draft = None;
         self.session.leave_open_chat();
+        typing?;
+        closed?;
         flushed.map(|_| ())
     }
 

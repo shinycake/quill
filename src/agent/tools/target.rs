@@ -62,7 +62,12 @@ pub(crate) fn my_user_id(ctx: &Ctx) -> Result<i64, ToolError> {
     Ok(id)
 }
 
-/// The class of `chat`, a TDLib `chat` object.
+/// Most classes the cache keeps; past it the cache starts over.
+const MAX_CACHED_CLASSES: usize = 20_000;
+
+/// The class of `chat`, a TDLib `chat` object. Only a class that cannot
+/// change is remembered (a private chat's Saved/Bot/Other, a secret chat):
+/// a channel's class follows who owns it now, so it is read on every call.
 pub(crate) fn classify(ctx: &Ctx, chat: &Value, me: i64) -> Result<ChatClass, ToolError> {
     let chat_id = chat.get("id").and_then(Value::as_i64).unwrap_or(0);
     if let Some(class) = with_known(|known| known.classes.get(&(ctx.client.id(), chat_id)).copied())
@@ -111,7 +116,18 @@ pub(crate) fn classify(ctx: &Ctx, chat: &Value, me: i64) -> Result<ChatClass, To
         }
         _ => ChatClass::Other,
     };
-    with_known(|known| known.classes.insert((ctx.client.id(), chat_id), class));
+    let stable = matches!(
+        kind.get("@type").and_then(Value::as_str),
+        Some("chatTypePrivate" | "chatTypeSecret")
+    );
+    if stable {
+        with_known(|known| {
+            if known.classes.len() >= MAX_CACHED_CLASSES {
+                known.classes.clear();
+            }
+            known.classes.insert((ctx.client.id(), chat_id), class)
+        });
+    }
     Ok(class)
 }
 

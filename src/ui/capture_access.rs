@@ -5,6 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::recording_state::PermissionAsk;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
@@ -151,12 +152,25 @@ impl QuillApp {
         for &device in devices {
             match access(device) {
                 Access::Granted => {}
+                // A prompt already up belongs to an earlier press: this one
+                // must not wipe it, or that prompt's Allow would be ignored.
                 Access::Denied => {
                     self.set_note(StatusNote::error(denied_note(device)));
                     cx.notify();
                     return;
                 }
                 Access::Undetermined => {
+                    // The system prompt is up for an earlier press: this one
+                    // would only queue a second start behind it.
+                    if self.recording.permission != PermissionAsk::Idle {
+                        return;
+                    }
+                    let call = self.active_call_id();
+                    let ask = PermissionAsk::Asking {
+                        id: self.next_permission_ask(),
+                        call,
+                    };
+                    self.recording.permission = ask;
                     self.set_note(StatusNote::silent(tr(if device {
                         keys::Q_LEFTOVERS_ALLOW_CAMERA
                     } else {
@@ -180,6 +194,15 @@ impl QuillApp {
                             }
                         };
                         let _ = this.update(cx, |this, cx| {
+                            if this.recording.permission != ask {
+                                return;
+                            }
+                            this.recording.permission = PermissionAsk::Idle;
+                            // The call the press was for ended or changed
+                            // while the prompt was up: nothing to start.
+                            if call.is_some() && this.active_call_id() != call {
+                                return;
+                            }
                             if granted {
                                 this.with_device_access(devices, start, cx);
                             } else {
@@ -194,5 +217,17 @@ impl QuillApp {
             }
         }
         start(self, cx);
+    }
+
+    /// The id of the call on screen, if any.
+    fn active_call_id(&self) -> Option<i32> {
+        self.live
+            .as_ref()
+            .and_then(|live| live.driver.session.calls.active_call.as_ref())
+            .map(|call| call.id)
+    }
+
+    fn next_permission_ask(&mut self) -> u64 {
+        self.recording.next_permission_ask()
     }
 }

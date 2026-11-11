@@ -4241,3 +4241,91 @@ re-read at its spot first.
   `a_channel_owned_bid_can_be_raised_but_a_channel_cannot_get_a_new_one`.
   No test for 09-X061 and 13-064 (the render-side clear and a type
   change; the existing background and preview tests cover the reducers).
+
+
+### Sweep fixes (s3-platform)
+
+Agent access, windows and platform code. Entries by area:
+
+- **Agent grants and writes.** `grants::update` and `change_all` write the
+  file first and return `Result<(), SaveError>`; a failed save leaves the
+  cache and the generation as they were, so Settings never shows a revoke a
+  restart would undo, and `QuillApp::update_grants` toasts the failure. An
+  Allow on a prompt whose grant could not be saved answers Denied (01-012).
+  A finished write result is sent with a note when access went off meanwhile
+  (`Reply::writes`), never replaced by "Agent access is off" (01-011).
+  `Presence::drop` withdraws the connection's prompts (`Pending::conn`), so
+  a click after the agent left sends nothing, and `still_allowed` refuses a
+  call whose connection is gone (01-039). A send returns a `Batch`: every
+  message delivered or still sending is returned, refusals are listed, the
+  log names only delivered ids and says "N failed" / "N still sending";
+  only a batch with nothing delivered fails (01-030, 01-031). Folder edits
+  read the folder inside the queue turn (`change_built`, 01-035). The
+  class cache keeps only classes that cannot change (private and secret
+  chats) and is capped; a channel's ownership is read each call (01-014).
+  The bridge keeps the agent's subscriptions and replays them on a new link
+  (01-009). The UI driver's `Pending` and `Ticket` share one `Stage`
+  (`Queued`, `Running`, `Injected`, `GaveUp`, `GaveUpAfterInjecting`) under
+  one lock; a timeout after input went in is `BridgeError::RanNoAnswer`,
+  which tells the agent not to repeat the command (01-040).
+- **Skipped: 01-024.** Every agent reads the same launch token from one
+  file, so Quill cannot tell two processes of one client apart, and the
+  self-declared name is the only identity it has. A per-client identity needs
+  a pairing step (a token per client, written by `connect`), which is a
+  design of its own; reset-token would end every connection, which is the
+  too-broad half of the entry.
+- **Environment switch.** `testmode` removes the account again when the
+  marker cannot be written (01-023).
+- **Pinned drag.** The release merges the dragged order into the pinned list
+  as it is now (`merge_order`), so another device's pin or unpin is kept
+  (04-020). A move with no button down ends the drag unsaved (04-021).
+  The Touch Bar drag is `PinTouch::{Pressed, Dragging}` in `model.rs`; only
+  an Ended touch in `Dragging` saves, a cancelled one snaps back
+  (`TouchEnd`, 13-151).
+- **Permission prompt.** `PermissionAsk::{Idle, Asking}` is held by
+  `RecordingUi`: a second press while the system prompt is up is ignored and
+  the answer starts its press only while the same call is active (08-054).
+  A press that finds a device already granted or denied no longer sets the
+  state to `Idle`: only the answer to the ask itself ends it, so a later
+  Allow is not dropped.
+- **Country list.** `AuthState::countries` is `Fetch<Vec<Country>>`; the
+  error answer lands in `Failed`, the boxes draw "Couldn't load the
+  countries" with Retry, and only a box opening or Retry asks again, never a
+  frame (09-017). The sign-in picker is one of those boxes: it draws the
+  failed row and asks again when it opens.
+- **Grants.** Changes are `Widen` (save first; a failed save changes
+  nothing) or `Narrow` (the cache takes it even when the file cannot be
+  written, and the failure is logged and shown). `forget_account` and the
+  Settings revokes narrow, so a logged-out account never keeps all-chats
+  access in memory for the next sign-in under its key (01-012).
+- **Agent `td_call` sends** return the refused messages as `failed` beside
+  the delivered ones (01-031).
+- **Saved tag box** moved to `MessageUi` and is `per_window` (12-072).
+- **Debug mode.** `debug_mode::switch` returns `DebugLog::{Off, On,
+  TdlibRefused}`; the flag and the saved file follow the state after TDLib
+  answered, and a refusal is shown (01-025).
+- **Share box.** Only the destinations that failed stay ticked; with no
+  client nothing is cleared (13-073, 13-072). `ShareSelection` holds a
+  `ChatSend::{Due, CommentSent}` per ticked chat, so a retry sends a chat
+  whose comment landed only the forward, never the comment twice.
+- **Connect.** `deselect_chat` tears down locally before the TDLib closes
+  (02-024); the Replies block box closes only after the send (02-179).
+- **Keychain.** Delete maps `errSecItemNotFound` to Ok and every other
+  status to an error (04-025).
+- **Story composer.** Its save waits on its own `RequestId`
+  (`SaveStage::Saving`); a call pushed out of the slot says so instead of
+  closing as saved (07-036; the cover and privacy editors were keyed).
+- **Header menu** entries carry the chat and the screen epoch they were
+  built for (08-062).
+- **Dialog hosts.** An `Asked` host ends when no request is in flight and
+  its flag is still clear (08-108).
+- **Saved windows.** A save during a restore keeps the windows not yet
+  reopened (`windows_to_save`, 08-143).
+- **Notifications.** A notification waiting for its avatar is shown in the
+  locked form when the lock engaged meanwhile (11-p5-021). A refused reply
+  in a notification window opens the chat (`InlineReplyOutcome`, 11-p6-004).
+- **Toasts.** The lock ends a hover that can no longer end
+  (`ToastQueue::pointer_gone`, 13-115). A host window hidden or minimized
+  with the pointer over its toast is not covered: no event says so.
+- **Touch Bar.** The composer observation follows the composer on screen
+  (13-152); commands are refused while locked (13-157).

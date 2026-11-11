@@ -250,6 +250,26 @@ impl ChatWindows {
         }
     }
 
+    /// The session-wide boxes a window asked for whose flag no answer set
+    /// yet.
+    pub(in crate::ui) fn asked_dialogs(&self) -> Vec<DialogKind> {
+        self.dialogs
+            .hosts
+            .iter()
+            .filter(|(_, owner)| matches!(owner, Host::Asked(_)))
+            .map(|(kind, _)| *kind)
+            .collect()
+    }
+
+    /// The ask for `kind` ended with no box: its request settled (answered
+    /// without opening it, failed, or was cancelled), so the next open of
+    /// that kind goes to the window of its own ask, not to this one.
+    pub(in crate::ui) fn dialog_ask_expired(&mut self, kind: DialogKind) {
+        if matches!(self.dialogs.hosts.get(&kind), Some(Host::Asked(_))) {
+            self.dialogs.hosts.remove(&kind);
+        }
+    }
+
     /// The session-wide boxes `host` showed.
     pub(in crate::ui) fn dialogs_shown_by(&self, host: Option<ChatId>) -> Vec<DialogKind> {
         self.dialogs

@@ -468,3 +468,40 @@ fn a_chat_windows_waiting_draft_survives_typing_and_sends_elsewhere() {
     assert!(h.driver.flush_pending_draft().unwrap().is_some());
     assert_eq!(h.sent("setChatDraftMessage", BOB).len(), 2);
 }
+
+#[test]
+fn a_failed_close_still_leaves_the_chat_the_main_window_cleared() {
+    let mut h = Harness::two_chats();
+    h.driver.select_chat(BOB).unwrap();
+    // The close cannot be sent, but the main window has cleared its chat:
+    // the session must not keep treating it as shown.
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let session = std::mem::replace(
+        &mut h.driver.session,
+        Session::new(AccountKey::primary(), sink),
+    );
+    let (_dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let mut broken = ConnectDriver::new(
+        session,
+        Arc::new(RefusesClose),
+        test_credentials(),
+        prepared,
+    );
+    let closed = broken.deselect_chat();
+    assert!(closed.is_err(), "the failure is still reported");
+    assert_eq!(broken.session.open_chat, None);
+    assert!(!broken.session.chat_is_shown(BOB));
+}
+
+/// Refuses `closeChat`, as a client closing mid-switch does.
+struct RefusesClose;
+
+impl JsonSender for Arc<RefusesClose> {
+    fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
+        if request.contains("\"closeChat\"") {
+            Err(ConnectSendError::Native)
+        } else {
+            Ok(())
+        }
+    }
+}

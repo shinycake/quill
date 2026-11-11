@@ -34,30 +34,59 @@ impl ShareSend {
     }
 }
 
-/// Destinations ticked in the share box, in tick order.
+/// What one ticked chat still needs from a send.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatSend {
+    /// Nothing has gone out: the comment (if any) and the forward are due.
+    Due,
+    /// The comment landed but the forward did not: a retry sends only the
+    /// forward, so the comment is never posted twice.
+    CommentSent,
+}
+
+/// Destinations ticked in the share box, in tick order, each with what a
+/// retry still owes it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ShareSelection {
-    chats: Vec<ChatId>,
+    chats: Vec<(ChatId, ChatSend)>,
 }
 
 impl ShareSelection {
     /// Tick or untick `chat`; returns whether it is now ticked.
     pub fn toggle(&mut self, chat: ChatId) -> bool {
-        if let Some(index) = self.chats.iter().position(|id| *id == chat) {
+        if let Some(index) = self.chats.iter().position(|(id, _)| *id == chat) {
             self.chats.remove(index);
             false
         } else {
-            self.chats.push(chat);
+            self.chats.push((chat, ChatSend::Due));
             true
         }
     }
 
     pub fn contains(&self, chat: ChatId) -> bool {
-        self.chats.contains(&chat)
+        self.chats.iter().any(|(id, _)| *id == chat)
     }
 
-    pub fn chats(&self) -> &[ChatId] {
+    /// The ticked chats with what each still needs, in tick order.
+    pub fn entries(&self) -> &[(ChatId, ChatSend)] {
         &self.chats
+    }
+
+    /// The ticked chats, in tick order.
+    pub fn chats(&self) -> Vec<ChatId> {
+        self.chats.iter().map(|(id, _)| *id).collect()
+    }
+
+    /// Keep only the chats the send did not finish, each at the stage it
+    /// reached; everything else is done and unticked.
+    pub fn keep_unfinished(&mut self, unfinished: &[(ChatId, ChatSend)]) {
+        self.chats
+            .retain(|(chat, _)| unfinished.iter().any(|(id, _)| id == chat));
+        for (chat, stage) in &mut self.chats {
+            if let Some((_, reached)) = unfinished.iter().find(|(id, _)| id == chat) {
+                *stage = *reached;
+            }
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -75,7 +104,7 @@ impl ShareSelection {
     /// The only ticked chat (the forward bar can follow it).
     pub fn single(&self) -> Option<ChatId> {
         match self.chats.as_slice() {
-            [only] => Some(*only),
+            [(only, _)] => Some(*only),
             _ => None,
         }
     }
@@ -123,11 +152,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_retry_keeps_each_chat_at_the_stage_it_reached() {
+        let mut selection = ShareSelection::default();
+        for id in [1, 2, 3] {
+            selection.toggle(ChatId(id));
+        }
+        selection.keep_unfinished(&[
+            (ChatId(1), ChatSend::CommentSent),
+            (ChatId(2), ChatSend::Due),
+        ]);
+        assert_eq!(
+            selection.entries(),
+            &[
+                (ChatId(1), ChatSend::CommentSent),
+                (ChatId(2), ChatSend::Due)
+            ]
+        );
+    }
+
+    #[test]
     fn selection_toggles_in_tick_order() {
         let mut selection = ShareSelection::default();
         assert!(selection.toggle(ChatId(5)));
         assert!(selection.toggle(ChatId(2)));
-        assert_eq!(selection.chats(), &[ChatId(5), ChatId(2)]);
+        assert_eq!(selection.chats(), vec![ChatId(5), ChatId(2)]);
         assert_eq!(selection.single(), None);
         assert!(!selection.toggle(ChatId(5)));
         assert_eq!(selection.single(), Some(ChatId(2)));

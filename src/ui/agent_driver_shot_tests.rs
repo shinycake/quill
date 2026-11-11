@@ -177,7 +177,7 @@ fn ungranted_rows_are_hidden_and_all_chats_shows_them(cx: &mut TestAppContext) {
     assert_ne!(pixel_at(&full, granted_row), HIDDEN_FILL);
 
     // All chats on: chat B's row is drawn like any other.
-    grants::update(&AccountKey::primary(), |g| g.all_chats = Some(Scope::Read));
+    let _ = grants::update(&AccountKey::primary(), |g| g.all_chats = Some(Scope::Read));
     settle(vcx);
     let (_, everything) = take(&app, vcx, FULL);
     assert_eq!(everything.scope, ShotScope::AllChats);
@@ -193,7 +193,7 @@ fn ungranted_rows_are_hidden_and_all_chats_shows_them(cx: &mut TestAppContext) {
         "chat B's row is drawn"
     );
     assert_ne!(pixel_at(&everything, ungranted_row), HIDDEN_FILL);
-    grants::update(&AccountKey::primary(), |g| g.all_chats = None);
+    let _ = grants::update(&AccountKey::primary(), |g| g.all_chats = None);
 
     // Each screenshot is in the activity log; the window shows the full
     // frame again after.
@@ -559,7 +559,7 @@ fn a_secret_chat_peek_is_cut_with_all_chats_on(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     turn_on();
     grant(11, Scope::ReadWrite);
-    grants::update(&AccountKey::primary(), |g| g.all_chats = Some(Scope::Read));
+    let _ = grants::update(&AccountKey::primary(), |g| g.all_chats = Some(Scope::Read));
     let _presence = activity::connect("Test agent");
     settle(vcx);
     for (chat, shown) in [(SECRET, false), (12, true)] {
@@ -616,7 +616,7 @@ fn a_secret_chat_peek_is_cut_with_all_chats_on(cx: &mut TestAppContext) {
         });
         settle(vcx);
     }
-    grants::update(&AccountKey::primary(), |g| g.all_chats = None);
+    let _ = grants::update(&AccountKey::primary(), |g| g.all_chats = None);
 }
 
 /// A tooltip's picture: one solid square.

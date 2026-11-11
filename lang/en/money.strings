@@ -909,3 +909,4 @@
 "qll_money_statistics_unavailable" = "Statistics are not available for this chat.";
 "qll_money_statistics_send_failed" = "Could not send the statistics request.";
 "qll_money_statistics_info_failed" = "Could not load the chat's details.";
+"qll_money_countries_failed" = "Couldn't load the countries.";

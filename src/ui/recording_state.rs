@@ -40,6 +40,21 @@ pub(super) enum CaptureStart {
     },
 }
 
+/// The system prompt for the camera or microphone, asked for one press. A
+/// second press while it is up is ignored, and its answer starts the press
+/// that asked only while the call that press was for is still the active
+/// one (`capture_access.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PermissionAsk {
+    Idle,
+    Asking {
+        /// Told apart from any ask that came after it.
+        id: u64,
+        /// The call the press was for (answer, camera, dial), if any.
+        call: Option<i32>,
+    },
+}
+
 /// Which start a device answer belongs to. An answer for any start but the
 /// one opening now is stale (cancelled, maybe replaced) and is dropped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +88,8 @@ pub(crate) struct RecordingUi {
     capture: Option<Capture>,
     pub(super) start: CaptureStart,
     next_start: u64,
+    /// The camera or microphone prompt now showing (one per press).
+    pub(super) permission: PermissionAsk,
     pub(super) open_voice: Arc<dyn Fn() -> Result<VoiceCapture, String> + Send + Sync>,
     /// MED2: lock-to-record — a locked recording ignores Esc; only Send
     /// or Cancel (with confirmation) ends it.
@@ -103,11 +120,18 @@ impl super::on_screen::Farewell for RecordingUi {
 }
 
 impl RecordingUi {
+    /// A fresh id for the next permission ask.
+    pub(super) fn next_permission_ask(&mut self) -> u64 {
+        self.next_start = self.next_start.wrapping_add(1);
+        self.next_start
+    }
+
     pub(super) fn new() -> Self {
         Self {
             capture: None,
             start: CaptureStart::Idle,
             next_start: 0,
+            permission: PermissionAsk::Idle,
             open_voice: Arc::new(VoiceCapture::start),
             locked: false,
             discard_confirm: false,

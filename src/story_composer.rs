@@ -200,6 +200,22 @@ pub struct StoryMedia {
 
 /// Composer state. Pure (no GPUI); the UI layer owns the text inputs and
 /// syncs them into this before posting.
+/// The composer's `editStory` call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SaveStage {
+    #[default]
+    Idle,
+    /// Sent as `request`; only its own answer ends the wait.
+    Saving { request: crate::ids::RequestId },
+}
+
+impl StoryComposer {
+    /// An `editStory` call is waiting for its answer.
+    pub fn is_saving(&self) -> bool {
+        matches!(self.save, SaveStage::Saving { .. })
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct StoryComposer {
     pub open: bool,
@@ -224,11 +240,12 @@ pub struct StoryComposer {
     /// duplicate story). The UI tick clears it once
     /// `Session::story_post.outcome` leaves `None`.
     pub post_sent: bool,
-    /// Phase 9.5: `editStory` was sent in edit mode and its `ok` answer
-    /// has not landed yet. The UI tick clears it once
-    /// `Session::story_manage.pending` clears — success closes the
-    /// composer, failure surfaces `story_manage.error`.
-    pub save_sent: bool,
+    /// Phase 9.5: the `editStory` call of edit mode, until its own answer
+    /// lands. The UI tick settles it from the outcome of that request
+    /// (`StoryManageState::outcome`): success closes the composer, failure
+    /// surfaces the error, and a call another management call pushed out of
+    /// the slot says so instead of closing as saved.
+    pub save: SaveStage,
     /// UI-local validation / flow error (no valid media path yet, no
     /// users selected, demo mode, …). Cleared on open.
     pub local_error: Option<String>,

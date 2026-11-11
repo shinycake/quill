@@ -7,7 +7,7 @@ use crate::telegram::requests::block_message_sender_from_replies;
 impl<S: JsonSender> ConnectDriver<S> {
     /// Close the open box and block its sender. A no-op when no box is open.
     pub fn submit_replies_block(&mut self) -> Result<(), ConnectSendError> {
-        let Some(block) = self.session.users_state.replies_block.take() else {
+        let Some(block) = self.session.users_state.replies_block.clone() else {
             return Ok(());
         };
         if !self.chats_path_active() {
@@ -27,6 +27,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        // Sent: the box closes. Before this the user's choices stay.
+        self.session.users_state.replies_block = None;
         Ok(())
     }
 }

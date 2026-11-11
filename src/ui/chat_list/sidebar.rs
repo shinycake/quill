@@ -496,7 +496,14 @@ impl QuillApp {
             .rounded_md()
             .when(focus_visible, |this| this.focus_ring_style(window, cx))
             // A mouse move takes the selection back from the keys.
-            .on_mouse_move(cx.listener(|this, _, _, cx| this.chat_list_mouse_moved(cx)))
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                // A pointer moving with no button down: the release never
+                // reached the list (lost capture), so the drag ends unsaved.
+                if event.pressed_button != Some(MouseButton::Left) {
+                    this.cancel_pin_drag(cx);
+                }
+                this.chat_list_mouse_moved(cx)
+            }))
             // Pinned drag: the pointer position drives the live reorder; a
             // release anywhere ends it.
             .on_drag_move(

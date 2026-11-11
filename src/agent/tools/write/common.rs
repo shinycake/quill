@@ -392,6 +392,23 @@ pub fn change(
     change_on(ctx, target, tool, summary, request, Vec::new())
 }
 
+/// [`change`] for a write whose request is built from what it reads: `build`
+/// runs after the queue turn, so the read is as fresh as the write and does
+/// not put back what changed while the write waited.
+pub fn change_built(
+    ctx: &Ctx,
+    target: &Target,
+    tool: &str,
+    summary: &str,
+    build: impl FnOnce() -> Result<Value, ToolError>,
+) -> Result<Value, ToolError> {
+    take_write_turn(ctx, target.chat_id)?;
+    let result =
+        build().and_then(|request| td::call(&ctx.client, request).map_err(write_error(ctx)));
+    log_on(ctx, target, tool, summary, result.is_ok(), Vec::new());
+    result
+}
+
 /// [`change`] for a write made of several requests: they go out in one
 /// queue turn, so the turn's check (lock, switch, grants) is the only point
 /// where the write can be refused with nothing done. Separate turns would
@@ -580,6 +597,57 @@ fn refusal_error(refusal: Refusal) -> ToolError {
     }
 }
 
+/// How each message of one send ended. A message that Telegram refused
+/// does not fail the ones it delivered.
+#[derive(Debug, Default)]
+pub struct Batch {
+    /// Delivered messages (final ids) and ones still sending when the wait
+    /// ended (temporary ids, `sending_state` set), in order.
+    pub messages: Vec<Value>,
+    /// What Telegram said about each message it refused.
+    pub failures: Vec<String>,
+}
+
+impl Batch {
+    /// Messages Telegram has not confirmed yet: their ids are temporary.
+    pub fn still_sending(&self) -> usize {
+        self.messages
+            .iter()
+            .filter(|m| m.get("sending_state").is_some_and(|s| !s.is_null()))
+            .count()
+    }
+
+    /// The ids the log can open and undo: delivered messages only.
+    fn delivered_ids(&self) -> Vec<i64> {
+        let delivered: Vec<Value> = self
+            .messages
+            .iter()
+            .filter(|m| m.get("sending_state").is_none_or(Value::is_null))
+            .cloned()
+            .collect();
+        sent_ids(&delivered)
+    }
+
+    /// What to tell the agent when not everything went through.
+    pub fn caveats(&self) -> String {
+        let mut text = String::new();
+        if !self.failures.is_empty() {
+            text.push_str(&format!(
+                "{} message(s) were NOT sent ({}); the others were. Do not resend the ones that went out.\n",
+                self.failures.len(),
+                self.failures.join("; ")
+            ));
+        }
+        let waiting = self.still_sending();
+        if waiting > 0 {
+            text.push_str(&format!(
+                "{waiting} message(s) were still sending when Quill stopped waiting; their ids are temporary. Do not resend them; read the chat to see when they arrive.\n"
+            ));
+        }
+        text
+    }
+}
+
 /// Send messages to `target` through the paced queue and wait until
 /// Telegram delivers them. Returns the messages with their final ids.
 pub fn send(
@@ -589,19 +657,25 @@ pub fn send(
     summary: &str,
     request: Value,
     count: u32,
-) -> Result<Vec<Value>, ToolError> {
+) -> Result<Batch, ToolError> {
     let result = send_inner(ctx, target, request, count);
-    let ids = result.as_deref().map(sent_ids).unwrap_or_default();
-    log_on(ctx, target, tool, summary, result.is_ok(), ids);
+    match &result {
+        Ok(batch) => {
+            let mut note = summary.to_string();
+            if !batch.failures.is_empty() {
+                note.push_str(&format!(" ({} failed)", batch.failures.len()));
+            }
+            if batch.still_sending() > 0 {
+                note.push_str(&format!(" ({} still sending)", batch.still_sending()));
+            }
+            log_on(ctx, target, tool, &note, true, batch.delivered_ids());
+        }
+        Err(_) => log_on(ctx, target, tool, summary, false, Vec::new()),
+    }
     result
 }
 
-fn send_inner(
-    ctx: &Ctx,
-    target: &Target,
-    request: Value,
-    count: u32,
-) -> Result<Vec<Value>, ToolError> {
+fn send_inner(ctx: &Ctx, target: &Target, request: Value, count: u32) -> Result<Batch, ToolError> {
     admit(ctx, target, count)?;
     // Before the request goes out: no outcome recorded earlier is this
     // send's.
@@ -623,7 +697,19 @@ fn send_inner(
         &waiting,
         DELIVERY_WAIT,
     );
-    let mut delivered = Vec::with_capacity(pending.len());
+    settle(ctx, pending, &waiting, &outcomes)
+}
+
+/// Match each message to how it ended. When none was delivered or is still
+/// on its way, the call fails with the first refusal.
+fn settle(
+    ctx: &Ctx,
+    pending: Vec<Value>,
+    waiting: &[i64],
+    outcomes: &[Option<Sent>],
+) -> Result<Batch, ToolError> {
+    let mut batch = Batch::default();
+    let mut first_refusal = None;
     for message in pending {
         let id = message.get("id").and_then(Value::as_i64);
         let outcome = waiting
@@ -631,19 +717,49 @@ fn send_inner(
             .position(|w| Some(*w) == id)
             .and_then(|at| outcomes.get(at).cloned().flatten());
         match outcome {
-            Some(Sent::Delivered(final_message)) => delivered.push(final_message),
-            Some(Sent::Failed(code, message)) => {
-                return Err(write_error(ctx)(TdError::Td { code, message }));
+            Some(Sent::Delivered(final_message)) => batch.messages.push(final_message),
+            Some(Sent::Failed(code, text)) => {
+                let error = write_error(ctx)(TdError::Td {
+                    code,
+                    message: text,
+                });
+                batch.failures.push(error.0.clone());
+                first_refusal.get_or_insert(error);
             }
-            None => delivered.push(message),
+            None => batch.messages.push(message),
         }
     }
-    Ok(delivered)
+    match first_refusal {
+        Some(error) if batch.messages.is_empty() => Err(error),
+        _ => Ok(batch),
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse_time;
+    use super::{Batch, parse_time};
+    use serde_json::json;
+
+    #[test]
+    fn a_batch_logs_only_delivered_ids_and_says_what_did_not_go_out() {
+        let batch = Batch {
+            messages: vec![
+                json!({"id": 100, "sending_state": null}),
+                json!({"id": -5, "sending_state": {"@type": "messageSendingStatePending"}}),
+            ],
+            failures: vec!["FILE_PARTS_INVALID".into()],
+        };
+        assert_eq!(
+            batch.delivered_ids(),
+            vec![100],
+            "no temporary id is logged"
+        );
+        assert_eq!(batch.still_sending(), 1);
+        let caveats = batch.caveats();
+        assert!(caveats.contains("1 message(s) were NOT sent"));
+        assert!(caveats.contains("still sending"));
+        assert!(Batch::default().caveats().is_empty());
+    }
 
     #[test]
     fn times_parse_as_utc() {

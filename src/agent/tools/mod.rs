@@ -361,6 +361,11 @@ impl CallStart {
     }
 }
 
+/// The connection the current call came on (0 off a call).
+pub(crate) fn current_conn() -> u64 {
+    call_start().map_or(0, |began| began.conn)
+}
+
 fn call_start() -> Option<CallStart> {
     CALL.try_with(std::cell::Cell::get).ok().flatten()
 }
@@ -400,6 +405,11 @@ pub(crate) fn still_allowed() -> Result<(), ToolError> {
     let Some(began) = call_start() else {
         return Err(ToolError::new(LOCKED_BEFORE_SENDING_MESSAGE));
     };
+    if began.conn != 0 && !crate::agent::activity::is_connected(began.conn) {
+        return Err(ToolError::new(
+            "The agent disconnected while this waited, so nothing was sent or changed.",
+        ));
+    }
     if began.conn != 0 && crate::agent::activity::is_revoked(began.conn) {
         return Err(ToolError::new(crate::agent::server::REVOKED_MESSAGE));
     }
@@ -547,6 +557,11 @@ pub fn call_on(conn: u64, name: &str, arguments: &Value, agent: &str) -> Value {
     }
 }
 
+/// Whether the tool called `name` can change things (anything but read-only).
+pub(crate) fn changes_things(name: &str) -> bool {
+    all_tools().any(|tool| tool.name == name && !tool.read_only)
+}
+
 /// A tool's result, unless Quill locked at any point since `locks` was
 /// read: the lock holds for the whole call, so what a read found (a wait
 /// that ended at the lock included) is withheld, and a write says it may
@@ -672,10 +687,10 @@ mod tests {
         access::set_paused_by_lock(false);
         let account = crate::ids::AccountKey("grants-noop-test".into());
         let call = super::CallScope::begin(super::CallStart::now(0));
-        crate::agent::grants::update(&account, |_| {});
-        crate::agent::grants::update(&account, |g| g.contacts = false);
+        let _ = crate::agent::grants::update(&account, |_| {});
+        let _ = crate::agent::grants::update(&account, |g| g.contacts = false);
         assert!(super::still_allowed().is_ok(), "nothing changed");
-        crate::agent::grants::update(&account, |g| g.contacts = true);
+        let _ = crate::agent::grants::update(&account, |g| g.contacts = true);
         assert!(matches!(
             super::still_allowed(),
             Err(super::ToolError(message)) if message == super::GRANTS_CHANGED_MESSAGE

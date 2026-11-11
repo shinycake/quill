@@ -57,6 +57,14 @@ impl Session {
                 self.auth_state.change_number_error =
                     Some(sessions_error_line("check the verification code", err));
             }
+            // The country list failed: the boxes say so and offer Retry,
+            // instead of "Loading countries" for good.
+            Some(RequestPurpose::GetCountries) => {
+                self.auth_state.countries = crate::state::fetch::Fetch::Failed {
+                    error: format!("{:?}", err.class),
+                    stale: self.auth_state.countries.take_data(),
+                };
+            }
             // TDLib answers and stays in WaitTdlibParameters, which sends no
             // update: without this the card says "Connecting" forever.
             Some(RequestPurpose::SetParameters) if err.code != LOST_REQUEST_ERROR_CODE => {

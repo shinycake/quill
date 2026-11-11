@@ -89,7 +89,7 @@ pub(super) fn turn_on() {
 }
 
 pub(super) fn grant(chat_id: i64, scope: Scope) {
-    grants::update(&AccountKey::primary(), |g| {
+    let _ = grants::update(&AccountKey::primary(), |g| {
         g.chats.insert(
             chat_id,
             ChatGrant {

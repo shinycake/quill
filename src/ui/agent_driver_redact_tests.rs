@@ -179,7 +179,7 @@ fn list_parts_hide_rows_of_ungranted_chats_and_untagged_rows(cx: &mut TestAppCon
     }
 
     // All chats on: the same screen shows the rows the grants cut.
-    grants::update(&AccountKey::primary(), |g| g.all_chats = Some(Scope::Read));
+    let _ = grants::update(&AccountKey::primary(), |g| g.all_chats = Some(Scope::Read));
     settle(vcx);
     let tree = read_tree(&app, vcx);
     let text = text_of(&tree);
@@ -191,5 +191,5 @@ fn list_parts_hide_rows_of_ungranted_chats_and_untagged_rows(cx: &mut TestAppCon
     show_search_tab(&app, vcx, SearchTab::Channels);
     let text = text_of(&read_tree(&app, vcx));
     assert!(text.contains(UNGRANTED_CHANNEL), "{text}");
-    grants::update(&AccountKey::primary(), |g| g.all_chats = None);
+    let _ = grants::update(&AccountKey::primary(), |g| g.all_chats = None);
 }

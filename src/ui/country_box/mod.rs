@@ -78,7 +78,8 @@ impl QuillApp {
                 .session
                 .auth_state
                 .countries
-                .clone()
+                .data()
+                .cloned()
                 .unwrap_or_default(),
             None => crate::ui::signin_ui::demo_country_fixtures(),
         }
@@ -122,7 +123,7 @@ impl QuillApp {
                     return;
                 };
                 if let Some(live) = self.live.as_mut() {
-                    let _ = live.driver.fetch_countries();
+                    let _ = live.driver.retry_countries();
                 }
                 if let Some(slot) = self.country_box_slot(host) {
                     *slot = Some(country_box);
@@ -152,12 +153,51 @@ impl QuillApp {
         };
         let country_box = CountryBox::new(mode, &chosen, window, cx);
         if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.fetch_countries();
+            let _ = live.driver.retry_countries();
         }
         if let Some(slot) = self.country_box_slot(host) {
             *slot = Some(country_box);
         }
         cx.notify();
+    }
+
+    /// The country list could not be loaded: what the boxes draw instead of
+    /// "Loading countries", with Retry.
+    pub(super) fn countries_failed_row(&self, id: &str, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .p_3()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .text_sm()
+            .text_color(cx.theme().muted_foreground)
+            .child(tr(keys::Q_MONEY_COUNTRIES_FAILED))
+            .child(
+                Button::new(SharedString::from(format!("countries-retry-{id}")))
+                    .label(tr(keys::Q_MONEY_RETRY))
+                    .ghost()
+                    .small()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.retry_countries(cx);
+                    })),
+            )
+            .into_any_element()
+    }
+
+    /// Ask for the country list again after it failed.
+    pub(super) fn retry_countries(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.retry_countries();
+        }
+        cx.notify();
+    }
+
+    /// Whether the live country list failed to load.
+    pub(super) fn countries_failed(&self) -> bool {
+        self.live
+            .as_ref()
+            .is_some_and(|live| live.driver.session.auth_state.countries.error().is_some())
     }
 
     /// A country box is up (Esc closes it before its host).
@@ -331,13 +371,20 @@ impl QuillApp {
             .flex()
             .flex_col();
         if hits.is_empty() {
-            list = list.child(div().p_3().text_sm().text_color(muted).child(
-                if countries.is_empty() {
-                    tr(keys::Q_MONEY_LOADING_COUNTRIES)
-                } else {
-                    tr(keys::Q_OPS_COUNTRY_NOT_FOUND)
-                },
-            ));
+            list = list.child(if countries.is_empty() && self.countries_failed() {
+                self.countries_failed_row(id, cx)
+            } else {
+                div()
+                    .p_3()
+                    .text_sm()
+                    .text_color(muted)
+                    .child(if countries.is_empty() {
+                        tr(keys::Q_MONEY_LOADING_COUNTRIES)
+                    } else {
+                        tr(keys::Q_OPS_COUNTRY_NOT_FOUND)
+                    })
+                    .into_any_element()
+            });
         }
         for country in hits {
             let iso = country.iso.clone();

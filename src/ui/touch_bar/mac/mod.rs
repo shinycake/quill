@@ -107,6 +107,9 @@ fn ns_window(window: &Window) -> Option<Retained<NSWindow>> {
 
 struct SyncState {
     pending: Cell<bool>,
+    /// The composer entity a selection change is followed on. Every account
+    /// on screen has its own, so a sync that finds another one follows it.
+    followed_composer: Cell<Option<EntityId>>,
     /// The recent emoji the emoji list was built from, and that list.
     emoji: RefCell<(Option<Vec<String>>, Rc<Vec<super::model::PickerItem>>)>,
 }
@@ -131,6 +134,7 @@ pub(super) fn install(demo: bool, window: &mut Window, cx: &mut Context<QuillApp
     let handle = window.window_handle();
     let state = Rc::new(SyncState {
         pending: Cell::new(false),
+        followed_composer: Cell::new(None),
         emoji: RefCell::new((None, Rc::default())),
     });
     // Touches run on the app in its window.
@@ -182,20 +186,30 @@ pub(super) fn install(demo: bool, window: &mut Window, cx: &mut Context<QuillApp
     });
     let on_app = schedule.clone();
     cx.observe_self(move |_, cx| on_app(cx)).detach();
-    // The app is mid-update here, so its composer is read once it is not.
-    // screen-scope: installed once at startup for the app's OS integration;
-    // it only schedules a sync, which reads the screen's state when it runs
-    let on_composer = schedule.clone();
-    cx.defer_in(window, move |app, _, cx| {
-        let Some(composer) = app.in_window_scope(None, cx, |app, _| app.composer.clone()) else {
-            return;
-        };
-        cx.observe(&composer, move |_, _, cx| on_composer(cx))
-            .detach();
-    });
     let on_focus = schedule;
     cx.observe_window_activation(window, move |_, _, cx| on_focus(cx))
         .detach();
+}
+
+/// Follow the composer on screen now: a selection change in it schedules a
+/// sync (the formatting popover follows the selection). An account switch
+/// builds a new composer, so this runs on every sync and observes the new
+/// one; the old observation ended with its entity.
+fn follow_composer(app: &mut QuillApp, cx: &mut Context<QuillApp>, state: &SyncState) {
+    // screen-scope: only schedules a sync, which reads the screen's state
+    // when it runs
+    let Some(composer) = app.in_window_scope(None, cx, |app, _| app.composer.clone()) else {
+        return;
+    };
+    if state.followed_composer.get() == Some(composer.entity_id()) {
+        return;
+    }
+    let Some(schedule) = SYNC_SCHEDULER.with(|slot| slot.try_borrow().ok().and_then(|s| s.clone()))
+    else {
+        return;
+    };
+    state.followed_composer.set(Some(composer.entity_id()));
+    cx.observe(&composer, move |_, _, cx| schedule(cx)).detach();
 }
 
 /// Mirror the app into the Touch Bar.
@@ -210,6 +224,7 @@ fn sync(app: &mut QuillApp, window: &mut Window, cx: &mut Context<QuillApp>, sta
         }
         return;
     }
+    follow_composer(app, cx, state);
     let bar = app.touch_bar_model(window, cx);
     let picker = matches!(
         bar,
