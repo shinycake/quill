@@ -7,8 +7,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::status_note::{NoteKind, StatusNote};
-use quill::ids::ChatId;
 use gpui_kit::Task;
+use quill::ids::ChatId;
 use std::collections::VecDeque;
 use std::rc::Rc;
 use std::time::{Duration, Instant};

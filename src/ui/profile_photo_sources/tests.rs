@@ -89,7 +89,7 @@ fn a_video_avatar_opens_the_full_editor(cx: &mut TestAppContext) {
             .send_box
             .video_editor
             .as_ref()
-            .map(|editor| editor.edits)
+            .map(|editor| editor.edits())
     });
     let edits = edits.expect("editor");
     assert_eq!((edits.from_ms, edits.till_ms), (0, 9600));

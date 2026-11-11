@@ -482,10 +482,9 @@ impl QuillApp {
             };
             // A second request for a message already waiting or crumbling
             // would draw a second ghost over the first.
-            if vanishing
-                .iter()
-                .any(|ghost| ghost.message.chat_id == message.chat_id && ghost.message.id == message.id)
-            {
+            if vanishing.iter().any(|ghost| {
+                ghost.message.chat_id == message.chat_id && ghost.message.id == message.id
+            }) {
                 continue;
             }
             let (row, bubble) = painted_now(ChatMessage::new(chat_id, *id))

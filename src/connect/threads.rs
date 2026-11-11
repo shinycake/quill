@@ -61,12 +61,14 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Retry a failed thread open.
     pub fn retry_thread(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some((chat_id, message_id, asker)) = self
-            .session
-            .threads
-            .thread
-            .as_ref()
-            .map(|thread| (thread.origin_chat_id, thread.origin_message_id, thread.asker))
+        let Some((chat_id, message_id, asker)) =
+            self.session.threads.thread.as_ref().map(|thread| {
+                (
+                    thread.origin_chat_id,
+                    thread.origin_message_id,
+                    thread.asker,
+                )
+            })
         else {
             return Ok(None);
         };

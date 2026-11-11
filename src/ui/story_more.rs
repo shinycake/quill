@@ -443,7 +443,9 @@ impl QuillApp {
                 cx.notify();
             });
         });
-        self.stories.media_saves.insert(key, MediaSave::Saving(task));
+        self.stories
+            .media_saves
+            .insert(key, MediaSave::Saving(task));
         cx.notify();
     }
 

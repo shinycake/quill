@@ -73,13 +73,20 @@ impl<T> Drawn<T> {
     }
 }
 
+/// The content shown before `last` and when `last` replaced it, while the
+/// swap runs.
+#[derive(Debug)]
+struct Swap<T> {
+    from: T,
+    since: Instant,
+}
+
 #[derive(Debug)]
 pub(crate) struct Presence<T> {
     shown: Glide,
     last: Option<T>,
-    previous: Option<T>,
-    /// When `last` changed while the surface was shown.
-    changed: Option<Instant>,
+    /// Set when `last` changed while the surface was shown.
+    swap: Option<Swap<T>>,
     /// Whose surface this is (a chat id): a change snaps, as the surface
     /// was never shown there.
     scope: u64,
@@ -97,8 +104,7 @@ impl<T: Clone + PartialEq> Presence<T> {
         Self {
             shown: Glide::settled(0., now, ease),
             last: None,
-            previous: None,
-            changed: None,
+            swap: None,
             scope: 0,
             enter,
             exit,
@@ -126,8 +132,7 @@ impl<T: Clone + PartialEq> Presence<T> {
     ) -> Option<Drawn<T>> {
         if scope != self.scope {
             self.scope = scope;
-            self.previous = None;
-            self.changed = None;
+            self.swap = None;
             self.last = state.clone();
             let at = if state.is_some() { 1. } else { 0. };
             self.shown = Glide::settled(at, now, self.ease);
@@ -137,8 +142,11 @@ impl<T: Clone + PartialEq> Presence<T> {
             Some(value) => {
                 if self.last.as_ref() != Some(&value) {
                     let swaps = animate && self.last.is_some() && self.shown.value(now) > 0.;
-                    self.previous = if swaps { self.last.take() } else { None };
-                    self.changed = swaps.then_some(now);
+                    self.swap = if swaps {
+                        self.last.take().map(|from| Swap { from, since: now })
+                    } else {
+                        None
+                    };
                     self.last = Some(value);
                 }
                 self.shown.go_eased(1., self.enter, animate, now, self.ease);
@@ -148,25 +156,24 @@ impl<T: Clone + PartialEq> Presence<T> {
                     .go_eased(0., self.exit, animate, now, self.exit_ease);
                 if self.shown.value(now) <= 0. {
                     self.last = None;
-                    self.previous = None;
-                    self.changed = None;
+                    self.swap = None;
                 }
             }
         }
         let value = self.last.clone()?;
         let swap = self
-            .changed
-            .map_or(1., |changed| progress(elapsed_since(changed, now), SWAP));
+            .swap
+            .as_ref()
+            .map_or(1., |swap| progress(elapsed_since(swap.since, now), SWAP));
         if swap >= 1. {
-            self.previous = None;
-            self.changed = None;
+            self.swap = None;
         }
         Some(Drawn {
             value,
             shown: self.shown.value(now).clamp(0., 1.),
             target: self.shown.target(),
             swap,
-            previous: self.previous.clone(),
+            previous: self.swap.as_ref().map(|swap| swap.from.clone()),
         })
     }
 
@@ -174,8 +181,9 @@ impl<T: Clone + PartialEq> Presence<T> {
     pub(crate) fn moving(&self, now: Instant) -> bool {
         self.shown.animating(now)
             || self
-                .changed
-                .is_some_and(|changed| elapsed_since(changed, now) < SWAP)
+                .swap
+                .as_ref()
+                .is_some_and(|swap| elapsed_since(swap.since, now) < SWAP)
     }
 }
 

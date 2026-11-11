@@ -4,7 +4,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use quill::state::{
-    ChatStatisticsFetch, GraphFetch, GraphKey, MessageStatsFetch, PostFetch, Session, StatsPostPreview,
+    ChatStatisticsFetch, GraphFetch, GraphKey, MessageStatsFetch, PostFetch, Session,
+    StatsPostPreview,
 };
 use quill::telegram::envelope::{
     ChannelStatistics, ChatStatistics, ChatStatisticsInteractionInfo, ChatStatisticsObject,

@@ -767,13 +767,10 @@ impl QuillApp {
 
     /// A privacy call for the story the open editor is for is on its way.
     fn privacy_call_busy(&self) -> bool {
-        self.stories
-            .viewer_ui()
-            .privacy_edit()
-            .is_some_and(|edit| {
-                self.stories
-                    .manage_call_busy(ManageKind::Privacy, (edit.chat_id, edit.story_id))
-            })
+        self.stories.viewer_ui().privacy_edit().is_some_and(|edit| {
+            self.stories
+                .manage_call_busy(ManageKind::Privacy, (edit.chat_id, edit.story_id))
+        })
     }
 
     /// Phase 9.5: send `setStoryPrivacySettings` (`td_api.tl:13743`)

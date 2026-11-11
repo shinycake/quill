@@ -19,7 +19,8 @@ use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::state::{
-    OlderEnd, Session, ThreadAsker, ThreadStatus, comments_bar_label, effective_preview, replies_link_label,
+    OlderEnd, Session, ThreadAsker, ThreadStatus, comments_bar_label, effective_preview,
+    replies_link_label,
 };
 use quill::telegram::envelope::{MessageReplyInfo, MessageSender};
 use std::path::PathBuf;

@@ -6,8 +6,8 @@ use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::{AccountKey, ChatId, MessageId, RequestId};
 use crate::platform::MemorySecretStore;
 use crate::state::{
-    ChatStatisticsFetch, GraphFetch, InfoPanelTarget, MessageStatsFetch, PostFetch, RECENT_POSTS_FIRST,
-    RequestPurpose, Session, StatsPage,
+    ChatStatisticsFetch, GraphFetch, InfoPanelTarget, MessageStatsFetch, PostFetch,
+    RECENT_POSTS_FIRST, RequestPurpose, Session, StatsPage,
 };
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::StatisticalGraph;

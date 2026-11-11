@@ -411,7 +411,9 @@ impl UserpicVideos {
     /// The main window will not render until it is back: its clips hold
     /// still. Its next frame sets the hold again (`frame_start`).
     pub(super) fn hold_main_window(&self) {
-        if let Some(commands) = self.with(|state| state.rehold(|state| cover(&mut state.covered, None, true))) {
+        if let Some(commands) =
+            self.with(|state| state.rehold(|state| cover(&mut state.covered, None, true)))
+        {
             settle(commands);
         }
     }

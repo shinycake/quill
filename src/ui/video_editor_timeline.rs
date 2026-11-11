@@ -19,7 +19,6 @@ use quill::video_timeline::{
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// `kDotDuration`: the cover dot grows while the head is held.
@@ -95,50 +94,39 @@ impl Fade {
     }
 }
 
-/// A press on the picture: a crop drag, or a tap that pauses.
+/// A press on the picture: where it began and what it took hold of.
 #[derive(Clone, Copy)]
 pub(super) struct StagePress {
     pub(super) at: Point<Pixels>,
     pub(super) grab: Option<quill::video_timeline::CropGrab>,
     pub(super) start: quill::video_timeline::CropArea,
-    pub(super) moved: bool,
 }
 
 /// Everything the layer's parts track between frames: drags, animations,
 /// the strip's frames and where things were painted last.
 #[derive(Default)]
 pub(super) struct EditorMotion {
-    /// The strip's frames, `None` until each is cut.
-    pub(super) frames: Vec<Option<super::owned_image::OwnedImage>>,
-    /// The strip width the frames were cut for.
-    frames_width: f32,
-    frames_cancel: Option<Arc<AtomicBool>>,
+    /// The strip's frames and the cut that makes them.
+    pub(super) frames: Frames,
     /// Where the strip control was painted.
     pub(super) timeline_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
-    /// The held part of the strip, if any.
-    pub(super) strip: StripGesture,
+    /// The pointer drag that is live, if any: one at a time.
+    pub(super) drag: Drag,
     pub(super) dot: Fade,
     /// The cover bubble and the picture flying into it.
     pub(super) bubble: CoverBubble,
     /// Where the picture and the crop were painted.
     pub(super) picture_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     pub(super) crop_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
-    pub(super) press: Option<StagePress>,
     /// The thirds grid over the crop while it is dragged.
     pub(super) grid: Fade,
     pub(super) quality_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     /// The active dot sliding from this index (`_activeShift`).
     pub(super) quality_shift: Fade,
-    pub(super) quality_pointer: QualityPointer,
 }
 
-/// Whether the pointer is down on the quality line.
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
-pub(super) enum QualityPointer {
-    #[default]
-    Up,
-    Down,
-}
+mod frames;
+pub(in crate::ui) use frames::{Frames, StripFrame};
 
 /// The player's follow of a drag: at most one seek per `SEEK_THROTTLE`.
 #[derive(Clone, Copy, Default)]
@@ -148,22 +136,29 @@ pub(super) struct Seek {
     pending: Option<i64>,
 }
 
-/// The strip is idle, or a part of it is held.
+/// The pointer drag that is live in the layer: none, a part of the strip
+/// held, a press on the picture (a click pauses; once it has travelled it
+/// drags the crop), or a press on the quality line.
 #[derive(Default)]
-pub(super) enum StripGesture {
+pub(super) enum Drag {
     #[default]
     Idle,
-    Held {
+    Strip {
         grab: Grab,
         /// The pointer's offset from the held part.
         shift: f32,
         seek: Seek,
     },
+    /// On the picture, not travelled far yet.
+    Pressed(StagePress),
+    /// On the picture, travelled: the crop follows.
+    Dragging(StagePress),
+    Quality,
 }
 
-impl StripGesture {
-    pub(super) fn is_held(&self) -> bool {
-        matches!(self, Self::Held { .. })
+impl Drag {
+    pub(super) fn strip_held(&self) -> bool {
+        matches!(self, Self::Strip { .. })
     }
 }
 
@@ -262,10 +257,21 @@ impl CoverBubble {
 }
 
 impl EditorMotion {
-    /// Stop cutting frames; the editor is gone.
-    pub(super) fn release_frames(&self) {
-        if let Some(cancel) = &self.frames_cancel {
-            cancel.store(true, Ordering::Relaxed);
+    /// The press on the quality line ended.
+    pub(super) fn release_quality(&mut self) {
+        if matches!(self.drag, Drag::Quality) {
+            self.drag = Drag::Idle;
+        }
+    }
+
+    /// The held part of the strip is let go; any other drag stays.
+    fn take_strip(&mut self) -> Option<(Grab, Seek)> {
+        match std::mem::take(&mut self.drag) {
+            Drag::Strip { grab, seek, .. } => Some((grab, seek)),
+            other => {
+                self.drag = other;
+                None
+            }
         }
     }
 
@@ -296,11 +302,11 @@ fn size_label(editor: &VideoEditorDialog) -> Option<String> {
         // A sticker's encoder fits the set's byte cap whatever the clip.
         EditorTarget::Set { .. } => return None,
         EditorTarget::Avatar => (
-            quill::profile_photo_video::estimated_size(&editor.edits),
+            quill::profile_photo_video::estimated_size(&editor.edits()),
             true,
         ),
         EditorTarget::Tray(_) | EditorTarget::MessageEdit => {
-            estimated_size(&editor.edits, &editor.info()?)?
+            estimated_size(&editor.edits(), &editor.info()?)?
         }
     };
     let text = quill::telegram::envelope::format_size_text(i64::try_from(bytes).ok()?);
@@ -323,26 +329,20 @@ impl QuillApp {
             return;
         }
         let motion = &mut editor.motion;
-        let kept = motion.frames.len() == times.len()
-            && (strip - motion.frames_width).abs() <= motion.frames_width * FRAME_WIDTH_TOLERANCE;
+        let width = motion.frames.width();
+        let kept = motion.frames.slots().len() == times.len()
+            && (strip - width).abs() <= width * FRAME_WIDTH_TOLERANCE;
         if kept {
             return;
         }
-        motion.release_frames();
-        let cancel = Arc::new(AtomicBool::new(false));
-        let mine = cancel.clone();
-        motion.frames_cancel = Some(cancel.clone());
-        motion.frames_width = strip;
-        motion.frames = times.iter().map(|_| None).collect();
         let source = editor.source.clone();
         // Twice the strip's height, for HiDPI screens.
         let height = (STRIP_HEIGHT * 2.0) as u32;
-        // One frame at a time, each shown as it arrives.
-        self.spawn_scoped(cx, async move |this, cx| {
+        let count = times.len();
+        // One frame at a time, each shown as it arrives. The task lives in
+        // the stage: a new cut or the editor going stops it.
+        let task = self.spawn_scoped(cx, async move |this, cx| {
             for (index, at) in times.into_iter().enumerate() {
-                if cancel.load(Ordering::Relaxed) {
-                    return;
-                }
                 let source = source.clone();
                 let frame = cx
                     .background_spawn(async move {
@@ -353,36 +353,28 @@ impl QuillApp {
                         still
                     })
                     .await;
-                let alive = this.update(cx, |this, cx| {
-                    let Some(editor) =
-                        this.composer_ui
-                            .send_box
-                            .video_editor
-                            .as_mut()
-                            .filter(|editor| {
-                                // This load's own token: an encode's serial bump
-                                // must not orphan the frames still being cut.
-                                editor
-                                    .motion
-                                    .frames_cancel
-                                    .as_ref()
-                                    .is_some_and(|current| Arc::ptr_eq(current, &mine))
-                            })
-                    else {
+                let landed = this.update(cx, |this, cx| {
+                    let Some(editor) = this.composer_ui.send_box.video_editor.as_mut() else {
                         return false;
                     };
-                    if let Some(slot) = editor.motion.frames.get_mut(index) {
-                        *slot = frame.map(Into::into);
-                    }
+                    let frame =
+                        frame.map_or(StripFrame::Failed, |image| StripFrame::Cut(image.into()));
+                    editor.motion.frames.land(index, frame, index + 1 == count);
                     cx.notify();
                     true
                 });
-                if !matches!(alive, Ok(true)) {
+                if !matches!(landed, Ok(true)) {
                     return;
                 }
             }
-        })
-        .detach();
+        });
+        if let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() {
+            editor.motion.frames = Frames::Cutting {
+                width: strip,
+                frames: (0..count).map(|_| StripFrame::Empty).collect(),
+                task,
+            };
+        }
     }
 
     /// A press on the strip (`mousePressEvent`).
@@ -395,7 +387,10 @@ impl QuillApp {
             return;
         };
         let grab = timeline.grab_at(x);
-        editor.motion.strip = StripGesture::Held {
+        if editor.busy() {
+            return;
+        }
+        editor.motion.drag = Drag::Strip {
             grab,
             shift: timeline.grab_shift(grab, x),
             seek: Seek::default(),
@@ -414,7 +409,7 @@ impl QuillApp {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
-        let StripGesture::Held { grab, shift, .. } = editor.motion.strip else {
+        let Drag::Strip { grab, shift, .. } = editor.motion.drag else {
             return;
         };
         let Some(mut timeline) = measured(editor) else {
@@ -423,9 +418,6 @@ impl QuillApp {
         let moved = timeline.drag(grab, x - shift);
         let width = editor.timeline().map_or(0.0, |kept| kept.width);
         editor.set_timeline(Timeline { width, ..timeline });
-        editor.edits.from_ms = timeline.from;
-        editor.edits.till_ms = timeline.till;
-        editor.edits.cover_ms = timeline.cover;
         let at = match moved {
             Moved::Nothing => {
                 cx.notify();
@@ -437,12 +429,12 @@ impl QuillApp {
                 at
             }
         };
-        editor.playback_ms = Some(at);
+        editor.set_playback_ms(at);
         // The player follows at most every `SEEK_THROTTLE`; the last wish
         // is taken on release.
         let now = Instant::now();
         let mut due = false;
-        if let StripGesture::Held { seek, .. } = &mut editor.motion.strip {
+        if let Drag::Strip { seek, .. } = &mut editor.motion.drag {
             due = seek
                 .last
                 .is_none_or(|last| now.duration_since(last) >= SEEK_THROTTLE);
@@ -471,23 +463,24 @@ impl QuillApp {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
-        let StripGesture::Held { grab, seek, .. } = std::mem::take(&mut editor.motion.strip) else {
+        let Some((grab, seek)) = editor.motion.take_strip() else {
             return;
         };
         if grab == Grab::Head {
             editor.motion.dot.start(0.0, DOT_MS, reduce);
         }
-        let (from, till) = (editor.edits.from_ms, editor.edits.till_ms);
+        let (from, till) = editor.range();
         let latest = seek
             .pending
-            .or(editor.playback_ms)
+            .or(editor.playback_ms())
             .unwrap_or(from)
             .clamp(from, till);
         let resume = if latest >= till { from } else { latest };
-        editor.playback_ms = Some(resume);
+        editor.set_playback_ms(resume);
+        let user_paused = editor.user_paused();
         if let Some(player) = editor.player() {
             player.seek(resume as f64 / 1000.0);
-            if !editor.user_paused {
+            if !user_paused {
                 player.play();
             }
         }
@@ -506,7 +499,7 @@ impl QuillApp {
             return;
         };
         let now = Instant::now();
-        let held = editor.motion.strip.is_held();
+        let held = editor.motion.drag.strip_held();
         editor.motion.bubble.tick(now, reduce, held);
     }
 
@@ -522,17 +515,12 @@ impl QuillApp {
         let screen = self.screen_epoch();
         let bounds_cell = editor.motion.timeline_bounds.clone();
         let timeline = editor.timeline();
-        let frames: Vec<Option<Arc<RenderImage>>> = editor
-            .motion
-            .frames
-            .iter()
-            .map(|frame| frame.as_deref().cloned())
-            .collect();
-        let playback = editor.playback_ms;
+        let frames = editor.motion.frames.pictures();
+        let playback = editor.playback_ms();
         let dot = editor.motion.dot.value(Instant::now());
         let size_text = size_label(editor);
         let wanted_reload = editor.info().is_some();
-        let painted_width = editor.motion.frames_width;
+        let painted_width = editor.motion.frames.width();
         canvas(
             move |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
             move |bounds, hitbox, window, cx| {
@@ -612,7 +600,7 @@ impl QuillApp {
     /// top of the whole layer.
     pub(super) fn video_editor_bubble(&self, editor: &VideoEditorDialog) -> Option<AnyElement> {
         let now = Instant::now();
-        let still = editor.still.as_deref().cloned()?;
+        let still = editor.still_image()?;
         let shown = editor.motion.bubble.value(now);
         let capture = editor.motion.bubble.capture().map(|start| {
             ease_out_quint(now.duration_since(start).as_millis() as f32 / CAPTURE_MS as f32)
@@ -624,7 +612,7 @@ impl QuillApp {
         let strip = editor.motion.timeline_bounds.get()?;
         timeline.width = f32::from(strip.size.width);
         let crop = editor.motion.crop_bounds.get();
-        let crop_area = quill::video_timeline::CropArea::of(editor.edits.crop);
+        let crop_area = quill::video_timeline::CropArea::of(editor.edits().crop);
         let round = editor.target.round();
         Some(
             canvas(

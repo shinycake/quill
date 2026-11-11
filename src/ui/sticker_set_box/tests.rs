@@ -412,7 +412,7 @@ fn a_video_sticker_adapts_through_the_video_editor(cx: &mut TestAppContext) {
             .video_editor
             .as_ref()
             .expect("editor");
-        (editor.edits, editor.set_emoji.clone())
+        (editor.edits(), editor.set_emoji.clone())
     });
     assert_eq!((edits.from_ms, edits.till_ms), (0, 3000));
     assert_eq!(edits.crop.map(|crop| (crop.w, crop.h)), Some((750, 1000)));

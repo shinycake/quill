@@ -29,7 +29,7 @@ use quill::lang::{keys, tr};
 use quill::sticker_set_box::SetKind;
 use quill::video_edit::{VideoEdits, VideoSource, probe_source, render_edited, render_frame};
 use quill::video_timeline::Timeline;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -138,26 +138,31 @@ pub(super) enum StillCut {
     },
 }
 
+/// The frame cut at a cover time (turned and mirrored like the edit): its
+/// file and its picture are replaced together, so they never describe two
+/// different frames.
+pub(super) struct CoverFrame {
+    /// The time of the source it was cut at, so a cover moved since is not
+    /// taken for the chosen one.
+    pub(super) at_ms: i64,
+    pub(super) path: PathBuf,
+    /// The decoded picture; `None` when the file would not decode.
+    pub(super) still: Option<super::owned_image::OwnedImage>,
+}
+
 pub(super) struct VideoEditorDialog {
     pub(super) target: EditorTarget,
     /// The file the edits start from.
     pub(super) source: PathBuf,
-    pub(super) edits: VideoEdits,
-    /// Reading, ready (the strip's selection, the player) or encoding.
+    /// Reading, ready (the edits, the strip's selection, the player) or
+    /// encoding (with the edits it encodes).
     pub(super) stage: EditorStage,
-    /// The still frame (turned and mirrored like the edit) at the cover:
-    /// the picture when the video can't play here, and the cover bubble.
-    /// With the time of the source it was cut at, so a cover moved since is
-    /// not taken for the chosen one.
-    pub(super) preview: Option<(i64, PathBuf)>,
-    pub(super) still: Option<super::owned_image::OwnedImage>,
+    /// The still frame at the cover: the picture when the video can't play
+    /// here, and the cover bubble.
+    pub(super) cover: Option<CoverFrame>,
     /// The cover still's cutter, matched by its own token so an encode's
     /// serial bump does not orphan a cut.
     pub(super) still_cut: StillCut,
-    /// Paused by a click on the picture (tdesktop `_userPaused`).
-    pub(super) user_paused: bool,
-    /// Where the player is, for the playhead.
-    pub(super) playback_ms: Option<i64>,
     /// Drags, animations and the measured layout.
     pub(super) motion: EditorMotion,
     /// Set target: the emoji the sticker already had, for the "New
@@ -180,6 +185,13 @@ fn is_editor_copy(path: &Path) -> bool {
 pub(super) fn load_still(path: &Path) -> Option<Arc<RenderImage>> {
     let image = image::open(path).ok()?.to_rgba8();
     Some(super::photo_editor::preview_of(&image))
+}
+
+impl VideoEditorDialog {
+    /// The picture of the cover frame, when it decoded.
+    pub(super) fn still_image(&self) -> Option<Arc<RenderImage>> {
+        self.cover.as_ref()?.still.as_deref().cloned()
+    }
 }
 
 impl QuillApp {
@@ -246,28 +258,26 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (stage, serial) = EditorStage::reading();
-        self.composer_ui.send_box.video_editor = Some(VideoEditorDialog {
-            target,
-            source: source.clone(),
-            edits: VideoEdits::full(0),
-            stage,
-            preview: None,
-            still: None,
-            still_cut: StillCut::Idle,
-            user_paused: false,
-            playback_ms: None,
-            motion: EditorMotion::default(),
-            set_emoji: None,
+        let serial = next_editor_serial();
+        let worker = cx.background_spawn({
+            let source = source.clone();
+            async move { probe_source(&source) }
         });
-        let worker = cx.background_spawn(async move { probe_source(&source) });
-        self.spawn_scoped_in(window, cx, async move |this, cx| {
+        let probe = self.spawn_scoped_in(window, cx, async move |this, cx| {
             let info = worker.await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.video_editor_probed(serial, info, initial, window, cx);
             });
-        })
-        .detach();
+        });
+        self.composer_ui.send_box.video_editor = Some(VideoEditorDialog {
+            target,
+            source,
+            stage: EditorStage::Reading { serial, probe },
+            cover: None,
+            still_cut: StillCut::Idle,
+            motion: EditorMotion::default(),
+            set_emoji: None,
+        });
         cx.notify();
     }
 
@@ -292,8 +302,11 @@ impl QuillApp {
             .composer_ui
             .send_box
             .video_editor
-            .as_ref()
-            .map(|editor| editor.target.clone())
+            .as_mut()
+            .map(|editor| {
+                editor.end_reading();
+                editor.target.clone()
+            })
         else {
             return;
         };
@@ -354,8 +367,7 @@ impl QuillApp {
         };
         let at = edits.cover_ms;
         if let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() {
-            editor.become_ready(info, timeline);
-            editor.edits = edits;
+            editor.become_ready(info, edits, timeline);
         }
         self.start_video_editor_player(cx);
         self.refresh_video_preview(at, cx);
@@ -377,7 +389,7 @@ impl QuillApp {
         let token = next_editor_serial();
         editor.still_cut = StillCut::Cutting { token, next: None };
         let source = editor.source.clone();
-        let (turns, flipped) = (editor.edits.turns, editor.edits.flipped);
+        let (turns, flipped) = (editor.edits().turns, editor.edits().flipped);
         let worker = cx.background_spawn(async move {
             let frame = render_frame(&source, at_ms, turns, flipped)?;
             let still = load_still(&frame);
@@ -404,11 +416,13 @@ impl QuillApp {
                 };
                 match result {
                     Ok((frame, still)) => {
-                        if let Some((_, old)) = editor.preview.replace((at_ms, frame)) {
-                            let _ = std::fs::remove_file(old);
-                        }
-                        if let Some(still) = still {
-                            editor.still = Some(still.into());
+                        let cut = CoverFrame {
+                            at_ms,
+                            path: frame,
+                            still: still.map(Into::into),
+                        };
+                        if let Some(old) = editor.cover.replace(cut) {
+                            let _ = std::fs::remove_file(old.path);
                         }
                     }
                     Err(note) => editor.set_note(note),
@@ -423,11 +437,10 @@ impl QuillApp {
     }
 
     pub(super) fn close_video_editor(&mut self, cx: &mut Context<Self>) {
-        if let Some(editor) = self.composer_ui.send_box.video_editor.take() {
-            if let Some((_, preview)) = editor.preview {
-                let _ = std::fs::remove_file(preview);
-            }
-            editor.motion.release_frames();
+        if let Some(editor) = self.composer_ui.send_box.video_editor.take()
+            && let Some(cover) = editor.cover
+        {
+            let _ = std::fs::remove_file(cover.path);
         }
         cx.notify();
     }
@@ -463,7 +476,7 @@ impl QuillApp {
         let Some(info) = editor.info().filter(|_| !editor.busy()) else {
             return false;
         };
-        let edits = editor.edits;
+        let edits = editor.edits();
         let source = editor.source.clone();
         // Taking the sound out of a video that has none changes nothing.
         let effective = VideoEdits {
@@ -618,7 +631,7 @@ impl QuillApp {
             done_app.update(cx, |this, cx| this.finish_video_editor(window, cx))
         };
         let body = app.update(cx, |this, cx| this.video_editor_layer(cx));
-        let body = Rc::new(RefCell::new(Some(body)));
+        let body = Rc::new(Cell::new(Some(body)));
         // Nearly the whole window, edge to edge inside the kit's margin, on
         // the layer's own dark background.
         dialog
@@ -632,10 +645,7 @@ impl QuillApp {
             .content(move |content, window, cx| {
                 let margin = cx.theme().spacing_tokens().lg;
                 let height = (window.viewport_size().height - margin * 2.).max(px(320.));
-                let body = body
-                    .borrow_mut()
-                    .take()
-                    .unwrap_or_else(|| div().into_any_element());
+                let body = body.take().unwrap_or_else(|| div().into_any_element());
                 content.child(div().h(height).w_full().child(body))
             })
             .on_ok(on_ok)

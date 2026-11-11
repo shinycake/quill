@@ -120,7 +120,11 @@ fn the_album_view_leaves_only_on_a_deleted_answer(cx: &mut TestAppContext) {
             }
             set_op(app, request, StoryPageOpState::Sending);
             app.story_page_upkeep(window, cx);
-            let open = app.stories.page.as_ref().and_then(|page| page.view.deleting());
+            let open = app
+                .stories
+                .page
+                .as_ref()
+                .and_then(|page| page.view.deleting());
             assert_eq!(open, Some(request), "in flight keeps the view and its call");
             set_op(app, request, state);
             app.story_page_upkeep(window, cx);

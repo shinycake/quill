@@ -159,7 +159,9 @@ fn preview(
 /// One recent post's `getMessage`: asked once, answered by its request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PostFetch {
-    Loading { request: RequestId },
+    Loading {
+        request: RequestId,
+    },
     Ready(StatsPostPreview),
     /// The server answered with an error (the post is gone): the row is
     /// skipped.

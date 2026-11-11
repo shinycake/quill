@@ -10,12 +10,7 @@ impl Session {
     }
 
     /// Open the thread view for the window that asked.
-    pub fn begin_thread_for(
-        &mut self,
-        chat_id: ChatId,
-        message_id: MessageId,
-        asker: ThreadAsker,
-    ) {
+    pub fn begin_thread_for(&mut self, chat_id: ChatId, message_id: MessageId, asker: ThreadAsker) {
         let mut view = ThreadView::resolving(chat_id, message_id);
         view.asker = asker;
         // A thread opened from inside a forum topic keeps that topic.

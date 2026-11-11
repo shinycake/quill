@@ -348,5 +348,8 @@ fn the_passcode_lock_closes_the_stealth_box(cx: &mut TestAppContext) {
         app.lock_by_passcode(cx)
     });
     frames(vcx);
-    assert!(!box_open(&app, vcx), "the box and its tick went with the lock");
+    assert!(
+        !box_open(&app, vcx),
+        "the box and its tick went with the lock"
+    );
 }
