@@ -117,7 +117,7 @@ fn parameters_start_the_ceremony_and_the_added_passkey_joins_the_list() {
     let now = Instant::now();
     state.add = PasskeyAdd::FetchingOptions(RequestId(1));
     assert!(!state.accept_parameters(Some(RequestId(1)), "{}", now));
-    assert!(matches!(state.add, PasskeyAdd::Idle));
+    assert!(matches!(state.add, PasskeyAdd::Failed(_)));
     state.add = PasskeyAdd::FetchingOptions(RequestId(2));
     assert!(state.accept_parameters(Some(RequestId(2)), OPTIONS, now));
     let options = state.take_starting().unwrap();

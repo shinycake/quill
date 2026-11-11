@@ -87,6 +87,7 @@ fn gift_mutation_ok_marks_the_list_stale_and_errors_release_the_lock() {
         RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { saved: false }),
         None,
     );
+    session.payments.hub.received.open();
     session.payments.hub.received.op = crate::state::fetch::ListOp::Mutating(extra);
     apply_json(
         &mut session,
@@ -158,6 +159,7 @@ fn another_requests_answer_does_not_free_a_gift_mutation() {
 fn a_sold_gifts_answer_leaves_another_selected_gift_open() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
+    session.payments.hub.received.open();
     let sell = |session: &mut Session, id: &str| {
         session.payments.hub.received.view.select(Some("g2".into()));
         session

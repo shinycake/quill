@@ -72,9 +72,6 @@ fn no_bot_means_nothing_found_not_a_spinner() {
         })
     );
     sharing.set_venue_bot_username("bot".into());
-    let resolve = sharing.next_requests();
-    sharing.request_sent(&resolve[0], 7);
-    sharing.venue_bot_resolved(7, None);
     assert!(sharing.next_requests().is_empty());
 }
 

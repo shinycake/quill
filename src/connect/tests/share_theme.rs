@@ -336,7 +336,7 @@ fn a_stale_gifts_page_is_dropped() {
         "next_offset": "", "gifts": [upgraded("r1", 101, false)]}),
     );
     let gifts = &rig.driver.session.users_state.peer_qr.gifts;
-    assert!(gifts.list.is_empty() && gifts.stage == GiftsStage::First);
+    assert!(gifts.list.is_empty() && matches!(gifts.stage, GiftsStage::FirstAsking(_)));
 }
 
 #[test]
@@ -385,7 +385,7 @@ fn a_late_page_of_your_gifts_stays_out_of_a_channels_list() {
     );
     let gifts = &rig.driver.session.users_state.peer_qr.gifts;
     assert!(
-        gifts.list.is_empty() && gifts.stage == GiftsStage::First,
+        gifts.list.is_empty() && matches!(gifts.stage, GiftsStage::FirstAsking(_)),
         "your page is dropped"
     );
     rig.feed(
