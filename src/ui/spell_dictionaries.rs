@@ -48,7 +48,8 @@ enum DictDownload {
     Idle,
     Running {
         download: ActiveDownload,
-        task: Task<()>,
+        /// Dropped with the stage: dropping it ends the progress loop.
+        _task: Task<()>,
     },
     /// The last download of `code` failed with `message`; starting another
     /// (or any download) clears it.
@@ -233,7 +234,10 @@ impl QuillApp {
                 cx.notify();
             });
         });
-        self.spell.dict_manager.download = DictDownload::Running { download, task };
+        self.spell.dict_manager.download = DictDownload::Running {
+            download,
+            _task: task,
+        };
         cx.notify();
     }
 
