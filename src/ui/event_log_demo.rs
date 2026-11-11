@@ -117,7 +117,7 @@ fn seed_event_log_session(sink: Arc<MemorySink>) -> Session {
 
 impl QuillApp {
     fn demo_event_log(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.ensure_event_log_search(window, cx);
+        self.ensure_event_log_search(CHANNEL, window, cx);
         self.open_group_settings_view(CHANNEL, GroupSettingsView::RecentActions, cx);
     }
 }

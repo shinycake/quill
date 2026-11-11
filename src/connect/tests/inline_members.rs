@@ -186,7 +186,7 @@ fn a_refused_member_send_fails_the_list_or_keeps_its_page() {
     );
     assert!(matches!(
         driver.session.groups.supergroup_members.get(&key),
-        Some(SupergroupMembersFetch::Failed(_))
+        Some(SupergroupMembersFetch::NotSent(_))
     ));
     // The retry goes out and fills the list.
     recorder.refuse_sends(false);
@@ -197,7 +197,7 @@ fn a_refused_member_send_fails_the_list_or_keeps_its_page() {
     driver
         .ingest(copy_and_parse(&members_json(1..4, 3, &first.as_extra()), &seq, &sink).unwrap())
         .unwrap();
-    // A search nobody could send is `Failed` under its own query, and a
+    // A search nobody could send is `NotSent` under its own query, and a
     // refused retry of it leaves that as it is: the box that asked draws
     // Retry, never "Loading" for a request that is not out.
     let search = (13, MemberListFilter::Search);
@@ -210,7 +210,7 @@ fn a_refused_member_send_fails_the_list_or_keeps_its_page() {
         );
         assert!(matches!(
             driver.session.groups.supergroup_members.get(&search),
-            Some(SupergroupMembersFetch::Failed(_))
+            Some(SupergroupMembersFetch::NotSent(_))
         ));
         assert_eq!(driver.session.groups.member_query(search), "bob");
     }

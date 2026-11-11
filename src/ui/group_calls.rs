@@ -368,7 +368,9 @@ impl QuillApp {
     /// Phase C2f: open the invite picker; fetch contacts first when
     /// the cache is empty.
     pub(super) fn open_group_call_invite(&mut self, cx: &mut Context<Self>) {
-        self.group_call_needs_unlock(cx);
+        if self.group_call_needs_unlock(cx) {
+            return;
+        }
         let call = self
             .session()
             .and_then(|s| s.calls.active_group_call.as_ref())
@@ -377,6 +379,14 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.session.users_state.contacts.data().is_none()
         {
+            let _ = live.driver.fetch_contacts();
+        }
+        cx.notify();
+    }
+
+    /// Retry on the invite picker's failed contacts line.
+    pub(super) fn retry_group_call_contacts(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_contacts();
         }
         cx.notify();
@@ -494,6 +504,13 @@ impl QuillApp {
         message_id: MessageId,
         cx: &mut Context<Self>,
     ) {
+        // A join already on its way: the press is a repeat, not a new ask.
+        if self
+            .session()
+            .is_some_and(|s| s.calls.pending_conference.is_some())
+        {
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
             self.screen.connection.set_note_for(
                 &self.screen.windows,

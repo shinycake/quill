@@ -79,9 +79,10 @@ impl Session {
                         (pending.chat_id, pending.around_message_id)
                 {
                     // Guard: a panel the user closed while the answer was in
-                    // flight must stay closed — only fill the loading entry.
+                    // flight must stay closed, and only the request the
+                    // panel waits for fills it.
                     if let Some(panel) = self.bots.game_scores.get_mut(&(chat_id.0, message_id.0)) {
-                        panel.succeed(scores);
+                        panel.answered(Some(pending.id), scores);
                     }
                 }
             }

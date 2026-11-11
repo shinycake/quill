@@ -252,7 +252,9 @@ impl QuillApp {
             None | Some(SupergroupMembersFetch::Loading) => {
                 list = list.child(message(tr(keys::CONTACTS_LOADING)));
             }
-            Some(SupergroupMembersFetch::Failed(error)) => {
+            Some(
+                SupergroupMembersFetch::Failed(error) | SupergroupMembersFetch::NotSent(error),
+            ) => {
                 list = list.child(
                     div()
                         .flex()

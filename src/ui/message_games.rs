@@ -138,6 +138,27 @@ fn game_scores_panel(
         .p_2()
         .rounded_md()
         .bg(bg_subtle());
+    if let Some(error) = scores.error() {
+        panel = panel.child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(div().flex_1().child(error.to_string()))
+                .child(
+                    Button::new(("game-scores-retry", row_id))
+                        .label(tr(keys::Q_PEOPLE_RETRY))
+                        .ghost()
+                        .small()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.retry_game_scores(chat_id, message_id, cx);
+                        })),
+                ),
+        );
+        return Some(panel.into_any_element());
+    }
     match scores.data() {
         None => {
             panel = panel.child(
@@ -205,10 +226,18 @@ impl QuillApp {
         self.load_game_scores(chat_id, message_id, cx);
     }
 
+    pub(super) fn retry_game_scores(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        cx: &mut Context<Self>,
+    ) {
+        self.load_game_scores(chat_id, message_id, cx);
+    }
+
     /// Ask `getGameHighScores` for the panel: the first open, or Retry
     /// after a refusal.
     fn load_game_scores(&mut self, chat_id: ChatId, message_id: MessageId, cx: &mut Context<Self>) {
-        let key = (chat_id.0, message_id.0);
         let user_id = self
             .live
             .as_ref()
@@ -220,21 +249,13 @@ impl QuillApp {
             );
             return;
         };
+        // The driver opens the panel as loading and ends it failed when the
+        // send is refused, so it draws its Retry.
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.bots.game_scores.insert(
-                key,
-                quill::state::fetch::Fetch::Loading {
-                    stale: None,
-                    request: None,
-                },
-            );
             live.driver
                 .send_game_high_scores(chat_id, message_id, user_id)
         });
         if !matches!(sent, Some(Ok(_))) {
-            if let Some(live) = self.live.as_mut() {
-                live.driver.session.bots.game_scores.remove(&key);
-            }
             self.set_status_note(
                 StatusNote::error(tr(keys::Q_MISC_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
                 cx,

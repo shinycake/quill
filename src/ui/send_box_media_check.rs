@@ -39,6 +39,7 @@ impl QuillApp {
             .map(|attachment| (attachment.path.clone(), attachment.kind))
             .collect();
         for (path, kind) in unread {
+            let path_key = path.clone();
             if let Some(check) = self.composer_sends.reads.media.done(&path).cloned() {
                 self.apply_media_check(&path, &check);
                 continue;
@@ -49,7 +50,6 @@ impl QuillApp {
             let send_box = &mut self.composer_sends.reads;
             send_box.media_check_jobs += 1;
             let job = send_box.media_check_jobs;
-            send_box.media.start(path.clone(), job);
             let source = path.clone();
             let worker = cx.background_spawn(async move {
                 match kind {
@@ -59,20 +59,26 @@ impl QuillApp {
             });
             let timer = cx.background_executor().timer(GIVE_UP_AFTER);
             let waited = path.clone();
-            self.spawn_scoped(cx, async move |this, cx| {
+            // The reads are the account's (`TrayReads`), not the window's:
+            // the answer settles them whichever window asked, or the file
+            // would stay "being read" and block Send. The stage owns both
+            // tasks, so forgetting the file stops them.
+            let give_up = Self::spawn_app(cx, async move |this, cx| {
                 timer.await;
                 let _ = this.update(cx, |this, cx| {
                     this.finish_media_check(&waited, job, MediaCheck::FileOnly, cx);
                 });
-            })
-            .detach();
-            self.spawn_scoped(cx, async move |this, cx| {
+            });
+            let read = Self::spawn_app(cx, async move |this, cx| {
                 let check = worker.await;
                 let _ = this.update(cx, |this, cx| {
                     this.finish_media_check(&path, job, check, cx);
                 });
-            })
-            .detach();
+            });
+            self.composer_sends
+                .reads
+                .media
+                .start(path_key, job, vec![give_up, read]);
         }
     }
 
@@ -96,8 +102,8 @@ impl QuillApp {
             return;
         }
         self.apply_media_check(path, &check);
-        // A file now needs its thumbnail.
-        self.prepare_tray_file_thumbnails(cx);
+        // A file now needs its thumbnail (for the screen now showing).
+        self.defer_screen(cx, |this, cx| this.prepare_tray_file_thumbnails(cx));
         cx.notify();
     }
 

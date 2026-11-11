@@ -671,6 +671,19 @@ where
     scrollable_dialog_content_tracked(None, build)
 }
 
+/// `scrollable_dialog_content` for a body built once per dialog render: the
+/// kit's `content` takes an `Fn`, so the element goes in through a `Cell`
+/// (no borrow that could panic). A call after the first draws nothing, as
+/// the builder runs again with the next render.
+pub(crate) fn one_shot_dialog_content(
+    body: AnyElement,
+) -> impl Fn(DialogContent, &mut Window, &mut App) -> DialogContent {
+    let slot = std::rc::Rc::new(std::cell::Cell::new(Some(body)));
+    scrollable_dialog_content(move |content, _, _| {
+        content.child(slot.take().unwrap_or_else(|| div().into_any_element()))
+    })
+}
+
 /// `scrollable_dialog_content` whose scroll region is tracked by `scroll`, so
 /// a long list in the body can ask for its next page near the end
 /// (`ui/scroll_load.rs`).

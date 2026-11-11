@@ -9,7 +9,6 @@ detached:QuillApp::bot_username_changed 1
 detached:QuillApp::business_bot_watch 1
 detached:QuillApp::close_earn_layer 1
 detached:QuillApp::close_profile_modal 1
-detached:QuillApp::copy_folder_link 1
 detached:QuillApp::custom_emoji_card_body 1
 detached:QuillApp::download_update 1
 detached:QuillApp::emoji_sets_search_typed 1
@@ -35,7 +34,6 @@ detached:QuillApp::start_update_checks 1
 detached:QuillApp::status_toast_visible 1
 detached:QuillApp::sync_call_window 1
 detached:QuillApp::wake_takeover_at 1
-detached:QuillApp::with_device_access 1
 detached:SyntheticChat::new 1
 detached:hide_main_window 1
 detached:request_video_frame 1
@@ -76,7 +74,6 @@ poll:QuillApp::spawn_system_unlock_wait 1
 poll:QuillApp::spawn_viewer_session_tick 1
 poll:QuillApp::spawn_voice_tick 1
 poll:QuillApp::start_dictionary_download 1
-poll:QuillApp::start_event_log_poll 1
 poll:QuillApp::start_mic_test 1
 poll:QuillApp::start_omarchy_watch 1
 poll:QuillApp::start_update_checks 1

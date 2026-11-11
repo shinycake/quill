@@ -8260,3 +8260,34 @@ profile_tabs, ton_wallet}.rs`, `connect/core/{mod, pumps}.rs`,
 - **No new CI guard.** The shapes (a failed page asked again from render, a
   stage matched by bot id) are about which state a function reads; the
   tests walk each exit instead.
+
+### Sweep fixes (r2-01)
+
+| id | result |
+| --- | --- |
+| 07-025 | `submit_delete_account` sends first: only an accepted send clears the password and reason and leaves the armed banner. A refused send keeps both and the banner, with a "Couldn't delete the account" note. |
+| 07-026 | `submit_account_ttl` and `submit_default_auto_delete` note a refused send. |
+| 07-034, 13-066 | the one-shot body goes in through `shell::one_shot_dialog_content`, a `Cell` (`take`, no borrow that can panic), used by every dialog builder this bundle owns or touched (account box, Money, Translate, the checkout and Subscriptions boxes, Manage Members). A later call of the kit's `Fn` closure draws nothing, as the builder runs again with the next render. |
+| 08-047, 12-C002 | `PermissionAsk::Asking` owns the wait task (dropping the stage ends it). The wait is screen-scoped (`spawn_screen`): the answer ends the stage by its id whichever window asked, and the recording starts through the asking window's own handle only while that window is still there. There is no fallback through the main window. |
+| 09-095, 09-097 | a first page of the event log that cannot be sent (path inactive, sender closed) is `ChatEventLogFetch::Failed` with the Retry the page already draws; Save filter / search failures land there too. |
+| 09-096 | an older page that was refused or never sent is `OlderEvents::Failed(line)` on the loaded page (it replaces `has_more`: `Exhausted`, `Available`, `Failed`). The list draws the line with Retry in place of the "Loading earlier actions" spinner, and the automatic load asks only while `Available`, so a failing server is not asked in a loop. Asking again clears the line. |
+| 09-098 | the id list is a `Cell<Vec<_>>` taken out before the list is reset, spliced or remeasured: no borrow at all. |
+| 09-099 | the poll tick does nothing while locked. |
+| 09-100 | the search box belongs to its `EventLogPage` (`page.search`, with the typing subscription): another chat's page has a box of its own, built with that chat's stored query. `shows` and the per-frame resync are gone; upkeep only builds a missing box. |
+| 10-040 | the poll tick ends the timer when the window is inactive (the page's `poll` is `None`); a window waking (`follow_windows` gate) restarts it with an immediate poll (`resume_event_log_poll`). |
+| 10-012 | the Gift Premium or Stars box draws contacts Loading, and Failed with Retry (`retry_gift_recipients`). The frequent-contacts fetch stays best-effort: failing it only drops that optional section, as in tdesktop. |
+| 10-043 | `open_group_call_invite` returns while locked, like the share opener. |
+| 10-055 | the invite picker draws a failed contacts fetch with Retry and a loading line, not "No contacts to invite". `fetch_contacts` itself lands a list it cannot ask for (chats path down) in the failed stage, so the picker never draws "Loading contacts..." for good. |
+| 10-051 | a repeat Join press while a conference join is pending is ignored, and the Join and Decline buttons of the invitation row are disabled while `pending_conference` holds (the driver's stage; nothing new to keep in step). |
+| 10-052 | skipped: tdesktop closes the rename box on send too. |
+| 10-057 | a member page that cannot be sent is `SupergroupMembersFetch::NotSent` (supergroups and basic groups), drawn like `Failed` with Retry, not a removed entry read as Loading. It is its own variant: only TDLib's `Failed` refusal switches the inline list to the Administrators fallback, so a transient local refusal keeps the Recent list and its Retry. |
+| 10-117, 10-118, 05-032, 02-092 | the checkout is one value: `PaymentsState::checkout: CheckoutForm` (`Closed`, `Loading { request, invoice }`, `Failed(line)`, `Ready`/`Verifying`/`Paid(Checkout)`), where `Checkout` carries the form, invoice, order info, shipping choice and note. The five fields `request`, `order_info`, `shipping_id` and `note` are gone: closing the checkout takes all of them, the driver's `send_payment_form_request` replaces the whole earlier one before sending, and the UI resets nothing by hand and drops the old dialog when the send is refused. A form answer or order-info answer applies only to the stage whose request asked; `sendPaymentForm` records the form only while the checkout shows that invoice. |
+| 11-018, 11-019 | the game scores panel draws `Fetch::Failed` with Retry; the driver opens the panel as `Loading { request }` and the answer or error applies only for that request. |
+| 12-A011 | `confirm_unpin` takes an `UnpinOrigin`; only the selection bar's unpin clears the forward stage. |
+| 02-002, 12-D014 | the tray reads (media check, file thumbnails, sound track) and their give-up timers run as app work (`spawn_app`), so they settle `TrayReads` whichever window or screen asked; the thumbnails follow-up is a `defer_screen`. The worker and the timer are held in the stage (`Read::Reading { job, _tasks }`): forgetting a file, starting it again or finishing it drops them, none is detached. |
+| 13-019 | `install_spell_engine` and `recheck_spelling` go through the disabled gate (`sync_spellcheck`), so turning spell check on later checks the draft. |
+| 07-014 | a failed first Money page draws Retry. |
+| 14-010 | the grossing apps list is `Loading { request }` and Failed with a Retry; a refused send is Failed. |
+
+Guards: none added (the shapes are per-feature stage choices that `check-implicit-state.py` cannot see).
+Tests: refused first event-log page, a failed older page and its Retry stage, refused member fetches and the Recent list kept after a local refusal, a contacts fetch with the path down, a newer checkout replacing the whole older one (note, shipping and order info included), a checkout that cannot be asked dropping the old dialog, an older game-scores answer ignored, the permission stage helpers, the poll stopping while inactive, the search box following its page.

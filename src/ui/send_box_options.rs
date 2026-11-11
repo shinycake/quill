@@ -124,11 +124,11 @@ impl QuillApp {
             let send_box = &mut self.composer_sends.reads;
             send_box.sound_jobs = send_box.sound_jobs.wrapping_add(1);
             let job = send_box.sound_jobs;
-            send_box.sound.start(path.clone(), job);
             let probed = path.clone();
             let worker =
                 cx.background_spawn(async move { quill::composer::without_sound_track(&probed) });
-            self.spawn_scoped(cx, async move |this, cx| {
+            let path_key = path.clone();
+            let read = Self::spawn_app(cx, async move |this, cx| {
                 let silent = worker.await;
                 let _ = this.update(cx, |this, cx| {
                     let send_box = &mut this.composer_sends.reads;
@@ -147,8 +147,11 @@ impl QuillApp {
                     }
                     cx.notify();
                 });
-            })
-            .detach();
+            });
+            self.composer_sends
+                .reads
+                .sound
+                .start(path_key, job, vec![read]);
         }
         self.prepare_tray_file_thumbnails(cx);
         self.check_tray_media(cx);

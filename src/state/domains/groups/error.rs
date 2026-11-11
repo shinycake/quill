@@ -558,19 +558,27 @@ impl Session {
                 if let Some(chat_id) = pending
                     .filter(|pending| self.take_event_log_wait(pending))
                     .and_then(|p| p.chat_id)
-                    && (from_event_id == 0
+                {
+                    if from_event_id == 0
                         || !matches!(
                             self.groups.event_log_fetch(chat_id.0),
                             Some(ChatEventLogFetch::Loaded(_))
-                        ))
-                {
-                    self.groups.set_event_log_fetch(
-                        chat_id.0,
-                        ChatEventLogFetch::Failed(call_request_error_line(
-                            err,
-                            "Could not load recent actions",
-                        )),
-                    );
+                        )
+                    {
+                        self.groups.set_event_log_fetch(
+                            chat_id.0,
+                            ChatEventLogFetch::Failed(call_request_error_line(
+                                err,
+                                "Could not load recent actions",
+                            )),
+                        );
+                    } else {
+                        // An older page: the loaded log stays, with Retry.
+                        self.fail_older_events(
+                            chat_id.0,
+                            call_request_error_line(err, "Could not load earlier actions"),
+                        );
+                    }
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::GetAdminRights { user_id })) => {

@@ -193,7 +193,6 @@ unkeyed:CardState::Loading 1
 unkeyed:ChatSearchJump::Loading 1
 unkeyed:ChatSearchPaging::Loading 1
 unkeyed:ChatStatisticsFetch::Loading 1
-unkeyed:CheckoutForm::Verifying 1
 unkeyed:ComposerReplyFetch::Loading 1
 unkeyed:ConferenceStage::Upgrading 1
 unkeyed:CoverStage::Probing 1
@@ -238,12 +237,10 @@ unkeyed:OptionMediaSlot::Preparing 1
 unkeyed:P2pStage::Waiting 1
 unkeyed:PageLoad::Loading 1
 unkeyed:Paging::Asked 1
-unkeyed:PermissionAsk::Asking 1
 unkeyed:PickWait::Decoding 1
 unkeyed:PickWait::Downloading 1
 unkeyed:PickerFill::Waiting 1
 unkeyed:PictureState::Downloading 1
-unkeyed:Read::Reading 1
 unkeyed:RegistrationStep::Asking 1
 unkeyed:Restore::Opening 1
 unkeyed:Rotation::Probing 1
@@ -261,7 +258,6 @@ unkeyed:TileState::Requested 1
 unkeyed:TitleCheck::Sent 1
 unkeyed:Toast::Waiting 1
 unkeyed:TonConnectRequestState::Pending 1
-unkeyed:ToneUpload::Uploading 1
 unkeyed:TransferStage::Sending 1
 unkeyed:Translation::Pending 1
 unkeyed:UpdateControl::Downloading 1

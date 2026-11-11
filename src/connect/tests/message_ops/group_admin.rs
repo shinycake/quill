@@ -742,3 +742,55 @@ fn driver_community_management_rights_and_delete() {
     assert!(driver.session.groups.communities.contains_key(&43));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Sweep 10-057: a member page the driver refuses to send is a failed list
+/// (drawn with Retry), not an entry removed so the panel reads "Loading".
+#[test]
+fn a_refused_member_fetch_is_a_failed_list() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink);
+    let mut driver = ConnectDriver::new(session, recorder, test_credentials(), prepared);
+    assert!(driver.fetch_basic_group_members(ChatId(9)).is_err());
+    assert!(matches!(
+        driver.session.groups.basic_group_members.get(&9),
+        Some(crate::state::SupergroupMembersFetch::NotSent(_))
+    ));
+    assert!(
+        driver
+            .refresh_supergroup_members(ChatId(13), crate::state::MemberListFilter::Recent, "")
+            .is_err()
+    );
+    assert!(matches!(
+        driver
+            .session
+            .groups
+            .supergroup_members
+            .get(&(13, crate::state::MemberListFilter::Recent)),
+        Some(crate::state::SupergroupMembersFetch::NotSent(_))
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A contacts fetch that cannot be asked at all (the chats path is down)
+/// ends in the failed stage the invite picker draws with Retry, never in a
+/// "Loading contacts..." nothing ends (sweep r2-01).
+#[test]
+fn a_contacts_fetch_while_the_path_is_down_is_a_failed_list() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink);
+    let mut driver = ConnectDriver::new(session, recorder, test_credentials(), prepared);
+    assert!(driver.fetch_contacts().is_err());
+    let contacts = &driver.session.users_state.contacts;
+    assert!(contacts.data().is_none());
+    assert!(contacts.error().is_some());
+    assert!(contacts.can_ask(), "Retry may ask again");
+    let _ = std::fs::remove_dir_all(&dir);
+}
