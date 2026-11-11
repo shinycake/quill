@@ -83,10 +83,12 @@ mod tests {
 
     #[test]
     fn a_refusal_is_dropped_with_the_page_and_is_not_a_capture() {
-        let mut ui = KeybindingUi::default();
-        ui.capture = Capture::Refused {
-            action: "focus-composer".into(),
-            message: "Conflict".into(),
+        let mut ui = KeybindingUi {
+            capture: Capture::Refused {
+                action: "focus-composer".into(),
+                message: "Conflict".into(),
+            },
+            ..KeybindingUi::default()
         };
         assert_eq!(ui.capture.refusal_of("focus-composer"), Some("Conflict"));
         assert_eq!(ui.capture.refusal_of("other"), None);

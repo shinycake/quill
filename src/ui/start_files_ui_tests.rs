@@ -55,7 +55,10 @@ fn files_from_outside_open_the_chooser(cx: &mut TestAppContext) {
     let file = a_file();
     app.update_in(vcx, |app, _, cx| {
         app.begin_start_files(vec![file.clone(), file.clone()], cx);
-        assert_eq!(app.start_files.choosing.files(), [file.clone()]);
+        assert_eq!(
+            app.start_files.choosing.files(),
+            std::slice::from_ref(&file)
+        );
     });
     vcx.run_until_parked();
     shell.read_with(vcx, |shell, _| {

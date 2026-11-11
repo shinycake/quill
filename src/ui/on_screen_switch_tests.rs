@@ -310,7 +310,7 @@ fn files_waiting_for_a_chat_survive_a_switch(cx: &mut TestAppContext) {
     app.read_with(&vcx, |app, _| {
         assert_eq!(
             app.start_files.choosing.files(),
-            [file.clone()],
+            std::slice::from_ref(&file),
             "the files wait"
         );
         assert!(QuillShell::open_dialog_names(app).contains(&"StartFiles"));
