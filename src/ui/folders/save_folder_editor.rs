@@ -169,11 +169,19 @@ impl QuillApp {
                 }
             } else if let Some(demo) = self.demo_session.as_mut() {
                 // The screenshot demo has no server to ask: nothing to leave.
-                demo.chat_list
+                let request = demo.request_for_folder(
+                    quill::state::RequestPurpose::GetChatFolderChatsToLeave,
+                    folder_id,
+                );
+                let fetch = demo
+                    .chat_list
                     .folder_chats_to_leave
                     .entry(folder_id)
-                    .or_default()
-                    .succeed(Vec::new());
+                    .or_default();
+                fetch.begin();
+                fetch.sent(request);
+                fetch.answered(Some(request), Vec::new());
+                demo.requests.take(request);
             }
         }
         cx.notify();
