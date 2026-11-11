@@ -340,15 +340,9 @@ fn draft_sync_keeps_edits() {
     assert_eq!(state.draft_terms(chat), Some(terms));
     state.sync_draft(chat, None);
     assert_eq!(state.bar(chat), None);
-    state.bars.insert(
-        chat.0,
-        SuggestBar {
-            terms,
-            mode: SuggestMode::Change,
-            edit_of: Some(MessageId(3)),
-            send: Default::default(),
-        },
-    );
+    state
+        .bars
+        .insert(chat.0, SuggestBar::editing(terms, MessageId(3)));
     state.sync_draft(chat, None);
     assert!(state.bar(chat).is_some());
     assert_eq!(state.draft_terms(chat), None);

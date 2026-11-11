@@ -17,9 +17,9 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
 use quill::suggested_posts::{
-    DATE_ABOUT, PriceCheck, STARS_WARNING, SuggestBar, SuggestMode, SuggestTerms, SuggestedPrice,
-    currency_tabs, field_text, price_about_member, price_section_title, price_submit_label,
-    shortfall,
+    BarKind, DATE_ABOUT, PriceCheck, STARS_WARNING, SuggestBar, SuggestMode, SuggestTerms,
+    SuggestedPrice, currency_tabs, field_text, price_about_member, price_section_title,
+    price_submit_label, shortfall,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -157,13 +157,13 @@ impl QuillApp {
                     price,
                     send_date: price_box.send_date,
                 };
-                let (target, mode, admin) = (price_box.target, price_box.mode, price_box.admin);
+                let (target, admin) = (price_box.target, price_box.admin);
                 if !admin && let Some(short) = price.and_then(|p| self.suggest_shortfall(p)) {
                     self.ask_for_balance(short, BalanceFor::Offer, cx);
                     return false;
                 }
                 self.suggested_posts.close_price();
-                self.apply_suggest_terms(target, mode, terms, cx);
+                self.apply_suggest_terms(target, terms, cx);
                 return true;
             }
             PriceCheck::TooSmall => limits.min_price_toast(ton),
@@ -191,7 +191,6 @@ impl QuillApp {
     pub(super) fn apply_suggest_terms(
         &mut self,
         target: SuggestTarget,
-        mode: SuggestMode,
         terms: SuggestTerms,
         cx: &mut Context<Self>,
     ) {
@@ -204,9 +203,7 @@ impl QuillApp {
                     chat_id,
                     Some(SuggestBar {
                         terms,
-                        mode,
-                        edit_of: old.and_then(|bar| bar.edit_of),
-                        send: old.map(|bar| bar.send).unwrap_or_default(),
+                        kind: old.map_or(BarKind::New, |bar| bar.kind),
                     }),
                     cx,
                 );
@@ -306,7 +303,6 @@ impl QuillApp {
                     chat_id,
                     message_id,
                 },
-                SuggestMode::Change,
                 SuggestTerms { price, send_date },
                 cx,
             ),
