@@ -247,3 +247,33 @@ fn the_apply_hotkey_without_a_style_only_toasts(cx: &mut gpui_kit::TestAppContex
     });
     assert_eq!(after, (true, draft), "nothing was sent or replaced");
 }
+
+/// Delete Style with no connection (and no demo) changes nothing: the
+/// editor stays open, and the failure is shown.
+#[gpui_kit::test]
+fn deleting_a_style_without_a_connection_keeps_the_editor(cx: &mut gpui_kit::TestAppContext) {
+    let (app, mut main) = open_main(cx);
+    open_editor(&app, &mut main);
+    app.update_in(&mut main, |app, window, cx| {
+        if let Some(editor) = app.ai_style_editor_mut() {
+            editor.editing = Some("Shanty".into());
+        }
+        app.demo_session = None;
+        app.remove_ai_style("Shanty", true, false, window, cx);
+        let open = app.ai_compose.open.as_ref();
+        assert_eq!(open.map(|o| o.view), Some(AiComposeView::StyleEditor));
+        assert!(open.is_some_and(|o| o.editor.is_some()), "the editor stays");
+    });
+}
+
+/// An addstyle link with no connection (and no demo) opens no preview
+/// that would look up forever.
+#[gpui_kit::test]
+fn a_style_link_without_a_connection_opens_no_preview(cx: &mut gpui_kit::TestAppContext) {
+    let (app, mut main) = open_main(cx);
+    app.update_in(&mut main, |app, window, cx| {
+        app.demo_session = None;
+        app.open_ai_style_preview("Shanty".into(), window, cx);
+    });
+    assert!(app.read_with(&main, |app, _| app.ai_compose.preview.is_none()));
+}

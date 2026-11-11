@@ -129,6 +129,10 @@ impl QuillApp {
             &self.translate_ui_language(),
         );
         let send = ai.start();
+        // The language picker opens unfiltered, whatever was typed last time.
+        self.ai_compose
+            .language_search
+            .update(cx, |search, cx| search.set_value("", window, cx));
         self.ai_compose.open = Some(AiComposeOpen {
             conversation,
             window: self.windows.scope,
@@ -177,14 +181,16 @@ impl QuillApp {
             return;
         };
         let chat_id: ChatId = open.conversation.chat_id;
-        let Some(live) = self.live.as_mut() else {
-            return;
+        let sent = match self.live.as_mut() {
+            Some(live) => live
+                .driver
+                .ai_box_request(chat_id, &send.request, send.token)
+                .is_ok(),
+            // A screenshot demo answers through its session.
+            None if self.demo_session.is_some() => return,
+            None => false,
         };
-        if live
-            .driver
-            .ai_box_request(chat_id, &send.request, send.token)
-            .is_ok()
-        {
+        if sent {
             return;
         }
         let error = self
@@ -195,6 +201,12 @@ impl QuillApp {
         if let Some(error) = error {
             self.ai_compose_error_toast(&error, window, cx);
         }
+    }
+
+    /// No connection outside a screenshot demo (it is being replaced): a
+    /// request cannot go out, so what asked must fail, not wait.
+    fn ai_compose_offline(&self) -> bool {
+        self.live.is_none() && self.demo_session.is_none()
     }
 
     fn ai_compose_style_names(&self) -> Vec<String> {

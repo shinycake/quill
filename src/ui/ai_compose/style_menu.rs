@@ -27,7 +27,7 @@ use quill::settings_catalog::Page;
 /// the action has no binding (tdesktop `AiApplyShortcutText`).
 pub(super) fn ai_apply_shortcut_text(cx: &App) -> Option<String> {
     let keymap = cx.key_bindings();
-    let keymap = keymap.borrow();
+    let keymap = keymap.try_borrow().ok()?;
     let binding = keymap.bindings_for_action(&AiComposeApply).last()?;
     let text: Vec<String> = binding
         .keystrokes()
@@ -177,7 +177,7 @@ impl QuillApp {
         });
     }
 
-    fn remove_ai_style(
+    pub(super) fn remove_ai_style(
         &mut self,
         name: &str,
         creator: bool,
@@ -192,7 +192,7 @@ impl QuillApp {
                 live.driver.remove_text_composition_style(name)
             }
         });
-        if matches!(sent, Some(Err(_))) {
+        if matches!(sent, Some(Err(_))) || (sent.is_none() && self.ai_compose_offline()) {
             // Nothing went out: the editor and the preview stay as they were.
             self.push_ai_toast(text_toast(""), window, cx);
             return;

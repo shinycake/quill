@@ -98,7 +98,9 @@ impl QuillApp {
         let now = surface_reveal::now();
         let animate = surface_reveal::animate(cx);
         let (drawn, moving) = {
-            let mut toasts = self.frame.surfaces.toasts.borrow_mut();
+            let Ok(mut toasts) = self.frame.surfaces.toasts.try_borrow_mut() else {
+                return None;
+            };
             let toast = toasts.entry(host.map(|chat| chat.0)).or_insert_with(|| {
                 surface_reveal::Presence::new(
                     surface_reveal::ENTER,

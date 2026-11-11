@@ -480,13 +480,13 @@ impl Session {
                                 .push(id, Ok(BackgroundOutcome::Applied));
                         }
                     }
-                    Some(RequestPurpose::SearchBackground)
-                        if self
-                            .chats_state
-                            .background_search
-                            .waits_for(pending.map(|p| p.id)) =>
-                    {
-                        self.chats_state.background_search = BackgroundSearch::Found(background);
+                    Some(RequestPurpose::SearchBackground) => {
+                        if let Some(id) = pending.map(|p| p.id)
+                            && self.chats_state.background_search.waits_for(Some(id))
+                        {
+                            self.chats_state.background_search =
+                                BackgroundSearch::Found(id, background);
+                        }
                     }
                     _ => {}
                 }

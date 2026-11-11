@@ -24,7 +24,7 @@ use quill::lang::{keys, tr, tr_with, trn_with};
 use quill::state::StyleError;
 use quill::telegram::envelope::MessageSender;
 use quill::text::TextEntity;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -58,11 +58,14 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let token = fresh_token();
-        let sent = self.live.as_mut().is_none_or(|live| {
-            live.driver
+        let sent = match self.live.as_mut() {
+            Some(live) => live
+                .driver
                 .search_text_composition_style(&name, token)
-                .is_ok()
-        });
+                .is_ok(),
+            // A screenshot demo answers through its session.
+            None => !self.ai_compose_offline(),
+        };
         if !sent {
             self.push_ai_toast(text_toast(tr(keys::AI_COMPOSE_TONE_INVALID)), window, cx);
             return;
@@ -103,6 +106,7 @@ impl QuillApp {
                 }
             }
             Some(Err(_)) => self.push_ai_toast(text_toast(""), window, cx),
+            None if self.ai_compose_offline() => self.push_ai_toast(text_toast(""), window, cx),
             None => {}
         }
         cx.notify();
@@ -262,13 +266,9 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .content(scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
+                    let body = Rc::new(Cell::new(Some(body)));
                     move |content, _, _| {
-                        content.child(
-                            body.borrow_mut()
-                                .take()
-                                .unwrap_or_else(|| div().into_any_element()),
-                        )
+                        content.child(body.take().unwrap_or_else(|| div().into_any_element()))
                     }
                 }))
                 .footer(footer)

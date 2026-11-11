@@ -245,10 +245,12 @@ pub enum WidgetAnswer {
         token: u64,
         outcome: QueryOutcome,
     },
-    /// `getWidgetPublicData`: the shared data and when to ask again, or
-    /// `None` when the request failed (the next poll waits a period).
+    /// `getWidgetPublicData` for the poll `request`: the shared data and
+    /// when to ask again, or `None` when the request failed (the next poll
+    /// waits a period).
     PublicData {
         key: WidgetKey,
+        request: crate::ids::RequestId,
         data: Option<(String, Duration)>,
     },
     /// The widget message was deleted: what the widget kept goes too.

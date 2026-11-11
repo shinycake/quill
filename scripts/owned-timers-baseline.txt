@@ -3,7 +3,6 @@
 detached:AgentBridge::new 1
 detached:QuillApp::after_closing 1
 detached:QuillApp::agent_driver_start 1
-detached:QuillApp::arm_viewer_swipe_timeout 1
 detached:QuillApp::begin_chat_preview_press 1
 detached:QuillApp::bot_username_changed 1
 detached:QuillApp::business_bot_watch 1
@@ -32,7 +31,6 @@ detached:watch_closed_windows 2
 detached:watch_saver 1
 poll:QuillApp::after_closing 1
 poll:QuillApp::arm_stream_hide_timer 1
-poll:QuillApp::arm_viewer_swipe_timeout 1
 poll:QuillApp::autoscroll_press 1
 poll:QuillApp::business_bot_watch 1
 poll:QuillApp::download_emoji_set 1
@@ -45,7 +43,6 @@ poll:QuillApp::ensure_slow_mode_tick 1
 poll:QuillApp::ensure_sticker_closer 1
 poll:QuillApp::ensure_story_tick 1
 poll:QuillApp::open_group_call_schedule 1
-poll:QuillApp::poll_viewer_headroom 1
 poll:QuillApp::pull_jump_when_ready 1
 poll:QuillApp::quick_replies_watch 1
 poll:QuillApp::refresh_system_accent 1
@@ -57,7 +54,6 @@ poll:QuillApp::schedule_swipe_poll 1
 poll:QuillApp::selection_drag_loop 1
 poll:QuillApp::show_notification_with_preview 1
 poll:QuillApp::spawn_system_unlock_wait 1
-poll:QuillApp::spawn_viewer_session_tick 1
 poll:QuillApp::spawn_voice_tick 1
 poll:QuillApp::start_dictionary_download 1
 poll:QuillApp::start_mic_test 1
@@ -65,7 +61,6 @@ poll:QuillApp::start_omarchy_watch 1
 poll:QuillApp::start_update_checks 1
 poll:QuillApp::stealth_box_tick 1
 poll:QuillApp::sync_qr_clock 1
-poll:QuillApp::viewer_note_activity 1
 poll:QuillApp::with_device_access 1
 poll:VideoPlayer::spawn_open_poll 1
 poll:closed 1

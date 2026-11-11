@@ -39,15 +39,10 @@ impl QuillApp {
             return;
         }
         // Presses queued while a decode runs build on the pending target.
-        let mut target = self
-            .viewer
-            .reorient
-            .pending()
-            .unwrap_or(self.viewer.orientation);
+        let mut target = self.viewer.reorient.target();
         change(&mut target);
         if target.is_identity() {
-            self.viewer.orientation = target;
-            self.viewer.reorient.reset();
+            self.viewer.reorient.reset(target);
             cx.notify();
             return;
         }
@@ -89,10 +84,7 @@ impl QuillApp {
         }
         match image {
             Some(image) => {
-                self.viewer.orientation = target;
-                self.viewer
-                    .reorient
-                    .finish((path, target.code(), image.into()));
+                self.viewer.reorient.finish(target, (path, image.into()));
             }
             None => {
                 self.viewer.reorient.cancel();
@@ -357,7 +349,7 @@ impl QuillApp {
         let no_files = quill::state::FileMap::default();
         let files = self.session().map_or(&no_files, |s| &s.media.files);
         let roots = self.media_display_roots();
-        let orientation = self.viewer.orientation;
+        let orientation = self.viewer.reorient.orientation();
         let Some(path) = viewer_display_path(&item, files, &roots) else {
             self.set_note(StatusNote::error(tr(
                 keys::Q_AV_DOWNLOAD_THE_PHOTO_FIRST_TO_2,
@@ -562,7 +554,7 @@ impl QuillApp {
         over_controls: bool,
         cx: &mut Context<Self>,
     ) {
-        self.viewer.over_controls = over_controls;
+        self.viewer.pointer.moved(over_controls);
         self.viewer_note_activity(cx);
     }
 
@@ -597,40 +589,34 @@ impl QuillApp {
         if self.viewer.visibility.has_timer() || controls_stay_up() {
             return;
         }
+        self.viewer_idle_check(cx);
+    }
+
+    /// The idle clock's turn: hide the controls once the pause is over,
+    /// else wait out the rest of it in a timer the visible stage holds.
+    fn viewer_idle_check(&mut self, cx: &mut Context<Self>) {
+        let idle = self.viewer.last_activity.elapsed().as_millis() as u64;
+        let done = !self.viewer.state.is_open() || self.viewer.visibility.is_hidden();
+        if done {
+            self.viewer.visibility.timer_done();
+            return;
+        }
+        // Never mid-drag (a seek, volume or speed thumb).
+        let held = self.viewer.pointer.over_controls() || self.viewer.controls.dragging();
+        if controls_should_hide(idle, held) {
+            let end = self.viewer_fade_end(cx);
+            self.viewer.visibility.hide(end);
+            cx.notify();
+            return;
+        }
+        let wait = Duration::from_millis(if held {
+            VIEWER_WAIT_HIDE_MS
+        } else {
+            controls_hide_wait_ms(idle).max(16)
+        });
         let timer = self.spawn_scoped(cx, async move |this, cx| {
-            loop {
-                let wait = this
-                    .update(cx, |this, cx| {
-                        let idle = this.viewer.last_activity.elapsed().as_millis() as u64;
-                        let done =
-                            !this.viewer.state.is_open() || this.viewer.visibility.is_hidden();
-                        // Never mid-drag (a seek, volume or speed thumb).
-                        let held = this.viewer.over_controls || this.viewer.controls.dragging();
-                        if !done && controls_should_hide(idle, held) {
-                            let end = this.viewer_fade_end(cx);
-                            this.viewer.visibility.hide(end);
-                            cx.notify();
-                        } else if !done {
-                            return Some(if held {
-                                VIEWER_WAIT_HIDE_MS
-                            } else {
-                                controls_hide_wait_ms(idle).max(16)
-                            });
-                        }
-                        this.viewer.visibility.timer_done();
-                        None
-                    })
-                    .ok()
-                    .flatten();
-                match wait {
-                    Some(ms) => {
-                        cx.background_executor()
-                            .timer(Duration::from_millis(ms))
-                            .await;
-                    }
-                    None => break,
-                }
-            }
+            cx.background_executor().timer(wait).await;
+            let _ = this.update(cx, |this, cx| this.viewer_idle_check(cx));
         });
         self.viewer.visibility.set_timer(timer);
     }

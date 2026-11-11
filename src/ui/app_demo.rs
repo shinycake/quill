@@ -263,7 +263,10 @@ impl QuillApp {
             // The gate counts the chat windows too: one may be in front.
             this.frame.main_active.set(active);
             this.preferences.advanced.forget_import_offer();
-            this.follow_windows(cx);
+            let any_active = this.follow_windows(cx);
+            // A hidden or backgrounded main window draws no frame to pause
+            // the profile cover's clip, so the change pauses it here.
+            this.hold_video_avatar(any_active);
             super::glyph_sweep::window_activation(window.window_handle().window_id(), active);
             this.viewer_window_activation(window, cx);
             // The system accent may have changed while another app was in

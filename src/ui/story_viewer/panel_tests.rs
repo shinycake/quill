@@ -227,3 +227,30 @@ fn a_story_media_save_belongs_to_its_story(cx: &mut TestAppContext) {
         );
     });
 }
+
+/// A cover or privacy call already sent stays tracked when the viewer
+/// steps to another story: its answer settles the story it was sent for.
+#[gpui_kit::test]
+fn a_manage_call_sent_stays_tracked_across_a_step(cx: &mut TestAppContext) {
+    use crate::ui::stories_state::{ManageCall, ManageKind};
+    use quill::ids::RequestId;
+    let (app, mut vcx) = open_app(cx, "ready-story-viewer");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        let calls = vec![
+            ManageCall {
+                kind: ManageKind::Cover,
+                story: (1, 2),
+                request: RequestId(7),
+            },
+            ManageCall {
+                kind: ManageKind::Privacy,
+                story: (1, 2),
+                request: RequestId(8),
+            },
+        ];
+        app.stories.manage_calls = calls.clone();
+        app.step_story_viewer(1, cx);
+        assert_eq!(app.stories.manage_calls, calls);
+    });
+}

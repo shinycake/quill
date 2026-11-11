@@ -22,7 +22,7 @@ use quill::ids::RequestId;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::BackgroundOutcome;
 use quill::telegram::envelope::{Background, BackgroundType};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -47,7 +47,7 @@ pub(super) enum PreviewSource {
 pub(super) enum PreviewStage {
     Editing,
     /// `searchBackground` is out for a `bg/` link; the answer is the
-    /// session's `background_search`, matched to this request.
+    /// session's `background_search` for this request.
     Looking {
         request: RequestId,
     },
@@ -255,6 +255,20 @@ impl QuillApp {
         }
     }
 
+    /// The Blur box: the link asked for or copied was for the old choice,
+    /// so the box starts over (dropping a Share still out).
+    fn set_preview_blur(&mut self, on: bool) {
+        if let Some(p) = self.dialogs.wallpaper_preview.as_mut() {
+            p.blur = Some(on);
+            if matches!(
+                p.stage,
+                PreviewStage::Sharing { .. } | PreviewStage::Copied | PreviewStage::Failed(_)
+            ) {
+                p.stage = PreviewStage::Editing;
+            }
+        }
+    }
+
     fn set_wallpaper_stage(&mut self, stage: PreviewStage) {
         if let Some(preview) = self.dialogs.wallpaper_preview.as_mut() {
             preview.stage = stage;
@@ -276,6 +290,9 @@ impl QuillApp {
         let Some(preview) = self.dialogs.wallpaper_preview.clone() else {
             return;
         };
+        if matches!(preview.stage, PreviewStage::Sharing { .. }) {
+            return;
+        }
         let Some(background) = self.previewed_background(&preview.source) else {
             return;
         };
@@ -300,30 +317,37 @@ impl QuillApp {
         self.drain_wallpaper_answers(cx) || looked
     }
 
-    /// The `bg/` link lookup the open preview waits for: found, or failed
-    /// with the reason (the session cleared its search either way).
+    /// The `bg/` link lookup the open preview waits for, answered under the
+    /// request in its stage: found, or failed with the reason. A search
+    /// that is no longer this request (the session started another or
+    /// cleared it) fails the preview rather than leaving it looking.
     fn drain_background_lookup(&mut self, cx: &mut Context<Self>) -> bool {
         use quill::state::BackgroundSearch;
-        if !matches!(
-            self.dialogs.wallpaper_preview.as_ref().map(|p| &p.stage),
-            Some(PreviewStage::Looking { .. })
-        ) {
+        let Some(PreviewStage::Looking { request }) = self
+            .dialogs
+            .wallpaper_preview
+            .as_ref()
+            .map(|p| p.stage.clone())
+        else {
             return false;
-        }
+        };
         let Some(session) = self.wallpaper_session_mut() else {
             return false;
         };
         let next = match &session.chats_state.background_search {
-            BackgroundSearch::Found(_) => PreviewStage::Editing,
-            BackgroundSearch::Idle => PreviewStage::Failed(
-                session
-                    .chats_state
-                    .background_error
-                    .take()
-                    .unwrap_or_default(),
-            ),
-            _ => return false,
+            BackgroundSearch::Waiting(id) if *id == request => return false,
+            BackgroundSearch::Found(id, _) if *id == request => PreviewStage::Editing,
+            BackgroundSearch::Failed(id, reason) if *id == request => {
+                PreviewStage::Failed(reason.clone())
+            }
+            BackgroundSearch::Idle
+            | BackgroundSearch::Waiting(_)
+            | BackgroundSearch::Found(..)
+            | BackgroundSearch::Failed(..) => PreviewStage::Failed(String::new()),
         };
+        if matches!(next, PreviewStage::Failed(_)) {
+            session.chats_state.background_search = BackgroundSearch::Idle;
+        }
         self.set_wallpaper_stage(next);
         cx.notify();
         true
@@ -463,13 +487,7 @@ impl QuillApp {
                         .checked(checked)
                         .label(tr(keys::Q_MISC_BLUR))
                         .on_click(cx.listener(|this, &on, _, cx| {
-                            if let Some(p) = this.dialogs.wallpaper_preview.as_mut() {
-                                p.blur = Some(on);
-                                if matches!(p.stage, PreviewStage::Copied | PreviewStage::Failed(_))
-                                {
-                                    p.stage = PreviewStage::Editing;
-                                }
-                            }
+                            this.set_preview_blur(on);
                             cx.notify();
                         })),
                 );
@@ -507,6 +525,7 @@ impl QuillApp {
                 );
             }
             let can_share = background.is_some() && this.live.is_some();
+            let sharing = matches!(preview.stage, PreviewStage::Sharing { .. });
             let footer = div()
                 .flex()
                 .items_center()
@@ -516,6 +535,7 @@ impl QuillApp {
                         Button::new("wallpaper-preview-share")
                             .label(tr(keys::Q_MISC_SHARE))
                             .ghost()
+                            .disabled(sharing)
                             .tooltip(tr(keys::Q_MISC_COPY_A_LINK_TO_THIS))
                             .on_click(
                                 cx.listener(|this, _, _, cx| this.share_wallpaper_preview(cx)),
@@ -543,17 +563,14 @@ impl QuillApp {
                         })),
                 )
                 .into_any_element();
-            let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+            let body = Rc::new(Cell::new(Some(body.into_any_element())));
             dialog
                 .overlay(true)
                 .width(px(440.))
                 .title(super::shell::dialog_title(tr(keys::Q_MISC_WALLPAPER)))
                 .content(super::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))

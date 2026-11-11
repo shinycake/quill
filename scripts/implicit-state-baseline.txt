@@ -23,8 +23,7 @@ GiveawaySummary::finished
 
 LiveInput::failed
 
-Lookup::fade_started
-Lookup::pending
+LiveInput::failed
 
 MediaMenuFacts::downloading
 

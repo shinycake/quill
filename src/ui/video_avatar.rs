@@ -127,7 +127,8 @@ impl QuillApp {
             Cover::Failed(file) => *file == animation.file_id,
             Cover::None => false,
         };
-        if !keep {
+        // Locked, no clip opens (one already playing is paused below).
+        if !keep && !self.refused_while_locked() {
             self.video_avatar.cover = self.open_cover_clip(owner, animation, scale, cx);
         }
         // The lock screen covers it too (the kit's dialogs read closed then).
@@ -144,6 +145,19 @@ impl QuillApp {
                     clip.player.pause();
                 }
             }
+        }
+    }
+
+    /// No Quill window is in front: the playing cover clip pauses now,
+    /// since the main window may be hidden and draw no frame to do it.
+    pub(super) fn hold_video_avatar(&mut self, active: bool) {
+        if active {
+            return;
+        }
+        if let Cover::Playing(clip) = &self.video_avatar.cover
+            && clip.player.wants_play()
+        {
+            clip.player.pause();
         }
     }
 

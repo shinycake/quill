@@ -101,7 +101,11 @@ impl Wallpaper {
         if !self.rotates() {
             return self;
         }
-        let rotation = ROTATIONS.with(|r| r.borrow().get(&self.identity()).copied());
+        let rotation = ROTATIONS.with(|r| {
+            r.try_borrow()
+                .ok()
+                .and_then(|map| map.get(&self.identity()).copied())
+        });
         self.with_rotation(rotation.unwrap_or(0))
     }
 
@@ -133,11 +137,13 @@ pub(super) fn rotate(wallpaper: &Wallpaper) -> bool {
         return false;
     }
     ROTATIONS.with(|r| {
-        let mut map = r.borrow_mut();
+        let Ok(mut map) = r.try_borrow_mut() else {
+            return false;
+        };
         let entry = map.entry(wallpaper.identity()).or_insert(0);
         *entry = quill::wallpaper_raster::next_rotation(*entry);
-    });
-    true
+        true
+    })
 }
 
 fn fill_wallpaper(fill: &BackgroundFill) -> Wallpaper {

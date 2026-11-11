@@ -841,6 +841,13 @@ fn a_late_background_search_answer_never_lands_under_another_link() {
         ),
     );
     assert!(session.chats_state.background_error.is_none(), "A's error");
+    assert!(
+        session
+            .chats_state
+            .background_search
+            .waits_for(Some(link_b)),
+        "B still waits"
+    );
     apply_json(&mut session, &seq, &sink, &background(link_b, 9));
     assert_eq!(
         session.chats_state.background_search.found().map(|b| b.id),

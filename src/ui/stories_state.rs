@@ -430,6 +430,9 @@ impl StoryUi {
             } else {
                 ViewerPanel::None
             };
+            // A cover or privacy call already sent stays tracked in
+            // `manage_calls`: its answer settles the story it was sent for,
+            // not the one shown now.
             self.open = Some(StoryViewerUi {
                 panel,
                 page_op: open.page_op.filter(|_| close_friends),
@@ -560,7 +563,10 @@ impl StoryUi {
 
 #[cfg(test)]
 mod reply_tests {
-    use super::{StoryViewerUi, ViewerPanel};
+    use super::{ManageCall, ManageKind, PanelKind, StoryViewerUi, ViewerPanel};
+    use crate::ui::story_albums::StoryPrivacyEdit;
+    use quill::ids::RequestId;
+    use quill::story_composer::StoryPrivacy;
 
     #[test]
     fn the_panel_belongs_to_an_open_row_and_goes_with_it() {
@@ -578,5 +584,34 @@ mod reply_tests {
         // Reopening starts without the old panel.
         ui.open_reply();
         assert!(!ui.reply_panel());
+    }
+
+    fn editing(chat_id: i64, story_id: i32) -> ViewerPanel {
+        ViewerPanel::Privacy(StoryPrivacyEdit {
+            chat_id,
+            story_id,
+            privacy: StoryPrivacy::Everyone,
+            selected_user_ids: Vec::new(),
+        })
+    }
+
+    /// A save's answer closes the editor of the story it was sent for, and
+    /// leaves a fresh editor of another story (or none) alone.
+    #[test]
+    fn a_saved_privacy_answer_closes_only_its_own_story_editor() {
+        let call = |story_id, request| ManageCall {
+            kind: ManageKind::Privacy,
+            story: (5, story_id),
+            request: RequestId(request),
+        };
+        let mut ui = StoryViewerUi::default();
+        ui.show(editing(5, 4));
+        ui.close_manage(call(3, 1));
+        assert!(
+            ui.is_open(PanelKind::Privacy),
+            "another story's editor stays"
+        );
+        ui.close_manage(call(4, 2));
+        assert!(!ui.is_open(PanelKind::Privacy), "its own editor closes");
     }
 }

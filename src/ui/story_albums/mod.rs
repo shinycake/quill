@@ -412,6 +412,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
+        let mut adds_sent = false;
         let sent = self.story_page_mutate(
             tr(keys::Q_MEDIA_ADD_STORIES_TO_ALBUM),
             |live, sent| {
@@ -420,6 +421,7 @@ impl QuillApp {
                         live.driver
                             .add_story_album_stories(chat_id, album_id, &added)?,
                     );
+                    adds_sent = true;
                 }
                 if !removed.is_empty() {
                     sent.push(
@@ -434,6 +436,12 @@ impl QuillApp {
         // The picker stays, with its ticks, until the changes are saved.
         if let (Some(page), Some(requests)) = (self.stories.page.as_mut(), sent) {
             page.wait = PageWait::SavingPicker(requests);
+        } else if adds_sent
+            && let Some(picker) = self.stories.page.as_mut().and_then(|p| p.picker.as_mut())
+        {
+            // The adds went out and the removes did not: a retry must not
+            // send the adds again.
+            picker.mark_added(&added);
         }
     }
 

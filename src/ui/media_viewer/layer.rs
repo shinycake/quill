@@ -198,7 +198,7 @@ impl QuillApp {
         // dimensions (axes swapped for a quarter turn) rather than trusting
         // object-fit, so it can never spill out of the frame.
         let natural = item.natural_size.map(|(w, h)| {
-            if self.viewer.orientation.swaps_axes() {
+            if self.viewer.reorient.orientation().swaps_axes() {
                 (h as f32, w as f32)
             } else {
                 (w as f32, h as f32)
@@ -321,7 +321,7 @@ impl QuillApp {
             (None, None) => LayerContent::Nothing,
         };
         if let Some(player) = self.viewer.clip.player() {
-            player.set_orientation(self.viewer.orientation.turns, false);
+            player.set_orientation(self.viewer.reorient.orientation().turns, false);
         }
         let open_gen = self.viewer.open_gen;
         let layer = self

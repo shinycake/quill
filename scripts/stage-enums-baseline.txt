@@ -74,7 +74,6 @@ bare:MenuSend::Sent 1
 bare:MessageStatsFetch::Loading 1
 bare:MuteState::Connecting 1
 bare:NextPage::Loading 1
-bare:Notes::Loading 1
 bare:Opening::Pending 1
 bare:OutboxReceipt::Sent 1
 bare:OwnLinkState::Waiting 1
@@ -96,7 +95,6 @@ bare:PipWindowStage::Opening 1
 bare:PlayHead::Waiting 1
 bare:PlayState::Opening 1
 bare:Playback::Waiting 1
-bare:Poll::Asking 1
 bare:PollPage::Opening 1
 bare:PollStatsFetch::Loading 1
 bare:PublicChatsFetch::Loading 1
@@ -150,7 +148,6 @@ bare:ViewState::Opening 1
 bare:ViewState::Waiting 1
 bare:Waker::Pending 1
 bare:WebRowState::Connecting 1
-bare:WhatsNewWindow::Opening 1
 bare:WithdrawalState::Pending 2
 bare:WorkerLife::Running 1
 bare:WriteAccess::Asking 1
@@ -170,7 +167,6 @@ unkeyed:ChatSearchPaging::Loading 1
 unkeyed:ChatStatisticsFetch::Loading 1
 unkeyed:ComposerReplyFetch::Loading 1
 unkeyed:ConferenceStage::Upgrading 1
-unkeyed:CoverStage::Probing 1
 unkeyed:CreateStage::Creating 1
 unkeyed:DebugConfirm::Asking 1
 unkeyed:DeleteEdit::Pending 1

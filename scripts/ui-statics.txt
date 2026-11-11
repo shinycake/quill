@@ -75,7 +75,6 @@ src/ui/video_player/decoder_load.rs LOADS,REFRESHES | counters
 src/ui/video_player/controls/pip/open.rs LATEST,WRITING | the one Picture-in-Picture
 src/ui/video_editor.rs OPENED | a counter
 src/ui/photo_editor_save.rs NEXT_RENDER | an id counter
-src/ui/story_albums/cover_strip.rs NEXT_SERIAL | an id counter
 src/ui/presence.rs LAST_INPUT_MS | the app's last input, any window
 src/ui/tray_settings.rs WINDOW_SKIPS_TASKBAR | an app setting
 src/ui/window_control.rs CONNECTION | the X connection
