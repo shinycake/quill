@@ -881,12 +881,12 @@ mod panel_tests;
 mod reply_media;
 mod repost;
 mod siblings;
-mod story_open;
 #[cfg(feature = "demo-capture")]
 mod story_demo;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod story_header_tests;
+mod story_open;
 mod story_viewer_overlay;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]

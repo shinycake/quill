@@ -443,22 +443,39 @@ fn a_refused_link_count_send_is_a_failed_count() {
 fn a_link_count_in_flight_or_failed_is_unknown_not_zero() {
     let mut rig = Rig::new();
     let session = &rig.driver.session;
-    assert!(!session.chat_invite_link_count_unknown(ChatId(13)), "never asked");
+    assert!(
+        !session.chat_invite_link_count_unknown(ChatId(13)),
+        "never asked"
+    );
     assert!(
         rig.driver
             .fetch_chat_invite_link_counts(ChatId(13))
             .unwrap()
             .is_some()
     );
-    assert!(rig.driver.session.chat_invite_link_count_unknown(ChatId(13)));
-    rig.driver.session.groups.invite_link_counts.insert(
-        13,
-        crate::state::InviteLinkCountsFetch::Loaded(Vec::new()),
+    assert!(
+        rig.driver
+            .session
+            .chat_invite_link_count_unknown(ChatId(13))
     );
-    assert!(!rig.driver.session.chat_invite_link_count_unknown(ChatId(13)));
-    rig.driver.session.groups.invite_link_counts.insert(
-        13,
-        crate::state::InviteLinkCountsFetch::Failed("x".into()),
+    rig.driver
+        .session
+        .groups
+        .invite_link_counts
+        .insert(13, crate::state::InviteLinkCountsFetch::Loaded(Vec::new()));
+    assert!(
+        !rig.driver
+            .session
+            .chat_invite_link_count_unknown(ChatId(13))
     );
-    assert!(rig.driver.session.chat_invite_link_count_unknown(ChatId(13)));
+    rig.driver
+        .session
+        .groups
+        .invite_link_counts
+        .insert(13, crate::state::InviteLinkCountsFetch::Failed("x".into()));
+    assert!(
+        rig.driver
+            .session
+            .chat_invite_link_count_unknown(ChatId(13))
+    );
 }

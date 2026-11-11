@@ -166,10 +166,7 @@ fn a_step_drops_a_repost_press_still_waiting_and_playback_runs(cx: &mut TestAppC
     app.update(vcx, |app, cx| app.step_story_viewer(-1, cx));
     frames(vcx);
     app.read_with(vcx, |app, _| {
-        assert_eq!(
-            app.stories.viewer.waiting(), None,
-            "the press is dropped"
-        );
+        assert_eq!(app.stories.viewer.waiting(), None, "the press is dropped");
         assert!(!app.story_playback_paused(), "playback runs again");
         assert_eq!(
             app.stories.viewer.current().map(|item| item.story_id),

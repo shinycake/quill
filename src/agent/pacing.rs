@@ -217,9 +217,8 @@ pub fn flood_seconds(message: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ANY_GAP, NEW_PEERS_PER_DAY, Refusal, SAME_CHAT_GAP, State, flood, flood_seconds,
+        ANY_GAP, NEW_PEERS_PER_DAY, Refusal, SAME_CHAT_GAP, State, Turn, flood, flood_seconds,
         forget_account, take_turn,
-        Turn,
     };
     use crate::ids::AccountKey;
     use std::time::{Duration, Instant};
@@ -272,9 +271,7 @@ mod tests {
         let book = |chat: i64| {
             let mut guard = crate::locks::lock_or_recover(&super::STATE);
             let state = guard.get_or_insert_with(State::default);
-            let (_, booking) = state
-                .reserve(now, &account, (9010, chat), 1, true)
-                .unwrap();
+            let (_, booking) = state.reserve(now, &account, (9010, chat), 1, true).unwrap();
             Turn {
                 booking: Some(booking),
             }

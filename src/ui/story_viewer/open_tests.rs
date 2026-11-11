@@ -75,10 +75,7 @@ fn a_linked_story_the_server_no_longer_has_shows_the_broken_link_toast(cx: &mut 
     });
     frames(vcx);
     app.read_with(vcx, |app, _| {
-        assert_eq!(
-            app.stories.viewer.waiting(), None,
-            "the open is dropped"
-        );
+        assert_eq!(app.stories.viewer.waiting(), None, "the open is dropped");
         assert!(!app.stories.viewer.is_open());
         let note = app.connection.note();
         assert_eq!(note.text(), tr(keys::STORIES_LINK_INVALID));
