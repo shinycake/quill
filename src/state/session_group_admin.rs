@@ -418,7 +418,7 @@ impl Session {
             linking = Some(linking.unwrap_or(false) || is_link);
         }
         if let Some(linking) = linking {
-            self.chats_state.chat_action_error = Some(admin_followup_failure_note(linking));
+            self.chats_state.chat_action_error.push(admin_followup_failure_note(linking));
         }
     }
 

@@ -106,10 +106,11 @@ impl QuillApp {
         // Slice CL1: a refused chat-list action (`toggleChatIsPinned`,
         // `toggleChatIsMarkedAsUnread`, `deleteChatHistory`) surfaces
         // here instead of silently doing nothing.
-        if let Some(err) = self
+        for err in self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.chats_state.chat_action_error.take())
+            .map(|live| live.driver.session.chats_state.chat_action_error.take_all())
+            .unwrap_or_default()
         {
             self.set_note(StatusNote::error(err));
             progressed = true;

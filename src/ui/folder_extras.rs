@@ -43,6 +43,22 @@ pub(super) struct FolderNewChatsDialog {
     pub selected: HashSet<i64>,
 }
 
+impl FolderNewChatsDialog {
+    /// The ticked chats the folder still offers, in id order: the offer
+    /// changes while the box is open (a chat joined elsewhere, the owner
+    /// removed one), and only what is still offered can be joined.
+    pub fn still_offered(&self, offered: &[i64]) -> Vec<i64> {
+        let mut ids: Vec<i64> = offered
+            .iter()
+            .copied()
+            .filter(|id| self.selected.contains(id))
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    }
+}
+
 /// A tag chip: the folder name in capitals, tinted with the folder colour
 /// (tdesktop `Ui::ChatsFilterTag`).
 pub(super) fn tag_chip(text: String, color_id: i32) -> Div {
@@ -379,8 +395,16 @@ impl QuillApp {
         let Some(dialog) = self.folders.new_chats_dialog.take() else {
             return;
         };
-        let mut ids: Vec<i64> = dialog.selected.iter().copied().collect();
-        ids.sort_unstable();
+        let offered: Vec<i64> = self
+            .session()
+            .and_then(|s| s.chat_list.folder_new_chats.get(&dialog.folder_id).cloned())
+            .unwrap_or_default();
+        let ids = dialog.still_offered(&offered);
+        if ids.is_empty() && !dialog.selected.is_empty() {
+            // Everything ticked has left the offer: nothing to join.
+            cx.notify();
+            return;
+        }
         match self.live.as_mut() {
             Some(live) => match live.driver.process_folder_new_chats(dialog.folder_id, &ids) {
                 Ok(_) => self.set_note(match ids.len() {
@@ -434,6 +458,7 @@ impl QuillApp {
                 .unwrap_or_default();
             let all_selected =
                 !chats.is_empty() && chats.iter().all(|id| state.selected.contains(id));
+            let selected = state.still_offered(&chats).len();
             let select_ids = chats.clone();
             let mut body = div()
                 .flex()
@@ -507,7 +532,6 @@ impl QuillApp {
                     .text_color(muted)
                     .child(tr(keys::FILTERS_BY_LINK_ABOUT)),
             );
-            let selected = state.selected.len();
             let footer = div()
                 .flex()
                 .justify_end()

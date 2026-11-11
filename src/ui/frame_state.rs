@@ -21,8 +21,6 @@ pub(crate) struct FrameUi {
     /// Highest frame rate animated content asked for since the last
     /// clock tick (0: nothing animated rendered); see `frame_clock`.
     pub(super) animation_demand: std::cell::Cell<u32>,
-    /// Chat-row online-dot and unread-badge animation state.
-    pub(super) row_fx: std::cell::RefCell<quill::row_fx::RowFxMap>,
     /// What asked for the next tick: cached slices by entity id, `None`
     /// for `QuillApp` itself (see `frame_clock`).
     pub(super) animation_targets: std::cell::RefCell<std::collections::HashSet<Option<EntityId>>>,
@@ -120,7 +118,6 @@ impl FrameUi {
         let stored = quill::settings::load_window_state();
         Self {
             animation_demand: Default::default(),
-            row_fx: Default::default(),
             animation_targets: Default::default(),
             still_ticks: Default::default(),
             window_views: Default::default(),

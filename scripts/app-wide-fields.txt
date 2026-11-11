@@ -43,7 +43,6 @@ preferences.whats_new * | the What's New window and its release notes, for the i
 preferences.advanced * | Settings > Advanced: debug codes, test environment, disk-backed demo; values of the install
 preferences.emoji_style * | the emoji set and its download, an app-wide asset
 frame.animation_demand | how many animations want frames: a count, for the frame clock
-frame.row_fx | the row fade map; keys are row view ids, cleared with the views
 frame.animation_targets | the views that asked for an animation frame
 frame.still_ticks * | per-view still ticks, keyed by view entity
 frame.window_views | the views of chat windows, by entity

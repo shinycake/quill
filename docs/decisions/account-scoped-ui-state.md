@@ -5712,3 +5712,65 @@ Minor entries, each proved against the code first.
   (`settle_create_community_dialog`). 10-094: the info panel target is a
   selection that draws from cached data; a failed fetch shows the error note
   and reopening asks again, so no stage can stick.
+
+### Sweep fixes (s4-chat-list)
+
+Twenty-four S4 entries. Each was read end to end against the integration
+branch first; eighteen were real and fixed, five were already fixed by the S3
+chat-list sweep, and 09-X059 duplicates 09-101.
+
+- **A swipe runs what the panel showed.** `SwipeMachine<K, A>` carries the
+  action the row offered at its latest event; the release stores it and `poll`
+  returns `(key, action)`, so a chat that was muted meanwhile does not flip
+  Mute into Unmute (02-007). `poll_swipe` runs nothing while locked and
+  `close_for_lock` drops the gesture and every spring-back (08-113).
+  tdesktop resolves the label per paint and per perform; the lock gate is
+  Quill's own rule (`lock-is-a-render-state.md`).
+- **Search.** A filter change bumps the generation and clears the results
+  (`SearchState::restart_for_filters`), so the Recent answer of the old tab no
+  longer lands under Channels (05-203). Picking a chat or a hit closes search
+  through `ConnectDriver::close_search`, which clears the typing debounce
+  (02-214). `getPublicPostSearchLimits` carries the search generation, is
+  applied only for the open one, and the quota of the previous query is
+  dropped when a new public-posts query starts (05-128).
+- **Shared-media calendar.** `jump_shared_media_to_day` returns
+  `SharedMediaJump::{Jumped, NoMedia, Stale}` and takes the calendar only after
+  its checks: a day with nothing near it keeps the box open with a note; a
+  calendar of another chat is dropped (02-232).
+- **Notes are a queue.** `chat_action_error` is `Notes` (the queue the message
+  notes already use): two refusals before the drain are both shown, oldest
+  first (05-063). The logout settle keeps it with the other queues.
+- **Suggestion box.** `hide_suggested_action` removes the action locally before
+  it tries to send, so a dismissal that cannot go out does not reopen the box
+  and add a toast per close (07-045).
+- **Chat list drags.** A forward drag entering the list drops the file drag's
+  probe, hover and one-second timer, and `choose_row_by_drag` refuses while a
+  forward drag is seen (08-064). The freeze timer, which every drag update
+  re-arms, ends the drag state too when no drag is active any more, and
+  `drag_left` clears even when nothing was hovered, so the next drag of the
+  same paths is probed again (08-065).
+- **Rows not on screen.** The Contacts and Calls panes and search results clear
+  `chat_list.items`, so key stepping and file drags never read a list that is
+  not drawn (08-075).
+- **Row animation per account.** `RowFxMap` moved from `FrameUi` into
+  `ChatListUi`, so a switch starts it empty and a row snaps on first sight
+  (08-098). It is bounded by one account's chats.
+- **Contacts.** A failed send in `fetch_contacts` sets `contacts_error`, so
+  Retry ends in the error line (09-002; `set_contact_sync`'s refetch uses the
+  same path). The Sync switch is saved first and put back when the save fails
+  (`ConnectDriver::set_contact_sync`, 09-X003).
+- **Folders.** The copy button's check mark is a `CopyMark` enum cleared by a
+  `spawn_screen` timer matched to its own copy (09-035). The join box for new
+  chats sends and counts `selected` intersected with the current offer
+  (09-101, 09-X059). The delete box asks `getChatFolderChatsToLeave` through
+  `folder_chats_to_leave: HashMap<i32, Fetch<Vec<i64>>>`: Loading disables the
+  confirm and says so, a failure draws the error with a Retry, and Delete stays
+  possible (09-X058). A failed delete no longer moves the tab to All; the poll
+  does it when `updateChatFolders` drops the folder (09-113).
+- **Already fixed** by the S3 chat-list sweep (e38b4dae, 6b7156e4): 05-060 and
+  09-X017 (the share box takes only the answer of its `LinkOp::Saving(request)`;
+  `folder_share_error` is gone), 09-036 (`InviteStage::Checking(request)`), 09-X055
+  (`InviteStage::Adding` is left by the matching answer, error or lost-request
+  settle), 09-X056 (`folder_limit_hit` carries the asking request).
+- **Not verified on screen.** The headless demo has no live driver, so the
+  delete-box Loading text and the Retry row were checked by tests only.

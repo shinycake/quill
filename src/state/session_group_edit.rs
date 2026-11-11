@@ -86,10 +86,12 @@ impl Session {
             // The photo uploads after the box closes (tdesktop), so the
             // box cannot show its refusal: say it as the action error.
             RequestPurpose::SetChatPhoto => {
-                self.chats_state.chat_action_error = Some(crate::lang::tr_with(
-                    crate::lang::keys::Q_PEOPLE_COULD_NOT_CHANGE_PHOTO,
-                    &[("reason", &super::request_errors::error_reason(err))],
-                ));
+                self.chats_state
+                    .chat_action_error
+                    .push(crate::lang::tr_with(
+                        crate::lang::keys::Q_PEOPLE_COULD_NOT_CHANGE_PHOTO,
+                        &[("reason", &super::request_errors::error_reason(err))],
+                    ));
                 (
                     GroupInfoField::Photo,
                     super::request_errors::error_reason(err),

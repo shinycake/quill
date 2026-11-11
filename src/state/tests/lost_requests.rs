@@ -219,5 +219,5 @@ fn a_swept_request_drops_its_admin_followups_and_says_so() {
     let pending = session.requests.take(id).expect("registered");
     session.settle_lost_request(pending);
     assert!(session.take_admin_followup(id).is_none());
-    assert!(session.chats_state.chat_action_error.is_some());
+    assert!(!session.chats_state.chat_action_error.is_empty());
 }

@@ -429,7 +429,7 @@ fn driver_group_sticker_set_gates_and_shape() {
             .session
             .chats_state
             .chat_action_error
-            .as_deref()
+            .last()
             .is_some_and(|e| e.contains("Could not change") && !e.contains("private body"))
     );
     assert_eq!(

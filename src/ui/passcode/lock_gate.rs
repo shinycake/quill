@@ -114,6 +114,8 @@ impl QuillApp {
     /// Close or stop what the lock screen does not cover or must not keep
     /// running. Every surface the lock reaches is called from here.
     pub(super) fn close_for_lock(&mut self, cx: &mut Context<Self>) {
+        // A swipe the finger left or released does not run behind the lock.
+        self.chat_list.swipe.drop_gestures();
         // The microphone or camera stops, and nothing is sent: a round
         // video reaching its time limit would go out by itself.
         if self.recording_busy() {

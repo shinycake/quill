@@ -389,6 +389,7 @@
 "qll_misc_next_unread_reaction_right_click" = "Next unread reaction · right-click for more";
 "qll_misc_no_archived_masks" = "No archived masks.";
 "qll_misc_no_chat_theme" = "No chat theme";
+"qll_misc_no_media_to_jump_to" = "No media to jump to.";
 "qll_misc_no_chats_found" = "No chats found.";
 "qll_misc_no_chats_loaded_yet" = "No chats loaded yet.";
 "qll_misc_no_colors_match" = "No colors match.";

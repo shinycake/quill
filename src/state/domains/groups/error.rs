@@ -71,10 +71,12 @@ impl Session {
                 self.fail_ownership_transfer(err);
             }
             Some(RequestPurpose::Groups(GroupsPurpose::AnswerSharingRequest { .. })) => {
-                self.chats_state.chat_action_error = Some(call_request_error_line(
-                    err,
-                    crate::lang::tr(crate::lang::keys::Q_SHARING_ANSWER_FAILED),
-                ));
+                self.chats_state
+                    .chat_action_error
+                    .push(call_request_error_line(
+                        err,
+                        crate::lang::tr(crate::lang::keys::Q_SHARING_ANSWER_FAILED),
+                    ));
             }
             Some(RequestPurpose::GetChatOwnerAfterLeaving) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
@@ -113,7 +115,7 @@ impl Session {
             // Switching ads off needs a boost level; say so for the usual
             // refusal (TDLib's message text is not kept, see `TdError`).
             Some(RequestPurpose::ToggleSupergroupCanHaveSponsoredMessages) => {
-                self.chats_state.chat_action_error = Some(if err.code == 400 {
+                self.chats_state.chat_action_error.push(if err.code == 400 {
                     "Could not switch off ads: the channel needs a higher boost level".to_string()
                 } else {
                     call_request_error_line(err, "Could not change ads for the channel")
@@ -125,10 +127,12 @@ impl Session {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                     self.groups.unrestrict_boost_pending.remove(&chat_id.0);
                 }
-                self.chats_state.chat_action_error = Some(call_request_error_line(
-                    err,
-                    "Could not change the boosts needed to bypass restrictions",
-                ));
+                self.chats_state
+                    .chat_action_error
+                    .push(call_request_error_line(
+                        err,
+                        "Could not change the boosts needed to bypass restrictions",
+                    ));
             }
             // B7: refused group admin changes were rolled back above; say
             // so instead of showing the old value as if nothing happened.
@@ -142,7 +146,7 @@ impl Session {
                 | RequestPurpose::SetChatDiscussionGroup
                 | RequestPurpose::UpgradeBasicGroup,
             ) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not change the group setting (error {})",
                     err.code
                 ));
@@ -152,10 +156,12 @@ impl Session {
                 | RequestPurpose::SetSupergroupCustomEmojiStickerSet,
             ) => {
                 self.file_appearance_answer(pending, Err(error_reason(err)));
-                self.chats_state.chat_action_error = Some(call_request_error_line(
-                    err,
-                    "Could not change the group's sticker pack",
-                ));
+                self.chats_state
+                    .chat_action_error
+                    .push(call_request_error_line(
+                        err,
+                        "Could not change the group's sticker pack",
+                    ));
             }
             // A statistics panel waiting for this supergroup's full info
             // cannot learn whether the chat shows statistics: fail it.
@@ -403,17 +409,20 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetChatBoostLink) => {
-                self.chats_state.chat_action_error =
-                    Some(call_request_error_line(err, "Could not get the boost link"));
+                self.chats_state
+                    .chat_action_error
+                    .push(call_request_error_line(err, "Could not get the boost link"));
             }
             Some(
                 RequestPurpose::ToggleSupergroupUsername
                 | RequestPurpose::ReorderSupergroupUsernames,
             ) => {
-                self.chats_state.chat_action_error = Some(call_request_error_line(
-                    err,
-                    "Could not change the usernames",
-                ));
+                self.chats_state
+                    .chat_action_error
+                    .push(call_request_error_line(
+                        err,
+                        "Could not change the usernames",
+                    ));
             }
             Some(RequestPurpose::DeleteRevokedChatInviteLink) => {
                 if let Some(pending) = pending {

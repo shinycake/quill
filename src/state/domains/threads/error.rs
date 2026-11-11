@@ -43,16 +43,19 @@ impl Session {
                     // the connection is back or Saved Messages opens again.
                     self.threads.saved.topics_requested = false;
                     self.threads.saved.retry_when_online = true;
-                    self.chats_state.chat_action_error =
-                        Some(call_request_error_line(err, "Could not load saved chats"));
+                    self.chats_state
+                        .chat_action_error
+                        .push(call_request_error_line(err, "Could not load saved chats"));
                 }
             }
             Some(RequestPurpose::GetSavedMessagesTags { topic_id: 0 }) => {
                 self.threads.saved.retry_when_online = true;
-                self.chats_state.chat_action_error = Some(call_request_error_line(
-                    err,
-                    "Could not complete that action",
-                ));
+                self.chats_state
+                    .chat_action_error
+                    .push(call_request_error_line(
+                        err,
+                        "Could not complete that action",
+                    ));
             }
             Some(RequestPurpose::LoadDirectMessagesChatTopics) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
@@ -60,8 +63,9 @@ impl Session {
                         self.threads.direct.exhausted.insert(chat_id.0);
                         self.view_generation.bump();
                     } else {
-                        self.chats_state.chat_action_error =
-                            Some(call_request_error_line(err, "Could not load chats"));
+                        self.chats_state
+                            .chat_action_error
+                            .push(call_request_error_line(err, "Could not load chats"));
                     }
                 }
             }
@@ -71,10 +75,12 @@ impl Session {
                 | ThreadsPurpose::ReadDirectMessagesChatTopic { .. }
                 | ThreadsPurpose::ToggleDirectMessagesChatTopicCanSendUnpaidMessages { .. },
             )) => {
-                self.chats_state.chat_action_error = Some(call_request_error_line(
-                    err,
-                    "Could not complete that action",
-                ));
+                self.chats_state
+                    .chat_action_error
+                    .push(call_request_error_line(
+                        err,
+                        "Could not complete that action",
+                    ));
             }
             // The rows show "No chats" and do not ask again.
             Some(RequestPurpose::GetForumTopics) => {
@@ -100,10 +106,12 @@ impl Session {
                 | RequestPurpose::GetSavedMessagesTopicHistory { .. }
                 | RequestPurpose::SearchSavedMessages { .. },
             ) => {
-                self.chats_state.chat_action_error = Some(call_request_error_line(
-                    err,
-                    "Could not complete that action",
-                ));
+                self.chats_state
+                    .chat_action_error
+                    .push(call_request_error_line(
+                        err,
+                        "Could not complete that action",
+                    ));
             }
             _ => {}
         }

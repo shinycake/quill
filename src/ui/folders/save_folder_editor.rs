@@ -161,8 +161,34 @@ impl QuillApp {
         });
         self.open_box(crate::ui::shell::DialogKind::FolderDelete);
         // Only a shared folder has chats worth leaving with it.
-        if shared
-            && let Some(live) = self.live.as_mut()
+        if shared {
+            if let Some(live) = self.live.as_mut() {
+                if let Err(err) = live.driver.fetch_chat_folder_chats_to_leave(folder_id) {
+                    self.set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_FOLDER_CHATS,
+                        &err,
+                    )));
+                }
+            } else if let Some(demo) = self.demo_session.as_mut() {
+                // The screenshot demo has no server to ask: nothing to leave.
+                demo.chat_list
+                    .folder_chats_to_leave
+                    .entry(folder_id)
+                    .or_default()
+                    .succeed(Vec::new());
+            }
+        }
+        cx.notify();
+    }
+
+    /// The Retry of the Delete folder box whose list of chats to leave
+    /// failed to load.
+    pub(in crate::ui) fn retry_folder_chats_to_leave(
+        &mut self,
+        folder_id: i32,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_chat_folder_chats_to_leave(folder_id)
         {
             self.set_note(StatusNote::error(user_error_for(
@@ -174,17 +200,25 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn confirm_folder_delete(&mut self, cx: &mut Context<Self>) {
+        // A shared folder's list of chats to leave is still on its way:
+        // deleting now would skip offering them, so the box waits.
+        let waiting = self.folders.delete_confirm.as_ref().is_some_and(|confirm| {
+            confirm.shared
+                && self
+                    .session()
+                    .and_then(|s| s.chat_list.folder_chats_to_leave.get(&confirm.folder_id))
+                    .is_none_or(|f| f.is_loading() || f.is_idle())
+        });
+        if waiting {
+            return;
+        }
         let Some(confirm) = self.folders.delete_confirm.take() else {
             return;
         };
         let leave: Vec<i64> = if confirm.shared {
             self.session()
-                .and_then(|s| {
-                    s.chat_list
-                        .folder_chats_to_leave
-                        .get(&confirm.folder_id)
-                        .cloned()
-                })
+                .and_then(|s| s.chat_list.folder_chats_to_leave.get(&confirm.folder_id))
+                .and_then(|f| f.data().cloned())
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|id| !confirm.keep.contains(id))
@@ -206,7 +240,10 @@ impl QuillApp {
             Ok(()) => StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_DELETED)),
             Err(err) => StatusNote::error(user_error_for(keys::Q_NOTES_FAILED_DELETE_FOLDER, &err)),
         });
-        if self.folders.tab == Some(confirm.folder_id) {
+        // The tab follows the folder's end: the live app leaves it when
+        // `updateChatFolders` no longer lists the folder (the poll), so a
+        // delete that failed keeps the folder and its tab.
+        if self.live.is_none() && self.folders.tab == Some(confirm.folder_id) {
             self.set_chat_list_view(self.chat_list.filter, None);
         }
         cx.notify();

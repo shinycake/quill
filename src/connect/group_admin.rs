@@ -497,8 +497,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         };
         if !matches!(result, Ok(true)) {
-            self.session.chats_state.chat_action_error =
-                Some(crate::state::admin_followup_failure_note(linking));
+            self.session
+                .chats_state
+                .chat_action_error
+                .push(crate::state::admin_followup_failure_note(linking));
         }
     }
 }

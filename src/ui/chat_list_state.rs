@@ -31,6 +31,11 @@ pub(crate) struct ChatListUi {
     pub(super) folder_tags: Rc<super::chat_row::FolderTagContext>,
     /// Chat-row swipe gesture state (`quill::chat_swipe`).
     pub(super) swipe: super::chat_swipe_ui::ChatSwipeState,
+    /// Online-dot and unread-badge animation state of the rows drawn. The
+    /// account's: a switch starts it empty, so a row of the next account
+    /// snaps on first sight instead of animating from another account's
+    /// state (a chat id alone does not name the same chat across accounts).
+    pub(super) row_fx: std::cell::RefCell<quill::row_fx::RowFxMap>,
     /// Slice CL1: right-click chat-row context menu target + window
     /// position.
     pub(super) menu: Option<ChatMenuState>,
@@ -105,6 +110,7 @@ impl ChatListUi {
             folder_tags: Default::default(),
             swipe: Default::default(),
             downloads_panel_open: false,
+            row_fx: Default::default(),
             menu: None,
             archive_menu: None,
             global,

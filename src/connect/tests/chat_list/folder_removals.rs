@@ -140,7 +140,7 @@ fn a_failed_spec_fetch_drops_the_removal_instead_of_asking_again() {
     ));
     assert!(rig.driver.session.chat_list.folder_remove_queue.is_empty());
     assert_eq!(rig.sent("getChatFolder").len(), 1, "no request loop");
-    assert!(rig.driver.session.chats_state.chat_action_error.is_some());
+    assert!(!rig.driver.session.chats_state.chat_action_error.is_empty());
 }
 
 #[test]
