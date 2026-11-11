@@ -40,8 +40,11 @@ pub struct EditContactDialog {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ContactNote {
     /// The full user info has not arrived: the field is empty and the
-    /// note is fetched (`fetch_user_full_info`).
+    /// note is fetched (`fetch_user_full_info`, keyed by `user_id`).
     Waiting,
+    /// The fetch could not be sent or failed: the field is plain and Save
+    /// keeps the stored note unless something was typed.
+    Unavailable,
     /// The field was filled from the full user info (or the user typed
     /// over it), so Save sends what it shows.
     Seeded,
@@ -53,7 +56,38 @@ pub struct BirthdayDialog {
     pub(crate) day_input: Entity<TextareaState>,
     pub(crate) month_input: Entity<TextareaState>,
     pub(crate) year_input: Entity<TextareaState>,
-    pub(crate) error: Option<&'static str>,
+    /// Why Save refused the fields as they were typed: drawn only while
+    /// the fields still read that way, so correcting one takes it away.
+    pub(crate) refusal: Option<BirthdayRefusal>,
+}
+
+/// A refused birthday: the day, month and year as typed, and why.
+#[derive(Clone, Debug)]
+pub(crate) struct BirthdayRefusal {
+    typed: [String; 3],
+    reason: &'static str,
+}
+
+impl BirthdayDialog {
+    fn typed(&self, cx: &App) -> [String; 3] {
+        [&self.day_input, &self.month_input, &self.year_input]
+            .map(|input| input.read(cx).value().to_string())
+    }
+
+    pub(crate) fn refuse(&mut self, reason: &'static str, cx: &App) {
+        self.refusal = Some(BirthdayRefusal {
+            typed: self.typed(cx),
+            reason,
+        });
+    }
+
+    /// The refusal to draw now (none once the fields changed).
+    pub(crate) fn shown_error(&self, cx: &App) -> Option<&'static str> {
+        self.refusal
+            .as_ref()
+            .filter(|refusal| refusal.typed == self.typed(cx))
+            .map(|refusal| refusal.reason)
+    }
 }
 
 /// B10: the one dialog behind the profile and contact panels. Only one is
@@ -77,11 +111,11 @@ pub enum ProfileDialog {
     MainTab,
     /// The note that the number is changed in the phone apps.
     ChangePhone,
-    /// Pick the chat to share `user_id`'s contact into; `target` is the
-    /// chosen chat awaiting the confirm step.
+    /// Share `user_id`'s contact into a chat: the picker, then the confirm
+    /// step for the chosen chat.
     ShareContact {
         user_id: i64,
-        target: Option<i64>,
+        step: ChatStep,
     },
     /// Confirm setting, suggesting or resetting a contact's photo.
     PersonalPhoto {
@@ -94,21 +128,60 @@ pub enum ProfileDialog {
         owner: quill::state::PhotoOwner,
         file_id: i32,
     },
-    /// Send the game `game_short_name` of `bot_id` to a chat (`target` is
-    /// the chosen chat awaiting the confirm step).
+    /// Send the game `game_short_name` of `bot_id` to a chat: the picker,
+    /// then the confirm step for the chosen chat.
     ShareGame {
         bot_id: i64,
         game_short_name: String,
-        target: Option<i64>,
+        step: ChatStep,
     },
     /// Add the bot `bot_id` to a group or channel: the chat picker, then
-    /// (`target` set) the rights to grant or the confirmation.
+    /// the rights to grant or the confirmation.
     AddBot {
         bot_id: i64,
         invite: quill::bot_invite::Invite,
-        target: Option<i64>,
+        step: AddBotStep,
+    },
+}
+
+/// The step of a box that sends something to a chat the person picks. Back
+/// returns to `Pick`; Send, Cancel or closing the box leave it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ChatStep {
+    /// The list of chats.
+    Pick,
+    /// Confirm sending into this chat.
+    Confirm(i64),
+}
+
+impl ChatStep {
+    /// The chat chosen, once there is one.
+    pub(crate) fn target(self) -> Option<i64> {
+        match self {
+            Self::Pick => None,
+            Self::Confirm(chat) => Some(chat),
+        }
+    }
+}
+
+/// The step of the "add a bot" box. The rights belong to the chosen chat,
+/// so they exist only once one is picked.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum AddBotStep {
+    Pick,
+    Confirm {
+        target: i64,
         rights: quill::telegram::envelope::ChatAdminRights,
     },
+}
+
+impl AddBotStep {
+    pub(crate) fn target(&self) -> Option<i64> {
+        match self {
+            Self::Pick => None,
+            Self::Confirm { target, .. } => Some(*target),
+        }
+    }
 }
 
 impl EditContactDialog {
@@ -156,7 +229,7 @@ impl BirthdayDialog {
             day_input: field(window, cx, tr(keys::Q_OPS_DAY), &day),
             month_input: field(window, cx, tr(keys::Q_OPS_MONTH_1_12), &month),
             year_input: field(window, cx, tr(keys::Q_OPS_YEAR_OPTIONAL), &year),
-            error: None,
+            refusal: None,
         }
     }
 }

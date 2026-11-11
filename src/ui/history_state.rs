@@ -111,8 +111,8 @@ pub(crate) struct HistoryUi {
     pub(super) seen: std::rc::Rc<std::cell::RefCell<Option<(ChatId, Vec<MessageId>)>>>,
     /// Messages of the rows inside the viewport at the last paint.
     pub(super) on_screen: std::rc::Rc<std::cell::RefCell<Vec<MessageId>>>,
-    /// Last `(chat, message ids)` reported as visible, to skip repeats.
-    pub(super) reported_visible: Option<(ChatId, Vec<MessageId>)>,
+    /// What was last reported as visible, to skip repeats within one open.
+    pub(super) reported_visible: Option<ReportedVisible>,
     /// Window activity at the last render (message effects play only
     /// while it is active).
     pub(super) window_active: bool,
@@ -327,4 +327,13 @@ impl HistoryUi {
             subsection_tabs: Default::default(),
         }
     }
+}
+
+/// The rows last reported as visible, and the open of the chat's history
+/// they were reported in: reopening the chat reports its rows again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ReportedVisible {
+    pub(super) chat: ChatId,
+    pub(super) open: u64,
+    pub(super) ids: Vec<MessageId>,
 }

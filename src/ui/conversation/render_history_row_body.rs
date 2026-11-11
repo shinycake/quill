@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::ui::status_note::StatusNote;
+use quill::connect::ConnectSendError;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
@@ -569,7 +570,7 @@ impl QuillApp {
     pub(in crate::ui) fn maybe_auto_load_older(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             // Phase 5.1: a topic view pages its own history.
-            let sent = if live.driver.session.threads.saved.tag_search.is_some() {
+            let result = if live.driver.session.threads.saved.tag_search.is_some() {
                 live.driver.fetch_saved_tag_page()
             } else if live.driver.session.threads.saved.sublist.is_some() {
                 live.driver.fetch_saved_sublist_history()
@@ -579,11 +580,10 @@ impl QuillApp {
                 live.driver.fetch_topic_history()
             } else {
                 live.driver.fetch_history()
-            }
-            .ok()
-            .flatten()
-            .is_some();
-            if sent {
+            };
+            // A first page that could not be sent ends in the Failed row
+            // (`ConnectDriver::fetch_history_for`).
+            if matches!(result, Ok(Some(_)) | Err(ConnectSendError::Native)) {
                 cx.notify();
             }
         }

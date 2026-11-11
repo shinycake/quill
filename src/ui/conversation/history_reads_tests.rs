@@ -117,7 +117,10 @@ fn overdraw_rows_below_the_view_are_not_read(cx: &mut TestAppContext) {
     assert!(off.iter().all(|id| !seen.contains(id)));
     // The report reads what was seen, nothing more.
     let reported = app.update(vcx, |app, _| {
-        app.history.reported_visible.clone().map(|(_, ids)| ids)
+        app.history
+            .reported_visible
+            .clone()
+            .map(|reported| reported.ids)
     });
     assert_eq!(reported, Some(seen));
 }
@@ -140,4 +143,26 @@ fn a_row_counts_as_on_screen_as_soon_as_any_of_it_shows(cx: &mut TestAppContext)
     let on_screen = app.update(vcx, |app, _| app.history.on_screen.borrow().clone());
     assert!(seen.iter().all(|id| on_screen.contains(id)));
     assert!(cut_off.iter().any(|id| on_screen.contains(id)));
+}
+
+#[gpui_kit::test]
+fn a_reopened_chat_reports_its_rows_again(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    let vcx = &mut vcx;
+    let first = app.read_with(vcx, |app, _| app.history.reported_visible.clone());
+    let first = first.expect("the open chat reported its rows");
+    // The same chat is opened afresh (closed and reopened): its view book
+    // starts over, so the same rows must be reported again, not skipped as
+    // a repeat of the last open's report.
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.prepare_history_view(A);
+        }
+        cx.notify();
+    });
+    frames(vcx);
+    let again = app.read_with(vcx, |app, _| app.history.reported_visible.clone());
+    let again = again.expect("reported again");
+    assert_eq!(again.ids, first.ids, "the same rows");
+    assert_ne!(again.open, first.open, "as a new open's report");
 }

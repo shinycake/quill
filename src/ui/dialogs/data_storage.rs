@@ -176,6 +176,7 @@ impl QuillApp {
     /// The Data & Storage settings page: the per-network editor when one
     /// is open, otherwise the overview with a refresh button.
     pub(crate) fn data_storage_page(&mut self, cx: &mut Context<Self>) -> Div {
+        self.settle_storage_sliders(cx);
         self.ensure_storage_sliders(cx);
         let Some((network, draft)) = self.settings.data_storage_editor.shown() else {
             return div()

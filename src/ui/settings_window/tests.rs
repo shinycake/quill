@@ -474,7 +474,7 @@ fn the_reset_statistics_confirm_does_not_come_back_with_the_page(cx: &mut TestAp
     app.update(vcx, |app, cx| app.show_settings_page(Page::DataStorage, cx));
     frames(vcx);
     assert_eq!(
-        app.read_with(vcx, |app, _| app.privacy.extra.network_reset),
+        app.read_with(vcx, |app, _| app.privacy.extra.network_reset.clone()),
         NetworkReset::Idle,
         "Reset is not armed again"
     );

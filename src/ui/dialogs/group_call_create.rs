@@ -34,7 +34,7 @@ use quill::calls::group_call_create::{
 use quill::ids::{ChatId, RequestId};
 use quill::lang::{keys, tr, tr_with, trn};
 use quill::telegram::envelope::MessageSender;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -43,9 +43,19 @@ pub(crate) struct GroupCallCreate {
     pub(crate) chat_id: ChatId,
     pub(crate) kind: CreateKind,
     pub(crate) step: CreateStep,
+}
+
+impl GroupCallCreate {
     /// Who the new call is joined as (`JoinInfo::joinAs`); `None` is
-    /// yourself.
-    pub(crate) join_as: Option<MessageSender>,
+    /// yourself. It is read off the step that holds the choice, never kept
+    /// beside it.
+    pub(crate) fn join_as(&self) -> Option<MessageSender> {
+        match &self.step {
+            CreateStep::ChooseJoinAs { selected, .. } => Some(*selected),
+            CreateStep::Confirm { join_as } => *join_as,
+            CreateStep::Leave(_) | CreateStep::Waiting(_) | CreateStep::Schedule(_) => None,
+        }
+    }
 }
 
 pub(crate) enum CreateStep {
@@ -58,8 +68,9 @@ pub(crate) enum CreateStep {
         options: Vec<MessageSender>,
         selected: MessageSender,
     },
-    /// "Start a video chat in this group?" with Create and the link.
-    Confirm,
+    /// "Start a video chat in this group?" with Create and the link; the
+    /// identity it creates as (`None`: yourself).
+    Confirm { join_as: Option<MessageSender> },
     /// `ScheduleGroupCallBox`.
     Schedule(ScheduleStep),
 }
@@ -103,7 +114,6 @@ impl QuillApp {
                     chat_id,
                     kind,
                     step: CreateStep::Leave(text),
-                    join_as: None,
                 });
                 self.open_box(DialogKind::GroupCallStart);
                 cx.notify();
@@ -128,7 +138,6 @@ impl QuillApp {
                             chat_id,
                             kind,
                             step: CreateStep::Waiting(request),
-                            join_as: None,
                         });
                         self.open_box(DialogKind::GroupCallStart);
                     }
@@ -142,8 +151,7 @@ impl QuillApp {
                     self.group_call_boxes.start_dialog = Some(GroupCallCreate {
                         chat_id,
                         kind,
-                        step: CreateStep::Confirm,
-                        join_as: None,
+                        step: CreateStep::Confirm { join_as: None },
                     });
                     self.open_box(DialogKind::GroupCallStart);
                 }
@@ -171,34 +179,7 @@ impl QuillApp {
         let initial = default_schedule_at(now, &offset_at);
         let max = schedule_max(now, &offset_at);
         let picker = new_date_time_picker(window, cx, initial, max - now);
-        let refresh = self.spawn_screen(cx, async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_secs(COUNTDOWN_REFRESH_SECS))
-                    .await;
-                let open = this.update(cx, |app, cx| {
-                    let open = matches!(
-                        app.group_call_boxes
-                            .start_dialog
-                            .as_ref()
-                            .map(|flow| &flow.step),
-                        Some(CreateStep::Schedule(_))
-                    );
-                    if open {
-                        cx.notify();
-                    }
-                    open
-                });
-                if !matches!(open, Ok(true)) {
-                    break;
-                }
-            }
-        });
-        let join_as = self
-            .group_call_boxes
-            .start_dialog
-            .as_ref()
-            .and_then(|flow| flow.join_as);
+        let refresh = self.schedule_refresh_timer(cx);
         self.group_call_boxes.start_dialog = Some(GroupCallCreate {
             chat_id,
             kind: CreateKind::Schedule,
@@ -207,10 +188,39 @@ impl QuillApp {
                 error: None,
                 _refresh: refresh,
             }),
-            join_as,
         });
         self.open_box(DialogKind::GroupCallStart);
         cx.notify();
+    }
+
+    /// One wake-up that redraws the countdown and arms the next, owned by the
+    /// schedule step (`ScheduleStep::_refresh`): leaving the step drops it.
+    fn schedule_refresh_timer(&mut self, cx: &mut Context<Self>) -> Task<()> {
+        self.spawn_screen(cx, async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_secs(COUNTDOWN_REFRESH_SECS))
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if !matches!(
+                    app.group_call_boxes
+                        .start_dialog
+                        .as_ref()
+                        .map(|flow| &flow.step),
+                    Some(CreateStep::Schedule(_))
+                ) {
+                    return;
+                }
+                let next = app.schedule_refresh_timer(cx);
+                if let Some(GroupCallCreate {
+                    step: CreateStep::Schedule(step),
+                    ..
+                }) = app.group_call_boxes.start_dialog.as_mut()
+                {
+                    step._refresh = next;
+                }
+                cx.notify();
+            });
+        })
     }
 
     fn close_group_call_create(&mut self, cx: &mut Context<Self>) {
@@ -281,22 +291,20 @@ impl QuillApp {
             .session()
             .and_then(|s| s.my_user_id)
             .map(|user_id| MessageSender::User { user_id });
-        let (step, join_as) = match join_as_step(options, me) {
+        let step = match join_as_step(options, me) {
             JoinAsStep::Empty => {
                 self.group_call_boxes.start_dialog = None;
                 server_error_toast(window, cx);
                 cx.notify();
                 return;
             }
-            JoinAsStep::OnlyMe(me) => (CreateStep::Confirm, Some(me)),
-            JoinAsStep::Choose { options, selected } => (
-                CreateStep::ChooseJoinAs { options, selected },
-                Some(selected),
-            ),
+            JoinAsStep::OnlyMe(me) => CreateStep::Confirm { join_as: Some(me) },
+            JoinAsStep::Choose { options, selected } => {
+                CreateStep::ChooseJoinAs { options, selected }
+            }
         };
         if let Some(flow) = self.group_call_boxes.start_dialog.as_mut() {
             flow.step = step;
-            flow.join_as = join_as;
         }
         cx.notify();
     }
@@ -311,7 +319,6 @@ impl QuillApp {
             && let CreateStep::ChooseJoinAs { selected, .. } = &mut flow.step
         {
             *selected = sender;
-            flow.join_as = Some(sender);
         }
         cx.notify();
     }
@@ -390,6 +397,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.group_call_boxes.start_dialog = None;
+        // One `createVideoChat` at a time: a second would replace the stage
+        // and its answer (or refusal) would never be matched.
+        if self.video_chat_create_in_flight() {
+            cx.notify();
+            return;
+        }
         // The call you are in ends only for a request the driver will take.
         if let Some(live) = self.live.as_ref()
             && live
@@ -410,6 +423,16 @@ impl QuillApp {
             None => self.demo_session.is_some().then_some(RequestId(0)),
         };
         self.created_video_chat(chat_id, sent, start_date == 0, join_as, window, cx);
+    }
+
+    /// A `createVideoChat` this account sent is still waiting for its
+    /// answer (the registry holds it until TDLib answers or it is swept).
+    pub(in crate::ui) fn video_chat_create_in_flight(&self) -> bool {
+        let VideoChatCreate::Sent(request) = self.group_call_boxes.create else {
+            return false;
+        };
+        self.session()
+            .is_some_and(|session| session.requests.get(request).is_some())
     }
 
     /// After a `createVideoChat` went out (`sent`) or was refused: remember
@@ -509,14 +532,14 @@ impl QuillApp {
                                 .group_call_boxes
                                 .start_dialog
                                 .as_ref()
-                                .map(|f| (f.chat_id, f.join_as))
+                                .map(|f| (f.chat_id, f.join_as()))
                             {
                                 this.send_group_call_create(chat_id, 0, join_as, window, cx);
                             }
                         },
                     ),
                 ),
-                CreateStep::Confirm => (
+                CreateStep::Confirm { .. } => (
                     None,
                     create_body(flow.chat_id, channel, cx),
                     footer_button(
@@ -528,7 +551,7 @@ impl QuillApp {
                                 .group_call_boxes
                                 .start_dialog
                                 .as_ref()
-                                .map(|f| (f.chat_id, f.join_as))
+                                .map(|f| (f.chat_id, f.join_as()))
                             {
                                 this.send_group_call_create(chat_id, 0, join_as, window, cx);
                             }
@@ -580,12 +603,9 @@ impl QuillApp {
                     dialog.title(crate::ui::shell::dialog_title(title))
                 })
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
+                    let body = Rc::new(Cell::new(Some(body)));
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))

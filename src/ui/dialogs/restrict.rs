@@ -18,10 +18,20 @@ pub struct RestrictDialog {
     pub(crate) until: RestrictUntil,
     /// The custom date and time; shown while `until` is `Custom`.
     pub(crate) custom: TimePicker,
-    pub(crate) error: Option<&'static str>,
+    /// The custom time Submit refused; drawn only while the picker still
+    /// shows that pick, so correcting the time takes it off the box.
+    pub(crate) error: Option<TimeRefusal>,
     pub(crate) permissions: ChatPermissions,
     /// The last Submit: the box closes on its answer, stays on its error.
     pub(crate) submit: quill::state::Submit,
+}
+
+/// A custom end time refused before anything was sent.
+#[derive(Debug, Clone, Copy)]
+pub struct TimeRefusal {
+    /// What the picker showed when refused (`None`: nothing picked).
+    pub(crate) picked: Option<i64>,
+    pub(crate) reason: &'static str,
 }
 
 impl RestrictDialog {

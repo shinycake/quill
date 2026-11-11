@@ -8135,6 +8135,49 @@ Review fix round (file-complete rule; the integration branch `claude/sweep-r2-fo
 | 10-083 | not a bug: a failed HDR decode draws the SDR picture, as a file with no HDR does; a re-decode of the same key from render would loop, and each open or step resets the stage, which retries it |
 | 10-081, 10-082, 11-002, 11-004, 11-008, 11-009, 13-038, 13-039, 13-059 | already fixed by the worker commits or `claude/sweep-r2-followup` (held tasks in `Decode::Decoding`, `Shown`, `Reorient`, `SavedToastStage`, `FadeOut`, `Wake`), and by the items above |
 
+### Sweep fixes (r2-36)
+
+Round 2 of the re-sweep, one bundle of box files. Every entry in these files
+was fixed or proven false; the files were then read again from the top.
+
+| id | file | outcome |
+| --- | --- | --- |
+| 09-012 | `conversation/conversation_part1.rs` | The render no longer asks for the first page: `select_chat_open` / `open_chat_window` ask when the history opens, and `fetch_history_for` ends an empty history in its failed stage (`Session::fail_history_load`) when the send itself is refused (`ConnectSendError::Native`), so render only draws the skeleton, the Retry row or the empty pane. `maybe_auto_load_older` (scroll) keeps the `load_failed()` gate from r2-04. Test: `a_first_page_that_cannot_be_sent_ends_in_the_failed_row_and_is_not_asked_again`. |
+| 09-016 | `conversation/mod.rs` | `reported_visible` is `ReportedVisible { chat, open, ids }`; `open` is the new `ViewBook::epoch()`, bumped by every `restart`, so a reopened chat reports its rows again. |
+| 09-029 | `dialogs/account_notices.rs` | `TermsStage::Terms(AgeLine)`: `Unticked` / `Ticked` / `Missing` replace the `age_ok` + `age_error` pair. |
+| 09-027, 09-028 | `dialogs/checklist.rs` | The two switches are one `OthersMay` value (baseline lines for `ChecklistDialog` dropped); the refusal clears on any edit through subscriptions the dialog holds. |
+| 09-026 | `dialogs/contacts.rs` | One `AddContactStage` (`Form`, `Importing`, `NotJoined`, `Saving`, `Failed`) replaces `stage` + `save`. `ContactSave` stays for Edit Contact. |
+| 09-032, 09-033 | `dialogs/data_extra.rs` | `NetworkReset::Resetting(RequestId)` holds the `resetNetworkStatistics` request and `settle_network_reset` (in `settle_box_submits`) ends it on the answer; a send that did not go out stays on the confirmation with the failure in `data_storage_save` under `StorageSaveKind::ResetStatistics` (the integration branch's per-kind failures), so no other save's `ok` wipes it. |
+| 09-043, 09-044, 09-045, 09-046 | `dialogs/folder.rs` | The copy mark's timer and the link request (`LinkOp` inside `FolderShareView`) are the integration branch's (`CopyTimer`, `view.op()`); this bundle adds the editor's refusal as `FolderLoad::Ready { error }` and the link form's name field and ticks in `FolderShareView::Edit { form, op }` (`LinkForm`). `FolderLoad::Loading` and `ContactNote::Waiting` wait on keyed per-folder / per-user fetch entries whose asks are deduped, so they hold no request of their own: `stage-enums-allow.txt` says so. |
+| 09-038, 09-039, 09-040, 09-041 | `dialogs/group_call_create.rs` | `join_as` is read off the step (`Confirm { join_as }`, `ChooseJoinAs { selected }`); a second `createVideoChat` is not sent while the first is still in the registry (`video_chat_create_in_flight`, also used by the RTMP start); the dialog body is held in a `Cell`. 09-040 skipped: `Waiting` leaves on the answer, on the error (create as yourself), when another Start replaces the flow, and when the session no longer holds its request (`abandoned`); tdesktop's `ChooseJoinAsProcess` also draws nothing while its list loads, so a box with a Cancel would be new behaviour. |
+| 09-037 | `dialogs/local_storage.rs` | `StorageDrag::Sent { account, requests }` holds the `setOption` requests the release sent (`set_storage_limits` now returns them) and ends when the session no longer holds any of them: on the limits TDLib holds if `StorageSaveKind::Limits` failed, settled otherwise (a rounded or clamped limit no longer keeps the stage). Test: `a_limit_release_settles_on_the_answers_of_its_own_requests` (both answer orders). |
+| 09-047 | `dialogs/member.rs` | `searched` is written when the request went out, not before. |
+| 09-048, 09-049, 09-050, 09-051 | `dialogs/poll.rs` | `PollDialog::options` is a list of `PollOptionRow { input, attach, correct }`; the panel's recipient is one `PollPick` (by slot id) in `PickerUi`; `Preparing` owns the read task and is answered by slot id; the focus of a fresh box is an `Option<Entity>` consumed by the mount (`focus_on_mount`, the way `checklist_box` does it) on both the poll box (`PollPage::Opening` is gone) and the Add an Option panel (`AddOptionStage` is gone). |
+| 09-052, 09-053, 09-054 | `dialogs/profile_panels.rs` | `ContactNote::Unavailable` ends the "Loading" wait when the full-info ask could not be sent or failed; the birthday refusal is kept with the typed fields and drawn only while they match; the chat pickers use `ChatStep` / `AddBotStep` instead of `target: Option<i64>` (the bot's rights live in the confirm step). |
+| 09-055 | `dialogs/restrict.rs` | The refused custom time is a `TimeRefusal` with the pick it refused and is drawn only while that pick is the shown one. |
+| 09-042 | `dialogs/rtmp_stream.rs` | The dialog body is held in a `Cell`, no `RefCell` borrow. |
+| 09-057 | `dialogs/storage_editor.rs` | Taken from the integration branch (`AutoDownloadAnswers`, taken by the request in `Saving`); this bundle's own `dialog_answers` version was dropped in the merge. |
+| new-01 | `dialogs/account_notices.rs` | The same `RefCell` body cell became a `Cell`; "No" on the new-login banner opens its box only after the request went out; a refused `deleteAccount` send from the terms box says so (`account_delete.fail`). |
+
+Guards: `scripts/check-dialog-answers.py` (new purpose), `view-state-not-chat.txt`
+(`reported_visible` entry), one `window-scope` note on the checklist's
+subscription. Behaviour that changed: with "Allow Multiple Answers" turned off,
+the quiz keeps the first marked row in row order (it kept the first marked in
+click order).
+
+Review fix round (merge of `claude/sweep-r2-followup`, integration shapes kept):
+
+- The group-call schedule countdown is one timer owned by the step (`schedule_refresh_timer`, re-armed by its own wake while the step is current), not a loop.
+- Every one-shot dialog body in the files this bundle touched uses `shell::one_shot_dialog_content` (a `Cell`), so no `RefCell` borrow is left there.
+- `Session::apply_ok`, `settings/state.rs` and `session_apply_ok.rs` equal the integration branch after the merge, so their ratchet hits are not this bundle's. `open_folder_delete`'s demo seed goes through `Fetch::begin` / `sent` / `answered`, and `bots_extras::Submitted`, `StorageScrollStage::Requested`, `ContactNote::Waiting` and `FolderLoad::Loading` have an allow line with the reason.
+- A fresh review of every touched file found the two items below (new-02, new-03) and nothing else.
+
+| id | file | outcome |
+| --- | --- | --- |
+| new-02 | `connect/settings/storage.rs` | `set_storage_limits` returns the requests that went out (the release stage's keys) instead of `()`. |
+| new-03 | `folders/save_folder_editor.rs` | The demo seed of the "chats to leave" list used `Fetch::succeed` (an answer set without a request); it now goes through `begin`, `sent` and `answered`. |
+
+
 ### Sweep fixes (r2-05)
 
 | id | what changed |

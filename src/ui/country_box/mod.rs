@@ -137,7 +137,7 @@ impl QuillApp {
             }
             CountryHost::Poll => {
                 if let Some(dialog) = self.chat_ui.poll_dialog.as_mut()
-                    && matches!(dialog.page, PollPage::Opening | PollPage::Form)
+                    && matches!(dialog.page, PollPage::Form)
                 {
                     dialog.page = PollPage::Country(country_box);
                 }

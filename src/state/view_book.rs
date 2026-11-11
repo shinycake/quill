@@ -36,12 +36,23 @@ pub struct ViewBook {
     /// the reaction (tdesktop `HistoryInner::paintEvent` →
     /// `markContentsRead` for a shown `hasUnreadReaction` item).
     on_screen: BTreeSet<i64>,
+    /// How many times the history was opened afresh (`restart`): a report
+    /// the UI de-duplicates by its rows is only a repeat within one open.
+    epoch: u64,
 }
 
 impl ViewBook {
     /// A fresh open generation: nothing viewed or reported.
     pub fn restart(&mut self) {
-        *self = Self::default();
+        *self = Self {
+            epoch: self.epoch.saturating_add(1),
+            ..Self::default()
+        };
+    }
+
+    /// Which open of the history this is (changes on every `restart`).
+    pub fn epoch(&self) -> u64 {
+        self.epoch
     }
 
     /// A thread's rows are viewed as reported from the start: no stage is

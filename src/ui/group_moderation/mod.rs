@@ -28,8 +28,6 @@ use quill::state::{
     AdminListFetch, AdminRightsFetch, MemberListFilter, SubmitView, SupergroupMembersFetch,
 };
 use quill::telegram::envelope::{ChatAdminRights, ChatPermissions, MessageSender};
-use std::cell::RefCell;
-use std::rc::Rc;
 /// A member change that went out and waits for its answer: the note and
 /// the box that follow it say what TDLib answered, not what was queued.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -323,7 +321,6 @@ impl QuillApp {
     pub(super) fn pick_restrict_until(&mut self, until: RestrictUntil, cx: &mut Context<Self>) {
         if let Some(dialog) = self.admin.restrict_dialog.as_mut() {
             dialog.until = until;
-            dialog.error = None;
             cx.notify();
         }
     }
@@ -349,8 +346,12 @@ impl QuillApp {
             {
                 Ok(unix) => RestrictUntil::Custom(unix).until_date(now),
                 Err(err) => {
+                    let picked = picked_unix(&dialog.custom, MIN_RESTRICT_SECS, cx);
                     if let Some(dialog) = self.admin.restrict_dialog.as_mut() {
-                        dialog.error = Some(err.message());
+                        dialog.error = Some(TimeRefusal {
+                            picked,
+                            reason: err.message(),
+                        });
                     }
                     cx.notify();
                     return;
@@ -384,7 +385,6 @@ impl QuillApp {
         match sent {
             Ok(id) => {
                 if let Some(dialog) = self.admin.restrict_dialog.as_mut() {
-                    dialog.error = None;
                     dialog.submit = quill::state::Submit::sent(vec![id]);
                 }
             }
@@ -626,13 +626,15 @@ impl QuillApp {
                         .child(line),
                 );
             }
-            if let Some(error) = dialog_state.error {
+            if let Some(refusal) = dialog_state.error
+                && refusal.picked == picked_unix(&dialog_state.custom, MIN_RESTRICT_SECS, cx)
+            {
                 body = body.child(
                     div()
                         .id("g1-restrict-error")
                         .text_xs()
                         .text_color(cx.theme().danger)
-                        .child(error),
+                        .child(refusal.reason),
                 );
             }
             if let quill::state::Submit::Failed(reason) = &dialog_state.submit {
@@ -680,19 +682,9 @@ impl QuillApp {
             let body = body.into_any_element();
             dialog
                 .title(crate::ui::shell::dialog_title(title))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .try_borrow_mut()
-                            .ok()
-                            .and_then(|mut cell| cell.take())
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::one_shot_dialog_content(
+                    body.into_any_element(),
+                ))
                 .footer(footer)
                 .on_close(on_close)
         })

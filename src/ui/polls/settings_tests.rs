@@ -117,19 +117,19 @@ fn several_answers_can_be_right_only_with_multiple_answers(cx: &mut TestAppConte
     app.update(&mut vcx, |app, _| {
         let dialog = app.chat_ui.poll_dialog.as_mut().unwrap();
         dialog.set_quiz(true);
+        let marked = |dialog: &crate::ui::dialogs::PollDialog| -> Vec<usize> {
+            (0..dialog.options.len())
+                .filter(|row| dialog.options[*row].correct)
+                .collect()
+        };
         dialog.set_correct_row(0, true);
-        dialog.set_correct_row(2, true);
-        assert_eq!(dialog.quiz_correct_rows, [0, 2]);
+        dialog.set_correct_row(1, true);
+        assert_eq!(marked(dialog), [0, 1]);
         // Switching multiple off keeps one.
         dialog.set_multiple(false);
-        assert_eq!(dialog.quiz_correct_rows, [0]);
+        assert_eq!(marked(dialog), [0]);
         dialog.set_correct_row(1, true);
-        assert_eq!(dialog.quiz_correct_rows, [1]);
-        // A removed option moves the marks after it.
-        dialog.set_multiple(true);
-        dialog.set_correct_row(3, true);
-        dialog.forget_correct_row(0);
-        assert_eq!(dialog.quiz_correct_rows, [0, 2]);
+        assert_eq!(marked(dialog), [1]);
     });
 }
 

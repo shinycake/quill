@@ -13,8 +13,6 @@ MediaFacts::in_saved_messages the message's chat is Saved Messages: a fact about
 ChatSwipeFacts::is_saved the chat with yourself: a fact about the chat read when the swipe label is resolved, not a stage
 RowMenuFacts::is_saved_messages the chat is Saved Messages: a fact about the chat read once when the row menu is built, not a stage
 Checklist::others_can_mark_tasks_as_done TDLib's checklist.others_can_mark_tasks_as_done permission ("Allow Others to Mark As Done"), mirrored as is; not a stage
-ChecklistDialog::others_can_mark_tasks_as_done the dialog's "Allow Others to Mark As Done" switch, a setting of the new checklist; not a stage
-ChecklistDialog::others_can_mark_tasks_as_done+error the "Allow Others to Mark As Done" switch beside the dialog's last validation error: independent
 ChecklistDraft::others_can_mark_tasks_as_done the frozen "Allow Others to Mark As Done" setting of the new checklist; not a stage
 ChecklistSend::others_can_mark_tasks_as_done the "Allow Others to Mark As Done" setting sent with the new checklist; not a stage
 ReceivedGift::is_saved TDLib's receivedGift.is_saved: whether the gift is shown on the profile page, the server's own setting, flipped only after the server confirmed toggleGiftIsSaved; not a stage of anything Quill runs

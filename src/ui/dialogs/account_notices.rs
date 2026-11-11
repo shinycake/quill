@@ -18,29 +18,32 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{LoginReview, prevented_login_message, unconfirmed_login_message};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// Where the terms prompt is (tdesktop: the box, its "sorry" confirm and
 /// the final "delete" warning).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TermsStage {
-    /// The terms text; the age line is ticked, or asked for after a press
-    /// without it.
-    Terms {
-        age_ok: bool,
-        age_error: bool,
-    },
+    /// The terms text, with where its age line stands.
+    Terms(AgeLine),
     DeclineSorry,
     DeleteWarning,
 }
 
+/// The "I confirm that I am at least N" line of the terms text.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum AgeLine {
+    #[default]
+    Unticked,
+    Ticked,
+    /// Agree was pressed without the tick: the line asks for it.
+    Missing,
+}
+
 impl Default for TermsStage {
     fn default() -> Self {
-        Self::Terms {
-            age_ok: false,
-            age_error: false,
-        }
+        Self::Terms(AgeLine::default())
     }
 }
 
@@ -233,15 +236,22 @@ impl QuillApp {
     }
 
     fn review_new_login(&mut self, confirmed: bool, cx: &mut Context<Self>) {
-        // "No" ends in the prevented-login box, which the answer sets.
-        if !confirmed {
-            self.open_box(DialogKind::AccountNotice);
-        }
+        // "No" ends in the prevented-login box, which the answer sets; the
+        // box opens only once the request went out, so a refused send does
+        // not leave an empty box behind.
         if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.review_unconfirmed_sessions(confirmed);
-        } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.settings.notices.unconfirmed_count = 0;
-            demo.settings.notices.unconfirmed_entries.clear();
+            let sent = live.driver.review_unconfirmed_sessions(confirmed).is_ok();
+            if sent && !confirmed {
+                self.open_box(DialogKind::AccountNotice);
+            }
+        } else if self.demo_session.is_some() {
+            if !confirmed {
+                self.open_box(DialogKind::AccountNotice);
+            }
+            if let Some(demo) = self.demo_session.as_mut() {
+                demo.settings.notices.unconfirmed_count = 0;
+                demo.settings.notices.unconfirmed_entries.clear();
+            }
             if !confirmed {
                 self.account_boxes.notice =
                     OpenNotice::LoginPrevented(vec![tr(keys::Q_OPS_BERLIN_GERMANY_PIXEL_9).into()]);
@@ -307,7 +317,7 @@ impl QuillApp {
                     false,
                 ),
             };
-            let body = Rc::new(RefCell::new(Some(body)));
+            let body = Rc::new(Cell::new(Some(body)));
             dialog
                 .overlay(true)
                 .when(locked, |d| {
@@ -318,10 +328,7 @@ impl QuillApp {
                 .title(crate::ui::shell::dialog_title(title))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))
@@ -358,7 +365,7 @@ impl QuillApp {
             .as_ref()
             .and_then(|s| s.settings.account_error().map(str::to_string));
         match self.terms_stage(&terms.id) {
-            TermsStage::Terms { age_ok, age_error } => {
+            TermsStage::Terms(age) => {
                 let min_age = terms.min_user_age;
                 let mut body = div().flex().flex_col().gap_3().child(
                     div()
@@ -375,22 +382,23 @@ impl QuillApp {
                                 keys::Q_OPS_I_CONFIRM_THAT_I_AM,
                                 &[("min_age", &min_age.to_string())],
                             ))
-                            .checked(age_ok)
+                            .checked(age == AgeLine::Ticked)
                             .on_click({
                                 let terms_id = terms_id.clone();
                                 cx.listener(move |this, &on: &bool, _, cx| {
                                     this.set_terms_stage(
                                         &terms_id,
-                                        TermsStage::Terms {
-                                            age_ok: on,
-                                            age_error: false,
-                                        },
+                                        TermsStage::Terms(if on {
+                                            AgeLine::Ticked
+                                        } else {
+                                            AgeLine::Unticked
+                                        }),
                                     );
                                     cx.notify();
                                 })
                             }),
                     );
-                    if age_error {
+                    if age == AgeLine::Missing {
                         body = body.child(
                             div()
                                 .text_xs()
@@ -431,13 +439,10 @@ impl QuillApp {
                             .on_click({
                                 let terms_id = terms_id.clone();
                                 cx.listener(move |this, _, _, cx| {
-                                    if min_age > 0 && !age_ok {
+                                    if min_age > 0 && age != AgeLine::Ticked {
                                         this.set_terms_stage(
                                             &terms_id,
-                                            TermsStage::Terms {
-                                                age_ok,
-                                                age_error: true,
-                                            },
+                                            TermsStage::Terms(AgeLine::Missing),
                                         );
                                     } else if let Some(live) = this.live.as_mut() {
                                         // A failed send lands in `terms`,
@@ -503,43 +508,51 @@ impl QuillApp {
                 if let Some(error) = account_error {
                     body = body.child(div().text_xs().text_color(danger()).child(error));
                 }
-                let footer = div()
-                    .flex()
-                    .justify_end()
-                    .gap_2()
-                    .child(
-                        Button::new("terms-delete-back")
-                            .label(tr(keys::Q_OPS_BACK))
-                            .primary()
-                            .disabled(busy_delete)
-                            .on_click({
-                                let terms_id = terms_id.clone();
-                                cx.listener(move |this, _, _, cx| {
-                                    this.set_terms_stage(&terms_id, TermsStage::DeclineSorry);
-                                    cx.notify();
+                let footer =
+                    div()
+                        .flex()
+                        .justify_end()
+                        .gap_2()
+                        .child(
+                            Button::new("terms-delete-back")
+                                .label(tr(keys::Q_OPS_BACK))
+                                .primary()
+                                .disabled(busy_delete)
+                                .on_click({
+                                    let terms_id = terms_id.clone();
+                                    cx.listener(move |this, _, _, cx| {
+                                        this.set_terms_stage(&terms_id, TermsStage::DeclineSorry);
+                                        cx.notify();
+                                    })
+                                }),
+                        )
+                        .child(
+                            Button::new("terms-delete-now")
+                                .label(if busy_delete {
+                                    tr(keys::Q_OPS_DELETING)
+                                } else {
+                                    tr(keys::Q_OPS_DELETE_NOW)
                                 })
-                            }),
-                    )
-                    .child(
-                        Button::new("terms-delete-now")
-                            .label(if busy_delete {
-                                tr(keys::Q_OPS_DELETING)
-                            } else {
-                                tr(keys::Q_OPS_DELETE_NOW)
-                            })
-                            .danger()
-                            .disabled(busy_delete)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                // TDLib: declined terms must call
-                                // `deleteAccount` with this reason.
-                                if let Some(live) = this.live.as_mut() {
-                                    let _ = live
-                                        .driver
-                                        .delete_account(tr(keys::Q_OPS_DECLINE_TOS_UPDATE), "");
-                                }
-                                cx.notify();
-                            })),
-                    );
+                                .danger()
+                                .disabled(busy_delete)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    // TDLib: declined terms must call
+                                    // `deleteAccount` with this reason.
+                                    // A send that did not go out says so in the box
+                                    // (`account_error`), so Delete now can be pressed again.
+                                    if let Some(live) = this.live.as_mut()
+                                        && live
+                                            .driver
+                                            .delete_account(tr(keys::Q_OPS_DECLINE_TOS_UPDATE), "")
+                                            .is_err()
+                                    {
+                                        live.driver.session.settings.account_delete.fail(tr(
+                                            keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
+                                        ));
+                                    }
+                                    cx.notify();
+                                })),
+                        );
                 (
                     tr(keys::Q_OPS_TERMS_OF_SERVICE).into(),
                     body.into_any_element(),

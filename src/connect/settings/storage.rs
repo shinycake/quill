@@ -216,11 +216,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         size: Option<i64>,
         keep: Option<i64>,
-    ) -> Result<(), ConnectSendError> {
-        self.session
-            .settings
-            .data_storage_save
-            .begin(StorageSaveKind::Limits);
+    ) -> Result<Vec<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             self.session
                 .settings
@@ -229,8 +225,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         // All four options go out even if one send fails; the first error
-        // is the outcome.
+        // is the outcome. The requests that went out are the ones the
+        // caller waits for.
         let mut first_error = None;
+        let mut sent = Vec::new();
+        self.session
+            .settings
+            .data_storage_save
+            .begin(StorageSaveKind::Limits);
         for (name, value) in crate::storage_limits::options_for(size, keep) {
             let extra = self.session.request(RequestPurpose::SetStorageOption, None);
             let json = match value {
@@ -248,9 +250,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .data_storage_save
                     .fail(StorageSaveKind::Limits, "Couldn't save the storage limits.");
                 first_error.get_or_insert(err);
+            } else {
+                sent.push(extra);
             }
         }
-        first_error.map_or(Ok(()), Err)
+        first_error.map_or(Ok(sent), Err)
     }
 
     /// TDLib keeps every cached file until the optimizer runs, and it only
@@ -269,7 +273,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.set_storage_limits(
                 Some(crate::storage_limits::DEFAULT_SIZE),
                 Some(crate::storage_limits::DEFAULT_KEEP),
-            )?;
+            )
+            .map(|_| ())?;
         }
         self.note_storage_limits_seeded();
         Ok(())

@@ -9,14 +9,14 @@ impl QuillApp {
     pub(in crate::ui) fn save_folder_editor(&mut self, cx: &mut Context<Self>) {
         let (name, folder_id) = match self.folders.editor.as_ref() {
             // The folder is still loading: its spec would go out blank.
-            Some(dialog) if dialog.load != FolderLoad::Ready => return,
+            Some(dialog) if !dialog.load.is_ready() => return,
             Some(dialog) => (dialog.name(cx), dialog.folder_id),
             None => return,
         };
         if let Some(dialog) = self.folders.editor.as_mut() {
             dialog.editor.name = name;
             if let Some(err) = dialog.editor.validate() {
-                dialog.error = Some(err.to_string());
+                dialog.load = FolderLoad::refused(err.to_string());
                 cx.notify();
                 return;
             }
@@ -65,12 +65,10 @@ impl QuillApp {
         if let Some(dialog) = self.folders.editor.as_mut() {
             match sent {
                 Some(Err(err)) => {
-                    dialog.error = Some(user_error_for(keys::Q_NOTES_FAILED_FOLDER, &err));
+                    dialog.load =
+                        FolderLoad::refused(user_error_for(keys::Q_NOTES_FAILED_FOLDER, &err));
                 }
-                _ => {
-                    dialog.load = FolderLoad::Merging;
-                    dialog.error = None;
-                }
+                _ => dialog.load = FolderLoad::Merging,
             }
         }
         cx.notify();
@@ -114,13 +112,13 @@ impl QuillApp {
             Ok(Some(request)) => {
                 if let Some(dialog) = self.folders.editor.as_mut() {
                     dialog.load = FolderLoad::Saving(request);
-                    dialog.error = None;
                 }
             }
             Ok(None) => self.folder_editor_saved(folder_id.is_some()),
             Err(err) => {
                 if let Some(dialog) = self.folders.editor.as_mut() {
-                    dialog.error = Some(user_error_for(keys::Q_NOTES_FAILED_SAVE_FOLDER, &err));
+                    dialog.load =
+                        FolderLoad::refused(user_error_for(keys::Q_NOTES_FAILED_SAVE_FOLDER, &err));
                 }
             }
         }
@@ -171,11 +169,19 @@ impl QuillApp {
                 }
             } else if let Some(demo) = self.demo_session.as_mut() {
                 // The screenshot demo has no server to ask: nothing to leave.
-                demo.chat_list
+                let request = demo.request_for_folder(
+                    quill::state::RequestPurpose::GetChatFolderChatsToLeave,
+                    folder_id,
+                );
+                let fetch = demo
+                    .chat_list
                     .folder_chats_to_leave
                     .entry(folder_id)
-                    .or_default()
-                    .succeed(Vec::new());
+                    .or_default();
+                fetch.begin();
+                fetch.sent(request);
+                fetch.answered(Some(request), Vec::new());
+                demo.requests.take(request);
             }
         }
         cx.notify();

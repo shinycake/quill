@@ -36,7 +36,6 @@ bare:CloseProgress::Pending 1
 bare:CodeLanguageStage::Opening 1
 bare:ConferenceKey::Joining 1
 bare:ConferenceStage::Running 1
-bare:ContactNote::Waiting 1
 bare:CreateProgress::InFlight 1
 bare:Decoding::Running 1
 bare:DeviceLink::Opening 1
@@ -53,7 +52,6 @@ bare:ExpandRun::Running 1
 bare:ExtractionStage::Starting 1
 bare:FeederState::Syncing 1
 bare:FieldStage::Waiting 1
-bare:FolderLoad::Loading 1
 bare:Found::Loading 1
 bare:GiftsLayout::Loading 1
 bare:GoalNow::Waiting 1
@@ -95,7 +93,6 @@ bare:PipWindowStage::Opening 1
 bare:PlayHead::Waiting 1
 bare:PlayState::Opening 1
 bare:Playback::Waiting 1
-bare:PollPage::Opening 1
 bare:PollStatsFetch::Loading 1
 bare:PublicChatsFetch::Loading 1
 bare:Refire::Running 1
@@ -125,14 +122,12 @@ bare:Stage::Running 1
 bare:Stage::Starting 1
 bare:StickerSetViewStage::Loading 1
 bare:StorageClear::Clearing 1
-bare:StorageScrollStage::Requested 1
 bare:StoryCardState::Loading 1
 bare:StoryPageOpState::Checking 1
 bare:StoryPageOpState::Sending 1
 bare:StoryStatsFetch::Loading 1
 bare:StreamPhase::Connecting 1
 bare:StreamState::Connecting 2
-bare:Submitted::Sending 1
 bare:SuggestedPostState::Pending 1
 bare:ThreadStatus::Resolving 1
 bare:ThreadStatus::Starting 1
@@ -192,7 +187,6 @@ unkeyed:ListEdit::InFlight 1
 unkeyed:LiveOverlay::Opening 1
 unkeyed:MessageReactionsState::Loading 1
 unkeyed:Neighbour::Asking 1
-unkeyed:OptionMediaSlot::Preparing 1
 unkeyed:P2pStage::Waiting 1
 unkeyed:PageLoad::Loading 1
 unkeyed:PickWait::Decoding 1
