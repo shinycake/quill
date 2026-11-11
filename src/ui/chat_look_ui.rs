@@ -75,8 +75,6 @@ pub(super) struct ChatLookDialog {
     /// The wallpaper file picker: while it is open its task lives here, so
     /// closing the dialog drops it and its answer goes nowhere.
     pub pick: WallpaperPick,
-    /// Also set the wallpaper for the other person (Premium only).
-    pub both: bool,
     /// Where Apply stands: the dialog stays open until every change it sent
     /// is acknowledged, and shows the error of one that failed.
     pub stage: LookStage,
@@ -190,7 +188,6 @@ impl QuillApp {
             wallpaper: WallpaperChoice::Keep,
             dimming: Dimming::Slider(slider),
             pick: WallpaperPick::Idle,
-            both: false,
             stage: LookStage::Editing,
         });
         self.open_box(DialogKind::ChatLook);
@@ -266,10 +263,10 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Send (or, in the screenshot demo, apply) the pending changes.
-    /// Apply the dialog's changes; `both` also sets a new wallpaper for the
-    /// other person (Premium only). It is the button's choice for this
-    /// Apply, never kept in the dialog.
+    /// Send (or, in the screenshot demo, apply) the dialog's changes;
+    /// `both` also sets a new wallpaper for the other person (Premium
+    /// only). It is the button's choice for this Apply, never kept in the
+    /// dialog.
     fn apply_chat_look(&mut self, both: bool, cx: &mut Context<Self>) {
         let Some(dialog) = self.dialogs.chat_look_dialog.clone() else {
             return;
@@ -866,8 +863,8 @@ crate::ui::shell::register_dialogs! {
 #[cfg(test)]
 mod tests {
     use super::{
-        ChatLookDialog, Dimming, LookChange, LookStage, LookTarget, WallpaperChoice, WallpaperPick,
-        chat_look_allowed, is_wallpaper_image, plan_changes,
+        ChatLookDialog, Dimming, LookChange, LookSend, LookStage, LookTarget, SendStage,
+        WallpaperChoice, WallpaperPick, chat_look_allowed, is_wallpaper_image, plan_changes,
     };
     use std::path::Path;
 
@@ -878,7 +875,6 @@ mod tests {
             wallpaper: WallpaperChoice::Keep,
             dimming: Dimming::Fixed(0),
             pick: WallpaperPick::Idle,
-            both: false,
             stage: LookStage::Editing,
         }
     }
@@ -958,9 +954,24 @@ mod tests {
     #[test]
     fn a_changed_choice_clears_a_refusal_but_keeps_sent_changes() {
         let mut blocked = dialog();
-        blocked.stage = LookStage::Blocked("Level 5 required".into());
+        blocked.stage = LookStage::Blocked {
+            why: "Level 5 required".into(),
+            done: Vec::new(),
+        };
         blocked.choices_changed();
         assert_eq!(blocked.stage, LookStage::Editing);
+        // What an earlier Apply got acknowledged is kept, without the line.
+        let done = vec![LookSend {
+            change: LookChange::Theme("a".into()),
+            stage: SendStage::Done,
+        }];
+        blocked.stage = LookStage::Blocked {
+            why: "Level 5 required".into(),
+            done: done.clone(),
+        };
+        blocked.choices_changed();
+        assert_eq!(blocked.stage, LookStage::Sent(done));
+        assert_eq!(blocked.stage.error(), None);
         let mut sent = dialog();
         sent.stage = LookStage::Sent(Vec::new());
         sent.choices_changed();

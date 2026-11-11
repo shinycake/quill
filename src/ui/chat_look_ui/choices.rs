@@ -61,10 +61,17 @@ impl Eq for PickTask {}
 
 impl ChatLookDialog {
     /// A choice (theme, wallpaper, dimming) changed: a refusal of the
-    /// earlier choices no longer describes them.
+    /// earlier choices no longer describes them. The changes an earlier
+    /// Apply got acknowledged stay, so the next Apply does not send them
+    /// again.
     pub(in crate::ui) fn choices_changed(&mut self) {
-        if matches!(self.stage, LookStage::Blocked(_)) {
-            self.stage = LookStage::Editing;
+        if let LookStage::Blocked { done, .. } = &mut self.stage {
+            let done = std::mem::take(done);
+            self.stage = if done.is_empty() {
+                LookStage::Editing
+            } else {
+                LookStage::Sent(done)
+            };
         }
     }
 }
