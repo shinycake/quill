@@ -150,7 +150,7 @@ impl QuillApp {
                         ),
                         None => this.begin_reply_from_message(chat_id, message_id, window, cx),
                     }
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -198,7 +198,7 @@ impl QuillApp {
                     )
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.reply_with_timecode(chat_id, message_id, window, cx);
-                        this.message_ui.menu = None;
+                        this.close_message_menu();
                         cx.notify();
                     }))
                     .into_any_element(),
@@ -216,7 +216,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     this.begin_reply_elsewhere(chat_id, message_id, window, cx);
                 }
             );
@@ -249,7 +249,7 @@ impl QuillApp {
                 cx,
                 {
                     cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -272,7 +272,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     this.open_translate_selection(chat_id, selected.clone(), window, cx);
                 }
             );
@@ -302,7 +302,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     this.open_translate_message(chat_id, message_id, window, cx);
                 }
             );
@@ -323,7 +323,7 @@ impl QuillApp {
                     _window,
                     cx,
                     {
-                        this.message_ui.menu = None;
+                        this.close_message_menu();
                         this.queue_link(open.clone(), msg_key, cx);
                     }
                 );
@@ -337,7 +337,7 @@ impl QuillApp {
                     super::super::ton_wallet_ui::explorer_menu_row(
                         "menu-ton-explorer",
                         address,
-                        |this| this.message_ui.menu = None,
+                        |this| this.close_message_menu(),
                         Some((&self.frame.menu.items, row_key(order::TON_EXPLORER))),
                         cx,
                     ),
@@ -350,7 +350,7 @@ impl QuillApp {
                     order::TON_SEND_MONEY,
                     super::super::ton_wallet_ui::send_money_menu_row(
                         "menu-ton-send-money",
-                        |this| this.message_ui.menu = None,
+                        |this| this.close_message_menu(),
                         Some((&self.frame.menu.items, row_key(order::TON_SEND_MONEY))),
                         cx,
                     ),
@@ -369,7 +369,7 @@ impl QuillApp {
                     _window,
                     cx,
                     {
-                        this.message_ui.menu = None;
+                        this.close_message_menu();
                         cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
                         cx.notify();
                     }
@@ -394,7 +394,7 @@ impl QuillApp {
                 cx,
                 {
                     this.begin_forward_one(chat_id, message_id, pending, window, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -412,7 +412,7 @@ impl QuillApp {
                 cx,
                 {
                     this.toggle_forward_select(chat_id, message_id, pending, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -427,7 +427,7 @@ impl QuillApp {
                     cx,
                     {
                         this.select_up_to(chat_id, message_id, cx);
-                        this.message_ui.menu = None;
+                        this.close_message_menu();
                         cx.notify();
                     }
                 );
@@ -445,7 +445,7 @@ impl QuillApp {
                 cx,
                 {
                     this.copy_game_link(chat_id, message_id, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -470,7 +470,7 @@ impl QuillApp {
                 cx,
                 {
                     this.begin_edit(edit.clone(), window, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -493,7 +493,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     this.open_fact_check(chat_id, message_id, existing.clone(), window, cx);
                 }
             );
@@ -508,7 +508,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     this.begin_add_offer(chat_id, message_id, window, cx);
                 }
             );
@@ -534,7 +534,7 @@ impl QuillApp {
                 _window,
                 cx,
                 {
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     this.request_toggle_pin(chat_id, message_id, _window, cx);
                     cx.notify();
                 }
@@ -551,7 +551,7 @@ impl QuillApp {
                 cx,
                 {
                     this.share_message_link(chat_id, message_id, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -579,7 +579,7 @@ impl QuillApp {
                 cx,
                 {
                     this.begin_stop_poll(chat_id, message_id, is_quiz, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -600,7 +600,7 @@ impl QuillApp {
                 cx,
                 {
                     this.retract_poll_vote(chat_id, message_id, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -620,7 +620,7 @@ impl QuillApp {
                 cx,
                 {
                     this.open_poll_stats_dialog(chat_id, message_id, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -637,7 +637,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     this.open_message_statistics_panel(chat_id, message_id, window, cx);
                 }
             );
@@ -668,7 +668,7 @@ impl QuillApp {
                 cx,
                 {
                     this.open_thread_view(chat_id, message_id, window, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -684,7 +684,7 @@ impl QuillApp {
                 cx,
                 {
                     this.retry_failed_message(chat_id, message_id, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -713,7 +713,7 @@ impl QuillApp {
                 cx,
                 {
                     this.open_delete_dialog_with(confirm.clone(), moderation.clone(), window, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -736,7 +736,7 @@ impl QuillApp {
                 cx,
                 move |this, _, cx| {
                     this.cancel_message_upload(chat_id, message_id, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 },
             );
@@ -811,7 +811,7 @@ impl QuillApp {
                     .child(div().font_semibold().child(bold))
                     .child(after)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.message_ui.menu = None;
+                        this.close_message_menu();
                         this.view_message_sticker_set(first, cx);
                     }))
                     .into_any_element(),

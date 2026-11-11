@@ -309,6 +309,8 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Not `close_message_menu`: the selector shows this message's
+        // reaction options, which that would drop.
         self.message_ui.menu = None;
         self.pickers.reaction_search_input.update(cx, |input, cx| {
             input.set_value("", window, cx);

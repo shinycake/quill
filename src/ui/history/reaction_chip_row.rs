@@ -90,7 +90,12 @@ pub(super) fn reaction_chip_row(
         let list_type = quill::reaction_who::chip_opens_list(can_list_reactors, are_tags)
             .then(|| chip.reaction_type.clone());
         let chip_el = div()
-            .id(("reaction-chip", message_id.0 as u64 * 64 + index as u64))
+            .id((
+                "reaction-chip",
+                (message_id.0 as u64)
+                    .wrapping_mul(64)
+                    .wrapping_add(index as u64),
+            ))
             .when_some(hover_text.filter(|text| !text.is_empty()), |this, text| {
                 this.tooltip(move |window, cx| {
                     gpui_kit::component::tooltip::Tooltip::new(text.clone()).build(window, cx)

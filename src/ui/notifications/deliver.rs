@@ -19,11 +19,13 @@ impl QuillApp {
         window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) {
-        if let Some(drain) = self
-            .live
-            .as_mut()
-            .map(|live| quill::notify_accounts::drain_on_screen(&mut live.driver.session))
-        {
+        let picker_open = self.notify.sound_picker_open();
+        if let Some(drain) = self.live.as_mut().map(|live| {
+            if !picker_open {
+                live.driver.session.settings.forget_sound_previews();
+            }
+            quill::notify_accounts::drain_on_screen(&mut live.driver.session)
+        }) {
             self.hand_out_notifications(drain, window, cx);
         }
         // The call windows follow the call from here too, not from the
@@ -183,6 +185,17 @@ impl QuillApp {
         else {
             return;
         };
+        // The slot holds one toast: a toast it held for another call (that
+        // one ended between two polls) goes down before it is overwritten.
+        if let Some((old_account, old_call)) = self.calls.notified.take()
+            && (old_account != account || old_call != call_id)
+            && quill::notify::current_backend() == quill::notify::NotifyBackend::Native
+        {
+            cx.dismiss_system_notification(&quill::notify_call::call_notification_tag(
+                &old_account.0,
+                old_call,
+            ));
+        }
         self.calls.notified = Some((account.clone(), call_id));
         self.spawn_call_notification_as(&account, notification, cx);
     }

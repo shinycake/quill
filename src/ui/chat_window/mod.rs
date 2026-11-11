@@ -586,6 +586,8 @@ impl QuillApp {
         self.drop_play_intent_in_window(chat_id);
         self.stop_gif_of_window(chat_id);
         self.widgets_left_window(Some(chat_id));
+        // One scale per window ever shown would outlive each closed window.
+        self.widgets.scales.remove(&Some(chat_id));
         super::send_fly::window_closed(chat_id);
         if self.windows.last_press == Some(chat_id) {
             self.windows.last_press = None;

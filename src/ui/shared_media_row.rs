@@ -211,23 +211,28 @@ impl QuillApp {
         let message_id = item.message_id;
         // The chat's rule: the text shown is checked against the address.
         let label = Some(link.display.clone());
-        line.id(("shared-media-link", message_id.0 as u64 * 8 + ix as u64))
-            .debug_selector(move || format!("shared-media-link-{ix}"))
-            .role(gpui_kit::Role::Link)
-            .aria_label(link.display.clone())
-            .cursor_pointer()
-            .on_click(cx.listener(move |this, _, _, cx| {
-                cx.stop_propagation();
-                this.queue_link(
-                    LinkTarget::Url {
-                        url: url.clone(),
-                        label: label.clone(),
-                    },
-                    (chat_id.0, message_id.0 as u64),
-                    cx,
-                );
-            }))
-            .into_any_element()
+        line.id((
+            "shared-media-link",
+            (message_id.0 as u64)
+                .wrapping_mul(8)
+                .wrapping_add(ix as u64),
+        ))
+        .debug_selector(move || format!("shared-media-link-{ix}"))
+        .role(gpui_kit::Role::Link)
+        .aria_label(link.display.clone())
+        .cursor_pointer()
+        .on_click(cx.listener(move |this, _, _, cx| {
+            cx.stop_propagation();
+            this.queue_link(
+                LinkTarget::Url {
+                    url: url.clone(),
+                    label: label.clone(),
+                },
+                (chat_id.0, message_id.0 as u64),
+                cx,
+            );
+        }))
+        .into_any_element()
     }
 }
 

@@ -76,6 +76,14 @@ pub(crate) struct NotifyUi {
 }
 
 impl NotifyUi {
+    /// Whether any sound picker (the chat panel's, its story-sound one or a
+    /// defaults section's) is open: the only place a preview is waited for.
+    pub(super) fn sound_picker_open(&self) -> bool {
+        self.mute_section() == MuteSection::SoundPicker
+            || self.story_sound_picker_open
+            || self.defaults_sound_picker.is_some()
+    }
+
     /// The chat the open Mute panel is for.
     pub(super) fn mute_chat(&self) -> Option<ChatId> {
         self.mute_box.and_then(|b| b.chat)

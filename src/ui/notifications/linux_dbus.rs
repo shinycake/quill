@@ -38,9 +38,48 @@ pub(super) type NotifyKey = (AccountKey, ChatId);
 struct Shown {
     chat_by_id: HashMap<u32, NotifyKey>,
     id_by_chat: HashMap<NotifyKey, u32>,
+    /// Toasts whose `Notify` round trip is out: their id is not known yet.
+    sending: HashMap<NotifyKey, Sending>,
+}
+
+/// A `Notify` still on the bus: whether the chat was read (withdrawn)
+/// before its id came back, so the toast is closed the moment it lands.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Sending {
+    Open,
+    Withdrawn,
 }
 
 impl Shown {
+    fn begin(&mut self, key: NotifyKey) {
+        self.sending.insert(key, Sending::Open);
+    }
+
+    /// The `Notify` failed: nothing was shown.
+    fn abandon(&mut self, key: &NotifyKey) {
+        self.sending.remove(key);
+    }
+
+    /// Withdraw the chat's toast that is still being sent. Returns whether
+    /// one is.
+    fn withdraw_sending(&mut self, key: &NotifyKey) -> bool {
+        match self.sending.get_mut(key) {
+            Some(state) => {
+                *state = Sending::Withdrawn;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The `Notify` answered with `id`. Returns whether the chat was
+    /// withdrawn meanwhile (the caller closes the toast).
+    fn land(&mut self, id: u32, key: NotifyKey) -> bool {
+        let withdrawn = self.sending.remove(&key) == Some(Sending::Withdrawn);
+        self.insert(id, key);
+        withdrawn
+    }
+
     fn insert(&mut self, id: u32, key: NotifyKey) {
         if let Some(previous) = self.id_by_chat.insert(key.clone(), id) {
             self.chat_by_id.remove(&previous);
@@ -68,7 +107,13 @@ pub(super) struct Notifier {
 /// The connection once made. A failed attempt is not cached here: the
 /// daemon may start after Quill (mako or dunst launched by the session
 /// after an autostarted Quill), so [`CONNECT_RETRY`] gates the next try.
-static NOTIFIER: OnceLock<Notifier> = OnceLock::new();
+/// The listener thread clears it when its bus connection ends, so the next
+/// notification connects again (a bus restart).
+static NOTIFIER: Mutex<Option<Arc<Notifier>>> = Mutex::new(None);
+
+fn current_notifier() -> Option<Arc<Notifier>> {
+    lock(&NOTIFIER).clone()
+}
 
 /// When the last connect failed, so a missing daemon is asked for again
 /// every [`REPROBE`] rather than on every notification or never.
@@ -96,21 +141,21 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// trips, up to the D-Bus timeout with a hanging daemon, and waits on
 /// [`CONNECT_RETRY`] while a worker connects. With no connection no toast
 /// went out over D-Bus, so there is nothing to close.
-pub(super) fn connected_notifier() -> Option<&'static Notifier> {
-    NOTIFIER.get()
+pub(super) fn connected_notifier() -> Option<Arc<Notifier>> {
+    current_notifier()
 }
 
 /// The process-wide notifier, connected on first use. `None` while the
 /// session bus or the daemon cannot be reached; asked again after
 /// [`REPROBE`], as the capability probe does. Blocks while it connects:
 /// worker threads only (the UI thread uses [`connected_notifier`]).
-pub(super) fn notifier_on_worker(clicks: &AccountClicks) -> Option<&'static Notifier> {
-    if let Some(notifier) = NOTIFIER.get() {
+pub(super) fn notifier_on_worker(clicks: &AccountClicks) -> Option<Arc<Notifier>> {
+    if let Some(notifier) = current_notifier() {
         return Some(notifier);
     }
     let mut gate = lock(&CONNECT_RETRY);
     // Another worker may have connected while this one waited.
-    if let Some(notifier) = NOTIFIER.get() {
+    if let Some(notifier) = current_notifier() {
         return Some(notifier);
     }
     let now = std::time::Instant::now();
@@ -120,7 +165,9 @@ pub(super) fn notifier_on_worker(clicks: &AccountClicks) -> Option<&'static Noti
     match Notifier::connect(clicks.clone()) {
         Ok(notifier) => {
             gate.failed_at = None;
-            Some(NOTIFIER.get_or_init(|| notifier))
+            let notifier = Arc::new(notifier);
+            *lock(&NOTIFIER) = Some(notifier.clone());
+            Some(notifier)
         }
         Err(error) => {
             eprintln!("desktop notifications over D-Bus unavailable: {error}");
@@ -173,7 +220,7 @@ pub(in crate::ui) fn linux_service_capabilities() -> quill::notify::custom::Nati
 /// answered inline. Taking it clears it. Only the account on screen offers
 /// the field.
 pub(super) fn take_reply_text(account: &AccountKey, chat_id: ChatId) -> Option<String> {
-    let notifier = NOTIFIER.get()?;
+    let notifier = current_notifier()?;
     lock(&notifier.reply_texts).remove(&(account.clone(), chat_id))
 }
 
@@ -229,7 +276,9 @@ impl Notifier {
             .into_iter()
             .map(|(key, value)| (key, Value::from(value)))
             .collect();
-        let id: u32 = Self::proxy(&self.connection)?.call(
+        let proxy = Self::proxy(&self.connection)?;
+        lock(&self.shown).begin(key.clone());
+        let sent: zbus::Result<u32> = proxy.call(
             tr(keys::Q_PREFS_NOTIFY),
             &(
                 APP_NAME,
@@ -241,15 +290,32 @@ impl Notifier {
                 hints,
                 -1_i32,
             ),
-        )?;
-        lock(&self.shown).insert(id, key);
+        );
+        let id = match sent {
+            Ok(id) => id,
+            Err(error) => {
+                lock(&self.shown).abandon(&key);
+                return Err(error);
+            }
+        };
+        // Read elsewhere while `Notify` was out: the toast goes down now.
+        let withdrawn = lock(&self.shown).land(id, key);
+        if withdrawn {
+            Self::proxy(&self.connection)?.call::<_, _, ()>("CloseNotification", &(id,))?;
+        }
         Ok(())
     }
 
     /// Withdraw the chat's notification, if one is up. Blocks for the bus
     /// round trip: call from a worker thread.
     pub(super) fn close(&self, key: &NotifyKey) -> zbus::Result<()> {
-        let Some(id) = lock(&self.shown).id_by_chat.get(key).copied() else {
+        let id = {
+            let mut shown = lock(&self.shown);
+            // A toast still on its way closes when it lands (`show`).
+            shown.withdraw_sending(key);
+            shown.id_by_chat.get(key).copied()
+        };
+        let Some(id) = id else {
             return Ok(());
         };
         Self::proxy(&self.connection)?.call::<_, _, ()>("CloseNotification", &(id,))
@@ -310,10 +376,13 @@ fn listen(signals: MessageIterator) {
         let Some(signal) = interpret_signal(member.as_str(), id, text.as_deref()) else {
             continue;
         };
-        if let Some(notifier) = NOTIFIER.get() {
+        if let Some(notifier) = current_notifier() {
             notifier.handle(signal);
         }
     }
+    // The bus connection ended: its toasts and their ids went with it. The
+    // next notification connects again.
+    *lock(&NOTIFIER) = None;
 }
 
 #[cfg(test)]
@@ -345,6 +414,28 @@ mod tests {
         gate.failed_at = Some(start);
         assert!(!gate.due(start + REPROBE / 2));
         assert!(gate.due(start + REPROBE));
+    }
+
+    #[test]
+    fn a_chat_read_while_its_toast_is_on_the_bus_is_closed_when_it_lands() {
+        let mut shown = Shown::default();
+        let key = (AccountKey::primary(), ChatId(7));
+        shown.begin(key.clone());
+        assert!(shown.withdraw_sending(&key));
+        assert!(shown.land(5, key.clone()), "closed as soon as it has an id");
+        // A newer message after that shows as usual.
+        shown.begin(key.clone());
+        assert!(!shown.land(6, key.clone()));
+        assert!(!shown.withdraw_sending(&key), "nothing is on the bus now");
+    }
+
+    #[test]
+    fn a_failed_notify_leaves_nothing_to_withdraw() {
+        let mut shown = Shown::default();
+        let key = (AccountKey::primary(), ChatId(7));
+        shown.begin(key.clone());
+        shown.abandon(&key);
+        assert!(!shown.withdraw_sending(&key));
     }
 
     #[test]

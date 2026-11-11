@@ -89,7 +89,7 @@ impl Render for QuillApp {
         }
         let history_drawn = self.slices.window.history_drawn();
         self.players.inline_videos.set_scale(window.scale_factor());
-        self.widgets.scale = window.scale_factor();
+        self.widgets.scales.insert(None, window.scale_factor());
         self.widgets_frame_start(None, cx);
         // Picture-in-Picture outlives neither its message, the account
         // nor an unlocked app.

@@ -197,9 +197,11 @@ pub struct SettingsState {
     /// Parity slice: downloaded-file id → notification sound id, for files
     /// fetched as notification sounds.
     pub sound_file_ids: HashMap<i32, i64>,
-    /// Parity slice: sound ids with playback requested whose file is not
+    /// Parity slice: sound ids with a preview requested whose file is not
     /// local yet. When the file completes, its path lands in
-    /// `pending_sound_plays`.
+    /// `pending_sound_plays`. The set belongs to the open sound picker: the
+    /// UI calls `forget_sound_previews` once no picker is open, so a
+    /// completion nobody waits for plays nothing.
     pub pending_sound_downloads: HashSet<i64>,
     /// Parity slice: local sound-file paths the UI should play, drained by
     /// `flush_notifications`. The reducer never spawns processes.
@@ -429,4 +431,19 @@ fn dedup_ids(mut list: Vec<i64>, more: Vec<i64>) -> Vec<i64> {
         }
     }
     list
+}
+
+impl SettingsState {
+    /// A preview download finished: whether a picker still waits for it.
+    /// Either way the request is over.
+    pub fn take_sound_preview(&mut self, sound_id: i64) -> bool {
+        self.pending_sound_downloads.remove(&sound_id)
+    }
+
+    /// No sound picker is open: previews asked for, and any not played yet,
+    /// are no longer wanted.
+    pub fn forget_sound_previews(&mut self) {
+        self.pending_sound_downloads.clear();
+        self.pending_sound_plays.clear();
+    }
 }

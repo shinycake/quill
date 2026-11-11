@@ -47,7 +47,7 @@ impl Session {
         let sound_id = self.settings.sound_file_ids.get(&file.id.0).copied();
         if let Some(sound_id) = sound_id {
             if let Some(path) = file.usable_path() {
-                if self.settings.pending_sound_downloads.remove(&sound_id) {
+                if self.settings.take_sound_preview(sound_id) {
                     // Parity slice: a completed notification-sound download
                     // with playback requested → hand the path to the UI for
                     // the in-process player. The reducer never spawns processes.
@@ -58,7 +58,7 @@ impl Session {
                 // (active → idle without completing) must not leave the id in
                 // `pending_sound_downloads` — otherwise a stale late
                 // completion could trigger a belated play.
-                self.settings.pending_sound_downloads.remove(&sound_id);
+                self.settings.take_sound_preview(sound_id);
             }
         }
         self.note_avatar_file_changed(file.id.0);

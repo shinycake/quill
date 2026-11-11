@@ -6256,6 +6256,7 @@ already fixed or cannot happen are listed at the end with the reason.
   `begin_sponsored_report`, so a second click finds no picker (test
   `a_picked_report_option_closes_the_picker_until_the_answer`).
 
+<<<<<<< HEAD
 ### Sweep fixes (s4-stories)
 
 Twenty-two S4 entries; each was proved against the code first.
@@ -6440,3 +6441,67 @@ Minor links, mini app, location and TDLib entries; each was proved first.
   fixed by 5ddbff65 (`Locating::drop` stops the manager). 09-X010's second
   half (drawing the invite box from `ChatsState::deep_link`) is left: the
   copy is only read by the box and cleared with the flow.
+=======
+### Sweep fixes (s4-messages-3)
+
+Thirty-four minor entries; each was proved against the integration branch first.
+
+- **Stages with an answer.** The Replies "Block" box stays as `Submitting`
+  (`RepliesBlockStage`, carrying the request id) until the answer: ok closes
+  it and queues the "blocked" note, an error gives the choices back
+  (11-p4-011). "Load full message" is one `Fetch<()>` per `ChatMessage` in
+  the session: loading from the send, removed by the answer, `Failed` by the
+  error, and the button waits while it loads (11-p4-012). A quick reply's
+  text is held as `TextSave::Sending` with its request; an answered refusal
+  puts the text and its edit back in the field (12-061). `mask_set_change_pending`
+  is keyed by set, so one Add disables its own row only (13-013).
+- **Answers matched to what asked.** A poll vote carries the option id and
+  the driver looks the index up at send time (11-p4-010). A file picked for a
+  poll option finds its slot by `OptionAttach::id`, not by row index (12-004).
+  A sticker-set editor and a selection translation say goodbye through
+  `Farewell`, so the encode stops and the job leaves the old session
+  (13-008, 13-164). The report's details field is emptied where the flow
+  ends, `close_message_report` (11-p3-008).
+- **One place for a close.** Every message-menu close goes through
+  `close_message_menu` (it also resets the reaction strip's request; the
+  reaction selector alone keeps it, as it shows those options);
+  `scripts/single_writers.py` rejects a bare `message_ui.menu = None`
+  (11-p4-006).
+- **Lost answers.** A translation job whose request is gone fails, so it no
+  longer holds one of the 20 places (13-167); a widget public-data poll is
+  swept like the other lookups and answers "poll again" (14-057); a retry of
+  a failed thread open keeps the failed pane when it cannot be sent, and says
+  so (13-107). Mini-app requests the bridge refuses (popup, custom method,
+  clipboard read) get their failure reply with the id that asked; a request
+  id over 64 characters is refused, not cut (14-077, 14-078).
+- **Widgets.** A press or hover is released when the widget goes off screen,
+  stops, fails or restarts; new content replaces the entry's content-bound
+  part whole (`replace_content`); a widget starts at the scale of the window
+  that shows it (`WidgetsUi::scales`); canvas reads and puts check their size
+  (14-046, 14-051, 14-058, 14-056, 14-047).
+- **Notifications.** A preview that has to download plays only while a sound
+  picker is open: `pending_sound_downloads` is a set the UI empties
+  (`forget_sound_previews`) on any poll that finds no picker open, with no
+  clock in the reducer (11-p5-023). A sound finishing in a background
+  account is not played. "Mark as read"
+  waits, queued, while locked (11-p5-025). A toast replaced in the call slot
+  is dismissed first (11-p5-022, partly). A Linux toast withdrawn while its
+  `Notify` is on the bus is closed when its id lands (`Sending`), and the
+  D-Bus connection is made again after the listener ends (11-p5-026,
+  11-p5-027).
+- **Smaller.** Element ids built from message ids use wrapping arithmetic
+  (11-p4-016); the sticker creator's refusals are toasts, not silent notes
+  (13-009); Reply in Another Chat keeps the reply when an agent may not open
+  the chat (12-073); leaving or changing a thread closes its info card
+  (13-106); the manager box puts the composer panel's tab back on close
+  (13-012, the shared open flag stays; the tab goes back only if the box
+  was open); a closed chat window drops its widget scale; a reaction picked
+  from the menu strip is toggled before the menu closes, so a locked emoji
+  still finds its Premium options; a demo session clears the translation
+  of a chat whose bar is gone (13-166).
+- **Skipped.** 12-098: the background poll already drains
+  `take_finished_rich_html_exports` per account. 14-054: query tokens are
+  process-wide (`next_query_token`). 13-165: tdesktop toasts the hide at
+  once (the bar is optimistic here too, with `RequestRollback`), and the
+  local hidden flag is already keyed by account.
+>>>>>>> origin/claude/sweep-s4-messages-3

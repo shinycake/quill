@@ -516,8 +516,10 @@ impl QuillApp {
             .aria_label(label)
             .child(self.reaction_glyph(&choice, STRIP_GLYPH))
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.message_ui.menu = None;
+                // Toggle first: closing the menu resets the strip's
+                // options, which a locked emoji's Premium upsell reads.
                 this.toggle_reaction(chat_id, message_id, choice.clone(), cx);
+                this.close_message_menu();
             }))
             .test_support()
             .into_any_element()

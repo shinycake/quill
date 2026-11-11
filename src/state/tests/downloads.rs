@@ -31,6 +31,24 @@ fn sound_download_error_drops_pending_playback() {
 }
 
 #[test]
+fn a_slow_sound_preview_still_plays_while_the_picker_is_open() {
+    let (mut session, _sink) = session();
+    session.settings.pending_sound_downloads.insert(7);
+    assert!(session.settings.take_sound_preview(7));
+    assert!(session.settings.pending_sound_downloads.is_empty());
+}
+
+#[test]
+fn a_sound_preview_finishing_after_the_picker_closed_is_not_played() {
+    let (mut session, _sink) = session();
+    session.settings.pending_sound_downloads.insert(7);
+    session.settings.pending_sound_plays.push("a.mp3".into());
+    session.settings.forget_sound_previews();
+    assert!(!session.settings.take_sound_preview(7));
+    assert!(session.settings.pending_sound_plays.is_empty());
+}
+
+#[test]
 fn video_thumb_auto_downloads_secret_video_does_not() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);

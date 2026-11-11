@@ -103,7 +103,7 @@ impl QuillApp {
             // `setup_app_menus` at startup).
             menu_bar: AppMenuBar::new(cx),
             first_run: super::first_run_ui::initial_first_run(demo.is_some(), &credentials, cx),
-            frame: super::frame_state::FrameUi::new(cx),
+            frame: Box::new(super::frame_state::FrameUi::new(cx)),
             group_call: super::group_call_state::GroupCallUi::new(),
             screen_share: Default::default(),
             composer_sends: Default::default(),

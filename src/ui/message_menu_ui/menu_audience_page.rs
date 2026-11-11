@@ -116,7 +116,7 @@ impl QuillApp {
                         )
                     })
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        this.message_ui.menu = None;
+                        this.close_message_menu();
                         this.open_avatar_profile(sender, window, cx);
                     }))
                     .into_any_element(),
