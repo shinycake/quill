@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::ui::widget_bubble::{time_over_widget, widget_width};
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr};
 
 pub(in crate::ui) fn session_history_row(
     message: &HistoryMessage,
@@ -109,46 +109,17 @@ pub(in crate::ui) fn session_history_row(
         );
     }
     let on_fill = message.is_outgoing && !look.plain;
-    let quote = reply_header.map(|header| {
-        let thumb = QuillApp::reply_thumb_path(&header, files, media_roots);
-        let pattern = QuillApp::reply_pattern_path(&header, session, files, media_roots);
-        reply_header_strip(message.id, header, thumb, pattern, on_fill, cx)
-    });
-    let has_forward = forward_header.is_some();
-    let forward_strip = forward_header.map(|header| {
-        let original = (header.original_date > 0 && message.forward_info.is_some()).then(|| {
-            tr_with(
-                keys::Q_CHAT_ORIGINAL,
-                &[(
-                    "into",
-                    &(super::super::message_text::format_unix_date_time(
-                        header.original_date.into(),
-                    ))
-                    .to_string(),
-                )],
-            )
-        });
-        forward_header_line(message.id, header, via_bot.clone(), original, on_fill, cx)
-    });
-    let via_strip = via_bot
-        .filter(|_| !has_forward)
-        .map(|bot| via_bot_line(message.id, bot, on_fill));
-    let header_parts: Vec<AnyElement> = [via_strip, forward_strip, quote]
-        .into_iter()
-        .flatten()
-        .collect();
-    let header = match header_parts.len() {
-        0 => None,
-        1 => header_parts.into_iter().next(),
-        _ => Some(
-            div()
-                .id(("row-headers", message.id.0 as u64))
-                .flex()
-                .flex_col()
-                .children(header_parts)
-                .into_any_element(),
-        ),
-    };
+    let header = row_header(
+        message,
+        reply_header,
+        forward_header,
+        via_bot,
+        on_fill,
+        session,
+        files,
+        media_roots,
+        cx,
+    );
     // How wide the bubble may get in this history (`BubbleRoom`), and its
     // picture: inside the border when it leads the bubble, inside the
     // padding under a header.
@@ -163,104 +134,13 @@ pub(in crate::ui) fn session_history_row(
         actions_span = span;
         buttons
     });
-    // Broadcast posts (Phase 2.2): eye glyph + compact view count, like the
-    // official clients' post footer. Renders whenever views exist; only
-    // channel posts carry a view count in practice.
-    // Channel post views and the author signature ride in the footer row
-    // with the time ("Demo Admin · 👁 12.4K · 16:44").
-    let views = message
-        .interaction_info
-        .as_ref()
-        .map(|info| info.view_count)
-        .filter(|&count| count > 0);
-    // Phase D2: author signature (`message.author_signature`, schema 1.8.67
-    // lines 3155/3165). The official clients show it under channel posts
-    // and anonymous admin messages. Suppressed when the message is
-    // forwarded — `forward_from_strip` already attributes the signature
-    // there, and a second line would double-attribute.
-    let signature = message
-        .author_signature
-        .clone()
-        .filter(|_| message.forward_info.is_none());
-    let footer_meta = FooterMeta::of(message, receipt, views, signature.clone())
-        .with_effect(super::super::message_effect_badge::footer_effect(
-            message,
-            session,
-            files,
-            media_roots,
-        ))
-        .with_forward_drag(crate::ui::forward_drag_source::drag_for_message(
-            session, message,
-        ));
+    let footer_meta = row_footer_meta(message, receipt, session, files, media_roots);
+    let views = footer_meta.views;
+    let signature = footer_meta.signature.clone();
     // Telegram Desktop widens a picture to its caption's longest line (the
     // time's skip block included when the caption ends the bubble).
     let info_width = footer_meta.reserve(footer_reserve(message.is_outgoing));
-    let chips = message.reaction_chips();
-    // Telegram Desktop shows who reacted (small avatars) instead of a
-    // count when there are at most three known reactors, outside channels.
-    let in_channel = session
-        .and_then(|s| s.chats.get(&message.chat_id.0))
-        .is_some_and(|chat| {
-            matches!(
-                chat.kind,
-                quill::telegram::envelope::ChatKind::Supergroup {
-                    is_channel: true,
-                    ..
-                }
-            )
-        });
-    // Saved Messages reactions are tags: Telegram Desktop shows just the
-    // tag's emoji, without a count or who reacted.
-    let are_tags = message
-        .interaction_info
-        .as_ref()
-        .and_then(|info| info.reactions.as_ref())
-        .is_some_and(|reactions| reactions.are_tags);
-    let can_list_reactors = message
-        .interaction_info
-        .as_ref()
-        .and_then(|info| info.reactions.as_ref())
-        .is_some_and(|reactions| reactions.can_get_added_reactions);
-    let has_chips = !chips.is_empty() || message.paid_reaction().is_some();
-    // Channel posts open their comments, group messages their replies
-    // (tdesktop `paintCommentsButton`). Inside the open thread itself the
-    // bar would only point back at the view.
-    let in_thread = session.is_some_and(|s| s.thread_for_chat(message.chat_id).is_some());
-    let in_group = session
-        .and_then(|s| s.chats.get(&message.chat_id.0))
-        .is_some_and(|chat| {
-            matches!(
-                chat.kind,
-                quill::telegram::envelope::ChatKind::BasicGroup { .. }
-                    | quill::telegram::envelope::ChatKind::Supergroup {
-                        is_channel: false,
-                        ..
-                    }
-            )
-        });
-    let mut reply_bar_el = message
-        .interaction_info
-        .as_ref()
-        .and_then(|info| info.reply_info.as_ref())
-        .filter(|_| !in_thread && message.id.0 > 0 && !message.pending())
-        .and_then(|info| {
-            let kind = if in_channel {
-                super::super::threads::ReplyBarKind::Comments
-            } else if in_group && info.reply_count > 0 {
-                super::super::threads::ReplyBarKind::Replies
-            } else {
-                return None;
-            };
-            Some(super::super::threads::reply_bar(
-                message.chat_id,
-                message.id,
-                kind,
-                info,
-                message.is_outgoing,
-                super::super::threads::replier_avatars(info, session, media_roots),
-                cx,
-            ))
-        });
+    let mut reply_bar_el = row_reply_bar(message, session, media_roots, cx);
     let fast_buttons = session.is_some_and(|session| {
         session
             .fast_button_target(message.chat_id)
@@ -297,21 +177,16 @@ pub(in crate::ui) fn session_history_row(
                 || message.auto_delete_chip(unix_ms_now()).is_some(),
         }
         .needs_bubble();
-    let chip_row = (!chips.is_empty() || message.paid_reaction().is_some()).then(|| {
-        reaction_chip_row(
-            message,
-            &chips,
-            are_tags,
-            can_list_reactors,
-            in_channel,
-            session,
-            files,
-            media_roots,
-            &footer_meta,
-            bubbleless,
-            cx,
-        )
-    });
+    let chip_row = message_reactions_row(
+        message,
+        &footer_meta,
+        bubbleless,
+        session,
+        files,
+        media_roots,
+        cx,
+    );
+    let has_chips = chip_row.is_some();
     let tail = bubble_width::caption_tail(message, reply_bar_el.is_some(), unix_ms_now());
     let caption_w = bubble_width::caption_width(
         cx,
