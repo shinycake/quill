@@ -6796,9 +6796,9 @@ converted (221 to 204, the rest belong to other bundles).
 | 05-256 | `ProxyList` (`Unasked`/`Loading{request}`/`Fresh`/`Stale`/`Failed`) and `ProxySave` (`Idle`/`Saving{request}`/`Failed`) replace `loading`/`stale`/`mutating`/`error`/`fetch_attempted`; the IPv6 error is its own line; a system step keeps the user's refused change inside `Saving::kept_error`. |
 | 05-274 | `KeyboardFetch` per chat (`Wanted`/`Loading{request}`/`Failed`/`Known`) replaces `by_chat` + `markup_message_ids`; a failed `getMessage` ends the fetch (test added). |
 | 05-272 | `ShareSearch::{Idle, Searching{query, local, server}}`, each half `Waiting(request)` or `Done`. |
-| 05-250 | `SponsoredReport::{Idle, Chosen, Asking{request}, Picking, Outcome}` replaces the flight, the target and the last outcome. |
-| 05-268, 06-023 | The greeting stickers are a `Fetch` (an error arm added; test added), `installed_loaded` derives from `lists.installed`, `SuggestFor` replaces `suggest_waiting_for_sets`. The selected set and the lists were already `StickerSetStage` and `Fetch`. |
-| 05-269, 06-024 | `GifSaved` (`Unloaded`/`Loading`/`Ready`/`Stale`/`Refreshing`/`Failed`) and `GifSearchStage`. |
+| 05-250 | Already `SponsoredReportFlow` on the integration branch (is-09); taken as is. |
+| 05-268, 06-023 | The greeting stickers and `installed_loaded` were already `Fetch` on the integration branch; `SuggestFor::{Nothing, WaitingForSets, Asked}` replaces `suggest_for` + `suggest_waiting_for_sets`, and its baseline line is gone. |
+| 05-269, 06-024 | Already `Fetch` + `GifList` on the integration branch (is-13); taken as is. |
 | 05-284, 06-036 | Skipped: `StoryPageOps` already tracks one `StoryPageOpState` per request (the request is the entry's key, loads and mutations never share a slot). |
 | 05-287 | `ForumTopicsMap` holds a list or a failure per forum. |
 | 06-030 | `Translation::Pending{job}` is the only record of a job; a late answer of a replaced job no longer overwrites the newer one. |
@@ -6807,7 +6807,7 @@ converted (221 to 204, the rest belong to other bundles).
 | 13-051 | `GallerySearch::{Closed, Open(SearchField)}`; the debounce is a `Task` dropped with the field. |
 | 06-017 | `ForwardsPage::{Idle, Loading(request), Failed}`. |
 | 06-026, 06-027, 06-028 | `Stage` on a sticker clip, `PlayHead::{Waiting, Playing}`, `StripPull::{Collapsed, Revealing, Expanded}`. `Clip::delivered` stays: it marks the first frame handed out, not a stage. |
-| 06-022 | `ComposerStage::Failed` holds the error line, `ComposerMode` replaces the edit and repost options. |
+| 06-022 | `ComposerStage::Failed` holds the error line (`local_error` is gone); `ComposerMode` is the integration branch's `Edit(chat, story)` / `Repost(chat, story)`. |
 | 06-038, 06-039 | `StoryPlayback::{Stopped, Running, Paused}`; `StoryViewerKind` carries the clip, the duration and the live call. |
 | 06-040 | A suggested post is busy while its approve or decline is a pending request. |
 | 06-035 | `AccentRead`; a lookup no longer starts a read, `refresh()` does. |
@@ -6825,6 +6825,19 @@ converted (221 to 204, the rest belong to other bundles).
 | 06-060 | `PremiumSticker{animation}`. |
 | 06-066 | `GiftOfferState`. |
 | 06-068 | `CryptoStage::{Unbound, Bound}`; the request log is hidden exactly while bound. |
+
+Review fixes: a refused save or remove of a GIF marks the saved list, never
+the search grid (tested); a refused refetch of a stale proxy list is
+`ProxyList::FailedStale`, which keeps `settled()` false so the rotation and
+system-proxy planners wait (a failed answer settles as before; tested); a
+newer reply-markup message replaces one not yet fetched (tested). The
+bridge's `stopped` flag is documented as the feed's report from another
+thread. The shared-media "load more" line comes from the lang table.
+`CryptoStage` binds in one step. `LocalFileState::Uploading` wraps the state
+the file was in, so a file being sent that is not complete keeps its path
+and size (tested). Call parameters live in `CallState::Ready`: a hang-up in
+flight starts no media, and a failed `discardCall` puts the state back, so
+the next pass connects; `ready_at` is set from the update itself, as before.
 
 Behaviour changes worth a look: a newer `updateChatReplyMarkup` replaces a
 keyboard fetch still out (its answer is then dropped); a
