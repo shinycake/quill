@@ -4167,3 +4167,23 @@ and 10 are widget items another fixer owns).
   timer is armed once per URL (`preview_timer_needed`) and a forward's
   answer no longer touches a newer forward
   (`a_forward_answer_keeps_a_newer_selection`).
+- **Review fixes (s3-messages-2, second round).** A waiting force reply asks
+  for a redraw only when it can arm (`Session::force_reply_ready`: its chat
+  is shown and its message loaded), so a target for a chat nobody shows no
+  longer forces a full redraw on every poll; a later incoming message with
+  any markup drops the waiting target, as tdesktop takes the force reply
+  from the chat's current keyboard when the chat opens (09-112). A window
+  copies the bot resolution only once it is settled, so a `Resolving` copy
+  cannot outlive the slot another window's lookup replaced (10-115). A
+  refused inline pick gives the `@bot query` back on TDLib's error answer
+  through `SentText::InlinePick` (10-116); a refused rich send drops its
+  draft clear, so a later send of the chat cannot delete the draft given
+  back (08-149, 08-150). `Session::apply` settles the answer board as
+  failed when the answer is for a gone account, so nothing awaited waits
+  for good. The AI composer answer carries the asking window and only that
+  window takes it, even when another shows the same chat (08-134). The
+  group settings join-request page asks through `ask_join_requests` (open,
+  refresh and Retry), so a send that cannot go out shows the error with
+  Retry instead of a spinner (08-059). The page itself is not covered by a
+  UI test (no fake live connection exists); the ask is covered by
+  `a_join_request_ask_that_cannot_go_out_fails_instead_of_loading`.

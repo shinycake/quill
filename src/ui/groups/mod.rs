@@ -448,15 +448,10 @@ impl QuillApp {
 
     /// Phase D3a: re-request the join-request list.
     pub(super) fn refresh_join_requests(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            match live.driver.refresh_chat_join_requests(chat_id) {
-                Ok(_) => {}
-                Err(_) => {
-                    self.set_note(StatusNote::error(tr(
-                        keys::Q_PEOPLE_COULD_NOT_REFRESH_JOIN_REQUESTS,
-                    )));
-                }
-            }
+        // A send that cannot go out leaves the list `Failed`, which the
+        // section draws with Retry (`ConnectDriver::ask_join_requests`).
+        if self.live.is_some() {
+            self.ask_join_requests(chat_id, "", true);
         } else {
             self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_JOIN_REQUESTS_NEED_A_LIVE,

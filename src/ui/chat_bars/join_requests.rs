@@ -108,7 +108,7 @@ impl QuillApp {
     }
 
     /// Ask for the list: see `ConnectDriver::ask_join_requests`.
-    fn ask_join_requests(&mut self, chat_id: ChatId, query: &str, refresh: bool) {
+    pub(in crate::ui) fn ask_join_requests(&mut self, chat_id: ChatId, query: &str, refresh: bool) {
         if let Some(live) = self.live.as_mut() {
             live.driver.ask_join_requests(chat_id, query, refresh);
         }
