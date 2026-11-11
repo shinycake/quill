@@ -271,7 +271,7 @@ fn a_chat_windows_video_chat_start_goes_on_in_its_own_frames(cx: &mut TestAppCon
             join_as: None,
         });
         app.windows
-            .open_box_in(DialogKind::GroupCallStart, Some(OTHER));
+            .open_box_in(DialogKind::GroupCallStart, Some(OTHER), RequestId(0));
         let session = app.demo_session.as_mut().expect("a demo session");
         session.calls.create_join_as = Some(CreateJoinAs {
             chat_id: OTHER.0,

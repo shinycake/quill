@@ -252,7 +252,7 @@ fn the_folder_limit_box_follows_the_box_that_hit_it(cx: &mut TestAppContext) {
     let chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, cx| {
         app.windows
-            .open_box_in(DialogKind::FolderEditor, Some(OTHER));
+            .open_box_in(DialogKind::FolderEditor, Some(OTHER), quill::ids::RequestId(0));
         app.note_window_press(None);
         app.set_window_scope(None);
         if let Some(session) = app.demo_session.as_mut() {

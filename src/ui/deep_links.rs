@@ -136,6 +136,9 @@ impl QuillApp {
             self.screen.links.flow.resume(origin);
             return;
         }
+        // These boxes open from the answer in hand: the ask waits for no
+        // request sent after it.
+        let since = live.driver.session.requests.issued();
         match state {
             None
             | Some(DeepLinkState::ResolvingInfo { .. })
@@ -158,7 +161,7 @@ impl QuillApp {
                         self.links.deep_link_dialog = Some(text);
                         self.screen
                             .windows
-                            .open_box_in(DialogKind::DeepLinkInfo, from_window);
+                            .open_box_in(DialogKind::DeepLinkInfo, from_window, since);
                     }
                     (false, Some(action)) => {
                         self.screen.links.flow.resume(origin);
@@ -171,7 +174,7 @@ impl QuillApp {
                         self.links.deep_link_dialog = Some(text);
                         self.screen
                             .windows
-                            .open_box_in(DialogKind::DeepLinkInfo, from_window);
+                            .open_box_in(DialogKind::DeepLinkInfo, from_window, since);
                     }
                 }
             }
@@ -183,7 +186,7 @@ impl QuillApp {
                 if self.screen.links.flow.invite().is_none() {
                     self.screen
                         .windows
-                        .open_box_in(DialogKind::DeepLinkInvite, from_window);
+                        .open_box_in(DialogKind::DeepLinkInvite, from_window, since);
                 }
                 self.screen.links.flow.ask(preview.clone());
                 live.driver.session.chats_state.deep_link = Some(DeepLinkFlow {
@@ -209,7 +212,7 @@ impl QuillApp {
                 self.links.deep_link_dialog = Some(text);
                 self.screen
                     .windows
-                    .open_box_in(DialogKind::DeepLinkInfo, from_window);
+                    .open_box_in(DialogKind::DeepLinkInfo, from_window, since);
             }
             // Typed links (`deep_link_types`): the UI half runs in render.
             // An agent's step gets none of them (settings, proxies, folders,

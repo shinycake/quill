@@ -106,7 +106,7 @@ impl QuillApp {
                 );
                 let forum = forum.map(|forum| {
                     let icons: Vec<i64> = forum
-                        .topics
+                        .topics()
                         .iter()
                         .map(|t| t.icon)
                         .filter(|icon| *icon > 0)

@@ -74,8 +74,6 @@ pub(super) struct ChatLookDialog {
     pub dimming: i32,
     /// The dimming slider (`None` in tests).
     pub dimming_slider: Option<Entity<SliderState>>,
-    /// Also set the wallpaper for the other person (Premium only).
-    pub both: bool,
     /// Where Apply stands: the dialog stays open until every change it sent
     /// is acknowledged, and shows the error of one that failed.
     pub stage: LookStage,
@@ -186,7 +184,6 @@ impl QuillApp {
             wallpaper: WallpaperChoice::Keep,
             dimming,
             dimming_slider: Some(slider),
-            both: false,
             stage: LookStage::Editing,
         });
         self.open_box(DialogKind::ChatLook);
@@ -259,7 +256,10 @@ impl QuillApp {
     }
 
     /// Send (or, in the screenshot demo, apply) the pending changes.
-    fn apply_chat_look(&mut self, cx: &mut Context<Self>) {
+    /// Apply the dialog's changes; `both` also sets a new wallpaper for the
+    /// other person (Premium only). It is the button's choice for this
+    /// Apply, never kept in the dialog.
+    fn apply_chat_look(&mut self, both: bool, cx: &mut Context<Self>) {
         let Some(dialog) = self.dialogs.chat_look_dialog.clone() else {
             return;
         };
@@ -273,7 +273,7 @@ impl QuillApp {
         let boosted = self.is_boosted_look(chat_id);
         let premium = self.session().is_some_and(|s| s.my_is_premium());
         // Boosted chats set the wallpaper for everyone, never for self only.
-        let only_for_self = !boosted && !(dialog.both && premium);
+        let only_for_self = !boosted && !(both && premium);
         if dialog.stage.applying() {
             cx.notify();
             return;
@@ -287,7 +287,7 @@ impl QuillApp {
             .collect();
         if boosted && let Some(why) = self.boosted_look_blocked(chat_id, &changes) {
             if let Some(d) = self.screen.dialogs.chat_look_dialog.as_mut() {
-                d.stage = LookStage::Blocked(why);
+                d.stage = LookStage::Blocked { why, done };
             }
             cx.notify();
             return;
@@ -878,7 +878,6 @@ mod tests {
             wallpaper: WallpaperChoice::Keep,
             dimming: 0,
             dimming_slider: None,
-            both: false,
             stage: LookStage::Editing,
         }
     }

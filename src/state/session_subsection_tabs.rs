@@ -54,14 +54,41 @@ pub struct RowTopic {
     pub icon: i64,
 }
 
+/// The topic list behind a forum row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RowTopics {
+    /// Not answered yet: the row reads "Loading…".
+    Loading,
+    /// The request failed and no list is held: the row offers a retry.
+    Failed,
+    /// The titles, most recently active first; empty reads "No chats".
+    Loaded(Vec<RowTopic>),
+}
+
+impl RowTopics {
+    /// The titles to draw: none until the list has arrived.
+    pub fn topics(&self) -> &[RowTopic] {
+        match self {
+            Self::Loaded(topics) => topics,
+            Self::Loading | Self::Failed => &[],
+        }
+    }
+}
+
+impl RowForum {
+    /// The titles to draw: none until the list has arrived.
+    pub fn topics(&self) -> &[RowTopic] {
+        self.list.topics()
+    }
+}
+
 /// What a forum's chat row shows below the name: the topic titles and the
 /// unread-topic count.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RowForum {
-    pub topics: Vec<RowTopic>,
-    /// The topic list arrived (or failed): empty then reads "No chats", not
-    /// "Loading…".
-    pub loaded: bool,
+    /// What the forum's topic list holds: the titles once it arrived, and
+    /// why there are none while it has not (still on its way, or failed).
+    pub list: RowTopics,
     /// The badge counts topics, not messages: the unmuted topics with unread
     /// messages, or all of them when every one is muted
     /// (`IncludeInBadge::UnmutedOrAll`).
@@ -273,13 +300,18 @@ impl Session {
             (muted, muted > 0)
         };
         let jump = topics.first().filter(|t| t.unread).map(|t| t.id);
+        let list = if self.threads.forum_topics.contains_key(&chat_id.0) {
+            RowTopics::Loaded(topics)
+        } else if self.threads.forum_topics_failed(chat_id.0) {
+            RowTopics::Failed
+        } else {
+            RowTopics::Loading
+        };
         Some(RowForum {
-            loaded: self.threads.forum_topics.contains_key(&chat_id.0)
-                || self.threads.forum_topics_failed(chat_id.0),
+            list,
             unread_topics: i32::try_from(shown).unwrap_or(i32::MAX),
             badge_muted,
             jump,
-            topics,
         })
     }
 

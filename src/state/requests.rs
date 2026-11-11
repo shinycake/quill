@@ -767,6 +767,18 @@ impl RequestRegistry {
         self.pending.len()
     }
 
+    /// The id of the newest request issued so far.
+    pub fn issued(&self) -> RequestId {
+        RequestId(self.next)
+    }
+
+    /// Whether a request issued at or after `since` is in flight: the
+    /// requests of what was asked from `since` on, whatever else is going
+    /// on.
+    pub fn any_since(&self, since: RequestId) -> bool {
+        self.pending.keys().any(|id| *id >= since.0)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.pending.is_empty()
     }

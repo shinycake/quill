@@ -22,9 +22,16 @@ pub(super) enum Restore {
     /// Waiting for the answer to the offer, holding what it would restore.
     Offered(Vec<SavedChatWindow>),
     /// Windows to open as their chats load; the rest is dropped once the
-    /// chat list is complete.
-    Opening(Vec<SavedChatWindow>),
-    Done,
+    /// chat list is complete. `refused` are the ones whose open was
+    /// refused: they are not tried again this launch and stay in the file.
+    Opening {
+        waiting: Vec<SavedChatWindow>,
+        refused: Vec<SavedChatWindow>,
+    },
+    /// Nothing more happens this launch. These windows were not brought
+    /// back (their open was refused, or the offer was dismissed unanswered)
+    /// and stay in the file for the next launch.
+    Done(Vec<SavedChatWindow>),
 }
 
 /// The write of the window places: nothing due, or a quiet-period timer
@@ -55,16 +62,23 @@ pub(super) fn to_restore(state: &ChatWindowsState, account: &str) -> Option<Vec<
 pub(super) fn split_ready(
     windows: Vec<SavedChatWindow>,
     chat_exists: impl Fn(ChatId) -> bool,
-) -> (Vec<(ChatId, Bounds<Pixels>)>, Vec<SavedChatWindow>) {
+) -> (Vec<ReadyWindow>, Vec<SavedChatWindow>) {
     let (ready, waiting): (Vec<_>, Vec<_>) = windows
         .into_iter()
         .partition(|window| chat_exists(ChatId(window.chat_id)));
     let ready = ready
-        .iter()
-        .map(|window| (ChatId(window.chat_id), bounds_of(window)))
+        .into_iter()
+        .map(|window| {
+            let place = (ChatId(window.chat_id), bounds_of(&window));
+            (window, place.0, place.1)
+        })
         .collect();
     (ready, waiting)
 }
+
+/// A saved window whose chat has loaded: the saved entry (kept in the file
+/// when its open is refused), its chat and its geometry.
+pub(super) type ReadyWindow = (SavedChatWindow, ChatId, Bounds<Pixels>);
 
 /// What to write as the account's saved windows: the windows open now, plus
 /// the saved ones a restore has not brought back yet (still waiting for
@@ -77,13 +91,15 @@ pub(super) fn windows_to_save(
 ) -> Option<Vec<SavedChatWindow>> {
     let not_back = match restore {
         Restore::Pending => return None,
-        Restore::Offered(saved) | Restore::Opening(saved) => saved.as_slice(),
-        Restore::Done => &[],
+        Restore::Offered(saved) | Restore::Done(saved) => saved.clone(),
+        Restore::Opening { waiting, refused } => {
+            waiting.iter().chain(refused).cloned().collect()
+        }
     };
     let mut all = open;
     for window in not_back {
         if !all.iter().any(|open| open.chat_id == window.chat_id) {
-            all.push(window.clone());
+            all.push(window);
         }
     }
     Some(all)
@@ -202,7 +218,7 @@ impl QuillApp {
             return;
         }
         let Some(account) = self.saved_windows_account() else {
-            self.windows.restore = Restore::Done;
+            self.windows.restore = Restore::Done(Vec::new());
             return;
         };
         match std::mem::take(&mut self.windows.restore) {
@@ -210,14 +226,17 @@ impl QuillApp {
                 let state = load_chat_windows();
                 let saved = state.windows_of(&account);
                 self.windows.restore = if saved.is_empty() {
-                    Restore::Done
+                    Restore::Done(Vec::new())
                 } else if state.answer == RestoreAnswer::Unasked {
                     self.offer_restore(window, cx);
                     Restore::Offered(saved)
                 } else {
                     match to_restore(&state, &account) {
-                        Some(saved) => Restore::Opening(saved),
-                        None => Restore::Done,
+                        Some(waiting) => Restore::Opening {
+                            waiting,
+                            refused: Vec::new(),
+                        },
+                        None => Restore::Done(Vec::new()),
                     }
                 };
             }
@@ -230,13 +249,24 @@ impl QuillApp {
                 }
                 self.windows.restore = Restore::Offered(saved);
             }
-            Restore::Opening(saved) => {
-                let (ready, waiting) = split_ready(saved, |chat| {
+            Restore::Opening { waiting, mut refused } => {
+                let (ready, waiting) = split_ready(waiting, |chat| {
                     self.session()
                         .is_some_and(|s| s.chats.contains_key(&chat.0))
                 });
-                for (chat_id, bounds) in ready {
-                    self.open_chat_window_at(chat_id, Some(bounds), window, cx);
+                // A window whose open was refused (the driver, say) is not
+                // lost: it stays in the file for the next launch. One whose
+                // chat can never have a window is dropped for good.
+                for (saved, chat_id, bounds) in ready {
+                    let openable = self
+                        .session()
+                        .and_then(|s| s.chats.get(&chat_id.0))
+                        .is_some_and(|chat| self.can_open_chat_window(chat));
+                    if openable
+                        && !self.try_open_chat_window_at(chat_id, Some(bounds), window, cx)
+                    {
+                        refused.push(saved);
+                    }
                 }
                 // Chats still loading get their windows when they arrive;
                 // once the list is complete the rest is gone for good.
@@ -244,12 +274,12 @@ impl QuillApp {
                     .session()
                     .is_some_and(|s| s.chat_list.main_paging.is_exhausted());
                 self.windows.restore = if waiting.is_empty() || exhausted {
-                    Restore::Done
+                    Restore::Done(refused)
                 } else {
-                    Restore::Opening(waiting)
+                    Restore::Opening { waiting, refused }
                 };
             }
-            Restore::Done => self.windows.restore = Restore::Done,
+            Restore::Done(kept) => self.windows.restore = Restore::Done(kept),
         }
     }
 
@@ -259,6 +289,7 @@ impl QuillApp {
         window.open_alert_dialog(cx, move |alert, _, _| {
             let yes = app.clone();
             let no = app.clone();
+            let closed = app.clone();
             alert
                 .title(tr(keys::Q_MISC_RESTORE_CHAT_WINDOWS))
                 .description(tr(keys::Q_MISC_QUILL_CAN_BRING_BACK_THE))
@@ -273,6 +304,11 @@ impl QuillApp {
                     let _ = no.update(cx, |this, cx| this.answer_restore(false, cx));
                     true
                 })
+                // After an answer too, when the stage has left the offer
+                // and this does nothing.
+                .on_close(move |_, _, cx| {
+                    let _ = closed.update(cx, |this, cx| this.dismiss_restore(cx));
+                })
         });
     }
 
@@ -282,10 +318,23 @@ impl QuillApp {
         state.answer(restore);
         save_chat_windows(&state);
         self.windows.restore = match std::mem::take(&mut self.windows.restore) {
-            Restore::Offered(saved) if restore => Restore::Opening(saved),
-            _ => Restore::Done,
+            Restore::Offered(waiting) if restore => Restore::Opening {
+                waiting,
+                refused: Vec::new(),
+            },
+            _ => Restore::Done(Vec::new()),
         };
         cx.notify();
+    }
+
+    /// The offer's box was closed with no answer (Escape, a click away):
+    /// "not now". The windows stay in the file, nothing is asked again this
+    /// launch, and no answer is stored, so the next launch asks again.
+    fn dismiss_restore(&mut self, cx: &mut Context<Self>) {
+        if let Restore::Offered(saved) = std::mem::take(&mut self.windows.restore) {
+            self.windows.restore = Restore::Done(saved);
+            cx.notify();
+        }
     }
 }
 
@@ -326,9 +375,9 @@ mod tests {
         // Chat 1 has loaded, chat 2 has not: one opens now, one waits.
         let (ready, waiting) = split_ready(saved, |chat| chat == ChatId(1));
         assert_eq!(ready.len(), 1);
-        assert_eq!(ready[0].0, ChatId(1));
-        assert_eq!(ready[0].1.origin, point(px(10.), px(20.)));
-        assert_eq!(ready[0].1.size, size(px(700.), px(500.)));
+        assert_eq!(ready[0].1, ChatId(1));
+        assert_eq!(ready[0].2.origin, point(px(10.), px(20.)));
+        assert_eq!(ready[0].2.size, size(px(700.), px(500.)));
         assert_eq!(waiting.len(), 1);
         assert_eq!(waiting[0].chat_id, 2);
     }
@@ -340,7 +389,10 @@ mod tests {
         };
         let waiting = vec![saved(1), saved(2), saved(3)];
         // Chat 1 is open; 2 and 3 still wait for their chats.
-        let opening = Restore::Opening(waiting.clone());
+        let opening = Restore::Opening {
+            waiting: waiting.clone(),
+            refused: Vec::new(),
+        };
         assert_eq!(
             chats(windows_to_save(vec![saved(1)], &opening)),
             Some(vec![1, 2, 3])
@@ -353,10 +405,15 @@ mod tests {
         );
         // Not looked at: the file stays as it is.
         assert_eq!(windows_to_save(vec![saved(1)], &Restore::Pending), None);
-        // Done: what is open is what is saved.
+        // Done with nothing kept: what is open is what is saved.
         assert_eq!(
-            chats(windows_to_save(vec![saved(1)], &Restore::Done)),
+            chats(windows_to_save(vec![saved(1)], &Restore::Done(Vec::new()))),
             Some(vec![1])
+        );
+        // Done with a refused or dismissed window: it stays in the file.
+        assert_eq!(
+            chats(windows_to_save(vec![saved(1)], &Restore::Done(vec![saved(2)]))),
+            Some(vec![1, 2])
         );
     }
 }

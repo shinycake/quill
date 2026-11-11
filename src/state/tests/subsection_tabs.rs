@@ -357,7 +357,7 @@ fn forum_rows_follow_display_as_forum() {
         &topics_answer(extra.0, 43, &[2, 3]),
     );
     let row = session.chat_row_forum(ChatId(43)).expect("a forum row");
-    assert!(row.loaded);
+    assert!(matches!(row.list, RowTopics::Loaded(_)));
     // Both topics are unread; the newest is first and is the jump target.
     assert_eq!(row.unread_topics, 2);
     assert_eq!(row.jump, Some(3));
@@ -377,9 +377,9 @@ fn forum_rows_follow_display_as_forum() {
         r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":16,"is_forum":true}}"#,
     );
     let row = session.chat_row_forum(ChatId(16)).expect("a forum row");
-    assert!(!row.loaded && row.topics.is_empty());
+    assert!(row.list == RowTopics::Loading && row.topics().is_empty());
     session.threads.forum_topics.fail(16, "failed");
-    assert!(session.chat_row_forum(ChatId(16)).expect("row").loaded);
+    assert!(session.chat_row_forum(ChatId(16)).expect("row").list == RowTopics::Failed);
 }
 
 /// The forum badge follows `IncludeInBadge::UnmutedOrAll`, ignores the unread
@@ -414,7 +414,7 @@ fn forum_badge_counts_unmuted_topics_and_icons_are_resolved() {
     set(&mut session, 3, false, 777);
     let shown = row(&session);
     assert_eq!((shown.unread_topics, shown.badge_muted), (1, false));
-    assert_eq!(shown.topics.first().map(|t| t.icon), Some(777));
+    assert_eq!(shown.topics().first().map(|t| t.icon), Some(777));
     assert!(session.open_chat_custom_emoji_ids().contains(&777));
     // Every unread topic muted: all count, and the badge is grey.
     set(&mut session, 3, true, 777);

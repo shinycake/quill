@@ -29,7 +29,9 @@ pub(in crate::ui) enum LookStage {
     #[default]
     Editing,
     /// Apply was refused before sending (a boosted chat's level), with why.
-    Blocked(String),
+    /// The changes an earlier Apply got acknowledged stay with it, so the
+    /// next Apply does not send them again.
+    Blocked { why: String, done: Vec<LookSend> },
     /// Apply's changes. The dialog closes when all are `Done`; a `Failed`
     /// one shows its reason and is sent again by the next Apply.
     Sent(Vec<LookSend>),
@@ -45,7 +47,7 @@ impl LookStage {
     pub fn error(&self) -> Option<&str> {
         match self {
             Self::Editing => None,
-            Self::Blocked(why) => Some(why),
+            Self::Blocked { why, .. } => Some(why),
             Self::Sent(sends) => sends.iter().find_map(|s| match &s.stage {
                 SendStage::Failed(why) => Some(why.as_str()),
                 _ => None,
@@ -62,7 +64,8 @@ impl LookStage {
                 .filter(|s| s.stage == SendStage::Done)
                 .cloned()
                 .collect(),
-            _ => Vec::new(),
+            Self::Blocked { done, .. } => done.clone(),
+            Self::Editing => Vec::new(),
         }
     }
 
@@ -149,6 +152,18 @@ mod tests {
         let mut acks = acks_for(&[(9, Answer::Done)]);
         assert_eq!(stage.settle(&mut acks), None);
         assert!(stage.applying());
+    }
+
+    #[test]
+    fn a_block_keeps_the_changes_that_were_done() {
+        let kept = sent(LookChange::Theme("a".into()), SendStage::Done);
+        let stage = LookStage::Blocked {
+            why: "level".into(),
+            done: vec![kept.clone()],
+        };
+        assert_eq!(stage.error(), Some("level"));
+        assert_eq!(stage.done(), vec![kept]);
+        assert!(!stage.applying());
     }
 
     #[test]

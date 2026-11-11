@@ -462,22 +462,28 @@ impl QuillShell {
                 }
             }
         });
-        // An ask is waiting for the answer that sets its flag. With no
-        // request in flight and the flag still clear, that answer is not
-        // coming (it failed, was cancelled, or opened nothing): the ask
-        // ends here, so a later open of the kind is not pinned to it.
+        // An ask is waiting for the answer that sets its flag. With none of
+        // the requests sent since it asked in flight and the flag still
+        // clear, that answer is not coming (it failed, was cancelled, or
+        // opened nothing): the ask ends here, so a later open of the kind
+        // is not pinned to it. Requests of other work do not hold it.
         app.update(cx, |app, _| {
             // Only a live client has requests to wait on; a demo stages its
             // answers by hand.
-            if app
-                .live
-                .as_ref()
-                .is_some_and(|live| live.driver.session.requests.is_empty())
-            {
-                for kind in app.windows.asked_dialogs() {
-                    if !Self::flag_open(app, kind) {
-                        app.windows.dialog_ask_expired(kind);
-                    }
+            let Some(live) = app.live.as_ref() else {
+                return;
+            };
+            let requests = &live.driver.session.requests;
+            let settled: Vec<DialogKind> = app
+                .windows
+                .asked_dialogs()
+                .into_iter()
+                .filter(|(_, since)| !requests.any_since(*since))
+                .map(|(kind, _)| kind)
+                .collect();
+            for kind in settled {
+                if !Self::flag_open(app, kind) {
+                    app.windows.dialog_ask_expired(kind);
                 }
             }
         });

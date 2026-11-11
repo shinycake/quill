@@ -84,6 +84,15 @@ impl WindowPlace {
     }
 }
 
+/// What a report of a window's place changed.
+#[derive(Debug, Default, Clone, Copy)]
+pub(super) struct Placed {
+    /// The window was activated or deactivated.
+    pub(super) activation_changed: bool,
+    /// Its bounds differ from the last ones recorded.
+    pub(super) moved: bool,
+}
+
 impl ChatWindows {
     /// Whether the active chat window hides the main window (at
     /// `main_place`) whole, as of their last places.
@@ -92,8 +101,10 @@ impl ChatWindows {
             return false;
         };
         self.open.iter().any(|open| {
-            let slot = open.slot.borrow();
-            slot.active && slot.place.is_some_and(|place| place.covers(&main))
+            // A slot in use (a re-entrant read) counts as not covering.
+            open.slot.try_borrow().is_ok_and(|slot| {
+                slot.active && slot.place.is_some_and(|place| place.covers(&main))
+            })
         }) && !hover_activates()
     }
 
@@ -112,7 +123,7 @@ impl ChatWindows {
             main_place
         } else {
             self.open.iter().find_map(|open| {
-                let slot = open.slot.borrow();
+                let slot = open.slot.try_borrow().ok()?;
                 slot.place.filter(|_| slot.active)
             })
         };
@@ -122,8 +133,9 @@ impl ChatWindows {
         self.open
             .iter()
             .filter(|open| {
-                let slot = open.slot.borrow();
-                !slot.active && slot.place.is_some_and(|place| front.covers(&place))
+                open.slot.try_borrow().is_ok_and(|slot| {
+                    !slot.active && slot.place.is_some_and(|place| front.covers(&place))
+                })
             })
             .map(|open| open.handle.window_id())
             .collect()
@@ -138,22 +150,34 @@ impl ChatWindows {
         })
     }
 
-    /// `chat_id`'s window is active or not and stands at `place`. Returns
-    /// whether its activation changed.
+    /// `chat_id`'s window is active or not and stands at `place` with
+    /// `bounds`. Returns what changed. The slot is the one record of where
+    /// the window stands, whether it draws or not (a locked window moves
+    /// too); a slot in use records nothing and changes nothing.
     pub(super) fn note_place(
         &self,
         chat_id: ChatId,
         active: bool,
         place: Option<WindowPlace>,
         bounds: Bounds<Pixels>,
-    ) -> bool {
+    ) -> Placed {
         let Some(slot) = self.slot_for(chat_id) else {
-            return false;
+            return Placed::default();
         };
-        let mut slot = slot.borrow_mut();
+        let Ok(mut slot) = slot.try_borrow_mut() else {
+            return Placed::default();
+        };
         slot.place = place;
-        slot.bounds = Some(bounds);
-        std::mem::replace(&mut slot.active, active) != active
+        let moved = slot.bounds.replace(bounds) != Some(bounds);
+        Placed {
+            activation_changed: std::mem::replace(&mut slot.active, active) != active,
+            moved,
+        }
+    }
+
+    /// Where `chat_id`'s window stood last, for "Reopen closed window".
+    pub(super) fn window_bounds(&self, chat_id: ChatId) -> Option<Bounds<Pixels>> {
+        self.slot_for(chat_id)?.try_borrow().ok()?.bounds
     }
 }
 
@@ -207,7 +231,12 @@ impl QuillApp {
         bounds: Bounds<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        self.windows.note_place(chat_id, active, place, bounds);
+        let placed = self.windows.note_place(chat_id, active, place, bounds);
+        if placed.moved {
+            // A window moved or resized under the lock draws nothing, but
+            // its place is still the one to save and to reopen at.
+            self.schedule_chat_windows_save(cx);
+        }
         if !active {
             self.in_window_scope(Some(chat_id), cx, Self::cancel_viewer_boost);
         }
