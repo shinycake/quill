@@ -68,7 +68,7 @@ impl QuillApp {
             .and_then(|session| session.chats.get(&chat_id.0))
             .map(|chat| chat.title.clone())
             .unwrap_or_default();
-        self.agent_bridge.ui_send = Some((
+        self.agent_bridge.ui_send = Some(Box::new((
             self.screen_epoch(),
             UiSend {
                 chat_id: chat_id.0,
@@ -76,7 +76,7 @@ impl QuillApp {
                 text,
                 request,
             },
-        ));
+        )));
         cx.notify();
     }
 

@@ -247,9 +247,7 @@ impl QuillApp {
                 // Only a send built on this command's screen is its own.
                 let send = app.update(cx, |app, _| {
                     let taken = app.agent_bridge.ui_send.take();
-                    taken
-                        .filter(|(epoch, _)| *epoch == screen)
-                        .map(|(_, send)| send)
+                    taken.filter(|sent| sent.0 == screen).map(|sent| sent.1)
                 });
                 match outcome {
                     Err(()) => {

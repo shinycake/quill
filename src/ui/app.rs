@@ -34,7 +34,7 @@ pub struct QuillApp {
     /// The first-run onboarding before sign-in (`ui/first_run_state.rs`).
     pub(super) first_run: super::first_run_state::FirstRun,
     /// Window and per-frame bookkeeping: animation demand, focus restore, quit guard (`ui/frame_state.rs`).
-    pub(super) frame: super::frame_state::FrameUi,
+    pub(super) frame: Box<super::frame_state::FrameUi>,
     /// The next send's attachments and options, per account, chat and topic (`ui/composer_sends.rs`).
     pub(super) composer_sends: super::composer_sends::ComposerSends,
     /// Settings → Language: the open box and recent packs (`ui/language_state.rs`).

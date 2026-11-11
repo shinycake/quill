@@ -79,10 +79,13 @@ pub(crate) struct AgentBridge {
     /// injected input (`agent_driver_send`), until the task picks it up.
     /// The send carries the screen it was built on: a command takes it
     /// only while that screen is still its own (07-026).
-    pub(super) ui_send: Option<(
-        super::on_screen::ScreenEpoch,
-        quill::agent::ui_driver::bridge::UiSend,
-    )>,
+    /// Boxed: `QuillApp` is held by value on the main thread's stack.
+    pub(super) ui_send: Option<
+        Box<(
+            super::on_screen::ScreenEpoch,
+            quill::agent::ui_driver::bridge::UiSend,
+        )>,
+    >,
 }
 
 impl AgentBridge {

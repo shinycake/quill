@@ -57,7 +57,7 @@ fn a_send_left_by_an_earlier_command_is_not_the_next_ones(cx: &mut TestAppContex
     vcx.update(|_, cx| {
         app.update(cx, |app, _| {
             let epoch = app.screen_epoch();
-            app.agent_bridge.ui_send = Some((
+            app.agent_bridge.ui_send = Some(Box::new((
                 epoch,
                 UiSend {
                     chat_id: 11,
@@ -65,7 +65,7 @@ fn a_send_left_by_an_earlier_command_is_not_the_next_ones(cx: &mut TestAppContex
                     text: "left behind".into(),
                     request: Value::Null,
                 },
-            ));
+            )));
         });
     });
     let reply = drive(&app, vcx, click(Target::Node(composer)));
