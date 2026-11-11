@@ -98,7 +98,7 @@ fn another_page_starts_at_the_top_and_the_same_page_keeps_its_place(cx: &mut Tes
     // in) is the same list: it keeps its place.
     app.update_in(vcx, |app, _, cx| {
         if let Some(session) = app.demo_session.as_mut()
-            && let Some(chat) = session.media.shared_media.chat_id
+            && let Some(chat) = session.media.shared_media.chat_id()
         {
             session
                 .media
@@ -113,8 +113,15 @@ fn another_page_starts_at_the_top_and_the_same_page_keeps_its_place(cx: &mut Tes
     show_photos(&app, vcx, 5000, 400);
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            let chat = session.media.shared_media.chat_id.map_or(1, |chat| chat.0);
-            session.media.shared_media.chat_id = Some(quill::ids::ChatId(chat + 1));
+            let chat = session
+                .media
+                .shared_media
+                .chat_id()
+                .map_or(1, |chat| chat.0);
+            session
+                .media
+                .shared_media
+                .open_for(quill::ids::ChatId(chat + 1));
         }
         cx.notify();
     });

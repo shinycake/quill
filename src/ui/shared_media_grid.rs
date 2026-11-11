@@ -65,7 +65,7 @@ impl QuillApp {
         .flex_1()
         .min_h_0()
         .w_full();
-        let key = PageKey::of(session.media.shared_media.chat_id, state);
+        let key = PageKey::of(session.media.shared_media.chat_id(), state);
         if let Some(handle) = self.shared_media_grid.scroll(tab, key) {
             list = list.track_scroll(handle);
         }

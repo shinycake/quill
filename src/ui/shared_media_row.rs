@@ -25,7 +25,7 @@ impl QuillApp {
     fn shared_track_icon(&self, item: &SharedMediaItem) -> IconName {
         let chat = self
             .session()
-            .and_then(|session| session.media.shared_media.chat_id);
+            .and_then(|session| session.media.shared_media.chat_id());
         let active = self.active_playback_id() == Some(item.message_id)
             && self
                 .playback
@@ -204,7 +204,7 @@ impl QuillApp {
         let (Some(url), Some(chat_id)) = (
             link.url.clone(),
             self.session()
-                .and_then(|session| session.media.shared_media.chat_id),
+                .and_then(|session| session.media.shared_media.chat_id()),
         ) else {
             return line.into_any_element();
         };

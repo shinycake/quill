@@ -255,7 +255,7 @@ fn a_saved_track_title_opens_its_playlist(cx: &mut TestAppContext) {
     });
     app.read_with(vcx, |app, _| {
         let session = app.demo_session.as_ref().expect("demo session");
-        assert_eq!(session.media.shared_media.playlist_user, Some(77));
+        assert_eq!(session.media.shared_media.playlist_user(), Some(77));
         assert_eq!(app.open_chat_id(), before, "the chat shown stays");
     });
 }

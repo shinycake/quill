@@ -43,7 +43,7 @@ impl QuillApp {
             let counts = session
                 .media
                 .shared_media
-                .chat_id
+                .chat_id()
                 .and_then(|id| session.media.chat_media_counts.get(&id.0))
                 .cloned();
             session
@@ -94,7 +94,7 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return;
         };
-        let Some(chat_id) = session.media.shared_media.chat_id else {
+        let Some(chat_id) = session.media.shared_media.chat_id() else {
             return;
         };
         let Some(stories_tab) = session.media.shared_media.tab_at(SharedMediaTab::Stories) else {
@@ -125,7 +125,9 @@ impl QuillApp {
 
     fn open_shared_media_gifts(&mut self, cx: &mut Context<Self>) {
         let owner = self.session().and_then(|session| {
-            let chat = session.chats.get(&session.media.shared_media.chat_id?.0)?;
+            let chat = session
+                .chats
+                .get(&session.media.shared_media.chat_id()?.0)?;
             match chat.kind {
                 ChatKind::Private { user_id } if user_id.0 > 0 => {
                     Some(MessageSender::User { user_id: user_id.0 })
@@ -317,7 +319,7 @@ impl QuillApp {
         let Some(session) = self.session_mut_for_playlist() else {
             return;
         };
-        session.media.shared_media.playlist_user = Some(user_id);
+        session.media.shared_media.open_playlist(user_id);
         // A page for a playlist that is not held asks for it as it opens
         // (deduped while one is loading or loaded); a failure shows with
         // a Retry.
@@ -339,7 +341,7 @@ impl QuillApp {
     /// nothing when it was opened without one).
     pub(super) fn close_playlist_ui(&mut self, cx: &mut Context<Self>) {
         if let Some(session) = self.session_mut_for_playlist() {
-            session.media.shared_media.playlist_user = None;
+            session.media.shared_media.close_playlist();
         }
         cx.notify();
     }

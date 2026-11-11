@@ -113,7 +113,7 @@ impl QuillApp {
             return false;
         };
         let state = &session.media.shared_media;
-        let Some(chat_id) = state.chat_id else {
+        let Some(chat_id) = state.chat_id() else {
             return false;
         };
         let tab = state.active_tab;
@@ -166,7 +166,7 @@ impl QuillApp {
         let viewer_chat = self.viewer.state.current().map(|item| item.chat_id);
         let same_chat = self
             .session()
-            .is_some_and(|session| session.media.shared_media.chat_id == viewer_chat);
+            .is_some_and(|session| session.media.shared_media.chat_id() == viewer_chat);
         if !same_chat {
             return;
         }
