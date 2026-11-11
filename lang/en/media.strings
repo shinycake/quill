@@ -293,6 +293,7 @@
 "qll_media_could_not_load_the_bot" = "Could not load the bot.";
 "qll_media_could_not_load_the_bots" = "Could not load the bot's details.";
 "qll_media_could_not_load_voters" = "Couldn't load voters";
+"qll_media_could_not_load_inline_results" = "Couldn't load results";
 "qll_media_could_not_look_up_the" = "could not look up the bot";
 "qll_media_could_not_open_map" = "could not open map";
 "qll_media_could_not_open_message" = "Couldn't open message";

@@ -241,8 +241,13 @@ impl Session {
                 }
             }
             SettingsPayload::DeviceLoginResult { result } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::ConfirmDeviceLogin) {
-                    self.settings.device_login = DeviceLogin::Done(result);
+                if let Some(asked) =
+                    pending.filter(|p| p.purpose == RequestPurpose::ConfirmDeviceLogin)
+                {
+                    self.settings.device_login = DeviceLogin::Done {
+                        request: asked.id,
+                        result,
+                    };
                     if result != crate::auth::DeviceLoginResult::Failed {
                         self.settings.sessions_op.changed(pending.map(|p| p.id));
                         self.settings.sessions.clear_error();

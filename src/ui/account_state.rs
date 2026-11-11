@@ -38,9 +38,6 @@ pub(crate) struct AccountBoxes {
     /// The notice the user opened from the banner or the 18+ switch, if
     /// any (one box, so one value).
     pub(super) notice: OpenNotice,
-    /// Whether the user already started the age verification (so turning
-    /// on 18+ content goes to the server).
-    pub(super) age_check: AgeCheck,
 }
 
 /// The account notice the user has open. It ends with its box, and with
@@ -62,21 +59,11 @@ impl OpenNotice {
     }
 }
 
-/// How far the user took the age verification.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum AgeCheck {
-    #[default]
-    NotStarted,
-    /// The verification bot was opened.
-    Started,
-}
-
 impl AccountBoxes {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         Self {
             lifecycle: AccountLifecycleState::new(window, cx),
             notice: OpenNotice::None,
-            age_check: AgeCheck::NotStarted,
         }
     }
 }

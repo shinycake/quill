@@ -8,6 +8,7 @@
 //! (same take-once pattern as `pending_story_open`).
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
+use super::chat_window::AskWaits;
 use super::links_state::{FlowOrigin, PendingOpen, QueuedLink, ResolvedLink, ResolvedStep};
 use super::shell::{DialogKind, QuillShell};
 use super::*;
@@ -91,6 +92,9 @@ impl QuillApp {
         if !matches!(live.driver.session.auth, AuthorizationState::Ready) {
             return;
         }
+        // What a box opened by this step waits for: the requests out once
+        // the step has sent its own (read by the next dialog sync).
+        let waits = AskWaits::Unread;
         // One flow at a time: a link waits while the previous one is being
         // resolved. An invite preview waiting for the user's answer gives
         // way to a new link: its box closes, as it is modal only in its
@@ -156,9 +160,11 @@ impl QuillApp {
                     (true, _) => {
                         self.cancel_inline_opening();
                         self.links.deep_link_dialog = Some(text);
-                        self.screen
-                            .windows
-                            .open_box_in(DialogKind::DeepLinkInfo, from_window);
+                        self.screen.windows.open_box_in(
+                            DialogKind::DeepLinkInfo,
+                            from_window,
+                            waits.clone(),
+                        );
                     }
                     (false, Some(action)) => {
                         self.screen.links.flow.resume(origin);
@@ -169,9 +175,11 @@ impl QuillApp {
                     (false, None) => {
                         self.cancel_inline_opening();
                         self.links.deep_link_dialog = Some(text);
-                        self.screen
-                            .windows
-                            .open_box_in(DialogKind::DeepLinkInfo, from_window);
+                        self.screen.windows.open_box_in(
+                            DialogKind::DeepLinkInfo,
+                            from_window,
+                            waits.clone(),
+                        );
                     }
                 }
             }
@@ -181,9 +189,11 @@ impl QuillApp {
                 // it shows. A new one belongs to the window the link was
                 // clicked in, not to the window the pointer is over now.
                 if self.screen.links.flow.invite().is_none() {
-                    self.screen
-                        .windows
-                        .open_box_in(DialogKind::DeepLinkInvite, from_window);
+                    self.screen.windows.open_box_in(
+                        DialogKind::DeepLinkInvite,
+                        from_window,
+                        waits.clone(),
+                    );
                 }
                 self.screen.links.flow.ask(preview.clone());
                 live.driver.session.chats_state.deep_link = Some(DeepLinkFlow {
@@ -207,9 +217,11 @@ impl QuillApp {
             Some(DeepLinkState::ShowText(text)) => {
                 self.cancel_inline_opening();
                 self.links.deep_link_dialog = Some(text);
-                self.screen
-                    .windows
-                    .open_box_in(DialogKind::DeepLinkInfo, from_window);
+                self.screen.windows.open_box_in(
+                    DialogKind::DeepLinkInfo,
+                    from_window,
+                    waits.clone(),
+                );
             }
             // Typed links (`deep_link_types`): the UI half runs in render.
             // An agent's step gets none of them (settings, proxies, folders,

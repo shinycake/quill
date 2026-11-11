@@ -128,9 +128,23 @@ impl EditMediaReplacement {
     }
 }
 
+/// Where the photo editor's Done for this message edit stands. The render
+/// that lands is applied only while the edit still waits for its number; a
+/// cancelled edit takes the stage with it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum EditRender {
+    #[default]
+    Idle,
+    /// The render numbered so goes off the UI thread; a later Done replaces
+    /// the number, so only the latest render lands.
+    Rendering(u64),
+}
+
 /// B5: per-message media-edit state.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MediaEdit {
+    /// The photo editor's render of this edit's image, until it lands.
+    pub render: EditRender,
     pub media: Option<EditableMedia>,
     /// The message belongs to an album (`media_album_id != 0`); the
     /// replacement must then fit that album's type.
@@ -359,6 +373,7 @@ impl ComposerEdit {
             kind,
             scheduled: false,
             media_edit: MediaEdit {
+                render: EditRender::Idle,
                 media: match content {
                     MessageContent::Photo(_) => Some(EditableMedia::Photo),
                     MessageContent::Video(_) => Some(EditableMedia::Video),
