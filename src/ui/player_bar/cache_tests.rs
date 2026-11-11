@@ -214,7 +214,7 @@ fn a_saved_track_has_no_neighbours_in_the_chat(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     let saved = quill::state::playlist_message_id(quill::ids::FileId(5));
     app.update(vcx, |app, _| {
-        app.playback.playing_audio = Some(saved);
+        app.playback.active = crate::ui::playback_state::ActiveTrack::Audio(saved);
     });
     assert_eq!(
         app.read_with(vcx, |app, _| app.playlist_can_move()),
@@ -237,7 +237,9 @@ fn give_saved_track(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
         }];
         playlist.total_count = 1;
         playlist.loaded = true;
-        app.playback.playing_audio = Some(quill::state::playlist_message_id(quill::ids::FileId(5)));
+        app.playback.active = crate::ui::playback_state::ActiveTrack::Audio(
+            quill::state::playlist_message_id(quill::ids::FileId(5)),
+        );
         app.playback.player.chat = Some(CHAT);
     });
 }

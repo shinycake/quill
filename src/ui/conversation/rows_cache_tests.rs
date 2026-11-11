@@ -246,7 +246,7 @@ fn voice_playback_keeps_the_rows_and_follows_the_position(cx: &mut TestAppContex
     };
     for secs in [1.0, 2.5] {
         app.update(vcx, |app, cx| {
-            app.playback.seek_preview_secs = Some(secs);
+            app.playback.scrub = crate::ui::playback_state::Scrub::Dragging(secs);
             cx.notify();
         });
         frames(vcx);

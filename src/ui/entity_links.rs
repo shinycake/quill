@@ -346,7 +346,7 @@ impl QuillApp {
                 self.playback
                     .positions
                     .insert(ChatMessage::new(chat_id, target_id), secs);
-                if self.playback.playing_voice == Some(target_id)
+                if self.playback.active.voice() == Some(target_id)
                     && self.playback.player.chat.is_none_or(|c| c == chat_id)
                 {
                     self.seek_active_to(secs, cx);
@@ -367,7 +367,7 @@ impl QuillApp {
                 self.playback
                     .positions
                     .insert(ChatMessage::new(chat_id, target_id), secs);
-                if self.playback.playing_audio == Some(target_id)
+                if self.playback.active.audio() == Some(target_id)
                     && self.playback.player.chat.is_none_or(|c| c == chat_id)
                 {
                     self.seek_active_to(secs, cx);

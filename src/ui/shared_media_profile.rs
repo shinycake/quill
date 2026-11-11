@@ -368,7 +368,8 @@ impl QuillApp {
         // shares the id, not the row.
         let playing = self
             .playback
-            .playing_audio
+            .active
+            .audio()
             .filter(|_| self.playback.player.chat == Some(chat));
         let is_playing = self.is_playing();
         let mut list = div()

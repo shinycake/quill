@@ -41,7 +41,7 @@ fn the_bar_title_jumps_in_the_tracks_own_window(cx: &mut TestAppContext) {
     let h = new_app(cx);
     let _chat_window = h.open_in_new_window(OTHER, cx);
     in_window(&h, h.main, None, cx, |app, window, cx| {
-        app.playback.playing_voice = Some(OTHER_LAST);
+        app.playback.active = crate::ui::playback_state::ActiveTrack::Voice(OTHER_LAST);
         app.playback.player.chat = Some(OTHER);
         app.jump_to_playing(window, cx);
     });
@@ -304,19 +304,19 @@ fn attached_stickers_close_the_box_in_the_other_window(cx: &mut TestAppContext) 
 fn deleting_the_tracks_chat_stops_the_player_and_releases_its_history(cx: &mut TestAppContext) {
     let h = new_app(cx);
     in_window(&h, h.main, None, cx, |app, _, cx| {
-        app.playback.playing_voice = Some(OTHER_LAST);
+        app.playback.active = crate::ui::playback_state::ActiveTrack::Voice(OTHER_LAST);
         app.playback.player.chat = Some(OTHER);
         app.sync_history_holds();
         assert!(app.session().is_some_and(|s| s.chat_history_in_use(OTHER)));
         app.check_playing_track(cx);
         assert_eq!(
-            app.playback.playing_voice,
+            app.playback.active.voice(),
             Some(OTHER_LAST),
             "the chat is there"
         );
         app.demo_session.as_mut().unwrap().chats.remove(&OTHER.0);
         app.check_playing_track(cx);
-        assert_eq!(app.playback.playing_voice, None, "the player stopped");
+        assert_eq!(app.playback.active.voice(), None, "the player stopped");
         assert_eq!(app.playback.player.chat, None, "its claim went");
         app.sync_history_holds();
         assert!(!app.session().is_some_and(|s| s.chat_history_in_use(OTHER)));

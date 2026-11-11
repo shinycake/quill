@@ -47,8 +47,8 @@ impl QuillApp {
     pub(super) fn maybe_autoplay_gif(&mut self, ix: usize, cx: &mut Context<Self>) {
         if self.playback.playing_animation.is_some()
             || self.playback.intent.is_some()
-            || self.playback.playing_voice.is_some()
-            || self.playback.playing_audio.is_some()
+            || self.playback.active.voice().is_some()
+            || self.playback.active.audio().is_some()
             || self.recording_active()
             || self.viewer.state.is_open()
             || self.stories.viewer.is_open()
