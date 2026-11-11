@@ -67,16 +67,6 @@ pub(in crate::ui) use cover::ViewerCover;
 pub(in crate::ui) use layer::ViewerVideoLayer;
 pub(in crate::ui) use pip::PipLink;
 
-/// Why a looping clip is paused. `HeldByWindow` is the pause this module
-/// made when the window lost focus, and only that one is undone when it
-/// returns (a pause the user made stays).
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
-pub(in crate::ui) enum LoopPause {
-    #[default]
-    Free,
-    HeldByWindow,
-}
-
 /// Viewer state that is not part of the item list: Shared Media paging,
 /// video full screen, and the inactive-window pause of looping clips.
 #[derive(Default)]
@@ -87,14 +77,10 @@ pub(super) struct ViewerExtra {
     pub shared_seen: usize,
     /// Video full screen, kept in step with the window (`fullscreen`).
     pub(in crate::ui) video_fullscreen: fullscreen::VideoFullscreen,
-    /// Who paused a looping clip: nobody, or the window losing focus.
-    pub(in crate::ui) loop_pause: LoopPause,
     /// The "saved to your Downloads folder" toast and its generation (a
     /// newer save restarts the hide timer).
     pub saved_toast: Option<quill::viewer_extras::SavedToast>,
     pub saved_toast_gen: u64,
-    /// "Share at": the message and second the forward picker was opened at.
-    pub share_at: Option<(ChatId, MessageId, i32)>,
     /// Turns of videos rotated in this run, by `(chat, message)`.
     pub rotations: HashMap<(i64, i64), u8>,
     /// The width the last frame laid the thumbnail strip out in, which

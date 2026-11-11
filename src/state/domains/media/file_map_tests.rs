@@ -87,3 +87,28 @@ fn a_pass_with_every_file_held_is_not_due_again_until_enough_writes() {
     }
     assert!(files.evict_due());
 }
+
+#[test]
+fn a_subset_holds_only_the_asked_files() {
+    let mut files = FileMap::default();
+    for id in 1..=4 {
+        files.insert(file(id, "/tmp/f"));
+    }
+    let subset = files.only([2, 4, 9]);
+    assert_eq!(subset.len(), 2, "9 is not in the map");
+    assert!(subset.contains_key(&2) && subset.contains_key(&4));
+    assert!(!subset.contains_key(&1));
+}
+
+#[test]
+fn a_download_subset_keeps_the_intents_of_the_asked_files() {
+    use crate::state::{DownloadIntents, DownloadOrigin};
+    let mut downloads = DownloadIntents::default();
+    downloads.begin(1, DownloadOrigin::User);
+    downloads.begin(2, DownloadOrigin::User);
+    let files = FileMap::default();
+    let subset = downloads.only([2, 3]);
+    assert!(subset.is_downloading(2, &files) || subset.is_requested(2));
+    assert!(!subset.is_requested(1), "file 1 was not asked for");
+    assert_eq!(subset.requested_count(), 1);
+}

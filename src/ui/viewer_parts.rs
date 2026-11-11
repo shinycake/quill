@@ -27,6 +27,10 @@ pub(super) enum ViewerClip {
         tick: Option<Task<()>>,
         /// The player failed after it opened: the line its controls show.
         error: Option<String>,
+        /// Whether the window losing focus paused this looping clip. It
+        /// goes with the clip, so a stopped or replaced clip never
+        /// resumes a pause that was not its own.
+        pause: LoopPause,
     },
     /// A `.gif` file the player can't decode (AVPlayer does not read GIF
     /// and the FFmpeg shim is missing): it animates as an image instead.
@@ -35,6 +39,16 @@ pub(super) enum ViewerClip {
     /// window's viewer has its own, so one clip's error is never drawn over
     /// another window's working clip.
     Failed { error: String },
+}
+
+/// Why a looping clip is paused. `HeldByWindow` is the pause the viewer
+/// made when the window lost focus, and only that one is undone when it
+/// returns (a pause the user made stays).
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub(super) enum LoopPause {
+    #[default]
+    Free,
+    HeldByWindow,
 }
 
 impl ViewerClip {
@@ -75,6 +89,7 @@ impl ViewerClip {
             player,
             tick: None,
             error: None,
+            pause: LoopPause::Free,
         };
     }
 
@@ -115,6 +130,24 @@ impl ViewerClip {
                 *self = other;
                 None
             }
+        }
+    }
+
+    /// The window lost focus and the viewer paused the clip.
+    pub(super) fn hold_for_window(&mut self) {
+        if let Self::Playing { pause, .. } = self {
+            *pause = LoopPause::HeldByWindow;
+        }
+    }
+
+    /// The window is back: `true` when the viewer's own pause is undone.
+    pub(super) fn release_window_hold(&mut self) -> bool {
+        match self {
+            Self::Playing { pause, .. } if *pause == LoopPause::HeldByWindow => {
+                *pause = LoopPause::Free;
+                true
+            }
+            _ => false,
         }
     }
 

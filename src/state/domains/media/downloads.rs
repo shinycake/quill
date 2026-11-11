@@ -95,6 +95,25 @@ pub struct DownloadIntents {
 }
 
 impl DownloadIntents {
+    /// The intents of just these files (and their place in the recent
+    /// list), for a view that reads only them while it needs the session
+    /// free.
+    pub fn only(&self, ids: impl IntoIterator<Item = i32>) -> Self {
+        let mut subset = Self::default();
+        for id in ids {
+            if let Some(intent) = self.entries.get(&id).copied() {
+                subset.put(id, Some(intent));
+            }
+            if self.finished.contains(&id) {
+                subset.finished.push_back(id);
+            }
+            if let Some(chat) = self.chats.get(&id) {
+                subset.chats.insert(id, *chat);
+            }
+        }
+        subset
+    }
+
     /// The request is out (retry clears an earlier end).
     pub fn begin(&mut self, file_id: i32, origin: DownloadOrigin) {
         if file_id == 0 {

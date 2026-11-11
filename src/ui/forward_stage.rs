@@ -15,9 +15,18 @@
 #![deny(clippy::indexing_slicing)]
 
 use quill::composer::ForwardDraft;
-use quill::ids::ChatId;
+use quill::ids::{ChatId, MessageId};
 
 use super::mount::Mount;
+
+/// "Share at 1:23" from the media viewer: the picker was opened over this
+/// message with the video at `secs`, so its "Copy link" links to that second.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ShareAt {
+    pub(crate) chat_id: ChatId,
+    pub(crate) message_id: MessageId,
+    pub(crate) secs: i32,
+}
 
 /// The forward being built in one window.
 #[derive(Debug, Default)]
@@ -39,6 +48,9 @@ pub(crate) enum ForwardStage {
         draft: ForwardDraft,
         bar: Option<ChatId>,
         mount: Mount,
+        /// The viewer position the box was opened at; it lasts as long as
+        /// the box does.
+        at: Option<ShareAt>,
     },
     /// One destination chosen: the forward bar waits above `dest`'s
     /// composer, and Send forwards (the typed comment first). No selection
@@ -203,15 +215,41 @@ impl ForwardStage {
                 draft,
                 bar: None,
                 mount: Mount::Mounting,
+                at: None,
             },
             Self::Bar { draft, dest } => Self::Picking {
                 draft,
                 bar: Some(dest),
                 mount: Mount::Mounting,
+                at: None,
             },
             picking @ Self::Picking { .. } => picking,
         };
         true
+    }
+
+    /// The box is open: it was opened at this viewer position.
+    pub(crate) fn set_share_at(&mut self, share_at: ShareAt) {
+        if let Self::Picking { at, .. } = self {
+            *at = Some(share_at);
+        }
+    }
+
+    /// A new forward is no viewer share at a time.
+    pub(crate) fn clear_share_at(&mut self) {
+        if let Self::Picking { at, .. } = self {
+            *at = None;
+        }
+    }
+
+    /// The position the box was opened at over this message, once: its
+    /// "Copy link" links to that second.
+    pub(crate) fn take_share_at(&mut self, chat_id: ChatId, message_id: MessageId) -> Option<i32> {
+        let Self::Picking { at, .. } = self else {
+            return None;
+        };
+        at.take_if(|at| at.chat_id == chat_id && at.message_id == message_id)
+            .map(|at| at.secs)
     }
 
     /// Leave the box: back to the selection or the bar it was opened over.
@@ -234,10 +272,13 @@ impl ForwardStage {
     pub(crate) fn drop_bar(&mut self) {
         *self = match std::mem::take(self) {
             Self::Bar { draft, .. } => Self::Selecting(draft),
-            Self::Picking { draft, mount, .. } => Self::Picking {
+            Self::Picking {
+                draft, mount, at, ..
+            } => Self::Picking {
                 draft,
                 bar: None,
                 mount,
+                at,
             },
             Self::ReplyChooser(mut under, mount) => {
                 under.drop_bar();

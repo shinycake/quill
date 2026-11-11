@@ -203,17 +203,8 @@ impl QuillApp {
     /// and the download / delete-permission lookups for the new current
     /// item. Shared by open, step, and "the current item was deleted".
     pub(in crate::ui) fn reset_viewer_item_state(&mut self, cx: &mut Context<Self>) {
-        self.viewer.zoom.reset();
-        self.viewer.drag = None;
-        self.viewer.wheel.new_item();
-        self.viewer.swipe.new_item();
+        self.viewer.new_item();
         self.viewer_leave_video_fullscreen();
-        // MED1: orientation and playback error are per-item state.
-        self.viewer.orientation = Default::default();
-        self.viewer.reorient.reset();
-        self.viewer.hdr.reset();
-        self.viewer.clip.clear_error();
-        self.viewer.extra.share_at = None;
         if let Some(item) = self.viewer.state.current()
             && let Some(turns) = self
                 .viewer
@@ -224,7 +215,6 @@ impl QuillApp {
             self.viewer.orientation.turns = *turns;
         }
         self.apply_viewer_quality_pref();
-        self.viewer.extra.loop_pause = LoopPause::Free;
         self.stop_viewer_video();
         self.ensure_viewer_download(cx);
         self.download_viewer_strip_thumbs();
@@ -259,21 +249,11 @@ impl QuillApp {
     pub(in crate::ui) fn close_media_viewer(&mut self, cx: &mut Context<Self>) {
         self.viewer_leave_video_fullscreen();
         self.stop_viewer_video();
-        // A timestamp link's start belongs to this open: a clip that never
-        // played here must not start there the next time it opens.
-        self.viewer.pending_seek = None;
-        self.viewer.extra.saved_toast = None;
-        // Reopening the same item starts with its caption collapsed.
-        self.viewer.extra.caption = Default::default();
-        self.viewer.state.close();
-        // A turned photo is a full-size picture of its own (up to about
-        // 20 MB, and as much again on the GPU); opening the next item
-        // replaced it, but nothing did until then.
-        self.viewer.reorient.reset();
-        self.viewer.hdr.reset();
-        self.viewer.over_controls = false;
-        // A pan held when the viewer closed ends with it.
-        self.viewer.drag = None;
+        // A timestamp link's start, the toast, the caption's expansion, a
+        // turned photo (a full-size picture of its own, up to about 20 MB,
+        // and as much again on the GPU) and a pan held when the viewer
+        // closed all end with it.
+        self.viewer.closed();
         cx.notify();
     }
 
@@ -380,7 +360,6 @@ impl QuillApp {
         at: Instant,
         cx: &mut Context<Self>,
     ) -> bool {
-        let had_timeout = self.viewer.swipe.timeout_at().is_some();
         let action = self.screen.viewer.swipe.feed(SwipeInput {
             dx,
             dy,
@@ -411,8 +390,9 @@ impl QuillApp {
         if let Some(dir) = step {
             self.step_viewer_swipe(dir, cx);
         }
-        if !had_timeout && self.viewer.swipe.timeout_at().is_some() {
-            self.arm_viewer_swipe_timeout(cx);
+        if self.viewer.swipe.wants_timer() {
+            let timer = self.viewer_swipe_timer(cx);
+            self.viewer.swipe.arm(timer);
         }
         action != SwipeAction::None
     }
@@ -427,7 +407,7 @@ impl QuillApp {
 
     /// A swipe without phases (Wayland, X11, some Windows drivers) ends
     /// after the trackpad pause, since no end phase will come.
-    fn arm_viewer_swipe_timeout(&mut self, cx: &mut Context<Self>) {
+    fn viewer_swipe_timer(&mut self, cx: &mut Context<Self>) -> Task<()> {
         self.spawn_scoped(cx, async move |this, cx| {
             let mut wait = VIEWER_TRACKPAD_GESTURE_GAP;
             loop {
@@ -453,7 +433,6 @@ impl QuillApp {
                 }
             }
         })
-        .detach();
     }
 
     /// A trackpad pinch zooms at the event position (tdesktop

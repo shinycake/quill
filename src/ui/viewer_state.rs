@@ -37,7 +37,7 @@ pub(crate) struct ViewerUi {
     /// Wheel and trackpad scrolling toward the next item.
     pub(super) wheel: WheelNav,
     /// A horizontal trackpad swipe pulling the next or previous arrow in.
-    pub(super) swipe: SwipeNav,
+    pub(super) swipe: SwipeNav<Task<()>>,
     /// Parity slice 5: the clip of the shown item, playing (sound playing)
     /// or paused (clock frozen, sound paused), a GIF animating as an image,
     /// or the line saying why it could not play. The controls read the
@@ -100,6 +100,78 @@ impl super::on_screen::Farewell for ViewerUi {
 }
 
 impl ViewerUi {
+    /// A new item is shown (open, step, the current one deleted): what
+    /// belongs to the previous item goes. Every field is named, so a field
+    /// added to [`ViewerUi`] fails to compile here until it is decided.
+    pub(super) fn new_item(&mut self) {
+        let Self {
+            state: _,
+            extra: _,
+            photo_editor: _,
+            zoom,
+            frame: _,
+            drag,
+            wheel,
+            swipe,
+            clip: _,
+            pip: _,
+            video_layer: _,
+            orientation,
+            reorient,
+            hdr,
+            album_pin: _,
+            open_gen: _,
+            pending_seek: _,
+            last_activity: _,
+            visibility: _,
+            over_controls: _,
+            controls: _,
+        } = self;
+        zoom.reset();
+        *drag = None;
+        wheel.new_item();
+        swipe.new_item();
+        *orientation = Default::default();
+        reorient.reset();
+        hdr.reset();
+        self.clip.clear_error();
+    }
+
+    /// The viewer closes: the item's state goes with what only this open
+    /// held (a timestamp link's start, the saved toast, the caption's
+    /// expansion, a pointer resting on a control).
+    pub(super) fn closed(&mut self) {
+        self.state.close();
+        self.new_item();
+        let Self {
+            state: _,
+            extra,
+            photo_editor: _,
+            zoom: _,
+            frame: _,
+            drag: _,
+            wheel: _,
+            swipe: _,
+            clip: _,
+            pip: _,
+            video_layer: _,
+            orientation: _,
+            reorient: _,
+            hdr: _,
+            album_pin: _,
+            open_gen: _,
+            pending_seek,
+            last_activity: _,
+            visibility: _,
+            over_controls,
+            controls: _,
+        } = self;
+        *pending_seek = None;
+        extra.saved_toast = None;
+        extra.caption = Default::default();
+        *over_controls = false;
+    }
+
     pub(super) fn new() -> Self {
         Self {
             state: MediaViewer::closed(),

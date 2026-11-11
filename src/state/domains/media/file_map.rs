@@ -54,6 +54,19 @@ impl FileMap {
         Some(&entry.file)
     }
 
+    /// A map of just these files (marking each used), for a view that
+    /// reads only them while it needs the session free.
+    pub fn only(&self, ids: impl IntoIterator<Item = i32>) -> Self {
+        let mut subset = Self::default();
+        for id in ids {
+            if let Some(entry) = self.entries.get(&id) {
+                entry.used.set(self.clock);
+                subset.entries.insert(id, entry.clone());
+            }
+        }
+        subset
+    }
+
     pub fn contains_key(&self, id: &i32) -> bool {
         self.entries.contains_key(id)
     }
