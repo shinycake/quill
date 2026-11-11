@@ -191,7 +191,7 @@ pub const LOOKUP_RETRY_MAX: Duration = Duration::from_secs(5 * 60);
 #[derive(Debug, Clone, PartialEq)]
 enum EffectLookup {
     /// Described; nothing more to ask.
-    Ready(MessageEffect),
+    Ready(Box<MessageEffect>),
     /// Sent; `failures` is how many earlier asks failed.
     Loading { failures: u32 },
     /// The server says the effect does not exist: nothing to wait for.
@@ -229,7 +229,8 @@ impl MessageEffects {
     }
 
     pub fn accept(&mut self, effect: MessageEffect) {
-        self.lookups.insert(effect.id, EffectLookup::Ready(effect));
+        self.lookups
+            .insert(effect.id, EffectLookup::Ready(Box::new(effect)));
         self.revision += 1;
     }
 

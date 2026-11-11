@@ -68,26 +68,19 @@ impl Session {
     }
 
     pub(crate) fn apply_passkeys_ok(&mut self, pending: Option<&PendingRequest>) {
+        let id = pending.map(|p| p.id);
         match passkeys_purpose(pending.map(|p| p.purpose)) {
             Some(PasskeysPurpose::Remove) => {
                 // Only the removal in flight settles it.
-                let id = pending.map(|p| p.id);
                 let passkeys = &mut self.settings.passkeys;
                 if let Some(removal) = passkeys.removing.take_if(|r| Some(r.request) == id) {
                     passkeys.finish_remove(&removal.passkey_id);
                 }
-                return;
             }
-            Some(PasskeysPurpose::CheckLogin) => {
-                // The authorization state moves on by itself (to Ready, or
-                // to the password screen after SESSION_PASSWORD_NEEDED).
-                self.settings
-                    .passkeys
-                    .login
-                    .finish_check(pending.map(|p| p.id));
-                return;
-            }
-            _ => return,
+            // The authorization state moves on by itself (to Ready, or to
+            // the password screen after SESSION_PASSWORD_NEEDED).
+            Some(PasskeysPurpose::CheckLogin) => self.settings.passkeys.login.finish_check(id),
+            _ => {}
         }
     }
 

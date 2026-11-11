@@ -599,10 +599,10 @@ impl QuillApp {
                 }
             }
             RuntimeEvent::Gesture { hold } => {
-                if let Some(entry) = self.widgets.entries.get_mut(&key) {
-                    if let Some(live) = entry.live_mut() {
-                        live.pointer.hold = hold;
-                    }
+                if let Some(entry) = self.widgets.entries.get_mut(&key)
+                    && let Some(live) = entry.live_mut()
+                {
+                    live.pointer.hold = hold;
                 }
             }
             RuntimeEvent::Request { token, data } => {
@@ -632,10 +632,10 @@ impl QuillApp {
             }
             RuntimeEvent::Copy(text) => self.copy_widget_text(text, cx),
             RuntimeEvent::Selection(text) => {
-                if let Some(entry) = self.widgets.entries.get_mut(&key) {
-                    if let Some(live) = entry.live_mut() {
-                        live.pointer.selection = text;
-                    }
+                if let Some(entry) = self.widgets.entries.get_mut(&key)
+                    && let Some(live) = entry.live_mut()
+                {
+                    live.pointer.selection = text;
                 }
             }
             RuntimeEvent::Watch(on) => {

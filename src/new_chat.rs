@@ -434,10 +434,7 @@ mod tests {
         };
         let shown = view(NewChatKind::Megagroup, &creating(NewChatBack::Info, failed));
         assert_eq!(shown.step, NewChatStep::Info);
-        assert_eq!(
-            shown.failure(),
-            Some((CreateFailure::Restricted, "nope"))
-        );
+        assert_eq!(shown.failure(), Some((CreateFailure::Restricted, "nope")));
         assert!(!shown.busy());
     }
 

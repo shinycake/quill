@@ -576,7 +576,12 @@ mod tests {
         nav.feed(event(0.0, -5.0, true, ms(now, 32)));
         assert!(!nav.is_spent());
         nav.spend(ms(now, 32));
-        nav.feed(event(0.0, -5.0, false, ms(now, 32) + VIEWER_TRACKPAD_GESTURE_GAP));
+        nav.feed(event(
+            0.0,
+            -5.0,
+            false,
+            ms(now, 32) + VIEWER_TRACKPAD_GESTURE_GAP,
+        ));
         assert!(!nav.is_spent());
         // A swipe in progress is not spent by the wheel.
         let mut pulling = SwipeNav::default();

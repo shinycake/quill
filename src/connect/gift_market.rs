@@ -132,14 +132,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             market.resale.as_mut()
         };
-        if let Some(search) = search {
-            match &result {
-                Ok(extra) => {
-                    search.stage = SearchStage::Loading { request: *extra };
-                    search.page = page.saturating_add(1);
-                }
-                Err(_) => {}
-            }
+        if let Some(search) = search
+            && let Ok(extra) = &result
+        {
+            search.stage = SearchStage::Loading { request: *extra };
+            search.page = page.saturating_add(1);
         }
         result
     }
@@ -216,10 +213,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 extra, &name, owner, price, text, hide_name,
             )
         });
-        if let Some(buy) = self.session.payments.gift_market.buy.as_mut() {
-            if let Ok(extra) = &result {
-                buy.pay = BuyPay::Paying { request: *extra };
-            }
+        if let Ok(extra) = &result
+            && let Some(buy) = self.session.payments.gift_market.buy.as_mut()
+        {
+            buy.pay = BuyPay::Paying { request: *extra };
         }
         result
     }
@@ -485,14 +482,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             GiftMarketPurpose::GiftsForCrafting { gift_id, page },
             |extra| rq::get_gifts_for_crafting(extra, gift_id, &offset),
         );
-        if let Some(craft) = self.session.payments.gift_market.craft.as_mut() {
-            match &result {
-                Ok(extra) => {
-                    craft.candidates.stage = SearchStage::Loading { request: *extra };
-                    craft.candidates.page = page.saturating_add(1);
-                }
-                Err(_) => {}
-            }
+        if let Some(craft) = self.session.payments.gift_market.craft.as_mut()
+            && let Ok(extra) = &result
+        {
+            craft.candidates.stage = SearchStage::Loading { request: *extra };
+            craft.candidates.page = page.saturating_add(1);
         }
         result
     }
