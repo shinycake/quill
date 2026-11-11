@@ -81,6 +81,7 @@ mod history_retention;
 mod history_trim;
 mod history_types;
 mod info_types;
+mod login_url;
 mod logout_notes;
 mod map_thumbs;
 mod media_library;
@@ -214,6 +215,7 @@ pub use history_trim::{
 };
 pub use history_types::*;
 pub use info_types::*;
+pub use login_url::*;
 pub use map_thumbs::{
     MAP_THUMB_HEIGHT, MAP_THUMB_SCALE, MAP_THUMB_WIDTH, MAP_THUMB_ZOOM, MapKey, MapThumbs,
 };

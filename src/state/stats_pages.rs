@@ -304,6 +304,21 @@ impl StatsState {
         }
     }
 
+    /// A `messageStatistics` answer of `pending`, when it is one of ours.
+    pub(crate) fn accept_message_statistics_for(
+        &mut self,
+        pending: Option<&PendingRequest>,
+        statistics: MessageStatisticsView,
+    ) {
+        if let Some(RequestPurpose::Groups(GroupsPurpose::GetMessageStatistics {
+            chat_id,
+            message_id,
+        })) = pending.map(|p| p.purpose)
+        {
+            self.accept_message_statistics(chat_id, message_id, pending.map(|p| p.id), statistics);
+        }
+    }
+
     pub(crate) fn accept_message_statistics(
         &mut self,
         chat_id: i64,
