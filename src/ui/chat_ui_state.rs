@@ -218,11 +218,11 @@ pub(crate) struct ChatUi {
     /// M1: the scheduled-messages dialog (view/delete). Here so that a
     /// chat change closes it: its rows act on the chat shown.
     pub(super) scheduled_dialog_open: bool,
-    /// M1: the schedule picker popup above the composer.
-    pub(super) schedule_popup_open: bool,
-    /// The date+time picker behind the schedule popup (created when the
-    /// popup opens, see `open_schedule_picker`). Its Reschedule target is
-    /// a message id of this chat, so the picker goes with the chat.
+    /// M1: the schedule picker popup above the composer: `Some` while it is
+    /// open, with the date+time picker it holds (created when the popup
+    /// opens, see `open_schedule_picker`). Its Reschedule target is a message
+    /// id of this chat, so the picker goes with the chat. The share box's
+    /// schedule step is a picker of its own target in the same slot.
     pub(super) schedule_picker: Option<super::scheduled::SchedulePicker>,
     /// Phase 4.2: poll creation dialog (open above the composer). Here so
     /// that a chat change closes it: Create posts to the chat shown.

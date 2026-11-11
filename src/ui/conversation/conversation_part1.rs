@@ -271,10 +271,9 @@ impl QuillApp {
                         // buttons that summon them.
                         // The share box's schedule step shows inside its dialog.
                         .when(
-                            self.chat_ui.schedule_popup_open
-                                && !self.chat_ui.schedule_picker.as_ref().is_some_and(|picker| {
-                                    picker.target == super::scheduled::ScheduleTarget::Share
-                                }),
+                            self.chat_ui.schedule_picker.as_ref().is_some_and(|picker| {
+                                picker.target != super::scheduled::ScheduleTarget::Share
+                            }),
                             |this| this.child(self.schedule_popup(cx)),
                         )
                         .when_some(self.paid_messages_notice(cx), |this, row| this.child(row))

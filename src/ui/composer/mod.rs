@@ -585,7 +585,7 @@ impl QuillApp {
                 self.note_message_leaving(&typed);
                 self.remember_sent_text(request, typed);
                 self.finish_pending_send();
-                self.chat_ui.schedule_popup_open = false;
+                self.close_composer_schedule_popup();
                 self.chat_ui.set_reply(None);
                 self.chat_ui.rich_editor_open = false;
                 self.clear_suggest_bar_after_send(chat_id);

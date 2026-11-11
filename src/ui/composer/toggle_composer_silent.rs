@@ -103,7 +103,7 @@ impl QuillApp {
 
     /// M1: load the chat's scheduled sends and open the dialog.
     pub(in crate::ui) fn open_scheduled_dialog(&mut self, cx: &mut Context<Self>) {
-        self.chat_ui.schedule_popup_open = false;
+        self.close_composer_schedule_popup();
         if let Some(live) = self.live.as_mut()
             && let Some(chat_id) = live.driver.session.open_chat
         {
@@ -388,8 +388,8 @@ impl QuillApp {
             option_chip("chip-schedule", label, cx)
                 .cursor_pointer()
                 .on_click(cx.listener(|this, _, window, cx| {
-                    if this.chat_ui.schedule_popup_open {
-                        this.chat_ui.schedule_popup_open = false;
+                    if this.chat_ui.schedule_picker.is_some() {
+                        this.close_composer_schedule_popup();
                         cx.notify();
                     } else {
                         this.open_schedule_picker(ScheduleTarget::Composer, window, cx);

@@ -284,8 +284,20 @@ impl QuillApp {
             send_effect: 0,
             slot,
         });
-        self.chat_ui.schedule_popup_open = true;
         cx.notify();
+    }
+
+    /// Hides the composer's schedule popup, dropping the picker behind it.
+    /// The share box's schedule step is its own and stays.
+    pub(super) fn close_composer_schedule_popup(&mut self) {
+        if self
+            .chat_ui
+            .schedule_picker
+            .as_ref()
+            .is_some_and(|picker| picker.target != ScheduleTarget::Share)
+        {
+            self.chat_ui.schedule_picker = None;
+        }
     }
 
     /// Closes the picker; a reschedule returns to the scheduled list.
@@ -294,7 +306,6 @@ impl QuillApp {
             self.chat_ui.schedule_picker.as_ref().map(|p| p.target),
             Some(ScheduleTarget::Reschedule(_) | ScheduleTarget::RescheduleSelected)
         );
-        self.chat_ui.schedule_popup_open = false;
         self.chat_ui.schedule_picker = None;
         if reopen {
             self.open_scheduled_dialog(cx);
@@ -359,7 +370,6 @@ impl QuillApp {
         } else {
             0
         };
-        self.chat_ui.schedule_popup_open = false;
         match target {
             ScheduleTarget::Composer => {
                 // The picker's own chat, which may no longer be on screen.
