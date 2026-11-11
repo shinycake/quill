@@ -4,8 +4,8 @@
 //! every update.
 use super::super::*;
 use super::*;
-use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::connect::tests::support::toggle_driver;
+use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::platform::MemorySecretStore;
 use crate::state::{SimilarBotsFetch, StickerTab};

@@ -750,5 +750,9 @@ fn a_file_being_sent_keeps_the_local_state_it_was_in() {
 
     let done = LocalFileState::from_parts("/tmp/c.bin", false, false, true, 9).into_uploading();
     assert!(done.is_uploading() && done.is_downloading_completed());
-    assert_eq!(done.clone().into_uploading(), done, "sending twice is sending");
+    assert_eq!(
+        done.clone().into_uploading(),
+        done,
+        "sending twice is sending"
+    );
 }
