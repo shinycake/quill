@@ -344,7 +344,7 @@ impl super::QuillApp {
                 session.auth,
                 quill::telegram::envelope::AuthorizationState::Ready
             )
-        }) || !self.background.clients.is_empty()
+        }) || !self.background.clients().is_empty()
     }
 }
 

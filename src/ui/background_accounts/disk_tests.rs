@@ -67,11 +67,11 @@ fn nothing_starts_while_the_disk_is_full(cx: &mut TestAppContext) {
         app.reap_closing(cx);
         app.ensure_background_accounts(cx);
         assert!(app.background.client(&account(2)).is_none());
-        assert!(!app.background.starting.contains(&account(1)));
+        assert!(!app.background.prepare.wanted(&account(1)));
         app.apply_disk_reading(ROOM, cx);
         app.ensure_background_accounts(cx);
         assert!(app.background.client(&account(2)).is_some());
-        assert!(app.background.starting.contains(&account(1)));
+        assert!(app.background.prepare.wanted(&account(1)));
     });
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -88,10 +88,10 @@ fn a_refused_background_open_waits_for_a_reading_with_room(cx: &mut TestAppConte
         );
         for free in [NEARLY, None] {
             app.apply_disk_reading(free, cx);
-            assert!(!app.background.starting.contains(&account(1)), "{free:?}");
+            assert!(!app.background.prepare.wanted(&account(1)), "{free:?}");
         }
         app.apply_disk_reading(ROOM, cx);
-        assert!(app.background.starting.contains(&account(1)));
+        assert!(app.background.prepare.wanted(&account(1)));
     });
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -111,10 +111,10 @@ fn a_full_reading_ends_a_start_in_flight(cx: &mut TestAppContext) {
     let (app, mut vcx, root) = app_with_unsigned_accounts(cx);
     app.update_in(&mut vcx, |app, _, cx| {
         app.ensure_background_accounts(cx);
-        assert!(app.background.starting.contains(&account(1)));
+        assert!(app.background.prepare.wanted(&account(1)));
         app.apply_disk_reading(FULL, cx);
         app.apply_disk_reading(FULL, cx);
-        assert!(!app.background.starting.contains(&account(1)));
+        assert!(!app.background.prepare.wanted(&account(1)));
     });
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
@@ -151,6 +151,36 @@ fn a_connection_prepared_before_the_disk_filled_opens_nothing(cx: &mut TestAppCo
         assert!(app.connection.status == ConnectUiStatus::Live);
         assert!(app.live.is_none());
         assert!(app.disk.is_full());
+    });
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A start that failed leaves its status, and the next pass starts the
+/// account again instead of skipping it for the rest of the run.
+#[gpui_kit::test]
+fn an_account_that_could_not_start_is_started_again_by_the_next_pass(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    vcx.run_until_parked();
+    let root = temp_root();
+    isolate(&app, &mut vcx, &root, &[account(1)]);
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.credentials = Some(credentials());
+        app.finish_background_start(account(1), Err(ConnectBlocker::StoreError), cx);
+        assert!(
+            app.background
+                .client(&account(1))
+                .is_some_and(|client| client.retryable()),
+            "a failed start keeps its status"
+        );
+        app.ensure_background_accounts(cx);
+        assert!(
+            app.background.prepare.wanted(&account(1)),
+            "the next pass tried again"
+        );
+        assert!(
+            app.background.client(&account(1)).is_none(),
+            "the dead entry no longer blocks it"
+        );
     });
     let _ = std::fs::remove_dir_all(&root);
 }

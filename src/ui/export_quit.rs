@@ -22,7 +22,7 @@ fn exporting(session: &Session) -> bool {
 
 impl QuillApp {
     fn all_sessions(&self) -> impl Iterator<Item = &Session> {
-        let background = self.background.clients.iter();
+        let background = self.background.clients().iter();
         self.session().into_iter().chain(
             background.filter_map(|client| client.live.as_ref().map(|live| &live.driver.session)),
         )

@@ -296,7 +296,7 @@ impl QuillApp {
             .and_then(|live| live.driver.note_disk(after, free, &floors).ok())
             .unwrap_or(0);
         running |= self.live.is_some();
-        for live in self.background.clients_mut() {
+        for live in self.background.live_clients_mut() {
             running = true;
             let _ = live.driver.note_disk(after, free, &floors);
         }

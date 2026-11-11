@@ -60,32 +60,43 @@ pub enum WheelAction {
     Previous,
 }
 
-/// The scroll distance gathered toward the next step, and the trackpad
-/// gesture that already moved or zoomed.
+/// The scroll distance gathered toward the next step. Whether the trackpad
+/// gesture already moved or zoomed is the gesture's own state
+/// (`SwipeNav::is_spent`), handed to [`Self::feed`].
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct WheelNav {
     accum: f32,
-    spent_at: Option<Instant>,
 }
 
 impl WheelNav {
-    pub fn feed(&mut self, input: WheelInput) -> WheelAction {
+    /// `spent`: the trackpad gesture this event belongs to already moved
+    /// or zoomed (ignored for a mouse wheel). The caller marks the gesture
+    /// spent when this returns an action for a trackpad event.
+    pub fn feed(&mut self, input: WheelInput, spent: bool) -> WheelAction {
         let WheelInput {
             dx,
             dy,
             primary,
             source,
             zoomed,
-            at,
+            ..
         } = input;
-        let spent = self.continue_gesture(source, at);
+        // A new trackpad gesture starts from zero.
+        if matches!(
+            source,
+            WheelSource::Trackpad {
+                begins_gesture: true
+            }
+        ) {
+            self.accum = 0.0;
+        }
+        let spent = spent && matches!(source, WheelSource::Trackpad { .. });
         if !dx.is_finite() || !dy.is_finite() || dx.abs() > dy.abs() {
             self.accum = 0.0;
             return WheelAction::None;
         }
         if primary || zoomed {
             self.accum = 0.0;
-            self.spend(source, at);
             return WheelAction::Zoom { delta_y: dy };
         }
         if spent {
@@ -101,46 +112,54 @@ impl WheelNav {
             WheelAction::Previous
         };
         self.accum = 0.0;
-        self.spend(source, at);
         action
     }
 
-    /// Another item is shown: drop the gathered delta, but keep the
-    /// trackpad gesture, so its momentum does not move again.
+    /// Another item is shown: drop the gathered delta. The gesture that
+    /// moved to it stays spent, so its momentum does not move again.
     pub fn new_item(&mut self) {
         self.accum = 0.0;
-    }
-
-    /// Whether this trackpad event belongs to a gesture that already
-    /// moved or zoomed (keeping that gesture alive). A new gesture starts
-    /// from zero.
-    fn continue_gesture(&mut self, source: WheelSource, at: Instant) -> bool {
-        let WheelSource::Trackpad { begins_gesture } = source else {
-            return false;
-        };
-        if begins_gesture {
-            self.accum = 0.0;
-        }
-        let spent = !begins_gesture
-            && self.spent_at.is_some_and(|last| {
-                at.saturating_duration_since(last) < VIEWER_TRACKPAD_GESTURE_GAP
-            });
-        self.spent_at = spent.then_some(at);
-        spent
-    }
-
-    fn spend(&mut self, source: WheelSource, at: Instant) {
-        if matches!(source, WheelSource::Trackpad { .. }) {
-            self.spent_at = Some(at);
-        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::media_viewer::{SwipeInput, SwipeNav};
 
     const NOTCH: f32 = VIEWER_WHEEL_NOTCH_PX;
+
+    /// The two halves as the viewer composes them: the gesture first, then
+    /// the wheel with the gesture's mark, and a trackpad action marks the
+    /// gesture spent.
+    #[derive(Default)]
+    struct Scroll {
+        wheel: WheelNav,
+        gesture: SwipeNav,
+    }
+
+    impl Scroll {
+        fn feed(&mut self, input: WheelInput) -> WheelAction {
+            let _ = self.gesture.feed(SwipeInput {
+                dx: input.dx,
+                dy: input.dy,
+                source: input.source,
+                at: input.at,
+                can_next: false,
+                can_prev: false,
+            });
+            let action = self.wheel.feed(input, self.gesture.is_spent());
+            if matches!(input.source, WheelSource::Trackpad { .. }) && action != WheelAction::None {
+                self.gesture.spend(input.at);
+            }
+            action
+        }
+
+        fn new_item(&mut self) {
+            self.wheel.new_item();
+            self.gesture.new_item();
+        }
+    }
 
     fn wheel(dy: f32, at: Instant) -> WheelInput {
         WheelInput {
@@ -167,7 +186,7 @@ mod tests {
     #[test]
     fn a_notch_down_moves_next_and_up_moves_previous() {
         let now = Instant::now();
-        let mut nav = WheelNav::default();
+        let mut nav = Scroll::default();
         assert_eq!(nav.feed(wheel(-NOTCH, now)), WheelAction::Next);
         assert_eq!(nav.feed(wheel(NOTCH, now)), WheelAction::Previous);
     }
@@ -175,7 +194,7 @@ mod tests {
     #[test]
     fn small_deltas_add_up_to_one_step() {
         let now = Instant::now();
-        let mut nav = WheelNav::default();
+        let mut nav = Scroll::default();
         let third = -NOTCH / 3.0 - 0.01;
         assert_eq!(nav.feed(wheel(third, now)), WheelAction::None);
         assert_eq!(nav.feed(wheel(third, now)), WheelAction::None);
@@ -186,7 +205,7 @@ mod tests {
     #[test]
     fn one_large_event_moves_once() {
         let now = Instant::now();
-        let mut nav = WheelNav::default();
+        let mut nav = Scroll::default();
         assert_eq!(nav.feed(wheel(-10.0 * NOTCH, now)), WheelAction::Next);
         assert_eq!(nav.feed(wheel(-NOTCH / 2.0, now)), WheelAction::None);
     }
@@ -194,7 +213,7 @@ mod tests {
     #[test]
     fn a_horizontal_scroll_does_nothing_and_drops_the_gathered_delta() {
         let now = Instant::now();
-        let mut nav = WheelNav::default();
+        let mut nav = Scroll::default();
         assert_eq!(nav.feed(wheel(-NOTCH * 0.8, now)), WheelAction::None);
         let sideways = WheelInput {
             dx: -NOTCH,
@@ -207,7 +226,7 @@ mod tests {
     #[test]
     fn the_primary_modifier_zooms_instead_of_moving() {
         let now = Instant::now();
-        let mut nav = WheelNav::default();
+        let mut nav = Scroll::default();
         let input = WheelInput {
             primary: true,
             ..wheel(NOTCH, now)
@@ -218,7 +237,7 @@ mod tests {
     #[test]
     fn a_zoomed_picture_zooms_on_a_plain_scroll() {
         let now = Instant::now();
-        let mut nav = WheelNav::default();
+        let mut nav = Scroll::default();
         let input = WheelInput {
             zoomed: true,
             ..wheel(-NOTCH, now)
@@ -229,7 +248,7 @@ mod tests {
     #[test]
     fn a_trackpad_needs_three_notches() {
         let now = Instant::now();
-        let mut nav = WheelNav::default();
+        let mut nav = Scroll::default();
         assert_eq!(nav.feed(trackpad(-NOTCH, true, now)), WheelAction::None);
         assert_eq!(nav.feed(trackpad(-NOTCH, false, now)), WheelAction::None);
         assert_eq!(
@@ -241,7 +260,7 @@ mod tests {
     #[test]
     fn a_trackpad_gesture_moves_once_until_a_new_gesture_or_a_pause() {
         let now = Instant::now();
-        let mut nav = WheelNav::default();
+        let mut nav = Scroll::default();
         let flick = -VIEWER_TRACKPAD_STEP_PX;
         assert_eq!(nav.feed(trackpad(flick, true, now)), WheelAction::Next);
         for frame in 1..40 {
@@ -266,7 +285,7 @@ mod tests {
     #[test]
     fn a_new_trackpad_gesture_drops_the_last_gestures_leftover() {
         let now = Instant::now();
-        let mut nav = WheelNav::default();
+        let mut nav = Scroll::default();
         assert_eq!(nav.feed(trackpad(-60.0, true, now)), WheelAction::None);
         assert_eq!(
             nav.feed(trackpad(-40.0, false, ms(now, 16))),
@@ -282,7 +301,7 @@ mod tests {
     #[test]
     fn a_trackpad_gesture_that_zoomed_does_not_move() {
         let now = Instant::now();
-        let mut nav = WheelNav::default();
+        let mut nav = Scroll::default();
         let zooming_out = WheelInput {
             zoomed: true,
             ..trackpad(-NOTCH, true, now)
@@ -295,7 +314,7 @@ mod tests {
     #[test]
     fn a_wheel_is_not_held_by_a_trackpad_gesture() {
         let now = Instant::now();
-        let mut nav = WheelNav::default();
+        let mut nav = Scroll::default();
         let flick = trackpad(-VIEWER_TRACKPAD_STEP_PX, true, now);
         assert_eq!(nav.feed(flick), WheelAction::Next);
         assert_eq!(nav.feed(wheel(-NOTCH, ms(now, 16))), WheelAction::Next);
@@ -304,7 +323,7 @@ mod tests {
     #[test]
     fn non_finite_deltas_do_nothing() {
         let now = Instant::now();
-        let mut nav = WheelNav::default();
+        let mut nav = Scroll::default();
         assert_eq!(nav.feed(wheel(f32::NAN, now)), WheelAction::None);
         assert_eq!(nav.feed(wheel(f32::INFINITY, now)), WheelAction::None);
         assert_eq!(nav.feed(wheel(-NOTCH, now)), WheelAction::Next);
@@ -313,7 +332,7 @@ mod tests {
     #[test]
     fn a_new_item_drops_the_gathered_delta() {
         let now = Instant::now();
-        let mut nav = WheelNav::default();
+        let mut nav = Scroll::default();
         assert_eq!(nav.feed(wheel(-NOTCH * 0.8, now)), WheelAction::None);
         nav.new_item();
         assert_eq!(nav.feed(wheel(-NOTCH * 0.8, now)), WheelAction::None);
@@ -322,7 +341,7 @@ mod tests {
     #[test]
     fn a_new_item_keeps_the_gesture_that_moved_to_it() {
         let now = Instant::now();
-        let mut nav = WheelNav::default();
+        let mut nav = Scroll::default();
         let flick = -VIEWER_TRACKPAD_STEP_PX;
         assert_eq!(nav.feed(trackpad(flick, true, now)), WheelAction::Next);
         nav.new_item();
