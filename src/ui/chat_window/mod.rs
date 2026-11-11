@@ -301,6 +301,12 @@ impl ChatWindows {
     }
 
     /// Whether `chat_id` has a window of its own.
+    /// Whether the window view `view` is listed: its bookkeeping did not
+    /// run yet.
+    pub(in crate::ui) fn lists_view(&self, view: EntityId) -> bool {
+        self.open.iter().any(|open| open.view.entity_id() == view)
+    }
+
     pub(in crate::ui) fn has(&self, chat_id: ChatId) -> bool {
         self.window_for(chat_id).is_some()
     }

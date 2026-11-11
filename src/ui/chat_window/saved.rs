@@ -114,7 +114,7 @@ impl QuillApp {
             .windows
             .open
             .iter()
-            .map(|open| (open.chat_id, open.handle, open.view.clone()))
+            .map(|open| (open.chat_id, open.handle))
             .collect();
         // A change still waiting for its timer is saved now too: the timer
         // is the screen's and goes with it, so a window closed just before
@@ -123,10 +123,9 @@ impl QuillApp {
             self.save_chat_windows_now(cx);
         }
         self.windows.save = SaveTimer::Idle;
-        for (chat_id, handle, view) in windows {
+        for (chat_id, handle) in windows {
             self.in_window_scope(Some(chat_id), cx, |app, cx| app.flush_leaving_draft(cx));
             self.forget_chat_window(chat_id, cx);
-            let _ = view.update(cx, |view, _| view.mark_closed());
             // The switch may run inside this window's own update, which
             // holds it: the removal waits until it is let go.
             // screen-scope: the window is already forgotten; this only closes the OS window.

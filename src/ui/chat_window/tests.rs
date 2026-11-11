@@ -590,12 +590,20 @@ fn a_window_a_switch_closed_reports_nothing_afterwards(cx: &mut TestAppContext) 
                 .and_then(|open| open.view.upgrade())
         })
         .expect("the window's view");
-    let closed_by_switch = h.app.update(cx, |app, cx| {
+    let kept = h.app.update(cx, |app, cx| {
         app.close_chat_windows_for_switch(cx);
-        // Before the deferred close report runs.
-        view.read(cx).is_closed()
+        assert!(!app.windows.lists_view(view.entity_id()), "unlisted");
+        app.windows.closed.len()
     });
-    assert!(closed_by_switch, "the late report has nothing left to do");
+    // The late report, before the platform's own removal runs.
+    view.update(cx, |view, cx| view.closing(true, None, cx));
+    h.app.read_with(cx, |app, _| {
+        assert_eq!(
+            app.windows.closed.len(),
+            kept,
+            "the late report has nothing left to do"
+        );
+    });
 }
 
 #[gpui_kit::test]
