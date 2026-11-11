@@ -48,7 +48,25 @@ pub struct UpdatesSync {
     pub freeze: Option<FreezeInfo>,
     pub speech_trial: Option<SpeechTrialUpdate>,
     pub live_shares: Vec<LiveShare>,
-    pub age_verification: Option<AgeVerificationParams>,
+    /// The age verification the server asks for. It lives as long as the
+    /// condition: how far the user took it goes with it.
+    pub age_verification: Option<AgeVerification>,
+}
+
+/// How far the user took the age verification.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AgeCheck {
+    #[default]
+    NotStarted,
+    /// The verification bot was opened.
+    Started,
+}
+
+/// The server's age verification request and the user's progress on it.
+#[derive(Debug, Clone)]
+pub struct AgeVerification {
+    pub params: AgeVerificationParams,
+    pub check: AgeCheck,
 }
 
 /// Dice emoji Telegram supports when the server has not sent a list yet.
@@ -157,8 +175,29 @@ impl UpdatesSync {
         self.live_shares.iter().filter(move |s| s.expires_at > now)
     }
 
+    /// The server repeats or lifts the request. A repeat keeps the user's
+    /// progress; lifting it ends the check, so a later request starts over.
     pub fn set_age_verification(&mut self, parameters: Option<AgeVerificationParams>) {
-        self.age_verification = parameters;
+        let check = self
+            .age_verification
+            .as_ref()
+            .map(|verification| verification.check)
+            .unwrap_or_default();
+        self.age_verification = parameters.map(|params| AgeVerification { params, check });
+    }
+
+    /// The user opened the verification bot.
+    pub fn start_age_check(&mut self) {
+        if let Some(verification) = self.age_verification.as_mut() {
+            verification.check = AgeCheck::Started;
+        }
+    }
+
+    /// Whether the user already started the verification being asked for.
+    pub fn age_check_started(&self) -> bool {
+        self.age_verification
+            .as_ref()
+            .is_some_and(|verification| verification.check == AgeCheck::Started)
     }
 }
 

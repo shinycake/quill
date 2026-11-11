@@ -409,7 +409,7 @@ impl Session {
         self.messages.message_audience = Some(MessageAudience::new(chat_id, message_id));
     }
 
-    fn audience_for(
+    pub(crate) fn audience_for(
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,

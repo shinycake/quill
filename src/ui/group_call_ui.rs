@@ -243,7 +243,37 @@ impl QuillApp {
             );
             shown += 1;
         }
-        if shown == 0 {
+        let contacts_error = self
+            .session()
+            .is_some_and(|s| s.users_state.contacts.error().is_some());
+        let contacts_loading = self
+            .session()
+            .is_some_and(|s| s.users_state.contacts.data().is_none())
+            && !contacts_error;
+        if shown == 0 && contacts_error {
+            panel = panel
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(tr(keys::Q_PEOPLE_COULDN_T_LOAD_CONTACTS)),
+                )
+                .child(
+                    Button::new("group-call-invite-retry")
+                        .label(tr(keys::Q_PEOPLE_RETRY))
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.retry_group_call_contacts(cx);
+                        })),
+                );
+        } else if shown == 0 && contacts_loading {
+            panel = panel.child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr(keys::Q_PEOPLE_LOADING_CONTACTS)),
+            );
+        } else if shown == 0 {
             panel = panel.child(
                 div()
                     .text_sm()
@@ -260,13 +290,16 @@ impl QuillApp {
     /// 1.8.69). Incoming, not joined and not missed: Join / Decline.
     /// Anything else reads as tdesktop's group call entries ("Outgoing
     /// group call", "Missed group call", ...); TDLib updates refresh the
-    /// row when it is joined or missed.
+    /// row when it is joined or missed. While a join is on its way
+    /// (`pending_conference`) neither button acts: the answer settles the row.
     pub(super) fn group_call_invitation_row(
         message: &HistoryMessage,
         is_active: bool,
         was_missed: bool,
+        session: Option<&quill::state::Session>,
         cx: &mut Context<QuillApp>,
     ) -> impl IntoElement {
+        let joining = session.is_some_and(|s| s.calls.pending_conference.is_some());
         let mut inner = div().flex().flex_col().items_center().gap_2();
         if !message.is_outgoing && !is_active && !was_missed {
             let chat_id = message.chat_id;
@@ -285,6 +318,7 @@ impl QuillApp {
                         .child(
                             Button::new(format!("gc-invite-accept-{}", message_id.0))
                                 .label(tr(keys::GROUP_CALL_JOIN))
+                                .disabled(joining)
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.accept_group_call_invitation(chat_id, message_id, cx);
                                 })),
@@ -293,6 +327,7 @@ impl QuillApp {
                             Button::new(format!("gc-invite-decline-{}", message_id.0))
                                 .label(tr(keys::CALL_DECLINE))
                                 .ghost()
+                                .disabled(joining)
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.decline_group_call_invitation(chat_id, message_id, cx);
                                 })),

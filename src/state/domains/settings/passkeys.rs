@@ -31,8 +31,8 @@ impl Session {
             PasskeysPayload::List(list) => {
                 // Only our own `getLoginPasskeys` answer replaces the list,
                 // and not one asked before a removal.
-                if let Some(PasskeysPurpose::List(generation)) = purpose {
-                    self.settings.passkeys.accept_list(list, generation);
+                if let (Some(PasskeysPurpose::List), Some(pending)) = (purpose, pending) {
+                    self.settings.passkeys.accept_list(pending.id, list);
                 }
             }
             PasskeysPayload::Added(passkey) => {
@@ -45,10 +45,10 @@ impl Session {
                 // a stage nothing answers.
                 if purpose == Some(PasskeysPurpose::Add) {
                     let passkeys = &mut self.settings.passkeys;
-                    if passkeys.fail_register(pending.map(|p| p.id)) {
-                        passkeys.error =
-                            Some("Could not add the passkey: unreadable answer".into());
-                    }
+                    passkeys.fail_register(
+                        pending.map(|p| p.id),
+                        "Could not add the passkey: unreadable answer".into(),
+                    );
                 }
             }
         }
@@ -58,9 +58,7 @@ impl Session {
     /// that cannot be read end the attempt with an error line.
     pub(crate) fn apply_passkey_parameters(&mut self, id: Option<RequestId>, json: &str) {
         let passkeys = &mut self.settings.passkeys;
-        if !passkeys.accept_parameters(id, json, Instant::now()) {
-            passkeys.error = Some("Could not add the passkey: unreadable parameters".into());
-        }
+        passkeys.accept_parameters(id, json, Instant::now());
     }
 
     /// `getAuthenticationPasskeyParameters` answered: the sign-in ceremony
@@ -79,10 +77,7 @@ impl Session {
         match passkeys_purpose(pending.map(|p| p.purpose)) {
             Some(PasskeysPurpose::Remove) => {
                 // Only the removal in flight settles it.
-                let passkeys = &mut self.settings.passkeys;
-                if let Some(removal) = passkeys.removing.take_if(|r| Some(r.request) == id) {
-                    passkeys.finish_remove(&removal.passkey_id);
-                }
+                self.settings.passkeys.removal_answered(id);
             }
             // The authorization state moves on by itself (to Ready, or to
             // the password screen after SESSION_PASSWORD_NEEDED).
@@ -100,34 +95,26 @@ impl Session {
         let passkeys = &mut self.settings.passkeys;
         let id = asked.map(|(id, _)| id);
         match passkeys_purpose(asked.map(|(_, purpose)| purpose)) {
-            Some(PasskeysPurpose::List(generation)) => {
+            Some(PasskeysPurpose::List) => {
                 // Retrying is the user's next look, not every ingest. A look
                 // older than a removal says nothing about the list now.
-                passkeys.list_failed(generation, sessions_error_line("load the passkeys", err));
+                if let Some(id) = id {
+                    passkeys.list_failed(id, sessions_error_line("load the passkeys", err));
+                }
                 true
             }
             Some(PasskeysPurpose::Remove) => {
                 // Only the removal in flight fails.
-                if passkeys
-                    .removing
-                    .take_if(|r| Some(r.request) == id)
-                    .is_some()
-                {
-                    passkeys.error = Some(sessions_error_line("delete the passkey", err));
-                }
+                passkeys.removal_failed(id, sessions_error_line("delete the passkey", err));
                 true
             }
             Some(PasskeysPurpose::Parameters) => {
-                if passkeys.fail_register(id) {
-                    passkeys.error = Some(sessions_error_line("add the passkey", err));
-                }
+                passkeys.fail_register(id, sessions_error_line("add the passkey", err));
                 true
             }
             Some(PasskeysPurpose::Add) => {
                 // tdesktop drops the options after a failed registration.
-                if passkeys.fail_register(id) {
-                    passkeys.error = Some(sessions_error_line("add the passkey", err));
-                }
+                passkeys.fail_register(id, sessions_error_line("add the passkey", err));
                 true
             }
             Some(PasskeysPurpose::LoginConfig) => {

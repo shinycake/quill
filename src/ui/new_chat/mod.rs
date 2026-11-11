@@ -87,13 +87,16 @@ impl QuillApp {
     pub(crate) fn new_chat_view(&self) -> Option<NewChatView> {
         let dialog = self.admin.create_chat_dialog.as_ref()?;
         let settled = self.settled_new_chat_stage(&dialog.stage);
-        Some(view(dialog.kind, &settled))
+        Some(view(&settled))
     }
 
     /// `stage` with the session's answers to its requests folded in.
     fn settled_new_chat_stage(&self, stage: &NewChatStage) -> NewChatStage {
+        let Some(kind) = self.admin.create_chat_dialog.as_ref().map(|d| d.kind) else {
+            return stage.clone();
+        };
         match self.session() {
-            Some(session) => session.settled_new_chat(stage),
+            Some(session) => session.settled_new_chat(kind, stage),
             None => stage.clone(),
         }
     }
@@ -247,14 +250,7 @@ impl QuillApp {
     /// takes its creation row with it.
     pub(in crate::ui) fn drain_new_chat_done(&mut self, cx: &mut Context<Self>) -> bool {
         // The answers the stage waits for are taken into it here.
-        let settled = self
-            .admin
-            .create_chat_dialog
-            .as_ref()
-            .map(|dialog| self.settled_new_chat_stage(&dialog.stage));
-        if let (Some(settled), Some(dialog)) = (settled, self.admin.create_chat_dialog.as_mut()) {
-            dialog.stage = settled;
-        }
+        self.settle_new_chat_stage();
         if !matches!(self.new_chat_step(), Some(NewChatStep::Done(_))) {
             return false;
         }
@@ -286,6 +282,29 @@ impl QuillApp {
                 dialog.selected_users.push(user_id);
             }
             cx.notify();
+        }
+    }
+
+    /// Take the session's answers into the dialog's stage. The create
+    /// request the stage held is let go once the stage has left it.
+    fn settle_new_chat_stage(&mut self) {
+        let Some(settled) = self
+            .admin
+            .create_chat_dialog
+            .as_ref()
+            .map(|dialog| self.settled_new_chat_stage(&dialog.stage))
+        else {
+            return;
+        };
+        let Some(dialog) = self.admin.create_chat_dialog.as_mut() else {
+            return;
+        };
+        let left = std::mem::replace(&mut dialog.stage, settled);
+        if let NewChatStage::Creating { request, .. } = left
+            && !matches!(&dialog.stage, NewChatStage::Creating { request: now, .. } if *now == request)
+            && let Some(live) = self.live.as_mut()
+        {
+            live.driver.abandon_new_chat(request);
         }
     }
 
@@ -438,19 +457,12 @@ impl QuillApp {
     /// A typed link hides the refusal of the last Save; a Save still out
     /// stays, so its answer moves the step on.
     pub(super) fn new_chat_link_edited(&mut self) {
-        let settled = self
-            .admin
-            .create_chat_dialog
-            .as_ref()
-            .map(|dialog| self.settled_new_chat_stage(&dialog.stage));
-        if let (Some(mut settled), Some(dialog)) = (settled, self.admin.create_chat_dialog.as_mut())
+        self.settle_new_chat_stage();
+        if let Some(dialog) = self.admin.create_chat_dialog.as_mut()
+            && let NewChatStage::Type { save, .. } = &mut dialog.stage
+            && matches!(save, TypeSaveStage::Refused(_))
         {
-            if let NewChatStage::Type { save, .. } = &mut settled
-                && matches!(save, TypeSaveStage::Refused(_))
-            {
-                *save = TypeSaveStage::Editing;
-            }
-            dialog.stage = settled;
+            *save = TypeSaveStage::Editing;
         }
     }
 

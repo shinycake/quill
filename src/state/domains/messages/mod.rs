@@ -1,4 +1,5 @@
 //! The messages domain: history, sending, editing, reactions, polls, translation and message menus.
+mod ai_answer;
 mod ai_compose;
 mod apply;
 mod error;
@@ -7,6 +8,7 @@ mod notes;
 mod purpose;
 mod state;
 
+pub use ai_answer::*;
 pub use ai_compose::*;
 pub use menu_actions::*;
 pub use notes::*;

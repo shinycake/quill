@@ -44,9 +44,14 @@ impl QuillApp {
             if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &sink) {
                 session.apply(owned);
             }
+            let request = session.request(
+                quill::state::RequestPurpose::UploadSavedNotificationSound,
+                None,
+            );
             session.settings.tone_upload = ToneUpload::Uploading {
                 name: "Glass Chime".into(),
                 target: SoundPickerTarget::Chat(chat_id),
+                request,
             };
         }
         self.open_mute_menu(cx);

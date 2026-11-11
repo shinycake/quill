@@ -79,7 +79,7 @@ impl Drop for Fixture {
     }
 }
 
-fn collectible(number: i32, owner: i64) -> Value {
+pub(super) fn collectible(number: i32, owner: i64) -> Value {
     json!({"@type": "upgradedGift", "id": (9000 + number).to_string(), "regular_gift_id": "500",
         "title": "Plush Pepe", "name": format!("PlushPepe-{number}"), "number": number,
         "model": {"@type": "upgradedGiftModel", "name": "Gold", "rarity": {"@type": "upgradedGiftAttributeRarityRare"}},
@@ -461,7 +461,7 @@ fn acquired_and_preview_requests() {
     );
 }
 
-fn received(number: i32) -> Value {
+pub(super) fn received(number: i32) -> Value {
     json!({"@type": "receivedGift", "received_gift_id": format!("r{number}"),
         "gift": {"@type": "sentGiftUpgraded", "gift": collectible(number, ME)}, "craft_date": 0})
 }

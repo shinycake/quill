@@ -61,38 +61,48 @@ enum EffectStage {
 /// played.
 #[derive(Debug, Default)]
 struct BoundedStages {
-    stages: HashMap<MessageKey, EffectStage>,
-    /// Insertion order. It may hold keys that were removed since; those
-    /// are skipped when the oldest is dropped.
-    order: VecDeque<MessageKey>,
+    /// Each key's stage with the ticket it was queued under.
+    stages: HashMap<MessageKey, (EffectStage, u64)>,
+    /// Insertion order, as `(key, ticket)`. An entry is live only while the
+    /// map still holds that key under that ticket; a removed or re-queued
+    /// key leaves a stale entry that is skipped, never evicting the live one.
+    order: VecDeque<(MessageKey, u64)>,
+    next_ticket: u64,
 }
 
 impl BoundedStages {
     fn set(&mut self, key: MessageKey, stage: EffectStage) {
-        if self.stages.insert(key, stage).is_some() {
+        if let Some(held) = self.stages.get_mut(&key) {
+            held.0 = stage;
             return;
         }
-        self.order.push_back(key);
+        let ticket = self.next_ticket;
+        self.next_ticket = self.next_ticket.wrapping_add(1);
+        self.stages.insert(key, (stage, ticket));
+        self.order.push_back((key, ticket));
         while self.stages.len() > MAX_HELD {
-            let Some(oldest) = self.order.pop_front() else {
+            let Some((oldest, oldest_ticket)) = self.order.pop_front() else {
                 break;
             };
-            self.stages.remove(&oldest);
+            if self.stages.get(&oldest).map(|held| held.1) == Some(oldest_ticket) {
+                self.stages.remove(&oldest);
+            }
         }
         // Removed keys leave their place in `order`: shed them when they
         // outnumber the live ones.
         if self.order.len() > MAX_HELD * 2 {
             let stages = &self.stages;
-            self.order.retain(|key| stages.contains_key(key));
+            self.order
+                .retain(|(key, ticket)| stages.get(key).map(|held| held.1) == Some(*ticket));
         }
     }
 
     fn get(&self, key: &MessageKey) -> Option<EffectStage> {
-        self.stages.get(key).copied()
+        self.stages.get(key).map(|held| held.0)
     }
 
     fn remove(&mut self, key: &MessageKey) -> Option<EffectStage> {
-        self.stages.remove(key)
+        self.stages.remove(key).map(|held| held.0)
     }
 }
 
@@ -222,5 +232,21 @@ mod tests {
         watch.mark_watched((3, -1));
         watch.note((3, 5), EffectArrival::Incoming { unread: true });
         assert!(!watch.is_unwatched((3, 5)));
+    }
+
+    #[test]
+    fn a_message_marked_after_it_was_noted_is_not_evicted_by_its_stale_queue_entry() {
+        let mut watch = EffectWatch::default();
+        watch.note((1, 0), EffectArrival::SentHere);
+        for id in 1..MAX_HELD as i64 {
+            watch.note((2, id), EffectArrival::SentHere);
+        }
+        // The first message plays: it is now the newest entry.
+        watch.mark_watched((1, 0));
+        watch.note((2, -1), EffectArrival::SentHere);
+        // The oldest live message goes, not the one that just played.
+        assert!(!watch.is_unwatched((2, 1)));
+        watch.note((1, 0), EffectArrival::Incoming { unread: true });
+        assert!(!watch.is_unwatched((1, 0)));
     }
 }

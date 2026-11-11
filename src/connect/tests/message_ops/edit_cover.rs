@@ -111,7 +111,7 @@ fn a_replacement_video_goes_with_the_probe_taken_when_it_was_staged() {
         spoiler: false,
         cover: None,
         video_extras: Default::default(),
-        probe: ReplacementProbe::Probing,
+        probe: ReplacementProbe::for_kind(EditMediaKind::Video),
     });
     let sent = recorder.snapshot().len();
     assert!(driver.edit_snapshot(&edit, "clip").is_err());

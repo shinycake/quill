@@ -322,7 +322,7 @@ impl QuillApp {
             scroll_top,
             viewport,
             content as f32,
-            panel.search_mode() && !panel.search_next_offset.is_empty(),
+            !panel.search_next_offset().is_empty(),
             panel.search_loading(),
         ) {
             return;

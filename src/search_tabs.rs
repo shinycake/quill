@@ -9,7 +9,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::lang::{keys, tr};
-use crate::search_filters::{GlobalSearchFilters, SearchChatType, SearchMediaKind, SearchScope};
+use crate::search_filters::GlobalSearchFilters;
 use crate::state::SharedMediaTab;
 
 /// One tab of the strip.
@@ -74,58 +74,13 @@ impl SearchTab {
 
     /// The tab a filter set is on.
     pub fn of(filters: &GlobalSearchFilters) -> Self {
-        match filters.scope {
-            SearchScope::PublicPosts => return Self::Posts,
-            SearchScope::Apps => return Self::Apps,
-            SearchScope::Downloads => return Self::Downloads,
-            SearchScope::MyMessages => {}
-        }
-        match filters.media {
-            SearchMediaKind::Photos => Self::Photos,
-            SearchMediaKind::Videos => Self::Videos,
-            SearchMediaKind::Links => Self::Links,
-            SearchMediaKind::Files => Self::Files,
-            SearchMediaKind::Music => Self::Music,
-            SearchMediaKind::Voice => Self::Voice,
-            // The in-chat "Media" join is not a global tab; it reads as
-            // chats.
-            SearchMediaKind::All | SearchMediaKind::Media => {
-                if filters.chat_type == SearchChatType::Channels {
-                    Self::Channels
-                } else {
-                    Self::Chats
-                }
-            }
-        }
+        filters.tab()
     }
 
     /// `filters` moved onto this tab. The date window and the archive
     /// toggle carry over; the chat type only where the tab lists chats.
-    pub fn apply(self, mut filters: GlobalSearchFilters) -> GlobalSearchFilters {
-        filters.scope = match self {
-            Self::Posts => SearchScope::PublicPosts,
-            Self::Apps => SearchScope::Apps,
-            Self::Downloads => SearchScope::Downloads,
-            _ => SearchScope::MyMessages,
-        };
-        filters.media = match self {
-            Self::Photos => SearchMediaKind::Photos,
-            Self::Videos => SearchMediaKind::Videos,
-            Self::Links => SearchMediaKind::Links,
-            Self::Files => SearchMediaKind::Files,
-            Self::Music => SearchMediaKind::Music,
-            Self::Voice => SearchMediaKind::Voice,
-            _ => SearchMediaKind::All,
-        };
-        match self {
-            Self::Channels => filters.chat_type = SearchChatType::Channels,
-            // Leaving the Channels tab must not leave its chat type behind.
-            Self::Chats if filters.chat_type == SearchChatType::Channels => {
-                filters.chat_type = SearchChatType::All;
-            }
-            _ => {}
-        }
-        filters
+    pub fn apply(self, filters: GlobalSearchFilters) -> GlobalSearchFilters {
+        filters.on_tab(self)
     }
 
     /// The media tab whose rows and glyph the results reuse.
@@ -243,7 +198,7 @@ mod tests {
         assert_eq!(SearchTab::strip(true), SearchTab::ALL.to_vec());
         assert_eq!(SearchTab::strip(false).len(), 10);
         let filters = SearchTab::Downloads.apply(GlobalSearchFilters::default());
-        assert_eq!(filters.scope, SearchScope::Downloads);
+        assert_eq!(filters.scope(), SearchScope::Downloads);
         assert!(!SearchTab::Downloads.searches_messages());
     }
 
@@ -274,7 +229,7 @@ mod tests {
     fn media_tabs_map_to_search_filters() {
         let constructor = |tab: SearchTab| {
             tab.apply(GlobalSearchFilters::default())
-                .media
+                .media()
                 .constructor()
         };
         assert_eq!(
@@ -312,37 +267,49 @@ mod tests {
                 continue;
             };
             let filters = tab.apply(GlobalSearchFilters::default());
-            assert_eq!(filters.media.constructor(), shared.filter_constructor());
+            assert_eq!(filters.media().constructor(), shared.filter_constructor());
         }
     }
 
     #[test]
     fn channels_tab_is_the_channel_chat_type() {
         let filters = SearchTab::Channels.apply(GlobalSearchFilters::default());
-        assert_eq!(filters.chat_type, SearchChatType::Channels);
-        assert_eq!(filters.scope, SearchScope::MyMessages);
+        assert_eq!(filters.chat_type(), SearchChatType::Channels);
+        assert_eq!(filters.scope(), SearchScope::MyMessages);
         let back = SearchTab::Chats.apply(filters);
-        assert_eq!(back.chat_type, SearchChatType::All);
+        assert_eq!(back.chat_type(), SearchChatType::All);
         assert_eq!(SearchTab::of(&back), SearchTab::Chats);
     }
 
     #[test]
     fn date_window_and_archive_survive_a_tab_change() {
-        let filters = GlobalSearchFilters {
-            date: SearchDateRange::Month,
-            archived: true,
-            chat_type: SearchChatType::Groups,
-            ..Default::default()
-        };
+        let mut filters = GlobalSearchFilters::default().with_chat_type(SearchChatType::Groups);
+        filters.date = SearchDateRange::Month;
+        filters.archived = true;
         let next = SearchTab::Files.apply(filters);
         assert_eq!(next.date, SearchDateRange::Month);
         assert!(next.archived);
-        assert_eq!(next.media, SearchMediaKind::Files);
+        assert_eq!(next.media(), SearchMediaKind::Files);
         // The Groups chat type stays so the Chats tab comes back as it was.
         assert_eq!(
-            SearchTab::Chats.apply(next).chat_type,
+            SearchTab::Chats.apply(next).chat_type(),
             SearchChatType::Groups
         );
+    }
+
+    #[test]
+    fn a_scope_and_a_media_kind_cannot_disagree() {
+        let posts = GlobalSearchFilters::default()
+            .on_tab(SearchTab::Photos)
+            .in_scope(SearchScope::PublicPosts);
+        assert_eq!(posts.scope(), SearchScope::PublicPosts);
+        assert_eq!(posts.media(), SearchMediaKind::All);
+        // The Channels chip is the Channels tab, and any other chip leaves it.
+        let channels = GlobalSearchFilters::default().with_chat_type(SearchChatType::Channels);
+        assert_eq!(channels.tab(), SearchTab::Channels);
+        let groups = channels.with_chat_type(SearchChatType::Groups);
+        assert_eq!(groups.tab(), SearchTab::Chats);
+        assert_eq!(groups.chat_type(), SearchChatType::Groups);
     }
 
     #[test]

@@ -246,9 +246,8 @@ impl QuillApp {
         // Slice G2: the event-log section's search box (created lazily;
         // its value syncs to the panel chat's stored query). The per-admin
         // filter lives in the session and follows the chat.
-        self.ensure_event_log_search(window, cx);
         if let Some(chat_id) = invite_panel_chat_id {
-            self.show_event_log_query(chat_id, window, cx);
+            self.ensure_event_log_search(chat_id, window, cx);
         }
         self.inline_members_opened(target, window, cx);
         cx.notify();

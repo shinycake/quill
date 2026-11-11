@@ -554,9 +554,15 @@ pub(crate) fn until(mut done: impl FnMut() -> bool) {
 pub(crate) struct ToggleSender {
     pub(crate) sent: Mutex<Vec<String>>,
     pub(crate) refuse: std::sync::atomic::AtomicBool,
+    /// Refuses every send once this many have been recorded.
+    pub(crate) refuse_after: Mutex<Option<usize>>,
 }
 
 impl ToggleSender {
+    pub(crate) fn refuse_after(&self, recorded: usize) {
+        *self.refuse_after.lock().expect("toggle sender") = Some(recorded);
+    }
+
     pub(crate) fn refuse(&self, on: bool) {
         self.refuse.store(on, std::sync::atomic::Ordering::SeqCst);
     }
@@ -571,10 +577,16 @@ impl JsonSender for Arc<ToggleSender> {
         if self.refuse.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(ConnectSendError::Native);
         }
-        self.sent
+        let mut sent = self.sent.lock().expect("toggle sender");
+        if self
+            .refuse_after
             .lock()
             .expect("toggle sender")
-            .push(request.to_string());
+            .is_some_and(|limit| sent.len() >= limit)
+        {
+            return Err(ConnectSendError::Native);
+        }
+        sent.push(request.to_string());
         Ok(())
     }
 }
