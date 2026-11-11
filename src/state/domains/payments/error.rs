@@ -67,10 +67,16 @@ impl Session {
                         Some(format!("Receipt failed: {}", error_reason(err)));
                 }
             }
-            Some(RequestPurpose::GetMarketplaceGift | RequestPurpose::SendMarketplaceGift) => {
+            Some(
+                purpose
+                @ (RequestPurpose::GetMarketplaceGift | RequestPurpose::SendMarketplaceGift),
+            ) => {
                 if let Some(gift) = self.payments.marketplace_gift.as_mut() {
-                    gift.loading = false;
-                    gift.sending = false;
+                    if purpose == RequestPurpose::GetMarketplaceGift {
+                        gift.loading_ended();
+                    } else {
+                        gift.sending_ended();
+                    }
                     gift.note = Some(format!("Gift request failed: {}", error_reason(err)));
                 }
             }

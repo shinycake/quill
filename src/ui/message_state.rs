@@ -8,23 +8,13 @@ use quill::ids::MessageId;
 use std::collections::HashSet;
 
 pub(crate) struct MessageUi {
-    /// M1: right-click context menu target + window position.
-    pub(super) menu: Option<MessageMenuState>,
-    /// Message text selected when the message menu opened, if the
-    /// selection lies in that message (Quote & Reply, Copy Selected Text).
-    pub(super) menu_selection: Option<String>,
-    /// Which occurrence of `menu_selection` in the message the selection
-    /// started at (0 for the first); where Quote & Reply points.
-    pub(super) menu_selection_nth: usize,
+    /// M1: right-click context menu target + window position, and what
+    /// it was opened over (`message_menu_state`).
+    pub(super) menu: super::message_menu_state::MessageMenu,
     /// Page, report and sticker-set dialogs of the message menu's extras.
     pub(super) menu_ui: super::message_menu_ui::MessageMenuUi,
-    /// The link the open message menu was opened over.
-    pub(super) menu_link: Option<quill::text::LinkTarget>,
     /// The link under the latest right-press, and where it was pressed.
     pub(super) right_clicked_link: Option<(Point<Pixels>, quill::text::LinkTarget)>,
-    /// The checklist task or poll option the open message menu was opened
-    /// over (the whole message when none).
-    pub(super) menu_item: quill::composer::ReplyItem,
     /// The task or option under the latest right-press, and where.
     pub(super) right_clicked_item: Option<(Point<Pixels>, quill::composer::ReplyItem)>,
     /// The "Open this link?" box (`DialogKind::OpenLink`).
@@ -43,9 +33,6 @@ pub(crate) struct MessageUi {
     pub(super) history_focus: FocusHandle,
     /// Screen-reader focus among the history's messages (`history_a11y`).
     pub(super) a11y: super::history_a11y::HistoryA11y,
-    /// tdesktop hover React / Unigram ReactionButton picker (emoji only).
-    /// The message menu's reaction strip is expanded to every reaction.
-    pub(super) reactions_expanded: bool,
     /// M1: swipe-to-reply press origin (chat, message, press x).
     pub(super) swipe_reply_start: Option<(ChatId, MessageId, Pixels)>,
     /// Phase 4.1: revealed text-entity spoilers, keyed by
@@ -88,13 +75,9 @@ pub(crate) struct MessageUi {
 impl MessageUi {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         Self {
-            menu: None,
-            menu_selection: None,
-            menu_selection_nth: 0,
+            menu: Default::default(),
             menu_ui: super::message_menu_ui::MessageMenuUi::new(window, cx),
-            menu_link: None,
             right_clicked_link: None,
-            menu_item: quill::composer::ReplyItem::Message,
             right_clicked_item: None,
             open_link_confirm: None,
             pending_link: None,
@@ -102,7 +85,6 @@ impl MessageUi {
             selection_drag_loop: false,
             history_focus: cx.focus_handle(),
             a11y: Default::default(),
-            reactions_expanded: false,
             swipe_reply_start: None,
             spoiler_revealed: HashSet::new(),
             dismissed_keyboards: std::collections::HashSet::new(),

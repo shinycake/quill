@@ -98,6 +98,21 @@ pub enum GiftPurchaseResult {
     PriceIncreased(Option<GiftPrice>),
 }
 
+/// Where a resale purchase is: the quote on its way, a quote to review, the
+/// purchase on its way, or done. One value; each request's answer or error
+/// leaves its own stage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GiftStage {
+    /// `getUpgradedGift` is out.
+    Loading,
+    /// Nothing is out: the quote (if any) can be bought, or loaded again.
+    Ready,
+    /// `sendResoldGift` is out.
+    Sending,
+    /// The purchase went through.
+    Completed,
+}
+
 #[derive(Debug, Clone)]
 pub struct GiftPurchase {
     pub chat_id: ChatId,
@@ -106,8 +121,40 @@ pub struct GiftPurchase {
     pub requested_name: String,
     pub quote: Option<GiftQuote>,
     pub price: Option<GiftPrice>,
-    pub loading: bool,
-    pub sending: bool,
-    pub completed: bool,
+    pub stage: GiftStage,
     pub note: Option<String>,
+}
+
+impl GiftPurchase {
+    pub fn is_loading(&self) -> bool {
+        self.stage == GiftStage::Loading
+    }
+
+    pub fn is_sending(&self) -> bool {
+        self.stage == GiftStage::Sending
+    }
+
+    pub fn is_completed(&self) -> bool {
+        self.stage == GiftStage::Completed
+    }
+
+    /// A request of this purchase is out.
+    pub fn is_busy(&self) -> bool {
+        matches!(self.stage, GiftStage::Loading | GiftStage::Sending)
+    }
+
+    /// The quote request failed or answered: leave `Loading`.
+    pub fn loading_ended(&mut self) {
+        if self.stage == GiftStage::Loading {
+            self.stage = GiftStage::Ready;
+        }
+    }
+
+    /// The purchase request failed or answered without success: leave
+    /// `Sending`.
+    pub fn sending_ended(&mut self) {
+        if self.stage == GiftStage::Sending {
+            self.stage = GiftStage::Ready;
+        }
+    }
 }

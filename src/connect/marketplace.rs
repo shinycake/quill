@@ -1,6 +1,6 @@
 use super::*;
 use crate::ids::{ChatId, RequestId};
-use crate::marketplace::{GiftPrice, GiftPurchase, valid_gift_name};
+use crate::marketplace::{GiftPrice, GiftPurchase, GiftStage, valid_gift_name};
 use crate::state::RequestPurpose;
 use crate::telegram::envelope::{ChatKind, MessageSender};
 
@@ -44,9 +44,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             requested_name: name.into(),
             quote: None,
             price: None,
-            loading: true,
-            sending: false,
-            completed: false,
+            stage: GiftStage::Loading,
             note: None,
         });
         self.ask_gift_text_limit();
@@ -60,7 +58,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if result.is_err()
             && let Some(gift) = self.session.payments.marketplace_gift.as_mut()
         {
-            gift.loading = false;
+            gift.loading_ended();
             gift.note = Some("Could not load the gift. Retry.".into());
         }
         result
@@ -121,9 +119,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .marketplace_gift
             .as_ref()
             .ok_or(ConnectSendError::InvalidRequest)?;
-        if gift.loading
-            || gift.sending
-            || gift.completed
+        if gift.stage != GiftStage::Ready
             || gift.price != Some(price)
             || !gift.quote.as_ref().is_some_and(|q| q.allows(price))
         {
@@ -145,7 +141,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             ),
         );
         if let Some(gift) = self.session.payments.marketplace_gift.as_mut() {
-            gift.sending = result.is_ok();
+            if result.is_ok() {
+                gift.stage = GiftStage::Sending;
+            }
             gift.note = if result.is_ok() {
                 Some("Sending the gift…".into())
             } else {

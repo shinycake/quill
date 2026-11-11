@@ -228,8 +228,8 @@ fn a_reply_started_in_a_chat_window_stays_in_that_window(cx: &mut TestAppContext
     h.settle(cx);
     let (window_menu, main_menu) = h.app.read_with(cx, |app, _| {
         let slot = app.windows.slot_for(OTHER).expect("slot");
-        let window_menu = slot.borrow().message_ui.menu;
-        (window_menu, app.message_ui.menu)
+        let window_menu = slot.borrow().message_ui.menu.at();
+        (window_menu, app.message_ui.menu.at())
     });
     assert_eq!(
         window_menu.map(|menu| (menu.chat_id, menu.message_id)),

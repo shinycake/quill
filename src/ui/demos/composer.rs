@@ -111,11 +111,13 @@ impl QuillApp {
             self.pickers.media_panel.tab = crate::ui::media_panel::PanelTab::Emoji;
         }
         if demo_history_extra("menu") {
-            self.message_ui.menu = Some(crate::ui::menu_states::MessageMenuState {
-                chat_id: ChatId(11),
-                message_id: sticker,
-                position: point(px(340.), px(380.)),
-            });
+            self.message_ui
+                .menu
+                .open_at(crate::ui::menu_states::MessageMenuState {
+                    chat_id: ChatId(11),
+                    message_id: sticker,
+                    position: point(px(340.), px(380.)),
+                });
         }
         if demo_history_extra("select") {
             self.toggle_forward_select(ChatId(11), sticker, false, cx);

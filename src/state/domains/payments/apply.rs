@@ -130,7 +130,7 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetMarketplaceGift)
                     && let Some(gift) = self.payments.marketplace_gift.as_mut()
                 {
-                    gift.loading = false;
+                    gift.loading_ended();
                     if let Some(quote) = quote.filter(|q| q.name == gift.requested_name) {
                         gift.price = quote.stars.or(quote.ton);
                         gift.note = gift
@@ -158,11 +158,11 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::SendMarketplaceGift)
                     && let Some(gift) = self.payments.marketplace_gift.as_mut()
                 {
-                    gift.sending = false;
+                    gift.sending_ended();
                     match result {
                         crate::marketplace::GiftPurchaseResult::Sent(_) => {
                             // The receipt id is intentionally empty for gifts sent to others.
-                            gift.completed = true;
+                            gift.stage = crate::marketplace::GiftStage::Completed;
                             gift.note = Some("Gift sent successfully.".into());
                             gift.price = None;
                         }

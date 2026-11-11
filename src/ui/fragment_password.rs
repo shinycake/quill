@@ -7,7 +7,7 @@
 //!
 //! The password lives only in the masked field. Callers read it once on
 //! Submit, hand it to the one request and empty the field at once
-//! (`set_value` also drops the undo history); [`keep_password_field`]
+//! (`set_value` also drops the undo history); [`PasswordField::keep`]
 //! empties it whenever the box is not on screen.
 #![deny(clippy::indexing_slicing)]
 
@@ -210,25 +210,51 @@ pub(super) fn export_error_text(error: &ExportError) -> SharedString {
     }
 }
 
-/// Per frame: the field takes the keyboard when the idle box opens and
-/// after each answer (tdesktop `PasscodeBox` focuses the field), and is
-/// emptied whenever the box is not on screen.
-pub(super) fn keep_password_field(
-    input: &Entity<InputState>,
-    focused: &mut bool,
-    showing: bool,
-    idle: bool,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    if idle && !*focused {
-        *focused = true;
-        input.update(cx, |input, cx| input.focus(window, cx));
-    } else if !idle {
-        *focused = false;
+/// Whether a password box's field has taken the keyboard since the box
+/// last opened.
+enum Keyboard {
+    Away,
+    Taken,
+}
+
+/// A password box's input and its keyboard stage, one value. It reads as
+/// the input (`Deref`).
+pub(super) struct PasswordField {
+    input: Entity<InputState>,
+    keyboard: Keyboard,
+}
+
+impl std::ops::Deref for PasswordField {
+    type Target = Entity<InputState>;
+    fn deref(&self) -> &Entity<InputState> {
+        &self.input
     }
-    if !showing && !input.read(cx).value().is_empty() {
-        input.update(cx, |input, cx| input.set_value("", window, cx));
+}
+
+impl PasswordField {
+    pub(super) fn new(input: Entity<InputState>) -> Self {
+        Self {
+            input,
+            keyboard: Keyboard::Away,
+        }
+    }
+
+    /// Per frame: the field takes the keyboard when the idle box opens and
+    /// after each answer (tdesktop `PasscodeBox` focuses the field), and is
+    /// emptied whenever the box is not on screen.
+    pub(super) fn keep(&mut self, showing: bool, idle: bool, window: &mut Window, cx: &mut App) {
+        match (idle, &self.keyboard) {
+            (true, Keyboard::Away) => {
+                self.keyboard = Keyboard::Taken;
+                self.input.update(cx, |input, cx| input.focus(window, cx));
+            }
+            (false, _) => self.keyboard = Keyboard::Away,
+            (true, Keyboard::Taken) => {}
+        }
+        if !showing && !self.input.read(cx).value().is_empty() {
+            self.input
+                .update(cx, |input, cx| input.set_value("", window, cx));
+        }
     }
 }
 

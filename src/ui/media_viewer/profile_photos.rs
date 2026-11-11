@@ -20,10 +20,7 @@ pub(in crate::ui) struct ProfilePhotoFacts {
 impl QuillApp {
     /// The gallery the viewer pages over and its entry on screen.
     fn viewer_gallery_photo(&self) -> Option<(PhotoGallery, GalleryPhoto)> {
-        if self.viewer.state.source() != ViewerSource::Profile {
-            return None;
-        }
-        let owner = self.viewer.extra.profile_owner?;
+        let owner = self.viewer.state.source().profile_owner()?;
         let item = self.viewer.state.current()?;
         let gallery = self.session()?.photo_gallery(owner)?;
         let photo = gallery
@@ -104,7 +101,7 @@ impl QuillApp {
         let Some((_, photo)) = self.viewer_gallery_photo() else {
             return;
         };
-        let Some(PhotoOwner::Chat(chat_id)) = self.viewer.extra.profile_owner else {
+        let Some(PhotoOwner::Chat(chat_id)) = self.viewer.state.source().profile_owner() else {
             return;
         };
         if let (Some(message_id), Some(live)) = (photo.message_id, self.live.as_mut()) {

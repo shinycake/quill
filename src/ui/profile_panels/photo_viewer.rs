@@ -6,7 +6,7 @@
 use super::*;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
-use quill::media_viewer::{MediaViewer, MediaViewerItem, ViewerSource, profile_photo_items};
+use quill::media_viewer::{MediaViewer, MediaViewerItem, profile_photo_items};
 use quill::state::{
     ChatPhotosFetch, InfoPanelTarget, PhotoGallery, PhotoOwner, ProfilePhotosFetch,
 };
@@ -193,8 +193,7 @@ impl QuillApp {
             return;
         }
         self.dialogs.pending_profile_gallery = None;
-        self.viewer.state = MediaViewer::open_profile(items, 0, gallery.total);
-        self.viewer.extra.profile_owner = Some(owner);
+        self.viewer.state = MediaViewer::open_profile(owner, items, 0, gallery.total);
         self.viewer.open_gen += 1;
         self.viewer_note_activity(cx);
         self.reset_viewer_item_state(cx);
@@ -204,10 +203,7 @@ impl QuillApp {
     /// Keep an open profile photo viewer in step with its gallery: append
     /// the pages that arrived, and ask for the next one near the end.
     pub(in crate::ui) fn sync_profile_photo_viewer(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.viewer.state.source() != ViewerSource::Profile {
-            return false;
-        }
-        let Some(owner) = self.viewer.extra.profile_owner else {
+        let Some(owner) = self.viewer.state.source().profile_owner() else {
             return false;
         };
         let gallery = self.session().and_then(|s| s.photo_gallery(owner));
@@ -240,7 +236,7 @@ impl QuillApp {
         let Some(item) = self.viewer.state.current().cloned() else {
             return;
         };
-        let Some(owner) = self.viewer.extra.profile_owner else {
+        let Some(owner) = self.viewer.state.source().profile_owner() else {
             return;
         };
         let Some(live) = self.live.as_mut() else {
@@ -273,7 +269,7 @@ impl QuillApp {
     /// Open the viewer's "Report" for the photo on screen: the viewer
     /// closes first so the reason list is not hidden behind it.
     pub(in crate::ui) fn report_viewer_profile_photo(&mut self, cx: &mut Context<Self>) {
-        let Some(owner) = self.viewer.extra.profile_owner else {
+        let Some(owner) = self.viewer.state.source().profile_owner() else {
             return;
         };
         let Some(file_id) = self

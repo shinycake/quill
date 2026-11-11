@@ -243,7 +243,7 @@ fn a_row_opens_the_set_box(cx: &mut TestAppContext) {
     let (app, _shell, mut vcx) = open_demo(cx);
     let vcx = &mut vcx;
     click(vcx, "manager-open-103");
-    assert!(app.read_with(vcx, |app, _| app.message_ui.menu_ui.sticker_set_open));
+    assert!(app.read_with(vcx, |app, _| app.message_ui.menu_ui.sticker_set_open()));
 }
 
 #[gpui_kit::test]

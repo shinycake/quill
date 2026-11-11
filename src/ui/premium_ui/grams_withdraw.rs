@@ -11,7 +11,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
-use crate::ui::fragment_password::{PasswordBox, SecurityCheck, keep_password_field};
+use crate::ui::fragment_password::{PasswordBox, SecurityCheck};
 use crate::ui::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
@@ -162,14 +162,10 @@ impl QuillApp {
             }
             None => (None, false, false, false),
         };
-        keep_password_field(
-            &self.screen.payments.grams_withdraw_password,
-            &mut self.screen.payments.grams_withdraw_password_focused,
-            showing,
-            idle,
-            window,
-            cx,
-        );
+        self.screen
+            .payments
+            .grams_withdraw_password
+            .keep(showing, idle, window, cx);
         if let Some(url) = url {
             self.open_fragment_url(&url, cx);
             cx.notify();

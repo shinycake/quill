@@ -114,7 +114,7 @@ impl QuillApp {
             .iter()
             .chain(std::iter::once(&item.download_file_id))
             .any(|id| file_is_downloading(*id, &files, &downloading));
-        let profile_view = self.viewer.state.source() == ViewerSource::Profile;
+        let profile_view = self.viewer.state.source().is_profile();
         let kind_label = if ttl.is_some() {
             quill::media_viewer::disappearing_label(item.kind)
         } else {

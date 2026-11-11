@@ -157,8 +157,9 @@ pub(crate) struct HistoryUi {
     /// clock that only moves when told to in tests.
     pub(super) vanish_clock: std::cell::Cell<super::vanish::VanishClock>,
     /// The open chat whose live-location countdowns are being refreshed
-    /// (`Some` exactly while that task runs; see `live_location_tick`).
-    pub(super) live_location_tick_chat: Option<ChatId>,
+    /// The chat and its refresh task, one value: dropping it (a screen
+    /// change drops `HistoryUi`) stops the task (see `live_location_tick`).
+    pub(super) live_location_tick: Option<(ChatId, Task<()>)>,
     /// The history's width class at the last paint (tdesktop
     /// `Adaptive::ChatLayout`, `chat_wide_ui`).
     pub(super) chat_layout: std::rc::Rc<std::cell::Cell<quill::chat_wide::ChatLayout>>,
@@ -263,7 +264,7 @@ impl HistoryUi {
             vanish_now: Default::default(),
             vanish_conflicts: Default::default(),
             vanish_clock: Default::default(),
-            live_location_tick_chat: None,
+            live_location_tick: None,
             chat_layout: Default::default(),
             width: Default::default(),
             width_probed: Default::default(),

@@ -16,7 +16,6 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::fragment_password::keep_password_field;
 use super::gift_manage_ui::{hint, stars};
 use super::gift_transfer_view::{StageView, stage_view};
 use super::shell::{DialogKind, QuillShell};
@@ -269,14 +268,10 @@ impl QuillApp {
             }
             None => (None, None, false, false),
         };
-        keep_password_field(
-            &self.screen.payments.gift_export_password,
-            &mut self.screen.payments.gift_export_password_focused,
-            in_password,
-            idle_password,
-            window,
-            cx,
-        );
+        self.screen
+            .payments
+            .gift_export_password
+            .keep(in_password, idle_password, window, cx);
         if let Some(url) = url {
             self.open_fragment_url(&url, cx);
             self.clear_transfer_inputs(window, cx);

@@ -52,7 +52,7 @@ fn message_menu_closes_when_its_message_is_removed(cx: &mut TestAppContext) {
         (open, MessageId(id))
     });
     app.update(vcx, |app, cx| {
-        app.message_ui.menu = Some(MessageMenuState {
+        app.message_ui.menu.open_at(MessageMenuState {
             chat_id: chat,
             message_id: message,
             position: point(px(400.), px(300.)),
@@ -60,7 +60,7 @@ fn message_menu_closes_when_its_message_is_removed(cx: &mut TestAppContext) {
         cx.notify();
     });
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.message_ui.menu.is_some()));
+    assert!(app.read_with(vcx, |app, _| app.message_ui.menu.is_open()));
     app.update(vcx, |app, cx| {
         if let Some(history) = app.session_mut().and_then(|s| s.histories.get_mut(&chat.0)) {
             history.messages.remove(&message.0);
@@ -68,7 +68,7 @@ fn message_menu_closes_when_its_message_is_removed(cx: &mut TestAppContext) {
         cx.notify();
     });
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.message_ui.menu.is_none()));
+    assert!(app.read_with(vcx, |app, _| !app.message_ui.menu.is_open()));
 }
 
 #[gpui_kit::test]

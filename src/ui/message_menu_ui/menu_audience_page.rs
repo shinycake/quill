@@ -141,7 +141,7 @@ impl QuillApp {
         let mut ix = 0u64;
         // Tabs per reaction (tdesktop `Ui::ReactionsList` / the "All" tab
         // and one tab per reaction when there is more than one).
-        let tab = self.message_ui.menu_ui.audience_tab.clone();
+        let tab = self.message_ui.menu.audience_tab();
         let chips: Vec<(ReactionType, i32)> = message
             .reaction_chips()
             .into_iter()

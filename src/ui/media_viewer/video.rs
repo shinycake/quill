@@ -293,6 +293,8 @@ impl QuillApp {
     /// Called on viewer close/step and when any other player starts.
     pub(in crate::ui) fn stop_viewer_video(&mut self) {
         self.viewer.player = None;
+        // A pause the window made belonged to the clip that is gone.
+        self.viewer.extra.loop_pause = super::LoopPause::Free;
         self.viewer.gif = None;
         self.viewer.video = None;
         self.viewer.video_path = None;

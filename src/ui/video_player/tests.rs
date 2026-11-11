@@ -591,8 +591,7 @@ mod viewer {
     /// the wall clock, so on a busy machine they can fade out before a
     /// frame is drawn, and faded controls are not drawn at all.
     pub(super) fn wake_controls(app: &mut QuillApp) {
-        app.viewer.last_activity = std::time::Instant::now();
-        app.viewer.controls_hidden = false;
+        app.viewer.chrome.show();
     }
 
     pub(super) fn settle(vcx: &mut VisualTestContext) {

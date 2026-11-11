@@ -57,9 +57,7 @@ impl QuillApp {
                 requested_name: quote.name.clone(),
                 price: quote.stars,
                 quote: Some(quote),
-                loading: false,
-                sending: false,
-                completed: false,
+                stage: quill::marketplace::GiftStage::Ready,
                 note: Some("Injected quote — no purchase is sent in this demo.".into()),
             });
         }
@@ -71,7 +69,7 @@ impl QuillApp {
             .update(cx, |input, cx| {
                 input.set_value("A little gift for you 🎁", window, cx)
             });
-        self.payments.marketplace_open = true;
+        self.payments.marketplace.open_for(ChatId(11), false);
     }
 
     pub(crate) fn demo_ready_sessions(&mut self, _window: &mut Window, cx: &mut Context<Self>) {

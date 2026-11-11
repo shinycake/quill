@@ -249,11 +249,11 @@ fn the_sticker_set_box_closes_in_the_window_that_showed_it(cx: &mut TestAppConte
     app.update(cx, |app, cx| {
         app.set_window_scope(None);
         app.in_window_scope(Some(OTHER), cx, |app, _| {
-            app.message_ui.menu_ui.sticker_set_open = true;
+            app.message_ui.menu_ui.show_sticker_set();
         });
         app.close_sticker_set_dialog(cx);
         let open = app.in_window_scope(Some(OTHER), cx, |app, _| {
-            app.message_ui.menu_ui.sticker_set_open
+            app.message_ui.menu_ui.sticker_set_open()
         });
         assert_eq!(open, Some(false));
     });

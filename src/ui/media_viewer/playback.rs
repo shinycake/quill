@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::ui::status_note::StatusNote;
+use crate::ui::viewer_state::SessionTick;
 use quill::lang::{keys, tr, tr_with};
 use std::time::Instant;
 
@@ -161,10 +162,10 @@ impl QuillApp {
         }
         let playing = self.viewer_video_playing();
         if !active && playing {
-            self.viewer.extra.inactive_paused = true;
+            self.viewer.extra.loop_pause = LoopPause::HeldByWindow;
             self.pause_viewer_video(cx);
-        } else if active && self.viewer.extra.inactive_paused {
-            self.viewer.extra.inactive_paused = false;
+        } else if active && self.viewer.extra.loop_pause == LoopPause::HeldByWindow {
+            self.viewer.extra.loop_pause = LoopPause::Free;
             self.resume_viewer_video(cx);
         }
     }
@@ -522,11 +523,10 @@ impl QuillApp {
     /// controls redraw themselves (`video_player`), so this never redraws
     /// the window on its own.
     pub(in crate::ui) fn spawn_viewer_session_tick(&mut self, cx: &mut Context<Self>) {
-        if self.viewer.session_tick {
+        if matches!(self.viewer.session_tick, SessionTick::Running { .. }) {
             return;
         }
-        self.viewer.session_tick = true;
-        self.spawn_scoped(cx, async move |this, cx| {
+        let task = self.spawn_scoped(cx, async move |this, cx| {
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(250))
@@ -569,10 +569,10 @@ impl QuillApp {
                 }
             }
             let _ = this.update(cx, |this, _| {
-                this.viewer.session_tick = false;
+                this.viewer.session_tick = SessionTick::Off;
             });
-        })
-        .detach();
+        });
+        self.viewer.session_tick = SessionTick::Running { _task: task };
     }
 
     /// Scroll-zoom the viewer visual around the pointer (`anchor`, px from

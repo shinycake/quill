@@ -277,7 +277,7 @@ impl QuillApp {
             // progress of the download it waits for; the message menu draws
             // there too and shows the reply count.
             PolledAction::Conversation
-                if self.viewer.state.is_open() || self.message_ui.menu.is_some() =>
+                if self.viewer.state.is_open() || self.message_ui.menu.is_open() =>
             {
                 cx.notify()
             }
@@ -551,9 +551,7 @@ impl QuillApp {
     /// restart fails the status line says so and the poll loop (which
     /// breaks on `live.is_none()`) stops.
     pub(super) fn restart_live_connection(&mut self, cx: &mut Context<Self>) {
-        self.payments.marketplace_open = false;
-        self.payments.marketplace_error = None;
-        self.payments.marketplace_private = true;
+        self.payments.marketplace.forget();
         self.close_screen_client(cx);
         // D2 fix-up: the warning promises "Downloaded media will be
         // erased from this device" — TDLib destroyed its own data, but

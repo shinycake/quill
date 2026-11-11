@@ -62,7 +62,7 @@ pub(crate) struct ViewerUi {
     pub(super) video_layer: Option<Entity<super::media_viewer::ViewerVideoLayer>>,
     /// Guard for the viewer's media-session tick (media keys and the OS
     /// Now Playing widget, 250 ms).
-    pub(super) session_tick: bool,
+    pub(super) session_tick: SessionTick,
     /// MED1: photo rotation and mirror flips (photos only; reset on
     /// open/step). Rendered from `viewer_rotated`.
     pub(super) orientation: quill::media_viewer::ViewerOrientation,
@@ -70,12 +70,8 @@ pub(crate) struct ViewerUi {
     /// `(path, orientation code)`; decoded eagerly by Rotate/Flip so the
     /// overlay render stays allocation-free.
     pub(super) rotated: Option<(PathBuf, u8, super::owned_image::OwnedImage)>,
-    /// The orientation a background decode is producing; it replaces
-    /// `orientation` when the decode lands.
-    pub(super) reorient_pending: Option<quill::media_viewer::ViewerOrientation>,
-    /// Bumped by every Rotate/Flip press and when the viewer moves on, so
-    /// a late decode is dropped.
-    pub(super) reorient_gen: u64,
+    /// The Rotate/Flip decode that is running, if any (`Reorient`).
+    pub(super) reorient: Reorient,
     /// HDR rendition of the current picture file (macOS).
     pub(super) hdr: super::hdr_image::HdrViewer,
     /// The header's album Pin or Unpin, kept while the history is unchanged.
@@ -87,18 +83,9 @@ pub(crate) struct ViewerUi {
     /// Keyed by chat and message: a bare id matched a later clip of
     /// another chat with the same id.
     pub(super) pending_seek: Option<(ChatMessage, f64)>,
-    /// Last mouse movement over the viewer (controls auto-hide clock).
-    pub(super) last_activity: std::time::Instant,
-    /// Toolbar, arrows and caption are faded out (after the idle wait).
-    pub(super) controls_hidden: bool,
-    /// When they last faded out.
-    pub(super) controls_hidden_at: std::time::Instant,
-    /// Bumped on every show/hide flip; keys the 150 ms controls fade.
-    pub(super) controls_gen: u64,
-    /// The pointer rests on a control, so they must not auto-hide.
-    pub(super) over_controls: bool,
-    /// A hide-timer task is already waiting.
-    pub(super) hide_timer: bool,
+    /// The toolbar, arrows and caption: shown or faded out, and the idle
+    /// clock that fades them (`viewer_chrome`).
+    pub(super) chrome: super::viewer_chrome::ViewerChrome,
     /// The video controller's sliders, drag previews, scrubber hover and
     /// the Space-hold boost (`video_player::controls`).
     pub(super) controls: super::video_player::controls::VideoControlsState,
@@ -124,11 +111,29 @@ impl super::on_screen::Farewell for ViewerUi {
     }
 }
 
+/// The media-session tick: not running, or the task that is. Dropping the
+/// viewer (a screen change) drops the task with it.
+pub(super) enum SessionTick {
+    Off,
+    Running { _task: Task<()> },
+}
+
+/// The Rotate/Flip decode. `Decoding` holds the orientation the decode is
+/// producing (it replaces `orientation` when the decode lands) and its
+/// task: a newer press, a step or a close replaces or drops the stage, and
+/// dropping the task is what makes a late decode never land.
+pub(super) enum Reorient {
+    Idle,
+    Decoding {
+        target: quill::media_viewer::ViewerOrientation,
+        _task: Task<()>,
+    },
+}
+
 impl ViewerUi {
     /// Drop a rotate/flip decode that is still running.
     pub(super) fn cancel_reorient(&mut self) {
-        self.reorient_pending = None;
-        self.reorient_gen = self.reorient_gen.wrapping_add(1);
+        self.reorient = Reorient::Idle;
     }
 
     pub(super) fn new() -> Self {
@@ -149,20 +154,14 @@ impl ViewerUi {
             player: None,
             gif: None,
             video_layer: None,
-            session_tick: false,
+            session_tick: SessionTick::Off,
             orientation: Default::default(),
             rotated: None,
-            reorient_pending: None,
-            reorient_gen: 0,
+            reorient: Reorient::Idle,
             hdr: Default::default(),
             open_gen: 0,
             pending_seek: None,
-            last_activity: std::time::Instant::now(),
-            controls_hidden: false,
-            controls_hidden_at: std::time::Instant::now(),
-            controls_gen: 0,
-            over_controls: false,
-            hide_timer: false,
+            chrome: super::viewer_chrome::ViewerChrome::new(),
             album_pin: Default::default(),
             controls: Default::default(),
         }

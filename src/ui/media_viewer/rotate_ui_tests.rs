@@ -49,13 +49,12 @@ fn closing_the_viewer_lets_go_of_a_turned_photo(cx: &mut TestAppContext) {
     )])));
     let weak = Arc::downgrade(&turned);
     app.update_in(vcx, |app, _, cx| {
-        let generation = app.viewer.reorient_gen;
         let target = ViewerOrientation {
             turns: 1,
             ..Default::default()
         };
         let path = PathBuf::from("turned.jpg");
-        app.finish_viewer_reorient(generation, path, target, Some(turned), cx);
+        app.finish_viewer_reorient(path, target, Some(turned), cx);
     });
     settle(vcx);
     assert!(weak.upgrade().is_some(), "the open viewer keeps it");

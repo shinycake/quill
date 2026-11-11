@@ -196,7 +196,7 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
             .marketplace_gift
             .as_ref()
             .unwrap()
-            .completed
+            .is_completed()
     );
     assert!(
         driver
@@ -214,7 +214,7 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
             .marketplace_gift
             .as_ref()
             .unwrap()
-            .completed,
+            .is_completed(),
         "unsolicited success is ignored"
     );
     let retry = driver
@@ -231,7 +231,7 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
             .marketplace_gift
             .as_ref()
             .unwrap()
-            .sending
+            .is_sending()
     );
     assert!(
         !driver
@@ -240,7 +240,7 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
             .marketplace_gift
             .as_ref()
             .unwrap()
-            .completed
+            .is_completed()
     );
     let success = driver
         .buy_marketplace_gift(GiftPrice::Stars(40), "Hi", false)
@@ -260,7 +260,7 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
             .marketplace_gift
             .as_ref()
             .unwrap()
-            .completed,
+            .is_completed(),
         "receipt id is empty for gifts to other users"
     );
     assert!(
@@ -343,7 +343,7 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
             .marketplace_gift
             .as_ref()
             .unwrap()
-            .loading
+            .is_loading()
     );
     assert!(
         driver

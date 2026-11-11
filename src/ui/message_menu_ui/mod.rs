@@ -32,43 +32,63 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-/// Which page of the message menu is showing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(super) enum MessageMenuPage {
-    #[default]
-    Main,
-    /// A song's "Save to..." destinations.
-    SaveTo,
-    /// "Add to Sticker Set" / "Add to Emoji Set": the sets the user
-    /// created.
-    AddToSet { emoji: bool },
-    /// Who saw / reacted to the message.
-    Audience,
-    /// The page of the poll option the menu was opened over (tdesktop
-    /// `FillPollOptionPage`).
-    PollOption,
-}
+pub(super) use super::message_menu_state::MessageMenuPage;
 
 /// UI state of the message menu's extras.
 pub(super) struct MessageMenuUi {
-    pub page: MessageMenuPage,
-    /// The report dialog (`DialogKind::MessageReport`) is open.
-    pub report_open: bool,
-    /// The sticker set dialog (`DialogKind::StickerSet`) is open.
-    pub sticker_set_open: bool,
-    /// The "who reacted" tab (`None` = All).
-    pub audience_tab: Option<quill::telegram::envelope::ReactionType>,
+    /// Which of this window's two message-menu boxes shows: the report
+    /// dialog (`DialogKind::MessageReport`) or the sticker set dialog
+    /// (`DialogKind::StickerSet`). One kit dialog shows at a time.
+    pub shown_box: MenuBox,
     /// Details of a report (`reportChatResultTextRequired`).
     pub report_text: Entity<TextareaState>,
+}
+
+/// The box of the message menu this window shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(super) enum MenuBox {
+    #[default]
+    None,
+    Report,
+    StickerSet,
+}
+
+impl MessageMenuUi {
+    pub(super) fn report_open(&self) -> bool {
+        self.shown_box == MenuBox::Report
+    }
+
+    pub(super) fn sticker_set_open(&self) -> bool {
+        self.shown_box == MenuBox::StickerSet
+    }
+
+    /// Show the report box (the sticker box, if it showed, gives way).
+    pub(super) fn show_report(&mut self) {
+        self.shown_box = MenuBox::Report;
+    }
+
+    pub(super) fn show_sticker_set(&mut self) {
+        self.shown_box = MenuBox::StickerSet;
+    }
+
+    /// The report box ends here; a sticker box stays.
+    pub(super) fn end_report(&mut self) {
+        if self.report_open() {
+            self.shown_box = MenuBox::None;
+        }
+    }
+
+    pub(super) fn end_sticker_set(&mut self) {
+        if self.sticker_set_open() {
+            self.shown_box = MenuBox::None;
+        }
+    }
 }
 
 impl MessageMenuUi {
     pub(super) fn new(window: &mut Window, cx: &mut App) -> Self {
         Self {
-            page: MessageMenuPage::Main,
-            report_open: false,
-            sticker_set_open: false,
-            audience_tab: None,
+            shown_box: MenuBox::None,
             report_text: cx.new(|cx| {
                 TextareaState::new(window, cx)
                     .placeholder(tr(keys::Q_CHAT_ADD_COMMENT))
@@ -345,12 +365,14 @@ impl QuillApp {
                             this.save_message_tone(target.file_id, cx)
                         }
                         MediaAction::SaveTo => {
-                            this.message_ui.menu_ui.page = MessageMenuPage::SaveTo;
+                            this.message_ui.menu.show_page(MessageMenuPage::SaveTo);
                             cx.notify();
                             return;
                         }
                         MediaAction::AddToSet { emoji } => {
-                            this.message_ui.menu_ui.page = MessageMenuPage::AddToSet { emoji };
+                            this.message_ui
+                                .menu
+                                .show_page(MessageMenuPage::AddToSet { emoji });
                             cx.notify();
                             return;
                         }
@@ -630,7 +652,7 @@ crate::ui::shell::register_dialogs! {
     /// The message menu's Report flow.
     MessageReport => DialogSpec::new(
         5600,
-        |app| app.message_ui.menu_ui.report_open,
+        |app| app.message_ui.menu_ui.report_open(),
         QuillApp::build_message_report_dialog,
     )
     .per_window()
