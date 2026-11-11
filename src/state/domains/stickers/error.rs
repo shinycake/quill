@@ -131,6 +131,12 @@ impl Session {
         {
             self.stickers.emoji.status_change = crate::emoji::StatusChange::Idle;
         }
+        if emoji_purpose == Some(RequestPurpose::GetTrendingEmojiSets) {
+            self.stickers.emoji.trending.failed(
+                pending.map(|p| p.id),
+                crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS),
+            );
+        }
         if let Some(list) = emoji_purpose.and_then(|p| self.stickers.emoji.lists.for_purpose(p)) {
             list.fail(crate::lang::tr(
                 crate::lang::keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS,

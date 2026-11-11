@@ -154,6 +154,7 @@ mod sweep_s3_payments_1;
 mod sweep_s4_chat_list;
 mod sweep_s4_links_tdlib_1;
 mod sweep_s4_messages_1;
+mod sweep_r2_13_earn;
 mod sweep_s4_payments_1;
 mod threads;
 mod ton_wallet;

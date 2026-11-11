@@ -43,7 +43,10 @@ fn an_emoji_list_failure_stays_on_its_tab_until_that_list_is_asked_again() {
     t.fail("getInstalledStickerSets", "boom");
     let lists = &t.driver.session.stickers.emoji.lists;
     assert!(lists.installed.error().is_some());
-    assert!(lists.trending.is_loading());
+    assert!(matches!(
+        t.driver.session.stickers.emoji.trending,
+        crate::emoji::TrendingPaging::Asking { .. }
+    ));
     // The trending answer (or any other request) does not clear it.
     t.answer(
         "getTrendingStickerSets",
@@ -52,7 +55,7 @@ fn an_emoji_list_failure_stays_on_its_tab_until_that_list_is_asked_again() {
     );
     let lists = &t.driver.session.stickers.emoji.lists;
     assert!(lists.installed.error().is_some(), "{:?}", lists.installed);
-    assert!(lists.trending.error().is_none());
+    assert!(t.driver.session.stickers.emoji.trending.error().is_none());
     // Back on Installed it asks again, which ends the failure.
     t.driver
         .select_emoji_set_tab(EmojiSetTab::Installed)

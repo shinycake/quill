@@ -292,9 +292,11 @@ fn a_cancelled_withdrawals_answer_opens_nothing() {
     );
     let earn = &p.0.session.payments.earn;
     assert_eq!(earn.open_url, None, "Fragment does not open after Cancel");
-    assert_eq!(
-        earn.withdraw.as_ref().map(|w| &w.step),
-        Some(&WithdrawStep::Checking),
+    assert!(
+        matches!(
+            earn.withdraw.as_ref().map(|w| &w.step),
+            Some(WithdrawStep::Checking(_))
+        ),
         "the new attempt goes on"
     );
     // Cancel the new attempt from its password box; its wrong-password
@@ -309,10 +311,10 @@ fn a_cancelled_withdrawals_answer_opens_nothing() {
         json!({"@type": "error", "code": 400, "message": "PASSWORD_HASH_INVALID",
             "@extra": cancelled}),
     );
-    assert_eq!(
+    assert!(matches!(
         p.0.session.payments.earn.withdraw.as_ref().map(|w| &w.step),
-        Some(&WithdrawStep::Checking)
-    );
+        Some(WithdrawStep::Checking(_))
+    ));
 }
 
 #[test]

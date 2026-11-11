@@ -121,10 +121,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Stars live on its own "Stars Balance" page.
         let want_stars = screen == EarnScreen::Stars || !is_bot;
         if want_ton {
-            page.ton = Load::Loading;
+            page.ton = Load::Loading(None);
         }
         if want_stars {
-            page.stars = Load::Loading;
+            page.stars = Load::Loading(None);
         }
         self.session.payments.earn.page = Some(page);
         let _ = self.ensure_earn_app_config();
@@ -146,9 +146,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let is_self = matches!(peer, EarnPeer::User(id) if Some(id) == me);
         let chat_id = peer.chat_id();
         if want_ton {
-            self.send_earn(EarnPurpose::TonStats { peer }, |extra| {
+            let request = self.send_earn(EarnPurpose::TonStats { peer }, |extra| {
                 get_chat_revenue_statistics(extra, chat_id, is_dark)
             })?;
+            if let Some(page) = self.session.payments.earn.page.as_mut() {
+                page.ton.sent(request);
+            }
             self.send_earn_tracked(
                 EarnPurpose::TonTransactions {
                     peer,
@@ -163,9 +166,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             )?;
         }
         if want_stars {
-            self.send_earn(EarnPurpose::StarStats { peer }, |extra| {
+            let request = self.send_earn(EarnPurpose::StarStats { peer }, |extra| {
                 get_star_revenue_statistics(extra, peer, is_dark)
             })?;
+            if let Some(page) = self.session.payments.earn.page.as_mut() {
+                page.stars.sent(request);
+            }
             let filters: &[TxFilter] = match screen {
                 // The channel page has one Stars list.
                 EarnScreen::Monetization => &[TxFilter::All],
@@ -368,16 +374,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Err(ConnectSendError::InvalidRequest);
         }
+        let request = self.send_withdrawal_request(target, "")?;
         self.session.payments.earn.withdraw = Some(Withdraw {
             target,
-            step: WithdrawStep::Checking,
-            request: None,
+            step: WithdrawStep::Checking(request),
         });
-        let result = self.send_withdrawal(target, "").map(|_| ());
-        if result.is_err() {
-            self.session.payments.earn.withdraw = None;
-        }
-        result
+        Ok(())
     }
 
     /// Submit the password box. The password is used for this one request
@@ -393,25 +395,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         let target = withdraw.target;
         // The step carries the request, so it is entered once the send
         // went out; a failed send leaves the box as it was.
-        let request = self.send_withdrawal(target, password)?;
+        let request = self.send_withdrawal_request(target, password)?;
         if let Some(withdraw) = self.session.payments.earn.withdraw.as_mut() {
             withdraw.step = WithdrawStep::PasswordSending(request);
         }
         Ok(())
-    }
-
-    /// Send the URL request and record it on the withdrawal, so only its
-    /// own answer acts on it.
-    fn send_withdrawal(
-        &mut self,
-        target: WithdrawTarget,
-        password: &str,
-    ) -> Result<RequestId, ConnectSendError> {
-        let request = self.send_withdrawal_request(target, password)?;
-        if let Some(withdraw) = self.session.payments.earn.withdraw.as_mut() {
-            withdraw.request = Some(request);
-        }
-        Ok(request)
     }
 
     fn send_withdrawal_request(
@@ -521,8 +509,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.earn_ready()?;
         self.session.payments.earn.join = Some(JoinPage::new(peer));
         let _ = self.ensure_earn_app_config();
-        self.fetch_connected_programs(false)?;
-        self.fetch_found_programs(false, false)
+        // The two lists are independent: a refused first send fails its
+        // own list (Retry shows) and the second is still asked.
+        let mine = self.fetch_connected_programs(false);
+        let found = self.fetch_found_programs(false, false);
+        mine.and(found)
     }
 
     fn fetch_connected_programs(&mut self, append: bool) -> Result<(), ConnectSendError> {
@@ -840,7 +831,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             join.stage = JoinStage::Open;
         }
-        Ok(())
+        result.map(|_| ())
     }
 
     /// "Revoke Link" confirmed.

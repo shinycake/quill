@@ -416,6 +416,7 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
     assert_eq!(with_purpose.stickers.emoji.archived_sets.len(), 2);
 
     let extra = with_purpose.request(RequestPurpose::GetTrendingEmojiSets, None);
+    with_purpose.stickers.emoji.trending.asked(extra, 0);
     apply_json(
         &mut with_purpose,
         &seq,

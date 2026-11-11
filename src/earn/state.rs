@@ -13,7 +13,9 @@ use std::collections::HashMap;
 pub enum Load<T> {
     #[default]
     Idle,
-    Loading,
+    /// Asked; the request id is set once the send went out. Only its own
+    /// answer or error acts on the page ([`Load::waits_for`]).
+    Loading(Option<crate::ids::RequestId>),
     Ready(T),
     /// The request failed; the text is shown on the page.
     Failed(String),
@@ -31,7 +33,20 @@ impl<T> Load<T> {
     }
 
     pub fn is_loading(&self) -> bool {
-        matches!(self, Self::Loading)
+        matches!(self, Self::Loading(_))
+    }
+
+    /// The request that was begun went out as `request`.
+    pub fn sent(&mut self, request: crate::ids::RequestId) {
+        if let Self::Loading(slot) = self {
+            *slot = Some(request);
+        }
+    }
+
+    /// Whether `request` is the one this fetch waits for: an answer of an
+    /// earlier open of the page (replaced since) is not.
+    pub fn waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!((self, request), (Self::Loading(Some(asked)), Some(id)) if *asked == id)
     }
 
     /// Settled: loaded, failed or never asked.
@@ -308,8 +323,10 @@ pub enum WithdrawTarget {
 /// Where a withdrawal stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WithdrawStep {
-    /// The first request, without a password, is out.
-    Checking,
+    /// The first request, without a password, is out as this request. An
+    /// answer to another one (sent before a Cancel) neither opens Fragment
+    /// nor touches this attempt.
+    Checking(crate::ids::RequestId),
     /// tdesktop's password box: "Two-step verification".
     Password { error: Option<String> },
     /// The password went out as this request. Its answer ends the
@@ -326,24 +343,17 @@ pub enum WithdrawStep {
 pub struct Withdraw {
     pub target: WithdrawTarget,
     pub step: WithdrawStep,
-    /// The URL request this withdrawal waits for. An answer to another
-    /// one (sent before a Cancel) neither opens Fragment nor touches this
-    /// attempt.
-    pub request: Option<crate::ids::RequestId>,
 }
 
 impl Withdraw {
-    pub fn waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
-        request.is_some() && self.request == request
-    }
-
     /// Whether `request` is the answer the current step waits for: the
     /// password-less try while `Checking`, the password's own request
     /// while `PasswordSending`; no other step takes an answer.
     pub fn takes_answer(&self, request: Option<crate::ids::RequestId>) -> bool {
         match self.step {
-            WithdrawStep::Checking => self.waits_for(request),
-            WithdrawStep::PasswordSending(sent) => request == Some(sent) && self.waits_for(request),
+            WithdrawStep::Checking(sent) | WithdrawStep::PasswordSending(sent) => {
+                request == Some(sent)
+            }
             WithdrawStep::Password { .. } | WithdrawStep::SecurityCheck { .. } => false,
         }
     }
@@ -683,7 +693,7 @@ impl EarnState {
     pub fn is_checking_withdrawal(&self) -> bool {
         self.withdraw
             .as_ref()
-            .is_some_and(|w| w.step == WithdrawStep::Checking)
+            .is_some_and(|w| matches!(w.step, WithdrawStep::Checking(_)))
     }
 
     /// A balance answer of `request`.

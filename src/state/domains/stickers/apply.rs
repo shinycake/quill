@@ -110,7 +110,7 @@ impl Session {
                     // it is selected.
                     let emoji = &mut self.stickers.emoji;
                     if emoji.open && emoji.tab == crate::emoji::EmojiSetTab::Trending {
-                        emoji.lists.trending = crate::state::fetch::Fetch::Idle;
+                        emoji.trending = crate::emoji::TrendingPaging::Idle;
                     }
                 }
             }
@@ -140,8 +140,12 @@ impl Session {
                     self.accept_trending_sticker_sets(sets, is_premium);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingEmojiSets) {
                     // Slice S10: emoji `trendingStickerSets` land in the emoji panel (see emoji.rs).
-                    self.stickers.emoji.trending_total = total_count;
-                    self.accept_trending_emoji_sets(sets, is_premium);
+                    self.accept_trending_emoji_sets(
+                        sets,
+                        is_premium,
+                        total_count,
+                        pending.map(|p| p.id),
+                    );
                 }
             }
             // Slice S8: `searchStickers` / `getFavoriteStickers` /

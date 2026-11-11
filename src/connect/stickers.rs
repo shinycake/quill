@@ -769,7 +769,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // An update of the shown trending tab left its list `Idle`.
         let emoji_trending = emoji.open
             && emoji.tab == crate::emoji::EmojiSetTab::Trending
-            && emoji.lists.trending.is_idle();
+            && emoji.trending.is_idle();
         let reactions = self.session.stickers.reaction_options_stale;
         if !self.chats_path_active() {
             return Ok(());

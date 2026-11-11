@@ -1,6 +1,7 @@
 //! Custom emoji pack browser; independent of regular sticker picker state.
 use super::*;
-use crate::emoji::{EmojiSetTab, SetMutation, StatusChange, StatusPicker};
+use crate::emoji::trending::TRENDING_PAGE;
+use crate::emoji::{EmojiSetTab, SetMutation, StatusChange, StatusPicker, TrendingPaging};
 use crate::ids::RequestId;
 use crate::state::RequestPurpose;
 use crate::sticker_suggest::suggest_emoji_for;
@@ -371,11 +372,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                         .requests
                         .take_purpose(RequestPurpose::GetTrendingEmojiSets),
                 );
-                self.session.stickers.emoji.lists.trending.cancel();
-                self.session.stickers.emoji.trending_offset = 0;
-                self.emoji_set_request(RequestPurpose::GetTrendingEmojiSets, |id| {
-                    get_trending_emoji_sets(id, 0, 100)
-                })
+                self.session.stickers.emoji.trending = TrendingPaging::Idle;
+                self.ask_trending_emoji_page(0)
             }
             EmojiSetTab::Search => Ok(None),
         }
@@ -538,10 +536,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.stickers.emoji.trending_has_more {
+        let Some(offset) = self.session.stickers.emoji.trending.next_page() else {
             return Ok(None);
-        }
-        let offset = self.session.stickers.emoji.trending_next_offset;
+        };
         if self
             .session
             .requests
@@ -549,10 +546,28 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.session.stickers.emoji.trending_offset = offset;
-        self.emoji_set_request(RequestPurpose::GetTrendingEmojiSets, |id| {
-            get_trending_emoji_sets(id, offset, 100)
-        })
+        self.ask_trending_emoji_page(offset)
+    }
+
+    /// The Trending page starting at `offset`: the stage names the request
+    /// once it went out, and a send that did not leave is a failed page.
+    fn ask_trending_emoji_page(
+        &mut self,
+        offset: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        let sent = self.emoji_set_request(RequestPurpose::GetTrendingEmojiSets, |id| {
+            get_trending_emoji_sets(id, offset, TRENDING_PAGE)
+        });
+        let trending = &mut self.session.stickers.emoji.trending;
+        match &sent {
+            Ok(Some(request)) => trending.asked(*request, offset),
+            Ok(None) => {}
+            Err(_) => trending.send_failed(
+                offset,
+                crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS),
+            ),
+        }
+        sent
     }
 
     pub fn set_emoji_pack_installed(
@@ -597,6 +612,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             drop(self.session.requests.take_purpose(purpose));
             if let Some(list) = self.session.stickers.emoji.lists.for_purpose(purpose) {
                 list.cancel();
+            }
+            if purpose == RequestPurpose::GetTrendingEmojiSets {
+                self.session.stickers.emoji.trending = TrendingPaging::Idle;
             }
         }
         if !self.chats_path_active() {

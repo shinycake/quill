@@ -15,6 +15,8 @@ mod custom_stickers;
 pub use custom_stickers::CustomEmojiStickers;
 pub mod keyword_lookup;
 pub use keyword_lookup::KeywordLookups;
+pub mod trending;
+pub use trending::TrendingPaging;
 
 /// Most resolved custom emoji kept in `EmojiPanel::custom_emoji_stickers`.
 pub const CUSTOM_EMOJI_CACHE_CAP: usize = 4000;
@@ -57,7 +59,6 @@ impl KeywordEmojis {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EmojiLists {
     pub installed: crate::state::fetch::Fetch<()>,
-    pub trending: crate::state::fetch::Fetch<()>,
     pub search: crate::state::fetch::Fetch<()>,
 }
 
@@ -70,19 +71,11 @@ impl EmojiLists {
         use crate::state::RequestPurpose;
         match purpose {
             RequestPurpose::GetInstalledEmojiSets => Some(&mut self.installed),
-            RequestPurpose::GetTrendingEmojiSets => Some(&mut self.trending),
             RequestPurpose::SearchEmojiSets => Some(&mut self.search),
             _ => None,
         }
     }
 
-    pub fn of(&self, tab: EmojiSetTab) -> &crate::state::fetch::Fetch<()> {
-        match tab {
-            EmojiSetTab::Installed => &self.installed,
-            EmojiSetTab::Trending => &self.trending,
-            EmojiSetTab::Search => &self.search,
-        }
-    }
 }
 
 /// The install or removal of one emoji set (`changeStickerSet`): at most
@@ -177,10 +170,9 @@ pub struct EmojiPanel {
     pub lists: EmojiLists,
     pub tab: EmojiSetTab,
     pub search_query: String,
-    pub trending_offset: i32,
-    pub trending_next_offset: i32,
-    pub trending_total: i32,
-    pub trending_has_more: bool,
+    /// The Trending tab's paging: its own stage, not a fetch beside
+    /// offsets.
+    pub trending: TrendingPaging,
     /// Slice S10: installed emoji sets (`getInstalledStickerSets` with
     /// `stickerTypeCustomEmoji`) — the "Emoji Sets" settings list.
     pub installed_sets: Vec<StickerSetInfo>,
@@ -382,11 +374,24 @@ impl Session {
     }
 
     /// Slice S10: store the trending emoji sets (single-page replace, like S8).
-    pub fn accept_trending_emoji_sets(&mut self, sets: Vec<StickerSetInfo>, is_premium: bool) {
+    pub fn accept_trending_emoji_sets(
+        &mut self,
+        sets: Vec<StickerSetInfo>,
+        is_premium: bool,
+        total: i32,
+        request: Option<crate::ids::RequestId>,
+    ) {
         self.remember_cover_files(&sets);
-        self.stickers.emoji.lists.trending.succeed(());
         let raw_count = sets.len() as i32;
-        if self.stickers.emoji.trending_offset == 0 {
+        let Some(offset) = self
+            .stickers
+            .emoji
+            .trending
+            .answered(request, raw_count, total)
+        else {
+            return;
+        };
+        if offset == 0 {
             self.stickers.emoji.trending_sets.clear();
         }
         for set in sets {
@@ -400,13 +405,6 @@ impl Session {
                 self.stickers.emoji.trending_sets.push(set);
             }
         }
-        self.stickers.emoji.trending_next_offset = self
-            .stickers
-            .emoji
-            .trending_offset
-            .saturating_add(raw_count);
-        self.stickers.emoji.trending_has_more = raw_count > 0
-            && self.stickers.emoji.trending_next_offset < self.stickers.emoji.trending_total;
         self.stickers.emoji.trending_is_premium = is_premium;
     }
 

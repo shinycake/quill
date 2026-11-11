@@ -64,7 +64,7 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
         &mut driver,
         json!({"@type":"trendingStickerSets","@extra":first.as_extra(),"total_count":3,"sets":[set(1,true),set(2,false)],"is_premium":false}),
     );
-    assert!(driver.session.stickers.emoji.trending_has_more);
+    assert!(driver.session.stickers.emoji.trending.next_page().is_some());
     assert_eq!(
         sent_request(&recorder, "viewTrendingStickerSets")["sticker_set_ids"],
         json!([1, 2])
@@ -79,7 +79,8 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
         json!({"@type":"trendingStickerSets","@extra":more.as_extra(),"total_count":3,"sets":[set(2,false)]}),
     );
     assert_eq!(driver.session.stickers.emoji.trending_sets.len(), 2);
-    assert!(!driver.session.stickers.emoji.trending_has_more); // Raw page length, not deduped count.
+    // Raw page length, not deduped count.
+    assert!(driver.session.stickers.emoji.trending.next_page().is_none());
     assert!(driver.session.stickers.stickers.stickers.is_empty());
     let remove = driver.set_emoji_pack_installed(1, false).unwrap().unwrap();
     assert_eq!(
