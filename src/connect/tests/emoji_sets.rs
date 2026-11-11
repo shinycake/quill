@@ -455,9 +455,15 @@ fn the_suggestion_bar_asks_for_the_installed_sets_until_they_answer() {
     assert!(driver.ensure_suggestion_emoji_sets().is_err());
     assert_eq!(asked(&recorder), 0);
     recorder.refuse_sends(false);
-    driver.ensure_suggestion_emoji_sets().unwrap();
+    assert!(driver.ensure_suggestion_emoji_sets().is_ok());
+    assert_eq!(
+        asked(&recorder),
+        0,
+        "a refused send is not re-asked by a rebuild"
+    );
+    driver.retry_suggestion_emoji_sets().unwrap();
     assert_eq!(asked(&recorder), 1);
-    driver.ensure_suggestion_emoji_sets().unwrap();
+    driver.retry_suggestion_emoji_sets().unwrap();
     assert_eq!(asked(&recorder), 1, "one request in flight is enough");
     let sent = recorder
         .snapshot()
