@@ -62,7 +62,6 @@ QuillApp::build_accounts_dialog::body.borrow_mut 1
 QuillApp::build_add_contact_dialog::body.borrow_mut 1
 QuillApp::build_add_special_dialog::body.borrow_mut 1
 QuillApp::build_ai_compose_dialog::body.borrow_mut 1
-QuillApp::build_ai_style_preview_dialog::body.borrow_mut 1
 QuillApp::build_archive_settings_dialog::body.borrow_mut 1
 QuillApp::build_block_bar_dialog::body.borrow_mut 1
 QuillApp::build_bot_create_dialog::content.borrow_mut 1
@@ -224,15 +223,12 @@ QuillApp::step_search_selection::search_order.borrow 1
 QuillApp::still_tick::still_ticks.borrow_mut 2
 QuillApp::still_tick_of::still_ticks.borrow 1
 QuillApp::swap_slot::slot.borrow_mut 1
-QuillApp::sync_window_title::window_title_shown.borrow 1
-QuillApp::sync_window_title::window_title_shown.borrow_mut 1
 QuillApp::tick_after_draws::animation_targets.borrow 1
 QuillApp::tick_after_draws::layers_drawn.borrow 1
 QuillApp::translate_offer::offer.borrow 1
 QuillApp::translate_offer::offer.borrow_mut 1
 QuillApp::tray_photo_size::photo_sizes.borrow_mut 1
 QuillApp::try_open_chat_window_at::slot.borrow 1
-QuillApp::window_title_in_place::title_badge.borrow_mut 1
 QuillShell::sync_host_dialogs::dialogs_closed.borrow_mut 1
 RichPreview::blocks::editor.borrow_mut 1
 RichPreview::blocks::parsed.borrow 1
@@ -249,7 +245,6 @@ WindowZoom::fire_resize::resize.borrow_mut 1
 WindowZoom::register::list.borrow_mut 1
 ZoomWindow::on_resize::resize.borrow_mut 1
 active::a.borrow 1
-ai_apply_shortcut_text::keymap.borrow 1
 anchor::anchors.borrow 1
 anchor::seen.borrow 1
 anchor_tracker::anchors.borrow_mut 1
@@ -275,8 +270,6 @@ clip_beat::asks.borrow 1
 clip_frame_keeps_time::answered.borrow 1
 close_frame::slices.borrow_mut 1
 close_frame::whole.borrow_mut 1
-connection::slot.borrow 1
-connection::slot.borrow_mut 1
 context_menu_item::keys.borrow 1
 corner_mask::masks.borrow_mut 2
 current::current.borrow 2
