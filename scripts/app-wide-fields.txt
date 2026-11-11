@@ -35,6 +35,7 @@ preferences.system_accent | the OS accent color
 preferences.system_accent.Read.0 | the OS accent color once read
 preferences.send_to * | the Explorer "Send to" shortcut belongs to the machine: read once, written off the UI thread, whichever account is on screen
 preferences.system_accent_poll | the one task waiting for the OS accent read to land
+preferences.link_handler_watch | the one task waiting for the process-wide link handler read to land
 preferences.font_picker | the font family picker entity
 preferences.accent_picker | the accent color picker entity
 preferences.index_sliders * | slider entities, keyed by setting; most are app settings, but the two storage-limit sliders show one account's TDLib limits, so every arrival on Data and Storage (and every leave) drops them and they are rebuilt from the account shown (`forget_storage_sliders`)
