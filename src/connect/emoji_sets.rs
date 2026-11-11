@@ -1,6 +1,6 @@
 //! Custom emoji pack browser; independent of regular sticker picker state.
 use super::*;
-use crate::emoji::{EmojiMutation, EmojiSetTab, EmojiStatusStage};
+use crate::emoji::{EmojiMutation, EmojiSetTab};
 use crate::ids::RequestId;
 use crate::state::RequestPurpose;
 use crate::sticker_suggest::suggest_emoji_for;
@@ -119,9 +119,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             crate::telegram::requests_emoji::set_emoji_status(extra, custom_emoji_id, expiration)
         })?;
         if request.is_some() {
-            self.session.stickers.emoji.status = EmojiStatusStage::Changing {
-                emoji: custom_emoji_id,
-            };
+            self.session
+                .stickers
+                .emoji
+                .begin_status_change(custom_emoji_id);
         }
         Ok(request)
     }

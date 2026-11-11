@@ -536,3 +536,28 @@ fn a_failed_custom_emoji_lookup_asks_again() {
     assert!(session.custom_emoji_needs_resolving(42));
     assert!(session.stickers.emoji.status_note().is_none());
 }
+
+#[test]
+fn a_line_that_arrives_during_a_status_change_shows_when_it_ends() {
+    let mut panel = EmojiPanel::default();
+    panel.begin_status_change(Some(7));
+    // A failed list fetch while the change is out is not swallowed.
+    panel.set_status_note("Could not update emoji statuses. Retry the action.");
+    assert!(panel.status_note().is_none());
+    assert_eq!(panel.finish_status_change(), Some(7));
+    assert_eq!(
+        panel.status_note(),
+        Some("Could not update emoji statuses. Retry the action.")
+    );
+    // The success line does not hide it.
+    panel.set_status_note_unless_shown("Emoji status updated.");
+    assert_eq!(
+        panel.status_note(),
+        Some("Could not update emoji statuses. Retry the action.")
+    );
+    panel.clear_status_note();
+    panel.begin_status_change(None);
+    panel.finish_status_change();
+    panel.set_status_note_unless_shown("Emoji status updated.");
+    assert_eq!(panel.status_note(), Some("Emoji status updated."));
+}

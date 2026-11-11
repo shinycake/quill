@@ -224,8 +224,13 @@ pub enum EmojiStatusStage {
     #[default]
     Idle,
     /// `setEmojiStatus` is in flight; `emoji` joins the recent packs when
-    /// it is confirmed (`None` removes the status).
-    Changing { emoji: Option<i64> },
+    /// it is confirmed (`None` removes the status). `note` is a line that
+    /// arrived meanwhile (a failed list fetch, a refused send); it shows
+    /// when the change ends.
+    Changing {
+        emoji: Option<i64>,
+        note: Option<String>,
+    },
     /// How the last action ended.
     Note(String),
 }
@@ -239,29 +244,52 @@ impl EmojiPanel {
         }
     }
 
-    /// A line for the status picker. A change in flight keeps its stage:
-    /// its own answer ends it with a line.
+    /// A line for the status picker. During a change in flight it is
+    /// carried in the stage and shows when the change ends.
     pub fn set_status_note(&mut self, note: impl Into<String>) {
-        if !matches!(self.status, EmojiStatusStage::Changing { .. }) {
-            self.status = EmojiStatusStage::Note(note.into());
+        match &mut self.status {
+            EmojiStatusStage::Changing { note: held, .. } => *held = Some(note.into()),
+            stage => *stage = EmojiStatusStage::Note(note.into()),
         }
     }
 
-    /// The picker forgets the last line; a change in flight stays.
+    /// The picker forgets the last line; a change in flight stays (with no
+    /// line carried).
     pub fn clear_status_note(&mut self) {
-        if matches!(self.status, EmojiStatusStage::Note(_)) {
-            self.status = EmojiStatusStage::Idle;
+        match &mut self.status {
+            EmojiStatusStage::Note(_) => self.status = EmojiStatusStage::Idle,
+            EmojiStatusStage::Changing { note, .. } => *note = None,
+            EmojiStatusStage::Idle => {}
         }
+    }
+
+    /// A change starts for `emoji`.
+    pub fn begin_status_change(&mut self, emoji: Option<i64>) {
+        self.status = EmojiStatusStage::Changing { emoji, note: None };
     }
 
     /// The status change in flight is answered; the emoji it set, if any.
+    /// A line that arrived meanwhile stays as the picker's note.
     pub fn finish_status_change(&mut self) -> Option<i64> {
-        match self.status {
-            EmojiStatusStage::Changing { emoji } => {
-                self.status = EmojiStatusStage::Idle;
+        match std::mem::take(&mut self.status) {
+            EmojiStatusStage::Changing { emoji, note } => {
+                if let Some(note) = note {
+                    self.status = EmojiStatusStage::Note(note);
+                }
                 emoji
             }
-            _ => None,
+            other => {
+                self.status = other;
+                None
+            }
+        }
+    }
+
+    /// The line a finished action leaves, unless a more telling one is
+    /// already shown.
+    pub fn set_status_note_unless_shown(&mut self, note: impl Into<String>) {
+        if self.status_note().is_none() {
+            self.set_status_note(note);
         }
     }
 }
@@ -789,7 +817,7 @@ impl Session {
                 self.requests
                     .take_purpose(RequestPurpose::GetRecentEmojiStatuses),
             );
-            self.stickers.emoji.set_status_note(
+            self.stickers.emoji.set_status_note_unless_shown(
                 if purpose == Some(RequestPurpose::SetEmojiStatus) {
                     "Emoji status updated."
                 } else {
