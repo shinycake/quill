@@ -5,9 +5,48 @@ use super::{
     ResaleListing, ResalePage, UpgradePreview,
 };
 use crate::gift_manage::GiftRecipient;
+use crate::ids::RequestId;
 use crate::marketplace::GiftPrice;
 use crate::state::fetch::Fetch;
 use std::collections::HashMap;
+use std::time::Instant;
+
+/// Where a paged list stands: not asked, a page in flight (the request
+/// whose answer it waits for), answered, or failed. A failed page keeps
+/// the rows and the offset, so "Show more" asks it again.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum SearchStage {
+    #[default]
+    Idle,
+    Loading {
+        request: RequestId,
+    },
+    Ready,
+    Failed(String),
+}
+
+impl SearchStage {
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading { .. })
+    }
+
+    /// Whether a page arrived or failed for the current query.
+    pub fn is_loaded(&self) -> bool {
+        matches!(self, Self::Ready | Self::Failed(_))
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            Self::Failed(error) => Some(error),
+            _ => None,
+        }
+    }
+
+    /// Whether `request` is the page this stage waits for.
+    pub fn waits_for(&self, request: Option<RequestId>) -> bool {
+        matches!(self, Self::Loading { request: waiting } if Some(*waiting) == request)
+    }
+}
 
 /// One resale search: the resale box, or the market list of the craft
 /// box's "Select Gifts".
@@ -23,12 +62,8 @@ pub struct ResaleSearch {
     pub next_offset: String,
     /// The next page to ask for.
     pub page: u32,
-    pub loading: bool,
-    /// Whether any page arrived for the current filter.
-    pub loaded: bool,
-    /// The request whose answer this search waits for.
-    pub request_id: u64,
-    pub error: Option<String>,
+    /// The page in flight, or how the last one ended.
+    pub stage: SearchStage,
 }
 
 impl ResaleSearch {
@@ -43,15 +78,13 @@ impl ResaleSearch {
 
     /// Whether another page can be asked for.
     pub fn has_more(&self) -> bool {
-        self.loaded && !self.loading && !self.next_offset.is_empty()
+        self.stage.is_loaded() && !self.next_offset.is_empty()
     }
 
     /// Takes a page: the first replaces the list, later ones append. Own
     /// listings are dropped in craft mode (tdesktop skips them).
     pub fn apply(&mut self, page: ResalePage, my_user_id: Option<i64>, append: bool) {
-        self.loading = false;
-        self.loaded = true;
-        self.error = None;
+        self.stage = SearchStage::Ready;
         self.total_count = page.total_count;
         self.next_offset = if page.listings.is_empty() {
             String::new()
@@ -74,6 +107,17 @@ impl ResaleSearch {
             self.listings = listings.collect();
         }
     }
+
+    pub fn is_loading(&self) -> bool {
+        self.stage.is_loading()
+    }
+
+    /// The page for `request` failed: the rows stay and the error shows.
+    pub fn fail(&mut self, request: Option<RequestId>, note: String) {
+        if self.stage.waits_for(request) {
+            self.stage = SearchStage::Failed(note);
+        }
+    }
 }
 
 /// The three steps of buying a listing (tdesktop
@@ -89,6 +133,19 @@ pub enum BuyStep {
     Confirm,
 }
 
+/// Where the payment of a resale purchase stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BuyPay {
+    #[default]
+    Idle,
+    /// `sendResoldGift` is out as `request`: only its answer applies here,
+    /// not one for a box closed before it came.
+    Paying { request: RequestId },
+    /// TDLib refused the purchase and reported the price now asked
+    /// ("Price change!"). Picking the currency again clears it.
+    Repriced(GiftPrice),
+}
+
 /// Buying one resale listing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResaleBuy {
@@ -96,16 +153,9 @@ pub struct ResaleBuy {
     pub recipient: GiftRecipient,
     pub step: BuyStep,
     pub pay_in_grams: bool,
-    pub sending: bool,
-    /// The price TDLib reported after a refused purchase ("Price change!").
-    pub price_changed: Option<GiftPrice>,
+    pub pay: BuyPay,
     /// Bought for a craft slot: the gift lands there instead of a toast.
     pub for_craft: bool,
-    /// The bought gift's id once `giftResaleResultOk` arrives.
-    pub done: Option<String>,
-    /// The purchase in flight (0: none): only its answer applies here, not
-    /// one for a box closed before it came.
-    pub request: u64,
 }
 
 impl ResaleBuy {
@@ -116,17 +166,35 @@ impl ResaleBuy {
             recipient,
             step: BuyStep::View,
             pay_in_grams,
-            sending: false,
-            price_changed: None,
+            pay: BuyPay::Idle,
             for_craft,
-            done: None,
-            request: 0,
+        }
+    }
+
+    /// Whether the purchase has gone out and waits for its answer.
+    pub fn sending(&self) -> bool {
+        matches!(self.pay, BuyPay::Paying { .. })
+    }
+
+    /// The purchase in flight.
+    pub fn request(&self) -> Option<RequestId> {
+        match self.pay {
+            BuyPay::Paying { request } => Some(request),
+            _ => None,
+        }
+    }
+
+    /// The price TDLib reported after a refused purchase.
+    pub fn price_changed(&self) -> Option<GiftPrice> {
+        match self.pay {
+            BuyPay::Repriced(price) => Some(price),
+            _ => None,
         }
     }
 
     /// The price the buy sends.
     pub fn price(&self) -> Option<GiftPrice> {
-        self.price_changed
+        self.price_changed()
             .or_else(|| super::listing_price(&self.listing.gift, self.pay_in_grams))
     }
 }
@@ -142,26 +210,97 @@ pub fn default_craft_probabilities() -> Vec<Vec<i32>> {
     ]
 }
 
+/// The user's own gifts that can go into the craft, paged.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CraftOwnGifts {
+    pub gifts: Vec<CraftGift>,
+    pub total: i32,
+    pub offset: String,
+    pub page: u32,
+    pub stage: SearchStage,
+}
+
+impl CraftOwnGifts {
+    pub fn is_loading(&self) -> bool {
+        self.stage.is_loading()
+    }
+}
+
+/// What a forge waits for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ForgeAnswer {
+    /// `craftGift` is out as this request (`None`: the demo's local forge,
+    /// which nothing answers).
+    Waiting(Option<RequestId>),
+    /// The answer arrived; `None` is an error (its note is shown). The
+    /// forge still runs its minimum time.
+    Replied(Option<CraftResult>),
+}
+
+/// The craft itself: choosing the gifts, the forge running, the outcome.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum CraftStage {
+    #[default]
+    Choosing,
+    /// The forge animation runs from `since` for at least a minimum time,
+    /// and ends when the answer is in.
+    Forging { since: Instant, answer: ForgeAnswer },
+    /// The outcome the result box shows (success or failure).
+    Done(CraftResult),
+}
+
+impl CraftStage {
+    pub fn is_forging(&self) -> bool {
+        matches!(self, Self::Forging { .. })
+    }
+
+    /// A craft is out and unanswered.
+    pub fn is_crafting(&self) -> bool {
+        matches!(
+            self,
+            Self::Forging {
+                answer: ForgeAnswer::Waiting(_),
+                ..
+            }
+        )
+    }
+
+    pub fn result(&self) -> Option<&CraftResult> {
+        match self {
+            Self::Done(result) => Some(result),
+            _ => None,
+        }
+    }
+
+    /// Whether `request` is the craft this stage waits for.
+    pub fn waits_for_craft(&self, request: Option<RequestId>) -> bool {
+        request.is_some()
+            && matches!(
+                self,
+                Self::Forging { answer: ForgeAnswer::Waiting(waiting), .. } if *waiting == request
+            )
+    }
+
+    /// The craft answered (`None`: an error or an answer without an
+    /// outcome); the forge runs on until its minimum time is over.
+    pub fn answer(&mut self, result: Option<CraftResult>) {
+        if let Self::Forging { answer, .. } = self {
+            *answer = ForgeAnswer::Replied(result);
+        }
+    }
+}
+
 /// The craft box: the chosen gifts, the candidates and the outcome.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CraftSession {
     pub regular_gift_id: i64,
     pub slots: Vec<CraftGift>,
-    pub candidates: Vec<CraftGift>,
-    pub candidates_total: i32,
-    pub candidates_offset: String,
-    pub candidates_page: u32,
-    pub candidates_loading: bool,
-    pub candidates_loaded: bool,
-    pub candidates_request: u64,
+    pub candidates: CraftOwnGifts,
     /// `attribute_persistence_probabilities`.
     pub probabilities: Vec<Vec<i32>>,
     /// Suitable listings on sale (resale in craft mode).
     pub market: ResaleSearch,
-    pub crafting: bool,
-    /// The craft in flight (0: none), whose answer this box shows.
-    pub craft_request: u64,
-    pub result: Option<CraftResult>,
+    pub stage: CraftStage,
 }
 
 impl CraftSession {
@@ -186,7 +325,7 @@ impl CraftSession {
 
     /// Candidates not already in a slot.
     pub fn free_candidates(&self) -> impl Iterator<Item = &CraftGift> {
-        self.candidates.iter().filter(|candidate| {
+        self.candidates.gifts.iter().filter(|candidate| {
             !self
                 .slots
                 .iter()
@@ -242,8 +381,8 @@ pub struct GiftMarketState {
     pub follow: AuctionFollow,
     /// The `getGiftAuctionState` the UI waits for (a link or a tile).
     pub auction: AuctionFetch,
-    /// The bid in flight: its gift and the request that answers it.
-    pub bidding: Option<(i64, crate::ids::RequestId)>,
+    /// The bid in flight.
+    pub bid: BidStage,
     pub craft: Option<CraftSession>,
     /// One-shot error toasts.
     pub notes: Vec<String>,
@@ -267,6 +406,34 @@ pub enum AuctionFetch {
     Ready {
         gift_id: i64,
     },
+}
+
+/// The bid of the user: idle, or out as `request` for this auction. Only
+/// its answer or error settles it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BidStage {
+    #[default]
+    Idle,
+    Placing {
+        gift_id: i64,
+        request: RequestId,
+    },
+}
+
+impl BidStage {
+    pub fn is_placing(self) -> bool {
+        matches!(self, Self::Placing { .. })
+    }
+
+    /// Whether the bid in flight is for this auction.
+    pub fn is_placing_for(self, gift_id: i64) -> bool {
+        matches!(self, Self::Placing { gift_id: placing, .. } if placing == gift_id)
+    }
+
+    /// Whether `request` is the bid in flight.
+    pub fn is_request(self, request: Option<RequestId>) -> bool {
+        matches!(self, Self::Placing { request: waiting, .. } if Some(waiting) == request)
+    }
 }
 
 /// The auction a bid box follows (`openGiftAuction`).

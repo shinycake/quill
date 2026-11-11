@@ -112,18 +112,14 @@ fn market_failures_hit_only_the_request_that_failed() {
     );
     let market = &mut session.payments.gift_market;
     let mut resale = ResaleSearch::new(5, ResaleFilter::default(), false);
-    resale.loading = true;
-    resale.request_id = new.0;
+    resale.stage = crate::gift_market::SearchStage::Loading { request: new };
     market.resale = Some(resale);
     fail(&mut session, old, &sink);
     let resale = session.payments.gift_market.resale.as_ref().unwrap();
-    assert!(
-        resale.loading && resale.error.is_none(),
-        "the newer search keeps loading"
-    );
+    assert!(resale.stage.is_loading(), "the newer search keeps loading");
     fail(&mut session, new, &sink);
     let resale = session.payments.gift_market.resale.as_ref().unwrap();
-    assert!(!resale.loading && resale.error.is_some());
+    assert!(resale.stage.error().is_some());
 
     // Auction A fails after B was asked: B's box still opens.
     let a = session.request(
@@ -165,16 +161,18 @@ fn market_failures_hit_only_the_request_that_failed() {
         None,
     );
     session.payments.gift_market.craft = Some(CraftSession {
-        candidates_loading: true,
-        candidates_request: live.0,
+        candidates: crate::gift_market::CraftOwnGifts {
+            stage: crate::gift_market::SearchStage::Loading { request: live },
+            ..Default::default()
+        },
         ..CraftSession::default()
     });
     fail(&mut session, stale, &sink);
     let craft = session.payments.gift_market.craft.as_ref().unwrap();
-    assert!(craft.candidates_loading && !craft.candidates_loaded);
+    assert!(craft.candidates.is_loading());
     fail(&mut session, live, &sink);
     let craft = session.payments.gift_market.craft.as_ref().unwrap();
-    assert!(!craft.candidates_loading && craft.candidates_loaded);
+    assert!(craft.candidates.stage.error().is_some());
 }
 
 #[test]

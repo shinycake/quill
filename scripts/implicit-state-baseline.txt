@@ -41,8 +41,6 @@ CheckoutView::sending
 Clip::busy
 ComposerUi::draft_restore_pending
 ConnectDriver::parameters_sent
-CraftSession::candidates_loaded
-CraftSession::candidates_loading
 DestRow::saved
 DragSelect::pending
 Drawn::leaving
@@ -156,10 +154,6 @@ QuickRepliesState::shortcuts_requested
 QuickRepliesState::shortcuts_requested+error
 ReceivedGift::is_saved
 Relay::started
-ResaleBuy::sending
-ResaleSearch::loaded
-ResaleSearch::loading
-ResaleSearch::loading+error
 RowForum::loaded
 RowMenuFacts::is_saved_messages
 RowState::pending

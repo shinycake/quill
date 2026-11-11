@@ -13,7 +13,8 @@ use super::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::diagnostics::MemorySink;
 use quill::gift_market::{
-    CraftGate, CraftGift, CraftResult, CraftSession, ResaleFilter, ResaleSearch, parse_resale_page,
+    CraftGate, CraftGift, CraftResult, CraftSession, CraftStage, ForgeAnswer, ResaleFilter,
+    ResaleSearch, SearchStage, parse_resale_page,
 };
 use quill::local_time::now_unix;
 use quill::premium_hub::upgraded::parse_collectible;
@@ -78,8 +79,8 @@ pub(super) fn seed_gift_craft_session(sink: Arc<MemorySink>) -> Session {
     for gift in gifts.iter().skip(1).take(2) {
         craft.add(gift.clone());
     }
-    craft.candidates = gifts.iter().skip(1).cloned().collect();
-    craft.candidates_loaded = true;
+    craft.candidates.gifts = gifts.iter().skip(1).cloned().collect();
+    craft.candidates.stage = SearchStage::Ready;
     craft.probabilities = vec![
         vec![1000],
         vec![600, 1000],
@@ -105,11 +106,14 @@ impl QuillApp {
             "select" => self.gift_market.stack.push(MarketBox::CraftSelect),
             "forge" => {
                 // Half way through the forge, still waiting for the answer.
-                if let Some(craft) = self.craft_mut() {
-                    craft.crafting = true;
+                if let Some(craft) = self.craft_mut()
+                    && let Some(since) = Instant::now().checked_sub(Duration::from_millis(1_400))
+                {
+                    craft.stage = CraftStage::Forging {
+                        since,
+                        answer: ForgeAnswer::Waiting(None),
+                    };
                 }
-                self.gift_market.forge_started =
-                    Instant::now().checked_sub(Duration::from_millis(1_400));
             }
             "success" | "failed" => {
                 let crafted = self.craft_session().and_then(|craft| {
@@ -126,7 +130,7 @@ impl QuillApp {
                     _ => CraftResult::Fail,
                 };
                 if let Some(craft) = self.craft_mut() {
-                    craft.result = Some(result);
+                    craft.stage = CraftStage::Done(result);
                 }
                 self.gift_market.stack = vec![MarketBox::CraftResult];
             }

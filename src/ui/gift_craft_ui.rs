@@ -21,9 +21,9 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::gift_market::{
-    CRAFT_SLOTS, CraftGate, CraftGift, CraftResult, CraftSession, GiftMarketState, ResaleFilter,
-    ResaleSearch, attribute_chances, craft_colors, craft_failed_text, format_percent,
-    shows_craftable_link,
+    CRAFT_SLOTS, CraftGate, CraftGift, CraftOwnGifts, CraftResult, CraftSession, CraftStage,
+    ForgeAnswer, GiftMarketState, ResaleFilter, ResaleSearch, attribute_chances, craft_colors,
+    craft_failed_text, format_percent, shows_craftable_link,
 };
 use quill::lang::{keys, tr, tr_with};
 use quill::local_time::{civil_local, hhmm, month_name, now_unix};
@@ -101,7 +101,7 @@ pub(super) fn craft_stickers(market: &GiftMarketState) -> Vec<&StickerContent> {
     let mut stickers: Vec<&StickerContent> = craft
         .slots
         .iter()
-        .chain(craft.candidates.iter())
+        .chain(craft.candidates.gifts.iter())
         .filter_map(|gift| gift.gift.model.sticker.as_ref())
         .collect();
     stickers.extend(
@@ -111,7 +111,7 @@ pub(super) fn craft_stickers(market: &GiftMarketState) -> Vec<&StickerContent> {
             .iter()
             .filter_map(|listing| listing.gift.model.sticker.as_ref()),
     );
-    if let Some(CraftResult::Success { gift, .. }) = craft.result.as_ref() {
+    if let Some(CraftResult::Success { gift, .. }) = craft.stage.result() {
         stickers.extend(gift.model.sticker.as_ref());
     }
     stickers
@@ -174,7 +174,6 @@ impl QuillApp {
                     && old.regular_gift_id == next.regular_gift_id
                 {
                     next.candidates = old.candidates;
-                    next.candidates_loaded = old.candidates_loaded;
                     next.probabilities = old.probabilities;
                     next.market = old.market;
                 }
@@ -217,13 +216,14 @@ impl QuillApp {
             Some(live) => live.driver.craft_gift().is_ok(),
             // The demo crafts nothing; the forge ends in a failure.
             None => self.craft_mut().is_some_and(|craft| {
-                craft.crafting = true;
+                craft.stage = CraftStage::Forging {
+                    since: Instant::now(),
+                    answer: ForgeAnswer::Waiting(None),
+                };
                 true
             }),
         };
-        if started {
-            self.gift_market.forge_started = Some(Instant::now());
-        } else {
+        if !started {
             self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_CRAFT_THE_GIFT)));
         }
         cx.notify();
@@ -240,15 +240,14 @@ impl QuillApp {
                 .map(|slot| slot.received_gift_id.clone())
                 .collect();
             craft.slots.clear();
-            craft.result = None;
+            craft.stage = CraftStage::Choosing;
             if demo {
                 craft
                     .candidates
+                    .gifts
                     .retain(|gift| !used.contains(&gift.received_gift_id));
             } else {
-                craft.candidates.clear();
-                craft.candidates_loaded = false;
-                craft.candidates_offset.clear();
+                craft.candidates = CraftOwnGifts::default();
                 craft.market =
                     ResaleSearch::new(craft.regular_gift_id, ResaleFilter::default(), true);
             }
@@ -261,32 +260,28 @@ impl QuillApp {
 
     /// Ends the forge once it ran its time and the answer is in.
     pub(super) fn craft_frame_upkeep(&mut self, cx: &mut Context<Self>) {
-        let Some(started) = self.gift_market.forge_started else {
-            return;
-        };
-        if started.elapsed().as_secs_f32() < FORGE_SECONDS {
-            return;
-        }
         let demo = self.live.is_none();
         let Some(craft) = self.craft_mut() else {
-            self.gift_market.forge_started = None;
             return;
         };
-        if demo && craft.crafting {
-            craft.crafting = false;
-            craft.result = Some(CraftResult::Fail);
-        }
-        if craft.crafting {
+        let CraftStage::Forging { since, answer } = &craft.stage else {
+            return;
+        };
+        if since.elapsed().as_secs_f32() < FORGE_SECONDS {
             return;
         }
-        let result = craft.result.clone();
-        if matches!(
-            result,
-            Some(CraftResult::InvalidGift | CraftResult::TooEarly(_))
-        ) {
-            craft.result = None;
-        }
-        self.gift_market.forge_started = None;
+        let result = match answer {
+            // The demo crafts nothing; the forge ends in a failure.
+            ForgeAnswer::Waiting(_) if demo => Some(CraftResult::Fail),
+            ForgeAnswer::Waiting(_) => return,
+            ForgeAnswer::Replied(result) => result.clone(),
+        };
+        craft.stage = match &result {
+            Some(done @ (CraftResult::Success { .. } | CraftResult::Fail)) => {
+                CraftStage::Done(done.clone())
+            }
+            _ => CraftStage::Choosing,
+        };
         match result {
             Some(CraftResult::Success { .. } | CraftResult::Fail) => {
                 self.market_replace(MarketBox::CraftResult, cx);
@@ -323,13 +318,13 @@ impl QuillApp {
         }
         // Closing the boxes while the forge runs leaves the craft in
         // flight: its outcome still opens the result box.
-        if self.gift_market.forge_started.is_some()
-            || self.craft_session().is_some_and(|craft| craft.crafting)
+        if self
+            .craft_session()
+            .is_some_and(|craft| craft.stage.is_forging())
         {
             return;
         }
         self.gift_market.craft_primary = None;
-        self.gift_market.forge_started = None;
         if let Some(market) = self.gift_market_mut() {
             market.craft = None;
         }
@@ -399,8 +394,11 @@ impl QuillApp {
     }
 
     pub(super) fn craft_box(&mut self, cx: &mut Context<Self>) -> BoxView {
-        if let Some(started) = self.gift_market.forge_started {
-            return self.forge_box(started, cx);
+        if let Some(CraftStage::Forging { since, .. }) =
+            self.craft_session().map(|craft| &craft.stage)
+        {
+            let since = *since;
+            return self.forge_box(since, cx);
         }
         let roots = self.media_display_roots();
         let Some(session) = self.session() else {
@@ -544,7 +542,7 @@ impl QuillApp {
             );
         }
         let success = format_percent(craft.success_per_mille());
-        let ready = !craft.slots.is_empty() && !craft.crafting;
+        let ready = !craft.slots.is_empty() && !craft.stage.is_crafting();
         let craft_button = two_line_button(
             "craft-start",
             tr_with(keys::GIFT_CRAFT_BUTTON, &[("gift", &name.to_string())]),
@@ -613,7 +611,7 @@ impl QuillApp {
                 56.,
             )));
         }
-        let waiting = progress >= 1. && craft.crafting;
+        let waiting = progress >= 1. && craft.stage.is_crafting();
         if progress < 1. {
             panel = panel.child(lost);
         }
@@ -672,7 +670,7 @@ impl QuillApp {
                     .on_click(cx.listener(|this, _, _, cx| this.craft_again(cx))),
             )
         };
-        match craft.result.as_ref() {
+        match craft.stage.result() {
             Some(CraftResult::Success { gift, .. }) => {
                 let body = div()
                     .flex()

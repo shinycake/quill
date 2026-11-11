@@ -9,7 +9,6 @@ use gpui_kit::component::slider::SliderState;
 use gpui_kit::*;
 use quill::gift_manage::GiftRecipient;
 use quill::gift_market::CraftGift;
-use std::time::Instant;
 
 /// One box of the gift market.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,8 +110,6 @@ pub(crate) struct GiftMarketUi {
     pub(super) bar_opens: usize,
     /// The gift the craft info box was opened for.
     pub(super) craft_primary: Option<CraftGift>,
-    /// When the forge started; it runs at least `FORGE_SECONDS`.
-    pub(super) forge_started: Option<Instant>,
 }
 
 /// The auction a bid box follows (`openGiftAuction`) is followed by the
@@ -144,7 +141,6 @@ impl GiftMarketUi {
             #[cfg(test)]
             bar_opens: 0,
             craft_primary: None,
-            forge_started: None,
         }
     }
 

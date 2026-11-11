@@ -476,7 +476,9 @@ fn a_buy_in_flight_is_not_replaced_by_another_resale_box() {
         is_channel: false,
     };
     let mut buy = crate::gift_market::ResaleBuy::new(listing, recipient, false);
-    buy.sending = true;
+    buy.pay = crate::gift_market::BuyPay::Paying {
+        request: crate::ids::RequestId(1),
+    };
     market.buy = Some(buy);
     assert!(t.driver.open_gift_resale(5, "Pepe").is_err());
     assert!(t.driver.start_gift_resale_buy("x", None, false).is_err());
@@ -487,7 +489,7 @@ fn a_buy_in_flight_is_not_replaced_by_another_resale_box() {
             .gift_market
             .buy
             .as_ref()
-            .is_some_and(|b| b.sending),
+            .is_some_and(|b| b.sending()),
         "the purchase keeps its box"
     );
 }

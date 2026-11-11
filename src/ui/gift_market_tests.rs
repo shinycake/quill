@@ -126,15 +126,16 @@ fn closing_the_buy_box_mid_purchase_keeps_the_purchase(cx: &mut TestAppContext) 
             .as_mut()
             .and_then(|s| s.payments.gift_market.buy.as_mut())
         {
-            buy.sending = true;
-            buy.request = 41;
+            buy.pay = quill::gift_market::BuyPay::Paying {
+                request: quill::ids::RequestId(41),
+            };
         }
         app.market_back(cx);
         assert_eq!(app.gift_market.top(), Some(&MarketBox::Resale));
         assert!(
             app.session()
                 .and_then(|s| s.payments.gift_market.buy.as_ref())
-                .is_some_and(|buy| buy.request == 41),
+                .is_some_and(|buy| buy.request() == Some(quill::ids::RequestId(41))),
             "the purchase in flight stays for its answer"
         );
     });

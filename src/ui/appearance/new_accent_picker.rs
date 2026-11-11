@@ -350,18 +350,16 @@ impl QuillApp {
 
     /// The handler is read on a thread (Linux): draw again when it lands.
     fn repaint_when_link_handler_read(&self, cx: &mut Context<Self>) {
-        use std::sync::atomic::{AtomicBool, Ordering};
-        static WATCHING: AtomicBool = AtomicBool::new(false);
-        if !quill::link_handler::refreshing() || WATCHING.swap(true, Ordering::AcqRel) {
+        let (landed, wait) = futures_channel::oneshot::channel::<()>();
+        // One watcher at a time; none when no read runs.
+        if !quill::link_handler::wake_when_read(move || {
+            let _ = landed.send(());
+        }) {
             return;
         }
         cx.spawn(async move |this, cx| {
-            while quill::link_handler::refreshing() {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(100))
-                    .await;
-            }
-            WATCHING.store(false, Ordering::Release);
+            // A read that died drops the sender: draw again then too.
+            let _ = wait.await;
             let _ = this.update(cx, |_, cx| cx.notify());
         })
         .detach();

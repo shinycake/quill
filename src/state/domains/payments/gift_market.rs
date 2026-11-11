@@ -1,9 +1,10 @@
 //! Reducer for the gift market (`crate::gift_market`): resale pages and
 //! purchases, auction states and bids, crafting candidates and results.
 use crate::gift_market::{
-    AuctionFetch, AuctionFollow, CraftGift, CraftResult, GiftMarketPayload, GiftMarketPurpose,
-    bid_done_toast, error_note,
+    AuctionFetch, AuctionFollow, BidStage, BuyPay, CraftGift, CraftResult, GiftMarketPayload,
+    GiftMarketPurpose, SearchStage, bid_done_toast, error_note,
 };
+use crate::ids::RequestId;
 use crate::marketplace::GiftPurchaseResult;
 use crate::state::fetch::Fetch;
 use crate::state::*;
@@ -23,6 +24,7 @@ impl Session {
     ) {
         let purpose = market_purpose(pending);
         let request = pending.map_or(0, |p| p.id.0);
+        let asked = pending.map(|p| p.id);
         match payload {
             GiftMarketPayload::ResalePage(page) => {
                 let Some(GiftMarketPurpose::SearchResale { page: index, .. }) = purpose else {
@@ -41,13 +43,13 @@ impl Session {
                 }
                 let me = self.my_user_id;
                 let market = &mut self.payments.gift_market;
-                if let Some(search) = market.resale.as_mut().filter(|s| s.request_id == request) {
+                if let Some(search) = market.resale.as_mut().filter(|s| s.stage.waits_for(asked)) {
                     search.apply(page, me, index > 0);
                 } else if let Some(search) = market
                     .craft
                     .as_mut()
                     .map(|craft| &mut craft.market)
-                    .filter(|s| s.request_id == request)
+                    .filter(|s| s.stage.waits_for(asked))
                 {
                     search.apply(page, me, index > 0);
                 }
@@ -111,23 +113,22 @@ impl Session {
                     .gift_market
                     .craft
                     .as_mut()
-                    .filter(|craft| craft.candidates_request == request)
+                    .filter(|craft| craft.candidates.stage.waits_for(asked))
                 else {
                     return;
                 };
-                craft.candidates_loading = false;
-                craft.candidates_loaded = true;
-                craft.candidates_total = candidates.total_count;
-                craft.candidates_offset = if candidates.gifts.is_empty() {
+                craft.candidates.stage = SearchStage::Ready;
+                craft.candidates.total = candidates.total_count;
+                craft.candidates.offset = if candidates.gifts.is_empty() {
                     String::new()
                 } else {
                     candidates.next_offset
                 };
                 craft.set_probabilities(candidates.probabilities);
                 if page > 0 {
-                    craft.candidates.extend(candidates.gifts);
+                    craft.candidates.gifts.extend(candidates.gifts);
                 } else {
-                    craft.candidates = candidates.gifts;
+                    craft.candidates.gifts = candidates.gifts;
                 }
             }
             GiftMarketPayload::CraftResult(result) => {
@@ -145,10 +146,9 @@ impl Session {
                     .gift_market
                     .craft
                     .as_mut()
-                    .filter(|craft| request != 0 && craft.craft_request == request)
+                    .filter(|craft| craft.stage.waits_for_craft(asked))
                 {
-                    craft.crafting = false;
-                    craft.result = Some(result);
+                    craft.stage.answer(Some(result));
                 }
             }
         }
@@ -165,14 +165,13 @@ impl Session {
         let Some(buy) = market
             .buy
             .as_mut()
-            .filter(|buy| request != 0 && buy.request == request)
+            .filter(|buy| request != 0 && buy.request() == Some(RequestId(request)))
         else {
             return;
         };
-        buy.sending = false;
+        buy.pay = BuyPay::Idle;
         match result {
             GiftPurchaseResult::Sent(received_gift_id) => {
-                buy.done = Some(received_gift_id.clone());
                 let listing = buy.listing.clone();
                 let recipient = buy.recipient.clone();
                 let for_craft = buy.for_craft;
@@ -208,7 +207,9 @@ impl Session {
                 market.buy = None;
             }
             GiftPurchaseResult::PriceIncreased(price) => {
-                buy.price_changed = price;
+                if let Some(price) = price {
+                    buy.pay = BuyPay::Repriced(price);
+                }
                 if let Some(crate::marketplace::GiftPrice::TonCents(_)) = price {
                     buy.pay_in_grams = true;
                 }
@@ -226,12 +227,8 @@ impl Session {
             ) => {
                 // Only the bid in flight settles it; another request's
                 // answer leaves the button waiting.
-                let id = pending.map(|p| p.id);
-                if market
-                    .bidding
-                    .is_some_and(|(_, request)| Some(request) == id)
-                {
-                    market.bidding = None;
+                if market.bid.is_request(pending.map(|p| p.id)) {
+                    market.bid = BidStage::Idle;
                 }
                 let per_round = market
                     .auctions
@@ -245,13 +242,12 @@ impl Session {
                 market.toasts.push((title.into(), text));
             }
             Some(GiftMarketPurpose::Craft) => {
-                let request = pending.map_or(0, |p| p.id.0);
                 if let Some(craft) = market
                     .craft
                     .as_mut()
-                    .filter(|craft| request != 0 && craft.craft_request == request)
+                    .filter(|craft| craft.stage.waits_for_craft(pending.map(|p| p.id)))
                 {
-                    craft.crafting = false;
+                    craft.stage.answer(None);
                 }
             }
             _ => {}
@@ -267,6 +263,7 @@ impl Session {
         request: u64,
     ) {
         let market = &mut self.payments.gift_market;
+        let asked = (request != 0).then_some(RequestId(request));
         let note = error_note(purpose, &error_reason(err));
         let low = err.earn_hint == Some(crate::earn::EarnErrorHint::BalanceTooLow);
         match purpose {
@@ -278,22 +275,14 @@ impl Session {
                 {
                     // Only the search that sent this request fails; a newer
                     // filter's search (or the other box's) keeps loading.
-                    if search.loading && request != 0 && search.request_id == request {
-                        search.loading = false;
-                        search.loaded = true;
-                        search.error = Some(note.clone());
-                    }
+                    search.fail(asked, note.clone());
                 }
             }
             GiftMarketPurpose::BuyResale => {
-                let Some(buy) = market
-                    .buy
-                    .as_mut()
-                    .filter(|buy| request != 0 && buy.request == request)
-                else {
+                let Some(buy) = market.buy.as_mut().filter(|buy| buy.request() == asked) else {
                     return;
                 };
-                buy.sending = false;
+                buy.pay = BuyPay::Idle;
                 if low {
                     market.balance_low = true;
                 } else {
@@ -308,11 +297,8 @@ impl Session {
                 market.notes.push(note);
             }
             GiftMarketPurpose::PlaceBid { .. } | GiftMarketPurpose::IncreaseBid { .. } => {
-                if market
-                    .bidding
-                    .is_some_and(|(_, waiting)| request != 0 && waiting.0 == request)
-                {
-                    market.bidding = None;
+                if market.bid.is_request(asked) {
+                    market.bid = BidStage::Idle;
                 }
                 if low {
                     market.balance_low = true;
@@ -324,23 +310,22 @@ impl Session {
                 let Some(craft) = market
                     .craft
                     .as_mut()
-                    .filter(|craft| request != 0 && craft.candidates_request == request)
+                    .filter(|craft| craft.candidates.stage.waits_for(asked))
                 else {
                     return;
                 };
-                craft.candidates_loading = false;
-                craft.candidates_loaded = true;
+                craft.candidates.stage = SearchStage::Failed(note.clone());
                 market.notes.push(note);
             }
             GiftMarketPurpose::Craft => {
                 let Some(craft) = market
                     .craft
                     .as_mut()
-                    .filter(|craft| request != 0 && craft.craft_request == request)
+                    .filter(|craft| craft.stage.waits_for_craft(asked))
                 else {
                     return;
                 };
-                craft.crafting = false;
+                craft.stage.answer(None);
                 market.notes.push(note);
             }
             GiftMarketPurpose::AcquiredGifts { gift_id } => {
