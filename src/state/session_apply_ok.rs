@@ -26,6 +26,21 @@ impl Session {
         }
         self.apply_profile_music_ok(pending);
         self.apply_proxy_ok(pending);
+        if let Some(request) = extra
+            && matches!(
+                pending.map(|p| p.purpose),
+                Some(
+                    RequestPurpose::SetPinnedForumTopics
+                        | RequestPurpose::Threads(
+                            ThreadsPurpose::ReadAllForumTopicMentions { .. }
+                                | ThreadsPurpose::ReadAllForumTopicReactions { .. }
+                                | ThreadsPurpose::UnpinAllForumTopicMessages { .. }
+                        )
+                )
+            )
+        {
+            self.topic_action_answered(request, true);
+        }
         self.apply_gift_code_ok(pending);
         self.apply_giveaway_ok(pending);
         self.apply_gift_manage_ok(pending);

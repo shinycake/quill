@@ -92,6 +92,8 @@ impl QuillApp {
         // A video chosen for an owned set finished downloading: its editor,
         // in the window the pick was made in.
         self.sticker_box_window_upkeep(window, cx);
+        // A topic menu action's answer: its success note.
+        self.topic_action_upkeep(cx);
         // A photo "Edit Image" waited for: its editor, or a note.
         self.edit_image_upkeep(cx);
         self.call_boxes_upkeep(window, cx);

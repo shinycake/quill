@@ -75,6 +75,24 @@ impl Session {
         Some(self.threads.bot_thread_starts.remove(at).outcome)
     }
 
+    /// How the topic action `request` ended, once it did.
+    pub fn take_topic_action_answer(&mut self, request: RequestId) -> Option<bool> {
+        let at = self
+            .threads
+            .topic_action_answers
+            .iter()
+            .position(|(asked, _)| *asked == request)?;
+        Some(self.threads.topic_action_answers.remove(at).1)
+    }
+
+    /// Keep how the topic action `request` ended for its window.
+    pub(crate) fn topic_action_answered(&mut self, request: RequestId, ok: bool) {
+        let answers = &mut self.threads.topic_action_answers;
+        answers.push((request, ok));
+        let over = answers.len().saturating_sub(KEPT_ANSWERS);
+        answers.drain(..over);
+    }
+
     /// Keep the answer to the new-thread request `request` for its window.
     pub(crate) fn bot_thread_answered(&mut self, request: RequestId, outcome: Result<i32, String>) {
         let starts = &mut self.threads.bot_thread_starts;
