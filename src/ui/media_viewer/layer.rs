@@ -215,7 +215,9 @@ impl QuillApp {
         // The docked caption sits on top of the controller: keep room for
         // it above the area the controller may be dragged in.
         let docked_h = if caption_docked {
-            caption.map_or(0.0, |caption| caption.plate_h)
+            caption.map_or(0.0, |caption| {
+                self.viewer.extra.caption.docked().height(caption.plate_h)
+            })
         } else {
             0.0
         };

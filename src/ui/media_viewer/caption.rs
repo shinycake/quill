@@ -129,6 +129,31 @@ pub(super) fn caption_layout(
     }
 }
 
+/// The height of the one-line caption chip on a moved controller.
+pub(super) const DOCKED_CHIP_H: f32 = 32.0;
+/// The row over an opened docked caption that folds it again.
+pub(super) const DOCKED_FOLD_ROW_H: f32 = 24.0;
+
+/// The caption on a controller dragged off its spot: a one-line chip, or
+/// opened in full on top of the controller.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(in crate::ui) enum DockedCaption {
+    #[default]
+    Folded,
+    Open,
+}
+
+impl DockedCaption {
+    /// What it takes above the controller, for a caption whose plate is
+    /// `plate_h` tall.
+    pub(super) fn height(self, plate_h: f32) -> f32 {
+        match self {
+            Self::Folded => DOCKED_CHIP_H,
+            Self::Open => DOCKED_FOLD_ROW_H + plate_h,
+        }
+    }
+}
+
 /// The caption's expand state, reset whenever the viewer shows another
 /// item.
 pub(in crate::ui) struct ViewerCaption {
@@ -137,6 +162,8 @@ pub(in crate::ui) struct ViewerCaption {
     /// 0 collapsed, 1 expanded.
     glide: Glide,
     scroll: ScrollHandle,
+    /// Folded to a chip or open, on a moved controller.
+    docked: DockedCaption,
 }
 
 impl Default for ViewerCaption {
@@ -145,6 +172,7 @@ impl Default for ViewerCaption {
             key: None,
             glide: Glide::settled(0., Instant::now(), sine_in_out),
             scroll: ScrollHandle::new(),
+            docked: DockedCaption::Folded,
         }
     }
 }
@@ -158,6 +186,11 @@ impl ViewerCaption {
         self.key = Some(key);
         self.glide = Glide::settled(0., Instant::now(), sine_in_out);
         self.scroll.set_offset(point(px(0.), px(0.)));
+        self.docked = DockedCaption::Folded;
+    }
+
+    pub(super) fn docked(&self) -> DockedCaption {
+        self.docked
     }
 }
 
@@ -174,6 +207,76 @@ impl QuillApp {
         caption.scroll.set_offset(point(px(0.), px(0.)));
         self.viewer_note_activity(cx);
         cx.notify();
+    }
+
+    /// Open the caption chip on a moved controller, or fold it again.
+    pub(in crate::ui) fn toggle_docked_caption(&mut self, cx: &mut Context<Self>) {
+        let caption = &mut self.viewer.extra.caption;
+        caption.docked = match caption.docked {
+            DockedCaption::Folded => DockedCaption::Open,
+            DockedCaption::Open => DockedCaption::Folded,
+        };
+        self.viewer_note_activity(cx);
+        cx.notify();
+    }
+
+    /// The folded caption on a moved controller: its first line, cut to
+    /// the bar, opening the whole caption on a click.
+    pub(super) fn viewer_docked_caption_chip(
+        &self,
+        item: &MediaViewerItem,
+        row_id: u64,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let first = item
+            .caption
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .unwrap_or_default()
+            .to_string();
+        let fg = gpui_kit::white();
+        div()
+            .id(("media-viewer-caption-chip", row_id))
+            .role(Role::Button)
+            .aria_label(tr(keys::Q_AV_SHOW_MORE))
+            .tab_index(0)
+            .h(px(DOCKED_CHIP_H))
+            .px_3()
+            .flex()
+            .items_center()
+            .gap_2()
+            .rounded_t(cx.theme().radius_lg)
+            .text_xs()
+            .text_color(fg.opacity(0.85))
+            .cursor_pointer()
+            .hover(move |style| style.bg(fg.opacity(0.06)))
+            // A press here opens the caption; it does not pick the bar up.
+            .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
+            .on_click(cx.listener(|this, _, _, cx| this.toggle_docked_caption(cx)))
+            .child(Icon::new(IconName::ChevronUp).with_size(px(14.)))
+            .child(div().flex_1().min_w_0().truncate().child(first))
+            .into_any_element()
+    }
+
+    /// The row over an opened docked caption, folding it back to the chip.
+    pub(super) fn viewer_docked_caption_fold(&self, row_id: u64, cx: &mut Context<Self>) -> Div {
+        div()
+            .h(px(DOCKED_FOLD_ROW_H))
+            .px_1()
+            .pt_1()
+            .flex()
+            .justify_end()
+            .child(
+                Button::new(("media-viewer-caption-fold", row_id))
+                    .icon(IconName::ChevronDown)
+                    .xsmall()
+                    .ghost()
+                    .text_color(gpui_kit::white())
+                    .tooltip(tr(keys::Q_AV_SHOW_LESS))
+                    .accessibility_label(tr(keys::Q_AV_SHOW_LESS))
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_docked_caption(cx))),
+            )
     }
 
     /// Escape collapses an expanded caption before it closes the viewer.

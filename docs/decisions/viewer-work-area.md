@@ -47,7 +47,9 @@ window of its own, maximized to the screen's available area
 - **The caption goes with it.** Away from home, the caption leaves the
   bottom bar and sits on top of the controller in one bar of the
   controller's width (one translucent plate; a press on either part drags
-  it), and the picture takes the caption's old room. Back home, it returns
+  it), and the picture takes the caption's old room. There it is folded to
+  a one-line chip (`DockedCaption::Folded`) that opens the whole caption on
+  a click and folds back from a chevron; each item starts folded. Back home, it returns
   under the picture. The caption plate is translucent and rounded like the
   controller's in both places.
 

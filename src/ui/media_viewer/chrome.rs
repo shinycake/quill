@@ -496,6 +496,17 @@ impl QuillApp {
         // dragged by either part.
         let (caption, transport) = match (docked, caption, transport) {
             (true, Some(caption), Some(transport)) => {
+                let caption = match self.viewer.extra.caption.docked() {
+                    super::caption::DockedCaption::Folded => {
+                        self.viewer_docked_caption_chip(item, row_id, cx)
+                    }
+                    super::caption::DockedCaption::Open => div()
+                        .flex()
+                        .flex_col()
+                        .child(self.viewer_docked_caption_fold(row_id, cx))
+                        .child(caption)
+                        .into_any_element(),
+                };
                 let press = self.viewer_controller_press(geometry.controller, cx);
                 let bar = div()
                     .id(("media-viewer-docked-bar", row_id))
@@ -511,7 +522,7 @@ impl QuillApp {
                     .child(
                         div()
                             .on_mouse_down(MouseButton::Left, move |event, window, cx| {
-                                // "Show more" claims its own press.
+                                // The chip and its buttons claim their presses.
                                 if !window.default_prevented() {
                                     press(event.position, event.click_count, window, cx);
                                 }
