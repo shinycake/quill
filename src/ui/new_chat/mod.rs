@@ -32,6 +32,21 @@ use quill::new_chat::{
 /// The description shows three lines and grows to eight.
 const DESCRIPTION_ROWS: (usize, usize) = (3, 8);
 
+/// Whether the name field shows its error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TitleCheck {
+    Fine,
+    /// Confirm found the name empty or too long.
+    Rejected,
+}
+
+impl TitleCheck {
+    /// The error shows for the dialog's own verdict or TDLib's.
+    pub(crate) fn shows_error(self, server_rejected: bool) -> bool {
+        self == Self::Rejected || server_rejected
+    }
+}
+
 pub(crate) struct NewChatDialog {
     pub(crate) kind: NewChatKind,
     pub(crate) stage: NewChatStage,
@@ -50,8 +65,9 @@ pub(crate) struct NewChatDialog {
     pub(crate) auto_delete: Option<i32>,
     /// The auto-delete step's picker over [`TTL_CHOICES`].
     auto_delete_picker: Entity<SelectState<Vec<SharedString>>>,
-    /// Confirm found the name empty or too long.
-    title_error: bool,
+    /// What the name field shows: the dialog's own check on Confirm, or
+    /// TDLib's `NO_CHAT_TITLE` (`NewChatView::failure`), one verdict.
+    title: TitleCheck,
     /// The type step of a supergroup or channel (tdesktop
     /// `SetupChannelBox`, which starts on Public).
     type_box: Option<GroupTypeBox>,
@@ -152,7 +168,7 @@ impl QuillApp {
         cx.subscribe(&title_input, |this, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
                 if let Some(dialog) = this.admin.create_chat_dialog.as_mut() {
-                    dialog.title_error = false;
+                    dialog.title = TitleCheck::Fine;
                 }
                 cx.notify();
             }
@@ -209,7 +225,7 @@ impl QuillApp {
             sources: PhotoSources::default(),
             auto_delete: None,
             auto_delete_picker,
-            title_error: false,
+            title: TitleCheck::Fine,
             type_box,
         });
         self.open_box(DialogKind::CreateChat);
@@ -285,7 +301,7 @@ impl QuillApp {
         match plan_new_chat(kind, &title, &description, &[], None, 0) {
             Err(NewChatInvalid::EmptyTitle | NewChatInvalid::TitleTooLong) => {
                 if let Some(dialog) = self.new_chat_dialog_mut() {
-                    dialog.title_error = true;
+                    dialog.title = TitleCheck::Rejected;
                     let input = dialog.title_input.clone();
                     input.update(cx, |input, cx| input.focus(window, cx));
                 }

@@ -166,7 +166,7 @@ fn fading(app: &QuillApp, id: u64) -> bool {
         .windows
         .shown
         .iter()
-        .any(|s| s.id == id && s.popup.hiding)
+        .any(|s| s.id == id && s.popup.hiding())
 }
 
 /// A new message of the chat whose window has a reply being typed does
@@ -184,7 +184,7 @@ fn a_new_message_keeps_the_window_being_replied_in(cx: &mut TestAppContext) {
         app.show_custom_notification(&me, message(7), None, None, false, true, cx);
         let replying = app.delivery.windows.shown.iter().find(|s| s.id == id);
         assert!(
-            replying.is_some_and(|s| s.replying() && !s.unlinked() && !s.popup.hiding),
+            replying.is_some_and(|s| s.replying() && !s.unlinked() && !s.popup.hiding()),
             "the window being replied in stays up"
         );
         let live = app
@@ -215,8 +215,7 @@ fn a_window_clicked_under_the_pointer_lets_the_others_fade(cx: &mut TestAppConte
         let later = now + std::time::Duration::from_secs(600);
         // The user was back at the computer: both are due later.
         for shown in app.delivery.windows.shown.iter_mut() {
-            shown.waiting_for_input = false;
-            shown.hide_at = Some(later);
+            shown.hold = super::Hold::Lingering { hide_at: later };
         }
         let (x, y) = (shown_id(app, 7), shown_id(app, 8));
         app.notify_window_event(x, ViewEvent::Hover(true), cx);
@@ -335,7 +334,7 @@ fn the_corner_preview_ends_with_the_page_that_showed_it(cx: &mut TestAppContext)
                 .windows
                 .samples
                 .iter()
-                .all(|(_, popup)| popup.hiding),
+                .all(|(_, popup)| popup.hiding()),
             "the sample windows are going"
         );
     });

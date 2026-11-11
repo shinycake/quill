@@ -89,8 +89,8 @@ fn an_empty_name_keeps_the_first_step(cx: &mut TestAppContext) {
     click(vcx, "new-chat-confirm");
     assert_eq!(step(&app, vcx), Some(NewChatStep::Info));
     assert_eq!(
-        app.read_with(vcx, |app, _| app.new_chat_dialog().map(|d| d.title_error)),
-        Some(true)
+        app.read_with(vcx, |app, _| app.new_chat_dialog().map(|d| d.title)),
+        Some(super::TitleCheck::Rejected)
     );
 }
 

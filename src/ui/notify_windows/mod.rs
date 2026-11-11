@@ -104,15 +104,18 @@ struct Popup {
     height: f32,
     shift: Anim,
     opacity: Anim,
-    hiding: bool,
     /// Where the window was last put, so a still frame moves nothing.
     placed: Option<Point<Pixels>>,
     drawn_opacity: f32,
 }
 
 impl Popup {
+    /// Fading out: the opacity heads for zero (`hide`), until `unhide`.
+    fn hiding(&self) -> bool {
+        self.opacity.to == 0.0
+    }
+
     fn hide(&mut self, slow: bool, now: Instant) {
-        self.hiding = true;
         let ms = if slow { SLOW_HIDE_MS } else { FAST_ANIM_MS };
         // Restart from fully shown, as tdesktop does (its #28811).
         self.opacity = Anim::still(1.0, now);
@@ -120,8 +123,7 @@ impl Popup {
     }
 
     fn unhide(&mut self, now: Instant) {
-        if self.hiding {
-            self.hiding = false;
+        if self.hiding() {
             self.opacity.retarget(1.0, FAST_ANIM_MS, false, now);
         }
     }
@@ -139,12 +141,54 @@ struct Shown {
     popup: Popup,
     stage: Stage,
     started: Instant,
-    waiting_for_input: bool,
-    /// When the slow fade is due: set once the user was back at the
-    /// computer (`notify_check_input`) or the pointer left the stack, and
-    /// never cleared while the window is up. Whether it fades now is
-    /// derived from it and the hold (`notify_settle_hiding`).
-    hide_at: Option<Instant>,
+    hold: Hold,
+}
+
+/// Why the window has not started its slow fade. It stays up until the
+/// user has touched the computer after it appeared (`notify_check_input`),
+/// then lingers until `hide_at`; the pointer leaving the stack can bring
+/// that time forward at any point. The time is never cleared while the
+/// window is up; whether it fades now is derived from it and the hold
+/// (`notify_settle_hiding`).
+#[derive(Clone, Copy)]
+enum Hold {
+    /// Nobody has touched the computer yet; `Some` once the pointer left.
+    WaitingForInput { hide_at: Option<Instant> },
+    /// The slow fade is due at this time.
+    Lingering { hide_at: Instant },
+}
+
+impl Hold {
+    fn hide_at(self) -> Option<Instant> {
+        match self {
+            Self::WaitingForInput { hide_at } => hide_at,
+            Self::Lingering { hide_at } => Some(hide_at),
+        }
+    }
+
+    fn waiting(self) -> bool {
+        matches!(self, Self::WaitingForInput { .. })
+    }
+
+    /// The fade is due no later than `due`.
+    fn due_by(self, due: Instant) -> Self {
+        let sooner = |at: Option<Instant>| at.map_or(due, |at| at.min(due));
+        match self {
+            Self::WaitingForInput { hide_at } => Self::WaitingForInput {
+                hide_at: Some(sooner(hide_at)),
+            },
+            Self::Lingering { hide_at } => Self::Lingering {
+                hide_at: sooner(Some(hide_at)),
+            },
+        }
+    }
+
+    /// The user is back: the linger starts, due no later than `due`.
+    fn input_back(self, due: Instant) -> Self {
+        Self::Lingering {
+            hide_at: self.hide_at().map_or(due, |at| at.min(due)),
+        }
+    }
 }
 
 /// Where a shown notification stands. Unlinking leaves `Replying`: a window
@@ -178,6 +222,13 @@ impl Shown {
     }
 }
 
+/// The tick that moves the windows: stopped, or the task that runs it.
+/// The tick stops itself when nothing is up; dropping the windows drops it.
+enum Clock {
+    Stopped,
+    Running { _task: Task<()> },
+}
+
 struct Pending {
     notification: OsNotification,
     icon: Option<PathBuf>,
@@ -200,7 +251,7 @@ pub(crate) struct NotifyWindows {
     /// The live window under the pointer: while it is, nothing fades
     /// (tdesktop `stopAllHiding`).
     hovered: Option<u64>,
-    ticking: bool,
+    clock: Clock,
     /// The main window's windowing system and display, noted every frame.
     pub(super) platform: NotifyPlatform,
     pub(super) main_display: Option<DisplayId>,
@@ -216,7 +267,7 @@ impl NotifyWindows {
             demo: Anim::still(1.0, Instant::now()),
             next_id: 0,
             hovered: None,
-            ticking: false,
+            clock: Clock::Stopped,
             platform: NotifyPlatform::Other,
             main_display: None,
         }
@@ -488,8 +539,7 @@ impl QuillApp {
             popup,
             stage: Stage::Live,
             started: now,
-            waiting_for_input: true,
-            hide_at: None,
+            hold: Hold::WaitingForInput { hide_at: None },
         });
         true
     }
@@ -550,7 +600,6 @@ impl QuillApp {
             height,
             shift: Anim::still(shift, now),
             opacity,
-            hiding: false,
             placed: Some(point(px(x), px(y))),
             drawn_opacity: 0.0,
         })
@@ -604,7 +653,7 @@ impl QuillApp {
                 hide_all.unhide(now);
             }
         } else if let Some(hide_all) = self.delivery.windows.hide_all.as_mut()
-            && !hide_all.hiding
+            && !hide_all.hiding()
         {
             hide_all.hide(false, now);
         }
@@ -767,7 +816,7 @@ impl QuillApp {
             return;
         }
         for shown in windows.shown.iter_mut().filter(|s| !s.unlinked()) {
-            shown.hide_at = Some(shown.hide_at.map_or(now, |at| at.min(now)));
+            shown.hold = shown.hold.due_by(now);
         }
         self.notify_settle_hiding(now);
         let windows = &mut self.delivery.windows;
@@ -779,13 +828,12 @@ impl QuillApp {
     }
 
     fn ensure_notify_clock(&mut self, cx: &mut Context<Self>) {
-        if self.delivery.windows.ticking {
+        if matches!(self.delivery.windows.clock, Clock::Running { .. }) {
             return;
         }
-        self.delivery.windows.ticking = true;
         // screen-scope: the notification windows are the app's; the tick
         // shows whichever account's notices are queued.
-        cx.spawn(async move |this, cx| {
+        let task = cx.spawn(async move |this, cx| {
             loop {
                 let next = this
                     .update(cx, |app, cx| app.notify_windows_tick(cx))
@@ -796,8 +844,8 @@ impl QuillApp {
                 };
                 cx.background_executor().timer(delay).await;
             }
-        })
-        .detach();
+        });
+        self.delivery.windows.clock = Clock::Running { _task: task };
     }
 
     /// One clock step: timers, fades, slides. Returns when to run again,
@@ -840,7 +888,7 @@ impl QuillApp {
                     cx.notify();
                 });
             }
-            if popup.hiding && popup.opacity.done(now) {
+            if popup.hiding() && popup.opacity.done(now) {
                 popup.close(cx);
                 closed = true;
             }
@@ -849,17 +897,17 @@ impl QuillApp {
             let windows = &mut self.delivery.windows;
             windows
                 .shown
-                .retain(|s| !(s.popup.hiding && s.popup.opacity.done(now)));
+                .retain(|s| !(s.popup.hiding() && s.popup.opacity.done(now)));
             if windows
                 .hide_all
                 .as_ref()
-                .is_some_and(|p| p.hiding && p.opacity.done(now))
+                .is_some_and(|p| p.hiding() && p.opacity.done(now))
             {
                 windows.hide_all = None;
             }
             windows
                 .samples
-                .retain(|(_, p)| !(p.hiding && p.opacity.done(now)));
+                .retain(|(_, p)| !(p.hiding() && p.opacity.done(now)));
             self.notify_show_next(cx);
         }
         let windows = &mut self.delivery.windows;
@@ -872,8 +920,8 @@ impl QuillApp {
                 windows
                     .shown
                     .iter()
-                    .filter(|s| !s.unlinked() && !s.popup.hiding)
-                    .filter_map(|s| s.hide_at)
+                    .filter(|s| !s.unlinked() && !s.popup.hiding())
+                    .filter_map(|s| s.hold.hide_at())
                     .min()
             })
             .flatten()
@@ -881,7 +929,7 @@ impl QuillApp {
         let waiting = windows
             .shown
             .iter()
-            .any(|s| s.waiting_for_input && !s.unlinked());
+            .any(|s| s.hold.waiting() && !s.unlinked());
         let next = match (deadline, waiting) {
             (Some(deadline), true) => Some(deadline.min(Duration::from_millis(INPUT_CHECK_MS))),
             (Some(deadline), false) => Some(deadline),
@@ -894,7 +942,7 @@ impl QuillApp {
             Some(delay) => Some(delay.max(FRAME)),
             None if open => Some(Duration::from_millis(INPUT_CHECK_MS)),
             None => {
-                windows.ticking = false;
+                windows.clock = Clock::Stopped;
                 None
             }
         }
@@ -907,7 +955,7 @@ impl QuillApp {
     fn notify_check_input(&mut self, now: Instant) {
         let idle = quill::passcode::os_idle_ms().map(Duration::from_millis);
         let windows = &mut self.delivery.windows;
-        for shown in windows.shown.iter_mut().filter(|s| s.waiting_for_input) {
+        for shown in windows.shown.iter_mut().filter(|s| s.hold.waiting()) {
             let back = match idle {
                 None => true,
                 Some(idle) => now
@@ -915,9 +963,8 @@ impl QuillApp {
                     .is_some_and(|input| input > shown.started),
             };
             if back {
-                shown.waiting_for_input = false;
                 let due = now + Duration::from_millis(WAIT_LONG_HIDE_MS);
-                shown.hide_at = Some(shown.hide_at.map_or(due, |at| at.min(due)));
+                shown.hold = shown.hold.input_back(due);
             }
         }
     }
@@ -938,10 +985,10 @@ impl QuillApp {
         }
         let held = windows.held();
         for shown in windows.shown.iter_mut().filter(|s| !s.unlinked()) {
-            let due = !held && shown.hide_at.is_some_and(|at| at <= now);
-            if due && !shown.popup.hiding {
+            let due = !held && shown.hold.hide_at().is_some_and(|at| at <= now);
+            if due && !shown.popup.hiding() {
                 shown.popup.hide(true, now);
-            } else if !due && shown.popup.hiding {
+            } else if !due && shown.popup.hiding() {
                 shown.popup.unhide(now);
             }
         }

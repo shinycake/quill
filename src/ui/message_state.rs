@@ -23,9 +23,7 @@ pub(crate) struct MessageUi {
     pub(super) pending_link: Option<super::entity_links::PendingLink>,
     /// A left press on a row that may become a drag selection, and the
     /// range it covers once it did (`selection_drag`).
-    pub(super) selection_drag: Option<super::selection_drag::DragSelect>,
-    /// The 15 ms pointer poll of a held press is running.
-    pub(super) selection_drag_loop: bool,
+    pub(super) selection_drag: super::selection_drag::SelectionDrag,
     /// Keyboard focus of the history while selecting: a row press or a
     /// drag moves focus here, so Space, Up and Down act on the rows and
     /// not on the composer (tdesktop focuses `HistoryInner`).
@@ -80,8 +78,7 @@ impl MessageUi {
             right_clicked_item: None,
             open_link_confirm: None,
             pending_link: None,
-            selection_drag: None,
-            selection_drag_loop: false,
+            selection_drag: Default::default(),
             history_focus: cx.focus_handle(),
             a11y: Default::default(),
             swipe_reply_start: None,

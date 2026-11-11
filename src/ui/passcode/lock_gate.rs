@@ -134,7 +134,7 @@ impl QuillApp {
             app.dismiss_context_menus(cx);
             // A held press on a history row never sees its release behind
             // the lock screen: its drag ends here, and its poll loop with it.
-            app.message_ui.selection_drag = None;
+            app.message_ui.selection_drag.clear();
             // And its inline clips: a locked chat window runs no frame
             // upkeep, so a round video playing there kept its sound.
             app.players.inline_videos.leave_window(app.windows.scope);
