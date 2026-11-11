@@ -804,3 +804,24 @@ fn later_markup_message_drops_the_waiting_force_reply() {
     );
     assert!(session.bots.pending_force_replies.is_empty());
 }
+
+#[test]
+fn an_answer_for_a_gone_account_settles_the_awaited_request_as_failed() {
+    // The answer of a request from before a logout is dropped, but the
+    // surface waiting on it (an edit, an Apply) must hear that it failed.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    let id = session.request(RequestPurpose::LoadChats, None);
+    session.acks.expect(id);
+    session.account_generation.bump();
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, id.0),
+    );
+    assert!(matches!(
+        session.acks.take(id),
+        Some(crate::state::Answer::Failed(_))
+    ));
+}

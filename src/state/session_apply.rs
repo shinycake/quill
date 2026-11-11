@@ -32,6 +32,10 @@ impl Session {
                 seq: Some(owned.seq),
                 note: "stale-account-generation",
             });
+            // The surface awaiting it must not wait for good: the answer
+            // belongs to an account that is gone, so it did not take.
+            self.acks
+                .settle(pending.id, Answer::Failed("The account changed before TDLib answered".into()));
             return;
         }
         if let Some(pending) = pending.as_ref() {

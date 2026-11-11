@@ -88,12 +88,16 @@ impl QuillApp {
     }
 
     /// Copy the session's resolution into this window's own when it is for
-    /// `username`.
-    fn capture_inline_bot(&mut self, username: &str) {
+    /// `username` and settled. A `Resolving` value is never copied: another
+    /// window's lookup may replace the slot before it answers, and the copy
+    /// would then wait forever. Until it settles the slot itself answers
+    /// ([`Self::inline_bot_for`]).
+    pub(super) fn capture_inline_bot(&mut self, username: &str) {
         let slot = self
             .session()
             .and_then(|session| session.bots.inline_bot_resolve.clone())
-            .filter(|resolve| resolve_username(resolve) == username);
+            .filter(|resolve| resolve_username(resolve) == username)
+            .filter(|resolve| !matches!(resolve, InlineBotResolve::Resolving { .. }));
         if slot.is_some() {
             self.chat_ui.inline_bot = slot;
         }
@@ -485,17 +489,22 @@ impl QuillApp {
         self.chat_ui.inline_results_open = false;
         self.chat_ui.inline_results_selected = 0;
         self.chat_ui.inline_query_armed = None;
-        if let Some(live) = self.live.as_mut()
-            && live
-                .driver
-                .send_inline_query_result(chat_id, query_id, &result_id)
-                .is_err()
-        {
-            // Nothing went out: the `@bot query` the user typed comes back.
-            self.set_composer_markup(&typed, window, cx);
-            self.set_note(StatusNote::error(tr(
-                keys::Q_MEDIA_COULD_NOT_SEND_THE_INLINE,
-            )));
+        let sent = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.send_inline_query_result(chat_id, query_id, &result_id));
+        match sent {
+            // TDLib's answer gives the text back if it refuses the pick
+            // (`settle_sent_text`).
+            Some(Ok(Some(request))) => self.remember_inline_pick(request, typed),
+            Some(Ok(None)) | None => {}
+            Some(Err(_)) => {
+                // Nothing went out: the `@bot query` the user typed comes back.
+                self.set_composer_markup(&typed, window, cx);
+                self.set_note(StatusNote::error(tr(
+                    keys::Q_MEDIA_COULD_NOT_SEND_THE_INLINE,
+                )));
+            }
         }
         cx.notify();
     }

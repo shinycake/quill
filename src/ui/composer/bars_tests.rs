@@ -769,6 +769,55 @@ fn a_refused_rich_send_gives_the_text_back(cx: &mut TestAppContext) {
     assert_eq!(field(&app, vcx), "typed meanwhile");
 }
 
+/// Sweep 08-149/150: a refused rich send keeps no draft clear, so a later
+/// send of the chat cannot delete the text it gave back. A refused inline
+/// pick (10-116) gives the `@bot query` back too.
+#[gpui_kit::test]
+fn a_refused_send_drops_its_draft_clear_and_gives_back_the_text(cx: &mut TestAppContext) {
+    use crate::ui::composer::SentText;
+    use crate::ui::composer_state::DraftClear;
+    use quill::ids::RequestId;
+    use quill::state::Answer;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat(&app, vcx, GROUP);
+    let clear_waits = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.send_slot()
+                .is_some_and(|slot| app.composer_sends.has_draft_clear(&slot))
+        })
+    };
+    app.update(vcx, |app, _| {
+        app.expect_draft_clear(DraftClear::whole_composer(GROUP));
+        app.chat_ui.sent_text = SentText::Sent {
+            request: RequestId(9),
+            markup: "rich".into(),
+        };
+    });
+    assert!(clear_waits(&app, vcx));
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.apply_sent_text_answer(&Answer::Failed("FLOOD".into()), window, cx)
+        })
+    });
+    assert!(!clear_waits(&app, vcx), "the refused send's clear is gone");
+    // The inline pick: the query returns on an error answer, not on Done.
+    set_field(&app, vcx, "");
+    app.update(vcx, |app, _| {
+        app.chat_ui.sent_text = SentText::InlinePick {
+            request: RequestId(10),
+            markup: "@bot cats".into(),
+        };
+    });
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.apply_sent_text_answer(&Answer::Failed("QUERY_ID_INVALID".into()), window, cx)
+        })
+    });
+    assert_eq!(field(&app, vcx), "@bot cats");
+    assert!(!app.read_with(vcx, |app, _| app.chat_ui.rich_editor_open));
+}
+
 /// Sweep 08-134: an AI answer replaces the draft it was asked about, not
 /// text typed since.
 #[gpui_kit::test]
@@ -842,6 +891,35 @@ fn a_window_reads_its_own_inline_bot(cx: &mut TestAppContext) {
             app.inline_bot_for("botc").is_none(),
             "unknown: not resolved"
         );
+    });
+}
+
+/// Sweep 10-115: window A copies the session slot while it is still
+/// `Resolving`, then window B's lookup replaces the slot. A must not keep
+/// the stale `Resolving` (it would wait for an answer that never comes): it
+/// reads nothing for its bot, so it asks again.
+#[gpui_kit::test]
+fn a_resolving_slot_replaced_by_another_window_is_not_kept(cx: &mut TestAppContext) {
+    use quill::state::InlineBotResolve;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolving {
+                username: "bota".into(),
+                generation: 1,
+            });
+        }
+        app.capture_inline_bot("bota");
+        if let Some(session) = app.demo_session.as_mut() {
+            session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolved {
+                username: "botb".into(),
+                user_id: 2,
+                is_inline: Some(true),
+            });
+        }
+        assert!(app.chat_ui.inline_bot.is_none());
+        assert!(app.inline_bot_for("bota").is_none());
     });
 }
 
