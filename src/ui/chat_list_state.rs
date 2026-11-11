@@ -128,6 +128,7 @@ impl ChatOverlay {
     }
 
     /// Nothing floats and no press is waiting.
+    #[cfg(test)]
     pub(super) fn is_none(&self) -> bool {
         matches!(self, Self::None)
     }
