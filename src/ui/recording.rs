@@ -239,6 +239,14 @@ impl QuillApp {
     }
 
     /// Stop the preview of a paused recording.
+    /// The voice capture, for a send: its preview stops first, since the
+    /// preview's clock goes with the capture and nothing would end the
+    /// player after it.
+    pub(super) fn take_voice_capture(&mut self) -> Option<quill::voice::VoiceCapture> {
+        self.stop_record_preview();
+        self.recording.take_voice()
+    }
+
     pub(super) fn stop_record_preview(&mut self) {
         if self.recording.take_preview().is_some() {
             self.kill_shared_player();
