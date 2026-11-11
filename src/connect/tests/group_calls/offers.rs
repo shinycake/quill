@@ -216,11 +216,11 @@ fn stopping_a_share_during_the_wait_sends_neither_start_nor_end() {
     let start = driver
         .toggle_group_call_screen_share()
         .expect("start sharing");
-    assert!(tracked(&driver).screen_share_pending);
+    assert!(tracked(&driver).screen_share.is_starting());
     driver
         .toggle_group_call_screen_share()
         .expect("changed my mind");
-    assert!(!tracked(&driver).screen_share_pending);
+    assert!(!tracked(&driver).screen_share.is_starting());
     assert!(driver.session.requests.get(start).is_none());
     land(&mut driver, &handle);
     assert_eq!(sent_count(&recorder, "startGroupCallScreenSharing"), 0);
@@ -263,7 +263,7 @@ fn an_unwanted_share_offer_clears_the_pending_share() {
     driver
         .toggle_group_call_screen_share()
         .expect("start sharing");
-    assert!(tracked(&driver).screen_share_pending);
+    assert!(tracked(&driver).screen_share.is_starting());
     // The call stopped being joined while the payload was made.
     driver
         .session
@@ -274,7 +274,7 @@ fn an_unwanted_share_offer_clears_the_pending_share() {
         .is_joined = false;
     land(&mut driver, &handle);
     assert_eq!(sent_count(&recorder, "startGroupCallScreenSharing"), 0);
-    assert!(!tracked(&driver).screen_share_pending);
+    assert!(!tracked(&driver).screen_share.is_starting());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -288,7 +288,7 @@ fn a_failed_share_payload_clears_the_pending_share() {
         .expect("the press is taken");
     assert_eq!(sent_count(&recorder, "startGroupCallScreenSharing"), 0);
     let call = tracked(&driver);
-    assert!(!call.screen_share_pending);
+    assert!(!call.screen_share.is_starting());
     assert!(call.screen_share_error.is_some());
     assert_eq!(call.transport_error, None, "the call itself still works");
     assert!(!handle.presentation_active(555));

@@ -47,9 +47,7 @@ impl Session {
             Some(RequestPurpose::Calls(CallsPurpose::AcceptCall { call_id })) => {
                 // The call was never answered and keeps ringing, so a
                 // close must leave it to ring.
-                if self.calls.answered_call == Some(call_id) {
-                    self.calls.answered_call = None;
-                }
+                self.calls.progress.answer_failed(call_id);
                 // An answer that fails after its call went must not land on
                 // the next one (tdesktop drops the request with its call).
                 if self.calls.active_call.as_ref().map(|call| call.id) == Some(call_id) {
@@ -60,7 +58,7 @@ impl Session {
             Some(RequestPurpose::DiscardCall) => {
                 // The active call's hang-up failed: the call goes on in
                 // the phase it had, and a swap waiting on it asks again.
-                if let Some(hang_up) = self.calls.hang_up.take_if(|h| Some(h.request) == extra) {
+                if let Some(hang_up) = self.calls.progress.hang_up_failed(extra) {
                     if let Some(call) = self.calls.active_call.as_mut()
                         && call.id == hang_up.call_id
                     {
@@ -104,11 +102,13 @@ impl Session {
             // flags), not the call overlay.
             Some(RequestPurpose::SearchCallMessages) => {
                 if pending.is_some_and(|p| self.calls.take_recent_calls_request(p.id)) {
-                    self.calls.recent_calls_error = true;
+                    self.calls.recent_calls_stage = RecentCalls::Failed;
                 }
             }
             Some(RequestPurpose::DeleteAllCallMessages) => {
-                self.calls.recent_calls_clearing = false;
+                if self.calls.recent_calls_clearing() {
+                    self.calls.recent_calls_stage = RecentCalls::Idle;
+                }
                 self.chats_state
                     .chat_action_error
                     .push(crate::chatlist_calls::clear_failed(err.code));
@@ -229,9 +229,7 @@ impl Session {
                 if let Some(tracked) = self.calls.active_group_call.as_mut()
                     && tracked.id == group_call_id
                 {
-                    tracked.screen_share_pending = false;
-                    tracked.screen_sharing = false;
-                    tracked.screen_share_answer.clear();
+                    tracked.screen_share = ScreenShare::Off;
                 }
                 self.calls.group_call_error = Some(call_request_error_line(
                     err,
@@ -244,9 +242,7 @@ impl Session {
                 if let Some(tracked) = self.calls.active_group_call.as_mut()
                     && tracked.id == group_call_id
                 {
-                    tracked.screen_share_pending = false;
-                    tracked.screen_sharing = false;
-                    tracked.screen_share_answer.clear();
+                    tracked.screen_share = ScreenShare::Off;
                 }
                 self.calls.group_call_error = Some(call_request_error_line(
                     err,

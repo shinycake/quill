@@ -8,7 +8,7 @@
 use super::conference::input_ref;
 use super::*;
 use crate::calls::engine::{EngineError, GroupOffer, GroupOfferKey};
-use crate::state::{ConferenceInput, ConferenceOrigin};
+use crate::state::{ConferenceInput, ConferenceOrigin, ScreenShare};
 use crate::telegram::requests::create_group_call;
 
 pub(super) enum OfferSend {
@@ -134,7 +134,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             OfferSend::Screen => calls
                 .active_group_call
                 .as_ref()
-                .is_some_and(|call| call.id == id && call.is_joined && call.screen_share_pending),
+                .is_some_and(|call| call.id == id && call.is_joined && call.screen_share.is_starting()),
         }
     }
 
@@ -326,7 +326,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             OfferSend::Screen => {
                 if let Some(call) = self.session.calls.group_call_mut(id) {
-                    call.screen_share_pending = false;
+                    call.screen_share = ScreenShare::Off;
                 }
             }
         }

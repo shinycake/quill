@@ -4,6 +4,36 @@ use crate::calls::engine::ConnectParams;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+/// The screen-share stage of a group call. `Starting` leaves on the
+/// `startGroupCallScreenSharing` answer (to `Sharing` once the presentation
+/// connected, or to `Off` when it failed), on its error, on a stop, and when
+/// the call ends.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum ScreenShare {
+    #[default]
+    Off,
+    /// Asked; `answer` is the `Text` presentation answer once it arrived,
+    /// consumed by the driver pump to finish the handshake.
+    Starting { answer: Option<String> },
+    Sharing,
+}
+
+impl ScreenShare {
+    pub fn is_sharing(&self) -> bool {
+        matches!(self, Self::Sharing)
+    }
+
+    pub fn is_starting(&self) -> bool {
+        matches!(self, Self::Starting { .. })
+    }
+
+    /// Sharing or about to: the stop control shows, the engine keeps its
+    /// presentation.
+    pub fn is_on(&self) -> bool {
+        !matches!(self, Self::Off)
+    }
+}
+
 /// Phase C1: the tracked live call (signaling only — no media
 /// transport; real audio/video is the C2 libtgvoip spike). States
 /// follow TDLib's `CallState` (schema 1.8.67, lines 7054–7086):
@@ -371,11 +401,11 @@ pub struct ActiveGroupCall {
     /// subscribe failures), mirroring the 1:1 call's `transport_error`.
     /// The join itself is never blocked by these.
     pub transport_error: Option<String>,
-    /// Phase C2g: screen-share presentation state. `screen_share_pending`
-    /// while the `startGroupCallScreenSharing` answer is in flight;
-    /// `screen_sharing` once the presentation transport connected.
-    pub screen_share_pending: bool,
-    pub screen_sharing: bool,
+    /// Phase C2g: screen-share presentation stage, one value
+    /// (`ScreenShare`): off, starting (the `startGroupCallScreenSharing`
+    /// answer in flight, then held until the driver pump consumes it) and
+    /// sharing once the presentation transport connected.
+    pub screen_share: ScreenShare,
     /// Your shared window is hidden, so the share is paused (the driver
     /// sent `toggleGroupCallScreenSharingIsPaused`). Your own tile shows
     /// the paused state at once, before the participant update.
@@ -384,10 +414,6 @@ pub struct ActiveGroupCall {
     /// stop). Kept apart from `transport_error`: a failed share leaves
     /// the call itself working.
     pub screen_share_error: Option<String>,
-    /// The `Text` presentation answer from
-    /// `startGroupCallScreenSharing`; consumed by the driver pump to
-    /// finish the presentation handshake.
-    pub screen_share_answer: String,
     /// Speaker and listener links from `getVideoChatInviteLink`,
     /// fetched on demand (`crate::calls::share_links`).
     pub share_links: crate::calls::share_links::VideoChatShareLinks,
@@ -631,11 +657,9 @@ impl ActiveGroupCall {
             join_payload: String::new(),
             transport_ready: false,
             transport_error: None,
-            screen_share_pending: false,
-            screen_sharing: false,
+            screen_share: ScreenShare::Off,
             screen_share_paused: false,
             screen_share_error: None,
-            screen_share_answer: String::new(),
             share_links: Default::default(),
             is_rtmp_stream: false,
             scheduled_start_date: 0,

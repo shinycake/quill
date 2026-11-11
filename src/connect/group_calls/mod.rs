@@ -6,7 +6,7 @@ use crate::calls::engine::{
 use crate::calls::tile_pin::TileKey;
 use crate::ids::RequestId;
 use crate::locks::LockExt;
-use crate::state::CallsPurpose;
+use crate::state::{CallsPurpose, ScreenShare};
 use crate::state::RequestPurpose;
 use crate::telegram::envelope::{ChatKind, MessageSender};
 use crate::telegram::requests::{
@@ -273,8 +273,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .calls
             .group_call(group_call_id)
-            .filter(|call| call.screen_share_pending)
-            .map(|call| call.screen_share_answer.clone());
+            .and_then(|call| match &call.screen_share {
+                ScreenShare::Starting { answer } => answer.clone(),
+                _ => None,
+            });
         if let Some(answer) = share_answer
             && !answer.is_empty()
         {
@@ -290,14 +292,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
                 match result {
                     Ok(()) => {
-                        call.screen_share_pending = false;
-                        call.screen_sharing = true;
-                        call.screen_share_answer.clear();
+                        call.screen_share = ScreenShare::Sharing;
                         call.screen_share_error = None;
                     }
                     Err(err) => {
-                        call.screen_share_pending = false;
-                        call.screen_share_answer.clear();
+                        call.screen_share = ScreenShare::Off;
                         call.screen_share_error = Some(err.to_string());
                     }
                 }
@@ -312,7 +311,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .calls
             .group_call(group_call_id)
-            .is_some_and(|call| call.screen_sharing || call.screen_share_pending);
+            .is_some_and(|call| call.screen_share.is_on());
         if !want_presentation
             && let Some(engine) = self.call_engine.as_deref_mut()
             && engine.presentation_active(group_call_id)

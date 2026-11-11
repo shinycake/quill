@@ -138,7 +138,7 @@ fn game_scores_panel(
         .p_2()
         .rounded_md()
         .bg(bg_subtle());
-    match scores {
+    match scores.data() {
         None => {
             panel = panel.child(
                 div()
@@ -214,7 +214,11 @@ impl QuillApp {
             return;
         };
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.bots.game_scores.insert(key, None);
+            live.driver
+                .session
+                .bots
+                .game_scores
+                .insert(key, Fetch::Loading { stale: None });
             live.driver
                 .send_game_high_scores(chat_id, message_id, user_id)
         });

@@ -1,5 +1,6 @@
 //! Connect driver: in-call controls (screen share, mute, video, participants, invitations).
 use super::*;
+use crate::state::ScreenShare;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase C2g: start or stop screen sharing in the tracked group
@@ -31,7 +32,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .calls
             .active_group_call
             .as_ref()
-            .is_some_and(|call| call.screen_sharing || call.screen_share_pending);
+            .is_some_and(|call| call.screen_share.is_on());
         if sharing {
             let key = GroupOfferKey::Screen(group_call_id);
             if let Some(extra) = self.drop_group_offer(key) {
@@ -40,7 +41,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     let _ = engine.stop_screen_share(group_call_id);
                 }
                 if let Some(call) = self.session.calls.active_group_call.as_mut() {
-                    call.screen_share_pending = false;
+                    call.screen_share = ScreenShare::Off;
                 }
                 return Ok(extra);
             }
@@ -52,10 +53,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 call.screen_share_error = Some(err.to_string());
             }
             if let Some(call) = self.session.calls.active_group_call.as_mut() {
-                call.screen_sharing = false;
-                call.screen_share_pending = false;
+                call.screen_share = ScreenShare::Off;
                 call.screen_share_paused = false;
-                call.screen_share_answer.clear();
             }
             return Ok(extra);
         }
@@ -80,7 +79,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         if let Some(call) = self.session.calls.active_group_call.as_mut() {
-            call.screen_share_pending = true;
+            call.screen_share = ScreenShare::Starting { answer: None };
         }
         self.wait_for_offer(
             GroupOfferKey::Screen(group_call_id),

@@ -80,14 +80,12 @@ impl Session {
                 {
                     // Guard: a panel the user closed while the answer was in
                     // flight must stay closed — only fill the loading entry.
-                    if self
+                    if let Some(panel) = self
                         .bots
                         .game_scores
-                        .contains_key(&(chat_id.0, message_id.0))
+                        .get_mut(&(chat_id.0, message_id.0))
                     {
-                        self.bots
-                            .game_scores
-                            .insert((chat_id.0, message_id.0), Some(scores));
+                        panel.succeed(scores);
                     }
                 }
             }

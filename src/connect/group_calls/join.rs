@@ -1,5 +1,6 @@
 //! Connect driver: starting, joining, rejoining and leaving group calls.
 use super::*;
+use crate::state::ScreenShare;
 use crate::state::GroupCallRejoin;
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -483,9 +484,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // doesn't drop the new `joinVideoChat` answer.
             call.transport_ready = false;
             call.join_payload.clear();
-            call.screen_sharing = false;
-            call.screen_share_pending = false;
-            call.screen_share_answer.clear();
+            call.screen_share = ScreenShare::Off;
         }
         match conference.flatten() {
             Some(input) => {

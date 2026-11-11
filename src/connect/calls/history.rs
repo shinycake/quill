@@ -1,5 +1,6 @@
 //! Connect driver: call debug logs, call history, call privacy and busy-call handling.
 use super::*;
+use crate::state::RecentCalls;
 use crate::state::{CallUpload, PrivacyAsk};
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -159,10 +160,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        if self.session.calls.recent_calls_clearing() {
+            // The clear answers first; the list reopens then.
+            return Err(ConnectSendError::InvalidRequest);
+        }
         self.session.calls.recent_calls.clear();
         self.session.calls.recent_calls_offset.clear();
-        self.session.calls.recent_calls_error = false;
-        self.session.calls.recent_calls_request = None;
+        self.session.calls.recent_calls_stage = RecentCalls::Idle;
         self.fetch_call_history_page()
     }
 
@@ -178,7 +182,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if !crate::chatlist_calls::can_clear(
             self.session.calls.recent_calls.len(),
-            self.session.calls.recent_calls_clearing,
+            self.session.calls.recent_calls_clearing(),
         ) {
             return Ok(None);
         }
@@ -192,7 +196,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.calls.recent_calls_clearing = true;
+        self.session.calls.recent_calls_stage = RecentCalls::Clearing;
         Ok(Some(extra))
     }
 
@@ -206,7 +210,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     fn fetch_call_history_page(&mut self) -> Result<RequestId, ConnectSendError> {
-        if self.session.calls.recent_calls_loading() {
+        if self.session.calls.recent_calls_loading() || self.session.calls.recent_calls_clearing()
+        {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
@@ -218,12 +223,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&search_call_messages(extra, &offset, 40))
         {
             self.session.requests.take(extra);
-            self.session.calls.recent_calls_error = true;
+            self.session.calls.recent_calls_stage = RecentCalls::Failed;
             return Err(err);
         }
-        self.session.calls.recent_calls_request = Some(extra);
         // A retry of a failed page shows as loading again.
-        self.session.calls.recent_calls_error = false;
+        self.session.calls.recent_calls_stage = RecentCalls::Loading(extra);
         Ok(extra)
     }
 

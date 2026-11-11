@@ -44,7 +44,7 @@ impl Session {
                 active.is_video = call.is_video;
                 // A hang-up in flight keeps showing: the update is where
                 // the call goes back to if the discardCall fails.
-                match self.calls.hang_up.as_mut() {
+                match self.calls.progress.hang_up_mut() {
                     Some(hang_up) if hang_up.call_id == call.id => {
                         hang_up.resume = call.state.clone();
                     }
@@ -185,17 +185,7 @@ impl Session {
         if !self.note_call_migration(call, &summary) {
             self.calls.summary = Some(summary);
         }
-        if self
-            .calls
-            .hang_up
-            .as_ref()
-            .is_some_and(|hang_up| hang_up.call_id == call.id)
-        {
-            self.calls.hang_up = None;
-        }
-        if self.calls.answered_call == Some(call.id) {
-            self.calls.answered_call = None;
-        }
+        self.calls.progress.call_ended(call.id);
         self.calls
             .busy_decline_queue
             .retain(|(id, _, _)| *id != call.id);
@@ -572,7 +562,13 @@ impl Session {
         if let Some(tracked) = self.calls.active_group_call.as_mut()
             && tracked.id == group_call_id
         {
-            tracked.screen_share_answer = payload;
+            // Only a share still starting takes the answer; a stop that
+            // beat it leaves the stage `Off`.
+            if tracked.screen_share.is_starting() {
+                tracked.screen_share = ScreenShare::Starting {
+                    answer: Some(payload),
+                };
+            }
         }
     }
 

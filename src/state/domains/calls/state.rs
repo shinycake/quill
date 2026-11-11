@@ -42,13 +42,9 @@ pub struct CallsState {
     /// active: its swap prompt, or the accept queued behind the current
     /// call's hang-up. Further incoming calls go to `busy_decline_queue`.
     pub second_call: SecondCall,
-    /// The active call's `discardCall` in flight, which owns its
-    /// `HangingUp` phase.
-    pub hang_up: Option<HangUp>,
-    /// The incoming call `acceptCall` went out for. Its state stays
-    /// `Pending` until TDLib's `updateCall`, but it no longer rings: a
-    /// close hangs it up.
-    pub answered_call: Option<i32>,
+    /// What this side did to the active call: answered it, or hung it up
+    /// (the `discardCall` in flight owns the `HangingUp` phase).
+    pub progress: CallProgress,
     /// Phase C2i: "who can call me"
     /// (`userPrivacySettingAllowCalls`, schema 1.8.67 :9006).
     pub privacy_allow_calls: Option<PrivacyWho>,
@@ -71,15 +67,9 @@ pub struct CallsState {
     /// `next_offset` from the last `foundMessages` page; empty starts
     /// (or restarts) the list.
     pub recent_calls_offset: String,
-    /// The `searchCallMessages` page the list waits for. Only its answer
-    /// or error lands: a reopen asks for the first page again at once, and
-    /// "Clear all" forgets the page in flight, so an older page never
-    /// fills the list.
-    pub recent_calls_request: Option<RequestId>,
-    /// The last `searchCallMessages` request failed.
-    pub recent_calls_error: bool,
-    /// A `deleteAllCallMessages` request is in flight.
-    pub recent_calls_clearing: bool,
+    /// Where the recent-calls list stands (`RecentCalls`): the page it
+    /// waits for, a failure, or a "Clear all" in flight.
+    pub recent_calls_stage: RecentCalls,
     /// Phase C3a: the tracked group call / voice chat, if any.
     /// **Signaling only** — TDLib transports no audio/video; the
     /// `joinVideoChat` response payload is stored (`join_payload`) and
@@ -151,16 +141,26 @@ impl CallsState {
 
     /// A recent-calls page is in flight.
     pub fn recent_calls_loading(&self) -> bool {
-        self.recent_calls_request.is_some()
+        matches!(self.recent_calls_stage, RecentCalls::Loading(_))
+    }
+
+    /// The last `searchCallMessages` request failed.
+    pub fn recent_calls_failed(&self) -> bool {
+        self.recent_calls_stage == RecentCalls::Failed
+    }
+
+    /// A `deleteAllCallMessages` request is in flight.
+    pub fn recent_calls_clearing(&self) -> bool {
+        self.recent_calls_stage == RecentCalls::Clearing
     }
 
     /// Whether `request` is the recent-calls page the list waits for; if
     /// so the list stops waiting for it.
     pub(crate) fn take_recent_calls_request(&mut self, request: RequestId) -> bool {
-        if self.recent_calls_request != Some(request) {
+        if self.recent_calls_stage != RecentCalls::Loading(request) {
             return false;
         }
-        self.recent_calls_request = None;
+        self.recent_calls_stage = RecentCalls::Idle;
         true
     }
 
@@ -206,17 +206,14 @@ impl CallsState {
             busy_declined_calls: std::collections::VecDeque::new(),
             busy_declined: Vec::new(),
             second_call: SecondCall::None,
-            hang_up: None,
-            answered_call: None,
+            progress: CallProgress::Idle,
             privacy_allow_calls: None,
             privacy_p2p: None,
             privacy_asks: CallPrivacyAsks::default(),
             prefs: CallPrefs::default(),
             recent_calls: Vec::new(),
             recent_calls_offset: String::new(),
-            recent_calls_request: None,
-            recent_calls_error: false,
-            recent_calls_clearing: false,
+            recent_calls_stage: RecentCalls::Idle,
             active_group_call: None,
             story_stream: None,
             rtmp_start: None,
@@ -245,6 +242,22 @@ pub enum PrivacyAsk {
     /// Asked as this request; only its answer settles the rule.
     Asking(RequestId),
     Failed,
+}
+
+/// The stage of the recent-calls list. `Loading` leaves on its own answer
+/// (to `Idle`) or error (to `Failed`); `Failed` on a retry or a reopen;
+/// `Clearing` on the answer or error of the clear, and it forgets a page
+/// in flight, so an older page never fills the list. A reopen asks for the
+/// first page again at once.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RecentCalls {
+    #[default]
+    Idle,
+    /// The `searchCallMessages` page the list waits for; only its answer
+    /// or error lands.
+    Loading(RequestId),
+    Failed,
+    Clearing,
 }
 
 /// The two rules the calls UI reads (`userPrivacySettingAllowCalls` and

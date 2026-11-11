@@ -2,7 +2,6 @@
 ActiveGroupCall::join_as_requested
 ActiveGroupCall::loaded_all_participants
 ActiveGroupCall::loaded_all_participants+transport_error
-ActiveGroupCall::screen_share_pending
 AppearancePrefs::ignore_battery_saving
 Assembly::started
 AudioEngine::failed
