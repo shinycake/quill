@@ -24,9 +24,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    /// B14: `setCloseFriends` with the full new list; the ids are staged
-    /// ride on the request (`PendingRequest::user_ids`) and are applied on
-    /// its `ok`.
+    /// B14: `setCloseFriends` with the full new list; the ids ride on the
+    /// request (`PendingRequest::user_ids`) and are applied on its `ok`.
     pub fn set_close_friends(&mut self, user_ids: &[i64]) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);

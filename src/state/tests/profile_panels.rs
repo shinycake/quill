@@ -372,20 +372,70 @@ fn groups_in_common_page_in_and_stop_on_a_short_page() {
     apply_json(&mut session, &seq, &sink, &chats_json(first, 1..41));
     let list = ProfileChatsKind::GroupsInCommon;
     assert_eq!(session.profile_chat_list(list, 31).len(), 40);
-    assert!(!session.common_groups_paging(31).exhausted);
+    assert_eq!(session.common_groups_more(31), MorePage::Idle);
 
-    let more = session.request_for_user(purpose, 31);
-    session
-        .users_state
-        .common_groups_paging
-        .entry(31)
-        .or_default()
-        .next_page = crate::state::PhotoPage::Asking(more);
+    let more = ask_next_page(&mut session, purpose);
+    assert!(session.common_groups_more(31).loading());
     apply_json(&mut session, &seq, &sink, &chats_json(more, 38..46));
     // Overlap is dropped; the short page ends the list.
     assert_eq!(session.profile_chat_list(list, 31).len(), 45);
-    let paging = session.common_groups_paging(31);
-    assert!(paging.exhausted && !paging.next_page.asking());
+    assert_eq!(session.common_groups_more(31), MorePage::Exhausted);
+}
+
+/// The list asks for its next page as this request.
+fn ask_next_page(session: &mut Session, purpose: RequestPurpose) -> RequestId {
+    let more = session.request_for_user(purpose, 31);
+    if let Some(ProfileChatsFetch::Loaded { more: page, .. }) = session
+        .users_state
+        .profile_chat_lists
+        .get_mut(&(ProfileChatsKind::GroupsInCommon, 31))
+    {
+        *page = MorePage::Loading(more);
+    }
+    more
+}
+
+/// The panel was reopened (the list asked again as a new first page) while
+/// a follow-up page was out: that page's answer and failure change nothing.
+#[test]
+fn an_old_follow_up_page_does_not_replace_a_reopened_list() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let purpose = RequestPurpose::GetProfileChats(ProfileChatsKind::GroupsInCommon);
+    let key = (ProfileChatsKind::GroupsInCommon, 31);
+    let first = session.request_for_user(purpose, 31);
+    apply_json(&mut session, &seq, &sink, &chats_json(first, 1..41));
+    let stale_page = ask_next_page(&mut session, purpose);
+    let stale_failing = session.request_for_user(purpose, 31);
+    // Reopened: the list is dropped and asked for again.
+    session.users_state.profile_chat_lists.remove(&key);
+    let again = session.request_for_user(purpose, 31);
+    session
+        .users_state
+        .profile_chat_lists
+        .insert(key, ProfileChatsFetch::Loading(again));
+    apply_json(&mut session, &seq, &sink, &chats_json(again, 1..41));
+    apply_json(&mut session, &seq, &sink, &chats_json(stale_page, 41..46));
+    assert_eq!(
+        session
+            .profile_chat_list(ProfileChatsKind::GroupsInCommon, 31)
+            .len(),
+        40,
+        "the old page-2 answer is dropped"
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"boom"}}"#,
+            stale_failing.0
+        ),
+    );
+    assert!(matches!(
+        session.users_state.profile_chat_lists.get(&key),
+        Some(ProfileChatsFetch::Loaded { .. })
+    ));
 }
 
 #[test]
@@ -399,13 +449,7 @@ fn a_failed_follow_up_page_keeps_the_listed_groups() {
         ProfileChatsFetch::Loading(first),
     );
     apply_json(&mut session, &seq, &sink, &chats_json(first, 1..41));
-    let more = session.request_for_user(purpose, 31);
-    session
-        .users_state
-        .common_groups_paging
-        .entry(31)
-        .or_default()
-        .next_page = crate::state::PhotoPage::Asking(more);
+    let more = ask_next_page(&mut session, purpose);
     apply_json(
         &mut session,
         &seq,
@@ -421,10 +465,8 @@ fn a_failed_follow_up_page_keeps_the_listed_groups() {
             .len(),
         40
     );
-    let paging = session.common_groups_paging(31);
-    assert!(!paging.next_page.asking());
     // The list ends here, as in tdesktop, so Load more cannot repeat.
-    assert!(paging.exhausted);
+    assert_eq!(session.common_groups_more(31), MorePage::Exhausted);
 }
 
 /// A user's photo that changes (here or on another device) drops their
@@ -594,16 +636,9 @@ fn a_late_follow_up_page_of_a_dropped_fetch_does_not_replace_the_list() {
         .profile_chat_lists
         .insert(key, ProfileChatsFetch::Loading(first));
     apply_json(&mut session, &seq, &sink, &chats_json(first, 1..41));
-    let late = session.request_for_user(purpose, 31);
-    session
-        .users_state
-        .common_groups_paging
-        .entry(31)
-        .or_default()
-        .next_page = crate::state::PhotoPage::Asking(late);
-    // The profile is fetched again: the paging is dropped, a new first page
-    // is asked, and it lands before the old page 2.
-    session.users_state.common_groups_paging.remove(&31);
+    let late = ask_next_page(&mut session, purpose);
+    // The profile is fetched again: the loaded list (and its paging) is
+    // replaced by a new first page, which lands before the old page 2.
     let again = session.request_for_user(purpose, 31);
     session
         .users_state
@@ -617,5 +652,5 @@ fn a_late_follow_up_page_of_a_dropped_fetch_does_not_replace_the_list() {
     apply_json(&mut session, &seq, &sink, &chats_json(again, 1..41));
     apply_json(&mut session, &seq, &sink, &chats_json(late, 41..45));
     assert_eq!(session.profile_chat_list(key.0, 31).len(), 40);
-    assert!(!session.common_groups_paging(31).exhausted);
+    assert_eq!(session.common_groups_more(31), MorePage::Idle);
 }

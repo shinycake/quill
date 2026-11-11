@@ -128,6 +128,24 @@ fn joining_a_channel_adds_the_notice_row_with_the_strip_expanded() {
 }
 
 #[test]
+fn leaving_the_channel_drops_the_joined_notice_and_strip() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, CHANNEL);
+    join(&mut session, &seq, &sink, 13);
+    assert!(session.similar_strip(ChatId(13)).is_some());
+    let extra = session.request(RequestPurpose::LeaveChat, Some(ChatId(13)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+    );
+    assert!(session.similar_strip(ChatId(13)).is_none());
+    assert!(session.joined_notice_row(ChatId(13)).is_none());
+}
+
+#[test]
 fn joining_a_group_shows_no_strip() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);

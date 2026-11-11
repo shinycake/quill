@@ -189,11 +189,10 @@ impl Session {
             self.clear_date_jump_ui(Some(left));
         }
         // Phase 5.1: switching chats leaves the topic view (re-selecting the
-        // chat leaves it too, so the topic's history is released here).
-        if let (Some(previous), Some(topic)) = (previous, self.open_topic.take())
-            && previous == chat_id
-        {
-            self.release_topic_history(chat_id, topic);
+        // chat leaves it too); the topic's history is released against the
+        // chat it was open in.
+        if let (Some(previous), Some(topic)) = (previous, self.open_topic.take()) {
+            self.release_topic_history(previous, topic);
         }
         // ... and the Saved Messages sublist / tag filter.
         self.threads.saved.close_views();

@@ -303,17 +303,37 @@ pub fn active_account(app_root: &Path) -> AccountKey {
         .unwrap_or_else(AccountKey::primary)
 }
 
+/// Held across every load, edit and save of `accounts.json` made through
+/// [`update_registry`], so two writers on two threads cannot both read the
+/// old list and let the second save drop the first one's change.
+static REGISTRY_UPDATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Read the registry, let `edit` change it, and save it when `edit` says
+/// it did (`Ok(true)`), all under one lock. The one way to write the list.
+fn update_registry<E: From<std::io::Error>>(
+    app_root: &Path,
+    edit: impl FnOnce(&mut AccountRegistry) -> Result<bool, E>,
+) -> Result<(), E> {
+    let _one_writer = crate::locks::lock_or_recover(&REGISTRY_UPDATE);
+    let mut registry = load_registry(app_root);
+    if edit(&mut registry)? {
+        save_registry(app_root, &registry)?;
+    }
+    Ok(())
+}
+
 /// Persist the startup account. Errors when `key` is not in the registry.
 pub fn set_active_account(app_root: &Path, key: &AccountKey) -> std::io::Result<()> {
-    let mut registry = load_registry(app_root);
-    if !registry.accounts.iter().any(|r| &r.key == key) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!("no such account: {key}"),
-        ));
-    }
-    registry.active = Some(key.clone());
-    save_registry(app_root, &registry)
+    update_registry(app_root, |registry| {
+        if !registry.accounts.iter().any(|r| &r.key == key) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("no such account: {key}"),
+            ));
+        }
+        registry.active = Some(key.clone());
+        Ok(true)
+    })
 }
 
 /// Whether accounts that are not on screen show notifications (default on).
@@ -322,33 +342,37 @@ pub fn notify_from_all(app_root: &Path) -> bool {
 }
 
 pub fn set_notify_from_all(app_root: &Path, on: bool) -> std::io::Result<()> {
-    let mut registry = load_registry(app_root);
-    registry.notify_from_all = on;
-    save_registry(app_root, &registry)
+    update_registry(app_root, |registry| {
+        registry.notify_from_all = on;
+        Ok(true)
+    })
 }
 
 /// Add an account with a collision-free key (`account-<n>`); returns the key.
 pub fn add_account(app_root: &Path, display_name: &str) -> std::io::Result<AccountKey> {
-    let mut registry = load_registry(app_root);
-    let mut n = 1u32;
-    loop {
-        // `account-<n>` is always a valid key; the error is unreachable.
-        let candidate = AccountKey::new(&format!("account-{n}")).ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid account key")
-        })?;
-        // A key whose old folder is still to be deleted is not free yet.
-        if !registry.accounts.iter().any(|r| r.key == candidate)
-            && !registry.pending_deletes.contains(&candidate)
-        {
-            registry.accounts.push(AccountRecord {
-                key: candidate.clone(),
-                display_name: display_name.to_string(),
-            });
-            save_registry(app_root, &registry)?;
-            return Ok(candidate);
+    let mut added = None;
+    update_registry::<std::io::Error>(app_root, |registry| {
+        let mut n = 1u32;
+        loop {
+            // `account-<n>` is always a valid key; the error is unreachable.
+            let candidate = AccountKey::new(&format!("account-{n}")).ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid account key")
+            })?;
+            // A key whose old folder is still to be deleted is not free yet.
+            if !registry.accounts.iter().any(|r| r.key == candidate)
+                && !registry.pending_deletes.contains(&candidate)
+            {
+                registry.accounts.push(AccountRecord {
+                    key: candidate.clone(),
+                    display_name: display_name.to_string(),
+                });
+                added = Some(candidate);
+                return Ok(true);
+            }
+            n += 1;
         }
-        n += 1;
-    }
+    })?;
+    added.ok_or_else(|| std::io::Error::other("no account key was chosen"))
 }
 
 /// Refusing to remove the last remaining account, or deleting an account's
@@ -531,6 +555,24 @@ mod account_registry_tests {
             std::env::temp_dir().join(format!("quill-accounts-test-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir
+    }
+
+    #[test]
+    fn accounts_added_from_two_threads_are_both_kept() {
+        let root = tmp_root("two-writers");
+        let writers: Vec<_> = (0..8)
+            .map(|n| {
+                let root = root.clone();
+                std::thread::spawn(move || add_account(&root, &format!("Name {n}")).is_ok())
+            })
+            .collect();
+        for writer in writers {
+            assert!(writer.join().unwrap_or(false));
+        }
+        let keys: std::collections::BTreeSet<_> =
+            list_accounts(&root).into_iter().map(|r| r.key.0).collect();
+        assert_eq!(keys.len(), 9, "primary and every added account");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

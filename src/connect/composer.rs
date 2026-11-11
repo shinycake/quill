@@ -195,6 +195,17 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn keep_failed_draft(&mut self, err: ConnectSendError, pending: PendingDraft) {
         if err != ConnectSendError::InvalidRequest && self.pending_draft.is_none() {
             self.pending_draft = Some(pending);
+            return;
+        }
+        // Not kept: the slot's unsaved mark must not outlive its save, or
+        // drafts written on another device would never show there.
+        let slot = (pending.chat_id, pending.topic);
+        if !self
+            .pending_draft
+            .as_ref()
+            .is_some_and(|waiting| (waiting.chat_id, waiting.topic) == slot)
+        {
+            self.session.clear_draft_dirty(slot.0, slot.1);
         }
     }
 
@@ -246,7 +257,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     pub fn cancel_pending_draft(&mut self) {
-        self.pending_draft = None;
+        if let Some(pending) = self.pending_draft.take() {
+            self.session
+                .clear_draft_dirty(pending.chat_id, pending.topic);
+        }
         self.draft_clock = DraftSaveClock::idle();
     }
 

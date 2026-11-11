@@ -76,7 +76,7 @@ impl QuillApp {
             .profile_chat_lists
             .get(&(ProfileChatsKind::SuitableCommunityChats, 0))
         {
-            Some(ProfileChatsFetch::Loaded(ids)) => (ids.clone(), CandidateStatus::Ready),
+            Some(ProfileChatsFetch::Loaded { ids, .. }) => (ids.clone(), CandidateStatus::Ready),
             Some(ProfileChatsFetch::Loading(_)) => (Vec::new(), CandidateStatus::Loading),
             Some(ProfileChatsFetch::Failed(error)) => {
                 (Vec::new(), CandidateStatus::Failed(error.clone()))

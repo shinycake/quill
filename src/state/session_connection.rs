@@ -45,12 +45,16 @@ impl Session {
     /// Slice parity:platform-offline-errors — whether the client is
     /// currently offline for send/call purposes. `Ready` and `Updating`
     /// are online (`Updating` is live sync; sends/calls still work —
-    /// see #218 mapping it to Transitioning). Other connection states
-    /// mean TDLib has no usable live connection.
+    /// see #218 mapping it to Transitioning). `Initial` has not heard from
+    /// TDLib yet and shows no offline strip, so it is not offline either.
+    /// Other connection states mean TDLib has no usable live connection.
     pub fn is_offline(&self) -> bool {
-        !matches!(
-            self.connection,
-            ConnectionState::Ready | ConnectionState::Updating
-        )
+        match self.connection {
+            ConnectionState::Ready | ConnectionState::Updating | ConnectionState::Initial => false,
+            ConnectionState::WaitingForNetwork
+            | ConnectionState::ConnectingToProxy
+            | ConnectionState::Connecting
+            | ConnectionState::Unknown => true,
+        }
     }
 }

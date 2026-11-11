@@ -454,7 +454,7 @@ impl QuillApp {
     /// it is loaded and no change of it is in flight.
     fn app_proxy_list(&self) -> Option<(Vec<quill::proxy::ProxyEntry>, bool)> {
         let proxy = &self.live.as_ref()?.driver.session.settings.proxy;
-        if proxy.stale || proxy.mutating || proxy.loading {
+        if proxy.stale || proxy.mutating || proxy.fetch.loading() {
             return None;
         }
         Some((proxy.all_entries()?, proxy.prefer_ipv6))

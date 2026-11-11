@@ -144,6 +144,50 @@ fn driver_submits_code_and_password_only_in_matching_states() {
 }
 
 #[test]
+fn password_step_requests_are_sent_once_while_one_is_out() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    let wait_password = copy_and_parse(
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateWaitPassword","password_hint":"","has_recovery_email_address":true}}"#,
+        &seq,
+        &sink,
+    )
+    .unwrap();
+    driver.ingest(wait_password).unwrap();
+    let sent_of = |kind: &str| {
+        recorder
+            .snapshot()
+            .iter()
+            .filter(|json| json.contains(kind))
+            .count()
+    };
+    assert!(driver.request_password_recovery().is_ok());
+    assert_eq!(
+        driver.request_password_recovery(),
+        Err(ConnectSendError::InvalidRequest)
+    );
+    assert_eq!(sent_of("requestAuthenticationPasswordRecovery"), 1);
+    assert!(driver.submit_recovery_code("123456").is_ok());
+    assert_eq!(
+        driver.submit_recovery_code("123456"),
+        Err(ConnectSendError::InvalidRequest)
+    );
+    assert_eq!(sent_of("recoverAuthenticationPassword"), 1);
+    assert!(driver.submit_password("pw").is_ok());
+    assert_eq!(
+        driver.submit_password("pw"),
+        Err(ConnectSendError::InvalidRequest)
+    );
+    assert_eq!(sent_of("checkAuthenticationPassword"), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn driver_resend_code_and_qr_login_only_in_matching_states() {
     let store = MemorySecretStore::new();
     let (dir, prepared) = prepared_tmp(&store);

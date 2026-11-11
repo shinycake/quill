@@ -155,6 +155,27 @@ fn the_web_view_data_waits_for_the_mini_app_helper() {
     forget(&root, &key);
 }
 
+/// The helper of a logged-out account exits after the same key signed in
+/// again: the new session's web view folder (new salt) is not deleted.
+#[test]
+fn a_late_web_view_delete_spares_the_next_sign_ins_folder() {
+    let _serial = crate::locks::lock_or_recover(&SERIAL);
+    let root = root();
+    let dir = webview_dir(&root, "account-937");
+    let _ = std::fs::remove_dir_all(&dir);
+    let old = webview_store_id(Some(&root), "account-937", 1);
+    let old_salt = saved_salt(&dir);
+    assert!(old_salt.is_some());
+    // Logged out, then signed in again under the key: a new salt.
+    let _ = std::fs::remove_dir_all(&dir);
+    let new = webview_store_id(Some(&root), "account-937", 1);
+    assert_ne!(old, new);
+    remove_webview_dir_of(&dir, old_salt.as_deref());
+    assert!(dir.join(WEBVIEW_SALT).exists(), "the new folder stays");
+    remove_webview_dir_of(&dir, saved_salt(&dir).as_deref());
+    assert!(!dir.exists(), "its own folder goes");
+}
+
 /// A different Telegram user in a slot drops what the last one left, as
 /// when the app quit before a log-out finished; the same user keeps it.
 #[test]

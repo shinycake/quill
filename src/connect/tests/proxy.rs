@@ -122,6 +122,33 @@ fn a_mutation_refetches_the_authoritative_list() {
 }
 
 #[test]
+fn a_list_fetch_that_predates_a_change_does_not_clear_the_stale_mark() {
+    let mut rig = Rig::new();
+    rig.load_list(&[(1, true), (2, false)]);
+    let old = rig.driver.fetch_proxies().unwrap();
+    assert_eq!(
+        rig.driver.fetch_proxies().unwrap(),
+        old,
+        "the fetch out is waited for, not repeated"
+    );
+    assert_eq!(rig.count("getProxies"), 2);
+    rig.driver.enable_proxy(2).unwrap();
+    rig.answer("enableProxy", json!({"@type": "ok"}));
+    assert_eq!(rig.count("getProxies"), 3, "the change asks again");
+    // The answer sent before the change lands late: it is not the list.
+    let mut stale = proxies_json(&[(1, true), (2, false)]);
+    stale["@extra"] = json!(old.0.to_string());
+    rig.feed(stale);
+    let proxy = &rig.driver.session.settings.proxy;
+    assert!(proxy.stale, "still waiting for the fetch after the change");
+    assert!(proxy.fetch.loading());
+    rig.answer("getProxies", proxies_json(&[(1, false), (2, true)]));
+    let proxy = &rig.driver.session.settings.proxy;
+    assert!(!proxy.stale && !proxy.fetch.loading());
+    assert_eq!(proxy.enabled().map(|p| p.id), Some(2));
+}
+
+#[test]
 fn ok_acks_refetch_and_errors_surface_without_touching_the_list() {
     let mut rig = Rig::new();
     rig.load_list(&[(1, true), (2, false)]);

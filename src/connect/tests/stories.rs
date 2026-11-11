@@ -5,7 +5,7 @@ use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
 use crate::ids::{AccountKey, ChatId, MessageId};
 use crate::platform::MemorySecretStore;
-use crate::state::{RequestPurpose, Session};
+use crate::state::Session;
 use crate::story_composer::StoryPrivacy;
 use crate::telegram::client::copy_and_parse;
 use serde_json::Value;
@@ -887,18 +887,20 @@ fn driver_b14_close_friends_hide_profile_and_share() {
     let v: Value = serde_json::from_str(&recorder.snapshot().last().cloned().unwrap()).unwrap();
     assert_eq!(v["@type"], "getCloseFriends");
 
-    // setCloseFriends carries the ids on its request until `ok`.
+    // setCloseFriends carries the ids on the request until `ok`.
     driver.set_close_friends(&[4, 8]).unwrap();
     let v: Value = serde_json::from_str(&recorder.snapshot().last().cloned().unwrap()).unwrap();
     assert_eq!(v["@type"], "setCloseFriends");
     assert_eq!(v["user_ids"], serde_json::json!([4, 8]));
-    let sent = driver
-        .session
-        .requests
-        .pending
-        .values()
-        .find(|p| p.purpose == RequestPurpose::SetCloseFriends);
-    assert_eq!(sent.and_then(|p| p.user_ids.clone()), Some(vec![4, 8]));
+    let extra = v["@extra"].as_str().unwrap_or_default();
+    assert!(
+        driver
+            .session
+            .requests
+            .pending
+            .values()
+            .any(|p| p.user_ids == Some(vec![4, 8]) && p.id.0.to_string() == extra)
+    );
 
     // Hide / unhide.
     driver

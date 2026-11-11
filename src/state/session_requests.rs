@@ -164,6 +164,17 @@ impl Session {
         id
     }
 
+    /// Like `request`, but stamps the string id of what it acts on
+    /// (`PendingRequest::subject_id`: the terms `acceptTermsOfService`
+    /// accepts, the gift `sellGift` sells); its `ok` carries none.
+    pub fn request_for_subject(&mut self, purpose: RequestPurpose, subject_id: &str) -> RequestId {
+        let id = self.request(purpose, None);
+        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
+            pending.subject_id = Some(subject_id.to_owned());
+        }
+        id
+    }
+
     /// Phase B1: like `request`, but stamps the secret chat id for
     /// `GetSecretChat` / `CloseSecretChat` correlation
     /// (`PendingRequest::secret_chat_id`) — the `secretChat` response and

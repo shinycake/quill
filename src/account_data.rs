@@ -69,14 +69,19 @@ fn new_salt() -> String {
     hex(bytes.iter())
 }
 
+/// The salt saved in `dir`, if there is a valid one.
+fn saved_salt(dir: &Path) -> Option<String> {
+    let saved = std::fs::read_to_string(dir.join(WEBVIEW_SALT)).ok()?;
+    let saved = saved.trim();
+    (saved.len() == 32 && saved.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then(|| saved.to_owned())
+}
+
 /// The salt saved in `dir`, made and saved first when there is none.
 fn webview_salt(dir: &Path) -> Option<String> {
     let file = dir.join(WEBVIEW_SALT);
-    if let Ok(saved) = std::fs::read_to_string(&file) {
-        let saved = saved.trim();
-        if saved.len() == 32 && saved.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            return Some(saved.to_owned());
-        }
+    if let Some(saved) = saved_salt(dir) {
+        return Some(saved);
     }
     let salt = new_salt();
     std::fs::create_dir_all(dir).ok()?;
@@ -128,13 +133,24 @@ pub fn forget_after_helper(
         return;
     };
     let later = dir.clone();
+    // Whose folder this is: its salt now. The helper can outlive a sign-in
+    // under the same key, whose folder carries another salt.
+    let owner = saved_salt(&dir);
     let spawned = std::thread::Builder::new()
         .name("quill-webview-forget".into())
         .spawn(move || {
             let _ = helper_gone.recv();
-            let _ = std::fs::remove_dir_all(later);
+            remove_webview_dir_of(&later, owner.as_deref());
         });
     if spawned.is_err() {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// Delete `dir` unless a later sign-in made it its own (it then holds a
+/// different salt than `owner`, the one read when the old account left).
+fn remove_webview_dir_of(dir: &Path, owner: Option<&str>) {
+    if saved_salt(dir).as_deref() == owner {
         let _ = std::fs::remove_dir_all(dir);
     }
 }

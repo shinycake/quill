@@ -3,7 +3,7 @@
 //! `Session::proxy`. Mutations never touch the list optimistically: the
 //! answer marks it stale and the driver refetches `getProxies`.
 use super::*;
-use crate::proxy::PingStatus;
+use crate::proxy::{PingStatus, ProxyFetch};
 
 /// Ping slot used by the "enable this proxy?" link box, whose proxy is
 /// not in the list (TDLib ids are non-negative).
@@ -17,10 +17,15 @@ impl Session {
         pending: Option<&PendingRequest>,
         proxies: Vec<crate::proxy::ProxyEntry>,
     ) {
-        if pending.map(|p| p.purpose) != Some(RequestPurpose::GetProxies) {
+        let Some(pending) = pending.filter(|p| p.purpose == RequestPurpose::GetProxies) else {
+            return;
+        };
+        let proxy = &mut self.settings.proxy;
+        // An older fetch (sent before a change, or replaced) says nothing
+        // about the list as it is now.
+        if !proxy.fetch.answers(pending.id) {
             return;
         }
-        let proxy = &mut self.settings.proxy;
         proxy
             .pings
             .retain(|id, _| *id == LINK_PING_ID || proxies.iter().any(|p| p.id == *id));
@@ -35,7 +40,7 @@ impl Session {
             proxy.carrier_failed = None;
         }
         proxy.list = Some(list);
-        proxy.loading = false;
+        proxy.fetch = ProxyFetch::Idle;
         proxy.stale = false;
     }
 
@@ -102,6 +107,9 @@ impl Session {
         let system = pending.is_some_and(|p| proxy.system_step.answered(p.id, false));
         proxy.mutating = false;
         proxy.stale = true;
+        // A list fetch still out may predate this change: its answer is not
+        // the one to wait for any more, and the refetch asks again.
+        proxy.fetch = ProxyFetch::Idle;
         // The box's error line is the user's: the system step's success
         // does not wipe the error of the user's own failed change.
         if !system {
@@ -161,9 +169,12 @@ impl Session {
     ) {
         match purpose {
             RequestPurpose::GetProxies => {
-                self.settings.proxy.loading = false;
-                self.settings.proxy.stale = false;
-                self.settings.proxy.error = Some(sessions_error_line("load the proxy list", err));
+                if pending.is_some_and(|p| self.settings.proxy.fetch.answers(p.id)) {
+                    self.settings.proxy.fetch = ProxyFetch::Idle;
+                    self.settings.proxy.stale = false;
+                    self.settings.proxy.error =
+                        Some(sessions_error_line("load the proxy list", err));
+                }
             }
             RequestPurpose::MutateProxy => {
                 self.settings.proxy.mutating = false;

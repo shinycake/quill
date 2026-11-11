@@ -524,6 +524,19 @@ fn reopening_the_same_chat_releases_its_open_topic() {
 }
 
 #[test]
+fn switching_to_another_chat_releases_the_open_topic_of_the_chat_left() {
+    let (mut session, _sink) = session();
+    switch(&mut session, 7);
+    topic_with(&mut session, 7, 1, 200);
+    session.select_topic(ChatId(7), 1);
+    switch(&mut session, 8);
+    assert_eq!(
+        session.threads.topic_histories[&(7, 1)].messages.len(),
+        CLOSED_TAIL_KEEP
+    );
+}
+
+#[test]
 fn a_late_page_for_a_closed_topic_stays_inside_the_topic_bound() {
     let (mut session, _sink) = session();
     for topic in 1..=(CLOSED_TOPICS_MAX as i32 + 6) {

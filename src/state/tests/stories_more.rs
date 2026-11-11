@@ -674,8 +674,17 @@ fn b14_close_friends_load_and_save_round_trip() {
     assert_eq!(session.stories.close_friends.ids(), Some(&vec![31, 33]));
     assert!(session.stories.page_ops.is_empty());
 
-    // `setCloseFriends` applies the staged ids on `ok`.
+    // `setCloseFriends` applies the ids the request carried on `ok`: the
+    // first save's ok does not take the second save's.
+    let first = session.request_for_user_ids(RequestPurpose::SetCloseFriends, &[31]);
     let extra = session.request_for_user_ids(RequestPurpose::SetCloseFriends, &[33]);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, first.0),
+    );
+    assert_eq!(session.stories.close_friends.ids(), Some(&vec![31]));
     apply_json(
         &mut session,
         &seq,

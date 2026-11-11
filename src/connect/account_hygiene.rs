@@ -94,7 +94,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let extra = self
             .session
-            .request(RequestPurpose::AcceptTermsOfService, None);
+            .request_for_subject(RequestPurpose::AcceptTermsOfService, &terms.id);
         self.session.settings.notices.terms_accept.begin();
         match self
             .sender

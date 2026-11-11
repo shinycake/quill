@@ -221,3 +221,24 @@ fn a_swept_request_drops_its_admin_followups_and_says_so() {
     assert!(session.take_admin_followup(id).is_none());
     assert!(!session.chats_state.chat_action_error.is_empty());
 }
+
+/// An answer dropped as out of order still settles what asked for it: the
+/// download is no longer counted as running, so the file can be asked again.
+#[test]
+fn an_answer_dropped_as_out_of_order_does_not_leave_its_download_running() {
+    let (mut session, sink) = session();
+    session.connection = ConnectionState::Ready;
+    session.last_seq = 50;
+    let file = FileId(7);
+    let extra = session.request_download(file);
+    assert!(session.requests.has_download(file));
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+    );
+    assert!(session.requests.is_empty());
+    assert!(!session.requests.has_download(file));
+}

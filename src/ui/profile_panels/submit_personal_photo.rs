@@ -593,7 +593,7 @@ impl QuillApp {
                             })),
                         );
                     }
-                    Some(ProfileChatsFetch::Loaded(ids)) if ids.is_empty() => {
+                    Some(ProfileChatsFetch::Loaded { ids, .. }) if ids.is_empty() => {
                         body = body.child(
                             div()
                                 .text_sm()
@@ -601,7 +601,7 @@ impl QuillApp {
                                 .child(tr(keys::Q_PEOPLE_YOU_DONT_HAVE_ANY_CHANNELS)),
                         );
                     }
-                    Some(ProfileChatsFetch::Loaded(ids)) => {
+                    Some(ProfileChatsFetch::Loaded { ids, .. }) => {
                         for id in ids {
                             let Some(title) = session.chats.get(&id).map(|c| c.title.clone())
                             else {

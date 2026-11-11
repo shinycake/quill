@@ -163,8 +163,17 @@ impl Session {
     ) {
         if let Some(pending) = pending
             && let RequestPurpose::Calls(CallsPurpose::CreateCall { is_video }) = pending.purpose
+            && self.calls.active_call.is_some()
+        {
+            // Another call (an incoming one that arrived meanwhile) took the
+            // slot: the created call has no owner here, so it is discarded.
+            self.calls.created_call_discards.push((id, is_video));
+            // Its updates are no one's either: the end of the call the user
+            // placed must not show as a missed call.
+            self.remember_busy_declined(id);
+        } else if let Some(pending) = pending
+            && let RequestPurpose::Calls(CallsPurpose::CreateCall { is_video }) = pending.purpose
             && let Some(user_id) = pending.user_id
-            && self.calls.active_call.is_none()
         {
             self.calls.active_call = Some(ActiveCall {
                 id,

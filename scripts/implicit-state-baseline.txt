@@ -156,8 +156,6 @@ PremiumHub::tx_loading
 PrivacyData::network_loading
 PrivacyData::network_loading+error
 ProfileModal::closing
-ProxyState::loading
-ProxyState::loading+error
 PublicLinkRevoke::failed
 PullMachine::expand_pending
 Queued::failed

@@ -252,7 +252,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self.session.request(RequestPurpose::SellGift, None);
+        let extra = self
+            .session
+            .request_for_subject(RequestPurpose::SellGift, received_gift_id);
         self.session.payments.hub.gift_mutating = true;
         self.session.payments.hub.gifts_error = None;
         let json = sell_gift(extra, received_gift_id);
