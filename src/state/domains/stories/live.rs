@@ -416,7 +416,7 @@ impl Session {
                 live.streamer.fail(reason.to_string());
                 live.note = Some(crate::lang::tr_with(
                     crate::lang::keys::Q_OPS_COULD_NOT_LOAD_THE_STREAM,
-                    &[("reason", reason)],
+                    &[("reason", &reason)],
                 ));
             }
             LiveStoryPurpose::GetTopDonors { .. } => live.donors.fail(reason.to_string()),
