@@ -110,7 +110,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::CloseChat, Some(chat_id));
-        self.sender.send_json(&close_chat(extra, chat_id))?;
+        self.send_json_request(extra, &close_chat(extra, chat_id))?;
         Ok(())
     }
 

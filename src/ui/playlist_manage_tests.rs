@@ -186,3 +186,27 @@ fn down_and_up_wrap_through_the_track_menu_items(cx: &mut TestAppContext) {
     vcx.simulate_keystrokes("down");
     assert_eq!(focus(vcx), Some(first), "and Down came back");
 }
+
+#[gpui_kit::test]
+fn closing_the_playlist_goes_back_to_the_gallery_under_it(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_playlist(&app, vcx);
+    app.update_in(vcx, |app, _, cx| {
+        let shared = &mut app
+            .demo_session
+            .as_mut()
+            .expect("demo session")
+            .media
+            .shared_media;
+        shared.open = true;
+        shared.chat_id = Some(quill::ids::ChatId(5));
+        app.close_playlist_ui(cx);
+    });
+    app.read_with(vcx, |app, _| {
+        let shared = &app.session().expect("session").media.shared_media;
+        assert_eq!(shared.playlist_user, None);
+        assert!(shared.open, "the gallery stays");
+        assert_eq!(shared.chat_id, Some(quill::ids::ChatId(5)));
+    });
+}

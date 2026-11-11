@@ -116,3 +116,58 @@ fn a_saved_position_belongs_to_its_chat(cx: &mut TestAppContext) {
         assert_eq!(there.display_secs, 0.0);
     });
 }
+
+/// A drag on the seek slider of a track that is no longer the active one
+/// (the track changed under the press) neither previews nor seeks.
+#[gpui_kit::test]
+fn a_slider_of_the_previous_track_does_not_seek_the_new_one(cx: &mut TestAppContext) {
+    use crate::ui::playback::PlaybackKind;
+    use gpui_kit::component::slider::{SliderEvent, SliderValue};
+    let (app, mut vcx) = open_app(cx);
+    let song = track("ui-slider-owner.wav", 4);
+    let begin = |app: &mut QuillApp, message: MessageId, cx: &mut gpui_kit::Context<QuillApp>| {
+        app.begin_track_playback(
+            PlaybackKind::Audio,
+            DEMO_CHAT,
+            message,
+            DEMO_SONG_SECS,
+            0.0,
+            &song,
+            cx,
+        );
+        app.playback.seek_slider.clone().expect("its slider")
+    };
+    let old = app.update(&mut vcx, |app, cx| begin(app, DEMO_SONG, cx));
+    let current = app.update(&mut vcx, |app, cx| {
+        begin(app, MessageId(DEMO_SONG.0 + 1), cx)
+    });
+    old.update(&mut vcx, |_, cx| {
+        cx.emit(SliderEvent::Change(SliderValue::Single(100.0)));
+    });
+    app.read_with(&vcx, |app, _| {
+        assert!(!app.playback.seek_scrubbing);
+        assert_eq!(app.playback.seek_preview_secs, None);
+    });
+    old.update(&mut vcx, |_, cx| {
+        cx.emit(SliderEvent::Release(SliderValue::Single(100.0)));
+    });
+    app.read_with(&vcx, |app, _| {
+        assert!(app.players.audio.position_secs() < 50.0);
+        assert_eq!(
+            app.playback
+                .positions
+                .get(&crate::ui::playback_state::ChatMessage::new(
+                    DEMO_CHAT,
+                    MessageId(DEMO_SONG.0 + 1)
+                )),
+            None
+        );
+    });
+    current.update(&mut vcx, |_, cx| {
+        cx.emit(SliderEvent::Change(SliderValue::Single(100.0)));
+    });
+    app.read_with(&vcx, |app, _| {
+        assert!(app.playback.seek_scrubbing);
+        assert_eq!(app.playback.seek_preview_secs, Some(100.0));
+    });
+}

@@ -191,6 +191,19 @@ fn play_waits_for_the_open_then_starts_the_backend() {
 }
 
 #[test]
+fn a_player_stuck_opening_stops_asking_for_frames() {
+    let (player, _script) = scripted(false);
+    player.play();
+    let start = Instant::now();
+    assert!(player.frame_demand(start).animates);
+    assert!(
+        !player
+            .frame_demand(start + Duration::from_secs(60))
+            .animates
+    );
+}
+
+#[test]
 fn a_pull_asks_for_the_picture_at_the_predicted_present_time() {
     let (player, script) = scripted(true);
     player.play();

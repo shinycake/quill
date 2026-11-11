@@ -21,9 +21,12 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
     session.messages.resend_error.push("resend".into());
     session.messages.ai_error.push("ai".into());
     session.messages.message_action_note.push("banned".into());
-    session.chats_state.chat_action_error = Some("pin".into());
+    session.chats_state.chat_action_error.push("pin".into());
     session.chats_state.report_chat_outcome = Some("chat reported".into());
     session.groups.invite_link_error = Some("link".into());
+    session.payments.earn.notes.push("Failed: x".into());
+    session.payments.earn.open_url = Some("https://fragment.example".into());
+    session.payments.earn.setup_closed = true;
 
     session.payments.receipt_error = Some("receipt".into());
     session.payments.unlocked_notice = Some("unlocked".into());
@@ -32,7 +35,7 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
         .send_permission_error
         .push("no rights".into());
     session.messages.flood_notice.push("slow down".into());
-    session.bots.last_callback_answer = Some(CallbackAnswer {
+    session.bots.callback_answers.push_back(CallbackAnswer {
         answer: CallbackQueryAnswer {
             text: String::new(),
             show_alert: false,
@@ -57,7 +60,7 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
     assert!(session.payments.unlocked_notice.is_none());
     assert!(session.messages.send_permission_error.is_empty());
     assert!(session.messages.flood_notice.is_empty());
-    assert!(session.bots.last_callback_answer.is_none());
+    assert!(session.bots.callback_answers.is_empty());
     assert!(session.bots.last_login_url_info.is_none());
     assert!(session.bots.login_url_request.is_none());
 
@@ -67,9 +70,12 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
     assert!(session.messages.resend_error.is_empty());
     assert!(session.messages.ai_error.is_empty());
     assert!(session.messages.message_action_note.is_empty());
-    assert!(session.chats_state.chat_action_error.is_none());
+    assert!(session.chats_state.chat_action_error.is_empty());
     assert!(session.chats_state.report_chat_outcome.is_none());
     assert!(session.groups.invite_link_error.is_none());
+    assert!(session.payments.earn.notes.is_empty());
+    assert!(session.payments.earn.open_url.is_none());
+    assert!(!session.payments.earn.setup_closed);
 }
 
 /// An answer whose request is still in flight keeps its context, so the

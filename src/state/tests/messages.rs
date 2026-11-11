@@ -546,7 +546,7 @@ fn view_messages_tdlib_error_releases_in_flight_ids() {
         r#"{"@type":"updateNewMessage","message":{"id":5,"chat_id":1,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#,
     );
     let extra = session.request(RequestPurpose::ViewMessages, Some(ChatId(1)));
-    session.begin_viewing(ChatId(1), &[MessageId(5)]);
+    session.begin_viewing(ChatId(1), extra, &[MessageId(5)]);
     assert!(session.message_ids_to_view(ChatId(1)).is_empty());
     assert!(
         session
@@ -569,7 +569,7 @@ fn view_messages_tdlib_error_releases_in_flight_ids() {
     assert!(!sink.rendered().contains("CANARY_VIEW_FAIL"));
 
     let extra = session.request(RequestPurpose::ViewMessages, Some(ChatId(1)));
-    session.begin_viewing(ChatId(1), &[MessageId(5)]);
+    session.begin_viewing(ChatId(1), extra, &[MessageId(5)]);
     apply_json(
         &mut session,
         &seq,
@@ -601,7 +601,7 @@ fn reported_visible_messages_survive_a_view_error() {
     assert!(session.report_visible_messages(ChatId(1), &[MessageId(4)]));
     assert_eq!(session.message_ids_to_view(ChatId(1)), vec![MessageId(4)]);
     let extra = session.request(RequestPurpose::ViewMessages, Some(ChatId(1)));
-    session.begin_viewing(ChatId(1), &[MessageId(4)]);
+    session.begin_viewing(ChatId(1), extra, &[MessageId(4)]);
     assert!(session.message_ids_to_view(ChatId(1)).is_empty());
     apply_json(
         &mut session,
@@ -828,4 +828,84 @@ fn a_failed_send_loaded_again_still_shows_failed() {
     assert!(row.failed(), "the row keeps its failed state");
     assert!(row.can_retry());
     assert!(row.pending(), "a failed send is not a delivered message");
+}
+
+/// Two `viewMessages` in flight at once: the answer to one settles its own
+/// ids only. The first ok does not mark the second request's ids viewed, so
+/// when the second fails they are due again (sweep 05-178).
+#[test]
+fn a_view_answer_settles_only_its_own_request() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.open_chat(ChatId(1));
+    for id in [4, 5] {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":1,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"m","entities":[]}}}}}}}}"#
+            ),
+        );
+    }
+    assert!(session.report_visible_messages(ChatId(1), &[MessageId(4), MessageId(5)]));
+    let first = session.request(RequestPurpose::ViewMessages, Some(ChatId(1)));
+    session.begin_viewing(ChatId(1), first, &[MessageId(4)]);
+    let second = session.request(RequestPurpose::ViewMessages, Some(ChatId(1)));
+    session.begin_viewing(ChatId(1), second, &[MessageId(5)]);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, first.0),
+    );
+    let history = session.histories.get(&1).unwrap();
+    assert!(history.viewed.contains(&4));
+    assert!(!history.viewed.contains(&5), "the second is still out");
+    assert!(history.is_viewing(5));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","code":400,"message":"x","@extra":"{}"}}"#,
+            second.0
+        ),
+    );
+    let history = session.histories.get(&1).unwrap();
+    assert!(!history.viewed.contains(&5));
+    assert_eq!(
+        session.message_ids_to_view(ChatId(1)),
+        vec![MessageId(5)],
+        "its failure puts its own ids due again"
+    );
+}
+
+/// An answer from before the chat was re-opened settles nothing: the new
+/// open generation starts with none in flight.
+#[test]
+fn a_view_answer_from_before_a_reopen_settles_nothing() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.open_chat(ChatId(1));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewMessage","message":{"id":5,"chat_id":1,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"m","entities":[]}}}}"#,
+    );
+    let old = session.request(RequestPurpose::ViewMessages, Some(ChatId(1)));
+    session.begin_viewing(ChatId(1), old, &[MessageId(5)]);
+    session.prepare_history_view(ChatId(1));
+    let fresh = session.request(RequestPurpose::ViewMessages, Some(ChatId(1)));
+    session.begin_viewing(ChatId(1), fresh, &[MessageId(5)]);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, old.0),
+    );
+    let history = session.histories.get(&1).unwrap();
+    assert!(!history.viewed.contains(&5), "the old answer is not ours");
+    assert!(history.is_viewing(5));
 }

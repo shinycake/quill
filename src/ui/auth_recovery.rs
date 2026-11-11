@@ -9,6 +9,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::composer::should_send_on_enter;
 use quill::lang::{keys, tr};
+use quill::state::PasswordRecovery;
 use quill::telegram::envelope::AuthorizationState;
 use zeroize::Zeroize;
 /// Slice A10: 2FA password recovery UI. "Forgot password?" on the auth
@@ -51,6 +52,14 @@ pub(crate) fn subscribe_recovery_input(
 }
 
 impl QuillApp {
+    /// The password screen asks for the emailed code: the server accepted
+    /// the recovery request.
+    pub(crate) fn recovery_code_step(&self) -> bool {
+        self.live.as_ref().is_some_and(|live| {
+            live.driver.session.auth_state.password_recovery == PasswordRecovery::CodeSent
+        })
+    }
+
     /// Slice A10: start 2FA password recovery. No local cooldown: a
     /// too-early request fails server-side (429) and surfaces via
     /// `last_auth_error`.
@@ -71,14 +80,13 @@ impl QuillApp {
             return;
         }
         match live.driver.request_password_recovery() {
+            // The code step opens when the server answers `ok`
+            // (`PasswordRecovery::CodeSent`); a refusal shows as the auth
+            // error on the password step.
             Ok(_) => {
-                self.auth_ui.recovery_mode = true;
                 self.auth_ui
                     .recovery_code_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
-                self.set_note(StatusNote::silent(tr(
-                    keys::Q_MISC_RECOVERY_CODE_SENT_CHECK_YOUR,
-                )));
             }
             Err(_) => {
                 self.set_note(StatusNote::error(tr(
@@ -128,7 +136,9 @@ impl QuillApp {
 
     /// Slice A10: leave recovery-code entry, back to password entry.
     pub(crate) fn cancel_password_recovery(&mut self, cx: &mut Context<Self>) {
-        self.auth_ui.recovery_mode = false;
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.auth_state.password_recovery = PasswordRecovery::Idle;
+        }
         cx.notify();
     }
 
@@ -136,7 +146,7 @@ impl QuillApp {
     /// recovery-code entry when `recovery_mode` is set. "Forgot password?"
     /// only appears when the server advertised a recovery email.
     pub(crate) fn auth_password_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let recovery_mode = self.auth_ui.recovery_mode;
+        let recovery_mode = self.recovery_code_step();
         let has_recovery_email = matches!(
             self.current_auth(),
             AuthorizationState::WaitPassword {
@@ -156,6 +166,12 @@ impl QuillApp {
                     Textarea::new(&self.auth_ui.recovery_code_input)
                         .aria_label(tr(keys::Q_MISC_PASSWORD_RECOVERY_CODE))
                         .h(px(40.)),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(tr(keys::Q_MISC_RECOVERY_CODE_SENT_CHECK_YOUR)),
                 )
                 .child(
                     div()

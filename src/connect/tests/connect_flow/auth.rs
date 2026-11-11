@@ -371,7 +371,7 @@ fn driver_two_step_password_ops_gate_dedupe_and_shape() {
             )
             .unwrap();
     assert!(driver.session.auth_state.password_state.is_some());
-    assert!(!driver.session.auth_state.password_state_loading);
+    assert!(!driver.session.auth_state.password_state_loading());
 
     // Enable: empty old password, email in the same call.
     let enable_extra = driver

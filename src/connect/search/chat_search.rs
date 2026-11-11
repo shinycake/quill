@@ -466,6 +466,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .and_then(|c| c.shared_tab)
         {
+            self.session.search.date_jump_note = None;
             self.jump_shared_media_to_day(tab, day_number)?;
             return Ok(None);
         }

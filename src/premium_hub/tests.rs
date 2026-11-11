@@ -249,3 +249,19 @@ fn filters_map_to_td_directions() {
         Some("transactionDirectionOutgoing")
     );
 }
+
+/// 04-051: the smallest i64 from a hostile `star_count` draws, not panics.
+#[test]
+fn the_label_of_the_smallest_star_count_does_not_overflow() {
+    let amount = StarAmount {
+        stars: i64::MIN,
+        nanos: 0,
+    };
+    assert_eq!(amount.label(), "-9,223,372,036,854,775,808");
+    assert!(amount.signed_label().starts_with('-'));
+    let small = StarAmount {
+        stars: -1234,
+        nanos: 0,
+    };
+    assert_eq!(small.label(), "-1,234");
+}

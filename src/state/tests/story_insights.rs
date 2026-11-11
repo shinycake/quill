@@ -29,8 +29,10 @@ fn statistics_and_forwards_land_for_the_open_story_only() {
         )
     };
     let first = session.request_for_story(RequestPurpose::GetStoryPublicForwards, ChatId(11), 5);
+    session.story_forwards_loading(11, 5, first, "");
     apply_json(&mut session, &seq, &sink, &page(first.0, "n"));
     let second = session.request_for_story(RequestPurpose::GetStoryPublicForwards, ChatId(11), 5);
+    session.story_forwards_loading(11, 5, second, "n");
     apply_json(&mut session, &seq, &sink, &page(second.0, ""));
     let state = session.stories.insights.as_ref().unwrap();
     assert_eq!(state.forwards.len(), 2);
@@ -50,6 +52,40 @@ fn statistics_and_forwards_land_for_the_open_story_only() {
             .forwards
             .is_empty()
     );
+}
+
+/// A first page answered twice replaces the rows instead of extending
+/// them, and a page nobody waits for is dropped (sweep 03-007).
+#[test]
+fn a_first_forwards_page_replaces_and_a_stray_page_is_dropped() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.begin_story_insights(11, 5);
+    let page = |extra: u64| {
+        format!(
+            r#"{{"@type":"publicForwards","@extra":"{extra}","total_count":1,"next_offset":"","forwards":[{{"@type":"publicForwardMessage","message":{{"id":40,"chat_id":-100,"date":9}}}}]}}"#
+        )
+    };
+    let first = session.request_for_story(RequestPurpose::GetStoryPublicForwards, ChatId(11), 5);
+    session.story_forwards_loading(11, 5, first, "");
+    apply_json(&mut session, &seq, &sink, &page(first.0));
+    // Asked again (a reopen), answered again: one row, not two.
+    let again = session.request_for_story(RequestPurpose::GetStoryPublicForwards, ChatId(11), 5);
+    session.story_forwards_loading(11, 5, again, "");
+    // The first request's late duplicate answer is not the one awaited.
+    apply_json(&mut session, &seq, &sink, &page(first.0));
+    assert!(
+        session
+            .stories
+            .insights
+            .as_ref()
+            .unwrap()
+            .forwards_loading()
+    );
+    apply_json(&mut session, &seq, &sink, &page(again.0));
+    let state = session.stories.insights.as_ref().unwrap();
+    assert_eq!(state.forwards.len(), 1);
+    assert!(!state.forwards_loading());
 }
 
 #[test]

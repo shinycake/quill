@@ -364,3 +364,83 @@ fn info_updates_change_the_loaded_message() {
     ));
     assert_eq!(state(&f), Some(SuggestedPostState::Approved));
 }
+
+/// 03-012: the bar of an edit stays up until its send answers; a refusal
+/// keeps the terms, the answer takes the bar down.
+#[test]
+fn the_edit_bar_stays_until_the_send_answers() {
+    use crate::suggested_posts::{BarSend, SuggestMode};
+    let mut f = Fixture::new();
+    f.open_direct_messages(true);
+    let mut bar = SuggestBar::new(stars(10, 0));
+    bar.mode = SuggestMode::Change;
+    bar.edit_of = Some(MessageId(8 << 20));
+    f.driver
+        .session
+        .payments
+        .suggested_posts
+        .bars
+        .insert(CHAT.0, bar);
+    f.driver
+        .send_suggested_change(CHAT, MessageId(8 << 20), "Text", false, stars(10, 0))
+        .unwrap();
+    let sending = |f: &Fixture| f.driver.session.suggest_bar(CHAT).map(|bar| bar.send);
+    assert!(sending(&f).is_some_and(BarSend::is_sending));
+    // A second send waits for the first one's answer.
+    assert!(
+        f.driver
+            .send_suggested_change(CHAT, MessageId(8 << 20), "Text", false, stars(10, 0))
+            .is_err()
+    );
+    let extra = f.last("sendMessage")["@extra"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    f.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"BALANCE_TOO_LOW"}}"#
+    ));
+    assert_eq!(sending(&f), Some(BarSend::Idle), "the terms are kept");
+    f.driver
+        .send_suggested_change(CHAT, MessageId(8 << 20), "Text", false, stars(10, 0))
+        .unwrap();
+    let extra = f.last("sendMessage")["@extra"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    f.ingest(&format!(
+        r#"{{"@type":"message","@extra":"{extra}","id":{id},"chat_id":{chat},"sender_id":{{"@type":"messageSenderUser","user_id":1}},"is_outgoing":true,"date":1700000000,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Text","entities":[]}}}}}}"#,
+        id = 10 << 20,
+        chat = CHAT.0
+    ));
+    assert_eq!(f.driver.session.suggest_bar(CHAT), None);
+}
+
+/// 06-041: an offer update does not free the post while its approve is out.
+#[test]
+fn an_offer_update_keeps_the_approve_busy_until_it_answers() {
+    let mut f = Fixture::new();
+    f.open_direct_messages(true);
+    f.driver
+        .approve_suggested_post(CHAT, MessageId(5 << 20), 1_900_000_000)
+        .unwrap();
+    f.ingest(&format!(
+        r#"{{"@type":"updateMessageSuggestedPostInfo","chat_id":{},"message_id":{},"suggested_post_info":{{"@type":"suggestedPostInfo","price":null,"send_date":0,"state":{{"@type":"suggestedPostStatePending"}},"can_be_approved":true,"can_be_declined":true}}}}"#,
+        CHAT.0,
+        5 << 20
+    ));
+    assert!(
+        f.driver
+            .approve_suggested_post(CHAT, MessageId(5 << 20), 0)
+            .is_err(),
+        "the first approve is still out"
+    );
+    assert_eq!(f.sent("approveSuggestedPost").len(), 1);
+    let extra = f.last("approveSuggestedPost")["@extra"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    f.ingest(&format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#));
+    f.driver
+        .approve_suggested_post(CHAT, MessageId(5 << 20), 0)
+        .unwrap();
+}

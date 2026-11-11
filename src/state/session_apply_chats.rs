@@ -230,6 +230,9 @@ impl Session {
         self.replace_avatar(old_photo_file_id, photo_file_id);
         // `updateSupergroup` precedes `updateNewChat`: adopt its status now.
         self.adopt_supergroup_status_for_chat(chat_id);
+        // A story of this poster that `getStory` refused before the chat was
+        // known is asked for again.
+        self.stories.poster_chat_known(chat_id.0);
     }
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply_update_supergroup(
@@ -655,7 +658,9 @@ impl Session {
         {
             self.chat_list
                 .folder_chats_to_leave
-                .insert(folder_id, chat_ids.iter().map(|id| id.0).collect());
+                .entry(folder_id)
+                .or_default()
+                .succeed(chat_ids.iter().map(|id| id.0).collect());
         }
         // `getChatFolderNewChats` answer: the "N new chats" bar.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatFolderNewChats)
@@ -696,6 +701,7 @@ impl Session {
         // search branch below consumes `chat_ids`.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatsToPostStories) {
             self.stories.post_as_chats = chat_ids.iter().map(|id| id.0).collect();
+            self.stories.post.post_as_error = None;
         }
         // Parity slice: `getChatNotificationSettingsExceptions`
         // answer — the scope is correlated via `pending.scope`

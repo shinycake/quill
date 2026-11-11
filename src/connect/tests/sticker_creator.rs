@@ -220,7 +220,7 @@ fn an_existing_sticker_is_added_under_its_emoji_or_the_default() {
         .unwrap();
     let request = sent_request(&recorder, "addStickerToSet");
     assert_eq!(request["sticker"]["emojis"], "🙂");
-    assert_eq!(edits(&driver).pending, 2);
+    assert_eq!(edits(&driver).in_flight.len(), 2);
     drop(dir);
 }
 

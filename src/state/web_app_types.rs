@@ -69,6 +69,14 @@ impl PhoneShare {
     }
 }
 
+/// The outcome of one `toggleBotIsAddedToAttachmentMenu`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttachmentToggle {
+    pub bot_user_id: i64,
+    /// Whether the bot is in the menu now, or why the change failed.
+    pub result: Result<bool, String>,
+}
+
 /// `sendWebAppCustomRequest` answers, keyed by the app's `req_id`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CustomRequestReply {
@@ -107,9 +115,10 @@ pub struct WebApps {
     /// failure message, with the bot it was asked for: the flow waiting
     /// takes only its own bot's answer.
     pub attachment_menu_bot: Option<(i64, Result<AttachmentMenuBot, String>)>,
-    /// One-shot: `toggleBotIsAddedToAttachmentMenu` outcome,
-    /// `(bot_user_id, added)` or a failure message.
-    pub attachment_menu_toggled: Option<Result<(i64, bool), String>>,
+    /// One-shot: `toggleBotIsAddedToAttachmentMenu` outcomes, oldest
+    /// first, each with the bot it answers: the flow waiting takes only its
+    /// own bot's.
+    pub attachment_menu_toggled: Vec<AttachmentToggle>,
     /// One-shot: write-access answers, `(bot_user_id, result)`.
     pub write_access: Option<(i64, WriteAccessResult)>,
     /// One-shot: `toggleBotCanManageEmojiStatus` outcome,

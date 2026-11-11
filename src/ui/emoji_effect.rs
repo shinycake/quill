@@ -355,6 +355,14 @@ fn begin_pass(keep: &dyn Fn(i64) -> bool) {
     super::message_effect_badge::begin_pass(keep);
 }
 
+/// The account on screen is leaving: the anchors, badges and effects noted
+/// by chat id belong to it, and a chat id of the next account must not
+/// find them.
+pub(super) fn forget_account_notes() {
+    begin_pass(&|_| false);
+    ACTIVE.with(|active| active.borrow_mut().clear());
+}
+
 fn anchor(key: Key) -> Option<Bounds<Pixels>> {
     ANCHORS.with(|anchors| anchors.borrow().get(&key).copied())
 }
@@ -566,11 +574,16 @@ impl QuillApp {
         self.message_effects_pass(window_active, cx);
         // The live session's, else a screenshot demo's.
         let queued = match self.live.as_mut() {
-            Some(live) => live.driver.session.stickers.interactions.take_pending(),
+            Some(live) => live
+                .driver
+                .session
+                .stickers
+                .interactions
+                .take_fresh(now, START_WAIT),
             None => self
                 .demo_session
                 .as_mut()
-                .map(|session| session.stickers.interactions.take_pending())
+                .map(|session| session.stickers.interactions.take_fresh(now, START_WAIT))
                 .unwrap_or_default(),
         };
         let none_here =
@@ -689,7 +702,7 @@ impl QuillApp {
         now: Instant,
         cx: &mut Context<Self>,
     ) {
-        let mut watched: Vec<(ChatId, String)> = Vec::new();
+        let mut watched: Vec<EmojiEffect> = Vec::new();
         let mut replays: Vec<(ChatId, MessageId)> = Vec::new();
         let waiting: Vec<(usize, i32)> = ACTIVE.with(|active| {
             active
@@ -745,7 +758,7 @@ impl QuillApp {
                         replays.push((entry.effect.chat_id, entry.effect.message_id));
                     }
                     if entry.effect.incoming {
-                        watched.push((entry.effect.chat_id, entry.effect.sticker.emoji.clone()));
+                        watched.push(entry.effect.clone());
                     }
                 }
             }
@@ -764,17 +777,13 @@ impl QuillApp {
         for (chat_id, message_id) in replays {
             self.replay_lone_emoji(chat_id, message_id);
         }
-        for (chat_id, sticker_emoji) in watched {
-            let emoji = ACTIVE
-                .with(|active| {
-                    active
-                        .borrow()
-                        .iter()
-                        .find(|a| a.effect.chat_id == chat_id)
-                        .map(|a| a.effect.clone())
-                })
-                .and_then(|effect| self.session().map(|s| message_emoji(s, &effect)))
-                .unwrap_or(sticker_emoji);
+        for effect in watched {
+            let chat_id = effect.chat_id;
+            // The effect that started, not the first one of its chat.
+            let emoji = self
+                .session()
+                .map(|s| message_emoji(s, &effect))
+                .unwrap_or_else(|| effect.sticker.emoji.clone());
             let now_ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as u64)
@@ -792,7 +801,7 @@ impl QuillApp {
 mod tests {
     use super::{
         ACTIVE, BADGE_GRACE, MAX_QUEUED, SHIFT_SHARE, START_WAIT, badge_within_grace,
-        effect_origin, may_start, push_premium, shift_for, sticker_wait_over,
+        effect_origin, forget_account_notes, may_start, push_premium, shift_for, sticker_wait_over,
     };
     use std::time::{Duration, Instant};
 
@@ -884,6 +893,15 @@ mod tests {
             },
             incoming: false,
         }
+    }
+
+    /// 09-085: an account switch drops the effects of the account that left.
+    #[test]
+    fn leaving_the_account_drops_its_effects() {
+        push_premium(effect_in(1), false, Instant::now());
+        assert!(ACTIVE.with(|active| !active.borrow().is_empty()));
+        forget_account_notes();
+        assert!(ACTIVE.with(|active| active.borrow().is_empty()));
     }
 
     /// Round 14 (area B, finding 11): the cap is per chat, so effects

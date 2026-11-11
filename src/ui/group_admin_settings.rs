@@ -24,7 +24,7 @@ use gpui_kit::*;
 use quill::group_manage::{custom_reactions_allowed, custom_reactions_over_level};
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with, trn_with};
-use quill::state::{DiscussionControl, ProfileChatsFetch, ProfileChatsKind, Session};
+use quill::state::{DiscussionControl, ProfileChatsFetch, ProfileChatsKind, Session, SubmitView};
 use quill::telegram::envelope::{ChatAvailableReactions, ChatKind, ReactionType};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -228,7 +228,6 @@ impl QuillApp {
             }
             GroupSettingsAction::LinkGroup(group) => driver.link_discussion_group(chat_id, group),
             GroupSettingsAction::Unlink => driver.unlink_discussion_group(chat_id),
-            GroupSettingsAction::Upgrade => driver.upgrade_basic_group(chat_id),
         };
         match result {
             Ok(Some(_)) => {}
@@ -296,27 +295,25 @@ impl QuillApp {
         else {
             return;
         };
-        let Some(main) = self.main_window.handle else {
-            return;
-        };
+        // The replacement opens from the main window, or from the chat
+        // window itself when the main one is gone (closed or hidden), so
+        // the window never stays on the dead group.
+        let host = self.main_window.handle.unwrap_or(handle);
         let screen = self.screen_epoch();
         let app = cx.weak_entity();
         // window-scope: `in_screen_scope` puts the main window's state in place.
         cx.defer(move |cx| {
-            let bounds = handle
-                .update(cx, |_, window, _| {
-                    let bounds = window.bounds();
-                    window.remove_window();
-                    bounds
-                })
-                .ok();
-            let _ = main.update(cx, |_, window, cx| {
+            let Some(bounds) = handle.update(cx, |_, window, _| window.bounds()).ok() else {
+                return;
+            };
+            let _ = host.update(cx, |_, window, cx| {
                 let _ = app.update(cx, |this, cx| {
                     this.in_screen_scope(screen, cx, |this, cx| {
-                        this.open_chat_window_at(new, bounds, window, cx);
+                        this.open_chat_window_at(new, Some(bounds), window, cx);
                     });
                 });
             });
+            let _ = handle.update(cx, |_, window, _| window.remove_window());
         });
     }
 
@@ -766,34 +763,40 @@ impl QuillApp {
                 self.event_log_filter_body(cx),
                 self.event_log_filter_footer(chat_id, cx),
             ),
-            GroupSettingsView::ConfirmUpgrade => (
-                tr(keys::Q_PEOPLE_UPGRADE_TO_SUPERGROUP).to_string(),
-                div()
-                    .text_sm()
-                    .child(tr_with(
-                        keys::Q_PEOPLE_UPGRADE_SUPERGROUP_SURE,
-                        &[("title", &title)],
-                    ))
-                    .into_any_element(),
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        Button::new("b7-upgrade-confirm")
-                            .label(tr(keys::Q_PEOPLE_UPGRADE))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.group_settings_action(GroupSettingsAction::Upgrade, cx);
-                                this.close_group_settings_dialog(cx);
-                                this.close_kit_dialog_if_done(
-                                    DialogKind::GroupSettings,
-                                    window,
-                                    cx,
-                                );
-                            })),
-                    )
-                    .child(close("b7-back", tr(keys::CANCEL), cx))
-                    .into_any_element(),
-            ),
+            GroupSettingsView::ConfirmUpgrade(submit) => {
+                let requests = self.session().map(|session| &session.requests);
+                let sending = submit.is_sending(requests);
+                let mut body =
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(div().text_sm().child(tr_with(
+                            keys::Q_PEOPLE_UPGRADE_SUPERGROUP_SURE,
+                            &[("title", &title)],
+                        )));
+                if let SubmitView::Failed(reason) = submit.view(requests) {
+                    body = body.child(div().text_xs().text_color(cx.theme().danger).child(reason));
+                }
+                (
+                    tr(keys::Q_PEOPLE_UPGRADE_TO_SUPERGROUP).to_string(),
+                    body.into_any_element(),
+                    div()
+                        .flex()
+                        .gap_2()
+                        .child(
+                            Button::new("b7-upgrade-confirm")
+                                .label(tr(keys::Q_PEOPLE_UPGRADE))
+                                .loading(sending)
+                                .disabled(sending)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.submit_group_upgrade(cx);
+                                })),
+                        )
+                        .child(close("b7-back", tr(keys::CANCEL), cx))
+                        .into_any_element(),
+                )
+            }
             GroupSettingsView::ConfirmUnlink => {
                 let text = match controls.discussion {
                     Some(DiscussionControl::Group { channel }) => {

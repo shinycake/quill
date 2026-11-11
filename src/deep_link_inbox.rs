@@ -71,12 +71,15 @@ struct Inbox {
     activate: bool,
     /// A later launch asked this Quill to quit (`--quit`).
     quit: bool,
+    /// Links turned away because the queue was full, until the UI says so.
+    dropped: u32,
 }
 
 static INBOX: Mutex<Inbox> = Mutex::new(Inbox {
     links: VecDeque::new(),
     activate: false,
     quit: false,
+    dropped: 0,
 });
 
 fn inbox() -> std::sync::MutexGuard<'static, Inbox> {
@@ -84,20 +87,50 @@ fn inbox() -> std::sync::MutexGuard<'static, Inbox> {
     INBOX.lock_or_recover()
 }
 
+/// What became of an external link.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PushOutcome {
+    /// Not a Telegram link: left to other handlers.
+    Rejected,
+    Queued,
+    /// The same link already waits.
+    Duplicate,
+    /// The queue is full: the link was dropped and the UI will say so.
+    Full,
+}
+
+impl PushOutcome {
+    /// Whether the link was a Telegram link (the window is raised).
+    pub fn is_link(self) -> bool {
+        self != Self::Rejected
+    }
+}
+
 /// Validates and queues an external link, and asks for the window to be
-/// raised. Returns whether the link was accepted.
-pub fn push_external_link(raw: &str) -> bool {
+/// raised.
+pub fn push_external_link(raw: &str) -> PushOutcome {
     let Some(link) = sanitize_link(raw) else {
-        return false;
+        return PushOutcome::Rejected;
     };
     let mut inbox = inbox();
     inbox.activate = true;
-    if inbox.links.len() < MAX_QUEUED && !inbox.links.contains(&link) {
+    let outcome = if inbox.links.contains(&link) {
+        PushOutcome::Duplicate
+    } else if inbox.links.len() < MAX_QUEUED {
         inbox.links.push_back(link);
-    }
+        PushOutcome::Queued
+    } else {
+        inbox.dropped = inbox.dropped.saturating_add(1);
+        PushOutcome::Full
+    };
     drop(inbox);
     wake_ui();
-    true
+    outcome
+}
+
+/// Whether links were dropped for a full queue since the last call.
+pub fn take_dropped() -> bool {
+    std::mem::take(&mut inbox().dropped) > 0
 }
 
 /// Handles the argv of a later launch (running on the single-instance
@@ -113,7 +146,7 @@ pub fn handle_forwarded_launch(args: &[String]) {
     }
     let mut accepted = false;
     for arg in args {
-        accepted |= push_external_link(arg);
+        accepted |= push_external_link(arg).is_link();
     }
     let silent = args.iter().any(|arg| arg == "--start-minimized");
     if !accepted && !silent {
@@ -159,7 +192,9 @@ pub fn pop_link() -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{handle_forwarded_launch, push_external_link, sanitize_link, take_quit_request};
+    use super::{
+        PushOutcome, handle_forwarded_launch, push_external_link, sanitize_link, take_quit_request,
+    };
 
     #[test]
     fn a_forwarded_quit_is_taken_once() {
@@ -215,16 +250,46 @@ mod tests {
         // The one test that owns the global inbox, to avoid cross-test races.
         while super::pop_link().is_some() {}
         let _ = super::take_activation();
-        assert!(!push_external_link("file:///etc/passwd"));
+        let _ = super::take_dropped();
+        assert_eq!(
+            push_external_link("file:///etc/passwd"),
+            PushOutcome::Rejected
+        );
         assert!(!super::take_activation());
-        assert!(push_external_link("tg://resolve?domain=a"));
-        assert!(push_external_link("tg://resolve?domain=a"));
-        assert!(push_external_link("tg://resolve?domain=b"));
+        assert_eq!(
+            push_external_link("tg://resolve?domain=a"),
+            PushOutcome::Queued
+        );
+        assert_eq!(
+            push_external_link("tg://resolve?domain=a"),
+            PushOutcome::Duplicate
+        );
+        assert_eq!(
+            push_external_link("tg://resolve?domain=b"),
+            PushOutcome::Queued
+        );
         assert!(super::take_activation());
         assert!(!super::take_activation());
         assert_eq!(super::pop_link().as_deref(), Some("tg://resolve?domain=a"));
         assert_eq!(super::pop_link().as_deref(), Some("tg://resolve?domain=b"));
         assert_eq!(super::pop_link(), None);
+        assert!(!super::take_dropped());
+
+        // A full queue says so instead of dropping silently.
+        for n in 0..super::MAX_QUEUED {
+            assert_eq!(
+                push_external_link(&format!("tg://resolve?domain=l{n}")),
+                PushOutcome::Queued
+            );
+        }
+        assert_eq!(
+            push_external_link("tg://resolve?domain=late"),
+            PushOutcome::Full
+        );
+        assert!(super::take_dropped());
+        assert!(!super::take_dropped());
+        while super::pop_link().is_some() {}
+        let _ = super::take_activation();
 
         // A forwarded launch: links queue; a bare relaunch raises the window;
         // an autostart relaunch stays silent.

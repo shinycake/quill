@@ -148,6 +148,11 @@ impl Orientation {
         }
     }
 
+    /// A quarter turn away from upright: width and height are swapped.
+    pub fn is_sideways(self) -> bool {
+        self.ccw_turns % 2 == 1
+    }
+
     pub fn flipped(self) -> Self {
         Orientation {
             flipped: !self.flipped,

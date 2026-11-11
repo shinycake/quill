@@ -206,9 +206,7 @@ impl QuillApp {
                         .accessibility_label(tr(keys::Q_MEDIA_FAST_BUTTONS_MODE))
                         .on_click(cx.listener(move |this, &next: &bool, _, cx| {
                             quill::fast_buttons::set_enabled(user_id, next);
-                            // Rows are cached per message revision; the
-                            // digits appear on the next history refresh.
-                            this.history.rows_key = None;
+                            this.rebuild_rows_in_every_window(cx);
                             cx.notify();
                         })),
                 ),
@@ -222,6 +220,13 @@ impl QuillApp {
         invite: Invite,
         cx: &mut Context<Self>,
     ) {
+        if self.profile_box_in_the_way() {
+            self.set_status_note(
+                StatusNote::info(tr(keys::Q_MISC_CLOSE_THE_OPEN_BOX_FIRST)),
+                cx,
+            );
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
             // The rights a bot asks for ride on its full info.
             let _ = live.driver.fetch_user_full_info(bot_id);
@@ -234,6 +239,16 @@ impl QuillApp {
         });
         self.open_box(DialogKind::ProfilePanel);
         cx.notify();
+    }
+
+    /// A profile box that is not one of the bot pickers is open: a link
+    /// must not replace it (an Edit Contact box would lose its typed
+    /// changes).
+    fn profile_box_in_the_way(&self) -> bool {
+        !matches!(
+            self.dialogs.profile_dialog,
+            None | Some(ProfileDialog::AddBot { .. } | ProfileDialog::ShareGame { .. })
+        )
     }
 
     /// Retry from the box's error line: ask for the bot's full info again.
@@ -602,6 +617,13 @@ impl QuillApp {
         game_short_name: String,
         cx: &mut Context<Self>,
     ) {
+        if self.profile_box_in_the_way() {
+            self.set_status_note(
+                StatusNote::info(tr(keys::Q_MISC_CLOSE_THE_OPEN_BOX_FIRST)),
+                cx,
+            );
+            return;
+        }
         self.dialogs.profile_dialog = Some(ProfileDialog::ShareGame {
             bot_id,
             game_short_name,

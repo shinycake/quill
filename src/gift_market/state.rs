@@ -240,11 +240,8 @@ pub struct GiftMarketState {
     pub previews: HashMap<i64, Fetch<UpgradePreview>>,
     /// The auction `openGiftAuction` follows.
     pub follow: AuctionFollow,
-    /// A `getGiftAuctionState` the UI waits for (a link or a tile) and
-    /// the gift it resolved to.
-    pub auction_request: u64,
-    pub auction_ready: Option<i64>,
-    pub auction_loading: bool,
+    /// The `getGiftAuctionState` the UI waits for (a link or a tile).
+    pub auction: AuctionFetch,
     /// A bid in flight, by gift id.
     pub bidding: Option<i64>,
     pub craft: Option<CraftSession>,
@@ -254,6 +251,22 @@ pub struct GiftMarketState {
     pub toasts: Vec<(String, String)>,
     /// A paid request was refused for too few Stars.
     pub balance_low: bool,
+}
+
+/// The `getGiftAuctionState` the UI waits for. Its answer and its error
+/// count only while they carry the request asked last; an error is a toast
+/// and ends the stage.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AuctionFetch {
+    #[default]
+    Idle,
+    Loading {
+        request: u64,
+    },
+    /// The state of this gift arrived; the UI takes it once.
+    Ready {
+        gift_id: i64,
+    },
 }
 
 /// The auction a bid box follows (`openGiftAuction`).

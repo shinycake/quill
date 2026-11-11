@@ -209,12 +209,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let before = self.session.shutdown;
+        let logout = self.session.auth_state.logout_request;
         self.session.begin_close();
         let extra = self.session.request(RequestPurpose::Close, None);
         if let Err(err) = self.sender.send_json(&close_request(extra)) {
             // Nothing went out: the session keeps running.
             self.session.requests.take(extra);
             self.session.shutdown = before;
+            self.session.auth_state.logout_request = logout;
             return Err(err);
         }
         Ok(extra)

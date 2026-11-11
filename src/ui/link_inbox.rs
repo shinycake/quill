@@ -31,6 +31,11 @@ pub fn install_link_inbox(
                             // account is on screen takes it.
                             this.queue_outside_link(link);
                         }
+                        if quill::deep_link_inbox::take_dropped() {
+                            this.set_note(crate::ui::status_note::StatusNote::error(
+                                quill::lang::tr(quill::lang::keys::Q_MISC_LINK_INBOX_FULL),
+                            ));
+                        }
                     })
                     .is_ok();
                 if alive

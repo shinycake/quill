@@ -10,6 +10,7 @@
 
 use super::app::QuillApp;
 use super::autoscroll_ui::scroll_history_by;
+use super::chat_ui_state::A11yFocus;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::base::{GlobalState, TextSelection};
 use gpui_kit::*;
@@ -66,7 +67,7 @@ impl QuillApp {
             // The press owns the pointer: no text selection under it.
             GlobalState::suppress_text_selection(cx);
             window.focus(&self.message_ui.history_focus, cx);
-            self.chat_ui.selection_focus = Some(message_id);
+            self.chat_ui.focus = A11yFocus::Row(message_id);
             if event.modifiers.shift
                 && let Some(anchor) = self.chat_ui.selection_anchor
             {
@@ -168,7 +169,7 @@ impl QuillApp {
                 // Drag-selecting gives the history the keyboard
                 // (`updateDragSelection` → `setFocus`).
                 window.focus(&self.message_ui.history_focus, cx);
-                self.chat_ui.selection_focus = Some(press);
+                self.chat_ui.focus = A11yFocus::Row(press);
                 range = Some(DragRange {
                     anchor: press,
                     to,
@@ -239,12 +240,12 @@ impl QuillApp {
                 // The release ends the drag, not a swipe to reply.
                 self.message_ui.swipe_reply_start = None;
                 self.chat_ui.selection_anchor = Some(range.to);
-                self.chat_ui.selection_focus = Some(range.to);
+                self.chat_ui.focus = A11yFocus::Row(range.to);
             }
             None if drag.click_toggles => {
                 self.toggle_forward_select(drag.chat, drag.press, drag.pending, cx);
                 self.chat_ui.selection_anchor = Some(drag.press);
-                self.chat_ui.selection_focus = Some(drag.press);
+                self.chat_ui.focus = A11yFocus::Row(drag.press);
             }
             None => {}
         }
@@ -268,7 +269,7 @@ impl QuillApp {
                 .is_some_and(|draft| draft.is_from(chat, topic))
             {
                 self.share.forward = crate::ui::forward_stage::ForwardStage::None;
-                self.chat_ui.selection_focus = None;
+                self.chat_ui.focus.clear_row();
             }
         } else {
             match self.share.forward.selection_mut() {
@@ -529,7 +530,7 @@ mod tests {
     }
 
     fn focus(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Option<MessageId> {
-        app.read_with(cx, |app, _| app.chat_ui.selection_focus)
+        app.read_with(cx, |app, _| app.chat_ui.focus.row())
     }
 
     fn drag(cx: &mut VisualTestContext, from: Point<Pixels>, to: Point<Pixels>) {

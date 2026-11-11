@@ -154,7 +154,9 @@ impl Session {
                         .messages
                         .pending_bot_messages
                         .get(&(chat_id.0, forum_topic_id))
-                        .is_some_and(|old| old.draft_id == draft_id && old.stopped);
+                        .is_some_and(|old| {
+                            old.draft_id == draft_id && old.stop == BotStopStage::Stopped
+                        });
                     self.remember_files(&files);
                     self.messages.pending_bot_messages.insert(
                         (chat_id.0, forum_topic_id),
@@ -163,8 +165,11 @@ impl Session {
                             can_stop: can_stop && !stopped,
                             keep_on_stop,
                             content,
-                            stop_failed: false,
-                            stopped,
+                            stop: if stopped {
+                                BotStopStage::Stopped
+                            } else {
+                                BotStopStage::Running
+                            },
                             expires_at_ms: unix_ms_now().saturating_add(
                                 self.messages.pending_bot_period_secs.saturating_mul(1000),
                             ),
@@ -500,6 +505,12 @@ impl Session {
                     }
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SendMessage) {
                     self.upsert_message(message, true);
+                } else if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::Payments(PaymentsPurpose::SuggestedPost(_)))
+                ) {
+                    self.settle_suggested_send(pending);
+                    self.upsert_message(message, false);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SendBotStartMessage) {
                     // TDLib took the start: only now does the START
                     // parameter go (a refusal keeps it for the next press).
