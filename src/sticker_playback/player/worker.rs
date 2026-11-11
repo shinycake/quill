@@ -2,7 +2,7 @@
 //! opener thread runs) and draws or unpacks the frames of the clips it owns.
 #![deny(clippy::indexing_slicing)]
 
-use super::engine::Stage;
+use super::engine::{Open, Stage};
 use super::engine::{Job, Shared, State};
 use super::source::{Source, frame_len};
 use super::store::{self, Scratch, StoredFrame};
@@ -106,9 +106,9 @@ fn open(
     };
     match opened {
         Ok(source) => {
-            clip.stage = Stage::Ready(ClipInfo {
+            clip.stage = Stage::Ready(Open::new(ClipInfo {
                 timeline: source.timeline,
-            });
+            }));
             clip.source_bytes = frame_len(key).unwrap_or(0);
             sources.insert(key, source);
         }
@@ -171,7 +171,7 @@ fn frame(
         clip.stage = Stage::Failed("A frame could not be drawn.".to_string());
         return true;
     }
-    let first = drawn.is_some() && !std::mem::replace(&mut clip.delivered, true);
+    let first = drawn.is_some() && clip.stage.hand_out_frame();
     if let Some(draw) = timing.draw {
         clip.note_draw(draw);
     }
