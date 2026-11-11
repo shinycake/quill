@@ -70,14 +70,16 @@ pub(crate) struct SidebarReveal {
 enum Wake {
     #[default]
     Idle,
-    Waiting(Task<()>),
+    Waiting {
+        _task: Task<()>,
+    },
 }
 
 impl std::fmt::Debug for Wake {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Wake::Idle => "Idle",
-            Wake::Waiting(_) => "Waiting",
+            Wake::Waiting { .. } => "Waiting",
         })
     }
 }
@@ -108,7 +110,7 @@ impl SidebarReveal {
     /// over). A wake for a mode that is no longer `Leaving` is dropped.
     pub(crate) fn hold_wake(&mut self, task: Task<()>) {
         if matches!(self.mode, Mode::Hidden(Peek::Leaving { .. })) {
-            self.wake = Wake::Waiting(task);
+            self.wake = Wake::Waiting { _task: task };
         }
     }
 
