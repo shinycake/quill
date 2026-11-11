@@ -760,7 +760,10 @@ mod pump_tests {
     fn an_idle_poll_does_not_redraw() {
         // No deep-link flow at all: the case on every idle poll.
         assert!(!deep_link_step_redraws(None, None));
-        let resolving = DeepLinkState::ResolvingInfo { generation: 1 };
+        let resolving = DeepLinkState::ResolvingInfo {
+            generation: 1,
+            original: String::new(),
+        };
         assert!(!deep_link_step_redraws(Some(&resolving), None));
     }
 

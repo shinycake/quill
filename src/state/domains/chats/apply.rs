@@ -545,11 +545,14 @@ impl Session {
                 })) = pending.map(|p| p.purpose)
                     && matches!(
                         &self.chats_state.deep_link,
-                        Some(DeepLinkState::ResolvingInfo { generation: slot }) if *slot == generation
+                        Some(DeepLinkState::ResolvingInfo { generation: slot, .. }) if *slot == generation
                     )
                 {
                     use crate::deep_link_types::{LinkRoute, route};
-                    let original = std::mem::take(&mut self.chats_state.deep_link_original);
+                    let original = match self.chats_state.deep_link.take() {
+                        Some(DeepLinkState::ResolvingInfo { original, .. }) => original,
+                        _ => String::new(),
+                    };
                     let wallet_link =
                         crate::ton_wallet::links::wallet_link(&link, self.ton_wallet.can_use);
                     if let Some(crate::ton_wallet::links::WalletLink::Notice(surface)) = wallet_link
@@ -648,7 +651,8 @@ impl Session {
                     && matches!(
                         &self.chats_state.deep_link,
                         Some(DeepLinkState::ResolvingInfo {
-                            generation: slot
+                            generation: slot,
+                            ..
                         }) if *slot == generation
                     )
                 {

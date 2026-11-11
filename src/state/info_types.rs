@@ -735,8 +735,11 @@ pub enum DeepLinkState {
         is_channel: bool,
         generation: u64,
     },
-    /// `getDeepLinkInfo` in flight; `generation` drops stale answers.
-    ResolvingInfo { generation: u64 },
+    /// `getInternalLinkType` or `getDeepLinkInfo` in flight; `generation`
+    /// drops stale answers. `original` is the link text of the internal
+    /// lookup (the proxy hand-off and the browser fallback need it back);
+    /// empty for `getDeepLinkInfo`.
+    ResolvingInfo { generation: u64, original: String },
     /// `deepLinkInfo` answer parsed. The UI consumes this once: with an
     /// action it fires the follow-up request, otherwise (or when
     /// `need_update`) it shows `text` in a dialog.
@@ -772,7 +775,7 @@ impl DeepLinkState {
     pub fn generation(&self) -> Option<u64> {
         match self {
             Self::InvitePreview { generation, .. }
-            | Self::ResolvingInfo { generation }
+            | Self::ResolvingInfo { generation, .. }
             | Self::Info { generation, .. }
             | Self::ResolvingChat { generation, .. } => Some(*generation),
             Self::ChatReady { .. } | Self::ShowText(_) | Self::Ui(_) | Self::Unknown { .. } => None,

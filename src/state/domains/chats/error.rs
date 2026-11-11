@@ -135,7 +135,11 @@ impl Session {
                         Some(RequestPurpose::Chats(
                             ChatsPurpose::DeepLinkInternalType { .. }
                         ))
-                    ) && crate::text::openable_http_url(&self.chats_state.deep_link_original);
+                    ) && matches!(
+                        &self.chats_state.deep_link,
+                        Some(DeepLinkState::ResolvingInfo { original, .. })
+                            if crate::text::openable_http_url(original)
+                    );
                 // The Premium bot's `/start` was for the link that failed
                 // (stale or not): a later link to the bot must not send it
                 // unasked. Another flow's failure leaves it alone.
@@ -151,7 +155,10 @@ impl Session {
                 if limit_box {
                     self.chats_state.deep_link = None;
                 } else if !stale && web_fallback {
-                    let url = std::mem::take(&mut self.chats_state.deep_link_original);
+                    let url = match self.chats_state.deep_link.take() {
+                        Some(DeepLinkState::ResolvingInfo { original, .. }) => original,
+                        _ => String::new(),
+                    };
                     self.chats_state.deep_link = Some(DeepLinkState::Ui(
                         crate::deep_link_types::DeepLinkUi::Browser { url },
                     ));

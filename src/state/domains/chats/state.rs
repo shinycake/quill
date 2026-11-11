@@ -127,9 +127,6 @@ pub struct ChatsState {
     pub deep_link: Option<DeepLinkState>,
     /// Generation counter for deep-link request correlation.
     pub deep_link_seq: u64,
-    /// The link text being resolved by `getInternalLinkType` (the proxy
-    /// hand-off needs it back).
-    pub deep_link_original: String,
     /// The flow in `deep_link` was started by a step the agent UI driver
     /// injected. Set at every start of a flow, kept while it continues,
     /// taken by the UI at every terminal state; the UI re-checks what an
@@ -169,7 +166,6 @@ impl ChatsState {
             chat_upgrades: Vec::new(),
             deep_link: None,
             deep_link_seq: 0,
-            deep_link_original: String::new(),
             deep_link_from_agent: false,
         }
     }
@@ -181,6 +177,5 @@ impl ChatsState {
     pub fn end_deep_link_flow(&mut self) {
         self.deep_link = None;
         self.deep_link_from_agent = false;
-        self.deep_link_original.clear();
     }
 }

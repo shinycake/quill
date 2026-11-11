@@ -309,7 +309,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.chats_state.deep_link_seq =
             self.session.chats_state.deep_link_seq.wrapping_add(1);
         let generation = self.session.chats_state.deep_link_seq;
-        self.session.chats_state.deep_link = Some(DeepLinkState::ResolvingInfo { generation });
+        self.session.chats_state.deep_link = Some(DeepLinkState::ResolvingInfo {
+            generation,
+            original: if internal {
+                link.to_string()
+            } else {
+                String::new()
+            },
+        });
         let (purpose, build): (_, fn(RequestId, &str) -> String) = if internal {
             (
                 RequestPurpose::Chats(ChatsPurpose::DeepLinkInternalType { generation }),
@@ -321,9 +328,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 get_deep_link_info,
             )
         };
-        if internal {
-            self.session.chats_state.deep_link_original = link.to_string();
-        }
         let extra = self.session.request(purpose, None);
         let json = build(extra, link);
         match self.sender.send_json(&json) {
