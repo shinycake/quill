@@ -108,11 +108,13 @@ pub(crate) fn set_zoom(zoom: f32) {
         return;
     }
     ZOOM.with(|z| z.set(zoom));
-    let windows: Vec<Rc<WindowZoom>> = WINDOWS.with(|list| {
-        let mut list = list.borrow_mut();
-        list.retain(|w| w.strong_count() > 0);
-        list.iter().filter_map(Weak::upgrade).collect()
-    });
+    let windows: Vec<Rc<WindowZoom>> = WINDOWS
+        .with(|list| {
+            let mut list = list.try_borrow_mut().ok()?;
+            list.retain(|w| w.strong_count() > 0);
+            Some(list.iter().filter_map(Weak::upgrade).collect())
+        })
+        .unwrap_or_default();
     for window in windows {
         window.zoom.set(zoom);
         window.fire_resize();
@@ -177,9 +179,10 @@ impl WindowZoom {
             traffic_light_zoom: Cell::new(zoom),
         });
         WINDOWS.with(|list| {
-            let mut list = list.borrow_mut();
-            list.retain(|w| w.strong_count() > 0);
-            list.push(Rc::downgrade(&state));
+            if let Ok(mut list) = list.try_borrow_mut() {
+                list.retain(|w| w.strong_count() > 0);
+                list.push(Rc::downgrade(&state));
+            }
         });
         state
     }
@@ -193,7 +196,12 @@ impl WindowZoom {
             self.refire.set(Refire::RunAgain);
             return;
         }
-        let Some(callback) = self.resize.borrow_mut().take() else {
+        let Some(callback) = self
+            .resize
+            .try_borrow_mut()
+            .ok()
+            .and_then(|mut slot| slot.take())
+        else {
             return;
         };
         // Back to idle with the callback in place even if it panics, so the
@@ -228,8 +236,9 @@ struct RunningResize<'a> {
 impl Drop for RunningResize<'_> {
     fn drop(&mut self) {
         self.state.refire.set(Refire::Idle);
-        let mut slot = self.state.resize.borrow_mut();
-        if slot.is_none() {
+        if let Ok(mut slot) = self.state.resize.try_borrow_mut()
+            && slot.is_none()
+        {
             *slot = self.callback.take();
         }
     }
@@ -758,7 +767,9 @@ impl PlatformWindow for ZoomWindow {
         self.inner.on_hover_status_change(callback)
     }
     fn on_resize(&self, callback: Box<dyn FnMut(Size<Pixels>, f32)>) {
-        *self.state.resize.borrow_mut() = Some(callback);
+        if let Ok(mut slot) = self.state.resize.try_borrow_mut() {
+            *slot = Some(callback);
+        }
         let state = Rc::downgrade(&self.state);
         self.inner.on_resize(Box::new(move |size, scale| {
             if let Some(state) = state.upgrade() {

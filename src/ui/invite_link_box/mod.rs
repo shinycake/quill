@@ -44,17 +44,7 @@ pub(crate) enum CustomBox {
     Date(TimePicker),
     Limit {
         input: Entity<InputState>,
-        focus: LimitFocus,
     },
-}
-
-/// Whether the number field still has to take focus: the kit focuses a
-/// dialog as it opens, so the field asks once the dialog is built. It goes
-/// with the box.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LimitFocus {
-    Requested,
-    Done,
 }
 
 impl QuillApp {

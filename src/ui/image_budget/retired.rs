@@ -28,6 +28,13 @@ use gpui_kit::*;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::thread::LocalKey;
+
+/// Run `f` on a thread-local cell, or not at all when something already
+/// holds it (a re-entrant call): a borrow here never panics.
+fn with_cell<T, R>(cell: &'static LocalKey<RefCell<T>>, f: impl FnOnce(&mut T) -> R) -> Option<R> {
+    cell.with(|cell| cell.try_borrow_mut().ok().map(|mut guard| f(&mut guard)))
+}
 
 thread_local! {
     /// Images waiting to leave the atlas, by image id.
@@ -86,28 +93,32 @@ struct LatestFrames {
 
 impl LatestFrames {
     /// Between frames: every window's latest frame is done. `main` says
-    /// whether the main window is open.
-    fn now(main: bool) -> Self {
-        close_frame();
+    /// whether the main window is open. `None` when the frame books are
+    /// busy: no sweep then, nothing is dropped on a guess.
+    fn now(main: bool) -> Option<Self> {
+        close_frame()?;
         let counts = |window: &Option<_>| main || window.is_some();
         let whole = WHOLE.with(|whole| {
-            whole
-                .borrow()
-                .iter()
-                .filter(|(window, _)| counts(window))
-                .map(|(_, whole)| (whole.latest, whole.images_below))
-                .collect()
-        });
+            let whole = whole.try_borrow().ok()?;
+            Some(
+                whole
+                    .iter()
+                    .filter(|(window, _)| counts(window))
+                    .map(|(_, whole)| (whole.latest, whole.images_below))
+                    .collect(),
+            )
+        })?;
         let slices = SLICES.with(|slices| {
-            slices
-                .borrow()
-                .values()
-                .filter(|s| counts(&s.window))
-                .filter(|s| whole_of(s.window).is_some_and(|whole| s.shown >= whole.latest))
-                .map(|s| (s.rendered, s.images_below.unwrap_or(usize::MAX)))
-                .collect()
-        });
-        Self { whole, slices }
+            let slices = slices.try_borrow().ok()?;
+            let mut latest = Vec::new();
+            for s in slices.values().filter(|s| counts(&s.window)) {
+                if whole_of(s.window).is_some_and(|whole| s.shown >= whole.latest) {
+                    latest.push((s.rendered, s.images_below.unwrap_or(usize::MAX)));
+                }
+            }
+            Some(latest)
+        })?;
+        Some(Self { whole, slices })
     }
 
     /// Whether one may show image `id`, retired in frame `retired`: a
@@ -125,31 +136,37 @@ impl LatestFrames {
 
 /// The latest frame of any window is done: bound the ids of the images it
 /// (and each slice that rendered in it) painted, once. Call between frames
-/// or as the next frame starts, in any window. Returns the bound.
-pub(super) fn close_frame() -> usize {
+/// or as the next frame starts, in any window. Returns the bound, or
+/// `None` when the frame books are busy (the frame stays open, the next
+/// call tries again).
+pub(super) fn close_frame() -> Option<usize> {
     let frame = frame();
     if let Some((done, below)) = FRAME_DONE.get()
         && done == frame
     {
-        return below;
+        return Some(below);
     }
     let below = next_image_id();
-    FRAME_DONE.set(Some((frame, below)));
     WHOLE.with(|whole| {
-        for whole in whole.borrow_mut().values_mut() {
+        let mut whole = whole.try_borrow_mut().ok()?;
+        for whole in whole.values_mut() {
             if whole.latest == frame {
                 whole.images_below = below;
             }
         }
-    });
+        Some(())
+    })?;
     SLICES.with(|slices| {
-        for slice in slices.borrow_mut().values_mut() {
+        let mut slices = slices.try_borrow_mut().ok()?;
+        for slice in slices.values_mut() {
             if slice.rendered == frame && slice.images_below.is_none() {
                 slice.images_below = Some(below);
             }
         }
-    });
-    below
+        Some(())
+    })?;
+    FRAME_DONE.set(Some((frame, below)));
+    Some(below)
 }
 
 /// Hand images Quill made (and painted) to the atlas sweeper once their
@@ -159,10 +176,9 @@ pub(super) fn close_frame() -> usize {
 /// leave.
 pub(in crate::ui) fn retire_all(images: impl IntoIterator<Item = Arc<RenderImage>>) {
     let (frame, sweep) = (frame(), SWEEPS.get());
-    let mut any = false;
-    RETIRED.with(|retired| {
-        retired.borrow_mut().extend(images.into_iter().map(|image| {
-            any = true;
+    let entries: Vec<_> = images
+        .into_iter()
+        .map(|image| {
             (
                 image.id.0,
                 Retired {
@@ -171,8 +187,17 @@ pub(in crate::ui) fn retire_all(images: impl IntoIterator<Item = Arc<RenderImage
                     sweep,
                 },
             )
-        }));
+        })
+        .collect();
+    let any = !entries.is_empty();
+    // Replaced entries are dropped here, outside the cell.
+    let replaced = with_cell(&RETIRED, |retired| {
+        entries
+            .into_iter()
+            .filter_map(|(id, entry)| retired.insert(id, entry))
+            .collect::<Vec<_>>()
     });
+    drop(replaced);
     // The sticker player hands over an empty list for every frame it
     // fetches: no sweep for those.
     if any {
@@ -183,10 +208,10 @@ pub(in crate::ui) fn retire_all(images: impl IntoIterator<Item = Arc<RenderImage
 /// Something may have become sweepable: wake the sweeper task, if any
 /// image waits.
 pub(super) fn wake() {
-    if RETIRED.with(|retired| retired.borrow().is_empty()) {
+    if with_cell(&RETIRED, |retired| retired.is_empty()).unwrap_or(true) {
         return;
     }
-    if let Some(wake) = WAKE.with(|slot| slot.borrow_mut().take()) {
+    if let Some(wake) = with_cell(&WAKE, Option::take).flatten() {
         let _ = wake.send(());
     }
 }
@@ -220,7 +245,7 @@ pub(in crate::ui) fn start_sweeper(cx: &mut App) {
     }
     // Window ids from an earlier app on this thread (tests) mean nothing.
     MAIN.set(None);
-    SEEN.with(|seen| seen.borrow_mut().clear());
+    with_cell(&SEEN, HashMap::clear);
     let closed = cx.on_window_closed(|_, _| wake());
     cx.set_global(Sweeper { _closed: closed });
     // Armed now, not when the task first runs: a wake before then counts.
@@ -239,22 +264,22 @@ const RETRY_AFTER: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Wake the sweeper once more shortly, unless that is already planned.
 fn retry_later(cx: &mut App) {
-    if RETRY.with(|retry| retry.borrow().is_some()) {
+    if with_cell(&RETRY, |retry| retry.is_some()).unwrap_or(true) {
         return;
     }
     let task = cx.spawn(async move |cx| {
         cx.background_executor().timer(RETRY_AFTER).await;
-        drop(RETRY.with(|retry| retry.borrow_mut().take()));
+        drop(with_cell(&RETRY, Option::take));
         wake();
     });
-    RETRY.with(|retry| *retry.borrow_mut() = Some(task));
+    with_cell(&RETRY, |retry| *retry = Some(task));
 }
 
 /// A fresh wake for the sweeper task. A wake while it sweeps is not
 /// needed: that sweep comes after it.
 fn arm() -> oneshot::Receiver<()> {
     let (wake, woken) = oneshot::channel();
-    WAKE.with(|slot| *slot.borrow_mut() = Some(wake));
+    with_cell(&WAKE, |slot| *slot = Some(wake));
     woken
 }
 
@@ -305,11 +330,15 @@ pub(in crate::ui) fn take_unshowable(
 ) -> Vec<Arc<RenderImage>> {
     let sweep = SWEEPS.get() + 1;
     SWEEPS.set(sweep);
-    let seen = see(windows, sweep);
-    let latest = LatestFrames::now(main);
-    RETIRED.with(|retired| {
+    let Some(seen) = see(windows, sweep) else {
+        return Vec::new();
+    };
+    let Some(latest) = LatestFrames::now(main) else {
+        return Vec::new();
+    };
+    with_cell(&RETIRED, |retired| {
         let mut gone = Vec::new();
-        retired.borrow_mut().retain(|&id, entry| {
+        retired.retain(|&id, entry| {
             // Still held elsewhere (a cache that took it back, the chat
             // list's animation layer): it may be painted again.
             if Arc::strong_count(&entry.image) > 1
@@ -323,13 +352,13 @@ pub(in crate::ui) fn take_unshowable(
         });
         gone
     })
+    .unwrap_or_default()
 }
 
 /// Note each window's latest frame at sweep `sweep`, and forget the
-/// windows that closed.
-fn see(windows: &[(WindowId, u64)], sweep: u64) -> Vec<Seen> {
-    SEEN.with(|seen| {
-        let mut seen = seen.borrow_mut();
+/// windows that closed. `None` when the books are busy.
+fn see(windows: &[(WindowId, u64)], sweep: u64) -> Option<Vec<Seen>> {
+    with_cell(&SEEN, |seen| {
         seen.retain(|id, _| windows.iter().any(|(open, _)| open == id));
         windows
             .iter()

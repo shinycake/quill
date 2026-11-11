@@ -2,7 +2,7 @@ use super::super::{
     WindowDraw, begin_chat_frame, begin_frame, begin_patch_frame, forget_window, frame,
     next_image_id, slice_rendered, slice_shown,
 };
-use super::{LatestFrames, retire_all, take_unshowable};
+use super::{LatestFrames, WHOLE, retire_all, take_unshowable};
 use gpui_kit::{EntityId, RenderImage, WindowId};
 use quill::ids::ChatId;
 use smallvec::SmallVec;
@@ -11,6 +11,10 @@ use std::sync::Arc;
 fn picture() -> Arc<RenderImage> {
     let frame = image::Frame::new(image::RgbaImage::new(2, 2));
     Arc::new(RenderImage::new(SmallVec::from_buf([frame])))
+}
+
+fn latest(main: bool) -> LatestFrames {
+    LatestFrames::now(main).expect("the frame books are free")
 }
 
 /// A sweep with only the main window open.
@@ -38,6 +42,21 @@ fn an_image_retired_twice_still_leaves() {
     assert_eq!(held.strong_count(), 0, "and nothing holds it");
 }
 
+/// A sweep that finds the frame books held (a re-entrant call) drops
+/// nothing and does not panic; the next sweep drops the image.
+#[test]
+fn a_sweep_that_finds_the_frame_books_busy_keeps_everything() {
+    let image = picture();
+    retire_all([image]);
+    begin_frame();
+    begin_frame();
+    WHOLE.with(|whole| {
+        let _held = whole.borrow_mut();
+        assert!(main_sweep().is_empty(), "nothing is dropped on a guess");
+    });
+    assert_eq!(main_sweep().len(), 1, "it leaves once the books are free");
+}
+
 /// The F1 leak: an inline video retires a picture every frame while only
 /// its animation layer redraws and the chat list replays a render from
 /// long ago. Pictures made after that render must leave after the next
@@ -58,7 +77,7 @@ fn frames_retired_while_a_slice_replays_leave_after_the_next_frame() {
         slice_shown(sidebar, None);
         pictures.push((picture, retired));
     }
-    let main = LatestFrames::now(true);
+    let main = latest(true);
     assert_eq!(main.slices.len(), 1);
     // The latest frame may still show the newest picture.
     let (newest, newest_at) = pictures.pop().unwrap_or_default();
@@ -75,7 +94,7 @@ fn frames_retired_while_a_slice_replays_leave_after_the_next_frame() {
     assert!(main.may_show(painted_by_sidebar, frame() - 1));
     begin_frame();
     slice_rendered(sidebar, None);
-    assert!(!LatestFrames::now(true).may_show(painted_by_sidebar, frame() - 2));
+    assert!(!latest(true).may_show(painted_by_sidebar, frame() - 2));
 }
 
 /// Frames that redraw only an animation layer: what the layer drew leaves
@@ -92,16 +111,16 @@ fn a_patch_frame_lets_go_of_the_layer_alone() {
     let whole = begin_frame();
     slice_shown(slice, None);
     slice_rendered(layer, None);
-    LatestFrames::now(true);
+    latest(true);
     let mut drawn = Vec::new();
     for _ in 0..30 {
         let picture = next_image_id();
         begin_patch_frame();
         slice_rendered(layer, None);
-        LatestFrames::now(true);
+        latest(true);
         drawn.push((picture, frame()));
     }
-    let main = LatestFrames::now(true);
+    let main = latest(true);
     assert!(main.may_show(in_slice, rendered), "the slice it replays");
     assert!(main.may_show(in_app, whole), "the whole frame");
     let (latest, retired) = drawn.pop().unwrap_or_default();
@@ -123,10 +142,10 @@ fn images_made_after_a_whole_frame_leave_on_patch_frames_alone() {
     let on_screen = picture();
     begin_frame();
     slice_rendered(layer, None);
-    LatestFrames::now(true);
+    latest(true);
     begin_patch_frame();
     slice_rendered(layer, None);
-    LatestFrames::now(true);
+    latest(true);
     let held = on_screen.id;
     retire_all([on_screen]);
 
@@ -136,21 +155,21 @@ fn images_made_after_a_whole_frame_leave_on_patch_frames_alone() {
         let id = shown.id;
         begin_patch_frame();
         slice_rendered(layer, None);
-        LatestFrames::now(true);
+        latest(true);
         begin_patch_frame();
         slice_rendered(layer, None);
-        LatestFrames::now(true);
+        latest(true);
         retire_all([shown]);
         begin_patch_frame();
         slice_rendered(layer, None);
-        LatestFrames::now(true);
+        latest(true);
         left.extend(main_sweep().iter().map(|image| image.id));
         assert!(left.contains(&id), "a picture after the whole frame left");
         assert!(!left.contains(&held), "the whole frame still shows this");
     }
 
     begin_frame();
-    LatestFrames::now(true);
+    latest(true);
     begin_frame();
     let gone: Vec<_> = main_sweep().iter().map(|image| image.id).collect();
     assert_eq!(gone, [held], "it leaves with the next whole frame");
@@ -164,14 +183,14 @@ fn a_slice_render_covers_what_was_made_until_its_frame_was_done() {
     slice_rendered(slice, None);
     let during = next_image_id();
     // Between frames: the frame of the render is done.
-    LatestFrames::now(true);
+    latest(true);
     let after = next_image_id();
     begin_frame();
     slice_shown(slice, None);
     let retired = frame();
     begin_frame();
     slice_shown(slice, None);
-    let main = LatestFrames::now(true);
+    let main = latest(true);
     assert!(main.may_show(during, retired), "the render may show it");
     assert!(!main.may_show(after, retired), "made after the render");
 }
@@ -190,9 +209,9 @@ fn a_replaying_chat_slice_keeps_what_it_painted_until_its_window_closes() {
         begin_chat_frame(chat, WindowDraw::Whole);
         slice_shown(slice, Some(chat));
     }
-    assert!(LatestFrames::now(false).may_show(id, retired));
+    assert!(latest(false).may_show(id, retired));
     forget_window(chat);
-    assert!(!LatestFrames::now(false).may_show(id, retired));
+    assert!(!latest(false).may_show(id, retired));
 }
 
 /// Another window's latest frame shows what existed when it was done,
