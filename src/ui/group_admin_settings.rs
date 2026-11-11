@@ -109,9 +109,9 @@ impl QuillApp {
             self.start_event_log_poll(chat_id, cx);
             self.hook_event_log_scroll(cx);
         }
-        if let Some(live) = self.live.as_mut() {
+        let refused = self.live.as_mut().is_some_and(|live| {
             let driver = &mut live.driver;
-            let _ = match view {
+            match view {
                 GroupSettingsView::Discussion if channel => {
                     driver.fetch_suitable_discussion_chats().map(|_| ())
                 }
@@ -133,7 +133,13 @@ impl QuillApp {
                     driver.fetch_chat_event_log(chat_id).map(|_| ())
                 }
                 _ => Ok(()),
-            };
+            }
+            .is_err()
+        });
+        // A page whose ask was refused would wait for an answer that never
+        // comes: say so, and reopening the page asks again.
+        if refused {
+            self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULDNT_LOAD_RETRY)));
         }
         cx.notify();
     }

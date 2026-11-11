@@ -103,6 +103,24 @@ impl QuillApp {
                 .map(|_| ())
         };
         if result.is_err() {
+            // A refused send leaves no fetch behind, which the list would
+            // draw as "Loading" for good: record the failure it draws with
+            // Retry.
+            let failed =
+                SupergroupMembersFetch::Failed(tr(keys::Q_MEDIA_COULD_NOT_LOAD_MEMBERS).into());
+            if let Some(session) = self.session_mut() {
+                if shape.is_basic {
+                    session
+                        .groups
+                        .basic_group_members
+                        .insert(shape.chat.0, failed);
+                } else {
+                    session
+                        .groups
+                        .supergroup_members
+                        .insert((shape.chat.0, MemberListFilter::Recent), failed);
+                }
+            }
             self.set_note(StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_LOAD_MEMBERS)));
             cx.notify();
         }
