@@ -566,7 +566,7 @@ fn driver_edit_scheduled_message_sends_scheduling_state() {
         .edit_scheduled_message(
             ChatId(7),
             MessageId(70),
-            ComposerScheduling::SendAtDate(1_800_000_600),
+            ComposerScheduling::at(1_800_000_600),
         )
         .unwrap();
     let json = recorder.snapshot().last().cloned().expect("request");

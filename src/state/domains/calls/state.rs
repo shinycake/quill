@@ -3,6 +3,24 @@
 //! with `new`.
 use crate::state::*;
 
+/// The stage of the recent-calls list (`searchCallMessages` pages and
+/// `deleteAllCallMessages`). Only the answer or error of the request in the
+/// stage lands: a reopen asks for the first page again at once, and
+/// "Clear all" forgets the page in flight, so an older page never fills
+/// the list.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RecentCalls {
+    #[default]
+    Idle,
+    /// A page waits for its answer; its error is `Failed`.
+    Loading { request: RequestId },
+    /// The last page failed; asking again shows it as loading.
+    Failed,
+    /// "Clear all" waits for TDLib; the list empties on `ok`, and its
+    /// error is `Idle` again.
+    Clearing { request: RequestId },
+}
+
 pub struct CallsState {
     /// Phase C1: the tracked live call, if any. **Signaling only** —
     /// TDLib transports no audio/video (official clients use
@@ -71,15 +89,9 @@ pub struct CallsState {
     /// `next_offset` from the last `foundMessages` page; empty starts
     /// (or restarts) the list.
     pub recent_calls_offset: String,
-    /// The `searchCallMessages` page the list waits for. Only its answer
-    /// or error lands: a reopen asks for the first page again at once, and
-    /// "Clear all" forgets the page in flight, so an older page never
-    /// fills the list.
-    pub recent_calls_request: Option<RequestId>,
-    /// The last `searchCallMessages` request failed.
-    pub recent_calls_error: bool,
-    /// A `deleteAllCallMessages` request is in flight.
-    pub recent_calls_clearing: bool,
+    /// Where the recent-calls list stands: its page or its "Clear all" in
+    /// flight, or the last page's failure.
+    pub recent_calls_stage: RecentCalls,
     /// Phase C3a: the tracked group call / voice chat, if any.
     /// **Signaling only** — TDLib transports no audio/video; the
     /// `joinVideoChat` response payload is stored (`join_payload`) and
@@ -151,16 +163,26 @@ impl CallsState {
 
     /// A recent-calls page is in flight.
     pub fn recent_calls_loading(&self) -> bool {
-        self.recent_calls_request.is_some()
+        matches!(self.recent_calls_stage, RecentCalls::Loading { .. })
+    }
+
+    /// The last `searchCallMessages` request failed.
+    pub fn recent_calls_error(&self) -> bool {
+        self.recent_calls_stage == RecentCalls::Failed
+    }
+
+    /// A `deleteAllCallMessages` request is in flight.
+    pub fn recent_calls_clearing(&self) -> bool {
+        matches!(self.recent_calls_stage, RecentCalls::Clearing { .. })
     }
 
     /// Whether `request` is the recent-calls page the list waits for; if
     /// so the list stops waiting for it.
     pub(crate) fn take_recent_calls_request(&mut self, request: RequestId) -> bool {
-        if self.recent_calls_request != Some(request) {
+        if self.recent_calls_stage != (RecentCalls::Loading { request }) {
             return false;
         }
-        self.recent_calls_request = None;
+        self.recent_calls_stage = RecentCalls::Idle;
         true
     }
 
@@ -214,9 +236,7 @@ impl CallsState {
             prefs: CallPrefs::default(),
             recent_calls: Vec::new(),
             recent_calls_offset: String::new(),
-            recent_calls_request: None,
-            recent_calls_error: false,
-            recent_calls_clearing: false,
+            recent_calls_stage: RecentCalls::Idle,
             active_group_call: None,
             story_stream: None,
             rtmp_start: None,

@@ -143,7 +143,7 @@ fn prepare_file(
             file.send_path =
                 Some(send_path_scaled(attachment, media)?.ok_or(PrepareError::Unreadable)?);
         }
-        AttachmentKind::Video if alone && attachment.extras.gif => {
+        AttachmentKind::Video if alone && attachment.extras.is_gif() => {
             file.animation = Some(
                 crate::video::probe_with_ffprobe(&attachment.path, false)
                     .map(|probe| AnimationSize {

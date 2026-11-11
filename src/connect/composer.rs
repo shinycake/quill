@@ -96,8 +96,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 delay_ms,
                 started_ms,
             } => {
-                self.draft_clock = DraftSaveClock {
-                    started_ms: Some(started_ms),
+                self.draft_clock = DraftSaveClock::Armed {
+                    first_edit_ms: started_ms,
                 };
                 self.draft_save_token = self.draft_save_token.saturating_add(1);
                 let token = self.draft_save_token;

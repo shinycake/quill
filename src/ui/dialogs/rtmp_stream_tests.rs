@@ -142,7 +142,9 @@ fn the_key_stays_hidden_until_the_warning_is_confirmed(cx: &mut TestAppContext) 
     let (app, mut main) = open_main(cx);
     answer(&app, &mut main);
     let shown = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
-        app.read_with(vcx, |app, _| app.group_call_boxes.rtmp_start.key_shown)
+        app.read_with(vcx, |app, _| {
+            app.group_call_boxes.rtmp_start.view == super::RtmpBoxView::Rows(super::KeyRow::Shown)
+        })
     };
     assert!(!shown(&app, &mut main));
     click(&mut main, "rtmp-start-key");
@@ -250,8 +252,7 @@ fn a_failed_request_is_a_toast_and_opens_no_box(cx: &mut TestAppContext) {
             .as_mut()
             .and_then(|s| s.calls.rtmp_start.as_mut())
         {
-            start.sent(REQUEST);
-            start.fail(Some(REQUEST));
+            start.fail(Some(quill::ids::RequestId(0)));
         }
         cx.notify();
     });
@@ -269,7 +270,7 @@ fn a_failed_request_is_a_toast_and_opens_no_box(cx: &mut TestAppContext) {
             .as_mut()
             .and_then(|s| s.calls.rtmp_start.as_mut())
         {
-            start.sent(REQUEST);
+            start.revoking(REQUEST);
             start.fail(Some(REQUEST));
         }
     });
@@ -283,18 +284,20 @@ fn revoke_asks_first_then_closes_its_confirmation(cx: &mut TestAppContext) {
     answer(&app, &mut main);
     // The "..." menu's "Revoke" item opens this confirmation.
     app.update(&mut main, |app, cx| {
-        app.group_call_boxes.rtmp_start.confirm = Some(super::RtmpConfirm::Revoke);
+        app.group_call_boxes
+            .rtmp_start
+            .view
+            .ask(super::RtmpConfirm::Revoke);
         cx.notify();
     });
     frames(&mut main);
     assert!(main.debug_bounds("rtmp-start-confirm-text").is_some());
     click(&mut main, "rtmp-start-confirm");
     assert!(
-        app.read_with(&main, |app, _| app
-            .group_call_boxes
-            .rtmp_start
-            .confirm
-            .is_none()),
+        app.read_with(&main, |app, _| matches!(
+            app.group_call_boxes.rtmp_start.view,
+            super::RtmpBoxView::Rows(_)
+        )),
         "Revoke closes the confirmation and asks for a new key"
     );
 }

@@ -117,7 +117,7 @@ impl QuillApp {
                 // so the unedited file never goes out.
                 if self.tray_renders_an_edit() {
                     let once = self.send_once();
-                    self.update_pending_send(|send| send.held_send = Some((text, once)));
+                    self.update_pending_send(|send| send.hold_send(text, once));
                     self.set_note(StatusNote::silent(tr(keys::Q_OPS_PREPARING_THE_FILES)));
                     cx.notify();
                     return;
@@ -223,10 +223,7 @@ impl QuillApp {
                     let mut snaps = Vec::new();
                     // A repeating message is sent alone (tdesktop limits the
                     // batch to one item with a repeat period).
-                    let repeating = matches!(
-                        self.pending_send().scheduling,
-                        ComposerScheduling::SendAtDate(_)
-                    ) && self.pending_send().schedule_repeat != 0;
+                    let repeating = self.pending_send().scheduling.repeat_period() != 0;
                     if attachments.len() >= 2 && grouped && !repeating {
                         // One message per run of one album type, in tray
                         // order (tdesktop `GroupRanges`); paid media is one

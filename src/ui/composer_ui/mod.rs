@@ -566,7 +566,7 @@ impl QuillApp {
             };
             let spoiler = attachment.spoiler;
             let is_photo = attachment.kind == AttachmentKind::Photo;
-            let rendering = attachment.extras.photo_render.is_some();
+            let rendering = attachment.extras.photo_render().is_some();
             // "Edit video" and "Cover" on a video, no spoiler on paid media
             // (`send_box_options.rs`).
             let video_actions = self.video_card_actions(index, attachment, cx);

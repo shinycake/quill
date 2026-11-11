@@ -62,11 +62,11 @@ pub use markup::{
 };
 pub use markup_parser::parse_format_markup;
 pub use media_options::{
-    AttachmentExtras, FILE_THUMBNAIL_SIDE, FileThumbnail, MediaSendOptions, PAID_MEDIA_MAX_STARS,
-    PHOTO_SIDE_LARGE, PHOTO_SIDE_STANDARD, PhotoScaleTimedOut, PriceInput, can_use_high_quality,
-    file_thumbnail_upload_required, fitted_photo_size, is_gif_path, paid_media_fits,
-    parse_paid_price, photo_for_send, photo_scale_args, photo_side_limit, photo_size_of,
-    scaled_photo_for_send, session_allows_paid_media,
+    AttachmentExtras, FILE_THUMBNAIL_SIDE, FileThumbnail, GifMode, MediaSendOptions,
+    PAID_MEDIA_MAX_STARS, PHOTO_SIDE_LARGE, PHOTO_SIDE_STANDARD, PhotoPrep, PhotoScaleTimedOut,
+    PriceInput, can_use_high_quality, file_thumbnail_upload_required, fitted_photo_size,
+    is_gif_path, paid_media_fits, parse_paid_price, photo_for_send, photo_scale_args,
+    photo_side_limit, photo_size_of, scaled_photo_for_send, session_allows_paid_media,
 };
 pub use media_prep::{
     AnimationSize, PREP_BUDGET, PrepareError, PreparedFile, PreparedMedia, PreparedNote,
@@ -94,13 +94,18 @@ pub const DRAFT_SAVE_ANYWAY_MS: u64 = 5_000;
 /// Clock for tdesktop `saveDraft(delayed)`: first edit arms 1s; further edits
 /// reset that 1s until 5s from the first edit, then the write happens immediately.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DraftSaveClock {
-    pub started_ms: Option<u64>,
+pub enum DraftSaveClock {
+    Idle,
+    /// A draft write is waiting; `first_edit_ms` is when its first edit
+    /// came.
+    Armed {
+        first_edit_ms: u64,
+    },
 }
 
 impl DraftSaveClock {
     pub fn idle() -> Self {
-        Self { started_ms: None }
+        DraftSaveClock::Idle
     }
 }
 
@@ -119,18 +124,18 @@ pub fn schedule_draft_save(clock: DraftSaveClock, now_ms: u64, delayed: bool) ->
     if !delayed {
         return DraftSaveStep::Write;
     }
-    match clock.started_ms {
-        None => DraftSaveStep::Wait {
+    match clock {
+        DraftSaveClock::Idle => DraftSaveStep::Wait {
             delay_ms: DRAFT_SAVE_TIMEOUT_MS,
             started_ms: now_ms,
         },
-        Some(started) if now_ms.saturating_sub(started) < DRAFT_SAVE_ANYWAY_MS => {
-            DraftSaveStep::Wait {
-                delay_ms: DRAFT_SAVE_TIMEOUT_MS,
-                started_ms: started,
-            }
-        }
-        Some(_) => DraftSaveStep::Write,
+        DraftSaveClock::Armed {
+            first_edit_ms: started,
+        } if now_ms.saturating_sub(started) < DRAFT_SAVE_ANYWAY_MS => DraftSaveStep::Wait {
+            delay_ms: DRAFT_SAVE_TIMEOUT_MS,
+            started_ms: started,
+        },
+        DraftSaveClock::Armed { .. } => DraftSaveStep::Write,
     }
 }
 
@@ -339,8 +344,8 @@ mod tests {
                 started_ms: 10_000,
             }
         );
-        let armed = DraftSaveClock {
-            started_ms: Some(10_000),
+        let armed = DraftSaveClock::Armed {
+            first_edit_ms: 10_000,
         };
         assert_eq!(
             schedule_draft_save(armed, 11_500, true),

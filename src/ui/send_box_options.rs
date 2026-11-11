@@ -148,7 +148,7 @@ impl QuillApp {
                             .attachments_at_mut(&path)
                             .filter(|attachment| attachment.needs_sound_check())
                         {
-                            attachment.extras.gif = true;
+                            attachment.extras.set_gif(true);
                         }
                     }
                     cx.notify();

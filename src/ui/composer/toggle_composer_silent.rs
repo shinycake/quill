@@ -21,10 +21,6 @@ impl QuillApp {
             disable_notification: self.composer_effective_silent()
                 || self.composer_ui.send_silent_once,
             scheduling: send.scheduling,
-            schedule_repeat_period: match send.scheduling {
-                ComposerScheduling::SendAtDate(_) => send.schedule_repeat,
-                _ => 0,
-            },
             link_preview_disabled: send.preview.disabled,
             link_preview_above_text: send.preview.above_text,
             link_preview_media: send.preview.media,
@@ -375,7 +371,7 @@ impl QuillApp {
     fn schedule_option_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let label = match self.pending_send().scheduling {
             ComposerScheduling::None => return None,
-            ComposerScheduling::SendAtDate(date) => format!(
+            ComposerScheduling::SendAtDate { date, .. } => format!(
                 "{} · {}",
                 match self.schedule_kind() {
                     ScheduleKind::Reminder => tr(keys::Q_CHAT_REMINDER),

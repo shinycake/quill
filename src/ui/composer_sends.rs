@@ -46,14 +46,25 @@ pub(crate) struct PendingSend {
     pub(super) paid_stars: i64,
     /// `messageSchedulingState*` for the next send.
     pub(super) scheduling: ComposerScheduling,
-    /// The repeat period (seconds) chosen with the schedule; zero for never.
-    pub(super) schedule_repeat: i32,
     /// The link preview choice (tdesktop keeps it in the draft as
     /// `WebPageDraft`).
     pub(super) preview: LinkPreviewChoice,
-    /// The text of a Send pressed while a photo edit was rendering, with
-    /// that send's one-time options: it goes out when the last one lands.
-    pub(super) held_send: Option<(String, SendOnce)>,
+    /// A Send pressed while a photo edit was rendering.
+    pub(super) send: TraySend,
+}
+
+/// Whether the tray's Send waits for the photo edits still rendering.
+#[derive(Debug, PartialEq)]
+pub(super) enum TraySend {
+    Idle,
+    /// The text of the Send pressed while a photo edit was rendering, with
+    /// that send's one-time options: it goes out when the last render
+    /// lands. Only [`PendingSend::hold_send`] makes one, and the tray lets
+    /// it go when no render is left.
+    Held {
+        text: String,
+        once: SendOnce,
+    },
 }
 
 /// The options a single send carries and the next does not: "Send without
@@ -75,14 +86,13 @@ impl PendingSend {
         group_media: None,
         paid_stars: 0,
         scheduling: ComposerScheduling::None,
-        schedule_repeat: 0,
         preview: LinkPreviewChoice {
             disabled: false,
             above_text: false,
             media: PreviewMediaSize::Auto,
             link_index: 0,
         },
-        held_send: None,
+        send: TraySend::Idle,
     };
 
     /// Drop the tray and the choices that only make sense with it.
@@ -93,20 +103,43 @@ impl PendingSend {
         self.hd_photos = false;
         self.group_media = None;
         self.paid_stars = 0;
-        self.held_send = None;
+        self.send = TraySend::Idle;
     }
 
     /// Some photo of the tray is still rendering its edit.
     pub(super) fn renders_an_edit(&self) -> bool {
         self.attachments
             .iter()
-            .any(|attachment| attachment.extras.photo_render.is_some())
+            .any(|attachment| attachment.extras.photo_render().is_some())
+    }
+
+    /// Hold a Send until the renders land. Without a render there is
+    /// nothing to wait for: it is refused, and the caller sends at once.
+    pub(super) fn hold_send(&mut self, text: String, once: SendOnce) -> bool {
+        if !self.renders_an_edit() {
+            return false;
+        }
+        self.send = TraySend::Held { text, once };
+        true
+    }
+
+    /// The held Send, once the last render landed.
+    pub(super) fn take_held_send(&mut self) -> Option<(String, SendOnce)> {
+        match std::mem::replace(&mut self.send, TraySend::Idle) {
+            TraySend::Idle => None,
+            TraySend::Held { text, once } => Some((text, once)),
+        }
+    }
+
+    /// A Send is held for the renders.
+    pub(super) fn send_is_held(&self) -> bool {
+        matches!(self.send, TraySend::Held { .. })
     }
 
     /// A held Send waits only on a render that will land.
     fn release_idle_hold(&mut self) {
         if !self.renders_an_edit() {
-            self.held_send = None;
+            self.send = TraySend::Idle;
         }
     }
 

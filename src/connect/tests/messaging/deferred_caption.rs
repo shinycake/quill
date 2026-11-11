@@ -164,8 +164,7 @@ fn up_leaves_a_pending_text_alone() {
 fn silent_and_scheduled_media_sends_carry_their_options() {
     let s = photo_in_flight(SendOptions {
         disable_notification: true,
-        scheduling: ComposerScheduling::SendAtDate(2_000_000_000),
-        schedule_repeat_period: 86_400,
+        scheduling: ComposerScheduling::at(2_000_000_000).repeating(86_400),
         ..SendOptions::default()
     });
     let send = s

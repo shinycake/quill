@@ -245,7 +245,7 @@ impl QuillApp {
         let now = WallClock::of(cx).now();
         let existing = match target {
             ScheduleTarget::Composer => match self.pending_send().scheduling {
-                ComposerScheduling::SendAtDate(date) => Some(date),
+                ComposerScheduling::SendAtDate { date, .. } => Some(date),
                 _ => None,
             },
             ScheduleTarget::Share | ScheduleTarget::RescheduleSelected => None,
@@ -261,10 +261,8 @@ impl QuillApp {
             }),
         };
         // The change dialog starts from the repeat chosen before.
-        let repeat = match (target, self.pending_send().scheduling) {
-            (ScheduleTarget::Composer, ComposerScheduling::SendAtDate(_)) => {
-                self.pending_send().schedule_repeat
-            }
+        let repeat = match target {
+            ScheduleTarget::Composer => self.pending_send().scheduling.repeat_period(),
             _ => 0,
         };
         let initial = existing
@@ -313,12 +311,9 @@ impl QuillApp {
             .ok_or(ScheduleError::Invalid)
             .and_then(|unix| validate_send_date(unix, WallClock::of(cx).now()));
         match picked {
-            Ok(send_date) => self.apply_schedule(
-                target,
-                ComposerScheduling::SendAtDate(send_date),
-                window,
-                cx,
-            ),
+            Ok(send_date) => {
+                self.apply_schedule(target, ComposerScheduling::at(send_date), window, cx)
+            }
             Err(err) => {
                 if let Some(picker) = self.chat_ui.schedule_picker.as_mut() {
                     picker.error = Some(err.message());
@@ -352,12 +347,10 @@ impl QuillApp {
                 )
             })
             .unwrap_or((0, false, 0, None));
-        let repeat = if self.repeat_allowed(target)
-            && matches!(scheduling, ComposerScheduling::SendAtDate(_))
-        {
-            repeat
+        let scheduling = if self.repeat_allowed(target) {
+            scheduling.repeating(repeat)
         } else {
-            0
+            scheduling.repeating(0)
         };
         self.chat_ui.schedule_popup_open = false;
         match target {
@@ -369,12 +362,11 @@ impl QuillApp {
                 };
                 self.composer_sends.update(&slot, |send| {
                     send.scheduling = scheduling;
-                    send.schedule_repeat = repeat;
                 });
                 // Sending now would send another chat's text.
                 let send_after = send_after && open.as_ref() == Some(&slot);
                 self.set_note(match (scheduling, kind) {
-                    (ComposerScheduling::SendAtDate(date), ScheduleKind::Reminder) => {
+                    (ComposerScheduling::SendAtDate { date, .. }, ScheduleKind::Reminder) => {
                         StatusNote::silent(tr_with(
                             keys::Q_OPS_REMINDER_SET_FOR,
                             &[(
@@ -383,7 +375,7 @@ impl QuillApp {
                             )],
                         ))
                     }
-                    (ComposerScheduling::SendAtDate(date), ScheduleKind::Schedule) => {
+                    (ComposerScheduling::SendAtDate { date, .. }, ScheduleKind::Schedule) => {
                         StatusNote::silent(tr_with(
                             keys::Q_OPS_SCHEDULED_FOR,
                             &[(
@@ -413,7 +405,7 @@ impl QuillApp {
             }
             ScheduleTarget::Share => {
                 self.submit_share(
-                    quill::share_box::ShareSend::Scheduled(scheduling, repeat),
+                    quill::share_box::ShareSend::Scheduled(scheduling),
                     window,
                     cx,
                 );

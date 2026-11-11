@@ -236,10 +236,13 @@ fn a_failed_later_page_keeps_the_loaded_calls_and_retries_that_page() {
         r#"{{"@type":"error","@extra":"{}","code":500,"message":"X"}}"#,
         more.0
     ));
-    assert!(f.driver.session.calls.recent_calls_error);
+    assert!(f.driver.session.calls.recent_calls_error());
     assert_eq!(f.shown_calls(), vec![300, 299], "the loaded calls stay");
     let retry = f.driver.fetch_more_call_history().expect("retry the page");
-    assert!(!f.driver.session.calls.recent_calls_error, "loading again");
+    assert!(
+        !f.driver.session.calls.recent_calls_error(),
+        "loading again"
+    );
     f.calls_page(retry, &[260, 259], "later");
     assert_eq!(f.shown_calls(), vec![300, 299, 260, 259]);
 }

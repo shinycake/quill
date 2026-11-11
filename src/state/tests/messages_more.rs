@@ -666,7 +666,7 @@ fn reschedule_ok_rewrites_the_scheduled_entry() {
     let extra = session.request(
         RequestPurpose::Messages(MessagesPurpose::EditMessageSchedulingState {
             message_id: MessageId(70),
-            scheduling: ComposerScheduling::SendAtDate(5000),
+            scheduling: ComposerScheduling::at(5000),
         }),
         Some(ChatId(7)),
     );

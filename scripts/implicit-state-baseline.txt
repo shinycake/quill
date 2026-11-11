@@ -91,7 +91,6 @@ InvoiceWatch::sending
 JoinedLines::started
 LanguageLinkLookup::loading
 LanguageLinkLookup::loading+error
-Latest::wake_pending
 LayerFade::closing
 LinuxState::failed
 LiveInput::failed
@@ -114,7 +113,6 @@ MembersView::loading
 MiniAppWindow::closing_confirmation
 MiniAppWindow::data_sent
 MiniAppWindow::waiting_write_access
-MutedSpeechHint::done
 NewChatView::busy
 NewChatView::busy+failure
 OutputState::opening
@@ -163,7 +161,6 @@ ResaleSearch::loading+error
 RowForum::loaded
 RowMenuFacts::is_saved_messages
 RowState::pending
-RtmpStart::failed
 SavedMessagesState::tags_loaded
 SavedMessagesState::topics_requested
 SavedTagSearch::loaded

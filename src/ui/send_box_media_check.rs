@@ -10,7 +10,7 @@ use super::image_decode::{self, DecodeSize};
 use super::send_box_thumbnails::{GIVE_UP_AFTER, write_jpeg};
 use gpui_kit::*;
 use quill::composer::{
-    AttachmentKind, ComposerAttachment, PHOTO_SIDE_LARGE, fitted_photo_size,
+    AttachmentKind, ComposerAttachment, PHOTO_SIDE_LARGE, PhotoPrep, fitted_photo_size,
     media_dimensions_valid, photo_needs_jpeg,
 };
 use quill::media_viewer::READ_BYTES_LIMIT;
@@ -109,7 +109,9 @@ impl QuillApp {
         for attachment in self.composer_sends.attachments_at_mut(path) {
             match check {
                 MediaCheck::AsIs => {}
-                MediaCheck::Jpeg(jpeg) => attachment.extras.photo_jpeg = Some(jpeg.clone()),
+                MediaCheck::Jpeg(jpeg) => {
+                    attachment.extras.set_photo(PhotoPrep::Jpeg(jpeg.clone()))
+                }
                 MediaCheck::FileOnly => attachment.keep_as_file(),
             }
         }
@@ -118,8 +120,8 @@ impl QuillApp {
 
 fn needs_media_check(attachment: &ComposerAttachment) -> bool {
     match attachment.kind {
-        AttachmentKind::Photo => attachment.extras.photo_jpeg.is_none(),
-        AttachmentKind::Video => !attachment.extras.gif,
+        AttachmentKind::Photo => attachment.extras.photo_jpeg().is_none(),
+        AttachmentKind::Video => !attachment.extras.is_gif(),
         AttachmentKind::Document | AttachmentKind::VideoNote => false,
     }
 }

@@ -104,22 +104,22 @@ impl ComposerAttachment {
                 (true, Some(_)) => {
                     attachment.kind = AttachmentKind::Document;
                     attachment.spoiler = false;
-                    attachment.extras.gif = false;
+                    attachment.extras.set_gif(false);
                 }
                 (false, Some(kind))
                     if attachment.kind == AttachmentKind::Document
-                        && !attachment.extras.file_only =>
+                        && !attachment.extras.file_only() =>
                 {
                     attachment.kind = kind;
                 }
-                (true, None) if gif && attachment.extras.gif => {
+                (true, None) if gif && attachment.extras.is_gif() => {
                     attachment.kind = AttachmentKind::Document;
-                    attachment.extras.gif = false;
+                    attachment.extras.set_gif(false);
                     attachment.spoiler = false;
                 }
                 (false, None) if gif && attachment.kind == AttachmentKind::Document => {
                     attachment.kind = AttachmentKind::Video;
-                    attachment.extras.gif = true;
+                    attachment.extras.set_gif(true);
                 }
                 _ => {}
             }
@@ -130,7 +130,7 @@ impl ComposerAttachment {
     /// some attachment is a photo, video or GIF file.
     pub fn can_send_as_files(list: &[Self]) -> bool {
         list.iter().any(|attachment| {
-            !attachment.extras.file_only
+            !attachment.extras.file_only()
                 && (media_kind_for(&attachment.path).is_some() || is_gif_path(&attachment.path))
         })
     }
@@ -139,23 +139,23 @@ impl ComposerAttachment {
     pub fn keep_as_file(&mut self) {
         self.kind = AttachmentKind::Document;
         self.spoiler = false;
-        self.extras.gif = false;
-        self.extras.file_only = true;
+        self.extras.set_gif(false);
+        self.extras.set_photo(PhotoPrep::FileOnly);
     }
 
     /// The picture a photo shows and goes out as: the JPEG made for it, or
     /// the file itself.
     pub fn photo_file(&self) -> &Path {
-        self.extras.photo_jpeg.as_deref().unwrap_or(&self.path)
+        self.extras.photo_jpeg().unwrap_or(&self.path)
     }
 
     /// tdesktop `modifications.gif = !hasAudio`: an `.mp4` video may be a
     /// GIF when it has no sound track. This says whether the file is worth
     /// checking with [`without_sound_track`]; the check runs ffprobe, so the
-    /// UI does it in the background and then sets `extras.gif`.
+    /// UI does it in the background and then sets `extras.is_gif()`.
     pub fn needs_sound_check(&self) -> bool {
         self.kind == AttachmentKind::Video
-            && !self.extras.gif
+            && !self.extras.is_gif()
             && self
                 .path
                 .extension()
@@ -167,7 +167,7 @@ impl ComposerAttachment {
     /// sent: it is a GIF and goes alone (one file, separate messages, or a
     /// video whose sound was taken out, which leaves the album).
     pub fn sends_as_animation(&self, tray_len: usize, grouped: bool) -> bool {
-        self.extras.gif && (tray_len == 1 || !grouped || self.extras.sound_removed)
+        self.extras.is_gif() && (tray_len == 1 || !grouped || self.extras.sound_removed())
     }
 
     /// The album this attachment can share (tdesktop `GroupTypeForFile`):
@@ -177,7 +177,7 @@ impl ComposerAttachment {
     fn album_type(&self) -> Option<AlbumType> {
         match self.kind {
             AttachmentKind::VideoNote => None,
-            _ if self.extras.gif && self.extras.sound_removed => None,
+            _ if self.extras.sound_removed() => None,
             AttachmentKind::Photo | AttachmentKind::Video => Some(AlbumType::PhotoVideo),
             AttachmentKind::Document if is_audio_path(&self.path) => Some(AlbumType::Music),
             AttachmentKind::Document => Some(AlbumType::File),
@@ -251,19 +251,19 @@ impl ComposerAttachment {
             .collect();
         let had_gif = list
             .iter()
-            .any(|att| is_gif_path(&att.path) && att.extras.gif);
+            .any(|att| is_gif_path(&att.path) && att.extras.is_gif());
         let added = Self::append_planned(list, &planned)?;
         if gif_alone && let Some(first) = list.first_mut() {
-            first.extras.gif = true;
+            first.extras.set_gif(true);
         }
         if had_gif {
             // An animated `.gif` file is only sent alone: next to other files it is a file.
             for att in list
                 .iter_mut()
-                .filter(|att| is_gif_path(&att.path) && att.extras.gif)
+                .filter(|att| is_gif_path(&att.path) && att.extras.is_gif())
             {
                 att.kind = AttachmentKind::Document;
-                att.extras.gif = false;
+                att.extras.set_gif(false);
             }
         }
         Ok(added)
@@ -519,20 +519,20 @@ mod tests {
         let mut list = Vec::new();
         ComposerAttachment::append_dropped_files(&mut list, std::slice::from_ref(&gif)).unwrap();
         assert_eq!(list[0].kind, AttachmentKind::Video);
-        assert!(list[0].extras.gif);
+        assert!(list[0].extras.is_gif());
         // As a file and back.
         assert!(ComposerAttachment::can_send_as_files(&list));
         ComposerAttachment::set_send_as_files(&mut list, true);
         assert_eq!(list[0].kind, AttachmentKind::Document);
-        assert!(!list[0].extras.gif);
+        assert!(!list[0].extras.is_gif());
         ComposerAttachment::set_send_as_files(&mut list, false);
         assert_eq!(list[0].kind, AttachmentKind::Video);
-        assert!(list[0].extras.gif);
+        assert!(list[0].extras.is_gif());
         // Another file turns the GIF into a file; the photo stays a photo.
         ComposerAttachment::append_dropped_files(&mut list, std::slice::from_ref(&photo)).unwrap();
         let kinds: Vec<_> = list.iter().map(|att| att.kind).collect();
         assert_eq!(kinds, [AttachmentKind::Document, AttachmentKind::Photo]);
-        assert!(list.iter().all(|att| !att.extras.gif));
+        assert!(list.iter().all(|att| !att.extras.is_gif()));
         // Dropped together with a photo, it is a file too.
         let mut both = Vec::new();
         ComposerAttachment::append_dropped_files(&mut both, &[gif, photo]).unwrap();
@@ -544,10 +544,9 @@ mod tests {
     #[test]
     fn gif_videos_leave_the_album_only_when_their_sound_was_taken_out() {
         let mut silent = attachment("a.mp4", AttachmentKind::Video);
-        silent.extras.gif = true;
+        silent.extras.set_gif(true);
         let mut muted = attachment("b.mp4", AttachmentKind::Video);
-        muted.extras.gif = true;
-        muted.extras.sound_removed = true;
+        muted.extras.gif = GifMode::SoundRemoved;
         let photo = attachment("c.jpg", AttachmentKind::Photo);
         let list = [silent.clone(), photo.clone(), muted.clone()];
         let groups = ComposerAttachment::split_for_send(&list, true);
@@ -684,7 +683,7 @@ mod tests {
         assert!(!without_sound_track(&root.join("missing.mp4")));
         let mut att = ComposerAttachment::pick(&silent, AttachmentKind::Video).unwrap();
         assert!(att.needs_sound_check());
-        att.extras.gif = true;
+        att.extras.set_gif(true);
         assert!(!att.needs_sound_check());
         let photo = ComposerAttachment::pick(&loud, AttachmentKind::Photo).unwrap();
         assert!(!photo.needs_sound_check());
@@ -700,11 +699,10 @@ mod tests {
         }
         let mut list = Vec::new();
         ComposerAttachment::append_dropped_files(&mut list, std::slice::from_ref(&clip)).unwrap();
-        list[0].extras.gif = true;
-        list[0].extras.sound_removed = true;
+        list[0].extras.gif = GifMode::SoundRemoved;
         ComposerAttachment::append_dropped_files(&mut list, std::slice::from_ref(&photo)).unwrap();
         assert_eq!(list.len(), 2);
-        assert!(list[0].extras.gif && list[0].extras.sound_removed);
+        assert!(list[0].extras.sound_removed());
         assert_eq!(list[0].kind, AttachmentKind::Video);
         let _ = fs::remove_dir_all(&root);
     }

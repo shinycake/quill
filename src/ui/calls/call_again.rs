@@ -82,7 +82,7 @@ impl QuillApp {
             scrolled_near_end(&self.call_boxes.history_scroll),
             !calls.recent_calls_offset.is_empty(),
             calls.recent_calls_loading(),
-        ) || calls.recent_calls_error && !scrolled
+        ) || calls.recent_calls_error() && !scrolled
             || !self.call_boxes.history_asked.allow(loaded, scrolled)
         {
             return;
@@ -107,9 +107,9 @@ impl QuillApp {
                 (
                     session.calls.recent_calls.clone(),
                     session.calls.recent_calls_loading(),
-                    session.calls.recent_calls_error,
+                    session.calls.recent_calls_error(),
                     !session.calls.recent_calls_offset.is_empty(),
-                    session.calls.recent_calls_clearing,
+                    session.calls.recent_calls_stage,
                 )
             })
             .unwrap_or_default();

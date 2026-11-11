@@ -92,7 +92,7 @@ impl QuillApp {
     ) {
         let render = NEXT_RENDER.fetch_add(1, Ordering::Relaxed);
         let marked = self.composer_sends.update_item(&item, |attachment| {
-            attachment.extras.photo_render = Some(render);
+            attachment.extras.begin_render(render);
         });
         if marked.is_none() {
             return;
@@ -191,14 +191,15 @@ impl QuillApp {
             let attachment = send
                 .attachments
                 .iter_mut()
-                .find(|attachment| attachment.extras.photo_render == Some(render))?;
-            attachment.extras.photo_render = None;
+                .find(|attachment| attachment.extras.photo_render() == Some(render))?;
             let Some(saved) = &saved else {
+                attachment.extras.abandon_render();
                 // The held Send would carry the unedited photo.
-                send.held_send = None;
+                let path = attachment.path.clone();
+                send.take_held_send();
                 return Some(Landed {
                     held: None,
-                    path: Some(attachment.path.clone()),
+                    path: Some(path),
                 });
             };
             let stem = attachment
@@ -208,12 +209,11 @@ impl QuillApp {
                 .unwrap_or("photo")
                 .to_string();
             attachment.path = saved.clone();
-            attachment.extras.photo_jpeg = None;
-            attachment.extras.file_only = false;
+            attachment.extras.land_render();
             attachment.file_name = format!("{stem}.png");
             attachment.kind = quill::composer::AttachmentKind::Photo;
             let held = (!send.renders_an_edit())
-                .then(|| send.held_send.take())
+                .then(|| send.take_held_send())
                 .flatten();
             Some(Landed {
                 held,
