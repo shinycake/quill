@@ -95,7 +95,11 @@ impl NotifyUi {
     /// Flip `section`: it opens, or collapses when it was the open one.
     pub(super) fn toggle_mute_section(&mut self, section: MuteSection) -> bool {
         let open = self.mute_section() != section;
-        self.set_mute_section(if open { section } else { MuteSection::Collapsed });
+        self.set_mute_section(if open {
+            section
+        } else {
+            MuteSection::Collapsed
+        });
         open
     }
 

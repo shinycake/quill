@@ -54,11 +54,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A send that failed is a failed list, drawn with Retry: back to
         // Idle would ask again at the next render.
         if result.is_err() {
-            self.session
-                .settings
-                .language
-                .packs
-                .fail(crate::lang::tr(crate::lang::keys::Q_NOTES_SOMETHING_WENT_WRONG));
+            self.session.settings.language.packs.fail(crate::lang::tr(
+                crate::lang::keys::Q_NOTES_SOMETHING_WENT_WRONG,
+            ));
         }
         result
     }

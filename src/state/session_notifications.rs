@@ -284,7 +284,8 @@ impl Session {
             .scope_notification_settings
             .get(&scope)
             .cloned();
-        settings_state.scope_saves
+        settings_state
+            .scope_saves
             .begin(scope, request, settings.clone(), || shown);
         settings_state
             .scope_notification_settings
@@ -298,7 +299,8 @@ impl Session {
         settings: &ReactionNotificationSettings,
     ) {
         let shown = self.settings.reaction_notification_settings.clone();
-        self.settings.reaction_saves
+        self.settings
+            .reaction_saves
             .begin((), request, settings.clone(), || shown);
         self.settings.reaction_notification_settings = Some(settings.clone());
     }

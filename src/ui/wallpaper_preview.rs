@@ -87,7 +87,7 @@ impl QuillApp {
     pub(super) fn open_wallpaper_preview(&mut self, source: PreviewSource, cx: &mut Context<Self>) {
         if let Some(session) = self.wallpaper_session_mut() {
             session.chats_state.background_error = None;
-            }
+        }
         self.dialogs.wallpaper_preview = Some(WallpaperPreview {
             source,
             blur: None,

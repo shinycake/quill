@@ -4,6 +4,7 @@
 use super::app::QuillApp;
 use super::chat_theme::{danger, danger_bg};
 use super::dialogs::NotificationsConfirm;
+use crate::ui::notify_state::{MuteBox, MuteSection};
 use gpui_kit::component::button::*;
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::switch::Switch;
@@ -11,7 +12,6 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use crate::ui::notify_state::{MuteBox, MuteSection};
 use quill::notify::NotificationSoundKind;
 use quill::settings::BadgePrefs;
 use quill::state::ChatSummary;
